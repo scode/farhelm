@@ -18,6 +18,8 @@ use farhelm_proto::{ControlMsg, Frame, SessionInfo};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::time::Duration;
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::net::{UnixListener, UnixStream};
 use tokio::sync::{Mutex, mpsc, oneshot};
@@ -43,6 +45,28 @@ const REPLAY_CHUNK: usize = 32 * 1024;
 /// oversized `SessionCreated` reply structurally impossible, and does so
 /// before `create_session` has touched tmux or the filesystem.
 const CREATE_FIELD_CAP: usize = 64 * 1024;
+
+/// The no-progress window `handle_connection`'s shutdown tail allows the
+/// writer task before giving up on it — NOT a total deadline on the drain.
+///
+/// "Drain everything queued" and "never hang" cannot both hold against a
+/// peer that stops reading without erroring (a full TCP/pipe window — a
+/// wedged ssh session, say): the writer's `write_frame` call just parks,
+/// there is no error for the `writer_failed` oneshot to carry, and without
+/// a bound the connection task (plus its entire backlog) leaks for the
+/// process lifetime. But a flat deadline over-punishes a peer that is
+/// merely slow rather than gone — backpressured but still reading, so
+/// frames keep landing, just not inside any one fixed window — and killing
+/// that connection breaks the half-close contract that replies already
+/// queued before shutdown began still reach a peer that is still reading.
+/// `drain_writer` resets this window every time a frame completes, so a
+/// slow-but-live peer gets unbounded total time to drain; only a peer that
+/// lands zero frames across one whole window is treated as gone. See
+/// `drain_writer` for the honest residual this still leaves (a single
+/// frame slower than the window). This only bounds shutdown —
+/// steady-state backpressure while a connection is still active is out of
+/// scope here (M2.5, PLAN.md).
+const WRITER_DRAIN_TIMEOUT: Duration = Duration::from_secs(5);
 
 /// A session as the supervisor tracks it: the wire-visible metadata plus
 /// the two tmux handles that address its terminal.
@@ -363,13 +387,20 @@ where
     // through this queue so frames never interleave mid-write.
     let (tx, mut rx) = mpsc::unbounded_channel::<Frame>();
     let (writer_failed_tx, mut writer_failed_rx) = oneshot::channel();
-    let writer_task = tokio::spawn(async move {
+    // Progress counter for the shutdown-tail drain: `drain_writer` reads
+    // this to tell "peer merely slow" apart from "peer gone" instead of
+    // enforcing one flat deadline. Relaxed is enough on both ends — this
+    // is a liveness heartbeat, not a value anything is synchronized on.
+    let frames_written = Arc::new(AtomicU64::new(0));
+    let frames_written_for_writer = Arc::clone(&frames_written);
+    let mut writer_task = tokio::spawn(async move {
         while let Some(frame) = rx.recv().await {
             if let Err(e) = writer.write_frame(&frame).await {
                 warn!(error = %e, "frame write to client failed");
                 let _ = writer_failed_tx.send(e.to_string());
                 break;
             }
+            frames_written_for_writer.fetch_add(1, Ordering::Relaxed);
         }
     });
 
@@ -479,8 +510,69 @@ where
     }
     drop(attachments);
     drop(tx);
-    let _ = writer_task.await;
+    // Progress-bounded drain, not an unconditional await: see
+    // WRITER_DRAIN_TIMEOUT and drain_writer. A peer that stopped reading
+    // without erroring leaves the writer parked mid-write forever, with no
+    // error for `writer_failed` to report — that path is already handled
+    // above; this is the silent-stall case. Unlike a flat deadline,
+    // `drain_writer` only gives up once a whole window passes with zero
+    // frames landing, so a live-but-slow peer still gets its queued
+    // replies.
+    drain_writer(&mut writer_task, &frames_written, WRITER_DRAIN_TIMEOUT).await;
     result
+}
+
+/// Wait for `writer_task` to finish, giving up only once a full `window`
+/// passes without a single frame completing — not after `window` elapses
+/// in total.
+///
+/// This is what lets `handle_connection`'s shutdown tail honor the
+/// half-close contract (queued replies reach a peer that is still
+/// reading) without also being willing to wait forever: a peer that is
+/// backpressured but alive keeps landing frames, each of which resets the
+/// window, so it gets unbounded total time to drain. Only a peer that
+/// lands zero frames across one whole window — the "gone" case this
+/// function exists to bound — gets its writer task aborted. The abort is
+/// always followed by an await of the same handle, matching every other
+/// abort-then-await pairing in this module: a bare `abort()` only
+/// schedules cancellation, and returning before the task is actually
+/// polled to completion would let a new attach race the old writer's last
+/// touch of the socket.
+///
+/// Honest residual: progress is observed at frame granularity via
+/// `frames_written`, not at the byte level. A single frame whose own
+/// write spans the entire window with nothing else completing — i.e. a
+/// link slower than the frame size divided by `window` (for the 32 KiB
+/// `REPLAY_CHUNK` and the default 5s window, under roughly 6.4 KB/s) —
+/// is indistinguishable here from a peer that is truly gone, and gets
+/// aborted. That is accepted, not accidental: catching it would need
+/// sub-frame progress reporting, which `FrameWriter` does not have.
+async fn drain_writer(
+    writer_task: &mut tokio::task::JoinHandle<()>,
+    frames_written: &AtomicU64,
+    window: Duration,
+) {
+    loop {
+        let before = frames_written.load(Ordering::Relaxed);
+        if tokio::time::timeout(window, &mut *writer_task)
+            .await
+            .is_ok()
+        {
+            // Writer task finished (queue drained or it hit a write
+            // error) within this window; nothing left to bound.
+            return;
+        }
+        if frames_written.load(Ordering::Relaxed) != before {
+            // At least one frame landed during the window that just
+            // timed out: the peer is slow, not gone. Give it another
+            // window instead of counting this as no progress.
+            continue;
+        }
+        warn!("no frame completed for a full {window:?} window; aborting writer task");
+        writer_task.abort();
+        let _ = writer_task.await;
+        return;
+    }
 }
 
 /// Build the frame for a per-request reply, degrading to `ControlMsg::Error`
@@ -1070,5 +1162,113 @@ mod tests {
             }
             other => panic!("expected a normal ControlMsg::SessionList, got {other:?}"),
         }
+    }
+
+    use std::sync::atomic::AtomicBool;
+
+    /// A guard whose `Drop` flips a sentinel, used below to distinguish a
+    /// task that was genuinely aborted-and-polled-to-completion from one
+    /// merely abandoned. A tokio task's future is dropped only once
+    /// cancellation has actually been delivered and polled, so observing
+    /// the sentinel is proof of that, not just proof that `abort()` was
+    /// called (which alone only schedules cancellation).
+    struct DropSignal(Arc<AtomicBool>);
+
+    impl Drop for DropSignal {
+        fn drop(&mut self) {
+            self.0.store(true, Ordering::SeqCst);
+        }
+    }
+
+    /// Pins the abort-then-await ordering in `drain_writer`'s no-progress
+    /// path: a writer landing zero frames across one whole window must be
+    /// aborted — and that abort actually awaited to completion — before
+    /// the helper returns, not merely timed out and abandoned.
+    ///
+    /// The task under test never completes on its own
+    /// (`std::future::pending`) and holds a `DropSignal` guard; the
+    /// sentinel firing is the only way to know the task's future was
+    /// truly dropped, which only happens once its cancellation has been
+    /// delivered and polled to completion. The outer 5s timeout catches
+    /// the regression this test exists to prevent: a helper whose abort
+    /// path fires `abort()` without awaiting the handle, or that never
+    /// reaches the abort branch at all, would leave `drain_writer` — and
+    /// this test — hanging.
+    ///
+    /// `start_paused` puts the test on tokio's virtual clock: real time
+    /// never elapses, so the window boundary is crossed deterministically
+    /// at the next await point instead of racing a wall-clock sleep
+    /// against scheduler jitter.
+    #[tokio::test(start_paused = true)]
+    async fn drain_writer_aborts_and_awaits_on_sustained_no_progress() {
+        let dropped = Arc::new(AtomicBool::new(false));
+        let guard = DropSignal(Arc::clone(&dropped));
+        let mut task = tokio::spawn(async move {
+            let _guard = guard;
+            std::future::pending::<()>().await;
+        });
+        let frames_written = AtomicU64::new(0);
+
+        tokio::time::timeout(
+            Duration::from_secs(5),
+            drain_writer(&mut task, &frames_written, Duration::from_millis(50)),
+        )
+        .await
+        .expect("drain_writer must not hang waiting on a task making zero progress");
+
+        assert!(
+            dropped.load(Ordering::SeqCst),
+            "writer task must have been aborted, and that abort awaited to \
+             completion, before drain_writer returns"
+        );
+    }
+
+    /// The whole reason `drain_writer` exists: a writer that is merely
+    /// slow — landing a frame every window instead of finishing inside a
+    /// single one — must be allowed to keep going rather than being
+    /// aborted the moment one window elapses. This is what tells
+    /// "backpressured but alive" apart from "gone" (the case the sibling
+    /// test above covers).
+    ///
+    /// The task increments `frames_written` on a cadence shorter than the
+    /// drain window, several times over, before completing — so
+    /// `drain_writer` has to ride out multiple windows on renewed
+    /// progress and only return once the task finishes naturally. The
+    /// `completed` flag is set exclusively on that natural-completion
+    /// path (the abort path in `drain_writer` never gets to run it), so
+    /// seeing it true is proof the return came from completion, not from
+    /// `drain_writer` giving up and aborting the task after the fact.
+    ///
+    /// Also on `start_paused`'s virtual clock, for the same reason as the
+    /// sibling test: the multi-window wait this test exercises would
+    /// otherwise depend on real sleeps landing inside real window
+    /// boundaries, which is exactly the kind of timing assumption that is
+    /// fine on a fast idle machine and flaky under load.
+    #[tokio::test(start_paused = true)]
+    async fn drain_writer_waits_through_progress_and_returns_on_completion() {
+        let frames_written = Arc::new(AtomicU64::new(0));
+        let completed = Arc::new(AtomicBool::new(false));
+        let writer_counter = Arc::clone(&frames_written);
+        let completed_flag = Arc::clone(&completed);
+        let mut task = tokio::spawn(async move {
+            for _ in 0..10 {
+                tokio::time::sleep(Duration::from_millis(20)).await;
+                writer_counter.fetch_add(1, Ordering::Relaxed);
+            }
+            completed_flag.store(true, Ordering::SeqCst);
+        });
+
+        tokio::time::timeout(
+            Duration::from_secs(5),
+            drain_writer(&mut task, &frames_written, Duration::from_millis(60)),
+        )
+        .await
+        .expect("drain_writer must return once the task completes naturally");
+
+        assert!(
+            completed.load(Ordering::SeqCst),
+            "task must have run to natural completion, not been aborted \
+             mid-flight while progress was still arriving"
+        );
     }
 }

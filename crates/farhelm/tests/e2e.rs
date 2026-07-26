@@ -1338,6 +1338,80 @@ async fn supervisor_writer_failure_ends_a_half_broken_connection() {
     );
 }
 
+/// A peer that stops reading — without ever erroring — must not pin
+/// `handle_connection` open forever.
+///
+/// Before `WRITER_DRAIN_TIMEOUT` existed, the shutdown tail did
+/// `drop(tx); writer_task.await;` unconditionally. That is fine for the
+/// write-*error* case (the `writer_failed` oneshot already ends the
+/// connection promptly, pinned by the test above), but it has no answer
+/// for a peer that just stops reading: a full TCP/pipe window with
+/// nothing on the other end. The writer task's `write_frame` call parks
+/// with no error to report, `writer_task.await` never resolves, and
+/// `handle_connection` — plus every reply still queued for it — leaks
+/// for the process lifetime. This test reproduces exactly that: flood
+/// the supervisor with requests without ever reading a reply (so a real
+/// backlog queues up), then close only the peer's write half so the
+/// supervisor's read loop sees EOF and runs the shutdown tail with the
+/// writer parked mid-write and a backlog behind it. This peer makes zero
+/// progress for the rest of the test, so it stays a "gone" peer under
+/// `drain_writer`'s no-progress window too — the case that test coverage
+/// still holds for, even though the shutdown tail no longer enforces a
+/// flat deadline. Without the fix this hangs forever; with it,
+/// `handle_connection` returns once a full `WRITER_DRAIN_TIMEOUT` window
+/// passes without a frame landing.
+#[tokio::test]
+async fn writer_never_reading_peer_does_not_hang_connection_shutdown() {
+    use farhelm_proto::io::{FrameReader, FrameWriter, handshake};
+
+    let h = harness().await;
+
+    // A SMALL duplex buffer — unlike the 1 MiB transports the other
+    // tests in this file use — so the reply direction fills from a
+    // modest, fast-to-send backlog instead of requiring an impractical
+    // flood to reproduce the stall.
+    let (client_side, server_side) = tokio::io::duplex(4 * 1024);
+    let sup = Arc::clone(&h.sup);
+    let handle = tokio::spawn(async move { handle_connection(sup, server_side).await });
+
+    let (read_half, write_half) = tokio::io::split(client_side);
+    let mut reader = FrameReader::new(read_half);
+    let mut writer = FrameWriter::new(write_half);
+    handshake(&mut reader, &mut writer, "helm")
+        .await
+        .expect("handshake");
+
+    // Flood with cheap requests and never read a single reply. This
+    // cannot itself deadlock the test: the supervisor's read loop drains
+    // the peer->supervisor direction continuously (ListSessions against
+    // an empty session map is nearly free — lock, clone an empty vec,
+    // hand the reply to the writer task's unbounded queue), so this
+    // direction keeps moving no matter how many requests are queued.
+    // Only the OTHER direction — supervisor replies, which nothing here
+    // ever reads — fills the small duplex buffer and stalls the
+    // supervisor's writer task mid-write, which is the condition under
+    // test.
+    for req_id in 0..5_000u64 {
+        writer
+            .write_control(&ControlMsg::ListSessions { req_id })
+            .await
+            .expect("request direction stays open; the supervisor keeps reading it");
+    }
+
+    // Half-close: the write half goes away while the read half (which
+    // this test never touches) stays open. That is what makes the
+    // supervisor's read loop observe EOF and enter the shutdown tail —
+    // with the writer task still parked on an unwritable reply and a
+    // full backlog queued behind it.
+    writer.shutdown().await.expect("half-close write side");
+
+    tokio::time::timeout(Duration::from_secs(30), handle)
+        .await
+        .expect("handle_connection must return within the bounded writer drain, not hang forever")
+        .expect("connection task panicked")
+        .expect("a peer closing its write half cleanly is not itself a connection error");
+}
+
 /// The real socket transport: `Supervisor::serve` plus
 /// `farhelm internal stdio`, which is the remote-host path with ssh
 /// removed. Every other test bypasses both via an in-process pipe, so

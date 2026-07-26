@@ -19,3 +19,8 @@ uuid.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true
+# test-util enables tokio's virtual clock (`#[tokio::test(start_paused =
+# true)]`), used by the drain_writer tests so they assert real-time
+# behavior deterministically instead of racing wall-clock sleeps against
+# window lengths.
+tokio = { workspace = true, features = ["test-util"] }
