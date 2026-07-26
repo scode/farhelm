@@ -54,9 +54,17 @@ pub struct HelmArgs {
     pub remote_farhelm: String,
 
     /// State directory on the remote host (defaults to the remote's own
-    /// default).
+    /// default). A `String`, not a `PathBuf`: this path is handed to the
+    /// remote shell as ssh argv text and never touches the local
+    /// filesystem, so there is no reason to parse it as a local path — and
+    /// `String` lets clap reject a non-UTF-8 value right here, before it
+    /// can survive to a lossy conversion deep in the ssh argv builder.
+    /// This is ssh's own textual boundary, not farhelm-proto's wire
+    /// contract: this string never crosses the protocol (contrast
+    /// `ControlMsg::CreateSession::cwd`, which does and has its UTF-8-only
+    /// contract documented in farhelm-proto's crate docs).
     #[arg(long)]
-    pub remote_state_dir: Option<PathBuf>,
+    pub remote_state_dir: Option<String>,
 
     /// Directory with the built web UI (index.html + assets). Without
     /// it the API still serves; the UI returns 404.
@@ -281,13 +289,41 @@ fn origin_is_allowed(headers: &axum::http::HeaderMap, port: u16) -> bool {
 /// joins it with spaces and hands the string to the remote login shell,
 /// so anything that may contain spaces (the remote state dir) must be
 /// quoted as that shell will parse it, or the path word-splits remotely.
+///
+/// The UTF-8 requirement enforced below is specific to this ssh path;
+/// local-only mode (no `--ssh`) keeps native `OsString` state paths and
+/// still tolerates non-UTF-8 homes (see `farhelm_supervisor::default_state_dir`).
 fn ssh_args(
     dest: &str,
     control_path: &std::path::Path,
     remote_farhelm: &str,
-    remote_state_dir: Option<&std::path::Path>,
-) -> Vec<String> {
-    let control_path = ssh_control_path_option(control_path);
+    remote_state_dir: Option<&str>,
+) -> anyhow::Result<Vec<String>> {
+    // This is the last point a local filesystem path is still a `Path`
+    // before it is embedded in text handed to ssh. The alternative,
+    // `Path::to_string_lossy`, does not fail on a non-UTF-8 path — it
+    // silently substitutes replacement characters and produces a
+    // *different* path, which ssh would then happily create or connect to
+    // a ControlMaster socket under, with no indication anything went
+    // wrong. Rejecting loudly here, naming the path, is what makes ssh
+    // config values and argv text safe to build from a `Path`: unlike
+    // `ControlMsg::cwd` (farhelm-proto's own UTF-8-only wire contract),
+    // this path never crosses the protocol at all — the requirement here
+    // comes from ssh treating both its `-o` values and its remote argv as
+    // text, not from anything upstream.
+    let control_path_str = control_path.to_str().with_context(|| {
+        // `to_string_lossy`, not `{control_path:?}`: the point of naming
+        // the path in the error is so the user can recognize WHICH one is
+        // unusable, and Debug's `\xFF`-escaped form is far less
+        // recognizable at a glance than the lossy rendering of the parts
+        // that are valid UTF-8.
+        format!(
+            "path {} is not valid UTF-8; ssh's ControlPath option and remote argv are handled \
+             as text and cannot represent it — rename it or point --state-dir elsewhere",
+            control_path.to_string_lossy()
+        )
+    })?;
+    let control_path = ssh_control_path_option(control_path_str);
     let mut args = vec![
         "-o".to_string(),
         "BatchMode=yes".to_string(),
@@ -305,9 +341,9 @@ fn ssh_args(
     ];
     if let Some(remote_state) = remote_state_dir {
         args.push("--state-dir".to_string());
-        args.push(shell_words::quote(&remote_state.to_string_lossy()).into_owned());
+        args.push(shell_words::quote(remote_state).into_owned());
     }
-    args
+    Ok(args)
 }
 
 /// Encode a ControlPath for OpenSSH's config-value parser.
@@ -315,12 +351,14 @@ fn ssh_args(
 /// This is not shell quoting: `-o` values use ssh_config tokenization,
 /// then expand percent tokens. Quotes and backslashes need config
 /// escapes, while user-supplied `%` must become `%%`; only the final `%C`
-/// added by Farhelm remains an expansion token.
-fn ssh_control_path_option(path: &std::path::Path) -> String {
-    let raw = path.to_string_lossy();
+/// added by Farhelm remains an expansion token. Takes `&str` rather than
+/// `&Path`: the UTF-8 check belongs to the caller (`ssh_args`), the one
+/// actual boundary where a local `Path` becomes ssh-config text — this
+/// function is a pure string encoder with nothing left to reject.
+fn ssh_control_path_option(raw: &str) -> String {
     let (prefix, suffix) = raw
         .strip_suffix("%C")
-        .map_or((raw.as_ref(), ""), |prefix| (prefix, "%C"));
+        .map_or((raw, ""), |prefix| (prefix, "%C"));
     let escaped = prefix
         .replace('\\', "\\\\")
         .replace('"', "\\\"")
@@ -349,7 +387,7 @@ async fn connect_supervisor(
                 &control_path,
                 &args.remote_farhelm,
                 args.remote_state_dir.as_deref(),
-            ));
+            )?);
             // stderr inherits: ssh's own diagnostics (auth failures,
             // unreachable host) go to the user's terminal untouched —
             // they are the actionable error SPEC.md wants surfaced.
@@ -575,10 +613,53 @@ async fn serve_term(
 
 #[cfg(test)]
 mod tests {
-    use super::{build_router, origin_is_allowed};
+    use super::{HelmArgs, build_router, origin_is_allowed};
     use axum::http::HeaderMap;
 
     const PORT: u16 = 7433;
+
+    /// A `#[derive(Parser)]` shim purely so this test can call
+    /// `try_parse_from` — `HelmArgs` itself is `#[derive(Args)]`, meant to
+    /// be `#[command(flatten)]`ed into the real `farhelm` CLI, and only a
+    /// top-level `Parser` exposes clap's parsing entry point.
+    #[derive(clap::Parser, Debug)]
+    struct Wrapper {
+        #[command(flatten)]
+        args: HelmArgs,
+    }
+
+    /// Pins `--remote-state-dir`'s CLI-level UTF-8 rejection: the field is
+    /// `Option<String>`, not `Option<PathBuf>`, specifically so clap itself
+    /// refuses a non-UTF-8 OS argument before it can reach the ssh argv
+    /// builder. Reverting the field to `PathBuf` (with a lossy conversion
+    /// added downstream to compensate) would leave every other test in
+    /// this crate green — clap's own argument-parsing behavior is the only
+    /// thing that would catch that regression, so it must be pinned here
+    /// directly rather than inferred from ssh-argv-level tests.
+    #[test]
+    fn remote_state_dir_rejects_non_utf8_os_argument() {
+        use clap::Parser;
+        use std::os::unix::ffi::OsStringExt;
+
+        let non_utf8 = std::ffi::OsString::from_vec(vec![0xff, 0xfe]);
+        let mut argv: Vec<std::ffi::OsString> = vec!["farhelm".into(), "--remote-state-dir".into()];
+        argv.push(non_utf8);
+        let err = Wrapper::try_parse_from(argv).unwrap_err();
+        assert_eq!(err.kind(), clap::error::ErrorKind::InvalidUtf8);
+
+        // A valid unicode value must keep working — this is a rejection
+        // test for non-UTF-8 specifically, not a ban on the flag.
+        let parsed = Wrapper::try_parse_from([
+            "farhelm".into(),
+            "--remote-state-dir".into(),
+            std::ffi::OsString::from("/remote/state"),
+        ])
+        .unwrap();
+        assert_eq!(
+            parsed.args.remote_state_dir.as_deref(),
+            Some("/remote/state")
+        );
+    }
 
     fn headers(host: Option<&str>, origin: Option<&str>) -> HeaderMap {
         let mut h = HeaderMap::new();
@@ -692,7 +773,8 @@ mod tests {
             std::path::Path::new("/home/u/my state/ssh-cm-%C"),
             "farhelm",
             None,
-        );
+        )
+        .unwrap();
         assert!(
             args.contains(&"ControlPath=\"/home/u/my state/ssh-cm-%C\"".to_string()),
             "ControlPath must be quoted for ssh's own parser: {args:?}"
@@ -710,7 +792,8 @@ mod tests {
             std::path::Path::new("/home/u/%d/\"quoted\"/back\\slash/ssh-cm-%C"),
             "farhelm",
             None,
-        );
+        )
+        .unwrap();
         assert!(args.contains(
             &"ControlPath=\"/home/u/%%d/\\\"quoted\\\"/back\\\\slash/ssh-cm-%C\"".to_string()
         ));
@@ -726,7 +809,8 @@ mod tests {
             std::path::Path::new("/state/ssh-cm-%C"),
             "/opt/far helm's/bin",
             None,
-        );
+        )
+        .unwrap();
         let dashdash = args.iter().position(|a| a == "--").expect("-- separator");
         let remote = args[dashdash + 1..].join(" ");
         let parsed = shell_words::split(&remote).expect("remote command must be shell-parseable");
@@ -739,8 +823,9 @@ mod tests {
             "user@host",
             std::path::Path::new("/state/ssh-cm-%C"),
             "farhelm",
-            Some(std::path::Path::new("/home/u/my state/farhelm")),
-        );
+            Some("/home/u/my state/farhelm"),
+        )
+        .unwrap();
         let dashdash = args.iter().position(|a| a == "--").expect("-- separator");
         let remote = args[dashdash + 1..].join(" ");
         let parsed = shell_words::split(&remote).expect("remote command must be shell-parseable");
@@ -753,6 +838,33 @@ mod tests {
                 "--state-dir",
                 "/home/u/my state/farhelm"
             ]
+        );
+    }
+
+    /// `ssh_args` is the enforcement point for a local ControlPath that
+    /// happens to contain non-UTF-8 bytes (a stray mount, a mis-encoded
+    /// filename): without the check inlined there, the path would flow
+    /// into `Path::to_string_lossy` further down the ssh argv builder and
+    /// get silently rewritten into a *different* path — one ssh would
+    /// then create or reuse a ControlMaster socket under with no error
+    /// and no hint that the path it acted on was not the one on disk.
+    /// Asserting the offending path's lossy display appears in the error
+    /// pins that the message tells the user WHICH path is unusable, not
+    /// just that "something" was not UTF-8 — bypassing the check at the
+    /// call site, or degrading the error to something generic, fails this
+    /// test. A valid-UTF-8 control path (covered by the quoting tests
+    /// above) must keep passing through unchanged.
+    #[test]
+    fn ssh_args_rejects_a_non_utf8_control_path_naming_it_in_the_error() {
+        use std::ffi::OsStr;
+        use std::os::unix::ffi::OsStrExt;
+
+        let non_utf8 = std::path::Path::new(OsStr::from_bytes(b"/home/u/\xffstate/ssh-cm-%C"));
+        let err = super::ssh_args("user@host", non_utf8, "farhelm", None).unwrap_err();
+        let rendered = format!("{err:#}");
+        assert!(
+            rendered.contains(&non_utf8.to_string_lossy().into_owned()),
+            "error should name the offending path so the user can see which one: {rendered}"
         );
     }
 

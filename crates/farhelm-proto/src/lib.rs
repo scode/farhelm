@@ -21,6 +21,39 @@
 //! can eyeball a protocol trace. Data frames carry raw terminal bytes on a
 //! per-attachment channel; keeping them binary keeps PTY throughput off
 //! the JSON path.
+//!
+//! ## Paths that cross this protocol are UTF-8-only
+//!
+//! Every path field that actually travels over the wire (`SessionInfo::cwd`,
+//! `ControlMsg::CreateSession::cwd`) is a Rust `String`, and a `String` is
+//! valid UTF-8 by construction — there is no wire representation for a
+//! path that isn't. This is a deliberate v1 contract for *this specific
+//! boundary*, not an oversight: a bytes-preserving encoding was considered
+//! and rejected, because JSON, the web UI, and SQLite all fight arbitrary
+//! bytes, while every place a session `cwd` actually enters the system
+//! (clap's `String` args, JSON request bodies) already rejects non-UTF-8
+//! input on its own.
+//!
+//! The corollary is what matters operationally: a session `cwd` that is
+//! not valid UTF-8 cannot be represented on this protocol at all, and must
+//! be rejected — loudly, with an actionable error — at the boundary where
+//! it first enters (CLI argument parsing, the HTTP API), never
+//! lossy-converted into something that merely *resembles* it. A lossy
+//! conversion (`Path::to_string_lossy`) does not fail; it silently
+//! produces a different path, and every downstream consumer would then act
+//! on that different path with no indication anything went wrong. Callers
+//! on both sides of this crate must reject at the boundary rather than
+//! launder a non-UTF-8 `cwd` through `to_string_lossy` on the way in.
+//!
+//! This contract governs only paths that are `ControlMsg`/`SessionInfo`
+//! fields. It says nothing about host paths that never cross this wire —
+//! `farhelm-helm`'s ssh ControlPath and `--remote-state-dir`, for
+//! instance, are textual for reasons specific to ssh, and enforce their
+//! own UTF-8 requirement independently (see that crate's docs).
+//!
+//! Terminal *output*, by contrast, is fine as arbitrary bytes — see
+//! `Frame::data`. The UTF-8-only rule is specifically about paths, not
+//! about the protocol as a whole.
 
 use serde::{Deserialize, Serialize};
 
@@ -191,6 +224,10 @@ impl Frame {
 pub struct SessionInfo {
     pub id: String,
     pub title: String,
+    /// Working directory the session was created in. UTF-8-only by
+    /// construction (see the module-level "Paths are UTF-8-only" note) —
+    /// a non-UTF-8 host path cannot reach this field; it must have been
+    /// rejected at the boundary before a `SessionInfo` could exist.
     pub cwd: String,
     pub invocation: String,
 }
@@ -219,6 +256,10 @@ pub enum ControlMsg {
     /// (PLAN_M1.md: flags bypass the creation UI, never the creation API).
     CreateSession {
         req_id: u64,
+        /// Working directory to launch the agent in. UTF-8-only (see the
+        /// module-level "Paths are UTF-8-only" note); the sender must
+        /// reject a non-UTF-8 host path before it ever reaches this
+        /// field, not launder it through a lossy conversion.
         cwd: String,
         invocation: String,
         title: Option<String>,
