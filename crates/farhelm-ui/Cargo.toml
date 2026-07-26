@@ -1,0 +1,9 @@
+[package]
+name = "farhelm-ui"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "The Dioxus UI, built for web (wasm) and desktop from one crate"
+
+[dependencies]

@@ -1,0 +1,79 @@
+# CI baseline per the project's modernize conventions: formatting, lint,
+# tests, and doc formatting run as SEPARATE jobs so failures report in
+# parallel and triage is one glance. Jobs that compile Rust (clippy, test)
+# carry explicit cargo caching with job-scoped keys; the toolchain action's
+# built-in cache is disabled everywhere so exactly one caching layer exists,
+# and its implicit RUSTFLAGS are cleared so these commands behave
+# identically in CI and locally. AGENTS.md's finish-work commands must
+# match these invocations exactly — change one, change both.
+#
+# Non-GitHub-owned actions are pinned to commit SHAs (tag in comment):
+# mutable tags would let an upstream compromise run arbitrary code with
+# this repo's token.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  fmt:
+    runs-on: ubicloud
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions-rust-lang/setup-rust-toolchain@166cdcfd11aee3cb47222f9ddb555ce30ddb9659 # v1
+        with:
+          components: rustfmt
+          cache: false
+          rustflags: ""
+      - run: cargo fmt --all -- --check
+
+  clippy:
+    runs-on: ubicloud
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-${{ github.job }}-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-${{ github.job }}-
+      - uses: actions-rust-lang/setup-rust-toolchain@166cdcfd11aee3cb47222f9ddb555ce30ddb9659 # v1
+        with:
+          components: clippy
+          cache: false
+          rustflags: ""
+      - run: cargo clippy --all-targets -- -D warnings
+
+  test:
+    runs-on: ubicloud
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-${{ github.job }}-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-${{ github.job }}-
+      - uses: actions-rust-lang/setup-rust-toolchain@166cdcfd11aee3cb47222f9ddb555ce30ddb9659 # v1
+        with:
+          cache: false
+          rustflags: ""
+      - run: cargo test
+
+  dprint:
+    runs-on: ubicloud
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check formatting with dprint
+        uses: dprint/check@9cb3a2b17a8e606d37aae341e49df3654933fc23 # v2.3

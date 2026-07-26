@@ -1,0 +1,9 @@
+[package]
+name = "farhelm-helm"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "The control plane: host registry, SSH transport, aggregation, HTTP/WS API"
+
+[dependencies]

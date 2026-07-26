@@ -1,0 +1,18 @@
+[workspace]
+resolver = "3"
+members = [
+  "crates/farhelm",
+  "crates/farhelm-helm",
+  "crates/farhelm-proto",
+  "crates/farhelm-supervisor",
+  "crates/farhelm-ui",
+]
+
+# Shared package metadata. One version number across the workspace is a
+# SPEC_impl.md decision: the protocol hello carries it, and version skew is
+# handled at the edges rather than per-crate.
+[workspace.package]
+version = "0.0.1"
+edition = "2024"
+license = "MIT"
+repository = "https://github.com/scode/farhelm"
