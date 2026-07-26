@@ -27,6 +27,23 @@ use tracing::{info, warn};
 /// enough that the first screenful renders while the rest streams.
 const REPLAY_CHUNK: usize = 32 * 1024;
 
+/// Combined byte cap on `CreateSession`'s `cwd` + `invocation` + `title`,
+/// enforced before `create_session` does anything.
+///
+/// Without this, a request whose fields nearly fill `MAX_FRAME_LEN` can
+/// succeed at creating the session, and only then discover that its
+/// `SessionCreated` reply — the same fields again, plus the generated id
+/// and the frame wrapper — exceeds the cap and gets degraded to an
+/// `Error` by `reply_frame`. That leaves the session alive while the
+/// caller is told the request failed, with no way to learn the id needed
+/// to attach to (or tear down) the very session it just created. 64 KiB
+/// is orders of magnitude beyond any real cwd, invocation, or title —
+/// each of which must also survive being embedded in a tmux command line
+/// — so capping the inputs this far below the frame limit makes an
+/// oversized `SessionCreated` reply structurally impossible, and does so
+/// before `create_session` has touched tmux or the filesystem.
+const CREATE_FIELD_CAP: usize = 64 * 1024;
+
 /// A session as the supervisor tracks it: the wire-visible metadata plus
 /// the two tmux handles that address its terminal.
 ///
@@ -466,6 +483,62 @@ where
     result
 }
 
+/// Build the frame for a per-request reply, degrading to `ControlMsg::Error`
+/// if the honest reply would not fit on the wire.
+///
+/// Callers send by pushing onto `tx`, the channel the writer task
+/// (`handle_connection`) drains — without ever observing whether the
+/// frame they built actually encodes. The writer discovers an oversized
+/// frame only later, as a write error indistinguishable from the
+/// transport genuinely breaking, and (correctly, for a real transport
+/// failure) treats ANY write failure as connection-fatal. An oversized
+/// frame is not a transport failure, though; it is a message this
+/// connection can never send, and finding that out at the writer would
+/// tear down every attachment sharing the connection over one bad reply.
+/// So the check has to happen here, before the frame is ever enqueued.
+/// `ListSessions` is the only M1 reply that can realistically hit this:
+/// one frame carries every
+/// session with no pagination until M2 (PLAN.md), so a host with enough
+/// sessions (or unusually large titles) can legitimately exceed
+/// `MAX_FRAME_LEN`. The substituted `Error` reply is small by construction
+/// — just a `req_id` and a fixed-shape message — so it always fits.
+///
+/// Only call this for messages that carry a `req_id`: it panics otherwise,
+/// which is deliberate. A reply silently sent unchecked here would be the
+/// same oversized-frame-reaches-the-writer bug this function exists to
+/// close; better to fail loudly at the call site than send something that
+/// might carry no `req_id` for the substitute `Error` to correlate against.
+fn reply_frame(msg: &ControlMsg) -> Frame {
+    let req_id = match *msg {
+        ControlMsg::SessionCreated { req_id, .. }
+        | ControlMsg::SessionList { req_id, .. }
+        | ControlMsg::Attached { req_id, .. }
+        | ControlMsg::Error { req_id, .. } => req_id,
+        ref other => {
+            unreachable!("reply_frame called with a message that carries no req_id: {other:?}")
+        }
+    };
+    let frame = Frame::control(msg);
+    if frame.exceeds_max_len() {
+        warn!(
+            req_id,
+            size = frame.encoded_len(),
+            "control reply exceeds max frame size; substituting an error reply"
+        );
+        Frame::control(&ControlMsg::Error {
+            req_id,
+            message: format!(
+                "response too large to send ({} bytes; limit {}); session list pagination \
+                 is planned for M2, which will avoid this for ListSessions",
+                frame.encoded_len(),
+                farhelm_proto::MAX_FRAME_LEN,
+            ),
+        })
+    } else {
+        frame
+    }
+}
+
 /// Dispatch one control message from a connected client.
 ///
 /// Failures belonging to one request—bad cwd, a tmux hiccup, an unknown
@@ -484,7 +557,7 @@ async fn handle_control(
     input_routes: &mut HashMap<u32, Arc<SessionEntry>>,
 ) {
     let send = |m: &ControlMsg| {
-        let _ = tx.send(Frame::control(m));
+        let _ = tx.send(reply_frame(m));
     };
     match msg {
         ControlMsg::CreateSession {
@@ -494,16 +567,29 @@ async fn handle_control(
             title,
             cols,
             rows,
-        } => match sup
-            .create_session(&cwd, &invocation, title, cols, rows)
-            .await
-        {
-            Ok(session) => send(&ControlMsg::SessionCreated { req_id, session }),
-            Err(e) => send(&ControlMsg::Error {
-                req_id,
-                message: format!("{e:#}"),
-            }),
-        },
+        } => {
+            let field_len = cwd.len() + invocation.len() + title.as_deref().map_or(0, str::len);
+            if field_len > CREATE_FIELD_CAP {
+                send(&ControlMsg::Error {
+                    req_id,
+                    message: format!(
+                        "cwd, invocation, and title together are {field_len} bytes, \
+                         exceeding the {CREATE_FIELD_CAP}-byte limit"
+                    ),
+                });
+                return;
+            }
+            match sup
+                .create_session(&cwd, &invocation, title, cols, rows)
+                .await
+            {
+                Ok(session) => send(&ControlMsg::SessionCreated { req_id, session }),
+                Err(e) => send(&ControlMsg::Error {
+                    req_id,
+                    message: format!("{e:#}"),
+                }),
+            }
+        }
         ControlMsg::ListSessions { req_id } => {
             let sessions = sup
                 .sessions
@@ -758,4 +844,231 @@ pub async fn connect(state_dir: &Path) -> anyhow::Result<UnixStream> {
     UnixStream::connect(&path)
         .await
         .with_context(|| format!("connecting to supervisor socket {}", path.display()))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The defusal this whole change exists for: an oversized reply must
+    /// never reach the writer task, because the writer's fatal-on-any-
+    /// write-error handling would tear down the shared connection (and
+    /// every attachment on it) over what should have been a single
+    /// request's failure. Assert the substitute frame decodes as an
+    /// `Error` correlated to the same `req_id` the caller was waiting on,
+    /// and that its message actually names the problem (a size figure and
+    /// the word "large") rather than being an opaque placeholder string.
+    ///
+    /// `ListSessions` is the one M1 reply built entirely from unbounded
+    /// caller-controlled data (session titles), with no pagination until
+    /// M2 — so it is the realistic way a control reply exceeds
+    /// `MAX_FRAME_LEN`. One oversized title is enough to clear the cap
+    /// (JSON escaping plus the frame header add overhead on top of the
+    /// title itself), so a single `SessionInfo` suffices here.
+    #[test]
+    fn reply_frame_substitutes_error_for_oversized_reply() {
+        let req_id = 42;
+        let oversized = ControlMsg::SessionList {
+            req_id,
+            sessions: vec![SessionInfo {
+                id: "s1".to_string(),
+                title: "x".repeat(farhelm_proto::MAX_FRAME_LEN as usize),
+                cwd: "/tmp".to_string(),
+                invocation: "agent".to_string(),
+            }],
+        };
+        assert!(
+            Frame::control(&oversized).exceeds_max_len(),
+            "test fixture must actually exceed MAX_FRAME_LEN"
+        );
+
+        let frame = reply_frame(&oversized);
+        assert!(!frame.exceeds_max_len(), "substituted reply must fit");
+        let decoded: ControlMsg = serde_json::from_slice(&frame.body).unwrap();
+        match decoded {
+            ControlMsg::Error {
+                req_id: got_req_id,
+                message,
+            } => {
+                assert_eq!(got_req_id, req_id);
+                assert!(
+                    message.contains(&farhelm_proto::MAX_FRAME_LEN.to_string()),
+                    "error message must name the limit that was exceeded: {message}"
+                );
+                assert!(
+                    message.contains("large"),
+                    "error message must describe the problem concretely: {message}"
+                );
+            }
+            other => panic!("expected ControlMsg::Error, got {other:?}"),
+        }
+    }
+
+    /// The common case: a reply that fits comes back byte-identical to
+    /// what `Frame::control` alone would produce. `reply_frame` always
+    /// serializes and size-checks the message — there is no cheaper path
+    /// that skips that for the common case — but the *result* for a
+    /// fitting reply must be indistinguishable from the unwrapped frame.
+    #[test]
+    fn reply_frame_passes_through_normal_reply_unchanged() {
+        let msg = ControlMsg::SessionCreated {
+            req_id: 7,
+            session: SessionInfo {
+                id: "s1".to_string(),
+                title: "demo".to_string(),
+                cwd: "/tmp".to_string(),
+                invocation: "agent".to_string(),
+            },
+        };
+        assert_eq!(reply_frame(&msg), Frame::control(&msg));
+    }
+
+    /// `reply_frame` panics on a message with no `req_id` to correlate an
+    /// oversize substitution against. This is pinning an explicit
+    /// invariant, not documenting an accident: a silent fallback here
+    /// (inventing a `req_id`, or sending the oversized reply unchecked)
+    /// would recreate the exact oversize-reaches-the-writer bug this
+    /// function exists to close, just for a different message shape. If a
+    /// future caller ever routes an event message (like `Detached`)
+    /// through `reply_frame`, this test is what catches it.
+    #[test]
+    #[should_panic(expected = "carries no req_id")]
+    fn reply_frame_panics_on_message_without_req_id() {
+        reply_frame(&ControlMsg::Detached {
+            channel: 1,
+            reason: "x".into(),
+        });
+    }
+
+    /// A dummy launch-shim path for tests that never create a session:
+    /// `Supervisor::new_with_exe` never touches this path itself (only
+    /// `create_session` does, via `window_command`), so a nonexistent
+    /// file is fine wherever a test's request is rejected — by the
+    /// `CREATE_FIELD_CAP` guard, say — before any side effect happens.
+    fn dummy_exe() -> PathBuf {
+        PathBuf::from("/nonexistent/farhelm")
+    }
+
+    /// The pre-side-effect half of the `CREATE_FIELD_CAP` guard: a request
+    /// whose fields already exceed the cap must be rejected — with an
+    /// `Error` reply correlated to its `req_id` and naming the cap — before
+    /// `create_session` ever runs, so no session is left behind for a
+    /// caller who was told the request failed. Drives the real
+    /// `handle_control` dispatcher (not just the cap arithmetic in
+    /// isolation) against a real `Supervisor`, since the invariant this
+    /// protects is about what happens at the call site.
+    #[tokio::test]
+    async fn create_session_over_field_cap_is_rejected_before_any_side_effect() {
+        let state = tempfile::tempdir().expect("state dir");
+        let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
+            .await
+            .expect("supervisor construction touches only tmux, not the launch shim");
+        let (tx, mut rx) = mpsc::unbounded_channel();
+        let mut input_routes = HashMap::new();
+        let req_id = 99;
+
+        handle_control(
+            &sup,
+            ControlMsg::CreateSession {
+                req_id,
+                cwd: "x".repeat(CREATE_FIELD_CAP),
+                invocation: "agent".to_string(),
+                title: None,
+                cols: 80,
+                rows: 24,
+            },
+            &tx,
+            &mut input_routes,
+        )
+        .await;
+
+        let reply = rx.try_recv().expect("a reply must have been sent");
+        match serde_json::from_slice::<ControlMsg>(&reply.body).unwrap() {
+            ControlMsg::Error {
+                req_id: got_req_id,
+                message,
+            } => {
+                assert_eq!(got_req_id, req_id);
+                assert!(
+                    message.contains(&CREATE_FIELD_CAP.to_string()),
+                    "error message must name the limit that was exceeded: {message}"
+                );
+            }
+            other => panic!("expected ControlMsg::Error, got {other:?}"),
+        }
+        assert!(
+            sup.sessions.lock().await.is_empty(),
+            "a rejected request must create nothing"
+        );
+    }
+
+    /// Call-site regression, the most important test in this file: it
+    /// drives `handle_control` itself, not `reply_frame` in isolation.
+    /// Reverting the `ListSessions` arm from `reply_frame` back to plain
+    /// `Frame::control` would leave every other test in this module
+    /// green — they all call `reply_frame` directly — and only this test
+    /// would catch it. It also proves the degrade is per-request: a
+    /// second, ordinary request on the same connection (same `tx`) must
+    /// still get an honest reply, so substituting one oversized reply
+    /// must not poison the connection or any shared state.
+    #[tokio::test]
+    async fn list_sessions_call_site_degrades_oversized_reply_and_keeps_serving() {
+        let state = tempfile::tempdir().expect("state dir");
+        let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
+            .await
+            .expect("supervisor construction touches only tmux, not the launch shim");
+
+        // Populate the session map directly with fake data, sidestepping
+        // tmux/launch entirely: only the size-driven reply behavior at
+        // the ListSessions call site is under test here.
+        sup.sessions.lock().await.insert(
+            "s1".to_string(),
+            Arc::new(SessionEntry {
+                info: SessionInfo {
+                    id: "s1".to_string(),
+                    title: "x".repeat(farhelm_proto::MAX_FRAME_LEN as usize),
+                    cwd: "/tmp".to_string(),
+                    invocation: "agent".to_string(),
+                },
+                tmux_name: "fh-fake".to_string(),
+                pane: "%0".to_string(),
+            }),
+        );
+
+        let (tx, mut rx) = mpsc::unbounded_channel();
+        let mut input_routes = HashMap::new();
+
+        handle_control(
+            &sup,
+            ControlMsg::ListSessions { req_id: 1 },
+            &tx,
+            &mut input_routes,
+        )
+        .await;
+        let reply = rx.try_recv().expect("a reply must have been sent");
+        match serde_json::from_slice::<ControlMsg>(&reply.body).unwrap() {
+            ControlMsg::Error { req_id, .. } => assert_eq!(req_id, 1),
+            other => panic!("expected ControlMsg::Error for the oversized list, got {other:?}"),
+        }
+
+        // Clear the oversized fixture and send a normal request through
+        // the SAME tx: a healthy reply here is what proves the earlier
+        // substitution was scoped to its one request.
+        sup.sessions.lock().await.clear();
+        handle_control(
+            &sup,
+            ControlMsg::ListSessions { req_id: 2 },
+            &tx,
+            &mut input_routes,
+        )
+        .await;
+        let reply2 = rx.try_recv().expect("a second reply must have been sent");
+        match serde_json::from_slice::<ControlMsg>(&reply2.body).unwrap() {
+            ControlMsg::SessionList { req_id, sessions } => {
+                assert_eq!(req_id, 2);
+                assert!(sessions.is_empty());
+            }
+            other => panic!("expected a normal ControlMsg::SessionList, got {other:?}"),
+        }
+    }
 }

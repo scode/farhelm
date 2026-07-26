@@ -96,15 +96,40 @@ impl Frame {
         }
     }
 
+    /// Bytes this frame would occupy on the wire *after* the 4-byte length
+    /// prefix — i.e. the value that prefix itself carries, and the same
+    /// quantity [`Frame::exceeds_max_len`] and `encode` compare against
+    /// [`MAX_FRAME_LEN`].
+    pub fn encoded_len(&self) -> usize {
+        5 + self.body.len()
+    }
+
+    /// Whether `encode` would refuse this frame for exceeding
+    /// [`MAX_FRAME_LEN`].
+    ///
+    /// This exists so a sender can check *before* handing a frame to the
+    /// writer task: senders enqueue frames onto that task's channel
+    /// without observing whether the eventual encode succeeds, and the
+    /// writer only discovers an oversized frame later as a write error it
+    /// cannot attribute — indistinguishable, at that point, from the
+    /// transport genuinely breaking. Checking here lets the sender
+    /// substitute something small (a per-request error reply, say)
+    /// instead of losing the whole connection over one oversized message.
+    /// Deliberately shares `encoded_len`'s arithmetic with `encode` rather
+    /// than recomputing the header size independently: the two must never
+    /// drift, because a false "fits" here still turns into that same
+    /// fatal write error downstream.
+    pub fn exceeds_max_len(&self) -> bool {
+        self.encoded_len() > MAX_FRAME_LEN as usize
+    }
+
     /// Encode to the wire format, appending to `out`.
     ///
     /// The size check mirrors [`Frame::decode`]: anything written here
     /// must be acceptable to the peer. The output is untouched on error,
     /// so a caller may reuse its scratch buffer after rejecting a frame.
     pub fn encode(&self, out: &mut Vec<u8>) -> Result<(), FrameError> {
-        let len = 5usize
-            .checked_add(self.body.len())
-            .ok_or(FrameError::TooLarge(usize::MAX))?;
+        let len = self.encoded_len();
         if len > MAX_FRAME_LEN as usize {
             return Err(FrameError::TooLarge(len));
         }
@@ -374,21 +399,30 @@ mod tests {
     /// The frame cap includes kind and channel but excludes the four-byte
     /// length prefix. Pinning both sides of that exact boundary prevents
     /// encoder and decoder limits from drifting by one header width.
+    ///
+    /// Also pins that `exceeds_max_len` agrees with `encode` at that same
+    /// boundary in both directions: a false "fits" from the predicate
+    /// would sail past a sender's guard undetected and only surface once
+    /// the frame reaches the writer, as a write error it cannot attribute
+    /// to this specific oversized message.
     #[test]
     fn frame_size_boundary_accepts_the_maximum_and_rejects_one_more() {
         let largest_body = MAX_FRAME_LEN as usize - 5;
+        let at_cap = Frame::data(1, vec![0; largest_body]);
+        assert!(!at_cap.exceeds_max_len());
         let mut wire = Vec::new();
-        Frame::data(1, vec![0; largest_body])
+        at_cap
             .encode(&mut wire)
             .expect("largest valid frame must encode");
         let (decoded, used) = Frame::decode(&wire).unwrap().unwrap();
         assert_eq!(decoded.body.len(), largest_body);
         assert_eq!(used, wire.len());
 
+        let one_past = Frame::data(1, vec![0; largest_body + 1]);
+        assert!(one_past.exceeds_max_len());
         let mut unchanged = b"prefix".to_vec();
-        let frame = Frame::data(1, vec![0; largest_body + 1]);
         assert!(matches!(
-            frame.encode(&mut unchanged),
+            one_past.encode(&mut unchanged),
             Err(FrameError::TooLarge(_))
         ));
         assert_eq!(unchanged, b"prefix");
