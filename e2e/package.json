@@ -1,0 +1,11 @@
+{
+  "name": "farhelm-e2e",
+  "private": true,
+  "description": "Playwright end-to-end tests driving the web UI against a real helm + supervisor + fake agent",
+  "scripts": {
+    "test": "playwright test"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.49.0"
+  }
+}

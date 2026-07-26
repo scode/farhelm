@@ -28,6 +28,9 @@ Before creating or updating a PR, or claiming work is done, run exactly what CI 
 - `cargo clippy --all-targets -- -D warnings`
 - `cargo test`
 - `dprint check`
+- `cd e2e && npx playwright test` — the browser end-to-end suite. It needs `cargo build` and
+  `cd crates/farhelm-ui && dx build --platform web --release` first (it drives the built web UI against a real helm and
+  supervisor), plus a one-time `cd e2e && npm install && npx playwright install chromium`.
 
 These commands mirror `.github/workflows/ci.yml`; if CI changes, update this list in the same change (and vice versa).
 

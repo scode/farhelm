@@ -4,6 +4,20 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 repository.workspace = true
-description = "The multi-call farhelm binary: helm, supervisor, spawn, internal"
+description = "The multi-call farhelm binary: helm, supervisor, internal commands"
 
 [dependencies]
+anyhow.workspace = true
+clap.workspace = true
+farhelm-helm.workspace = true
+farhelm-supervisor.workspace = true
+tokio.workspace = true
+tracing-subscriber.workspace = true
+
+[dev-dependencies]
+# Only the integration tests speak the wire protocol directly; the binary
+# reaches it through the helm and supervisor crates.
+farhelm-proto.workspace = true
+serde_json.workspace = true
+shell-words.workspace = true
+tempfile.workspace = true

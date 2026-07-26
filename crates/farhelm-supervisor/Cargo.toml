@@ -7,3 +7,14 @@ repository.workspace = true
 description = "Per-host session management: tmux driver, agent integrations, state"
 
 [dependencies]
+anyhow.workspace = true
+farhelm-proto.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+shell-words.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+uuid.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true

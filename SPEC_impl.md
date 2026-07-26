@@ -82,28 +82,60 @@ rates; `cat` of a huge file must degrade to slow, never to silent data loss.
 ## Terminal substrate: private tmux server
 
 Each supervisor runs a dedicated tmux server on a private socket (`~/.local/state/farhelm/tmux.sock`) with a locked-down
-generated config: status bar off, `history-limit` sized to SPEC.md's replay floor, `window-size manual`,
-`remain-on-exit on`. One tmux session per Farhelm session; window 0 is the agent terminal, additional windows are the
-terminal tabs. The user's own tmux usage and config are untouched.
+generated config: status bar off, `history-limit` sized to SPEC.md's replay floor, `remain-on-exit on`. One tmux session
+per Farhelm session; window 0 is the agent terminal, additional windows are the terminal tabs. The user's own tmux usage
+and config are untouched.
 
-Farhelm requires tmux ≥ 3.3 (dependable control mode). Releases bundle a private tmux build per platform, used whenever
-the host's tmux is missing or below the floor — the Mac app bundles one too, since macOS ships no tmux at all. A host
-tmux at or above the floor is acceptable; version is checked, not just presence.
+Farhelm requires tmux ≥ 3.3 (dependable control mode) to operate at all. One capability sits higher: restoring bracketed
+paste on reattach reads the `bracket_paste_flag` format, which tmux only gained in 3.7 — below that the supervisor warns
+once at first attach (a startup probe cannot tell "old tmux" from "no pane to inspect yet") and loses that one mode,
+everything else working normally. This matters in practice because Ubuntu 24.04 ships tmux 3.4. Releases bundle a
+private tmux build per platform, used whenever the host's tmux is missing or below the floor — the Mac app bundles one
+too, since macOS ships no tmux at all. A host tmux at or above the floor is acceptable; version is checked, not just
+presence.
 
 tmux is a headless PTY holder and history store. The supervisor's only client is a non-rendering control-mode client
 (`tmux -C`, the interface iTerm2's tmux integration is built on; `pipe-pane` is the fallback shape). Sizing (audited on
 tmux 3.7): a control-mode client is an attached client, but tmux ignores it for window sizing until it declares a size
-via `refresh-client -C` — the supervisor never declares one, and instead pins sizing with `window-size manual` plus
-explicit `resize-window` tracking the attached GUI client's dimensions (`resize-window` itself forces
-`window-size manual` on the window, so the config setting and the command agree). The supervisor streams raw pane output
-to the client; input goes in via `send-keys`/`paste-buffer`. Passthrough sequences (audited): the control-mode `%output`
-stream carries `\ePtmux;...\e\\`-wrapped payloads still wrapped, regardless of the `allow-passthrough` option — that
-option only gates forwarding to rendering clients, which Farhelm has none of — so the supervisor unwraps passthrough
-payloads itself before they reach xterm.js. Reconnect replay prefills xterm.js from `capture-pane -e` history, then
-switches to the live stream — that is how the 10,000-line floor is met. Content alone is not enough, though: pane modes
-(alternate screen, bracketed paste, mouse reporting, application cursor keys, cursor position) are read from tmux pane
-format variables and re-synthesized into xterm.js after the prefill — without that, a reattached full-screen agent
-silently loses paste bracketing and mouse reporting. The supervisor enforces SPEC.md's one-attachment rule itself.
+via `refresh-client -C` — the supervisor never declares one, so tmux ignores it for sizing entirely, and geometry comes
+from explicit `resize-window` calls tracking the attached GUI client's dimensions (`resize-window` sets
+`window-size manual` on the window it touches, which is where that setting comes from). NOTE: setting
+`window-size manual` globally in the config crashes the tmux 3.4 server outright — the version Ubuntu 24.04 ships — so
+it must stay out of the generated config; the two mechanisms above make it redundant anyway. The supervisor streams raw
+pane output to the client; input goes in via `load-buffer -` over stdin followed by `paste-buffer -d -r` (`-r` so tmux
+does not rewrite LF to CR — the bytes are exact terminal input; `-d` so the input does not linger in the server's buffer
+list). Stdin delivery is a security choice, not a performance one: the earlier `send-keys -H` shape put every input
+byte, hex-encoded, on a spawned process's argv — world-readable via `/proc/<pid>/cmdline`, which matters because input
+includes credentials typed at agent prompts. It also removed `send-keys`'s 512-byte chunking, which existed only because
+tmux rejects a command with ~1000 arguments as "command too long". Passthrough sequences (audited): the control-mode
+`%output` stream carries `\ePtmux;...\e\\`-wrapped payloads still wrapped, regardless of the `allow-passthrough` option
+— that option only gates forwarding to rendering clients, which Farhelm has none of — so the supervisor unwraps
+passthrough payloads itself before they reach xterm.js. Reconnect replay prefills xterm.js from `capture-pane -e`
+history, then continues with live bytes from the same control client — that is how the 10,000-line floor is met without
+a gap between the two. The handoff ordering is load-bearing: the incumbent control client is killed and awaited, the
+window is resized, and the replacement attaches with `no-output`. Pane modes, a history snapshot, a visible-screen
+snapshot, and `refresh-client -f !no-output` are submitted as one semicolon-separated command group through that
+replacement. The matching `%end` for the final refresh block is the cutover: earlier pane bytes are represented by the
+snapshot, later ones arrive as `%output`, and `no-output` advances rather than queueing a second copy for delivery.
+Normal-screen replay selects the history snapshot; alternate-screen replay selects the visible snapshot so normal
+history is not mixed into a full-screen app.
+
+This boundary was checked against tmux 3.3a, 3.4, and 3.7b with `scripts/check-tmux-cutover.py` under a continuously
+busy pane. The corresponding tmux source has the same ordering in all three versions: one input line appends the
+complete command group, synchronous `capture-pane` and `refresh-client` commands drain from that queue before the server
+loop returns to pane reads, and `CLIENT_CONTROL_NOOUTPUT` advances the client offset instead of queueing a backlog. Each
+command still produces its own `%begin`/`%end` block, so the parser keeps their numeric identities and does not declare
+the stream live at an earlier block. A command `%error`, partial EOF, timeout, output before cutover, or missing
+matching marker fails the attach rather than replaying an incomplete snapshot.
+
+Content alone is not enough: pane modes (alternate screen, bracketed paste, mouse reporting, application cursor keys,
+cursor position) are read from tmux pane format variables and re-synthesized into xterm.js after the prefill — without
+that, a reattached full-screen agent silently loses paste bracketing and mouse reporting. Replay remains bounded by
+tmux's retained history. One deeper tmux limitation also remains: `capture-pane` serializes rendered cells, not an
+in-progress terminal escape parser. If reconnect lands after tmux has consumed only a prefix of one escape sequence, the
+snapshot cannot serialize that hidden parser state for xterm.js; a later application repaint repairs the display.
+Farhelm does preserve split printable output and keeps its own passthrough decoder across live `%output` notification
+boundaries. The supervisor enforces SPEC.md's one-attachment rule itself.
 
 Exited-session semantics: `remain-on-exit on` keeps dead panes viewable per SPEC.md, and exit codes come from the dead
 pane's status. Exec failure versus ran-and-died cannot be told apart by exit code alone (a missing command yields 127
@@ -126,7 +158,7 @@ Motivation: tmux delivers exactly the hard guarantees SPEC.md makes — processe
 restarts, scrollback retention, screen re-render on reattach — with a decade of hardening, and the approach is validated
 by herdr. The rejected alternative (per-session Rust holder daemons owning PTYs plus our own terminal-grid engine for
 replay) buys independence from tmux at the cost of owning a terminal state machine's bugs; not a v1 trade. The
-supervisor's internal terminal interface stays narrow (create, attach-stream, resize, capture, kill) so a Rust holder
+supervisor's internal terminal interface stays narrow (create, attach-cutover, resize, input, kill) so a Rust holder
 could replace tmux behind it later without touching anything above.
 
 Consequence to keep in mind: tmux sits in the escape-sequence path. Fidelity issues (new terminal features, passthrough
@@ -188,6 +220,11 @@ by eye; raw binary data channels keep PTY throughput off the JSON path.
   macOS, the fallback is process-group kill plus a sweep for surviving processes carrying the session's marker
   environment variable.
 - Attachments land in `~/.local/state/farhelm/attachments/<session-id>/`, deleted with the session.
+- The rest of the state directory: `supervisor.sock` (the unix socket that is the supervisor's only doorway — mode 0600,
+  inside a 0700 directory, because reaching it means running commands as the user), `tmux.sock` and `tmux.conf` for the
+  private tmux server, and `launch/` holding one 0600 JSON spec per session. A launch spec carries the agent's full
+  command line, which users put credentials into, so the shim unlinks it as soon as it has read it, creation removes it
+  if the session never starts, and the supervisor sweeps leftovers at startup.
 
 ## Helm internals
 
@@ -203,10 +240,18 @@ by eye; raw binary data channels keep PTY throughput off the JSON path.
 
 ## Logging
 
-`tracing` everywhere, with `tracing-subscriber` env-filter semantics. Components write human-readable logs to
-`~/.local/state/farhelm/logs/` with rotation (tracing-appender); verbosity via `RUST_LOG`-style env and a `--log-level`
-flag. Spans carry session ids and host ids so SPEC.md's required diagnostic trails (creation, PTY lifecycle, attachment
-transfer, reconnection, resume) fall out of structured context rather than ad-hoc log lines.
+`tracing` everywhere, with `tracing-subscriber` env-filter semantics. The intended mature shape uses spans carrying
+session and host ids, so SPEC.md's required diagnostic trails (creation, PTY lifecycle, attachment transfer,
+reconnection, resume) fall out of structured context rather than ad-hoc log lines.
+
+M1 emits structured lifecycle and failure events, attaching session or channel fields where that context exists. It does
+not yet establish the systematic session/host spans above: the host registry, reconnection, and resume are later
+milestones, so their diagnostic trails cannot exist yet either.
+
+Logs go to stderr, and deliberately not stdout: under `farhelm internal stdio` the process's stdout IS the protocol
+channel, so a stray line there corrupts frames. File logging under `~/.local/state/farhelm/logs/` with rotation
+(tracing-appender) and a `--log-level` flag are the intended shape but are not built yet — today verbosity is
+`RUST_LOG`-style env only.
 
 Motivation: tracing is the ecosystem standard, and span context is the cheap way to make "logs are available for X" a
 property of the architecture instead of a discipline.
@@ -274,10 +319,11 @@ constraint (see the GUI section's motivation), not an afterthought:
 - **Playwright (TypeScript) drives the web build in headless Chromium** against a real helm and real supervisor on
   Linux. DOM assertions and screenshots both work because the UI is real DOM. This is the canonical GUI verification
   path for agents.
-- **A fake agent binary** (part of the workspace) stands in for Claude Code/Codex in tests: scripted TUI output,
-  question prompts, alternate screens, and fake on-disk session records matching each agent kind's layout. This makes
-  end-to-end tests — including status heuristics, conversation capture, and resume — deterministic and free of vendor
-  auth. Real-agent smoke testing stays manual.
+- **A fake agent** — `farhelm internal fake-agent --script basic|altscreen|binary`, a hidden subcommand of the one
+  binary rather than a separate artifact — stands in for Claude Code/Codex in M1 tests. Its deterministic scripts cover
+  prompt/echo input, terminal modes, alternate-screen rendering, and byte-clean live output without vendor auth. Later
+  milestones extend this fixture with fake on-disk records for status heuristics, conversation capture, and resume.
+  Real-agent smoke testing stays manual.
 - Rust integration tests exercise supervisor+tmux directly (CI provides tmux) and the framing protocol with golden
   cases; farhelm-proto keeps wire compatibility testable.
 - The desktop shell's native glue is the acknowledged manual-test gap (see GUI risks); everything else must be coverable

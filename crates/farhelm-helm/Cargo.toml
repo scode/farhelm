@@ -7,3 +7,15 @@ repository.workspace = true
 description = "The control plane: host registry, SSH transport, aggregation, HTTP/WS API"
 
 [dependencies]
+anyhow.workspace = true
+axum.workspace = true
+clap.workspace = true
+farhelm-proto.workspace = true
+farhelm-supervisor.workspace = true
+futures-util.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+shell-words.workspace = true
+tokio.workspace = true
+tower-http.workspace = true
+tracing.workspace = true
