@@ -225,6 +225,13 @@ by eye; raw binary data channels keep PTY throughput off the JSON path.
   private tmux server, and `launch/` holding one 0600 JSON spec per session. A launch spec carries the agent's full
   command line, which users put credentials into, so the shim unlinks it as soon as it has read it, creation removes it
   if the session never starts, and the supervisor sweeps leftovers at startup.
+- Symlink TOCTOU hardening of the state directory is intentionally absent. The directory create, chmod, lock, socket,
+  and sweep operations are plain path-based calls that follow symlinks; making them airtight means `O_NOFOLLOW` opens,
+  dir-fd-relative operations, and ownership verification throughout. Exploiting the gap requires write access to a
+  parent of the state directory — the user's own home — and an attacker with that already runs arbitrary code as the
+  user, so the rewrite buys nothing against any attacker this tool could plausibly face. Decided won't-fix during the M1
+  review. Revisit only if the state directory ever moves somewhere group- or world-writable. (The one place symlink
+  safety is load-bearing anyway, launch-spec creation, uses `O_EXCL` and is safe.)
 
 ## Helm internals
 

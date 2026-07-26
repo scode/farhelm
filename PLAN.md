@@ -28,14 +28,28 @@ Consequences of that stance:
 - **M1 — walking skeleton.** One remote session end to end: real helm, protocol, supervisor, tmux, xterm.js; reconnect
   with replay; fake agent and Playwright harness; web and desktop UI from one crate. Planned in detail in PLAN_M1.md.
 - **M2 — sessions as a managed thing.** Multiple sessions, the flat list, create/open/stop/delete from the GUI,
-  supervisor SQLite, helm session cache. Dogfooding starts here.
+  supervisor SQLite, helm session cache. Also the protocol growth the list forces: caps or pagination for the
+  session-list response (today it is one frame, defused to a per-request error when oversize), and widening the protocol
+  error taxonomy as the GUI's error surfacing demands it. Dogfooding starts here.
+- **M2.5 — terminal-path backpressure.** The end-to-end flow control SPEC_impl.md already specifies: `term.write()`
+  completion callbacks drive watermark pause/resume over the WebSocket, the supervisor throttles its pane reads, and the
+  internal queues become bounded. Deferred out of M1 (the review flagged the unbounded queues); scheduled right after
+  dogfooding starts because sustained heavy agent output is what turns the risk real.
 - **M3 — durability and resume.** Supervisor-restart survival, boot-id interrupted classification, error/exited via the
-  launch shim, conversation capture for Claude Code and Codex, restart-with-resume.
+  launch shim, conversation capture for Claude Code and Codex, restart-with-resume. Includes the crash-safety groundwork
+  the M1 review deferred here: an explicit atomicity policy for state-file writes (temp-write-then-rename with fsync
+  where a torn file would matter) and a fault-injection seam so the failure windows are testable, not just reasoned
+  about.
 - **M4 — attachments and terminal tabs.** Paste/drop to path-at-cursor; tabs in the session cwd.
 - **M5 — status and profiles.** Running/waiting/idle heuristics with per-agent sharpening, list filtering, profile CRUD
   and starter profiles.
 - **M6 — multi-host.** Registry and host management, local-host supervisor, stale-cache semantics, version-skew refusal.
   Deliberately late: M1's argv-specified single host carries dogfooding a long way, and the registry is bookkeeping, not
   risk.
+- **M6.5 — test-coverage backfill.** Coverage debt deliberately parked while the focus was end-to-end progress, tracked
+  here so it cannot be quietly forgotten. Known entry: unit coverage for terminal.js's `onBinary` byte conversion, which
+  needs a JS test-harness decision first (the repo has only Playwright today, and adopting a JS unit runner for one
+  small function was judged premature during the M1 review). Placed late because the parked items are small, stable code
+  with low regression risk; anything that starts changing often should be pulled forward instead of waiting here.
 - **M7 — the outer ring.** Web-token auth and device sessions, `farhelm spawn` and agent-spawned sessions (deliberately
   late as well), archive, provisioning, Mac app bundling.
