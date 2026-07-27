@@ -12,7 +12,7 @@ use farhelm_proto::io::{FrameReader, FrameWriter, handshake, parse_control};
 use farhelm_proto::{ControlMsg, Frame, FrameKind, SessionInfo};
 use std::collections::HashMap;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicU64, Ordering};
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::sync::{Mutex, mpsc, oneshot, watch};
 use tracing::warn;
@@ -47,7 +47,10 @@ pub struct SupervisorClient {
     pending: Mutex<Pending>,
     terminals: Mutex<HashMap<u32, mpsc::UnboundedSender<TermEvent>>>,
     next_req: AtomicU64,
-    next_channel: AtomicU32,
+    /// Wider than the wire's u32 on purpose: ids are never recycled (see
+    /// `allocate_channel`), so the counter must be able to walk past the
+    /// u32 range and fail allocation instead of wrapping back into it.
+    next_channel: AtomicU64,
 }
 
 /// In-flight requests plus the connection-dead flag, under one mutex on
@@ -66,6 +69,33 @@ struct Pending {
     /// afterwards fail immediately rather than queueing onto a connection
     /// that will never answer.
     closed: bool,
+}
+
+/// Hand out the next terminal channel id. Ids are never recycled within a
+/// connection's lifetime; allocation fails once the u32 wire range is spent.
+///
+/// Recycling — even "carefully", skipping ids still present in `terminals`
+/// — is unsound, because absence from that map does not mean an id is
+/// retired end-to-end. Callers keep the raw number after their map entry is
+/// gone: every cleanup path calls `detach(channel)` unconditionally,
+/// including after a server-side `Detached` already removed the entry, and
+/// frames addressed to a dead channel can still be in flight on the wire.
+/// A recycled id would let that stale cleanup tear down the new owner, or
+/// route a stale frame into it. Making ids unique for the connection's
+/// lifetime closes the whole class.
+///
+/// The cost is exhaustion after `u32::MAX` attachments on one connection,
+/// which no real deployment approaches; if it ever happens, a clean attach
+/// error (reconnect recovers, since ids are per-connection) beats silent
+/// cross-attachment corruption. The backing counter is u64, so it does not
+/// itself wrap; once past the u32 range every later call keeps failing.
+///
+/// Id 0 is never produced — the counter starts at 1, because 0 is the
+/// control channel and the supervisor rejects an Attach naming it.
+fn allocate_channel(next_channel: &AtomicU64) -> anyhow::Result<u32> {
+    let id = next_channel.fetch_add(1, Ordering::Relaxed);
+    u32::try_from(id)
+        .map_err(|_| anyhow::anyhow!("terminal channel ids exhausted on this connection"))
 }
 
 impl SupervisorClient {
@@ -90,7 +120,7 @@ impl SupervisorClient {
             terminals: Mutex::new(HashMap::new()),
             next_req: AtomicU64::new(1),
             // Channel 0 is the control channel; attachments start at 1.
-            next_channel: AtomicU32::new(1),
+            next_channel: AtomicU64::new(1),
         });
 
         // A `Weak`, deliberately: the client owns `writer_tx`, so a
@@ -354,10 +384,12 @@ impl SupervisorClient {
         cols: u16,
         rows: u16,
     ) -> anyhow::Result<(u32, mpsc::UnboundedReceiver<TermEvent>)> {
-        let channel = self.next_channel.fetch_add(1, Ordering::Relaxed);
+        let channel = allocate_channel(&self.next_channel)?;
         let (tx, rx) = mpsc::unbounded_channel();
         // Register before sending Attach: replay data frames may arrive
-        // before the Attached reply is processed.
+        // before the Attached reply is processed. The insert cannot clobber
+        // anything — `allocate_channel` never hands out an id twice on this
+        // connection.
         self.terminals.lock().await.insert(channel, tx);
 
         let req_id = self.req_id();
@@ -675,5 +707,78 @@ mod tests {
             .expect("request hung after malformed control frame")
             .expect_err("malformed control frame must fail the request");
         peer.await.unwrap();
+    }
+
+    /// The common case: allocation is a plain monotonic counter starting at
+    /// 1 (0 is the control channel). This pins the never-recycle contract's
+    /// happy half — each call hands out a new id and advances.
+    #[test]
+    fn allocate_channel_hands_out_sequential_ids() {
+        let next_channel = AtomicU64::new(1);
+
+        assert_eq!(allocate_channel(&next_channel).unwrap(), 1);
+        assert_eq!(allocate_channel(&next_channel).unwrap(), 2);
+    }
+
+    /// The never-recycle contract's hard half: once the u32 wire range is
+    /// spent, allocation must fail — permanently — rather than wrap back
+    /// into ids that may still be referenced by detached-but-uncleaned
+    /// callers or in-flight frames. Wrapping here is exactly the
+    /// cross-attachment corruption bug this allocator exists to prevent.
+    #[test]
+    fn allocate_channel_fails_instead_of_recycling() {
+        let next_channel = AtomicU64::new(u64::from(u32::MAX));
+
+        // The last id in the wire range is still valid...
+        assert_eq!(allocate_channel(&next_channel).unwrap(), u32::MAX);
+        // ...and everything past it errors, on every subsequent call.
+        assert!(allocate_channel(&next_channel).is_err());
+        assert!(allocate_channel(&next_channel).is_err());
+    }
+
+    /// `attach()` must surface exhaustion as a clean error before touching
+    /// any shared state or the wire: no Attach frame sent, no terminals
+    /// entry leaked. This exercises exhaustion through the real attach path
+    /// so a refactor that stops routing allocation through
+    /// `allocate_channel` cannot silently reintroduce id reuse while the
+    /// unit tests above stay green.
+    #[tokio::test]
+    async fn attach_fails_cleanly_when_channel_ids_exhausted() {
+        let (client_side, peer_side) = tokio::io::duplex(64 * 1024);
+        let peer = tokio::spawn(async move {
+            let (r, w) = tokio::io::split(peer_side);
+            let mut reader = FrameReader::new(r);
+            let mut writer = FrameWriter::new(w);
+            handshake(&mut reader, &mut writer, "supervisor")
+                .await
+                .unwrap();
+            reader
+        });
+        let (r, w) = tokio::io::split(client_side);
+        let client = SupervisorClient::start(r, w).await.unwrap();
+        let mut peer_reader = peer.await.unwrap();
+
+        client
+            .next_channel
+            .store(u64::from(u32::MAX) + 1, Ordering::Relaxed);
+
+        let error = timeout(Duration::from_secs(2), client.attach("s", 80, 24))
+            .await
+            .expect("attach hung on exhausted channel ids")
+            .expect_err("attach must fail once channel ids are exhausted");
+        assert!(error.to_string().contains("exhausted"));
+        assert!(client.terminals.lock().await.is_empty());
+
+        // The failed attach must not have written anything: dropping the
+        // client closes the connection, and the peer must see clean EOF
+        // with no frames in between.
+        drop(client);
+        assert!(
+            timeout(Duration::from_secs(2), peer_reader.read_frame())
+                .await
+                .expect("peer read hung")
+                .unwrap()
+                .is_none()
+        );
     }
 }
