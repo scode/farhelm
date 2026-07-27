@@ -36,19 +36,34 @@ body,
   white-space: nowrap;
 }
 
-.back-button {
+/* Shared secondary-button look: `.back-button`, `.new-session-button`,
+   the create form's submit button, and the per-row stop/delete buttons
+   all want the same plain outlined box, so that shape lives here ONCE
+   rather than repeated per class (which had drifted into four
+   copy-pasted declaration blocks before this consolidation) — each call
+   site's own class only adds what actually differs (font-size, padding,
+   color, alignment). */
+.btn {
   background: none;
   border: 1px solid #3a3f47;
   border-radius: 3px;
   color: #d8dee9;
   font: inherit;
-  font-size: 12px;
-  padding: 2px 8px;
   cursor: pointer;
 }
 
-.back-button:hover {
+.btn:hover:not(:disabled) {
   background: #262a31;
+}
+
+.btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.back-button {
+  font-size: 12px;
+  padding: 2px 8px;
 }
 
 /* List view (PLAN_M2.md step 7): a flat, sorted list of session rows —
@@ -57,18 +72,46 @@ body,
   overflow-y: auto;
 }
 
+/* The row is a column: `.session-row-main` (the flex ROW of open/stop/
+   delete buttons) stacked over an optional per-session error line —
+   see the SessionRow doc in lib.rs for why an error needs its own line
+   rather than squeezing in as a fourth flex item next to the buttons.
+   `.session-row` itself is a plain flex container (a <div>, not a
+   <button>: a <button> cannot legally nest the stop/delete <button>s
+   the M2-step-8 actions add). */
 .session-row {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  border-bottom: 1px solid #1d2026;
+}
+
+.session-row:focus-within {
+  background: #1d2026;
+}
+
+.session-row-main {
+  /* No explicit `width: 100%`: a flex COLUMN parent's default
+     `align-items: stretch` already fills this child to the parent's
+     full cross-axis (width) size, so setting it again here would be a
+     no-op that just invites a future reader to wonder what it overrides. */
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+}
+
+.session-row-open {
   /* Resets: this is a native <button> (real Enter/Space activation,
      focus, and screen-reader semantics for free — see the SessionRow
      doc in lib.rs), so it starts from the browser's button box-model
      and typography and has to be told to look like a plain row instead. */
   display: flex;
-  width: 100%;
+  flex: 1;
+  min-width: 0;
   align-items: baseline;
   gap: 12px;
   padding: 10px 14px;
   border: none;
-  border-bottom: 1px solid #1d2026;
   background: none;
   color: inherit;
   font: inherit;
@@ -76,10 +119,92 @@ body,
   cursor: pointer;
 }
 
-.session-row:hover,
-.session-row:focus {
+.session-row-open:hover:not(:disabled),
+.session-row-open:focus {
   background: #1d2026;
   outline: none;
+}
+
+/* Disabled for either of two reasons (see `nav_disabled || confirming` in
+   lib.rs's `SessionRow`): the list-wide nav lock (opening this row would
+   navigate away and unmount `ListView` mid-operation), or this row's OWN
+   delete confirmation being open (cancel is the only way back to normal —
+   see that component's doc). Either way it must visibly stop being a
+   normal clickable row rather than just silently failing to activate. */
+.session-row-open:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+/* Stop/delete/confirm-delete/confirm-cancel: small, secondary-looking
+   controls that stay out of the open button's way — plain text buttons
+   rather than icons, matching the rest of M2's undecorated chrome
+   (PLAN_M2.md). Box-model shape itself comes from `.btn` above; this
+   group only adds what differs, shared across all four rather than
+   duplicated per pair since the shape is identical. `flex-shrink: 0`
+   is deliberate, not a default left implicit: `.confirm-title` below is
+   the ONE row member allowed to shrink under space pressure (a long
+   title, say) — these buttons must stay full-size and reachable
+   regardless, never the ones that give. */
+.session-row-stop,
+.session-row-delete,
+.confirm-delete,
+.confirm-cancel {
+  align-self: center;
+  margin-right: 10px;
+  font-size: 12px;
+  padding: 2px 8px;
+  flex-shrink: 0;
+}
+
+/* The dangerous action in either state — plain "delete", or "confirm
+   delete" once a prompt is open — gets the same red: a user
+   mid-confirmation should read "confirm delete" as at least as alarming
+   as the button that led here, not a plainer, calmer control that
+   undersells what it is about to do. */
+.session-row-delete,
+.confirm-delete {
+  color: #e08080;
+  border-color: #5a3838;
+}
+
+/* Inline delete confirmation (replaces the old native `window.confirm()`
+   path — wry ships no dialogs on macOS's WKWebView, see the design note
+   in lib.rs's `SessionRow`): TWO elements plus two buttons stand in for
+   the stop/delete pair while a row is mid-confirm, sitting in the same
+   `.session-row-main` flex row those buttons normally occupy.
+   `.confirm-consequence` is the safety-critical "what happens if you
+   delete this" half and never shrinks or ellipsizes — `flex-shrink: 0`,
+   same as the buttons — so it always renders in full regardless of how
+   little room a long neighboring title leaves it. `.confirm-title` is
+   the ONLY element here allowed to give: `min-width: 0` overrides a flex
+   item's default min-content floor (without it, a legal multi-KB,
+   whitespace-free title would refuse to shrink below its own full
+   rendered width, pushing everything else — including the buttons —
+   straight off the visible row), and `overflow`/`text-overflow`/
+   `white-space` turn that forced shrink into a clean ellipsis instead of
+   a raw clip. Splitting these into two elements (rather than one
+   ellipsized string with the title embedded mid-sentence) is what makes
+   this promise possible in the first place: a single combined string has
+   only ONE truncation point, and for the old wording that point always
+   fell on the consequence half once a title ran long enough — see
+   `confirm_consequence`'s doc in lib.rs. */
+.confirm-consequence {
+  flex-shrink: 0;
+  font-size: 12px;
+  color: #e0d090;
+  margin-right: 6px;
+}
+
+.confirm-title {
+  flex: 1 1 0;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+  color: #e0d090;
+  margin-right: 6px;
 }
 
 /* Titles, cwds, and invocations are all attacker- or user-controlled
@@ -140,6 +265,64 @@ body,
 .status-badge.unknown {
   color: #5a606b;
   font-style: italic;
+}
+
+/* Create dialog (PLAN_M2.md step 8): an inline form toggled from the
+   toolbar, not a modal library — see the design note in lib.rs's
+   `CreateSessionForm` doc. Kept visually close to the row/badge styling
+   above it rather than introducing a new visual language for one form. */
+.list-toolbar {
+  padding: 10px 14px;
+}
+
+.new-session-button {
+  font-size: 13px;
+  padding: 4px 10px;
+}
+
+.create-session-form {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 14px;
+  margin: 0 14px 10px;
+  background: #1d2026;
+  border-radius: 4px;
+}
+
+.create-session-form label {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 12px;
+  color: #8a919e;
+}
+
+.create-session-form input {
+  background: #14161a;
+  border: 1px solid #3a3f47;
+  border-radius: 3px;
+  color: #d8dee9;
+  font: inherit;
+  font-size: 13px;
+  padding: 4px 8px;
+}
+
+.create-session-submit {
+  align-self: flex-start;
+  font-size: 13px;
+  padding: 4px 10px;
+}
+
+/* Reuses `.status`/`.status.error`'s look (below `.terminal`) is
+   deliberately NOT done here — those are full-width, padded blocks meant
+   for a whole view's state, while a form or action error needs to sit
+   snugly next to the control it's about, not take over the layout. */
+.create-session-error,
+.action-error {
+  padding: 2px 14px 8px;
+  font-size: 12px;
+  color: #e08080;
 }
 
 /* Two classes, not one: `.banner`'s own `display: none` (below) must

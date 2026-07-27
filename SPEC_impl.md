@@ -57,7 +57,10 @@ Known risks, accepted deliberately:
   desktop solution is built until a real deficiency shows up in our actual flows; native-side wry hooks are the known
   fallback. One concrete thing to check early rather than debug late: wry's own file-drop handling swallows DOM drop
   events unless configured not to. (The browser path is a secure context on loopback, so web clipboard APIs are fully
-  available there.)
+  available there.) Also established the hard way during M2 dogfooding: wry implements NO native JS dialogs on macOS —
+  `window.confirm()` silently does nothing — so any confirmation or prompt the UI needs must be in-page DOM, never a
+  browser dialog. SPEC.md's confirmation language is deliberately mechanism-agnostic; this is the constraint that picks
+  the mechanism.
 - Blitz (Dioxus's native renderer) is not production-ready. The plan assumes webview desktop indefinitely; nothing may
   depend on Blitz landing.
 

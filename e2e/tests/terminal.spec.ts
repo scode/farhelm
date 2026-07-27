@@ -1,19 +1,105 @@
 // The M1 acceptance suite at the browser level (PLAN_M1.md criterion 5),
-// grown by PLAN_M2.md step 7 to cover the list view and navigation: these
+// grown by PLAN_M2.md step 7 to cover the list view and navigation, and by
+// step 8 to cover the create dialog and per-row stop/delete actions: these
 // tests cover output rendering, input round-trip, reconnect replay,
-// resize, last-attach-wins takeover, the session list, and the
-// list/terminal navigation lifecycle — all against a real helm,
-// supervisor, tmux, and fake agent, with one deliberate exception: the
-// truncation-banner test below intercepts GET /api/sessions with
-// `page.route`, since pinning that behavior against a REAL ~500-session
-// listing would mean actually creating hundreds of sessions for one
-// assertion. Every other test drives the real stack end to end.
+// resize, last-attach-wins takeover, the session list, the create/stop/
+// delete UI, and the list/terminal navigation lifecycle — all against a
+// real helm, supervisor, tmux, and fake agent, with a handful of
+// deliberate exceptions that intercept `page.route` instead: the
+// truncation banner (pinning a ~500-session-cap reply without actually
+// creating hundreds of sessions), the Unknown-status confirm wording
+// (provoking that status needs an old-shaped peer, not anything this
+// build's own supervisor can produce — see that test's own docs), the
+// stop/delete failure-surfacing tests (forcing failures a healthy stack
+// would never hand back on its own), and two confirming-state poll tests
+// (a synthetic marker-carrying listing to prove a refetch's RESULT
+// reached the DOM, and a synthetic one-shot 500 to prove a failed refetch
+// doesn't clear `confirming` — neither is reachable by driving the real
+// stack alone). Every other test drives the real stack end to end.
 //
 // Assertions read the xterm.js BUFFER, not the DOM: the DOM renderer
 // materializes only viewport rows, so scrolled-off content (exactly what
 // replay tests care about) never appears in .xterm-rows. The buffer is
 // the semantic truth of what the terminal holds.
-import { test, expect, Page } from "@playwright/test";
+import { test, expect, Page, APIRequestContext } from "@playwright/test";
+import path from "node:path";
+
+/**
+ * A real, distinguishable agent invocation for the create-dialog tests
+ * (PLAN_M2.md step 8): the same fake-agent binary and `basic` script
+ * start-stack.sh uses for the shared "e2e-session", built from an
+ * absolute path so it works regardless of the supervisor's own cwd. Every
+ * dialog-driven session in this file uses this invocation rather than a
+ * bare `sleep` — the multi-session flow types into one of them, which
+ * `sleep` cannot answer.
+ */
+const FAKE_AGENT_INVOCATION = `"${path.resolve(__dirname, "../../target/debug/farhelm")}" internal fake-agent --script basic`;
+
+/**
+ * Open the list view's inline create form (PLAN_M2.md step 8: "not a
+ * modal library" — a plain toggled `<div>`, not a dialog element), fill
+ * in the three fields, and optionally submit.
+ *
+ * `title` is a required argument, not optional: every call site in this
+ * file needs a distinct, known title anyway (to look the session up
+ * afterward, or to assert on the row it produces), so there is no test
+ * here that actually wants the field left blank — "a blank title creates
+ * a session titled after the working directory's basename, not an empty
+ * string" below fills it with the empty string explicitly rather than
+ * omitting it, which reads the same in the test body and drops a branch
+ * this helper does not otherwise need.
+ *
+ * Filling and submitting are split into two steps (rather than one
+ * "createSession" helper) because the failure and double-submit tests
+ * below need to inspect the form BETWEEN filling it and the response
+ * landing — e.g. asserting the submit button is disabled mid-flight, or
+ * that a failed submit leaves the fields exactly as filled.
+ */
+async function fillCreateForm(
+  page: Page,
+  { cwd, invocation, title }: { cwd: string; invocation: string; title: string },
+) {
+  await page.locator(".new-session-button").click();
+  const form = page.locator(".create-session-form");
+  await expect(form).toBeVisible();
+  await form.locator('input[type="text"]').nth(0).fill(cwd);
+  await form.locator('input[type="text"]').nth(1).fill(invocation);
+  await form.locator('input[type="text"]').nth(2).fill(title);
+  return form;
+}
+
+/**
+ * Locator for a session row by its exact title, matched against the
+ * `.session-title` element specifically rather than `hasText` on the
+ * whole row: `hasText` matches a row's full text content (title, cwd, AND
+ * invocation concatenated), so it would happily also match a row whose
+ * cwd or invocation merely CONTAINS the wanted title as a substring.
+ * Anchoring the regex against just the title element is what actually
+ * pins "the row with THIS title", not "some row that mentions it
+ * somewhere".
+ */
+function rowByTitle(page: Page, title: string) {
+  return page.locator(".session-row").filter({
+    has: page.locator(".session-title", { hasText: new RegExp(`^${title}$`) }),
+  });
+}
+
+/**
+ * Look up a session's id from the real API by its title, for
+ * best-effort cleanup in a `finally` block when the UI flow under test
+ * did not get far enough to hand back an id itself (e.g. a create that
+ * is expected to fail, or a row that may already be gone by the time
+ * cleanup runs). Swallows a missing session rather than throwing, since
+ * "already cleaned up by the test's own happy path" is the common case,
+ * not an error.
+ */
+async function findSessionIdByTitle(
+  request: APIRequestContext,
+  title: string,
+): Promise<string | undefined> {
+  const listing = await (await request.get("/api/sessions")).json();
+  return listing.sessions.find((s: any) => s.title === title)?.id;
+}
 
 /** Full text content of the terminal buffer (scrollback + viewport). */
 async function termText(page: Page): Promise<string> {
@@ -41,19 +127,12 @@ async function waitForTermText(page: Page, needle: string, timeout = 15_000) {
 }
 
 /**
- * Locator for the shared "e2e-session" row in the list view, matched by
- * an EXACT `.session-title` match rather than `hasText` on the whole
- * row: `hasText` matches against the row's full text content (title,
- * cwd, AND invocation concatenated), so it would happily also match a
- * row whose cwd or invocation merely CONTAINS "e2e-session" as a
- * substring. Anchoring the regex against just the title element is what
- * actually pins "the row named e2e-session", not "some row that
- * mentions it somewhere".
+ * Locator for the shared "e2e-session" row start-stack.sh creates at boot
+ * — just `rowByTitle` fixed to that one name, since every terminal test
+ * below needs exactly this row and nothing else.
  */
 function sharedSessionRow(page: Page) {
-  return page.locator(".session-row").filter({
-    has: page.locator(".session-title", { hasText: /^e2e-session$/ }),
-  });
+  return rowByTitle(page, "e2e-session");
 }
 
 /**
@@ -123,16 +202,20 @@ test("list renders the session row with title, cwd, invocation, and an alive bad
 });
 
 // Keyboard activation (PLAN_M2.md step 7: rows must be
-// keyboard-activatable). Since SessionRow is a native <button> rather
-// than a div with a hand-rolled onkeydown, Enter activation (and Space)
-// come from the browser for free — this pins that the row is actually
-// reachable and operable via keyboard, not just that it happens to look
-// like a button.
+// keyboard-activatable). The open action (`.session-row-open`, PLAN_M2.md
+// step 8) is a native <button> rather than a div with a hand-rolled
+// onkeydown, so Enter activation (and Space) come from the browser for
+// free — this pins that it is actually reachable and operable via
+// keyboard, not just that it happens to look like a button. Focusing
+// `.session-row-open` directly, not the outer `.session-row` wrapper: step
+// 8 turned the row itself into a plain (non-focusable) `<div>` so it could
+// also host the stop/delete buttons as siblings — see the SessionRow doc
+// in lib.rs — so the row wrapper no longer accepts focus at all.
 test("keyboard activation opens the session, matching a real click", async ({
   page,
 }) => {
   await page.goto("/");
-  await sharedSessionRow(page).focus();
+  await sharedSessionRow(page).locator(".session-row-open").focus();
   await page.keyboard.press("Enter");
   await page.waitForFunction(() => (window as any).__farhelmTermReady === true);
   await expect(page.locator(".titlebar .title")).toHaveText("e2e-session");
@@ -501,19 +584,28 @@ test("second client takes over; first shows the detach banner", async ({
   await second.close();
 });
 
-// The creation API is the one true path (PLAN_M1.md: CLI flags feed the
-// same API a UI dialog will call), so its HTTP surface needs coverage
-// even though the UI has no create dialog yet (PLAN_M2.md step 8). Only
-// the failure case is exercised here: a successful POST would leave an
-// extra, untracked session sitting in the list for every test after this
-// one, with nothing to clean it up.
+// The creation API is the one true path (PLAN_M1.md: CLI flags AND the UI
+// dialog (PLAN_M2.md step 8) both feed this same endpoint), so its HTTP
+// surface needs its own direct coverage. Only the failure case is
+// exercised here: a successful POST would leave an extra, untracked
+// session sitting in the list for every test after this one, with nothing
+// to clean it up.
 // The status code is part of the contract, not an implementation detail:
 // a missing cwd is the caller's own precondition failure (4xx), distinct
 // from a server-side fault (5xx) the caller could not have avoided by
 // sending a different request. The supervisor classifies this as
 // InvalidRequest and farhelm-helm's http_error maps that to 400 — see
 // ErrorKind in farhelm-proto.
-test("create API reports precondition failures verbatim", async ({ request }) => {
+//
+// "Contains", not "is": the assertion below is `toContain`, not an exact
+// match, because the body carries more than just the one sentence pinned
+// here (an anyhow error chain — see farhelm-helm's `http_error` — can
+// prefix or wrap it with additional context). The test's job is pinning
+// that THIS text is present verbatim somewhere in the body, not pinning
+// the whole body's exact shape.
+test("create API reports a precondition failure containing the supervisor's own text", async ({
+  request,
+}) => {
   const resp = await request.post("/api/sessions", {
     data: { cwd: "/nonexistent/definitely/not/here", invocation: "true" },
   });
@@ -591,6 +683,1569 @@ test("stop and delete a session through the HTTP API", async ({ request }) => {
     // case where the happy path already deleted the session. This must
     // never throw over the top of a real assertion failure above.
     await request.delete(`/api/sessions/${id}`).catch(() => {});
+  }
+});
+
+// PLAN_M2.md step 8's UI acceptance flow, driven end to end through the
+// create form and per-row buttons rather than the raw API (the test above
+// already covers the API's own contract): two sessions created from the
+// form run side by side, one is opened and typed into, the other is
+// stopped and its badge flips live, and both are deleted — one WITHOUT a
+// confirmation prompt (already exited) and one WITH (still alive),
+// pinning the exact confirm/no-confirm split SPEC.md's "Lifecycle
+// operations" draws between the two states.
+//
+// The confirmation itself is the inline per-row prompt (`.confirm-consequence`
+// plus `.confirm-title` plus `.confirm-delete`/`.confirm-cancel`), not a
+// native `window.confirm()` — see `SessionRow`'s doc in lib.rs for why: wry
+// ships no dialogs at all on macOS's WKWebView, which made the old
+// eval-based path silently do nothing on that target. `.confirm-consequence`'s
+// absence after a delete click is what stands in for "no dialog fired"
+// below; its presence (checked for text content) is what stands in for
+// "dialog mentions the running agent".
+test("multi-session flow: create two, open and type in one, stop and delete the other, then delete the first with confirmation", async ({
+  page,
+  request,
+}) => {
+  const titleA = `multi-a-${Date.now()}`;
+  const titleB = `multi-b-${Date.now()}`;
+
+  try {
+    // Create session A through the dialog; success navigates straight
+    // into its terminal (SPEC.md: "creation launches the agent; you type
+    // your first prompt into its terminal").
+    await page.goto("/");
+    const formA = await fillCreateForm(page, {
+      cwd: "/tmp",
+      invocation: FAKE_AGENT_INVOCATION,
+      title: titleA,
+    });
+    await formA.locator('button[type="submit"]').click();
+    await page.waitForFunction(() => (window as any).__farhelmTermReady === true);
+    await waitForTermText(page, "FAKE-AGENT READY");
+    await expect(page.locator(".titlebar .title")).toHaveText(titleA);
+
+    // Type into session A while it is open, per the flow's "open one,
+    // type" step, then go back to the list to create session B.
+    await page.locator("#terminal").click();
+    await page.keyboard.type("marker-multi-a");
+    await page.keyboard.press("Enter");
+    await waitForTermText(page, "echo:marker-multi-a");
+    await page.locator(".back-button").click();
+
+    const formB = await fillCreateForm(page, {
+      cwd: "/tmp",
+      invocation: FAKE_AGENT_INVOCATION,
+      title: titleB,
+    });
+    await formB.locator('button[type="submit"]').click();
+    await page.waitForFunction(() => (window as any).__farhelmTermReady === true);
+    await waitForTermText(page, "FAKE-AGENT READY");
+    await expect(page.locator(".titlebar .title")).toHaveText(titleB);
+    await page.locator(".back-button").click();
+
+    // Both rows are back in the list, alive.
+    await expect(rowByTitle(page, titleA).locator(".status-badge")).toHaveText(
+      "alive",
+      { timeout: 10_000 },
+    );
+    await expect(rowByTitle(page, titleB).locator(".status-badge")).toHaveText(
+      "alive",
+      { timeout: 10_000 },
+    );
+
+    // Stop session B via its row button. No confirmation for stop
+    // (SPEC.md gives confirmation to delete/archive, not stop), and the
+    // badge must flip on the next poll WITHOUT a reload.
+    await rowByTitle(page, titleB)
+      .locator(".session-row-stop")
+      .click();
+    await expect(rowByTitle(page, titleB).locator(".status-badge")).toHaveText(
+      /^exited/,
+      { timeout: 10_000 },
+    );
+
+    // Delete session B (now exited): no confirmation expected — pin that
+    // the inline prompt never appears at all, not merely that it gets
+    // auto-handled. Stalled via the same route-hold technique as the
+    // dedicated "exited session deletes immediately" test: a bare
+    // post-click absence check cannot tell "never appeared" from
+    // "appeared and vanished before this check ran", and holding the
+    // DELETE open is what closes that gap.
+    const idB = await findSessionIdByTitle(request, titleB);
+    let releaseDeleteB: () => void = () => {};
+    const deleteBHeld = new Promise<void>((resolve) => {
+      releaseDeleteB = resolve;
+    });
+    await page.route(`**/api/sessions/${idB}`, async (route) => {
+      if (route.request().method() !== "DELETE") {
+        await route.continue();
+        return;
+      }
+      await deleteBHeld;
+      await route.continue();
+    });
+    await rowByTitle(page, titleB)
+      .locator(".session-row-delete")
+      .click();
+    await expect(rowByTitle(page, titleB)).toHaveCount(1);
+    await expect(rowByTitle(page, titleB).locator(".confirm-consequence")).toHaveCount(
+      0,
+    );
+    releaseDeleteB();
+    await expect(rowByTitle(page, titleB)).toHaveCount(0, { timeout: 10_000 });
+
+    // Delete session A (still alive): confirmation expected, wording
+    // must say the agent is still running (SPEC.md: "confirmation that
+    // says so when anything is still alive").
+    await rowByTitle(page, titleA)
+      .locator(".session-row-delete")
+      .click();
+    await expect(rowByTitle(page, titleA).locator(".confirm-consequence")).toContainText(
+      "running",
+    );
+    await rowByTitle(page, titleA)
+      .locator(".confirm-delete")
+      .click();
+    await expect(rowByTitle(page, titleA)).toHaveCount(0, { timeout: 10_000 });
+  } finally {
+    // Best-effort: both sessions should already be gone via the happy
+    // path above, but a failed assertion partway through must not leak a
+    // long-running fake-agent process into every later test.
+    for (const title of [titleA, titleB]) {
+      const id = await findSessionIdByTitle(request, title).catch(() => undefined);
+      if (id) {
+        await request.post(`/api/sessions/${id}/stop`).catch(() => {});
+        await request.delete(`/api/sessions/${id}`).catch(() => {});
+      }
+    }
+  }
+});
+
+// macOS autocorrect mangles create-form input both via suggestion popups
+// and silent in-place substitution (observed directly: WKWebView silently
+// capitalizing "claude" to "Claude" with no visible popup to catch and
+// reject) — a corrupted command or path is not a cosmetic issue, since
+// these fields hold literal text that gets executed, not prose. All three
+// inputs opt out of every browser-level text-mangling feature; this test
+// pins that the opt-out attributes actually made it into the rendered DOM
+// (a Dioxus rsx typo or a dropped attribute would otherwise silently leave
+// autocorrect back on) rather than exercising an OS-level autocorrect
+// engine itself, which is not something Playwright's headless Chromium
+// runs at all.
+test("create form inputs opt out of autocomplete, autocorrect, autocapitalize, and spellcheck", async ({
+  page,
+}) => {
+  await page.goto("/");
+  await page.locator(".new-session-button").click();
+  const form = page.locator(".create-session-form");
+  await expect(form).toBeVisible();
+
+  const inputs = form.locator('input[type="text"]');
+  await expect(inputs).toHaveCount(3);
+  for (let i = 0; i < 3; i++) {
+    const input = inputs.nth(i);
+    await expect(input).toHaveAttribute("autocomplete", "off");
+    await expect(input).toHaveAttribute("autocorrect", "off");
+    await expect(input).toHaveAttribute("autocapitalize", "none");
+    await expect(input).toHaveAttribute("spellcheck", "false");
+  }
+});
+
+// SPEC.md's precondition-failure split for creation: a bad working
+// directory must fail the create with the supervisor's OWN error text,
+// leave the form open with its values intact (so the user can fix the one
+// wrong field rather than retyping everything), and must not leave a
+// session behind. The exact "does not exist" wording is the same text
+// pinned at the HTTP level by `create API reports a precondition failure
+// containing the supervisor's own text` above; this test is the UI's
+// obligation to actually SHOW that text rather than swallowing it. It
+// goes one step further than "preserved": it actually fixes the one wrong
+// field and resubmits, proving the form is genuinely usable again
+// afterward — not merely that its stale values are still visible — which
+// is also the only thing in this file that pins `submitting` resetting to
+// `false` on the failure path.
+test("create dialog surfaces a precondition failure, preserves the form, and creates no session", async ({
+  page,
+  request,
+}) => {
+  const title = `create-failure-${Date.now()}`;
+  try {
+    await page.goto("/");
+    const form = await fillCreateForm(page, {
+      cwd: "/nonexistent/definitely/not/here",
+      invocation: "true",
+      title,
+    });
+    await form.locator('button[type="submit"]').click();
+
+    await expect(form.locator(".create-session-error")).toContainText(
+      "does not exist",
+    );
+    // Preserved, not cleared or reset: the same values the user typed.
+    await expect(form.locator('input[type="text"]').nth(0)).toHaveValue(
+      "/nonexistent/definitely/not/here",
+    );
+    await expect(form.locator('input[type="text"]').nth(1)).toHaveValue("true");
+    await expect(form.locator('input[type="text"]').nth(2)).toHaveValue(title);
+    // The form itself stayed open (a failed create must not silently
+    // close it and strand the user with no visible cause).
+    await expect(form).toBeVisible();
+
+    const listing = await (await request.get("/api/sessions")).json();
+    expect(listing.sessions.some((s: any) => s.title === title)).toBe(false);
+
+    // The other half of "preserved, not stuck": fixing the one wrong
+    // field and resubmitting must actually succeed, which pins that
+    // `submitting` was reset to `false` on the failure path (the
+    // double-submission guard in `CreateSessionForm`'s `onsubmit` would
+    // otherwise leave the control permanently disabled after its first,
+    // failed attempt).
+    await form.locator('input[type="text"]').nth(0).fill("/tmp");
+    await form.locator('button[type="submit"]').click();
+    await page.waitForFunction(() => (window as any).__farhelmTermReady === true);
+    await expect(page.locator(".titlebar .title")).toHaveText(title);
+  } finally {
+    const id = await findSessionIdByTitle(request, title).catch(() => undefined);
+    if (id) {
+      await request.post(`/api/sessions/${id}/stop`).catch(() => {});
+      await request.delete(`/api/sessions/${id}`).catch(() => {});
+    }
+  }
+});
+
+// Double-submission guard (SPEC.md: "one intended create yields one
+// session or a clear error, never two silently"): the submit control must
+// be disabled for the WHOLE round trip, not just synchronously after the
+// click handler returns. A normal create is too fast to observe that
+// window reliably, so this delays the POST response by a fixed, short
+// amount via route interception — long enough to deterministically
+// observe the disabled state, short enough to keep the test fast. Only
+// POST is intercepted (GET keeps flowing straight through) so the list's
+// own background polling is unaffected. Also covers the two OTHER controls
+// this same in-flight `submitting` flag locks: the "new session" toggle
+// (which would otherwise unmount the form mid-POST) and every row's open
+// button (which would otherwise unmount `ListView` itself mid-POST) — see
+// `nav_locked`'s docs in lib.rs for why opening ANY row is unsafe here,
+// not just a hypothetically "related" one.
+test("create dialog disables the submit control while a create is in flight", async ({
+  page,
+  request,
+}) => {
+  const title = `double-submit-${Date.now()}`;
+  await page.route("**/api/sessions", async (route) => {
+    if (route.request().method() !== "POST") {
+      await route.continue();
+      return;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 800));
+    await route.continue();
+  });
+
+  try {
+    await page.goto("/");
+    const form = await fillCreateForm(page, {
+      cwd: "/tmp",
+      invocation: FAKE_AGENT_INVOCATION,
+      title,
+    });
+    const submit = form.locator('button[type="submit"]');
+    await submit.click();
+
+    // The delayed POST is still in flight here — this is exactly the
+    // window a double-click or a timeout-triggered retry would otherwise
+    // land a second request into.
+    await expect(submit).toBeDisabled();
+    // The "new session" toggle is ALSO disabled for the same window: it
+    // is this form's only cancel/close affordance, and toggling
+    // `show_create` off while the create is in flight would unmount
+    // `CreateSessionForm` mid-`spawn`, stranding the POST's eventual
+    // response with nothing left to act on it (see the toggle button's
+    // own doc in lib.rs).
+    await expect(page.locator(".new-session-button")).toBeDisabled();
+    // And the row-open guard from the same design: opening the shared
+    // session right now would navigate away and unmount `ListView`
+    // itself, cancelling this in-flight create exactly the same way —
+    // see `nav_locked` in lib.rs.
+    await expect(
+      sharedSessionRow(page).locator(".session-row-open"),
+    ).toBeDisabled();
+
+    // Let the delayed response land: success navigates into the new
+    // session's terminal, same as the multi-session flow above.
+    await page.waitForFunction(() => (window as any).__farhelmTermReady === true, {
+      timeout: 15_000,
+    });
+    await expect(page.locator(".titlebar .title")).toHaveText(title);
+  } finally {
+    const id = await findSessionIdByTitle(request, title).catch(() => undefined);
+    if (id) {
+      await request.post(`/api/sessions/${id}/stop`).catch(() => {});
+      await request.delete(`/api/sessions/${id}`).catch(() => {});
+    }
+  }
+});
+
+// Clicking delete on an Alive session (SPEC.md's "confirmation that says
+// so when anything is still alive") must open the inline confirm prompt
+// — `.confirm-consequence` plus `.confirm-title` plus
+// `.confirm-delete`/`.confirm-cancel` swapped in for the row's normal
+// stop/delete buttons (`SessionRow`'s doc in lib.rs) — rather than calling
+// any API immediately. `window.confirm()` used to be the mechanism here;
+// it is gone because wry ships no native JS dialogs at all on macOS's
+// WKWebView, which made that path silently do nothing on a primary
+// target.
+test("alive delete opens an inline confirming state with the is-still-running wording and the session title", async ({
+  page,
+  request,
+}) => {
+  const title = `confirm-open-${Date.now()}`;
+  let deleteRequests = 0;
+  await page.route("**/api/sessions/*", async (route) => {
+    if (route.request().method() === "DELETE") {
+      deleteRequests++;
+    }
+    await route.continue();
+  });
+
+  try {
+    await page.goto("/");
+    const form = await fillCreateForm(page, {
+      cwd: "/tmp",
+      invocation: FAKE_AGENT_INVOCATION,
+      title,
+    });
+    await form.locator('button[type="submit"]').click();
+    await page.waitForFunction(() => (window as any).__farhelmTermReady === true);
+    await page.locator(".back-button").click();
+
+    const row = rowByTitle(page, title);
+    await expect(row.locator(".status-badge")).toHaveText("alive", {
+      timeout: 10_000,
+    });
+    await row.locator(".session-row-delete").click();
+
+    // The prompt carries the exact consequence wording (the untruncatable
+    // half, `SessionRow`'s doc in lib.rs) AND, separately, the session's
+    // own title (rendered as plain Dioxus text — see that doc for why
+    // that alone neutralizes anything the title might contain).
+    await expect(row.locator(".confirm-consequence")).toHaveText(
+      "still running — deleting kills the agent:",
+    );
+    await expect(row.locator(".confirm-title")).toHaveText(`"${title}"`);
+    // Normal buttons are gone while confirming, not merely hidden behind
+    // the prompt — `SessionRow` swaps them out entirely.
+    await expect(row.locator(".session-row-stop")).toHaveCount(0);
+    await expect(row.locator(".session-row-delete")).toHaveCount(0);
+    // The open button stays present but disabled (see `SessionRow`'s doc:
+    // cancel is the only way back to normal, not an implicit click on
+    // open).
+    await expect(row.locator(".session-row-open")).toBeDisabled();
+    expect(deleteRequests).toBe(0);
+
+    // Cancel: the row returns to normal, with no DELETE ever sent and the
+    // session still listed and alive — not just "not yet deleted" (which
+    // a bug that deleted on a timer, or deleted regardless of the
+    // confirmation's answer after some delay, could also satisfy).
+    await row.locator(".confirm-cancel").click();
+    await expect(row.locator(".confirm-consequence")).toHaveCount(0);
+    await expect(row.locator(".session-row-stop")).toBeEnabled();
+    await expect(row.locator(".session-row-delete")).toBeEnabled();
+    await expect(row.locator(".session-row-open")).toBeEnabled();
+    expect(deleteRequests).toBe(0);
+    await expect(row.locator(".status-badge")).toHaveText("alive");
+    const listing = await (await request.get("/api/sessions")).json();
+    const session = listing.sessions.find((s: any) => s.title === title);
+    expect(session).toBeTruthy();
+    expect(session.status.state).toBe("alive");
+  } finally {
+    const id = await findSessionIdByTitle(request, title).catch(() => undefined);
+    if (id) {
+      await request.post(`/api/sessions/${id}/stop`).catch(() => {});
+      await request.delete(`/api/sessions/${id}`).catch(() => {});
+    }
+  }
+});
+
+// The other half of the confirm flow: clicking "confirm delete" performs
+// exactly the DELETE the old accepted `window.confirm()` used to trigger —
+// pinned here as EXACTLY one DELETE request, the same request-counting
+// pattern the cancel test above uses to pin exactly zero.
+test("confirming an inline delete prompt deletes the session with exactly one DELETE request", async ({
+  page,
+  request,
+}) => {
+  const title = `confirm-delete-${Date.now()}`;
+  let deleteRequests = 0;
+  await page.route("**/api/sessions/*", async (route) => {
+    if (route.request().method() === "DELETE") {
+      deleteRequests++;
+    }
+    await route.continue();
+  });
+
+  try {
+    await page.goto("/");
+    const form = await fillCreateForm(page, {
+      cwd: "/tmp",
+      invocation: FAKE_AGENT_INVOCATION,
+      title,
+    });
+    await form.locator('button[type="submit"]').click();
+    await page.waitForFunction(() => (window as any).__farhelmTermReady === true);
+    await page.locator(".back-button").click();
+
+    const row = rowByTitle(page, title);
+    await expect(row.locator(".status-badge")).toHaveText("alive", {
+      timeout: 10_000,
+    });
+    await row.locator(".session-row-delete").click();
+    await expect(row.locator(".confirm-consequence")).toBeVisible();
+    await row.locator(".confirm-delete").click();
+
+    await expect(row).toHaveCount(0, { timeout: 10_000 });
+    expect(deleteRequests).toBe(1);
+  } finally {
+    const id = await findSessionIdByTitle(request, title).catch(() => undefined);
+    if (id) {
+      await request.post(`/api/sessions/${id}/stop`).catch(() => {});
+      await request.delete(`/api/sessions/${id}`).catch(() => {});
+    }
+  }
+});
+
+// Exited sessions are the one status that never confirms at all (SPEC.md:
+// delete confirms only when something might still be alive) — this pins
+// that directly, rather than relying on it as a side effect of the
+// multi-session flow test above.
+test("exited session deletes immediately with no confirming state", async ({
+  page,
+  request,
+}) => {
+  const created = await request.post("/api/sessions", {
+    data: { cwd: "/tmp", invocation: "true" },
+  });
+  expect(created.status()).toBe(200);
+  const { id } = await created.json();
+
+  // Stalled, not answered instantly: a bare post-click check for the
+  // prompt's absence cannot distinguish "never appeared" from "appeared
+  // and vanished again before this check ran" — a real gap for a status
+  // this fast to slip through undetected. Holding the DELETE response
+  // open keeps the row on screen long enough to make the absence
+  // assertion actually mean something, then releases it to let the
+  // delete complete normally.
+  let releaseDelete: () => void = () => {};
+  const deleteHeld = new Promise<void>((resolve) => {
+    releaseDelete = resolve;
+  });
+  await page.route(`**/api/sessions/${id}`, async (route) => {
+    if (route.request().method() !== "DELETE") {
+      await route.continue();
+      return;
+    }
+    await deleteHeld;
+    await route.continue();
+  });
+
+  try {
+    await page.goto("/");
+    const row = page.locator(`[data-session-id="${id}"]`);
+    await expect(row.locator(".status-badge")).toHaveText(/^exited/, {
+      timeout: 10_000,
+    });
+
+    await row.locator(".session-row-delete").click();
+    // The DELETE is stalled, so the row is still here — and, while it
+    // is, the confirm prompt has never appeared at all, a synchronous
+    // property of `on_delete`'s Exited arm (see lib.rs), not merely a
+    // narrow timing window this stall makes easier to hit by luck.
+    await expect(row).toHaveCount(1);
+    await expect(row.locator(".confirm-consequence")).toHaveCount(0);
+
+    releaseDelete();
+    await expect(row).toHaveCount(0, { timeout: 10_000 });
+  } finally {
+    await request.delete(`/api/sessions/${id}`).catch(() => {});
+  }
+});
+
+// A session's title is untrusted data (a supervisor over `--ssh` is a
+// different, possibly compromised host) that can legally contain anything,
+// including markup — and the confirm prompt is rendered by ordinary Dioxus
+// text interpolation straight to a DOM text node (`SessionRow`'s doc in
+// lib.rs), which is what actually neutralizes it. The OLD eval-based path
+// needed `serde_json::to_string`-encoding to stop a title from breaking
+// out of a JS *string literal*; that whole concern is gone along with the
+// eval call. The risk that remains is a DIFFERENT regression class:
+// something along this render path someday using
+// `innerHTML`/`dangerouslySetInnerHTML`-style markup injection instead of
+// a text node, which would parse a title as HTML rather than display it
+// as text.
+//
+// Two INDEPENDENT oracles cover that risk, deliberately, rather than
+// relying on either alone: the exact `toHaveText` checks below would
+// already catch MOST such a regression — a title parsed as markup would
+// render a broken `<img>` icon, not the literal `<img src=x
+// onerror="...">` text this asserts verbatim — but `toHaveText` only
+// proves the WRONG output didn't happen, not that nothing executed;
+// asserting `__pwned` stays unset is a genuinely separate signal (was
+// anything ever RUN), immune to a hypothetical bug where broken markup
+// happened to still leave matching text behind. Together they cover both
+// "did the display come out right" and "did anything execute", neither
+// implied by the other.
+test("delete confirmation safely displays a title containing executable HTML without ever parsing it as markup", async ({
+  page,
+  request,
+}) => {
+  const title = `inject-${Date.now()}-<img src=x onerror="window.__pwned=1">`;
+  const created = await request.post("/api/sessions", {
+    data: { cwd: "/tmp", invocation: "sleep 300", title },
+  });
+  expect(created.status()).toBe(200);
+  const { id } = await created.json();
+
+  try {
+    await page.goto("/");
+    const row = page.locator(`[data-session-id="${id}"]`);
+    await expect(row.locator(".status-badge")).toHaveText("alive", {
+      timeout: 10_000,
+    });
+    await row.locator(".session-row-delete").click();
+
+    await expect(row.locator(".confirm-consequence")).toHaveText(
+      "still running — deleting kills the agent:",
+    );
+    await expect(row.locator(".confirm-title")).toHaveText(`"${title}"`);
+    // The title's own row (open button) renders the same untrusted string
+    // too — checked here as well, since it is a second, independent
+    // render site for the exact same data.
+    await expect(row.locator(".session-title")).toHaveText(title);
+    expect(await page.evaluate(() => (window as any).__pwned)).toBeUndefined();
+  } finally {
+    await request.post(`/api/sessions/${id}/stop`).catch(() => {});
+    await request.delete(`/api/sessions/${id}`).catch(() => {});
+  }
+});
+
+// A session's title has no length limit the UI enforces (a legal title
+// can run tens of KB — see the existing overflow comment on
+// `.session-title` in app.css). Unlike the SPACE-CONTAINING metadata that
+// overflow handling elsewhere in this file exercises, a title with NO
+// whitespace at all cannot wrap or break naturally — CSS's default
+// min-content floor would let such a title claim its own full rendered
+// width and push everything after it off the visible row, which is
+// exactly what `.confirm-title`'s `min-width: 0` (app.css) exists to
+// prevent. `.confirm-consequence`, in contrast, must NEVER be the one
+// that gives: it is the safety-critical "will be killed" half, rendered
+// as its own untruncatable element specifically so a long title can never
+// clip it (`confirm_consequence`'s doc in lib.rs).
+//
+// This pins the actual CONTRACT, not just an emergent side effect: the
+// consequence text renders in full (exact match, not `toContainText`),
+// the title element is genuinely being clipped (not merely short enough
+// to fit), both buttons stay on screen and don't overlap the title, and
+// both buttons keep their own declared `flex-shrink: 0` — checked via
+// computed style directly, since that is the one assertion that fails
+// immediately and deterministically if a future edit ever drops that
+// declaration, independent of whatever the emergent flex arithmetic at
+// this particular viewport width happens to produce.
+//
+// Created via the raw API (a create-FORM round trip through this much
+// text would only slow the test down, not exercise anything the API path
+// doesn't already), then asserted in the browser's actual layout engine,
+// not just in the CSS source.
+test("a legal multi-KB, unbroken title keeps the consequence text intact and clips only the title, without disturbing the confirm/cancel buttons", async ({
+  page,
+  request,
+}) => {
+  const hugeTitle = "x".repeat(20_000);
+  const created = await request.post("/api/sessions", {
+    data: { cwd: "/tmp", invocation: "sleep 300", title: hugeTitle },
+  });
+  expect(created.status()).toBe(200);
+  const { id } = await created.json();
+
+  try {
+    await page.goto("/");
+    const row = page.locator(`[data-session-id="${id}"]`);
+    await expect(row.locator(".status-badge")).toHaveText("alive", {
+      timeout: 10_000,
+    });
+    await row.locator(".session-row-delete").click();
+
+    // The safety-critical consequence half renders in full, exact text —
+    // not merely "contains", so any accidental truncation (an ellipsis
+    // rule wrongly applied to THIS element instead of just the title)
+    // fails immediately.
+    await expect(row.locator(".confirm-consequence")).toHaveText(
+      "still running — deleting kills the agent:",
+    );
+
+    // The title itself IS being clipped — proving the overflow/min-width
+    // CSS is actually doing its job on a title this large, not merely
+    // absent because a shorter title happened to fit anyway.
+    const titleOverflowing = await row
+      .locator(".confirm-title")
+      .evaluate((el) => el.scrollWidth > el.clientWidth);
+    expect(titleOverflowing).toBe(true);
+
+    // Both buttons stay on screen, reachable...
+    await expect(row.locator(".confirm-delete")).toBeInViewport();
+    await expect(row.locator(".confirm-cancel")).toBeInViewport();
+    // ...and not overlapping the (massively wide, if unclipped) title —
+    // a real geometry check, not just individual visibility.
+    const [titleBox, confirmBox, cancelBox] = await Promise.all([
+      row.locator(".confirm-title").boundingBox(),
+      row.locator(".confirm-delete").boundingBox(),
+      row.locator(".confirm-cancel").boundingBox(),
+    ]);
+    expect(titleBox).not.toBeNull();
+    expect(confirmBox).not.toBeNull();
+    expect(cancelBox).not.toBeNull();
+    expect(titleBox!.x + titleBox!.width).toBeLessThanOrEqual(confirmBox!.x + 1);
+    expect(confirmBox!.x + confirmBox!.width).toBeLessThanOrEqual(cancelBox!.x + 1);
+
+    // The direct CSS contract: both buttons keep their natural
+    // (un-shrunk) box — `flex-shrink: 0` is what a reviewer removing
+    // either declaration would see fail here immediately, rather than
+    // this test depending on emergent flex-overflow arithmetic to notice.
+    const [confirmShrink, cancelShrink] = await Promise.all([
+      row
+        .locator(".confirm-delete")
+        .evaluate((el) => getComputedStyle(el).flexShrink),
+      row
+        .locator(".confirm-cancel")
+        .evaluate((el) => getComputedStyle(el).flexShrink),
+    ]);
+    expect(confirmShrink).toBe("0");
+    expect(cancelShrink).toBe("0");
+  } finally {
+    await request.post(`/api/sessions/${id}/stop`).catch(() => {});
+    await request.delete(`/api/sessions/${id}`).catch(() => {});
+  }
+});
+
+// The confirming state lives in `ListView`'s own client-side signal, keyed
+// by session id (see `confirming`'s doc in lib.rs) — a poll refresh (the
+// list's ONLY live-update mechanism in M2) refetches and re-renders the
+// whole listing on its own timer, independent of anything the user is
+// doing, and must not silently revert an in-progress confirmation out
+// from under them.
+//
+// A distinguishable field on a LATER poll response — not merely a
+// counted request — is what actually proves a real refetch's RESULT
+// reached the DOM: counting requests alone cannot rule out a regression
+// that fires the request but never applies its response (a dropped
+// `listing.set`, a silently-ignored decode failure), which would still
+// increment a request counter while never actually re-rendering anything.
+// Route-intercepting the GET with a synthetic listing carrying a marker
+// invocation is what turns "a poll happened" into "a poll's response was
+// applied and rendered" — but the marker is only armed AFTER the confirm
+// prompt is already open, not from page load onward: arming it up front
+// would let the marker show up as a leftover of the FIRST fetch (the one
+// that populates the initial list, before any click), which would pass
+// this test even if no poll ever landed again while confirming — exactly
+// the false positive this ordering exists to rule out.
+test("an inline confirming state survives a poll refresh; cancel still works afterward", async ({
+  page,
+  request,
+}) => {
+  const title = `confirm-survives-poll-${Date.now()}`;
+  const created = await request.post("/api/sessions", {
+    data: { cwd: "/tmp", invocation: "sleep 300", title },
+  });
+  expect(created.status()).toBe(200);
+  const { id } = await created.json();
+  const marker = "poll-marker-invocation";
+
+  // Baseline listing (the session's real invocation) until `markerArmed`
+  // flips — see the comment above for why arming has to wait.
+  let markerArmed = false;
+  await page.route("**/api/sessions", async (route) => {
+    if (route.request().method() !== "GET") {
+      await route.continue();
+      return;
+    }
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        sessions: [
+          {
+            id,
+            title,
+            cwd: "/tmp",
+            invocation: markerArmed ? marker : "sleep 300",
+            status: { state: "alive" },
+          },
+        ],
+        total: 1,
+        truncated: false,
+      }),
+    });
+  });
+
+  try {
+    await page.goto("/");
+    const row = page.locator(`[data-session-id="${id}"]`);
+    await expect(row.locator(".status-badge")).toHaveText("alive", {
+      timeout: 10_000,
+    });
+    await row.locator(".session-row-delete").click();
+    await expect(row.locator(".confirm-title")).toHaveText(`"${title}"`);
+
+    // Only NOW does the route start serving the marker — strictly after
+    // the prompt is already open, so the marker appearing can only be
+    // the result of a poll that happened WHILE confirming, not the
+    // initial page-load fetch.
+    markerArmed = true;
+
+    // The marker invocation only ever appears once THIS route's synthetic
+    // response has actually been fetched, decoded, and rendered — proof
+    // the refresh's result reached the DOM, not just that a request fired.
+    await expect(row.locator(".session-invocation")).toHaveText(marker, {
+      timeout: 10_000,
+    });
+
+    // Still confirming, still the same wording and title — a refresh must
+    // not have cleared it (nor silently deleted anything: no DELETE was
+    // ever confirmed).
+    await expect(row.locator(".confirm-title")).toHaveText(`"${title}"`);
+    await expect(row.locator(".status-badge")).toHaveText("alive");
+
+    await row.locator(".confirm-cancel").click();
+    await expect(row.locator(".confirm-consequence")).toHaveCount(0);
+    await expect(row.locator(".session-row-delete")).toBeEnabled();
+  } finally {
+    await page.unroute("**/api/sessions");
+    await request.post(`/api/sessions/${id}/stop`).catch(() => {});
+    await request.delete(`/api/sessions/${id}`).catch(() => {});
+  }
+});
+
+// Confirming is per-row state, not global (see `confirming`'s doc in
+// lib.rs): a delete click on one row must never bleed into another row's
+// buttons, the same "per-session, not one shared slot" property `errors`
+// and `pending` already have their own dedicated tests for above.
+test("one row's confirming state does not affect another row's controls", async ({
+  page,
+  request,
+}) => {
+  const createdA = await request.post("/api/sessions", {
+    data: { cwd: "/tmp", invocation: "sleep 300" },
+  });
+  const createdB = await request.post("/api/sessions", {
+    data: { cwd: "/tmp", invocation: "sleep 300" },
+  });
+  expect(createdA.status()).toBe(200);
+  expect(createdB.status()).toBe(200);
+  const { id: idA } = await createdA.json();
+  const { id: idB } = await createdB.json();
+
+  try {
+    await page.goto("/");
+    const rowA = page.locator(`[data-session-id="${idA}"]`);
+    const rowB = page.locator(`[data-session-id="${idB}"]`);
+    await expect(rowA.locator(".status-badge")).toHaveText("alive", {
+      timeout: 10_000,
+    });
+    await expect(rowB.locator(".status-badge")).toHaveText("alive", {
+      timeout: 10_000,
+    });
+
+    await rowA.locator(".session-row-delete").click();
+    await expect(rowA.locator(".confirm-consequence")).toBeVisible();
+
+    // B is completely untouched: still its normal stop/delete pair, both
+    // enabled, and no confirm prompt of its own.
+    await expect(rowB.locator(".confirm-consequence")).toHaveCount(0);
+    await expect(rowB.locator(".session-row-stop")).toBeEnabled();
+    await expect(rowB.locator(".session-row-delete")).toBeEnabled();
+    await expect(rowB.locator(".session-row-open")).toBeEnabled();
+
+    await rowA.locator(".confirm-cancel").click();
+  } finally {
+    for (const id of [idA, idB]) {
+      await request.post(`/api/sessions/${id}/stop`).catch(() => {});
+      await request.delete(`/api/sessions/${id}`).catch(() => {});
+    }
+  }
+});
+
+// Confirming is `ListView`'s own state, decoupled from the status that
+// triggered it (see `confirming`'s doc in lib.rs): a status change under
+// an open confirm prompt — this session getting stopped from another
+// client, say — must not silently close the prompt or swap back to the
+// normal stop/delete pair. `confirm_consequence`'s wording is,
+// deliberately, NOT frozen at the moment the prompt opened: it recomputes
+// from whatever status the row's LATEST render carries (see that
+// function's own doc), and its `Exited` arm exists specifically for this
+// transition — a residual case, not dead code, so this pins its exact
+// fallback wording rather than leaving it unexercised by anything in this
+// suite. The title element is unaffected by any of this (the status
+// change touches only the consequence text), so it is checked once,
+// before the transition, rather than redundantly re-checked after.
+test("an alive-to-exited status change under an open confirm prompt keeps confirming, with the fallback wording", async ({
+  page,
+  request,
+}) => {
+  const title = `alive-to-exited-${Date.now()}`;
+  const created = await request.post("/api/sessions", {
+    data: { cwd: "/tmp", invocation: "sleep 300", title },
+  });
+  expect(created.status()).toBe(200);
+  const { id } = await created.json();
+
+  try {
+    await page.goto("/");
+    const row = page.locator(`[data-session-id="${id}"]`);
+    await expect(row.locator(".status-badge")).toHaveText("alive", {
+      timeout: 10_000,
+    });
+    await row.locator(".session-row-delete").click();
+    await expect(row.locator(".confirm-consequence")).toContainText("running");
+    await expect(row.locator(".confirm-title")).toHaveText(`"${title}"`);
+
+    // Stopped from "elsewhere" (the raw API, standing in for another
+    // client) while this row's prompt sits open.
+    await request.post(`/api/sessions/${id}/stop`);
+
+    // The next poll picks the exited status up and re-words the SAME
+    // open prompt — it does not close it, and does not swap back to the
+    // normal stop/delete pair.
+    await expect(row.locator(".confirm-consequence")).toHaveText(
+      "delete anyway:",
+      { timeout: 10_000 },
+    );
+    // Cancel's continued presence is the interesting half here — proving
+    // the row is still genuinely IN the confirming state, not merely that
+    // SOME element with that text exists; confirm-delete is about to be
+    // clicked below, so Playwright's own actionability wait already
+    // covers its visibility.
+    await expect(row.locator(".confirm-cancel")).toBeVisible();
+    await expect(row.locator(".session-row-stop")).toHaveCount(0);
+
+    await row.locator(".confirm-delete").click();
+    await expect(row).toHaveCount(0, { timeout: 10_000 });
+  } finally {
+    await request.delete(`/api/sessions/${id}`).catch(() => {});
+  }
+});
+
+// The poll loop's own error path (`fetch_sessions` failing) swaps the
+// WHOLE list view for an error banner (`ListView`'s `Some(Err(e))` render
+// arm) rather than leaving stale rows on screen — which means a row's
+// `confirming` entry has nothing left to render into for as long as that
+// banner is showing. This pins that the entry itself, held in `ListView`'s
+// own state independent of any particular render, survives that gap
+// intact and reappears the moment the list recovers — a bare "the request
+// count went up" would not prove this, since it says nothing about
+// whether the confirm prompt for THIS id came back correctly afterward.
+test("a failed poll fetch while confirming does not clear the confirming state", async ({
+  page,
+  request,
+}) => {
+  const title = `poll-error-while-confirming-${Date.now()}`;
+  const created = await request.post("/api/sessions", {
+    data: { cwd: "/tmp", invocation: "sleep 300", title },
+  });
+  expect(created.status()).toBe(200);
+  const { id } = await created.json();
+
+  // A one-shot failure, armed only once the confirm prompt is genuinely
+  // open (below) — not from the start: arming up front races the very
+  // FIRST poll after page load (which can fire before the delete click
+  // even lands), which would fail a fetch that has nothing to do with
+  // confirming at all and could flake this test on nothing but timing.
+  let failArmed = false;
+  let failed = false;
+  await page.route("**/api/sessions", async (route) => {
+    if (route.request().method() !== "GET") {
+      await route.continue();
+      return;
+    }
+    if (failArmed && !failed) {
+      failed = true;
+      await route.fulfill({
+        status: 500,
+        contentType: "text/plain",
+        body: "injected poll failure",
+      });
+      return;
+    }
+    await route.continue();
+  });
+
+  try {
+    await page.goto("/");
+    const row = page.locator(`[data-session-id="${id}"]`);
+    await expect(row.locator(".status-badge")).toHaveText("alive", {
+      timeout: 10_000,
+    });
+    await row.locator(".session-row-delete").click();
+    await expect(row.locator(".confirm-title")).toHaveText(`"${title}"`);
+
+    // Only NOW does the next poll-driven GET fail — strictly after the
+    // prompt is confirmed open.
+    failArmed = true;
+
+    // The failed fetch swaps the list view for an error banner — this IS
+    // that transient state, not a bug this test is tripping over.
+    await expect(page.locator(".status.error")).toBeVisible({
+      timeout: 10_000,
+    });
+
+    // The next poll succeeds; the list — and the SAME confirming prompt,
+    // restored from `ListView`'s own state rather than anything baked
+    // into this particular render — comes back.
+    await expect(row.locator(".confirm-title")).toHaveText(`"${title}"`, {
+      timeout: 10_000,
+    });
+    await expect(row.locator(".status-badge")).toHaveText("alive");
+  } finally {
+    await page.unroute("**/api/sessions");
+    await request.post(`/api/sessions/${id}/stop`).catch(() => {});
+    await request.delete(`/api/sessions/${id}`).catch(() => {});
+  }
+});
+
+// The other confirm-wording branch: a session whose status is Unknown
+// (rather than a known-alive one) must ALSO confirm before deleting, but
+// with wording that admits uncertainty rather than borrowing the Alive
+// branch's "is still running" claim — SPEC.md's no-guessing rule applies
+// to this confirm text exactly as it does to the status badge itself.
+// Driven through a synthetic, route-intercepted listing (like the
+// truncation-banner test above) rather than a real session: a supervisor
+// restart is NOT how to provoke this — PLAN_M2.md's restart-gap behavior
+// yields `Exited { exit_code: None }` when tmux did not survive (an
+// explicit "known dead, unknown code", not "unknown whether alive" — see
+// `SessionStatus::Exited` in lib.rs), and ordinary `Alive`/`Exited` when
+// it did. Genuine `Unknown` only ever comes from `Session::status`'s
+// serde default kicking in on an old-shaped reply with no `status` field
+// at all (see that derive's own docs) — i.e. an old PEER, not a restart of
+// this same build's own supervisor — which is not something this suite's
+// single, current-build stack can produce, hence the synthetic listing.
+test("deleting a session with unknown status confirms first, with wording that admits uncertainty", async ({
+  page,
+}) => {
+  const sessionId = "unknown-status-session";
+  await page.route("**/api/sessions", async (route) => {
+    if (route.request().method() !== "GET") {
+      await route.continue();
+      return;
+    }
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        sessions: [
+          {
+            id: sessionId,
+            title: sessionId,
+            cwd: "/tmp",
+            invocation: "true",
+            // No "status" field at all — exactly what decodes as Unknown
+            // per `Session::status`'s own serde default in lib.rs.
+          },
+        ],
+        total: 1,
+        truncated: false,
+      }),
+    });
+  });
+  let deleteRequests = 0;
+  await page.route(`**/api/sessions/${sessionId}`, async (route) => {
+    if (route.request().method() === "DELETE") {
+      deleteRequests++;
+    }
+    await route.fulfill({ status: 200, contentType: "application/json", body: "{}" });
+  });
+
+  await page.goto("/");
+  const row = page.locator(`[data-session-id="${sessionId}"]`);
+  await expect(row.locator(".status-badge")).toHaveText("unknown");
+  await row.locator(".session-row-delete").click();
+
+  // Confirms before any DELETE: since there is no async eval in the way
+  // anymore, the assertion right after the click already proves ordering
+  // (the click handler's whole synchronous body only ever inserts into
+  // `confirming` for this status — see `on_delete` in lib.rs — so a
+  // DELETE this soon could only come from a regression that skipped
+  // confirmation outright).
+  await expect(row.locator(".confirm-consequence")).toHaveText(
+    "status unknown — the agent may still be running and will be killed:",
+  );
+  await expect(row.locator(".confirm-title")).toHaveText(`"${sessionId}"`);
+  expect(deleteRequests).toBe(0);
+
+  await row.locator(".confirm-delete").click();
+  await expect.poll(() => deleteRequests).toBe(1);
+});
+
+// Double-submission guard, taken one step further than the disabled-button
+// test above: that test only proves the CONTROL looks disabled, which a
+// user could still defeat with a second Enter keypress landing on the form
+// itself rather than the button, or any other path that dispatches a
+// native `submit` event without going through the (disabled) button.
+// `HTMLFormElement.requestSubmit()` is exactly such a path — it fires a
+// real `submit` event the disabled button cannot intercept — so a second
+// call here is what actually pins the RUST-SIDE `submitting` guard, not
+// merely the disabled attribute's cosmetic effect.
+test("submitting the create form twice while one create is in flight produces exactly one session", async ({
+  page,
+  request,
+}) => {
+  const title = `double-submit-guard-${Date.now()}`;
+  let postCount = 0;
+  await page.route("**/api/sessions", async (route) => {
+    if (route.request().method() !== "POST") {
+      await route.continue();
+      return;
+    }
+    postCount++;
+    await new Promise((resolve) => setTimeout(resolve, 500));
+    await route.continue();
+  });
+
+  try {
+    await page.goto("/");
+    const form = await fillCreateForm(page, {
+      cwd: "/tmp",
+      invocation: FAKE_AGENT_INVOCATION,
+      title,
+    });
+    await form.locator('button[type="submit"]').click();
+    // Bypasses the (already disabling) submit button entirely.
+    await page.evaluate(() => {
+      document
+        .querySelector<HTMLFormElement>(".create-session-form")
+        ?.requestSubmit();
+    });
+
+    await page.waitForFunction(() => (window as any).__farhelmTermReady === true, {
+      timeout: 15_000,
+    });
+    expect(postCount).toBe(1);
+
+    const listing = await (await request.get("/api/sessions")).json();
+    expect(listing.sessions.filter((s: any) => s.title === title)).toHaveLength(1);
+  } finally {
+    const id = await findSessionIdByTitle(request, title).catch(() => undefined);
+    if (id) {
+      await request.post(`/api/sessions/${id}/stop`).catch(() => {});
+      await request.delete(`/api/sessions/${id}`).catch(() => {});
+    }
+  }
+});
+
+// Per-session error surfacing: a stop or delete failure must render in
+// THAT row's own error line with the server's actual text, without
+// disturbing the row itself (no vanishing, no badge lying) or the rest of
+// the list. Both failures here happen on the SAME session, one after the
+// other — proving errors are keyed by session at all (a failure on one
+// session must not touch another's error line) is a separate concern,
+// covered by "a failed action's error is keyed to its own session, not
+// shared across rows" below. Route-intercepted with distinct sentinel
+// bodies for stop and delete so each assertion can tell exactly which
+// call produced which text.
+test("stop and delete failures surface in the row's own error line, without disturbing the rest of the list", async ({
+  page,
+  request,
+}) => {
+  const created = await request.post("/api/sessions", {
+    data: { cwd: "/tmp", invocation: "sleep 300" },
+  });
+  expect(created.status()).toBe(200);
+  const { id } = await created.json();
+
+  try {
+    await page.goto("/");
+    const row = page.locator(`[data-session-id="${id}"]`);
+    await expect(row.locator(".status-badge")).toHaveText("alive", {
+      timeout: 10_000,
+    });
+
+    await page.route(`**/api/sessions/${id}/stop`, (route) =>
+      route.fulfill({
+        status: 500,
+        contentType: "text/plain",
+        body: "stop-failure-sentinel",
+      }),
+    );
+    await row.locator(".session-row-stop").click();
+    await expect(row.locator(".action-error")).toContainText(
+      "stop-failure-sentinel",
+    );
+    // Scoped to this row and this action: no optimistic flip either way,
+    // and the rest of the list keeps working normally.
+    await expect(row.locator(".status-badge")).toHaveText("alive");
+    await expect(page.locator(".session-list")).toBeVisible();
+    await page.unroute(`**/api/sessions/${id}/stop`);
+
+    await page.route(`**/api/sessions/${id}`, async (route) => {
+      if (route.request().method() !== "DELETE") {
+        await route.continue();
+        return;
+      }
+      await route.fulfill({
+        status: 500,
+        contentType: "text/plain",
+        body: "delete-failure-sentinel",
+      });
+    });
+    // Still alive, so delete opens the inline confirm prompt first —
+    // click through it the same way a real user would.
+    await row.locator(".session-row-delete").click();
+    await row.locator(".confirm-delete").click();
+    await expect(row.locator(".action-error")).toContainText(
+      "delete-failure-sentinel",
+    );
+    // A failed delete must not vanish the row.
+    await expect(row).toHaveCount(1);
+    await page.unroute(`**/api/sessions/${id}`);
+  } finally {
+    await request.post(`/api/sessions/${id}/stop`).catch(() => {});
+    await request.delete(`/api/sessions/${id}`).catch(() => {});
+  }
+});
+
+// The other half of "per-session, not one shared slot" (see `errors`'s
+// own docs in lib.rs): a failure on session A must not just render in A's
+// own row (already covered above) but must ALSO survive an unrelated
+// SUCCESS on session B untouched, and B must pick up no error of its own
+// from any of it. A single shared `Option<String>` would have failed this
+// in either direction — B's success clearing A's error, or A's failure
+// somehow bleeding into B's row. Finishes by retrying A (now
+// unintercepted) to confirm a later SUCCESS clears only A's own entry.
+test("a failed action's error is keyed to its own session, not shared across rows", async ({
+  page,
+  request,
+}) => {
+  const createdA = await request.post("/api/sessions", {
+    data: { cwd: "/tmp", invocation: "sleep 300" },
+  });
+  const createdB = await request.post("/api/sessions", {
+    data: { cwd: "/tmp", invocation: "sleep 300" },
+  });
+  expect(createdA.status()).toBe(200);
+  expect(createdB.status()).toBe(200);
+  const { id: idA } = await createdA.json();
+  const { id: idB } = await createdB.json();
+
+  try {
+    await page.goto("/");
+    const rowA = page.locator(`[data-session-id="${idA}"]`);
+    const rowB = page.locator(`[data-session-id="${idB}"]`);
+    await expect(rowA.locator(".status-badge")).toHaveText("alive", {
+      timeout: 10_000,
+    });
+    await expect(rowB.locator(".status-badge")).toHaveText("alive", {
+      timeout: 10_000,
+    });
+
+    // A's stop fails (route-intercepted); B's stop is real and succeeds.
+    await page.route(`**/api/sessions/${idA}/stop`, (route) =>
+      route.fulfill({
+        status: 500,
+        contentType: "text/plain",
+        body: "error-a-sentinel",
+      }),
+    );
+    await rowA.locator(".session-row-stop").click();
+    await expect(rowA.locator(".action-error")).toContainText("error-a-sentinel");
+
+    await rowB.locator(".session-row-stop").click();
+    await expect(rowB.locator(".status-badge")).toHaveText(/^exited/, {
+      timeout: 10_000,
+    });
+
+    // A's error survives B's unrelated success untouched, and B picked up
+    // no error of its own from any of this.
+    await expect(rowA.locator(".action-error")).toContainText("error-a-sentinel");
+    await expect(rowB.locator(".action-error")).toHaveCount(0);
+
+    // Retrying A (now unintercepted) must succeed and clear ONLY A's
+    // error — B's (already-empty) state is untouched by this too.
+    await page.unroute(`**/api/sessions/${idA}/stop`);
+    await rowA.locator(".session-row-stop").click();
+    await expect(rowA.locator(".status-badge")).toHaveText(/^exited/, {
+      timeout: 10_000,
+    });
+    await expect(rowA.locator(".action-error")).toHaveCount(0);
+    await expect(rowB.locator(".action-error")).toHaveCount(0);
+  } finally {
+    for (const id of [idA, idB]) {
+      await request.post(`/api/sessions/${id}/stop`).catch(() => {});
+      await request.delete(`/api/sessions/${id}`).catch(() => {});
+    }
+  }
+});
+
+// The per-session in-flight guard (`pending` in lib.rs's `ListView`, and
+// the GLOBAL `nav_locked` derived from it — see that flag's own docs):
+// while session A has a stop or delete running, A's own stop, delete, AND
+// open buttons must all be disabled (open via the global nav lock, since
+// opening ANY row would unmount `ListView` and cancel A's in-flight op
+// just the same), while an unrelated session B's stop and delete stay
+// perfectly usable (that half of the guard IS per-session) — and B's OWN
+// open button is disabled too, which is the interesting, easy-to-miss
+// half of this: the nav lock does not care WHICH session is busy.
+test("stop's in-flight guard disables this row's stop, delete, and open, while another row's stop and delete stay usable", async ({
+  page,
+  request,
+}) => {
+  const createdA = await request.post("/api/sessions", {
+    data: { cwd: "/tmp", invocation: "sleep 300" },
+  });
+  const createdB = await request.post("/api/sessions", {
+    data: { cwd: "/tmp", invocation: "sleep 300" },
+  });
+  expect(createdA.status()).toBe(200);
+  expect(createdB.status()).toBe(200);
+  const { id: idA } = await createdA.json();
+  const { id: idB } = await createdB.json();
+
+  // Delayed, then let through with `route.continue()` — NOT fulfilled
+  // here: this route needs the REAL stop to actually reach the
+  // supervisor and kill session A's real `sleep 300`, or its badge would
+  // never flip to exited below and the test could never distinguish "the
+  // guard is working" from "the request never even landed".
+  let stopRequests = 0;
+  await page.route(`**/api/sessions/${idA}/stop`, async (route) => {
+    stopRequests++;
+    await new Promise((resolve) => setTimeout(resolve, 800));
+    await route.continue();
+  });
+
+  try {
+    await page.goto("/");
+    const rowA = page.locator(`[data-session-id="${idA}"]`);
+    const rowB = page.locator(`[data-session-id="${idB}"]`);
+    await expect(rowA.locator(".status-badge")).toHaveText("alive", {
+      timeout: 10_000,
+    });
+    await expect(rowB.locator(".status-badge")).toHaveText("alive", {
+      timeout: 10_000,
+    });
+
+    // Two native clicks dispatched synchronously in the same JS tick:
+    // Playwright's own `.click()` waits for an element to be enabled
+    // before clicking, which would never let a second click land on an
+    // already-disabled button, so it could only ever exercise the
+    // `disabled` ATTRIBUTE, not the guard behind it. A bare DOM
+    // `.click()` bypasses that actionability wait entirely and is what
+    // actually exercises the RUST-SIDE `pending` re-entry guard (the
+    // `if !pending.write().insert(...)` check in `on_stop`).
+    await page.evaluate((id) => {
+      const btn = document.querySelector<HTMLButtonElement>(
+        `[data-session-id="${id}"] .session-row-stop`,
+      );
+      btn?.click();
+      btn?.click();
+    }, idA);
+
+    // While the delayed stop is in flight: A's own controls are locked...
+    await expect(rowA.locator(".session-row-stop")).toBeDisabled();
+    await expect(rowA.locator(".session-row-delete")).toBeDisabled();
+    await expect(rowA.locator(".session-row-open")).toBeDisabled();
+    // ...B's stop/delete (per-session) are unaffected...
+    await expect(rowB.locator(".session-row-stop")).toBeEnabled();
+    await expect(rowB.locator(".session-row-delete")).toBeEnabled();
+    // ...but B's open is ALSO disabled — the nav lock is global, not
+    // scoped to whichever session happens to be busy.
+    await expect(rowB.locator(".session-row-open")).toBeDisabled();
+
+    await expect
+      .poll(() => rowA.locator(".status-badge").textContent(), {
+        timeout: 10_000,
+      })
+      .toMatch(/^exited/);
+
+    // Everything is usable again once the operation completes, and only
+    // ONE request ever reached the route — the second click was rejected
+    // by the guard, not merely delayed behind the first.
+    await expect(rowA.locator(".session-row-stop")).toBeEnabled();
+    await expect(rowA.locator(".session-row-delete")).toBeEnabled();
+    await expect(rowA.locator(".session-row-open")).toBeEnabled();
+    await expect(rowB.locator(".session-row-open")).toBeEnabled();
+    expect(stopRequests).toBe(1);
+  } finally {
+    for (const id of [idA, idB]) {
+      await request.post(`/api/sessions/${id}/stop`).catch(() => {});
+      await request.delete(`/api/sessions/${id}`).catch(() => {});
+    }
+  }
+});
+
+// Cross-guard regression test: a rapid stop/delete pair on the SAME row —
+// two native DOM clicks dispatched in the same JS tick, the same
+// bare-`.click()` technique the guard test above uses to bypass
+// Playwright's own actionability wait — must never let `on_stop` and the
+// delete-confirm flow interleave badly, in EITHER click order:
+//   - delete-then-stop: without `on_stop`'s own `confirming` check (see
+//     its doc in lib.rs), a stop queued right behind a delete click could
+//     slip this id into `pending` WHILE the confirm prompt is opening, so
+//     a later, perfectly genuine "confirm delete" click would find
+//     `pending` already occupied and silently no-op via `do_delete`'s
+//     re-entry guard instead of deleting — a confirmed delete vanishing
+//     with no error at all.
+//   - stop-then-delete: without `on_delete`'s own `pending` check, the
+//     delete click could open a confirm prompt for a session a stop is
+//     already acting on, whose eventual confirm would then race that
+//     in-flight stop.
+// Both sessions use a real, killable `sleep 300` so `on_stop`'s own API
+// call has something to reach — a synthetic stub would leave "the guard
+// refused it" indistinguishable from "the request never landed at all".
+test("rapid stop/delete clicks on the same row never let a confirmed delete silently vanish", async ({
+  page,
+  request,
+}) => {
+  const createdA = await request.post("/api/sessions", {
+    data: { cwd: "/tmp", invocation: "sleep 300" },
+  });
+  const createdB = await request.post("/api/sessions", {
+    data: { cwd: "/tmp", invocation: "sleep 300" },
+  });
+  expect(createdA.status()).toBe(200);
+  expect(createdB.status()).toBe(200);
+  const { id: idA } = await createdA.json();
+  const { id: idB } = await createdB.json();
+
+  let stopRequestsA = 0;
+  await page.route(`**/api/sessions/${idA}/stop`, async (route) => {
+    stopRequestsA++;
+    await route.continue();
+  });
+  let deleteRequestsA = 0;
+  await page.route(`**/api/sessions/${idA}`, async (route) => {
+    if (route.request().method() === "DELETE") {
+      deleteRequestsA++;
+    }
+    await route.continue();
+  });
+  let stopRequestsB = 0;
+  await page.route(`**/api/sessions/${idB}/stop`, async (route) => {
+    stopRequestsB++;
+    await route.continue();
+  });
+
+  try {
+    await page.goto("/");
+    const rowA = page.locator(`[data-session-id="${idA}"]`);
+    const rowB = page.locator(`[data-session-id="${idB}"]`);
+    await expect(rowA.locator(".status-badge")).toHaveText("alive", {
+      timeout: 10_000,
+    });
+    await expect(rowB.locator(".status-badge")).toHaveText("alive", {
+      timeout: 10_000,
+    });
+
+    // Ordering 1 (session A): delete, then stop, dispatched together.
+    await page.evaluate((id) => {
+      const row = document.querySelector(`[data-session-id="${id}"]`)!;
+      row.querySelector<HTMLButtonElement>(".session-row-delete")?.click();
+      row.querySelector<HTMLButtonElement>(".session-row-stop")?.click();
+    }, idA);
+
+    // The confirm prompt won; the queued stop click was refused outright
+    // — no stop request ever reached the network.
+    await expect(rowA.locator(".confirm-consequence")).toBeVisible();
+    expect(stopRequestsA).toBe(0);
+
+    // The genuinely user-driven confirm click must still work normally:
+    // this is the exact click the old (pre-cross-guard) bug would have
+    // silently swallowed had a stop slipped into `pending` first.
+    await rowA.locator(".confirm-delete").click();
+    await expect(rowA).toHaveCount(0, { timeout: 10_000 });
+    expect(deleteRequestsA).toBe(1);
+    expect(stopRequestsA).toBe(0);
+
+    // Ordering 2 (session B): stop, then delete, dispatched together.
+    await page.evaluate((id) => {
+      const row = document.querySelector(`[data-session-id="${id}"]`)!;
+      row.querySelector<HTMLButtonElement>(".session-row-stop")?.click();
+      row.querySelector<HTMLButtonElement>(".session-row-delete")?.click();
+    }, idB);
+
+    // The stop won; the queued delete click was refused, so no confirm
+    // prompt ever appeared for B at all.
+    await expect(rowB.locator(".status-badge")).toHaveText(/^exited/, {
+      timeout: 10_000,
+    });
+    await expect(rowB.locator(".confirm-consequence")).toHaveCount(0);
+    expect(stopRequestsB).toBe(1);
+  } finally {
+    for (const id of [idA, idB]) {
+      await request.post(`/api/sessions/${id}/stop`).catch(() => {});
+      await request.delete(`/api/sessions/${id}`).catch(() => {});
+    }
+  }
+});
+
+// The other cross-guard regression test: `confirm_delete`'s "proceed ONLY
+// when `confirming.remove` reports the id was actually present" check
+// (lib.rs) exists specifically for a cancel and a confirm click racing
+// each other, not for the stop/delete race the test above covers. Both
+// buttons are captured BEFORE either is clicked, then clicked together in
+// one synchronous block — cancel first, confirm second — the same
+// bare-`.click()` technique used elsewhere in this file to bypass
+// Playwright's own actionability wait, which would otherwise never let a
+// click reach a button its own prior click had logically superseded.
+// Without the guard, the confirm click (processed second, after cancel
+// has already cleared `confirming`) would still fall through to
+// `do_delete` regardless — deleting a session the user had just told the
+// UI, in the very same gesture, to leave alone.
+test("dispatching cancel and confirm in the same tick never deletes the session", async ({
+  page,
+  request,
+}) => {
+  const created = await request.post("/api/sessions", {
+    data: { cwd: "/tmp", invocation: "sleep 300" },
+  });
+  expect(created.status()).toBe(200);
+  const { id } = await created.json();
+
+  let deleteRequests = 0;
+  await page.route(`**/api/sessions/${id}`, async (route) => {
+    if (route.request().method() === "DELETE") {
+      deleteRequests++;
+    }
+    await route.continue();
+  });
+
+  try {
+    await page.goto("/");
+    const row = page.locator(`[data-session-id="${id}"]`);
+    await expect(row.locator(".status-badge")).toHaveText("alive", {
+      timeout: 10_000,
+    });
+    await row.locator(".session-row-delete").click();
+    await expect(row.locator(".confirm-consequence")).toBeVisible();
+
+    await page.evaluate((sessionId) => {
+      const row = document.querySelector(`[data-session-id="${sessionId}"]`)!;
+      const cancel = row.querySelector<HTMLButtonElement>(".confirm-cancel")!;
+      const confirm = row.querySelector<HTMLButtonElement>(".confirm-delete")!;
+      cancel.click();
+      confirm.click();
+    }, id);
+
+    // Cancel won: the row is back to normal, and no DELETE was ever sent
+    // — not merely "not yet", but never at all.
+    await expect(row.locator(".confirm-consequence")).toHaveCount(0);
+    await expect(row.locator(".session-row-delete")).toBeEnabled();
+    expect(deleteRequests).toBe(0);
+  } finally {
+    await request.post(`/api/sessions/${id}/stop`).catch(() => {});
+    await request.delete(`/api/sessions/${id}`).catch(() => {});
+  }
+});
+
+// `autofocus` on the cancel button (`SessionRow`'s "Focus-on-open" doc in
+// lib.rs) is the safety default: the instant the confirm prompt mounts,
+// keyboard focus must already be ON cancel, not confirm, so a stray
+// Enter/Space reaching the page right after the delete click (residual
+// focus, a fast typist) backs OUT of the destructive action instead of
+// into it. Checked via `document.activeElement` (Playwright's
+// `toBeFocused`), then exercised through a genuine Enter keypress via
+// Playwright's own keyboard API — the actual mechanism a stray keystroke
+// would use, not just a synthetic click on cancel.
+test("the confirm prompt focuses cancel on open; Enter closes it without deleting", async ({
+  page,
+  request,
+}) => {
+  const created = await request.post("/api/sessions", {
+    data: { cwd: "/tmp", invocation: "sleep 300" },
+  });
+  expect(created.status()).toBe(200);
+  const { id } = await created.json();
+
+  let deleteRequests = 0;
+  await page.route(`**/api/sessions/${id}`, async (route) => {
+    if (route.request().method() === "DELETE") {
+      deleteRequests++;
+    }
+    await route.continue();
+  });
+
+  try {
+    await page.goto("/");
+    const row = page.locator(`[data-session-id="${id}"]`);
+    await expect(row.locator(".status-badge")).toHaveText("alive", {
+      timeout: 10_000,
+    });
+    await row.locator(".session-row-delete").click();
+    await expect(row.locator(".confirm-consequence")).toBeVisible();
+
+    await expect(row.locator(".confirm-cancel")).toBeFocused();
+
+    await page.keyboard.press("Enter");
+    await expect(row.locator(".confirm-consequence")).toHaveCount(0);
+    await expect(row.locator(".session-row-delete")).toBeEnabled();
+    expect(deleteRequests).toBe(0);
+  } finally {
+    await request.post(`/api/sessions/${id}/stop`).catch(() => {});
+    await request.delete(`/api/sessions/${id}`).catch(() => {});
+  }
+});
+
+// SPEC.md's "Title: optional; auto-generated when omitted" through the
+// real create endpoint (farhelm-supervisor's `create_session` derives the
+// working directory's basename — see its own doc). A regression that sent
+// an empty STRING instead of omitting/nulling the field would ask the
+// supervisor to name the session "" verbatim (see `create_session`'s doc
+// in lib.rs) rather than triggering the derivation at all, so this checks
+// both ends: the wire request itself, and the title the created session
+// actually got.
+test("a blank title creates a session titled after the working directory's basename, not an empty string", async ({
+  page,
+  request,
+}) => {
+  let capturedBody: any = null;
+  await page.route("**/api/sessions", async (route) => {
+    if (route.request().method() !== "POST") {
+      await route.continue();
+      return;
+    }
+    capturedBody = route.request().postDataJSON();
+    await route.continue();
+  });
+
+  let id: string | undefined;
+  try {
+    await page.goto("/");
+    const form = await fillCreateForm(page, {
+      cwd: "/tmp",
+      invocation: FAKE_AGENT_INVOCATION,
+      title: "",
+    });
+    await form.locator('button[type="submit"]').click();
+    await page.waitForFunction(() => (window as any).__farhelmTermReady === true);
+
+    // `== null` deliberately covers BOTH an omitted key (`undefined`
+    // after JSON parsing) and an explicit `null` value — `create_session`
+    // in lib.rs sends `Option<&str>` through `serde_json::json!`, which
+    // serializes `None` as a JSON `null` rather than dropping the key,
+    // and either shape is equally correct here: what matters is that it
+    // is NOT the empty string.
+    expect(capturedBody.title == null).toBe(true);
+
+    const titleText = await page.locator(".titlebar .title").textContent();
+    expect(titleText).toBe("tmp");
+    expect(titleText).not.toBe("");
+
+    const listing = await (await request.get("/api/sessions")).json();
+    const createdSession = listing.sessions.find(
+      (s: any) => s.title === "tmp" && s.cwd === "/tmp",
+    );
+    expect(createdSession).toBeTruthy();
+    id = createdSession.id;
+  } finally {
+    if (id) {
+      await request.post(`/api/sessions/${id}/stop`).catch(() => {});
+      await request.delete(`/api/sessions/${id}`).catch(() => {});
+    }
   }
 });
 
