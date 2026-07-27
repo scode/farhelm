@@ -1,29 +1,422 @@
-//! Wire types and protocol version shared by the helm and supervisors.
+//! Wire protocol shared by the helm and supervisors.
 //!
 //! This crate is the seam that keeps helm and supervisor honestly
-//! decoupled: they meet only over the framing protocol defined here, even
-//! when both run in the same process (SPEC_impl.md, "Workspace layout").
-//! M1 fills in the framing (length-prefixed channels, JSON control frames,
-//! raw data frames) and the version hello; in M0 this is a stub so the
-//! workspace shape and CI exist before product code does.
+//! decoupled: they meet only over this protocol, whether the transport is
+//! a local unix socket or an ssh exec channel — "local host" and "remote
+//! host" differ only in transport (SPEC_impl.md). The codec itself is
+//! IO-free: frames encode to and decode from byte buffers, so golden
+//! tests pin the wire format without async machinery. Transport-agnostic
+//! async read/write helpers live in `io`.
+//!
+//! Wire format, deliberately minimal (all integers big-endian):
+//!
+//! ```text
+//! u32  length of everything after this field
+//! u8   frame kind: 0 = control, 1 = data
+//! u32  channel id (0 for control frames)
+//! ...  body
+//! ```
+//!
+//! Control frames carry JSON (`ControlMsg`) on channel 0 — JSON so a human
+//! can eyeball a protocol trace. Data frames carry raw terminal bytes on a
+//! per-attachment channel; keeping them binary keeps PTY throughput off
+//! the JSON path.
 
-/// Protocol version exchanged in the connection hello.
+use serde::{Deserialize, Serialize};
+
+pub mod io;
+
+/// Protocol version exchanged in the hello. Bumped only for incompatible
+/// frame or message changes; the receiving side refuses a mismatch with a
+/// clear error per SPEC.md's version-skew rule. Build versions travel
+/// alongside for diagnostics only and never gate anything.
+pub const PROTOCOL_VERSION: u32 = 1;
+
+/// The build version compiled into this binary, carried in the hello for
+/// diagnostics.
+pub const BUILD_VERSION: &str = env!("CARGO_PKG_VERSION");
+
+/// Frame kind tags on the wire. `Control` is JSON on channel 0; `Data` is
+/// raw bytes on an attachment channel.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FrameKind {
+    Control,
+    Data,
+}
+
+/// One decoded frame. `channel` is 0 for control frames; data frames use
+/// the channel assigned at attach time.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Frame {
+    pub kind: FrameKind,
+    pub channel: u32,
+    pub body: Vec<u8>,
+}
+
+/// Frames larger than this are rejected at decode time. Terminal output is
+/// chunked well below this by the supervisor; the cap exists so a
+/// corrupted length prefix cannot make the reader allocate gigabytes.
+pub const MAX_FRAME_LEN: u32 = 8 * 1024 * 1024;
+
+/// Errors surfaced by frame encoding/decoding.
+#[derive(Debug, thiserror::Error)]
+pub enum FrameError {
+    #[error("frame length {0} exceeds maximum {MAX_FRAME_LEN}")]
+    TooLarge(usize),
+    #[error("frame truncated: need {need} bytes, have {have}")]
+    Truncated { need: usize, have: usize },
+    #[error("unknown frame kind tag {0}")]
+    UnknownKind(u8),
+}
+
+impl Frame {
+    /// Wrap a control message as a channel-0 frame. Infallible: the
+    /// serialization cannot fail, so callers get a `Frame` rather than a
+    /// `Result` they would only ever unwrap.
+    pub fn control(msg: &ControlMsg) -> Frame {
+        Frame {
+            kind: FrameKind::Control,
+            channel: 0,
+            // ControlMsg contains no map types or non-string keys, so
+            // serialization cannot fail.
+            body: serde_json::to_vec(msg).expect("ControlMsg is always serializable"),
+        }
+    }
+
+    /// Wrap raw terminal bytes for an attachment channel. `bytes` is
+    /// opaque — never inspected, never re-encoded — which is what keeps
+    /// arbitrary PTY output (binary, invalid UTF-8) crossing the wire
+    /// intact. Encoding rejects a body that would exceed
+    /// [`MAX_FRAME_LEN`], before writing any partial frame.
+    pub fn data(channel: u32, bytes: Vec<u8>) -> Frame {
+        Frame {
+            kind: FrameKind::Data,
+            channel,
+            body: bytes,
+        }
+    }
+
+    /// Encode to the wire format, appending to `out`.
+    ///
+    /// The size check mirrors [`Frame::decode`]: anything written here
+    /// must be acceptable to the peer. The output is untouched on error,
+    /// so a caller may reuse its scratch buffer after rejecting a frame.
+    pub fn encode(&self, out: &mut Vec<u8>) -> Result<(), FrameError> {
+        let len = 5usize
+            .checked_add(self.body.len())
+            .ok_or(FrameError::TooLarge(usize::MAX))?;
+        if len > MAX_FRAME_LEN as usize {
+            return Err(FrameError::TooLarge(len));
+        }
+        let len = len as u32;
+        out.extend_from_slice(&len.to_be_bytes());
+        out.push(match self.kind {
+            FrameKind::Control => 0,
+            FrameKind::Data => 1,
+        });
+        out.extend_from_slice(&self.channel.to_be_bytes());
+        out.extend_from_slice(&self.body);
+        Ok(())
+    }
+
+    /// Decode one frame from the front of `buf`. Returns the frame and the
+    /// number of bytes consumed, or `None` when `buf` does not yet hold a
+    /// complete frame (the caller reads more and retries). Errors are
+    /// unrecoverable protocol violations; the connection should be closed.
+    pub fn decode(buf: &[u8]) -> Result<Option<(Frame, usize)>, FrameError> {
+        if buf.len() < 4 {
+            return Ok(None);
+        }
+        let len = u32::from_be_bytes([buf[0], buf[1], buf[2], buf[3]]);
+        if len > MAX_FRAME_LEN {
+            return Err(FrameError::TooLarge(len as usize));
+        }
+        if len < 5 {
+            // A frame body is at least kind + channel.
+            return Err(FrameError::Truncated {
+                need: 5,
+                have: len as usize,
+            });
+        }
+        let total = 4 + len as usize;
+        if buf.len() < total {
+            return Ok(None);
+        }
+        let kind = match buf[4] {
+            0 => FrameKind::Control,
+            1 => FrameKind::Data,
+            other => return Err(FrameError::UnknownKind(other)),
+        };
+        let channel = u32::from_be_bytes([buf[5], buf[6], buf[7], buf[8]]);
+        let body = buf[9..total].to_vec();
+        Ok(Some((
+            Frame {
+                kind,
+                channel,
+                body,
+            },
+            total,
+        )))
+    }
+}
+
+/// A session as the supervisor reports it. The supervisor is authoritative
+/// (SPEC.md); the helm never invents or mutates these fields.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct SessionInfo {
+    pub id: String,
+    pub title: String,
+    pub cwd: String,
+    pub invocation: String,
+}
+
+/// Control-channel messages. `req_id` correlates a response to its request
+/// so one connection can carry concurrent requests; unsolicited events
+/// (`Detached`) carry no `req_id`.
 ///
-/// Incompatible frame changes bump this; the connecting side refuses a
-/// mismatch with a clear error per SPEC.md's version-skew rule. Build
-/// versions travel separately and are diagnostic only.
-pub const PROTOCOL_VERSION: u32 = 0;
+/// Compatibility posture: within one protocol version the set of messages
+/// is fixed; anything incompatible bumps `PROTOCOL_VERSION` rather than
+/// negotiating per-message.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum ControlMsg {
+    /// First message in each direction on every connection. The receiver
+    /// refuses a `protocol_version` mismatch by replying `Error` and
+    /// closing — SPEC.md's version-skew rule, enforced at the edge.
+    Hello {
+        protocol_version: u32,
+        build_version: String,
+        /// "helm" or "supervisor"; diagnostic only.
+        role: String,
+    },
+    /// Create and launch a session. This is the one true creation path:
+    /// the M1 CLI flags and any future UI dialog both land here
+    /// (PLAN_M1.md: flags bypass the creation UI, never the creation API).
+    CreateSession {
+        req_id: u64,
+        cwd: String,
+        invocation: String,
+        title: Option<String>,
+        cols: u16,
+        rows: u16,
+    },
+    /// Success reply to `CreateSession`. The session and terminal exist,
+    /// but this does not establish that the agent's later `exec`
+    /// succeeded. M1 has no structured launch-status message; failures
+    /// remain visible as terminal diagnostics for future classification.
+    SessionCreated {
+        req_id: u64,
+        session: SessionInfo,
+    },
+    ListSessions {
+        req_id: u64,
+    },
+    /// Reply to `ListSessions`: the supervisor's complete session set, in
+    /// no defined order.
+    SessionList {
+        req_id: u64,
+        sessions: Vec<SessionInfo>,
+    },
+    /// Attach to a session's terminal. The requester picks the (connection
+    /// -unique) data channel; the supervisor replays history onto it and
+    /// then streams live output. Attaching implicitly detaches any
+    /// previous attachment (SPEC.md: one attachment, last attach wins).
+    Attach {
+        req_id: u64,
+        session_id: String,
+        channel: u32,
+        cols: u16,
+        rows: u16,
+    },
+    /// Attach accepted. Data frames on `channel` may arrive *before* this
+    /// reply is processed — the supervisor starts the replay as soon as
+    /// the attachment is installed — so a client must have the channel
+    /// registered before it sends `Attach`, not after it sees `Attached`.
+    Attached {
+        req_id: u64,
+        channel: u32,
+    },
+    /// Give up an attachment voluntarily. No reply, and no error if the
+    /// channel was never attached or was already taken over: detach is
+    /// idempotent so a client tearing down a closed terminal never has to
+    /// reason about who won a race.
+    Detach {
+        channel: u32,
+    },
+    /// Unsolicited: this channel's attachment was taken over or torn down.
+    Detached {
+        channel: u32,
+        reason: String,
+    },
+    /// Set the session's terminal dimensions. Fire-and-forget: no
+    /// `req_id`, no reply, and the supervisor ignores it unless `channel`
+    /// is the session's live attachment on the sending connection —
+    /// otherwise a resize still in flight from a client that just lost a
+    /// takeover would reflow the winner's terminal. `channel` is what
+    /// makes that enforceable when several clients multiplex over one
+    /// connection (every browser tab rides the helm's single supervisor
+    /// connection, so connection identity alone cannot tell them apart).
+    Resize {
+        session_id: String,
+        channel: u32,
+        cols: u16,
+        rows: u16,
+    },
+    /// A request failed, or (with `req_id` 0) something went wrong that no
+    /// request is waiting on. `message` is meant for the user verbatim —
+    /// SPEC.md requires concrete, actionable errors, so it travels
+    /// unabridged from the supervisor to the client.
+    Error {
+        /// 0 when the error is not tied to a specific request.
+        req_id: u64,
+        message: String,
+    },
+}
+
+impl ControlMsg {
+    /// The hello this build sends.
+    pub fn hello(role: &str) -> ControlMsg {
+        ControlMsg::Hello {
+            protocol_version: PROTOCOL_VERSION,
+            build_version: BUILD_VERSION.to_string(),
+            role: role.to_string(),
+        }
+    }
+}
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    /// The workspace starts at protocol version 0; the first real frame
-    /// definition in M1 keeps or bumps this deliberately, never
-    /// accidentally. This test exists so `cargo test` exercises the crate
-    /// from the first CI run.
+    /// Round-trip through the real encoder/decoder: any drift between
+    /// encode and decode shows up here before it shows up between a helm
+    /// and a supervisor built from different checkouts.
     #[test]
-    fn protocol_version_is_zero_until_first_real_frames() {
-        assert_eq!(PROTOCOL_VERSION, 0);
+    fn frame_roundtrip_control_and_data() {
+        let mut wire = Vec::new();
+        let hello = ControlMsg::hello("helm");
+        Frame::control(&hello).encode(&mut wire).unwrap();
+        Frame::data(7, b"hello \x1b[1mworld\x1b[0m".to_vec())
+            .encode(&mut wire)
+            .unwrap();
+
+        let (f1, used1) = Frame::decode(&wire).unwrap().unwrap();
+        assert_eq!(f1.kind, FrameKind::Control);
+        assert_eq!(f1.channel, 0);
+        assert_eq!(
+            serde_json::from_slice::<ControlMsg>(&f1.body).unwrap(),
+            hello
+        );
+        let (f2, used2) = Frame::decode(&wire[used1..]).unwrap().unwrap();
+        assert_eq!(f2.kind, FrameKind::Data);
+        assert_eq!(f2.channel, 7);
+        assert_eq!(f2.body, b"hello \x1b[1mworld\x1b[0m");
+        assert_eq!(used1 + used2, wire.len());
+    }
+
+    /// Golden bytes for the simplest data frame. This is the test that
+    /// makes wire-format changes loud: if it fails, PROTOCOL_VERSION must
+    /// be bumped, not the expectation silently updated.
+    #[test]
+    fn frame_wire_format_is_pinned() {
+        let mut wire = Vec::new();
+        Frame::data(2, vec![0x41, 0x42]).encode(&mut wire).unwrap();
+        assert_eq!(
+            wire,
+            vec![
+                0x00, 0x00, 0x00, 0x07, // len = kind(1) + channel(4) + body(2)
+                0x01, // kind = data
+                0x00, 0x00, 0x00, 0x02, // channel 2
+                0x41, 0x42, // body
+            ]
+        );
+    }
+
+    /// Partial buffers must return None (read more), not an error: the
+    /// stream reader depends on this to handle short reads.
+    #[test]
+    fn decode_of_partial_frame_asks_for_more() {
+        let mut wire = Vec::new();
+        Frame::data(1, vec![1, 2, 3]).encode(&mut wire).unwrap();
+        for cut in 0..wire.len() {
+            assert!(Frame::decode(&wire[..cut]).unwrap().is_none());
+        }
+    }
+
+    /// A hostile or corrupt length prefix must be rejected before
+    /// allocation, and an unknown kind tag must fail decode.
+    #[test]
+    fn decode_rejects_garbage() {
+        let huge = (MAX_FRAME_LEN + 1).to_be_bytes();
+        let mut buf = huge.to_vec();
+        buf.extend_from_slice(&[0; 16]);
+        assert!(matches!(Frame::decode(&buf), Err(FrameError::TooLarge(_))));
+
+        let mut wire = Vec::new();
+        Frame::data(1, vec![9]).encode(&mut wire).unwrap();
+        wire[4] = 0xff; // corrupt the kind tag
+        assert!(matches!(
+            Frame::decode(&wire),
+            Err(FrameError::UnknownKind(0xff))
+        ));
+
+        // A length too small to hold even kind+channel must error, not
+        // report "need more bytes": returning Ok(None) here would make
+        // the reader wait forever for bytes that can never complete a
+        // frame.
+        let undersized = [0u8, 0, 0, 2, 0, 0];
+        assert!(matches!(
+            Frame::decode(&undersized),
+            Err(FrameError::Truncated { .. })
+        ));
+    }
+
+    /// The frame cap includes kind and channel but excludes the four-byte
+    /// length prefix. Pinning both sides of that exact boundary prevents
+    /// encoder and decoder limits from drifting by one header width.
+    #[test]
+    fn frame_size_boundary_accepts_the_maximum_and_rejects_one_more() {
+        let largest_body = MAX_FRAME_LEN as usize - 5;
+        let mut wire = Vec::new();
+        Frame::data(1, vec![0; largest_body])
+            .encode(&mut wire)
+            .expect("largest valid frame must encode");
+        let (decoded, used) = Frame::decode(&wire).unwrap().unwrap();
+        assert_eq!(decoded.body.len(), largest_body);
+        assert_eq!(used, wire.len());
+
+        let mut unchanged = b"prefix".to_vec();
+        let frame = Frame::data(1, vec![0; largest_body + 1]);
+        assert!(matches!(
+            frame.encode(&mut unchanged),
+            Err(FrameError::TooLarge(_))
+        ));
+        assert_eq!(unchanged, b"prefix");
+    }
+
+    /// The JSON control encoding is part of the wire contract (a different
+    /// serde representation is a protocol change even if the Rust types
+    /// compile), so pin one message's exact JSON.
+    #[test]
+    fn control_json_shape_is_pinned() {
+        let msg = ControlMsg::Attach {
+            req_id: 3,
+            session_id: "s1".into(),
+            channel: 9,
+            cols: 80,
+            rows: 24,
+        };
+        let json = serde_json::to_value(&msg).unwrap();
+        assert_eq!(
+            json,
+            serde_json::json!({
+                "type": "attach",
+                "req_id": 3,
+                "session_id": "s1",
+                "channel": 9,
+                "cols": 80,
+                "rows": 24,
+            })
+        );
     }
 }

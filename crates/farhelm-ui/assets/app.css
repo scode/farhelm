@@ -1,0 +1,60 @@
+/* Minimal M1 chrome: dark, terminal-first, nothing decorative. */
+html,
+body,
+#main {
+  height: 100%;
+  margin: 0;
+  background: #14161a;
+  color: #d8dee9;
+  font-family: system-ui, sans-serif;
+}
+
+.layout {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+
+.titlebar {
+  padding: 6px 10px;
+  background: #1d2026;
+  font-size: 13px;
+  display: flex;
+  gap: 12px;
+  align-items: baseline;
+}
+
+.titlebar .title {
+  font-weight: 600;
+}
+
+.titlebar .meta {
+  color: #8a919e;
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.banner {
+  display: none;
+  background: #7a3b3b;
+  color: #fff;
+  padding: 4px 10px;
+  font-size: 13px;
+}
+
+.terminal {
+  flex: 1;
+  min-height: 0;
+  padding: 4px;
+}
+
+.status {
+  padding: 2em;
+  font-size: 14px;
+}
+
+.status.error {
+  color: #e08080;
+}

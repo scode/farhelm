@@ -7,3 +7,15 @@ repository.workspace = true
 description = "The Dioxus UI, built for web (wasm) and desktop from one crate"
 
 [dependencies]
+dioxus.workspace = true
+reqwest.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+web-sys.workspace = true
+
+[features]
+default = []
+web = ["dioxus/web"]
+desktop = ["dioxus/desktop"]
