@@ -59,6 +59,16 @@ const SCHEMA_VERSION: i64 = 1;
 /// `SessionEntry`'s shape, which is free to keep evolving (e.g. gaining
 /// the restart-gap `terminal: Option<Terminal>` field) independently of
 /// what is stored on disk.
+///
+/// Deliberately missing: `SessionInfo::status`. Liveness is never
+/// persisted — tmux is its only truth (module docs above), and a status
+/// written at some past moment would be stale the instant the process it
+/// described changed state, with nothing to invalidate it on the way
+/// back out of SQLite. `service::Supervisor::reload_sessions` always
+/// recomputes a freshly loaded row's terminal from a live `has_session`
+/// probe, and `ListSessions` recomputes `status` itself on every reply
+/// (`service::session_status`) — a persisted status column would be
+/// redundant at best and actively misleading at worst.
 #[derive(Debug, Clone)]
 pub struct StoredSession {
     pub id: String,

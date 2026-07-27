@@ -17,7 +17,7 @@
 
 use farhelm_helm::{SupervisorClient, SupervisorError, TermEvent};
 use farhelm_proto::io::parse_control;
-use farhelm_proto::{ControlMsg, ErrorKind, Frame, FrameKind, SessionInfo};
+use farhelm_proto::{ControlMsg, ErrorKind, Frame, FrameKind, SessionInfo, SessionStatus};
 use farhelm_supervisor::service::{Supervisor, handle_connection};
 use std::io;
 use std::pin::Pin;
@@ -125,6 +125,27 @@ async fn kill_tmux_server_and_wait(sock: &std::path::Path) {
         );
         tokio::time::sleep(Duration::from_millis(50)).await;
     }
+}
+
+/// The pane id (`%N`) tmux currently reports for `tmux_name`'s session —
+/// used to independently confirm a test's own precondition about pane-id
+/// reuse, rather than assuming it from the tmux server's fresh-start
+/// behavior alone.
+async fn pane_id_of(sock: &std::path::Path, tmux_name: &str) -> String {
+    let out = tmux_query(
+        sock,
+        &["display-message", "-p", "-t", tmux_name, "#{pane_id}"],
+    )
+    .await;
+    assert!(
+        out.status.success(),
+        "test setup: querying the pane id for {tmux_name} must succeed, got: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    String::from_utf8(out.stdout)
+        .expect("pane id is UTF-8")
+        .trim()
+        .to_string()
 }
 
 /// Whether the harness's tmux knows a given format variable, probed
@@ -305,6 +326,155 @@ async fn basic_session(h: &Harness) -> (SessionInfo, tempfile::TempDir) {
         .await
         .expect("create");
     (session, work)
+}
+
+/// Attach an expected `status` to a cloned `SessionInfo` before an
+/// equality assertion.
+///
+/// `list_sessions` computes `status` fresh from tmux on every call
+/// (`service.rs`'s `ListSessions` handler) rather than trusting whatever a
+/// caller last saw — so a listing assertion built from a `SessionInfo`
+/// returned by `create_session` (always `Unknown`, a create-time
+/// placeholder — see `service.rs`'s `create_session` doc comment) must
+/// say explicitly what status that same row is expected to carry by the
+/// time THIS call observes it, instead of silently reusing the
+/// create-time value (which would make the assertion pass or fail on an
+/// unrelated coincidence whenever the two happen to agree).
+fn with_status(mut session: SessionInfo, status: SessionStatus) -> SessionInfo {
+    session.status = status;
+    session
+}
+
+/// Poll `list_sessions` until `session_id`'s status is no longer `Alive`,
+/// returning the settled `SessionInfo`.
+///
+/// Status is computed fresh from tmux at LIST time, never pushed
+/// (`service.rs`'s `ListSessions` handler) — so observing a transition
+/// (an agent exiting on its own, a stop's kill sweep completing) needs a
+/// bounded poll rather than a single read racing tmux's own
+/// `pane_dead`/`pane_dead_status` bookkeeping.
+async fn wait_for_non_alive_status(
+    client: &SupervisorClient,
+    session_id: &str,
+    secs: u64,
+) -> SessionInfo {
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(secs);
+    loop {
+        let listed = client
+            .list_sessions()
+            .await
+            .expect("list while polling for a status transition");
+        if let Some(found) = listed.sessions.iter().find(|s| s.id == session_id)
+            && !matches!(found.status, SessionStatus::Alive)
+        {
+            return found.clone();
+        }
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "session {session_id} never left Alive status within {secs}s"
+        );
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+}
+
+/// Whether this host's tmux reliably records a dead pane's exit status.
+///
+/// tmux 3.4 (Ubuntu 24.04's package, so CI's) can PERMANENTLY report a
+/// dead pane with an empty `#{pane_dead_status}` under parallel load —
+/// measured directly against raw tmux, no farhelm involved: 40 concurrent
+/// one-pane servers whose pane runs `sh -c 'sleep 0.3; exit 0'` left 6
+/// panes dead with no status on 3.4, and 0 on 3.7b. The supervisor
+/// already reports that honestly as `Exited { exit_code: None }`
+/// (SPEC.md: exit code "when known"), so this is a fact about what the
+/// exit-code-precision tests may assert per tmux version, not a product
+/// gap to code around.
+fn tmux_records_exit_codes_reliably() -> bool {
+    let out = std::process::Command::new("tmux")
+        .arg("-V")
+        .output()
+        .expect("running tmux -V");
+    let v = String::from_utf8_lossy(&out.stdout);
+    // "tmux 3.4" / "tmux 3.7b" — compare (major, minor) numerically;
+    // trailing letters do not matter at this boundary.
+    let nums: Vec<u32> = v
+        .split_whitespace()
+        .nth(1)
+        .unwrap_or("0.0")
+        .split('.')
+        .map(|part| {
+            part.chars()
+                .take_while(|c| c.is_ascii_digit())
+                .collect::<String>()
+                .parse()
+                .unwrap_or(0)
+        })
+        .collect();
+    (
+        nums.first().copied().unwrap_or(0),
+        nums.get(1).copied().unwrap_or(0),
+    ) > (3, 4)
+}
+
+/// Poll `list_sessions` until `session_id` reports `Exited` with the
+/// expected code — or, on a tmux that loses exit codes under load
+/// ([`tmux_records_exit_codes_reliably`]), with no code at all.
+///
+/// Two separate races justify the polling shape. First, tmux records
+/// `pane_dead` and `pane_dead_status` in separate steps, so a poll can
+/// land in the window where the pane is dead but its code is not yet
+/// recorded — the list honestly reports `Exited { exit_code: None }` for
+/// that instant, and asserting on the FIRST non-alive observation fails
+/// on a loaded machine (this bit CI while every local run passed).
+/// Second, tmux 3.4 can lose the code PERMANENTLY, so on such hosts an
+/// `Exited { exit_code: None }` that persists to the deadline counts as
+/// the accepted outcome rather than a failure — the precision assertion
+/// only binds where tmux itself is trustworthy.
+async fn wait_for_exit_code(
+    client: &SupervisorClient,
+    session_id: &str,
+    expected: i32,
+    secs: u64,
+) -> SessionInfo {
+    let tmux_reliable = tmux_records_exit_codes_reliably();
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(secs);
+    let mut last_seen: Option<SessionInfo> = None;
+    loop {
+        let listed = client
+            .list_sessions()
+            .await
+            .expect("list while polling for a status transition");
+        if let Some(found) = listed.sessions.iter().find(|s| s.id == session_id) {
+            match found.status {
+                SessionStatus::Exited {
+                    exit_code: Some(code),
+                } if code == expected => return found.clone(),
+                SessionStatus::Exited { exit_code } => {
+                    assert!(
+                        exit_code.is_none(),
+                        "session {session_id} exited with {exit_code:?}, expected \
+                         Some({expected})"
+                    );
+                }
+                _ => {}
+            }
+            last_seen = Some(found.clone());
+        }
+        if tokio::time::Instant::now() >= deadline {
+            if !tmux_reliable
+                && let Some(found) = &last_seen
+                && found.status == (SessionStatus::Exited { exit_code: None })
+            {
+                // This tmux is known to lose codes; a persistent None is
+                // the documented accepted outcome, not a failure.
+                return found.clone();
+            }
+            panic!(
+                "session {session_id} never reached Exited {{ Some({expected}) }} within \
+                 {secs}s (last observed: {last_seen:?})"
+            );
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
 }
 
 /// Boot a supervisor on a throwaway state dir and connect a client to it.
@@ -788,14 +958,14 @@ async fn create_in_missing_directory_errors() {
         ErrorKind::InvalidRequest,
         "a missing directory is the caller's mistake, not a server fault"
     );
-    assert!(h.client.list_sessions().await.unwrap().is_empty());
+    assert!(h.client.list_sessions().await.unwrap().sessions.is_empty());
 
     let sup2 = Supervisor::new_with_exe(h.state.path(), farhelm_bin().into())
         .await
         .expect("second supervisor construction reading the same state dir");
     let client2 = connect_client(&sup2).await;
     assert!(
-        client2.list_sessions().await.unwrap().is_empty(),
+        client2.list_sessions().await.unwrap().sessions.is_empty(),
         "a rejected create must not have persisted a row visible to a fresh supervisor"
     );
 }
@@ -820,7 +990,7 @@ async fn create_in_a_regular_file_reports_not_a_directory() {
         ErrorKind::InvalidRequest,
         "cwd being a file is the caller's mistake, not a server fault"
     );
-    assert!(h.client.list_sessions().await.unwrap().is_empty());
+    assert!(h.client.list_sessions().await.unwrap().sessions.is_empty());
 }
 
 /// A cwd nested UNDER a regular file (`/tmp/somefile/child`) is a
@@ -847,7 +1017,7 @@ async fn create_under_a_regular_file_is_invalid_request() {
         ErrorKind::InvalidRequest,
         "a path nested under a file is the caller's mistake, not a server fault"
     );
-    assert!(h.client.list_sessions().await.unwrap().is_empty());
+    assert!(h.client.list_sessions().await.unwrap().sessions.is_empty());
 }
 
 /// A NUL byte in the cwd text cannot address anything on a POSIX
@@ -871,7 +1041,7 @@ async fn create_with_nul_byte_in_cwd_is_invalid_request() {
         ErrorKind::InvalidRequest,
         "a NUL byte in the cwd is the caller's mistake, not a server fault"
     );
-    assert!(h.client.list_sessions().await.unwrap().is_empty());
+    assert!(h.client.list_sessions().await.unwrap().sessions.is_empty());
 }
 
 /// The helm must claim its HTTP port before creating the argv-requested
@@ -915,7 +1085,7 @@ async fn helm_bind_failure_creates_no_startup_session() {
 
     let client = connect_client(&sup).await;
     assert!(
-        client.list_sessions().await.unwrap().is_empty(),
+        client.list_sessions().await.unwrap().sessions.is_empty(),
         "bind failure must happen before startup session creation"
     );
 }
@@ -1192,6 +1362,59 @@ async fn exited_agent_leaves_a_viewable_terminal() {
         .expect("a session whose agent exited must still be attachable");
 }
 
+/// PLAN_M2.md's list-status contract: once an agent exits ON ITS OWN — no
+/// stop or delete involved — the next `ListSessions` must reflect that as
+/// `Exited` with the exact exit code tmux observed, not stay `Alive`
+/// forever. `exited_agent_leaves_a_viewable_terminal` already proves the
+/// terminal itself survives; this proves the status field tracks the same
+/// event. The basic fake agent's own `quit` path exits 0, which is what
+/// makes this an easy code to pin exactly (unlike a signal death).
+#[tokio::test]
+async fn exited_agent_lists_as_exited_with_its_exit_code() {
+    let h = harness().await;
+    let (session, _work) = basic_session(&h).await;
+    let (chan, mut rx) = h.client.attach(&session.id, 80, 24).await.expect("attach");
+    let mut seen = Vec::new();
+    wait_for(&mut rx, &mut seen, "FAKE-AGENT READY", 20).await;
+    h.client.send_input(chan, b"quit\r".to_vec());
+
+    // Exit-code precision, version-gated: see `wait_for_exit_code`.
+    wait_for_exit_code(&h.client, &session.id, 0, 30).await;
+}
+
+/// A nonzero exit is reported precisely, not just "not alive" — the whole
+/// point of carrying `exit_code` through instead of a boolean liveness
+/// flag. A plain shell exit needs no fake-agent script at all: its code
+/// is exactly what tmux's `#{pane_dead_status}` reports.
+///
+/// The half-second sleep before the exit is load-bearing, not padding: a
+/// pane whose process dies while tmux is still setting the pane up can
+/// lose the recorded exit status entirely (observed on loaded CI runners
+/// as a permanent `Exited { exit_code: None }`; never reproduced locally,
+/// where `exit 3` alone always raced in tmux's favor). An agent that
+/// exits before its terminal even finishes materializing is not the
+/// behavior this test pins, so the fixture deliberately outlives pane
+/// setup instead.
+#[tokio::test]
+async fn nonzero_exit_lists_with_its_precise_code() {
+    let h = harness().await;
+    let work = tempfile::tempdir().unwrap();
+    let session = h
+        .client
+        .create_session(
+            &work.path().to_string_lossy(),
+            "sh -c 'sleep 0.5; exit 3'",
+            None,
+            80,
+            24,
+        )
+        .await
+        .expect("create");
+
+    // Exit-code precision, version-gated: see `wait_for_exit_code`.
+    wait_for_exit_code(&h.client, &session.id, 3, 30).await;
+}
+
 /// Invocations that cannot become an argv fail the create outright, with
 /// no session left behind — the same contract as a missing directory.
 #[tokio::test]
@@ -1239,7 +1462,7 @@ async fn unparseable_invocations_error_without_creating_a_session() {
         "a shell-syntax error in the invocation is the caller's mistake, not a server fault"
     );
 
-    assert!(h.client.list_sessions().await.unwrap().is_empty());
+    assert!(h.client.list_sessions().await.unwrap().sessions.is_empty());
 }
 
 /// The launch shim's sentinel is what separates "could not start" from
@@ -1868,11 +2091,22 @@ async fn created_sessions_are_listed_with_a_derived_title() {
         .await
         .expect("create");
     assert_eq!(session.title, basename);
+    assert_eq!(
+        session.status,
+        SessionStatus::Unknown,
+        "SessionCreated's own reply must carry the create-time placeholder, not a fabricated \
+         Alive — creation establishes only that the session and terminal exist, not that the \
+         agent's exec succeeded (see ControlMsg::SessionCreated's own docs)"
+    );
 
     let listed = h.client.list_sessions().await.expect("list");
-    assert_eq!(listed.len(), 1);
-    assert_eq!(listed[0], session);
-    assert_eq!(listed[0].invocation, invocation);
+    assert_eq!(
+        listed.sessions,
+        vec![with_status(session.clone(), SessionStatus::Alive)],
+        "a session that has never been touched must list Alive once ListSessions computes \
+         the real answer from tmux — even though the create-time reply itself said Unknown"
+    );
+    assert_eq!(listed.sessions[0].invocation, invocation);
 }
 
 /// Attaching to a session id the supervisor does not know must fail with
@@ -1908,6 +2142,7 @@ async fn attach_to_unknown_session_errors_and_connection_survives() {
             .list_sessions()
             .await
             .expect("connection must survive a refused attach")
+            .sessions
             .is_empty()
     );
 }
@@ -1959,7 +2194,15 @@ async fn cutover_failure_is_request_local() {
         .list_sessions()
         .await
         .expect("connection survives cutover failure");
-    assert_eq!(listed, vec![session]);
+    assert_eq!(
+        listed.sessions,
+        vec![with_status(
+            session,
+            SessionStatus::Exited { exit_code: None }
+        )],
+        "the stored tmux_name no longer resolves to a live pane, so this must list as \
+         exited rather than fabricating liveness — the same honesty rule as the restart gap"
+    );
 }
 
 /// Two supervisors must never own one state dir: the second `serve()`
@@ -2161,7 +2404,7 @@ async fn create_with_degenerate_size_clamps_to_1x1() {
 
     // And the session is real, not just accepted: it must be listed.
     let listed = h.client.list_sessions().await.expect("list");
-    assert!(listed.iter().any(|s| s.id == session.id));
+    assert!(listed.sessions.iter().any(|s| s.id == session.id));
 }
 
 /// Extract every two-hex-digit token from `hexecho`'s output, discarding
@@ -2274,9 +2517,10 @@ async fn persisted_sessions_survive_a_supervisor_restart() {
 
     let listed = client2.list_sessions().await.expect("list after restart");
     assert_eq!(
-        listed,
-        vec![session.clone()],
-        "session metadata must round-trip identically from SQLite"
+        listed.sessions,
+        vec![with_status(session.clone(), SessionStatus::Alive)],
+        "session metadata must round-trip identically from SQLite, and a session whose \
+         tmux server survived the restart must still list Alive"
     );
 
     let (chan, mut rx) = client2
@@ -2322,10 +2566,15 @@ async fn restart_gap_lists_sessions_without_a_terminal_and_attach_fails() {
         .await
         .expect("list after restart gap");
     assert_eq!(
-        listed,
-        vec![session.clone()],
-        "a session must stay listed even once its tmux server is gone — \
-         vanishing is exactly what this PR exists to prevent"
+        listed.sessions,
+        vec![with_status(
+            session.clone(),
+            SessionStatus::Exited { exit_code: None }
+        )],
+        "a session must stay listed even once its tmux server is gone — vanishing is \
+         exactly what this PR exists to prevent — and the restart-gap entry (no terminal \
+         at all) must list as exited with no exit code to fabricate, PLAN_M2.md's \
+         restart-gap status contract"
     );
 
     let err = client2
@@ -2342,6 +2591,169 @@ async fn restart_gap_lists_sessions_without_a_terminal_and_attach_fails() {
             .kind,
         ErrorKind::NotFound,
         "a vanished terminal is a not-found, not a bad request or server fault"
+    );
+}
+
+/// A dead private tmux server must not take the whole session list down —
+/// `TmuxDriver::pane_states`'s "no server running" tolerance, exercised
+/// against a STILL-LIVE supervisor (no reconstruction, no restart-gap
+/// reload, unlike the sibling `restart_gap_*` test above). `session` here
+/// is tracked with a live `terminal: Some(..)` in this process's own map,
+/// so this is exactly the case real-stack dogfooding found: the private
+/// tmux server dying (crash, OOM, an operator killing it) while the
+/// supervisor keeps running.
+///
+/// This PINS THE OPPOSITE of what this test asserted before this change:
+/// an earlier version required `list_sessions` to fail here, reasoning
+/// that reporting every tracked session `Exited` off a "fabricated" empty
+/// pane-states map would be indistinguishable from an honestly observed
+/// mass exit. That conflated two different things. An empty pane-states
+/// MAP is not an empty session LISTING — `pane_states`'s return value
+/// plays no part in WHICH rows `ListSessions` selects for its reply (the
+/// session cap and byte budget decide that, independent of tmux
+/// entirely); the map only ever feeds `session_status`'s per-entry
+/// liveness lookup for whichever rows that selection already kept. And
+/// `"no server running"` is not a guess: it is tmux's own DEFINITIVE
+/// statement that no pane exists anywhere on this socket, so reporting
+/// every terminal-bearing entry as gone is accurate reporting, not
+/// fabrication — the same honest `Exited { exit_code: None }` a
+/// restart-gap row already gets. The old behavior instead turned a dead
+/// tmux server into a hard `ListSessions` failure: every session
+/// unreachable THROUGH THE UI (which has no session ids left to act on,
+/// including for delete, once the list that would supply them fails to
+/// load) even though every one of them was intact in SQLite and
+/// `DeleteSession`'s own handler was never itself refused. `TmuxDriver::
+/// pane_states`'s own docs carry the full version of this reasoning.
+///
+/// The connection must also stay usable afterward: proven here by a
+/// SECOND, genuinely different request (creating a fresh session)
+/// succeeding right after the first request observed the dead server — a
+/// repeat of the identical `list_sessions` call would only prove that one
+/// request shape still works, not that the connection generally still
+/// serves.
+///
+/// This does NOT attempt to restart or resurrect the vanished tmux server
+/// — recovery is M3 (PLAN.md). Until then the session simply reports
+/// `Exited`: a plain supervisor restart would reload its row
+/// terminal-less (the ordinary restart-gap case), still `Exited`, not
+/// "recovered" — there is no plain-restart path back to `Alive` for a
+/// session whose tmux is actually gone.
+#[tokio::test]
+async fn list_sessions_survives_when_the_tmux_server_is_gone() {
+    let h = harness().await;
+    let (session, work) = basic_session(&h).await;
+
+    let sock = h.state.path().join("tmux.sock");
+    kill_tmux_server_and_wait(&sock).await;
+
+    let expected = vec![with_status(
+        session,
+        SessionStatus::Exited { exit_code: None },
+    )];
+    let listed = h
+        .client
+        .list_sessions()
+        .await
+        .expect("list_sessions must succeed even once the private tmux server is gone");
+    assert_eq!(
+        listed.sessions, expected,
+        "a session tracked with a live terminal must still be listed — never dropped — and \
+         must report the same honest 'terminal gone' status a restart-gap row gets, since a \
+         vanished tmux server makes that a definitive fact rather than a guess"
+    );
+
+    h.client
+        .create_session(
+            &work.path().to_string_lossy(),
+            &agent_cmd("internal fake-agent --script basic"),
+            None,
+            80,
+            24,
+        )
+        .await
+        .expect(
+            "the connection must stay usable for an unrelated request after one ListSessions \
+             observed the dead tmux server",
+        );
+}
+
+// No sibling test provokes a NON-"no server running" `pane_states`
+// failure at this end-to-end layer: every other tmux failure this
+// module's own tolerance list (and the one above it) does not cover
+// would need something this harness has no honest way to arrange — a
+// malformed or corrupted tmux invocation, a permissions failure on the
+// socket, a tmux binary that emits an unrecognized diagnostic — without
+// resorting to fault injection this test suite does not otherwise use
+// (mocking or wrapping the tmux binary itself). Rather than invent a fake
+// seam for it, that classification is pinned at the unit level instead:
+// see `farhelm-supervisor`'s `tmux.rs`,
+// `is_tolerated_list_panes_diagnostic_pins_all_three_tolerated_cases`
+// (plus its path-embedding sibling), which exercise every diagnostic
+// outcome directly against constructed stderr: the three tolerated ones
+// (a running-but-empty server, an absent server, and a server caught
+// mid-teardown) and the unclassified failure that must still propagate.
+
+/// `session_status`'s pane-identity contract (`service.rs`): pane ids
+/// reset to `%0` on a FRESH tmux server (verified empirically — killing
+/// the server and creating a new session hands its first pane `%0`
+/// again), so a stale, never-reloaded `SessionEntry` whose OLD pane
+/// happened to be `%0` must not silently inherit a brand-new, unrelated
+/// session's liveness just because the two share that recycled number.
+///
+/// Deliberately NOT the restart-gap case (the `restart_gap_*` tests):
+/// the whole tmux server is killed and a SECOND session created on this
+/// SAME live process, without ever reconstructing the `Supervisor`
+/// (which would instead reload `terminal: None` for the dead row via
+/// `has_session`). `old_session` is the very first session this harness
+/// creates, so its pane is genuinely `%0`; killing the server and
+/// creating `new_session` right after gives it the exact same number on
+/// the freshly auto-started replacement server. Matching pane id alone
+/// would let `old_session` read as `Alive` off of `new_session`'s real
+/// liveness; `session_status`'s `session_name` cross-check
+/// (`TmuxDriver::pane_states`'s `#{session_name}` field) is what tells
+/// these two same-numbered panes apart.
+#[tokio::test]
+async fn stale_pane_id_after_server_restart_does_not_inherit_a_new_sessions_status() {
+    let h = harness().await;
+    let (old_session, _work1) = basic_session(&h).await;
+    let sock = h.state.path().join("tmux.sock");
+    let old_pane_id = pane_id_of(&sock, &format!("fh-{}", old_session.id)).await;
+
+    kill_tmux_server_and_wait(&sock).await;
+
+    // A brand-new session on the SAME live supervisor: tmux auto-starts a
+    // fresh server for the socket (no `-N` flag anywhere in this
+    // module — see `TmuxDriver::command`), whose pane-id counter starts
+    // back at `%0`, the same number `old_session`'s terminal remembers.
+    let (new_session, _work2) = basic_session(&h).await;
+    let new_pane_id = pane_id_of(&sock, &format!("fh-{}", new_session.id)).await;
+    assert_eq!(
+        old_pane_id, new_pane_id,
+        "test precondition: the old and new sessions must actually share the same recycled \
+         pane id, or this test is not exercising the cross-check it claims to — if tmux's \
+         pane-id-reset behavior ever changed, this assertion is what would catch it rather \
+         than the test silently passing for an unrelated reason"
+    );
+
+    let listed = h.client.list_sessions().await.expect("list");
+    let find = |id: &str| {
+        listed
+            .sessions
+            .iter()
+            .find(|s| s.id == id)
+            .cloned()
+            .unwrap_or_else(|| panic!("session {id} missing from the list"))
+    };
+    assert_eq!(
+        find(&old_session.id).status,
+        SessionStatus::Exited { exit_code: None },
+        "the old session's tmux is really gone; it must not inherit the new session's \
+         liveness just because both happen to reuse pane %0"
+    );
+    assert_eq!(
+        find(&new_session.id).status,
+        SessionStatus::Alive,
+        "the new session's own pane really is alive"
     );
 }
 
@@ -2383,12 +2795,19 @@ async fn restart_gap_is_decided_per_session() {
         .list_sessions()
         .await
         .expect("list after a partial restart gap");
-    listed.sort_by(|a, b| a.id.cmp(&b.id));
-    let mut expected = vec![alive_session.clone(), dead_session.clone()];
+    listed.sessions.sort_by(|a, b| a.id.cmp(&b.id));
+    let mut expected = vec![
+        with_status(alive_session.clone(), SessionStatus::Alive),
+        with_status(
+            dead_session.clone(),
+            SessionStatus::Exited { exit_code: None },
+        ),
+    ];
     expected.sort_by(|a, b| a.id.cmp(&b.id));
     assert_eq!(
-        listed, expected,
-        "both sessions must remain listed regardless of which one's terminal died"
+        listed.sessions, expected,
+        "both sessions must remain listed regardless of which one's terminal died, and \
+         only the one whose tmux session actually died must list as exited"
     );
 
     let (chan, mut rx) = client2
@@ -2638,11 +3057,24 @@ async fn stop_kills_the_whole_process_tree() {
     wait_until_pid_gone(child_pid, 15).await;
     wait_until_pid_gone(grandchild_pid, 15).await;
 
-    let listed = h.client.list_sessions().await.expect("list after stop");
-    assert_eq!(
-        listed,
-        vec![session.clone()],
-        "a stopped session must remain listed"
+    // Status is computed fresh from tmux at list time, not pushed, so the
+    // pane's `pane_dead` flag flipping and this list call race each
+    // other — this polls for the EVENTUAL exited classification rather
+    // than asserting on a single read that might land before the flip.
+    // What is under test is only that the session ends up classified
+    // `Exited`, not which exact code it carries: PLAN_M2.md's status test
+    // list, item (e), says "assert exited, don't over-pin the code" —
+    // a SIGKILL death's `pane_dead_status` is not pinned to one value
+    // across tmux versions, so the code is deliberately left unasserted.
+    let found = wait_for_non_alive_status(&h.client, &session.id, 15).await;
+    assert_eq!(found.id, session.id);
+    assert_eq!(found.title, session.title);
+    assert_eq!(found.cwd, session.cwd);
+    assert_eq!(found.invocation, session.invocation);
+    assert!(
+        matches!(found.status, SessionStatus::Exited { .. }),
+        "a stopped session must list as exited, got {:?}",
+        found.status
     );
 
     // A fresh Supervisor on the same state dir is what actually proves
@@ -2653,13 +3085,20 @@ async fn stop_kills_the_whole_process_tree() {
         .await
         .expect("second supervisor construction on the same state dir");
     let client2 = connect_client(&sup2).await;
+    let listed2 = client2
+        .list_sessions()
+        .await
+        .expect("list from fresh supervisor");
     assert_eq!(
-        client2
-            .list_sessions()
-            .await
-            .expect("list from fresh supervisor"),
-        vec![session.clone()],
+        listed2.sessions.len(),
+        1,
         "a stopped session's row must survive a supervisor restart"
+    );
+    assert_eq!(listed2.sessions[0].id, session.id);
+    assert!(
+        matches!(listed2.sessions[0].status, SessionStatus::Exited { .. }),
+        "the row's session is still dead after the restart too, got {:?}",
+        listed2.sessions[0].status
     );
 
     h.client.detach(chan).await;
@@ -2711,6 +3150,75 @@ async fn stop_kills_a_child_that_ignores_sigterm() {
 
     wait_until_pid_gone(self_pid, 15).await;
     wait_until_pid_gone(child_pid, 15).await;
+}
+
+/// The whole point of spawning `ListSessions`/`StopSession`/
+/// `DeleteSession` (`service.rs`'s `handle_control`, per those arms' own
+/// comments): a slow one in flight must not stall a cheap, unrelated
+/// request on the SAME connection behind it. `stop_session` against a
+/// `spawner` session is the slow one here — `kill_process_tree`'s grace
+/// period alone is half a second, before quiesce and kill-confirmation
+/// even start — and an unknown-session `attach` is about as cheap as a
+/// request gets: one lock-guarded map lookup, no tmux call at all.
+///
+/// Reverting the handlers to plain inline `await`s would fail this: the
+/// connection's single serial read loop would not even read the attach
+/// request's frame off the wire until the stop request ahead of it had
+/// been handled to completion, let alone reply to it first.
+#[tokio::test]
+async fn cheap_request_completes_before_a_slow_spawned_handler_in_flight() {
+    let h = harness().await;
+    let work = tempfile::tempdir().unwrap();
+    let session = h
+        .client
+        .create_session(
+            &work.path().to_string_lossy(),
+            &agent_cmd("internal fake-agent --script spawner"),
+            None,
+            80,
+            24,
+        )
+        .await
+        .expect("create");
+    let (_chan, mut rx) = h.client.attach(&session.id, 80, 24).await.expect("attach");
+    let mut seen = Vec::new();
+    wait_for(&mut rx, &mut seen, "FAKE-AGENT READY", 20).await;
+
+    // Kick off the slow stop without awaiting it yet.
+    let stop_client = Arc::clone(&h.client);
+    let stop_session_id = session.id.clone();
+    let stop_done = Arc::new(AtomicBool::new(false));
+    let stop_done_writer = Arc::clone(&stop_done);
+    let stop_task = tokio::spawn(async move {
+        stop_client
+            .stop_session(&stop_session_id)
+            .await
+            .expect("stop");
+        stop_done_writer.store(true, Ordering::SeqCst);
+    });
+
+    // Give the stop request time to actually be dispatched and its kill
+    // sweep started (well inside its 500ms grace period) before firing
+    // the cheap request — otherwise this could race the connection's own
+    // read loop picking up the stop frame at all, rather than exercising
+    // the "already in flight" scenario this test is about.
+    tokio::time::sleep(Duration::from_millis(50)).await;
+    assert!(
+        !stop_done.load(Ordering::SeqCst),
+        "test setup: the slow stop must still be in flight at this point"
+    );
+
+    let cheap_result = h.client.attach("definitely-not-a-session", 80, 24).await;
+    assert!(
+        cheap_result.is_err(),
+        "an unknown-session attach must still fail fast"
+    );
+    assert!(
+        !stop_done.load(Ordering::SeqCst),
+        "the cheap request must complete WHILE the slow stop is still in flight"
+    );
+
+    stop_task.await.expect("stop task panicked");
 }
 
 /// Stop must be idempotent both in the ordinary sense (calling it twice on
@@ -2801,7 +3309,7 @@ async fn delete_removes_session_terminal_and_row() {
     h.client.delete_session(&session.id).await.expect("delete");
 
     assert!(
-        h.client.list_sessions().await.unwrap().is_empty(),
+        h.client.list_sessions().await.unwrap().sessions.is_empty(),
         "a deleted session must not stay listed"
     );
 
@@ -2817,7 +3325,7 @@ async fn delete_removes_session_terminal_and_row() {
         .expect("second supervisor construction on the same state dir");
     let client2 = connect_client(&sup2).await;
     assert!(
-        client2.list_sessions().await.unwrap().is_empty(),
+        client2.list_sessions().await.unwrap().sessions.is_empty(),
         "the row must really be gone, not just absent from the original process's map"
     );
 }
@@ -2878,7 +3386,7 @@ async fn delete_works_on_a_terminal_less_session() {
         .await
         .expect("delete on a terminal-less session must succeed");
     assert!(
-        client2.list_sessions().await.unwrap().is_empty(),
+        client2.list_sessions().await.unwrap().sessions.is_empty(),
         "a deleted session must not stay listed"
     );
 }
@@ -2991,7 +3499,7 @@ async fn stop_then_delete_both_succeed() {
         .await
         .expect("delete after stop must succeed");
     assert!(
-        h.client.list_sessions().await.unwrap().is_empty(),
+        h.client.list_sessions().await.unwrap().sessions.is_empty(),
         "a deleted session must not stay listed"
     );
 }
@@ -3820,8 +4328,15 @@ async fn delete_fails_closed_when_the_alt_screen_snapshot_cannot_be_removed() {
         client2
             .list_sessions()
             .await
-            .expect("list from fresh supervisor"),
-        vec![session.clone()],
+            .expect("list from fresh supervisor")
+            .sessions,
+        // The failed delete already tore the tmux session down before the
+        // snapshot removal refused, so the surviving row lists as exited
+        // with no code — the same honest answer as any restart-gap row.
+        vec![with_status(
+            session.clone(),
+            SessionStatus::Exited { exit_code: None }
+        )],
         "a failed delete must leave the row in place for a retry"
     );
 }
@@ -3914,7 +4429,7 @@ async fn delete_after_externally_killed_tmux_session_succeeds() {
         .await
         .expect("delete must tolerate an externally killed tmux session");
     assert!(
-        h.client.list_sessions().await.unwrap().is_empty(),
+        h.client.list_sessions().await.unwrap().sessions.is_empty(),
         "a deleted session must not stay listed"
     );
 }
@@ -3963,9 +4478,17 @@ async fn delete_after_renamed_tmux_session_fails_closed() {
         "a teardown failure is a server-side sweep problem, not a caller precondition"
     );
     assert_eq!(
-        h.client.list_sessions().await.unwrap(),
-        vec![session.clone()],
-        "a failed delete must leave the row and map entry in place for a retry"
+        h.client.list_sessions().await.unwrap().sessions,
+        vec![with_status(
+            session.clone(),
+            SessionStatus::Exited { exit_code: None }
+        )],
+        "a failed delete must leave the row and map entry in place for a retry; \
+         session_status requires BOTH the remembered pane id AND the remembered tmux \
+         session name to match what tmux currently reports (see that function's own docs) \
+         — the rename changes the session name tmux reports for this pane, so the identity \
+         can no longer be positively confirmed, and the honest answer is Exited, not a \
+         guess either way"
     );
 }
 
@@ -4252,12 +4775,32 @@ async fn delete_fails_closed_when_a_launch_artifact_cannot_be_removed() {
         .await
         .expect("second supervisor construction on the same state dir");
     let client2 = connect_client(&sup2).await;
+    // Delete's process-tree sweep ran to completion (it happens before
+    // the artifact removal that actually failed — see the handler's
+    // ordering), so the agent is already dead by the time the row is
+    // still-listed here — but it must be a genuinely EXITED row, not
+    // `Alive`, even though the delete itself failed closed. Status is
+    // computed fresh from tmux at list time, so this polls rather than a
+    // single read (same reasoning as `wait_for_non_alive_status`'s docs).
+    let found = wait_for_non_alive_status(&client2, &session.id, 15).await;
+    assert_eq!(found.id, session.id);
+    assert_eq!(found.title, session.title);
+    assert_eq!(found.cwd, session.cwd);
+    assert_eq!(found.invocation, session.invocation);
+    assert!(
+        matches!(found.status, SessionStatus::Exited { .. }),
+        "a delete that already killed the process tree before failing closed must still \
+         list the row as exited, not Alive, got {:?}",
+        found.status
+    );
     assert_eq!(
         client2
             .list_sessions()
             .await
-            .expect("list from fresh supervisor"),
-        vec![session.clone()],
+            .expect("list from fresh supervisor")
+            .sessions
+            .len(),
+        1,
         "a failed delete must leave the row in place for a retry, provable only through a \
          SEPARATE supervisor construction, not this process's own map"
     );
@@ -4352,7 +4895,7 @@ async fn attach_during_delete_race_ends_in_a_consistent_state() {
         .expect("delete task panicked")
         .expect("delete must succeed");
     assert!(
-        h.client.list_sessions().await.unwrap().is_empty(),
+        h.client.list_sessions().await.unwrap().sessions.is_empty(),
         "the session must be gone once the race settles"
     );
 }
