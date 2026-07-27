@@ -93,6 +93,127 @@ pub async fn write_private_file(path: &std::path::Path, bytes: &[u8]) -> std::io
     }
 }
 
+/// Write a file readable by the owner alone, atomically replacing any
+/// prior content at the same path — the sibling of [`write_private_file`]
+/// for callers wanting a STABLE, repeatedly-rewritten path (keyed by
+/// something like a session id, whose contents get replaced on each
+/// write) rather than a fresh, write-once one.
+///
+/// Used for the alt-screen stop snapshot
+/// (`crates/farhelm-supervisor/src/service.rs`'s `StopSession` handler):
+/// the path is keyed by the session id, and a later stop overwriting an
+/// earlier stop's snapshot at that SAME path is the whole point — only
+/// the most recent screen before a kill is worth keeping. (Both this
+/// file's path and [`write_private_file`]'s launch-spec paths happen to
+/// be named after the same session id, a UUID generated at session
+/// creation; the difference between the two functions is REPLACE-vs-
+/// REFUSE-on-collision, not the naming scheme.)
+///
+/// Implemented as write-to-a-fresh-temp-file-then-`rename`, in the SAME
+/// directory as `path` (so the rename is same-filesystem and therefore
+/// atomic), rather than open-with-`truncate` in place. That fixes three
+/// holes a truncate-in-place leaves open:
+/// - a PRE-EXISTING file at `path` created with a wider mode (by
+///   something else, or by an earlier bug) would keep that wider mode
+///   forever — `OpenOptions::mode` only applies at CREATE time, never
+///   when an existing file is merely opened for writing — whereas the
+///   fresh temp file is always created 0600 from scratch, and `rename`
+///   replaces `path` outright rather than reusing its inode;
+/// - a reader (an `Attach` racing this write) could otherwise observe a
+///   PARTIALLY-written, torn snapshot mid-truncate; impossible here,
+///   because `rename` swaps the whole file atomically, so a concurrent
+///   reader always sees either the complete old content or the complete
+///   new content, never a mix;
+/// - a symlink an attacker planted at a predictable, session-id-derived
+///   `path` would make a truncate-in-place follow it and clobber
+///   whatever it points to; `rename` instead REPLACES whatever `path`
+///   names, symlink or not, without ever opening through it.
+///
+/// The temp file's name carries a fresh UUID suffix (`create_new` makes
+/// a collision a hard error rather than a silent overwrite of some other
+/// writer's in-flight temp file) purely so concurrent callers targeting
+/// the same destination can never collide on their staging file. Any
+/// failure before OR during the rename removes the temp file, so a
+/// failed write never leaves debris behind on its own — see
+/// [`remove_temp_after_failure`] for what happens when that cleanup
+/// ITSELF fails, and [`crate::service::sweep_snapshot_temp_files`] for
+/// the startup-time backstop covering a crash that skips this cleanup
+/// entirely.
+pub async fn overwrite_private_file(path: &std::path::Path, bytes: &[u8]) -> std::io::Result<()> {
+    use tokio::io::AsyncWriteExt;
+    let dir = path.parent().ok_or_else(|| {
+        std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            format!(
+                "{} has no parent directory to stage a temp file in",
+                path.display()
+            ),
+        )
+    })?;
+    let temp_name = format!(
+        ".{}.tmp-{}",
+        path.file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or("overwrite"),
+        uuid::Uuid::new_v4()
+    );
+    let temp_path = dir.join(temp_name);
+
+    let mut opts = tokio::fs::OpenOptions::new();
+    opts.write(true).create_new(true).mode(0o600);
+    let write_result: std::io::Result<()> = async {
+        let mut file = opts.open(&temp_path).await?;
+        file.write_all(bytes).await?;
+        // tokio's File buffers internally and its Drop does NOT flush —
+        // without this the temp file could be renamed into place empty.
+        file.flush().await
+    }
+    .await;
+    if let Err(e) = write_result {
+        return Err(remove_temp_after_failure(&temp_path, e).await);
+    }
+
+    // The rename can ALSO fail (destination is a directory, a permission
+    // problem, cross-device if `dir` and `path` ever diverge) — a failure
+    // here is just as much "the temp file is now debris" as a write
+    // failure, so it gets the identical cleanup treatment rather than
+    // leaving the staged file behind under the mistaken assumption that
+    // only the write step can go wrong.
+    if let Err(e) = tokio::fs::rename(&temp_path, path).await {
+        return Err(remove_temp_after_failure(&temp_path, e).await);
+    }
+    Ok(())
+}
+
+/// Remove a staged temp file after its OWN write or rename already
+/// failed, folding a cleanup failure into the RETURNED error rather than
+/// silently discarding it.
+///
+/// A `remove_file` that itself fails here (permissions, a concurrent
+/// removal racing this one) means the temp file may still be sitting on
+/// disk — exactly the debris this whole function exists to prevent — so
+/// the caller needs to learn that too, not just the original write/rename
+/// failure. `original`'s `kind()` is preserved on the combined error
+/// (rather than the cleanup error's own kind) because the write/rename
+/// failure is the causally primary one; the cleanup failure is
+/// context layered on top, mirroring how [`write_private_file`] already
+/// handles its own analogous partial-file cleanup.
+async fn remove_temp_after_failure(
+    temp_path: &std::path::Path,
+    original: std::io::Error,
+) -> std::io::Error {
+    match tokio::fs::remove_file(temp_path).await {
+        Ok(()) => original,
+        Err(cleanup_error) => std::io::Error::new(
+            original.kind(),
+            format!(
+                "{original}; could not remove staged temp file {}: {cleanup_error}",
+                temp_path.display()
+            ),
+        ),
+    }
+}
+
 /// Default state directory: `~/.local/state/farhelm` (SPEC_impl.md's
 /// layout), honoring `XDG_STATE_HOME` when set. Everything the supervisor
 /// persists — tmux socket, launch specs, its own unix socket — lives
@@ -173,6 +294,150 @@ mod tests {
             .await
             .expect_err("existing file must not be overwritten");
         assert_eq!(std::fs::read(&path).unwrap(), b"secret");
+    }
+
+    /// The rename-based replace must leave EXACTLY the new content behind
+    /// — no trailing bytes from a longer previous write. A truncate-based
+    /// implementation would pass this too, but a naive "seek to 0 and
+    /// write" one would not: this is the regression the atomic rewrite
+    /// (temp file + rename) is pinned against, longer-then-shorter being
+    /// the direction that actually exposes a missing truncate.
+    #[tokio::test]
+    async fn overwrite_private_file_replaces_longer_content_with_shorter_exactly() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("snapshot");
+
+        super::overwrite_private_file(&path, b"a much longer first payload")
+            .await
+            .unwrap();
+        super::overwrite_private_file(&path, b"short")
+            .await
+            .unwrap();
+
+        assert_eq!(
+            std::fs::read(&path).unwrap(),
+            b"short",
+            "the replaced file must contain exactly the new content, not the old content \
+             truncated-and-overwritten with leftover trailing bytes"
+        );
+    }
+
+    /// The written file must be 0600 regardless of how many times the
+    /// path has already been written — pins that the temp-file-then-
+    /// rename replacement always creates its staging file fresh (mode set
+    /// at CREATE time) rather than ever reopening the destination in
+    /// place, where an existing file's mode would otherwise be whatever
+    /// it already was.
+    #[tokio::test]
+    async fn overwrite_private_file_is_0600_on_repeat_writes() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("snapshot");
+
+        super::overwrite_private_file(&path, b"first")
+            .await
+            .unwrap();
+        super::overwrite_private_file(&path, b"second")
+            .await
+            .unwrap();
+
+        let mode = std::fs::metadata(&path).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode, 0o600, "overwritten file must be 0600, got {mode:o}");
+    }
+
+    /// A file that predates this code (or was created some other way)
+    /// with a too-wide mode must not keep that mode forever just because
+    /// its content happened to get replaced. This is exactly the hole a
+    /// `truncate`-in-place implementation leaves open — `OpenOptions::mode`
+    /// only applies at file CREATION, so reopening an existing file for
+    /// writing never narrows it — and exactly what the rename-based
+    /// replacement (a fresh 0600 temp file swapped in over the old one)
+    /// fixes structurally rather than by remembering to chmod.
+    #[tokio::test]
+    async fn overwrite_private_file_repairs_a_pre_existing_wide_mode() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("snapshot");
+
+        std::fs::write(&path, b"planted by something else").unwrap();
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o644)).unwrap();
+
+        super::overwrite_private_file(&path, b"replaced")
+            .await
+            .unwrap();
+
+        let mode = std::fs::metadata(&path).unwrap().permissions().mode() & 0o777;
+        assert_eq!(
+            mode, 0o600,
+            "a pre-existing wide-mode file must be replaced with a 0600 one, got {mode:o}"
+        );
+        assert_eq!(std::fs::read(&path).unwrap(), b"replaced");
+    }
+
+    /// A `rename` failure (not just a write failure) must still clean up
+    /// the staged temp file — the hole `remove_temp_after_failure` closes
+    /// on the rename path specifically. A DIRECTORY at the destination is
+    /// what reliably makes `rename` fail here: POSIX `rename(2)` refuses
+    /// to replace a directory with a non-directory regardless of
+    /// permissions, unlike a plain permission trick that might not
+    /// reliably fail for the same reason on every filesystem.
+    #[tokio::test]
+    async fn overwrite_private_file_removes_the_temp_file_when_rename_fails() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("snapshot");
+        std::fs::create_dir(&path).unwrap();
+
+        super::overwrite_private_file(&path, b"content")
+            .await
+            .expect_err("rename onto a directory must fail");
+
+        let leftover: Vec<_> = std::fs::read_dir(tmp.path())
+            .unwrap()
+            .filter_map(|entry| entry.ok())
+            .filter(|entry| entry.file_name().to_string_lossy().contains(".tmp-"))
+            .collect();
+        assert!(
+            leftover.is_empty(),
+            "a failed rename must not leave a staged temp file behind, found: {leftover:?}"
+        );
+    }
+
+    /// `path` being a SYMLINK must not make this function write through
+    /// it: `rename` replaces whatever directory entry `path` names
+    /// (symlink or not) with the temp file, rather than ever opening
+    /// `path` itself and following it — the third hole the atomic
+    /// rewrite closes (see the function's own docs). Pins both halves:
+    /// the destination ends up a plain, 0600 regular file with the new
+    /// content, and whatever the symlink used to point at is completely
+    /// untouched.
+    #[tokio::test]
+    async fn overwrite_private_file_replaces_a_symlink_without_following_it() {
+        let tmp = tempfile::tempdir().unwrap();
+        let target = tmp.path().join("target");
+        let path = tmp.path().join("snapshot");
+        std::fs::write(&target, b"target content").unwrap();
+        std::os::unix::fs::symlink(&target, &path).unwrap();
+
+        super::overwrite_private_file(&path, b"replacement")
+            .await
+            .unwrap();
+
+        assert!(
+            !std::fs::symlink_metadata(&path)
+                .unwrap()
+                .file_type()
+                .is_symlink(),
+            "the destination must become a regular file, not remain a symlink"
+        );
+        assert_eq!(std::fs::read(&path).unwrap(), b"replacement");
+        let mode = std::fs::metadata(&path).unwrap().permissions().mode() & 0o777;
+        assert_eq!(
+            mode, 0o600,
+            "the replacement file must be 0600, got {mode:o}"
+        );
+        assert_eq!(
+            std::fs::read(&target).unwrap(),
+            b"target content",
+            "the symlink's OLD target must be left completely untouched"
+        );
     }
 
     /// Helm and supervisor must never invent cwd-relative state when

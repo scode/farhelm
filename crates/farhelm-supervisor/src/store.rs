@@ -226,6 +226,27 @@ impl SessionStore {
         .context("session insert task panicked")?
     }
 
+    /// Remove a session's row, if any. Deleting an id with no matching row
+    /// is success, not an error — `DELETE` affecting zero rows is simply
+    /// what SQLite already does, not a promise this module has to keep on
+    /// SPEC.md's behalf — and the supervisor's delete handler relies on
+    /// exactly that to call this unconditionally rather than checking
+    /// existence first (a check-then-delete would just be a second query
+    /// racing nothing, since this connection is already serialized
+    /// through one mutex).
+    pub async fn delete_session(&self, id: &str) -> anyhow::Result<()> {
+        let conn = Arc::clone(&self.conn);
+        let id = id.to_string();
+        tokio::task::spawn_blocking(move || -> anyhow::Result<()> {
+            let conn = conn.lock().expect("session db mutex poisoned");
+            conn.execute("DELETE FROM sessions WHERE id = ?1", rusqlite::params![id])
+                .context("deleting session row")?;
+            Ok(())
+        })
+        .await
+        .context("session delete task panicked")?
+    }
+
     /// Load every persisted session, for `Supervisor::reload_sessions`
     /// (called both from construction and again from `serve`) to turn into
     /// `SessionEntry`s — live if tmux still knows the session, terminal-
@@ -365,6 +386,41 @@ mod tests {
             mode, 0o600,
             "database file must be repaired to owner-only, got {mode:o}"
         );
+    }
+
+    /// A deleted row must actually be gone on reload, and deleting an id
+    /// that was never inserted (or was already deleted) must succeed
+    /// rather than error — the idempotence `delete_session`'s docs promise.
+    #[tokio::test]
+    async fn delete_session_removes_the_row_and_tolerates_a_missing_one() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let db_path = dir.path().join("supervisor.db");
+        let store = SessionStore::open(&db_path).await.expect("open");
+        store
+            .insert_session(StoredSession {
+                id: "s1".to_string(),
+                title: "demo".to_string(),
+                cwd: "/tmp/work".to_string(),
+                invocation: "agent".to_string(),
+                tmux_name: "fh-abc".to_string(),
+                pane: "%0".to_string(),
+            })
+            .await
+            .expect("insert");
+
+        store.delete_session("s1").await.expect("delete");
+        assert!(
+            store.load_all().await.expect("load").is_empty(),
+            "deleted row must not survive a reload"
+        );
+
+        // Deleting again (an already-deleted row is, by now, exactly the
+        // same "no matching row" case as an id that never existed at
+        // all — one call suffices for both) must not error.
+        store
+            .delete_session("s1")
+            .await
+            .expect("deleting an already-deleted row must be idempotent");
     }
 
     /// `created_at` is written on every insert but read back by nothing in

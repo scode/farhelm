@@ -42,7 +42,8 @@ Consequences of that stance:
   launch shim, conversation capture for Claude Code and Codex, restart-with-resume. Includes the crash-safety groundwork
   the M1 review deferred here: an explicit atomicity policy for state-file writes (temp-write-then-rename with fsync
   where a torn file would matter) and a fault-injection seam so the failure windows are testable, not just reasoned
-  about.
+  about. Also the process-tree ownership hardening SPEC_impl.md describes: `systemd-run --user --scope` cgroups on Linux
+  where a user manager exists, layered over M2's /proc-walk-plus-env-marker sweep (which stays as the fallback).
 - **M4 — attachments and terminal tabs.** Paste/drop to path-at-cursor; tabs in the session cwd.
 - **M5 — status and profiles.** Running/waiting/idle heuristics with per-agent sharpening, list filtering, profile CRUD
   and starter profiles. Also live push of session-list changes to connected clients, replacing M2's polling — placed

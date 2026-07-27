@@ -372,6 +372,58 @@ async fn wait_for(
     }
 }
 
+/// Like [`wait_for`], but ordered: first wait until `first` appears, then
+/// keep reading until `then` appears strictly AFTER `first`'s position.
+///
+/// Exists for the snapshot replays whose fixture died still ON the
+/// alternate screen: whether a dead pane's capture retains the app's last
+/// frame or substitutes tmux's "Pane is dead" placeholder is
+/// version-dependent (3.4 retains it, 3.7b substitutes — observed
+/// directly on both), so the PREFILL may already contain the same marker
+/// text the snapshot suffix carries. A plain `wait_for(marker)` then
+/// returns before the divider/snapshot frames ever arrive and any
+/// assertion about them races. Anchoring the content wait after the
+/// divider's own position is version-proof: the divider exists only in
+/// the suffix.
+async fn wait_for_after(
+    rx: &mut UnboundedReceiver<TermEvent>,
+    seen: &mut Vec<u8>,
+    first: &str,
+    then: &str,
+    secs: u64,
+) {
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(secs);
+    let mut ended: Option<String> = None;
+    loop {
+        let text = String::from_utf8_lossy(seen).into_owned();
+        if let Some(idx) = text.find(first)
+            && text[idx + first.len()..].contains(then)
+        {
+            return;
+        }
+        if let Some(reason) = ended {
+            panic!(
+                "stream ended ({reason}) without {then:?} after {first:?}; transcript so far:\n\
+                 {text}"
+            );
+        }
+        let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
+        match tokio::time::timeout(remaining, rx.recv()).await {
+            Ok(Some(TermEvent::Data(bytes))) => seen.extend_from_slice(&bytes),
+            Ok(Some(TermEvent::Detached(reason))) => {
+                while let Ok(TermEvent::Data(bytes)) = rx.try_recv() {
+                    seen.extend_from_slice(&bytes);
+                }
+                ended = Some(reason);
+            }
+            Ok(None) => ended = Some("closed".to_string()),
+            Err(_) => {
+                panic!("timed out waiting for {then:?} after {first:?}; transcript so far:\n{text}")
+            }
+        }
+    }
+}
+
 /// Extract complete records from the counter fixture without decoding
 /// unrelated terminal bytes as UTF-8.
 ///
@@ -1211,6 +1263,7 @@ fn launch_shim_records_exec_failure_only_on_failure() {
         let spec = serde_json::json!({
             "argv": argv,
             "status_file": status_file.to_string_lossy(),
+            "session_id": format!("test-{name}"),
         });
         std::fs::write(&spec_path, spec.to_string()).unwrap();
         (spec_path, status_file)
@@ -2374,3 +2427,2081 @@ async fn restart_gap_is_decided_per_session() {
 // rather than improvised. The unwind logic itself — kill tmux, still
 // return the DB error — is covered by code review and the ordinary
 // create-path tests exercising the happy side of the same call.
+
+/// Pull the pid printed after `marker` (`"SELF-PID:"` or `"CHILD-PID:"`)
+/// out of a fake-agent `spawner` transcript, panicking with the whole
+/// transcript on any parse failure — a silent `0` or a wrong pid here
+/// would make the process-tree-kill tests below pass or fail for reasons
+/// unrelated to the code under test.
+fn extract_pid(transcript: &[u8], marker: &str) -> u32 {
+    let text = String::from_utf8_lossy(transcript);
+    let after = text
+        .find(marker)
+        .unwrap_or_else(|| panic!("{marker} not found in transcript:\n{text}"))
+        + marker.len();
+    let digits: String = text[after..]
+        .chars()
+        .take_while(char::is_ascii_digit)
+        .collect();
+    digits
+        .parse()
+        .unwrap_or_else(|_| panic!("could not parse a pid after {marker} in:\n{text}"))
+}
+
+/// Whether `pid` is gone in the sense that matters for a tree-kill test:
+/// no `/proc` entry at all, or a zombie (`Z`) still waiting on a parent
+/// that may never call `wait()` on it (the fake-agent `spawner` script
+/// deliberately never reaps its own child — see that script's docs).
+/// Treating a zombie as "gone" is what keeps this test from depending on
+/// exactly which ancestor ends up reaping an orphan once its own parent
+/// dies to the same tree-kill.
+fn process_is_gone(pid: u32) -> bool {
+    let Ok(content) = std::fs::read_to_string(format!("/proc/{pid}/stat")) else {
+        return true;
+    };
+    let Some(after_comm) = content.rfind(')') else {
+        return true;
+    };
+    content[after_comm + 1..]
+        .split_whitespace()
+        .next()
+        .is_none_or(|state| state == "Z")
+}
+
+/// Poll until `pid` is gone (see `process_is_gone`), failing the test if
+/// it never is. `kill_process_tree`'s SIGTERM/grace/SIGSTOP/SIGKILL
+/// sequence is not instantaneous, so this is the only honest way to
+/// observe its completion.
+async fn wait_until_pid_gone(pid: u32, secs: u64) {
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(secs);
+    loop {
+        if process_is_gone(pid) {
+            return;
+        }
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "pid {pid} was still alive after {secs}s"
+        );
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+}
+
+/// Every currently-live pid whose parent is `parent`, read directly from
+/// `/proc`. Used to discover a grandchild the fake-agent `spawner`
+/// scripts never print themselves (only `SELF-PID`/`CHILD-PID`) — `sh -c
+/// 'sleep 3600'` genuinely forks (verified empirically; see that
+/// script's docs), so the process tree these tests kill is really three
+/// levels deep, and a test that only checks the two printed pids cannot
+/// tell "killed the tree" apart from "killed everything but the leaf".
+fn children_of(parent: u32) -> Vec<u32> {
+    let mut children = Vec::new();
+    let Ok(entries) = std::fs::read_dir("/proc") else {
+        return children;
+    };
+    for entry in entries.flatten() {
+        let Some(pid) = entry
+            .file_name()
+            .to_str()
+            .and_then(|s| s.parse::<u32>().ok())
+        else {
+            continue;
+        };
+        let Ok(content) = std::fs::read_to_string(format!("/proc/{pid}/stat")) else {
+            continue;
+        };
+        let Some(after_comm) = content.rfind(')') else {
+            continue;
+        };
+        let Some(ppid) = content[after_comm + 1..]
+            .split_whitespace()
+            .nth(1)
+            .and_then(|s| s.parse::<u32>().ok())
+        else {
+            continue;
+        };
+        if ppid == parent {
+            children.push(pid);
+        }
+    }
+    children
+}
+
+/// Poll until `parent` has forked at least one child, returning its pid.
+/// `spawner`'s child process is created via `std::process::Command::spawn`
+/// (backed by `posix_spawn`), which returns once process creation has
+/// SUCCEEDED — but that says nothing about how far the new process itself
+/// has gotten. The race this closes is the child shell not yet having
+/// forked its OWN `sleep` grandchild by the time we look, not anything
+/// about when `spawn()` itself returns; this is the bounded wait for that,
+/// rather than assuming the grandchild already exists the instant
+/// `FAKE-AGENT READY` is seen.
+async fn wait_for_child(parent: u32, secs: u64) -> u32 {
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(secs);
+    loop {
+        if let Some(&pid) = children_of(parent).first() {
+            return pid;
+        }
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "pid {parent} never forked a child within {secs}s"
+        );
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+}
+
+/// Poll until `path` exists, failing the test if it never does. Used
+/// wherever a fake-agent script's own readiness cannot be observed
+/// through the terminal (its child's stdio is disconnected — see
+/// `spawner-stubborn`'s docs) and instead signals by creating a file in
+/// the session's working directory.
+async fn wait_for_file(path: &std::path::Path, secs: u64) {
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(secs);
+    loop {
+        if path.exists() {
+            return;
+        }
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "{} never appeared within {secs}s",
+            path.display()
+        );
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+}
+
+/// Poll `path` until it contains a parseable pid, returning it. Used to
+/// read the reparenting daemon's own self-reported pid out of
+/// `reparented.pid` — see `spawner-reparent`'s docs for why a file is the
+/// only way to learn it at all.
+async fn wait_for_pid_file(path: &std::path::Path, secs: u64) -> u32 {
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(secs);
+    loop {
+        if let Ok(contents) = std::fs::read_to_string(path)
+            && let Ok(pid) = contents.trim().parse::<u32>()
+        {
+            return pid;
+        }
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "{} never contained a parseable pid within {secs}s",
+            path.display()
+        );
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+}
+
+/// The acceptance test for process-tree stop (PLAN_M2.md step 4 / M2
+/// acceptance criterion 2): stopping a session must kill not just the
+/// agent but every descendant it spawned, three levels deep — the
+/// spawner process itself, the `sh` it forks, and the `sleep` `sh` forks
+/// in turn. The `spawner` fixture exists exactly for this — a plain
+/// script has nothing whose death would prove tree-kill rather than
+/// single-process kill.
+///
+/// Also covers stop's other headline properties in the same run: the
+/// session stays listed (both through this process's own client AND a
+/// FRESH `Supervisor` on the same state dir, which is what actually
+/// proves the DB row survived rather than merely this process's
+/// in-memory map), and a fresh attach still works and replays the
+/// pre-stop scrollback — stop leaves the terminal viewable, it does not
+/// tear anything down.
+#[tokio::test]
+async fn stop_kills_the_whole_process_tree() {
+    let h = harness().await;
+    let work = tempfile::tempdir().unwrap();
+    let session = h
+        .client
+        .create_session(
+            &work.path().to_string_lossy(),
+            &agent_cmd("internal fake-agent --script spawner"),
+            None,
+            80,
+            24,
+        )
+        .await
+        .expect("create");
+
+    let (chan, mut rx) = h.client.attach(&session.id, 80, 24).await.expect("attach");
+    let mut seen = Vec::new();
+    wait_for(&mut rx, &mut seen, "FAKE-AGENT READY", 20).await;
+    let self_pid = extract_pid(&seen, "SELF-PID:");
+    let child_pid = extract_pid(&seen, "CHILD-PID:");
+    assert_ne!(
+        self_pid, child_pid,
+        "test fixture must report two distinct pids"
+    );
+    let grandchild_pid = wait_for_child(child_pid, 10).await;
+
+    h.client.stop_session(&session.id).await.expect("stop");
+
+    wait_until_pid_gone(self_pid, 15).await;
+    wait_until_pid_gone(child_pid, 15).await;
+    wait_until_pid_gone(grandchild_pid, 15).await;
+
+    let listed = h.client.list_sessions().await.expect("list after stop");
+    assert_eq!(
+        listed,
+        vec![session.clone()],
+        "a stopped session must remain listed"
+    );
+
+    // A fresh Supervisor on the same state dir is what actually proves
+    // the row survived in SQLite, not just this process's own map — the
+    // same reasoning `persisted_sessions_survive_a_supervisor_restart`
+    // applies to create.
+    let sup2 = Supervisor::new_with_exe(h.state.path(), farhelm_bin().into())
+        .await
+        .expect("second supervisor construction on the same state dir");
+    let client2 = connect_client(&sup2).await;
+    assert_eq!(
+        client2
+            .list_sessions()
+            .await
+            .expect("list from fresh supervisor"),
+        vec![session.clone()],
+        "a stopped session's row must survive a supervisor restart"
+    );
+
+    h.client.detach(chan).await;
+    let (_chan2, mut rx2) = h
+        .client
+        .attach(&session.id, 80, 24)
+        .await
+        .expect("a stopped session's terminal must still be attachable");
+    let mut replay = Vec::new();
+    wait_for(&mut rx2, &mut replay, "SELF-PID", 15).await;
+}
+
+/// The SIGKILL half of `kill_process_tree`'s sequence: a child that traps
+/// and discards SIGTERM must still die, because the sweep escalates to
+/// SIGSTOP-quiesce and then SIGKILL rather than giving up once SIGTERM
+/// alone fails. The `spawner-stubborn` fixture's child would survive
+/// forever under a SIGTERM-only kill, so its death here is what pins the
+/// escalation actually runs, not just that SIGTERM is sent.
+///
+/// Waits for `stubborn-ready` (written by the child itself, AFTER
+/// installing the trap) before stopping — without that wait, a stop
+/// racing the child's own startup could catch it before `trap ''` has
+/// run, and SIGTERM would kill it the ordinary way, silently defeating
+/// the point of this test.
+#[tokio::test]
+async fn stop_kills_a_child_that_ignores_sigterm() {
+    let h = harness().await;
+    let work = tempfile::tempdir().unwrap();
+    let session = h
+        .client
+        .create_session(
+            &work.path().to_string_lossy(),
+            &agent_cmd("internal fake-agent --script spawner-stubborn"),
+            None,
+            80,
+            24,
+        )
+        .await
+        .expect("create");
+
+    let (_chan, mut rx) = h.client.attach(&session.id, 80, 24).await.expect("attach");
+    let mut seen = Vec::new();
+    wait_for(&mut rx, &mut seen, "FAKE-AGENT READY", 20).await;
+    let self_pid = extract_pid(&seen, "SELF-PID:");
+    let child_pid = extract_pid(&seen, "CHILD-PID:");
+    wait_for_file(&work.path().join("stubborn-ready"), 10).await;
+
+    h.client.stop_session(&session.id).await.expect("stop");
+
+    wait_until_pid_gone(self_pid, 15).await;
+    wait_until_pid_gone(child_pid, 15).await;
+}
+
+/// Stop must be idempotent both in the ordinary sense (calling it twice on
+/// a live session) and across the restart gap (a session whose terminal
+/// never came back has nothing running, so "make sure nothing is running"
+/// already holds).
+#[tokio::test]
+async fn stop_is_idempotent() {
+    let h = harness().await;
+    let (session, _work) = basic_session(&h).await;
+    h.client
+        .stop_session(&session.id)
+        .await
+        .expect("first stop");
+    h.client
+        .stop_session(&session.id)
+        .await
+        .expect("second stop on an already-stopped session must also succeed");
+
+    // A restart-gap (terminal-less) session, mirroring
+    // `restart_gap_lists_sessions_without_a_terminal_and_attach_fails`.
+    let (gap_session, _work2) = basic_session(&h).await;
+    let gap_tmux_name = format!("fh-{}", gap_session.id);
+    let sock = h.state.path().join("tmux.sock");
+    let killed = tmux_query(&sock, &["kill-session", "-t", &gap_tmux_name]).await;
+    assert!(
+        killed.status.success(),
+        "test setup: kill-session must succeed, got: {}",
+        String::from_utf8_lossy(&killed.stderr)
+    );
+    let sup2 = Supervisor::new_with_exe(h.state.path(), farhelm_bin().into())
+        .await
+        .expect("second supervisor construction after one session's tmux died");
+    let client2 = connect_client(&sup2).await;
+    client2
+        .stop_session(&gap_session.id)
+        .await
+        .expect("stopping a terminal-less session must succeed: nothing can be running");
+}
+
+/// Unknown ids are the one failure mode stop and delete share, and both
+/// must report it the same way `Attach` does.
+#[tokio::test]
+async fn stop_unknown_session_is_not_found() {
+    let h = harness().await;
+    let err = h
+        .client
+        .stop_session("does-not-exist")
+        .await
+        .expect_err("stop of an unknown session must fail");
+    assert_eq!(
+        err.downcast_ref::<SupervisorError>()
+            .expect("must carry a SupervisorError")
+            .kind,
+        ErrorKind::NotFound
+    );
+}
+
+/// See `stop_unknown_session_is_not_found`.
+#[tokio::test]
+async fn delete_unknown_session_is_not_found() {
+    let h = harness().await;
+    let err = h
+        .client
+        .delete_session("does-not-exist")
+        .await
+        .expect_err("delete of an unknown session must fail");
+    assert_eq!(
+        err.downcast_ref::<SupervisorError>()
+            .expect("must carry a SupervisorError")
+            .kind,
+        ErrorKind::NotFound
+    );
+}
+
+/// Delete must remove all three of a session's traces: the in-memory
+/// entry, the tmux session backing its terminal, and the SQLite row —
+/// the last checked through a SECOND, independent `Supervisor` on the same
+/// state dir, exactly like `create_in_missing_directory_errors` does for
+/// creation, since only that proves the row is really gone rather than
+/// merely absent from this one process's map.
+#[tokio::test]
+async fn delete_removes_session_terminal_and_row() {
+    let h = harness().await;
+    let (session, _work) = basic_session(&h).await;
+    let tmux_name = format!("fh-{}", session.id);
+
+    h.client.delete_session(&session.id).await.expect("delete");
+
+    assert!(
+        h.client.list_sessions().await.unwrap().is_empty(),
+        "a deleted session must not stay listed"
+    );
+
+    let sock = h.state.path().join("tmux.sock");
+    let out = tmux_query(&sock, &["has-session", "-t", &format!("={tmux_name}")]).await;
+    assert!(
+        !out.status.success(),
+        "the tmux session backing a deleted session's terminal must be gone"
+    );
+
+    let sup2 = Supervisor::new_with_exe(h.state.path(), farhelm_bin().into())
+        .await
+        .expect("second supervisor construction on the same state dir");
+    let client2 = connect_client(&sup2).await;
+    assert!(
+        client2.list_sessions().await.unwrap().is_empty(),
+        "the row must really be gone, not just absent from the original process's map"
+    );
+}
+
+/// Deleting a session out from under an attached client must detach it
+/// with an explicit notice rather than leaving its stream hanging —
+/// mirroring how `second_attach_detaches_first` asserts a takeover's
+/// `Detached` event.
+#[tokio::test]
+async fn delete_while_attached_detaches_the_client() {
+    let h = harness().await;
+    let (session, _work) = basic_session(&h).await;
+
+    let (_chan, mut rx) = h.client.attach(&session.id, 80, 24).await.expect("attach");
+    let mut seen = Vec::new();
+    wait_for(&mut rx, &mut seen, "FAKE-AGENT READY", 20).await;
+
+    let deleter = h.second_client().await;
+    deleter
+        .delete_session(&session.id)
+        .await
+        .expect("delete from a second client");
+
+    let detached = tokio::time::timeout(Duration::from_secs(10), async {
+        while let Some(ev) = rx.recv().await {
+            if let TermEvent::Detached(reason) = ev {
+                return reason;
+            }
+        }
+        panic!("attached client's stream ended without a Detached event");
+    })
+    .await
+    .expect("timed out waiting for Detached after delete");
+    assert!(
+        detached.contains("deleted"),
+        "detach reason should say the session was deleted, got: {detached}"
+    );
+}
+
+/// Delete must work on a restart-gap (terminal-less) session too — SPEC.md
+/// promises delete "in any state" — mirroring the restart-gap setup in
+/// `restart_gap_lists_sessions_without_a_terminal_and_attach_fails`.
+#[tokio::test]
+async fn delete_works_on_a_terminal_less_session() {
+    let h = harness().await;
+    let (session, _work) = basic_session(&h).await;
+
+    let sock = h.state.path().join("tmux.sock");
+    kill_tmux_server_and_wait(&sock).await;
+
+    let sup2 = Supervisor::new_with_exe(h.state.path(), farhelm_bin().into())
+        .await
+        .expect("second supervisor construction after the tmux server died");
+    let client2 = connect_client(&sup2).await;
+
+    client2
+        .delete_session(&session.id)
+        .await
+        .expect("delete on a terminal-less session must succeed");
+    assert!(
+        client2.list_sessions().await.unwrap().is_empty(),
+        "a deleted session must not stay listed"
+    );
+}
+
+/// Delete's process-tree reaping is the same `kill_process_tree` stop
+/// uses, but exercised on its own path (delete's handler, not stop's) and
+/// down to the same three-level chain — every discovered descendant
+/// (agent, its `sh` child, that child's own `sleep`) must actually be
+/// gone once delete returns, not merely the tmux session removed around
+/// them.
+#[tokio::test]
+async fn delete_kills_the_whole_process_tree() {
+    let h = harness().await;
+    let work = tempfile::tempdir().unwrap();
+    let session = h
+        .client
+        .create_session(
+            &work.path().to_string_lossy(),
+            &agent_cmd("internal fake-agent --script spawner"),
+            None,
+            80,
+            24,
+        )
+        .await
+        .expect("create");
+
+    let (_chan, mut rx) = h.client.attach(&session.id, 80, 24).await.expect("attach");
+    let mut seen = Vec::new();
+    wait_for(&mut rx, &mut seen, "FAKE-AGENT READY", 20).await;
+    let self_pid = extract_pid(&seen, "SELF-PID:");
+    let child_pid = extract_pid(&seen, "CHILD-PID:");
+    let grandchild_pid = wait_for_child(child_pid, 10).await;
+
+    h.client.delete_session(&session.id).await.expect("delete");
+
+    wait_until_pid_gone(self_pid, 15).await;
+    wait_until_pid_gone(child_pid, 15).await;
+    wait_until_pid_gone(grandchild_pid, 15).await;
+}
+
+/// Stop must leave an existing attachment exactly as it was: no
+/// unexpected `Detached`, and the attachment stays a normal, kickable one
+/// — a second client attaching afterwards must produce the ordinary
+/// takeover notice on the first, proving stop did not itself already
+/// tear the attachment down or leave it in some half-detached state.
+#[tokio::test]
+async fn stop_does_not_disturb_the_existing_attachment() {
+    let h = harness().await;
+    let (session, _work) = basic_session(&h).await;
+
+    let (_chan1, mut rx1) = h.client.attach(&session.id, 80, 24).await.expect("attach");
+    let mut seen1 = Vec::new();
+    wait_for(&mut rx1, &mut seen1, "FAKE-AGENT READY", 20).await;
+
+    h.client.stop_session(&session.id).await.expect("stop");
+
+    // Give stop a moment, then require that nothing unexpected arrived on
+    // the existing attachment: no Detached (stop must not touch it) and
+    // no closed stream. Trailing pre-stop output racing the agent's death
+    // is fine and not itself asserted on.
+    match tokio::time::timeout(Duration::from_millis(500), rx1.recv()).await {
+        Err(_) => {}                       // nothing arrived — expected
+        Ok(Some(TermEvent::Data(_))) => {} // trailing pre-death output
+        Ok(Some(TermEvent::Detached(reason))) => {
+            panic!("stop must not detach the existing attachment: {reason}")
+        }
+        Ok(None) => panic!("attachment stream closed unexpectedly after stop"),
+    }
+
+    // The attachment must still be live and kickable: a second attach
+    // takes it over exactly like `second_attach_detaches_first`.
+    let (chan2, mut rx2) = h
+        .client
+        .attach(&session.id, 80, 24)
+        .await
+        .expect("second attach");
+    let detached = tokio::time::timeout(Duration::from_secs(10), async {
+        while let Some(ev) = rx1.recv().await {
+            if let TermEvent::Detached(reason) = ev {
+                return reason;
+            }
+        }
+        panic!("first attachment stream ended without a takeover Detached");
+    })
+    .await
+    .expect("timed out waiting for the takeover Detached");
+    assert!(
+        detached.contains("another client"),
+        "takeover reason changed unexpectedly: {detached}"
+    );
+    // The second attachment is otherwise ordinary — same session, same
+    // (now-dead) pane, still attachable.
+    let mut seen2 = Vec::new();
+    wait_for(&mut rx2, &mut seen2, "FAKE-AGENT READY", 15).await;
+    h.client.detach(chan2).await;
+}
+
+/// Stop followed by delete on the same live session must both succeed:
+/// delete's own pane query must see the (by-then-dead) pane and skip
+/// straight to tmux teardown rather than erroring on an already-stopped
+/// agent.
+#[tokio::test]
+async fn stop_then_delete_both_succeed() {
+    let h = harness().await;
+    let (session, _work) = basic_session(&h).await;
+
+    h.client.stop_session(&session.id).await.expect("stop");
+    h.client
+        .delete_session(&session.id)
+        .await
+        .expect("delete after stop must succeed");
+    assert!(
+        h.client.list_sessions().await.unwrap().is_empty(),
+        "a deleted session must not stay listed"
+    );
+}
+
+/// Stopping an alt-screen agent must not silently discard its last frame.
+///
+/// A real alt-screen agent (claude, chiefly) restores the primary screen
+/// on its way out of a SIGTERM, and tmux never records alternate-screen
+/// content in history at all — without a pre-kill snapshot, the app's
+/// final frame is unreachable forever the instant the kill lands, and a
+/// reattach shows only a blank primary screen plus tmux's "pane is dead"
+/// text. This pins the fix end to end: stop an `altscreen` fake-agent
+/// session, attach fresh, and require BOTH the app's own marker text and
+/// the "last screen before stop" divider that only the snapshot path
+/// produces — the divider alone would not prove the CONTENT survived, and
+/// the marker alone (with no divider) would not prove it came from the
+/// snapshot path rather than some other replay quirk.
+#[tokio::test]
+async fn stop_replays_the_alt_screen_snapshot() {
+    let h = harness().await;
+    let work = tempfile::tempdir().unwrap();
+    let session = h
+        .client
+        .create_session(
+            &work.path().to_string_lossy(),
+            &agent_cmd("internal fake-agent --script altscreen"),
+            None,
+            80,
+            24,
+        )
+        .await
+        .expect("create");
+
+    let (chan, mut rx) = h.client.attach(&session.id, 80, 24).await.expect("attach");
+    let mut seen = Vec::new();
+    wait_for(&mut rx, &mut seen, "ALT-SCREEN APP", 20).await;
+    h.client.detach(chan).await;
+
+    h.client.stop_session(&session.id).await.expect("stop");
+
+    let (_chan2, mut rx2) = h
+        .client
+        .attach(&session.id, 80, 24)
+        .await
+        .expect("reattach after stop");
+    let mut replay = Vec::new();
+    // The needle is the CONTENT marker, not the divider: `send_alt_screen
+    // _snapshot` (service.rs) now streams the divider and the snapshot
+    // content as separate frames (chunked, matching the ordinary prefill's
+    // own frame-per-piece shape), and `wait_for` returns the instant its
+    // needle appears in the accumulated bytes — waiting on the divider
+    // text would risk returning right after that FIRST frame, before the
+    // content frame(s) sent immediately after it have necessarily been
+    // drained yet. Waiting on content that can only ever arrive in a
+    // LATER frame guarantees every frame before it, divider included, is
+    // already in `replay` by the time this returns.
+    wait_for(&mut rx2, &mut replay, "ALT-SCREEN APP", 15).await;
+    let text = String::from_utf8_lossy(&replay);
+    let divider_at = text.find("last screen before stop");
+    assert!(
+        divider_at.is_some(),
+        "the app's content must be preceded by the snapshot divider: {text}"
+    );
+    // Pins `-e` on the underlying `capture-pane`: the fixture draws its
+    // banner in reverse video (`\x1b[7m`), and a capture taken WITHOUT
+    // escape sequences would carry the plain text with none of its
+    // styling. Without this check, a regression that dropped `-e` would
+    // still pass every other assertion here (the text marker survives
+    // either way).
+    assert!(
+        text.contains("\x1b[7m"),
+        "the snapshot must preserve the fixture's reverse-video SGR sequence, proving \
+         capture-pane ran with -e: {text:?}"
+    );
+    // Pins `sanitize_snapshot_lines` (tmux.rs): `capture-pane -e` emits no
+    // attribute reset at a line's end, so a line that ends while a
+    // background/inverse attribute is still active leaves it running —
+    // a real terminal's scroll/line-feed handling then fills every cell
+    // from there onward with that still-active background
+    // (background-color-erase), producing a highlight band the real
+    // `claude` never showed. Only the SNAPSHOT segment is asserted here;
+    // full xterm.js cell-attribute verification belongs to the
+    // Playwright suite at a later stack layer.
+    //
+    // The segment must start AFTER the divider's own trailing `\r\n`, not
+    // at the divider's own text: service.rs's divider line
+    // (`"\r\n\x1b[2m-- last screen before stop --\x1b[0m\r\n"`) already
+    // contains its own literal `\x1b[0m\r\n` — slicing from the divider's
+    // text onward would make this assertion pass on the divider's OWN
+    // bytes regardless of whether `sanitize_snapshot_lines` ever ran,
+    // which is exactly the vacuous check a from-day-one review of this
+    // test caught. Reuses `divider_at` (found once above) rather than
+    // scanning for the divider text a second time.
+    let after_divider = &text[divider_at.expect("checked above")..];
+    let (_divider_line, snapshot_segment) = after_divider
+        .split_once("\r\n")
+        .expect("the divider line itself always ends in its own \\r\\n (service.rs)");
+    assert!(
+        snapshot_segment.contains("\x1b[0m\r\n"),
+        "the snapshot segment (excluding the divider's own trailing reset) must carry an SGR \
+         reset immediately before at least one line terminator: {snapshot_segment:?}"
+    );
+}
+
+/// `-N` coverage: a styled background painted with erase-to-end-of-line
+/// (`\x1b[K`, no literal trailing space characters — see `altscreen`'s
+/// `STATUS BAR` row) must survive into the stored snapshot. Verified
+/// empirically (scratch tmux session, not through this test) that such a
+/// row captures as ~19 bytes without `-N` (trimmed right after the label)
+/// versus padded out to the full 80-column pane width with it — so a
+/// length threshold comfortably between those two shapes is what
+/// discriminates "removing -N" from "keeping it" without depending on the
+/// EXACT escape-sequence bytes tmux happens to re-serialize, which is not
+/// this test's business to pin.
+#[tokio::test]
+async fn stop_snapshot_preserves_trailing_styled_padding_via_capture_n() {
+    let h = harness().await;
+    let work = tempfile::tempdir().unwrap();
+    let session = h
+        .client
+        .create_session(
+            &work.path().to_string_lossy(),
+            &agent_cmd("internal fake-agent --script altscreen"),
+            None,
+            80,
+            24,
+        )
+        .await
+        .expect("create");
+
+    let (chan, mut rx) = h.client.attach(&session.id, 80, 24).await.expect("attach");
+    let mut seen = Vec::new();
+    wait_for(&mut rx, &mut seen, "STATUS BAR", 20).await;
+    h.client.detach(chan).await;
+
+    h.client.stop_session(&session.id).await.expect("stop");
+
+    let (_chan2, mut rx2) = h
+        .client
+        .attach(&session.id, 80, 24)
+        .await
+        .expect("reattach after stop");
+    let mut replay = Vec::new();
+    wait_for(&mut rx2, &mut replay, "STATUS BAR", 15).await;
+    let text = String::from_utf8_lossy(&replay);
+
+    // Isolate the status-bar ROW: from the label up to the fixture's own
+    // trailing CRLF, so padding from LATER lines (or the divider itself)
+    // cannot inflate this measurement.
+    let start = text
+        .find("STATUS BAR")
+        .expect("status bar label must be present");
+    let row = &text[start..];
+    let row = &row[..row.find("\r\n").unwrap_or(row.len())];
+    assert!(
+        row.len() > 40,
+        "the status-bar row must carry its trailing erase-to-end-of-line padding, proving \
+         capture-pane ran with -N — got a {}-byte row: {row:?}",
+        row.len()
+    );
+    // `sanitize_snapshot_lines` (tmux.rs) must have closed this row off
+    // with its own SGR reset immediately before the `\r\n` this slice was
+    // cut at, regardless of the `-N` padding's own attribute bytes. The
+    // risk this guards against is a real terminal's scroll/line-feed
+    // handling filling cells with THIS row's still-active background
+    // (background-color-erase) on replay — not that background leaking
+    // into the divider row that follows: this fixture's divider happens
+    // to differ enough in styling that `capture-pane -e` reserializes an
+    // explicit `\x1b[49m` background reset at the divider's own start
+    // regardless of what this test does. That reserialization is a
+    // property of THIS SPECIFIC fixture content, not a general guarantee
+    // — see `sanitize_snapshot_lines`'s own "why a bare boundary reset is
+    // not enough" docs (tmux.rs) for the general case, where a following
+    // row's UNCHANGED style is never re-stated at all and would be lost
+    // without this transform's own restore.
+    assert!(
+        row.ends_with("\x1b[0m"),
+        "the captured-and-sanitized status-bar row must end with an SGR reset before its line \
+         terminator: {row:?}"
+    );
+}
+
+/// The third replay state alongside the other two alt-screen tests here:
+/// alive (ordinary reattach), dead-and-restored-to-primary (the divider
+/// case, `stop_replays_the_alt_screen_snapshot`), and this one —
+/// dead-but-STILL-on-the-alternate-screen. SIGKILLs the pane's own
+/// process directly, bypassing the supervisor's `stop` path (and so its
+/// SIGTERM-based restore handler AND its stop-time snapshot capture)
+/// entirely, so the pane dies without ever leaving the alternate screen
+/// and without `StopSession` ever having run to capture anything.
+///
+/// Pins the negative case only: the divider must NOT be appended. The
+/// `Attach` handler's gate is snapshot EXISTENCE now (file or pending
+/// map), not the pane's alternate-screen state — and no snapshot exists
+/// here at all, because `StopSession` (the only thing that ever creates
+/// one) never ran; `send_alt_screen_snapshot` finds neither source and
+/// returns before ever touching `modes.alternate_on`. It does NOT assert
+/// the app's own content survives, because (verified empirically,
+/// scratch tmux session, not through this codebase) it does not: tmux
+/// replaces a pane's LIVE grid with its own
+/// "Pane is dead" placeholder the moment the process backing it exits,
+/// whether or not that pane was on the alternate screen — capturing an
+/// alt-screen pane that died this way shows only that placeholder, same
+/// as capturing its (nonexistent) history would. That total loss is
+/// exactly the failure this whole feature exists to prevent, but ONLY
+/// for stops that went through `StopSession`'s own capture-before-kill
+/// path; a pane killed some other way (an externally-issued SIGKILL, as
+/// here) was never going to have a snapshot to fall back on in the first
+/// place, and this test's job is only to confirm that absence does not
+/// somehow manifest as a stray divider.
+#[tokio::test]
+async fn dead_pane_still_on_alt_screen_replays_without_a_divider() {
+    let h = harness().await;
+    let work = tempfile::tempdir().unwrap();
+    let session = h
+        .client
+        .create_session(
+            &work.path().to_string_lossy(),
+            &agent_cmd("internal fake-agent --script altscreen"),
+            None,
+            80,
+            24,
+        )
+        .await
+        .expect("create");
+
+    let (chan, mut rx) = h.client.attach(&session.id, 80, 24).await.expect("attach");
+    let mut seen = Vec::new();
+    wait_for(&mut rx, &mut seen, "ALT-SCREEN APP", 20).await;
+    h.client.detach(chan).await;
+
+    let tmux_name = format!("fh-{}", session.id);
+    let sock = h.state.path().join("tmux.sock");
+    let pid_out = tmux_query(
+        &sock,
+        &["display-message", "-p", "-t", &tmux_name, "#{pane_pid}"],
+    )
+    .await;
+    let pane_pid = String::from_utf8_lossy(&pid_out.stdout).trim().to_string();
+    let killed = tokio::process::Command::new("kill")
+        .arg("-9")
+        .arg(&pane_pid)
+        .status()
+        .await
+        .expect("running kill(1)");
+    assert!(
+        killed.success(),
+        "SIGKILL of the pane's own process must succeed"
+    );
+
+    // Wait for tmux to actually mark the pane dead before attaching, so
+    // the attach cannot race a not-yet-updated `pane_dead` flag.
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
+    loop {
+        let out = tmux_query(
+            &sock,
+            &["display-message", "-p", "-t", &tmux_name, "#{pane_dead}"],
+        )
+        .await;
+        if String::from_utf8_lossy(&out.stdout).trim() == "1" {
+            break;
+        }
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "pane never went dead after SIGKILL"
+        );
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+
+    let (_chan2, mut rx2) = h
+        .client
+        .attach(&session.id, 80, 24)
+        .await
+        .expect("attach to a dead-on-alt-screen pane");
+    let mut replay = Vec::new();
+    // What the replay of a dead-on-alt-screen pane contains is
+    // environment-dependent in a way that burned this test twice: some
+    // environments retain the app's last frame in the capture (the
+    // placeholder arriving, if at all, only via live output after
+    // attach), others substitute tmux's "Pane is dead" placeholder into
+    // the capture itself — and which one a given tmux 3.4 produces has
+    // varied even between this repo's CI and a local install of the same
+    // version. The assertion this test exists for is the NEGATIVE below
+    // (no snapshot divider), so the anchor deliberately accepts either
+    // marker: both prove the replay delivered the dead pane's content.
+    let anchor_deadline = tokio::time::Instant::now() + Duration::from_secs(15);
+    loop {
+        let text = String::from_utf8_lossy(&replay);
+        if text.contains("Pane is dead") || text.contains("ALT-SCREEN APP") {
+            break;
+        }
+        let remaining = anchor_deadline.saturating_duration_since(tokio::time::Instant::now());
+        match tokio::time::timeout(remaining, rx2.recv()).await {
+            Ok(Some(TermEvent::Data(bytes))) => replay.extend_from_slice(&bytes),
+            Ok(other) => panic!("attachment ended before any dead-pane content: {other:?}"),
+            Err(_) => panic!(
+                "timed out waiting for dead-pane replay content; transcript so far:\n{}",
+                String::from_utf8_lossy(&replay)
+            ),
+        }
+    }
+    // Settle-then-drain, same pattern as the other negative-divider
+    // assertions in this file: absence needs a short observation window,
+    // not a single immediate check.
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    while let Ok(TermEvent::Data(bytes)) = rx2.try_recv() {
+        replay.extend_from_slice(&bytes);
+    }
+    let text = String::from_utf8_lossy(&replay);
+    assert!(
+        !text.contains("last screen before stop"),
+        "a pane that died still on the alternate screen (never having gone through StopSession) \
+         must never gain a snapshot divider: {text}"
+    );
+}
+
+/// The positive counterpart to `dead_pane_still_on_alt_screen_replays_
+/// without_a_divider`: here `StopSession` DOES run (and DOES capture,
+/// since the pane is alive and on the alternate screen when `stop` is
+/// called), and its own `kill_process_tree` is what finally kills the
+/// app — via the `altscreen-ignores-term` fixture, which never restores
+/// the primary screen because it never runs any code on SIGTERM at all
+/// (`SIG_IGN`), so `kill_process_tree` must escalate through its full
+/// grace/SIGSTOP-quiesce/SIGKILL sequence before the pane actually dies.
+/// This is the exact scenario the alt-screen snapshot feature exists
+/// for, and the one the earlier `dead && !alternate_on` gate silently
+/// blanked: a dead pane still on the alternate screen, with a REAL
+/// snapshot on disk this time. Requires both the divider and the app's
+/// own marker to replay, AND the alt-exit escape (`\x1b[?1049l`) to
+/// precede the divider — landing the snapshot on the primary screen's
+/// scrollback rather than inside the scrollback-less alternate buffer the
+/// ordinary mode-replay just re-entered.
+#[tokio::test]
+async fn stop_replays_the_alt_screen_snapshot_when_the_agent_ignores_term_and_never_restores() {
+    let h = harness().await;
+    let work = tempfile::tempdir().unwrap();
+    let session = h
+        .client
+        .create_session(
+            &work.path().to_string_lossy(),
+            &agent_cmd("internal fake-agent --script altscreen-ignores-term"),
+            None,
+            80,
+            24,
+        )
+        .await
+        .expect("create");
+
+    let (chan, mut rx) = h.client.attach(&session.id, 80, 24).await.expect("attach");
+    let mut seen = Vec::new();
+    wait_for(&mut rx, &mut seen, "ALT-SCREEN APP", 20).await;
+    h.client.detach(chan).await;
+
+    // Runs to completion: `kill_process_tree`'s own escalation (grace,
+    // SIGSTOP-quiesce, SIGKILL, confirm) is what actually kills a process
+    // that ignores SIGTERM outright, so this call does not return until
+    // that whole sequence has finished.
+    h.client
+        .stop_session(&session.id)
+        .await
+        .expect("stop must still succeed against a SIGTERM-ignoring alt-screen app");
+
+    let (_chan2, mut rx2) = h
+        .client
+        .attach(&session.id, 80, 24)
+        .await
+        .expect("reattach after stop");
+    let mut replay = Vec::new();
+    // Ordered wait, anchored on the divider: this fixture died still ON
+    // the alternate screen, and whether the dead pane's PREFILL already
+    // contains the app's frame is tmux-version-dependent (see
+    // `wait_for_after`'s docs) — a plain content wait can return before
+    // the snapshot suffix ever arrives.
+    wait_for_after(
+        &mut rx2,
+        &mut replay,
+        "last screen before stop",
+        "ALT-SCREEN APP",
+        15,
+    )
+    .await;
+    let text = String::from_utf8_lossy(&replay);
+    let exit_alt_screen = text.find("\x1b[?1049l").expect(
+        "the alt-exit escape must precede the snapshot, since the pane died still on \
+                 the alternate screen",
+    );
+    let divider = text.find("last screen before stop").expect("checked above");
+    assert!(
+        exit_alt_screen < divider,
+        "the alt-exit escape must land the snapshot on the primary screen's scrollback, so it \
+         must precede the divider, not follow it: {text:?}"
+    );
+}
+
+/// The gap `Supervisor::pending_snapshots` (service.rs) exists to close:
+/// an `Attach` landing AFTER the pane has gone dead but BEFORE
+/// `StopSession` has finished (`kill_process_tree` can take a real
+/// fraction of a second against an uncooperative tree) must still see
+/// the snapshot, served from the in-memory pending map rather than a file
+/// that has not been written yet.
+///
+/// Uses `altscreen-stubborn-child`: this process's own pid restores the
+/// primary screen and exits within milliseconds of SIGTERM (so the pane
+/// goes dead almost immediately), while its spawned child ignores
+/// SIGTERM and forces `kill_process_tree` through its full SIGSTOP-
+/// quiesce-then-SIGKILL escalation — several hundred milliseconds beyond
+/// `KILL_GRACE` (500ms, service.rs) alone. A fixed delay comfortably
+/// inside that window is what this test uses to land the concurrent
+/// attach; see the delay's own comment for the honest limits of that
+/// approach (best-effort, not a deterministic barrier — REJECTED per the
+/// review round that requested this test).
+#[tokio::test]
+async fn attach_mid_stop_sees_the_pending_alt_screen_snapshot() {
+    let h = harness().await;
+    let work = tempfile::tempdir().unwrap();
+    let session = h
+        .client
+        .create_session(
+            &work.path().to_string_lossy(),
+            &agent_cmd("internal fake-agent --script altscreen-stubborn-child"),
+            None,
+            80,
+            24,
+        )
+        .await
+        .expect("create");
+
+    let (chan, mut rx) = h.client.attach(&session.id, 80, 24).await.expect("attach");
+    let mut seen = Vec::new();
+    wait_for(&mut rx, &mut seen, "ALT-SCREEN APP", 20).await;
+    h.client.detach(chan).await;
+
+    let stopper = h.second_client().await;
+    let stop_session_id = session.id.clone();
+    let stop_task = tokio::spawn(async move { stopper.stop_session(&stop_session_id).await });
+
+    // The fixture's own root process restores the primary screen and
+    // exits within single-digit milliseconds of receiving SIGTERM, but
+    // its stubborn child forces `kill_process_tree` through its full
+    // escalation. 250ms is comfortably inside the resulting window on any
+    // reasonable machine: long enough that the pane is certainly already
+    // dead, short enough that `stop_session` is, with very high
+    // confidence but not a hard guarantee, still in flight — a faster-
+    // than-expected sweep would simply mean this attach lands after
+    // publish instead, reading the same content back from the file
+    // rather than the pending map. Either way the assertions below still
+    // hold; only the CODE PATH exercised would differ, which is the
+    // honest limit of a fixed-delay approach to a race this narrow.
+    tokio::time::sleep(Duration::from_millis(250)).await;
+
+    let (chan2, mut rx2) = h
+        .client
+        .attach(&session.id, 80, 24)
+        .await
+        .expect("attach mid-stop");
+    let mut replay = Vec::new();
+    // Wait on the CONTENT marker, not the divider — same reasoning as
+    // `stop_replays_the_alt_screen_snapshot`'s identical comment: the
+    // divider and the snapshot content are separate, sequential frames,
+    // and `wait_for` returns the instant its OWN needle appears, so only
+    // a needle that can exclusively come from a LATER frame guarantees
+    // everything before it (the divider included) has already arrived.
+    wait_for(&mut rx2, &mut replay, "ALT-SCREEN APP", 10).await;
+    let text = String::from_utf8_lossy(&replay);
+    assert!(
+        text.contains("last screen before stop"),
+        "the app's content must be preceded by the snapshot divider: {text}"
+    );
+    h.client.detach(chan2).await;
+
+    stop_task
+        .await
+        .expect("stop task must not panic")
+        .expect("stop must still succeed despite the stubborn child");
+}
+
+/// The still-on-the-alternate-screen counterpart to `attach_mid_stop_
+/// sees_the_pending_alt_screen_snapshot`: re-checks the pending-map
+/// fallback against the CORRECTED replay rule (snapshot existence, not
+/// `!alternate_on`), and specifically pins that the `\x1b[?1049l`
+/// alt-exit escape composes correctly with a pending-map-served (not yet
+/// written to disk) snapshot, not just a file-served one.
+///
+/// Uses `altscreen-stubborn-child-stays-alt`: this process's own pid dies
+/// to the DEFAULT SIGTERM disposition within milliseconds (still on the
+/// alternate screen, no restore — unlike `AltscreenStubbornChild`'s
+/// restore-then-exit), while its spawned child ignores SIGTERM and forces
+/// `kill_process_tree` through its full escalation regardless. Same
+/// fixed-delay, best-effort timing approach as the sibling test above —
+/// see its own comment for the honest limits of that.
+#[tokio::test]
+async fn attach_mid_stop_sees_the_pending_snapshot_while_still_on_the_alt_screen() {
+    let h = harness().await;
+    let work = tempfile::tempdir().unwrap();
+    let session = h
+        .client
+        .create_session(
+            &work.path().to_string_lossy(),
+            &agent_cmd("internal fake-agent --script altscreen-stubborn-child-stays-alt"),
+            None,
+            80,
+            24,
+        )
+        .await
+        .expect("create");
+
+    let (chan, mut rx) = h.client.attach(&session.id, 80, 24).await.expect("attach");
+    let mut seen = Vec::new();
+    wait_for(&mut rx, &mut seen, "ALT-SCREEN APP", 20).await;
+    h.client.detach(chan).await;
+
+    let stopper = h.second_client().await;
+    let stop_session_id = session.id.clone();
+    let stop_task = tokio::spawn(async move { stopper.stop_session(&stop_session_id).await });
+
+    // See `attach_mid_stop_sees_the_pending_alt_screen_snapshot`'s
+    // identical comment: 250ms lands comfortably inside the window
+    // between the pane going dead (near-instant, default SIGTERM
+    // disposition) and `kill_process_tree` finishing (bounded below by
+    // `KILL_GRACE`, 500ms, plus escalating against the stubborn child).
+    tokio::time::sleep(Duration::from_millis(250)).await;
+
+    let (chan2, mut rx2) = h
+        .client
+        .attach(&session.id, 80, 24)
+        .await
+        .expect("attach mid-stop");
+    let mut replay = Vec::new();
+    // Ordered wait for the same tmux-version reason as the
+    // ignores-term test above (`wait_for_after`'s docs): this fixture's
+    // root died still on the alternate screen.
+    wait_for_after(
+        &mut rx2,
+        &mut replay,
+        "last screen before stop",
+        "ALT-SCREEN APP",
+        10,
+    )
+    .await;
+    let text = String::from_utf8_lossy(&replay);
+    let exit_alt_screen = text
+        .find("\x1b[?1049l")
+        .expect("the alt-exit escape must precede the pending-served snapshot too");
+    let divider = text
+        .find("last screen before stop")
+        .expect("the app's content must be preceded by the snapshot divider");
+    assert!(
+        exit_alt_screen < divider,
+        "the alt-exit escape must precede the divider even when the snapshot is served from \
+         the pending map rather than the file: {text:?}"
+    );
+    h.client.detach(chan2).await;
+
+    stop_task
+        .await
+        .expect("stop task must not panic")
+        .expect("stop must still succeed despite the stubborn child");
+}
+
+/// A primary-screen agent's stop must never even capture a snapshot, let
+/// alone replay one: its real scrollback already survives via ordinary
+/// tmux history, so a synthetic "last screen" block would be clutter with
+/// no lost content to recover. Pins the alt-screen-only gating in
+/// `capture_alt_screen_before_stop` (fed by
+/// `TmuxDriver::capture_alt_screen_if_active`'s own alternate-on check)
+/// two ways: the snapshot FILE must not exist on disk at all (a
+/// deterministic check on the actual artifact this feature writes, not a
+/// proxy for it), and the replayed divider text must not appear either
+/// (the user-visible consequence, kept as a second, independent
+/// assertion).
+#[tokio::test]
+async fn stop_replay_has_no_snapshot_divider_for_a_primary_screen_agent() {
+    let h = harness().await;
+    let (session, _work) = basic_session(&h).await;
+
+    let (chan, mut rx) = h.client.attach(&session.id, 80, 24).await.expect("attach");
+    let mut seen = Vec::new();
+    wait_for(&mut rx, &mut seen, "FAKE-AGENT READY", 20).await;
+    h.client.detach(chan).await;
+
+    h.client.stop_session(&session.id).await.expect("stop");
+
+    let snapshot_path = h.state.path().join("snapshots").join(&session.id);
+    assert!(
+        !snapshot_path.exists(),
+        "a primary-screen stop must never write a snapshot file at all"
+    );
+
+    let (_chan2, mut rx2) = h
+        .client
+        .attach(&session.id, 80, 24)
+        .await
+        .expect("reattach after stop");
+    let mut replay = Vec::new();
+    wait_for(&mut rx2, &mut replay, "FAKE-AGENT READY", 15).await;
+    // A missing divider needs a settle window, not a single check: the
+    // (incorrect) extra frames this test guards against would arrive
+    // immediately after the prefill, same as everything else asserted on
+    // above, so draining once more after a short wait is enough to catch
+    // them without an open-ended sleep.
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    while let Ok(TermEvent::Data(bytes)) = rx2.try_recv() {
+        replay.extend_from_slice(&bytes);
+    }
+    let text = String::from_utf8_lossy(&replay);
+    assert!(
+        !text.contains("last screen before stop"),
+        "a primary-screen stop replay must not gain the alt-screen divider: {text}"
+    );
+}
+
+/// A snapshot file must never be consulted for a LIVE pane, no matter
+/// what is sitting on disk at its path — the `Attach` handler gates the
+/// whole feature on the pane being dead (see `send_alt_screen_snapshot`'s
+/// call site), so a leftover or tampered-with file from some earlier
+/// state must not leak into an otherwise-ordinary attach. Plants a
+/// snapshot file directly (bypassing `stop` entirely) against a session
+/// whose agent is still running, so this is a pure "was the file even
+/// looked at" check, independent of whether stop's own capture logic
+/// would ever have produced this content.
+#[tokio::test]
+async fn attach_ignores_a_stale_snapshot_file_for_a_live_pane() {
+    let h = harness().await;
+    let (session, _work) = basic_session(&h).await;
+
+    let snapshot_dir = h.state.path().join("snapshots");
+    std::fs::create_dir_all(&snapshot_dir).expect("create snapshots dir");
+    std::fs::write(snapshot_dir.join(&session.id), b"stale content")
+        .expect("plant a stale snapshot file");
+
+    let (_chan, mut rx) = h.client.attach(&session.id, 80, 24).await.expect("attach");
+    let mut seen = Vec::new();
+    wait_for(&mut rx, &mut seen, "FAKE-AGENT READY", 20).await;
+    // Same settle-then-drain pattern as the primary-screen negative test
+    // above: absence needs a short observation window, not a single
+    // immediate check.
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    while let Ok(TermEvent::Data(bytes)) = rx.try_recv() {
+        seen.extend_from_slice(&bytes);
+    }
+    let text = String::from_utf8_lossy(&seen);
+    assert!(
+        !text.contains("last screen before stop"),
+        "a live pane's attach must never consult a stale snapshot file: {text}"
+    );
+}
+
+/// Stop's contract is killing the process tree — a storage failure while
+/// trying to capture or persist the alt-screen snapshot must never block
+/// that. Pre-creates a regular FILE at the path the snapshots
+/// subdirectory would occupy, so `ensure_private_dir` fails when
+/// `publish_alt_screen_snapshot` tries to create it; `stop_session` must
+/// still report success, and the pane must still actually be dead
+/// afterwards, proving the kill ran to completion despite the storage
+/// failure rather than merely "not erroring".
+#[tokio::test]
+async fn stop_still_kills_when_the_snapshots_directory_cannot_be_created() {
+    let h = harness().await;
+    let work = tempfile::tempdir().unwrap();
+    let session = h
+        .client
+        .create_session(
+            &work.path().to_string_lossy(),
+            &agent_cmd("internal fake-agent --script altscreen"),
+            None,
+            80,
+            24,
+        )
+        .await
+        .expect("create");
+
+    let (chan, mut rx) = h.client.attach(&session.id, 80, 24).await.expect("attach");
+    let mut seen = Vec::new();
+    wait_for(&mut rx, &mut seen, "ALT-SCREEN APP", 20).await;
+    h.client.detach(chan).await;
+
+    std::fs::write(
+        h.state.path().join("snapshots"),
+        b"blocks directory creation",
+    )
+    .expect("plant a regular file where the snapshots directory belongs");
+
+    h.client
+        .stop_session(&session.id)
+        .await
+        .expect("stop must still succeed despite a storage failure");
+
+    let tmux_name = format!("fh-{}", session.id);
+    let sock = h.state.path().join("tmux.sock");
+    let out = tmux_query(
+        &sock,
+        &["display-message", "-p", "-t", &tmux_name, "#{pane_dead}"],
+    )
+    .await;
+    assert_eq!(
+        String::from_utf8_lossy(&out.stdout).trim(),
+        "1",
+        "the process tree must still be killed even when the snapshot cannot be stored"
+    );
+}
+
+/// A snapshot that cannot be READ must degrade the attach to the plain
+/// prefill, not fail it — best-effort by design (see
+/// `send_alt_screen_snapshot`'s docs). Plants a DIRECTORY at the snapshot
+/// path for an already-dead-pane session (`tokio::fs::read` on a
+/// directory fails, unlike the ordinary "file absent" case), and requires
+/// the attach to still succeed and still replay the ordinary content —
+/// just without the divider.
+#[tokio::test]
+async fn attach_degrades_to_plain_prefill_when_the_snapshot_path_is_unreadable() {
+    let h = harness().await;
+    let (session, _work) = basic_session(&h).await;
+
+    let (chan, mut rx) = h.client.attach(&session.id, 80, 24).await.expect("attach");
+    let mut seen = Vec::new();
+    wait_for(&mut rx, &mut seen, "FAKE-AGENT READY", 20).await;
+    h.client.detach(chan).await;
+
+    h.client.stop_session(&session.id).await.expect("stop");
+
+    let snapshot_path = h.state.path().join("snapshots").join(&session.id);
+    std::fs::create_dir_all(&snapshot_path).expect("plant a directory at the snapshot path");
+
+    let (_chan2, mut rx2) = h
+        .client
+        .attach(&session.id, 80, 24)
+        .await
+        .expect("attach must still succeed despite an unreadable snapshot");
+    let mut replay = Vec::new();
+    wait_for(&mut rx2, &mut replay, "FAKE-AGENT READY", 15).await;
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    while let Ok(TermEvent::Data(bytes)) = rx2.try_recv() {
+        replay.extend_from_slice(&bytes);
+    }
+    let text = String::from_utf8_lossy(&replay);
+    assert!(
+        !text.contains("last screen before stop"),
+        "an unreadable snapshot must degrade to the plain prefill, not appear: {text}"
+    );
+}
+
+/// The chunked send path (`send_alt_screen_snapshot`) must deliver a
+/// snapshot LARGER than one `REPLAY_CHUNK` (32 KiB) completely and in
+/// order, across however many frames that takes — not just the
+/// single-frame case every other snapshot test here happens to exercise
+/// (the fixtures' own captured content is far smaller than 32 KiB).
+/// Plants a snapshot with a head marker, a marker straddling the
+/// (assumed, matching service.rs's own `REPLAY_CHUNK`) 32 KiB chunk
+/// boundary, and a tail marker; requires all three to arrive, in that
+/// relative order, in the reassembled replay.
+#[tokio::test]
+async fn dead_pane_snapshot_replay_delivers_a_multi_chunk_snapshot_intact() {
+    let h = harness().await;
+    let (session, _work) = basic_session(&h).await;
+
+    let (chan, mut rx) = h.client.attach(&session.id, 80, 24).await.expect("attach");
+    let mut seen = Vec::new();
+    wait_for(&mut rx, &mut seen, "FAKE-AGENT READY", 20).await;
+    h.client.detach(chan).await;
+
+    h.client.stop_session(&session.id).await.expect("stop");
+
+    const ASSUMED_REPLAY_CHUNK: usize = 32 * 1024;
+    let mut content = Vec::new();
+    content.extend_from_slice(b"HEAD-MARKER");
+    content.resize(ASSUMED_REPLAY_CHUNK - 5, b'x');
+    content.extend_from_slice(b"BOUNDARY-MARKER");
+    content.resize(ASSUMED_REPLAY_CHUNK + 4000, b'y');
+    content.extend_from_slice(b"TAIL-MARKER");
+
+    let snapshot_dir = h.state.path().join("snapshots");
+    std::fs::create_dir_all(&snapshot_dir).expect("create snapshots dir");
+    std::fs::write(snapshot_dir.join(&session.id), &content).expect("plant a multi-chunk snapshot");
+
+    let (_chan2, mut rx2) = h
+        .client
+        .attach(&session.id, 80, 24)
+        .await
+        .expect("reattach");
+    let mut replay = Vec::new();
+    wait_for(&mut rx2, &mut replay, "TAIL-MARKER", 15).await;
+    let text = String::from_utf8_lossy(&replay);
+    let head = text.find("HEAD-MARKER").expect("head marker must arrive");
+    let boundary = text
+        .find("BOUNDARY-MARKER")
+        .expect("chunk-boundary marker must arrive");
+    let tail = text.find("TAIL-MARKER").expect("tail marker must arrive");
+    assert!(
+        head < boundary && boundary < tail,
+        "markers must arrive in order across multiple chunks: {text:?}"
+    );
+}
+
+/// Fail-closed cleanup applies to the alt-screen snapshot exactly like
+/// the launch artifacts (`delete_fails_closed_when_a_launch_artifact_
+/// cannot_be_removed`): an unremovable snapshot must fail the WHOLE
+/// delete, row and map entry intact, rather than silently losing the last
+/// handle on a file that may hold secrets. A non-empty DIRECTORY at the
+/// snapshot path (rather than a permission trick) is what actually makes
+/// `remove_file` fail here — `unlink` refuses any directory regardless of
+/// permissions.
+#[tokio::test]
+async fn delete_fails_closed_when_the_alt_screen_snapshot_cannot_be_removed() {
+    let h = harness().await;
+    let (session, _work) = basic_session(&h).await;
+
+    let snapshot_path = h.state.path().join("snapshots").join(&session.id);
+    std::fs::create_dir_all(&snapshot_path).expect("plant a directory at the snapshot path");
+    std::fs::write(snapshot_path.join("inner"), b"x").expect("make the directory non-empty");
+
+    let result = h.client.delete_session(&session.id).await;
+    let err = result.expect_err("delete must fail closed when the snapshot cannot be removed");
+    assert_eq!(
+        err.downcast_ref::<SupervisorError>()
+            .expect("must carry a SupervisorError")
+            .kind,
+        ErrorKind::Internal,
+        "an unremovable snapshot is a server-side sweep problem, not a caller precondition"
+    );
+
+    let sup2 = Supervisor::new_with_exe(h.state.path(), farhelm_bin().into())
+        .await
+        .expect("second supervisor construction on the same state dir");
+    let client2 = connect_client(&sup2).await;
+    assert_eq!(
+        client2
+            .list_sessions()
+            .await
+            .expect("list from fresh supervisor"),
+        vec![session.clone()],
+        "a failed delete must leave the row in place for a retry"
+    );
+}
+
+/// Snapshot files are plain session-id-keyed state under the
+/// supervisor's own state dir, so they must survive exactly like the
+/// SQLite row does across a supervisor restart (mirroring
+/// `stop_kills_the_whole_process_tree`'s own restart check): stop an
+/// alt-screen session, construct a SECOND, independent `Supervisor` on
+/// the same state dir, and attach through IT — the divider and the app's
+/// own marker must both replay, proving the snapshot was read from disk
+/// rather than from any in-process state the first supervisor held.
+#[tokio::test]
+async fn alt_screen_snapshot_survives_a_supervisor_restart() {
+    let h = harness().await;
+    let work = tempfile::tempdir().unwrap();
+    let session = h
+        .client
+        .create_session(
+            &work.path().to_string_lossy(),
+            &agent_cmd("internal fake-agent --script altscreen"),
+            None,
+            80,
+            24,
+        )
+        .await
+        .expect("create");
+
+    let (chan, mut rx) = h.client.attach(&session.id, 80, 24).await.expect("attach");
+    let mut seen = Vec::new();
+    wait_for(&mut rx, &mut seen, "ALT-SCREEN APP", 20).await;
+    h.client.detach(chan).await;
+
+    h.client.stop_session(&session.id).await.expect("stop");
+
+    let sup2 = Supervisor::new_with_exe(h.state.path(), farhelm_bin().into())
+        .await
+        .expect("second supervisor construction on the same state dir");
+    let client2 = connect_client(&sup2).await;
+
+    let (_chan2, mut rx2) = client2
+        .attach(&session.id, 80, 24)
+        .await
+        .expect("attach through a fresh supervisor on the same state dir");
+    let mut replay = Vec::new();
+    // Waits on the content marker, not the divider — see
+    // `stop_replays_the_alt_screen_snapshot`'s identical comment for why:
+    // the divider and the snapshot content are separate, sequential
+    // frames, and `wait_for` returns as soon as ITS needle appears, so
+    // only a needle that can exclusively come from a LATER frame
+    // guarantees everything before it (divider included) already
+    // arrived.
+    wait_for(&mut rx2, &mut replay, "ALT-SCREEN APP", 15).await;
+    let text = String::from_utf8_lossy(&replay);
+    assert!(
+        text.contains("last screen before stop"),
+        "the snapshot must survive a supervisor restart and still replay behind its divider: \
+         {text}"
+    );
+}
+
+/// Delete must tolerate a tmux session that disappeared out from under a
+/// LIVE `SessionEntry` — someone (or something) else killed it directly
+/// on the private socket, distinct from the restart-gap case
+/// (`delete_works_on_a_terminal_less_session`) where the whole tmux
+/// server, not just one session, failed to survive. `pane_process`'s
+/// tolerated-absence path (the same tmux diagnostics `has_session`/
+/// `kill_session` already treat as "not there") is what makes this
+/// succeed rather than fail-closed.
+#[tokio::test]
+async fn delete_after_externally_killed_tmux_session_succeeds() {
+    let h = harness().await;
+    let (session, _work) = basic_session(&h).await;
+
+    let tmux_name = format!("fh-{}", session.id);
+    let sock = h.state.path().join("tmux.sock");
+    let killed = tmux_query(&sock, &["kill-session", "-t", &tmux_name]).await;
+    assert!(
+        killed.status.success(),
+        "test setup: kill-session must succeed, got: {}",
+        String::from_utf8_lossy(&killed.stderr)
+    );
+
+    // This process's own Supervisor still has a LIVE SessionEntry for
+    // this session (entries are never demoted from Some to None within
+    // one process's lifetime) — unlike the restart-gap tests, no second
+    // Supervisor construction is involved here.
+    h.client
+        .delete_session(&session.id)
+        .await
+        .expect("delete must tolerate an externally killed tmux session");
+    assert!(
+        h.client.list_sessions().await.unwrap().is_empty(),
+        "a deleted session must not stay listed"
+    );
+}
+
+/// A reachable, deterministic fail-closed path for delete's teardown.
+///
+/// The obvious candidate — an absent pane — does NOT fail closed anymore:
+/// per `kill_process_tree`'s `root_pid: None` handling, an absent or dead
+/// pane runs the marker-only sweep and then SUCCEEDS
+/// (`delete_after_externally_killed_tmux_session_succeeds` pins exactly
+/// that). What DOES still fail closed is `pane_process`'s own session-
+/// scoping check: renaming the underlying tmux session out from under a
+/// live `SessionEntry` (verified empirically — `display-message -t
+/// <pane>` happily resolves the renamed session and reports its NEW name)
+/// makes the stored `tmux_name` mismatch what tmux now reports, which
+/// `pane_process` treats as a hard error rather than "gone" — refusing to
+/// guess which session a suspiciously-renamed pane now belongs to. Delete
+/// must surface that as `Error`/`Internal` with the row and map entry
+/// left in place, not a false `SessionDeleted`.
+#[tokio::test]
+async fn delete_after_renamed_tmux_session_fails_closed() {
+    let h = harness().await;
+    let (session, _work) = basic_session(&h).await;
+
+    let tmux_name = format!("fh-{}", session.id);
+    let sock = h.state.path().join("tmux.sock");
+    let renamed = tmux_query(
+        &sock,
+        &["rename-session", "-t", &tmux_name, "renamed-out-from-under"],
+    )
+    .await;
+    assert!(
+        renamed.status.success(),
+        "test setup: rename-session must succeed, got: {}",
+        String::from_utf8_lossy(&renamed.stderr)
+    );
+
+    let err = h.client.delete_session(&session.id).await.expect_err(
+        "delete must fail closed when the pane's session was renamed out from under it",
+    );
+    assert_eq!(
+        err.downcast_ref::<SupervisorError>()
+            .expect("a failed teardown must carry a SupervisorError")
+            .kind,
+        ErrorKind::Internal,
+        "a teardown failure is a server-side sweep problem, not a caller precondition"
+    );
+    assert_eq!(
+        h.client.list_sessions().await.unwrap(),
+        vec![session.clone()],
+        "a failed delete must leave the row and map entry in place for a retry"
+    );
+}
+
+/// The acceptance test for the environment-marker half of
+/// `kill_process_tree` (lore/2026-07-27-m2-process-tree-stop.md): a
+/// daemon that has fully reparented to init — no longer any descendant of
+/// the pane's process at all — must still be killed, because only the
+/// `FARHELM_SESSION_ID` marker (never a PPID walk) can find it. This must
+/// fail if EITHER half of that mechanism is removed: marker injection at
+/// launch (`launch.rs`'s `SESSION_ID_ENV_VAR`) or marker enumeration
+/// during the sweep (`environ_has_marker`/`enumerate_tree`) — a bare PPID
+/// closure from the pane root would never reach this pid at all.
+#[tokio::test]
+async fn stop_kills_a_reparented_marked_daemon() {
+    let h = harness().await;
+    let work = tempfile::tempdir().unwrap();
+    let session = h
+        .client
+        .create_session(
+            &work.path().to_string_lossy(),
+            &agent_cmd("internal fake-agent --script spawner-reparent"),
+            None,
+            80,
+            24,
+        )
+        .await
+        .expect("create");
+    let _cleanup = MarkerCleanupGuard::new(session.id.clone());
+
+    let (_chan, mut rx) = h.client.attach(&session.id, 80, 24).await.expect("attach");
+    let mut seen = Vec::new();
+    wait_for(&mut rx, &mut seen, "FAKE-AGENT READY", 20).await;
+    let self_pid = extract_pid(&seen, "SELF-PID:");
+    let daemon_pid = wait_for_pid_file(&work.path().join("reparented.pid"), 10).await;
+    assert_ne!(
+        self_pid, daemon_pid,
+        "the reparented daemon must be a genuinely different process"
+    );
+
+    h.client.stop_session(&session.id).await.expect("stop");
+
+    wait_until_pid_gone(self_pid, 15).await;
+    wait_until_pid_gone(daemon_pid, 15).await;
+}
+
+/// The marker-only sweep must find and kill a REAL reparented survivor
+/// even when there is no live pane process at all to walk ancestry
+/// from — not a hypothetical, but the exact scenario `kill_process_tree`'s
+/// `root_pid: None` handling exists for (see that function's docs). This
+/// must fail if stop ever goes back to SKIPPING the sweep when the pane
+/// looks dead or absent, which is what the first cut of this code did.
+///
+/// The pane is made dead by killing the agent process directly (not by
+/// calling stop first, which would already reap the daemon via the live-
+/// pane path and prove nothing about the dead-pane path specifically).
+/// `remain-on-exit` keeps the pane around to report `pane_dead`, exactly
+/// like `exited_agent_leaves_a_viewable_terminal` relies on elsewhere.
+#[tokio::test]
+async fn stop_kills_a_reparented_daemon_with_no_live_pane_to_walk_from() {
+    let h = harness().await;
+    let work = tempfile::tempdir().unwrap();
+    let session = h
+        .client
+        .create_session(
+            &work.path().to_string_lossy(),
+            &agent_cmd("internal fake-agent --script spawner-reparent"),
+            None,
+            80,
+            24,
+        )
+        .await
+        .expect("create");
+    let _cleanup = MarkerCleanupGuard::new(session.id.clone());
+
+    let (_chan, mut rx) = h.client.attach(&session.id, 80, 24).await.expect("attach");
+    let mut seen = Vec::new();
+    wait_for(&mut rx, &mut seen, "FAKE-AGENT READY", 20).await;
+    let self_pid = extract_pid(&seen, "SELF-PID:");
+    let daemon_pid = wait_for_pid_file(&work.path().join("reparented.pid"), 10).await;
+
+    // Kill the pane's own process directly: the pane goes dead
+    // (remain-on-exit keeps the terminal), leaving no live pid for
+    // kill_process_tree to walk ancestry from at all.
+    // SAFETY: self_pid is a real, currently-live pid this test just
+    // extracted from the fake agent's own output.
+    unsafe {
+        libc::kill(self_pid as libc::pid_t, libc::SIGKILL);
+    }
+    wait_until_pid_gone(self_pid, 10).await;
+
+    h.client.stop_session(&session.id).await.expect("stop");
+    wait_until_pid_gone(daemon_pid, 15).await;
+}
+
+/// Closure seeding, not just the marker scan alone: the reparented
+/// daemon's own child has its `FARHELM_SESSION_ID` marker deliberately
+/// stripped (`env -u`), so the marker scan alone would never find it —
+/// only reaching it by walking the PPID closure FROM the daemon proves
+/// that marker pids seed the closure before it expands, per
+/// `enumerate_tree`'s docs. This must fail if that seeding is ever
+/// demoted back to appending marker pids as closure LEAVES instead of
+/// roots.
+#[tokio::test]
+async fn stop_kills_an_unmarked_child_of_a_reparented_daemon_via_closure_seeding() {
+    let h = harness().await;
+    let work = tempfile::tempdir().unwrap();
+    let session = h
+        .client
+        .create_session(
+            &work.path().to_string_lossy(),
+            &agent_cmd("internal fake-agent --script spawner-reparent"),
+            None,
+            80,
+            24,
+        )
+        .await
+        .expect("create");
+    let _cleanup = MarkerCleanupGuard::new(session.id.clone());
+
+    let (_chan, mut rx) = h.client.attach(&session.id, 80, 24).await.expect("attach");
+    let mut seen = Vec::new();
+    wait_for(&mut rx, &mut seen, "FAKE-AGENT READY", 20).await;
+    let daemon_pid = wait_for_pid_file(&work.path().join("reparented.pid"), 10).await;
+    let unmarked_child_pid = wait_for_pid_file(&work.path().join("unmarked-child.pid"), 10).await;
+    assert!(
+        marked_pids(&session.id).contains(&daemon_pid),
+        "test setup: the daemon must actually carry the marker"
+    );
+    assert!(
+        !marked_pids(&session.id).contains(&unmarked_child_pid),
+        "test setup: the child must NOT carry the marker — that is the point"
+    );
+
+    h.client.stop_session(&session.id).await.expect("stop");
+
+    wait_until_pid_gone(daemon_pid, 15).await;
+    wait_until_pid_gone(unmarked_child_pid, 15).await;
+}
+
+/// Delete must remove a session's launch artifacts, not just the row and
+/// the terminal — `launch/<id>.json` can hold the agent's full command
+/// line (credentials included, per launch.rs's own docs), and the shim
+/// usually unlinks both files itself, but the ordinary case is exactly
+/// what makes this easy to leave untested: this plants both files by hand
+/// (standing in for a delete that outraces the shim, or a spec that was
+/// never launched at all) so the removal path actually runs.
+#[tokio::test]
+async fn delete_removes_launch_artifacts() {
+    let h = harness().await;
+    let (session, _work) = basic_session(&h).await;
+
+    let launch_dir = h.state.path().join("launch");
+    let spec_path = launch_dir.join(format!("{}.json", session.id));
+    let status_path = launch_dir.join(format!("{}.status", session.id));
+    wait_for_shim_to_consume_spec(&spec_path).await;
+    std::fs::write(&spec_path, b"{}").expect("plant a launch spec");
+    std::fs::write(&status_path, b"exec_failed").expect("plant a launch status file");
+
+    h.client.delete_session(&session.id).await.expect("delete");
+
+    assert!(
+        !spec_path.exists(),
+        "delete must remove the launch spec, which may hold credentials"
+    );
+    assert!(
+        !status_path.exists(),
+        "delete must remove the launch status file"
+    );
+}
+
+/// Delete must remove a session's alt-screen stop snapshot — same
+/// confidentiality class as the launch artifacts above (terminal content
+/// can hold secrets an agent echoed), and delete is the last moment
+/// anything comes back to clean it up. Stops an `altscreen` session first
+/// so a snapshot genuinely exists, rather than asserting the absence of a
+/// file that was never going to be there.
+#[tokio::test]
+async fn delete_removes_the_alt_screen_snapshot() {
+    let h = harness().await;
+    let work = tempfile::tempdir().unwrap();
+    let session = h
+        .client
+        .create_session(
+            &work.path().to_string_lossy(),
+            &agent_cmd("internal fake-agent --script altscreen"),
+            None,
+            80,
+            24,
+        )
+        .await
+        .expect("create");
+
+    let (chan, mut rx) = h.client.attach(&session.id, 80, 24).await.expect("attach");
+    let mut seen = Vec::new();
+    wait_for(&mut rx, &mut seen, "ALT-SCREEN APP", 20).await;
+    h.client.detach(chan).await;
+
+    h.client.stop_session(&session.id).await.expect("stop");
+
+    let snapshot_path = h.state.path().join("snapshots").join(&session.id);
+    assert!(
+        snapshot_path.exists(),
+        "test setup: stopping an alt-screen session must write a snapshot"
+    );
+
+    h.client.delete_session(&session.id).await.expect("delete");
+
+    assert!(
+        !snapshot_path.exists(),
+        "delete must remove the alt-screen snapshot, which may hold secrets an agent echoed"
+    );
+}
+
+/// Wait for the shim to have consumed and unlinked the REAL launch spec
+/// at `spec_path` before a test plants a fake one at the same path —
+/// otherwise planting could race the shim's own read and hand it garbage
+/// instead of the real spec it needs to exec the fake agent.
+async fn wait_for_shim_to_consume_spec(spec_path: &std::path::Path) {
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
+    while spec_path.exists() {
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "the real launch spec was never consumed by the shim"
+        );
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+}
+
+/// Fail-closed artifact removal (SPEC.md/lore/2026-07-27-m2-process-tree-
+/// stop.md): a launch spec that cannot be removed must fail the WHOLE
+/// delete, row and map entry intact — never silently proceed and lose the
+/// last handle on a file that may hold credentials. Removing WRITE
+/// permission on the launch directory itself (not the file) is what
+/// actually makes a file undeletable on POSIX: `unlink` needs write+exec
+/// on the containing directory, not any particular mode on the file.
+///
+/// Skipped under euid 0: root bypasses directory permission checks
+/// entirely, which would make this test pass trivially without
+/// exercising the fail-closed path it exists to pin.
+#[tokio::test]
+async fn delete_fails_closed_when_a_launch_artifact_cannot_be_removed() {
+    // SAFETY: geteuid takes no arguments and cannot fail.
+    if unsafe { libc::geteuid() } == 0 {
+        eprintln!(
+            "skipping: running as root, which bypasses the directory permission this test relies on"
+        );
+        return;
+    }
+
+    let h = harness().await;
+    let (session, _work) = basic_session(&h).await;
+
+    let launch_dir = h.state.path().join("launch");
+    let spec_path = launch_dir.join(format!("{}.json", session.id));
+    wait_for_shim_to_consume_spec(&spec_path).await;
+    std::fs::write(&spec_path, b"{}").expect("plant a launch spec");
+
+    use std::os::unix::fs::PermissionsExt;
+    let original_mode = std::fs::metadata(&launch_dir)
+        .expect("stat launch dir")
+        .permissions()
+        .mode();
+    std::fs::set_permissions(&launch_dir, std::fs::Permissions::from_mode(0o500))
+        .expect("restrict launch dir to read+execute only");
+
+    let result = h.client.delete_session(&session.id).await;
+
+    // Restored FIRST and unconditionally, before any assertion that could
+    // panic — a permission-broken state dir must not outlive this test
+    // regardless of how it ends.
+    std::fs::set_permissions(&launch_dir, std::fs::Permissions::from_mode(original_mode))
+        .expect("restore launch dir permissions");
+
+    let err = result.expect_err("delete must fail closed when a launch artifact cannot be removed");
+    assert_eq!(
+        err.downcast_ref::<SupervisorError>()
+            .expect("must carry a SupervisorError")
+            .kind,
+        ErrorKind::Internal,
+        "an unremovable artifact is a server-side sweep problem, not a caller precondition"
+    );
+
+    let sup2 = Supervisor::new_with_exe(h.state.path(), farhelm_bin().into())
+        .await
+        .expect("second supervisor construction on the same state dir");
+    let client2 = connect_client(&sup2).await;
+    assert_eq!(
+        client2
+            .list_sessions()
+            .await
+            .expect("list from fresh supervisor"),
+        vec![session.clone()],
+        "a failed delete must leave the row in place for a retry, provable only through a \
+         SEPARATE supervisor construction, not this process's own map"
+    );
+
+    let _ = std::fs::remove_file(&spec_path);
+}
+
+/// A best-effort race: attach from a second client, in a retry loop,
+/// concurrently with a delete in flight. `DeleteSession`'s teardown sweep
+/// deliberately runs BEFORE it takes the `attachments` lock (see that
+/// handler's own comment), which is exactly what lets a concurrent Attach
+/// install itself while the sweep is still running — the lock-held phase
+/// then tears down WHATEVER attachment exists once it runs, new or old.
+/// This test does not try to land in one specific interleaving; it
+/// asserts that WHICHEVER one happens is internally consistent: an
+/// attach either fails `NotFound` (delete's row/map removal already
+/// happened) or succeeds and then receives a `Detached` (the lock-held
+/// phase caught it) — never a hang, and never a "succeeded and stayed
+/// attached forever" outcome once delete has actually finished. The
+/// session must be gone by the end either way.
+#[tokio::test]
+async fn attach_during_delete_race_ends_in_a_consistent_state() {
+    let h = harness().await;
+    let (session, _work) = basic_session(&h).await;
+
+    let deleter = Arc::clone(&h.client);
+    let delete_session_id = session.id.clone();
+    let delete_task = tokio::spawn(async move { deleter.delete_session(&delete_session_id).await });
+
+    let second = h.second_client().await;
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(20);
+    loop {
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "attach-during-delete race never reached a consistent outcome"
+        );
+        match second.attach(&session.id, 80, 24).await {
+            Ok((_channel, mut rx)) => {
+                // An attach that succeeded must be told WHY it no longer
+                // holds the session, truthfully — a `Detached` naming
+                // deletion, exactly as `DeleteSession`'s handler sends
+                // once the row is confirmed gone (see its "notice after
+                // commit" comment). A bare stream close (`None`) is NOT
+                // an acceptable alternative: it would mean the client
+                // learned the session vanished with no explanation, which
+                // is the same silent-disappearance failure the handler's
+                // ordering exists to prevent.
+                let reason = tokio::time::timeout(Duration::from_secs(15), async {
+                    loop {
+                        match rx.recv().await {
+                            Some(TermEvent::Detached(reason)) => return reason,
+                            Some(TermEvent::Data(_)) => continue,
+                            None => panic!(
+                                "an attachment that raced a delete closed without a Detached \
+                                 notice — the client learned nothing about why"
+                            ),
+                        }
+                    }
+                })
+                .await
+                .expect("an attachment that raced a delete must resolve to Detached");
+                assert!(
+                    reason.contains("delete"),
+                    "Detached reason for a racer that saw a successful delete must name \
+                     deletion, got: {reason:?}"
+                );
+                break;
+            }
+            Err(e) => {
+                // `NotFound` is delete's row/map removal having already
+                // landed. `Internal` is the OTHER legitimate shape of
+                // this exact race: the entry is still in the map (not
+                // removed yet) but delete's teardown already killed the
+                // tmux session underneath it, so Attach's own tmux calls
+                // fail with an ordinary (unclassified) tmux error. Both
+                // are consistent outcomes of "delete got there first";
+                // anything else is retried, bounded by the outer
+                // deadline, since it may just be a transient blip rather
+                // than the race settling.
+                let expected_race_outcome = e
+                    .downcast_ref::<SupervisorError>()
+                    .is_some_and(|se| matches!(se.kind, ErrorKind::NotFound | ErrorKind::Internal));
+                if expected_race_outcome {
+                    break;
+                }
+            }
+        }
+    }
+
+    delete_task
+        .await
+        .expect("delete task panicked")
+        .expect("delete must succeed");
+    assert!(
+        h.client.list_sessions().await.unwrap().is_empty(),
+        "the session must be gone once the race settles"
+    );
+}
+
+/// Failure-safe cleanup for tests whose fixtures can leave marked
+/// processes running when an assertion panics before `stop`/`delete` is
+/// ever called (or before it completes). `Drop` runs even during a panic
+/// unwind, so holding one of these for the duration of a test guarantees
+/// a best-effort SIGKILL sweep of anything still carrying the session's
+/// marker, regardless of where the test failed — the fixtures' own
+/// self-expiry bounds (see `Script::SpawnerForkStorm`'s docs) are the
+/// backstop under THIS, for the one case even a `Drop` cannot reach: the
+/// whole test process being killed externally (a CI timeout, say) before
+/// unwinding ever runs.
+///
+/// Deliberately synchronous (plain `libc::kill`, no starttime validation
+/// like `kill_process_tree`'s production sweep): this is test cleanup for
+/// a session id that is scoped to this one test and never reused, not a
+/// production code path sharing a host with unrelated processes, so the
+/// pid-reuse residual that motivates that validation elsewhere does not
+/// apply here with any practical likelihood.
+struct MarkerCleanupGuard {
+    session_id: String,
+}
+
+impl MarkerCleanupGuard {
+    fn new(session_id: impl Into<String>) -> Self {
+        Self {
+            session_id: session_id.into(),
+        }
+    }
+}
+
+impl Drop for MarkerCleanupGuard {
+    fn drop(&mut self) {
+        for pid in marked_pids(&self.session_id) {
+            // SAFETY: `libc::kill` validates `pid` itself; a pid that is
+            // already gone or not ours simply yields an ignorable errno.
+            unsafe {
+                libc::kill(pid as libc::pid_t, libc::SIGKILL);
+            }
+        }
+    }
+}
+
+/// Every currently-live pid whose `/proc/<pid>/environ` carries an exact
+/// `FARHELM_SESSION_ID=<id>` entry — the test-side mirror of the
+/// supervisor's own marker scan (`environ_contains_marker` in
+/// service.rs), used here to assert nothing survives a stop, independent
+/// of ancestry.
+fn marked_pids(session_id: &str) -> Vec<u32> {
+    let marker = format!("FARHELM_SESSION_ID={session_id}");
+    let mut pids = Vec::new();
+    let Ok(entries) = std::fs::read_dir("/proc") else {
+        return pids;
+    };
+    for entry in entries.flatten() {
+        let Some(pid) = entry
+            .file_name()
+            .to_str()
+            .and_then(|s| s.parse::<u32>().ok())
+        else {
+            continue;
+        };
+        let Ok(environ) = std::fs::read(format!("/proc/{pid}/environ")) else {
+            continue;
+        };
+        if environ
+            .split(|&b| b == 0)
+            .any(|entry| entry == marker.as_bytes())
+        {
+            pids.push(pid);
+        }
+    }
+    pids
+}
+
+/// The acceptance test for `kill_process_tree`'s SIGSTOP-quiesce phase: a
+/// child that continuously forks new marked grandchildren — each one
+/// deliberately long-lived (`sleep 3600`, never exiting on its own) —
+/// must leave NONE alive after stop, including ones that forked in the
+/// narrow gap between SIGTERM and the sweep's later signals — the exact
+/// race quiesce exists to close (see that function's docs and
+/// lore/2026-07-27-m2-process-tree-stop.md).
+///
+/// Long-lived grandchildren are the point, not an incidental detail: a
+/// SHORT-lived grandchild dies of natural causes within a few hundred
+/// milliseconds regardless of whether the sweep ever reaches it, which
+/// would let this test pass even with quiescing removed — the opposite
+/// of what it exists to catch. Checked immediately after `stop_session`
+/// returns, with no bounded retry: `kill_process_tree` already waits out
+/// its own confirmation window (`confirm_gone`) before returning `Ok`, so
+/// a survivor at this point is a survivor, not a straggler about to die
+/// on its own.
+///
+/// This test's discriminating power was verified empirically while
+/// writing it: temporarily disabling BOTH the post-grace SIGSTOP
+/// re-enumeration and the `for _ in 0..MAX_QUIESCE_PASSES` fixpoint loop
+/// in `kill_process_tree` (so the sweep goes straight from round one's
+/// SIGTERM snapshot to a final SIGKILL of that same stale set, with no
+/// re-enumeration at all) made this test fail reliably — a marked
+/// grandchild that forked during the grace period, after round one's
+/// snapshot, survived indefinitely, since nothing ever signaled it —
+/// across repeated runs, while the real code passes just as reliably.
+/// (An earlier attempt at this same verification, with the fork-storm
+/// fixture's forking loop process left to die to a plain `SIGTERM`,
+/// passed even with quiescing disabled: the loop's own death — and, it
+/// turned out, a `SIGHUP` cascade to its whole foreground process group
+/// once the pane's session-leader process died — stopped the storm
+/// almost immediately either way, closing the race window before it
+/// could matter. That is why the fixture ignores both `TERM` and `HUP`.)
+/// The disabling change was reverted before this test was committed; it
+/// must never be left disabled in the source.
+#[tokio::test]
+async fn stop_quiesce_survives_no_marked_process() {
+    let h = harness().await;
+    let work = tempfile::tempdir().unwrap();
+    let session = h
+        .client
+        .create_session(
+            &work.path().to_string_lossy(),
+            &agent_cmd("internal fake-agent --script spawner-fork-storm"),
+            None,
+            80,
+            24,
+        )
+        .await
+        .expect("create");
+    let _cleanup = MarkerCleanupGuard::new(session.id.clone());
+
+    let (_chan, mut rx) = h.client.attach(&session.id, 80, 24).await.expect("attach");
+    let mut seen = Vec::new();
+    wait_for(&mut rx, &mut seen, "FAKE-AGENT READY", 20).await;
+
+    // Let the storm actually produce a few generations before stopping,
+    // so there is something for the sweep to race against rather than a
+    // trivially-empty tree.
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    assert!(
+        !marked_pids(&session.id).is_empty(),
+        "test setup: the fork storm must have produced at least one live marked process by now"
+    );
+
+    h.client.stop_session(&session.id).await.expect("stop");
+
+    let survivors = marked_pids(&session.id);
+    assert!(
+        survivors.is_empty(),
+        "marked process(es) survived stop: {survivors:?} — the quiesce fixpoint let a fork \
+         through"
+    );
+}
