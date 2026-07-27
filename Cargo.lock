@@ -1754,6 +1754,7 @@ version = "0.0.1"
 dependencies = [
  "anyhow",
  "farhelm-proto",
+ "libc",
  "serde",
  "serde_json",
  "shell-words",
