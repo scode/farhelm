@@ -14,6 +14,19 @@ serde_json.workspace = true
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 web-sys.workspace = true
+# List-view polling sleep (PLAN_M2.md step 7, `ListView` in src/lib.rs):
+# `TimeoutFuture` wraps `setTimeout` for this one-shot sleep — see the
+# workspace `Cargo.toml` entry for why the desktop target instead reuses
+# `tokio::time::sleep`.
+gloo-timers.workspace = true
+
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+# Non-wasm half of the list-view poll sleep (src/lib.rs). Not a new
+# runtime dependency in practice: `dioxus-desktop` already constructs and
+# drives a multi-thread tokio runtime for the desktop target, so this
+# crate merely needs the `time` feature (already enabled workspace-wide)
+# to schedule a sleep on it.
+tokio.workspace = true
 
 [features]
 default = []

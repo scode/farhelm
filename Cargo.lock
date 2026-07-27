@@ -1786,9 +1786,11 @@ name = "farhelm-ui"
 version = "0.0.1"
 dependencies = [
  "dioxus",
+ "gloo-timers",
  "reqwest",
  "serde",
  "serde_json",
+ "tokio",
  "web-sys",
 ]
 

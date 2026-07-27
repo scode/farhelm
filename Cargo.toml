@@ -26,6 +26,11 @@ axum = { version = "0.8", features = ["ws"] }
 clap = { version = "4", features = ["derive"] }
 dioxus = "0.7.0"
 futures-util = { version = "0.3", default-features = false }
+# List-view polling sleep on wasm32 (farhelm-ui's `ListView`): a thin
+# `wasm-bindgen` binding to `setTimeout`, the only timer a browser tab
+# actually has for this. Non-wasm32 targets use `tokio::time::sleep`
+# instead — see farhelm-ui/Cargo.toml's target-dependency comment.
+gloo-timers = { version = "0.3", features = ["futures"] }
 libc = "0.2"
 reqwest = { version = "0.12", default-features = false, features = ["json"] }
 # `bundled` compiles SQLite from source rather than linking the host's

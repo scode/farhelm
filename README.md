@@ -27,8 +27,10 @@ first time a session is attached) and everything else still works. Ubuntu 24.04 
 - Against a remote host (passwordless ssh assumed; copy the binary there first): add
   `--ssh user@host --remote-farhelm /path/to/farhelm` to the helm command. Use an absolute `--cwd` there — it names a
   directory on the target host, and your local shell would expand a `~` against the wrong home.
-- Open the printed loopback URL in a browser. Close the tab, reopen it later: same session, scrollback intact, the agent
-  never noticed.
+- Open the printed loopback URL in a browser: a session list (title, working directory, invocation, and a status —
+  alive, or exited with the code when known), refreshing on its own every few seconds. Click a row to open its terminal;
+  a back control returns to the list. Close the tab, reopen it later: same session, scrollback intact, the agent never
+  noticed.
 
 The desktop window is the same UI in a wry webview: `cargo run -p farhelm-ui --features desktop` with `FARHELM_URL`
 pointing at the helm (default `http://127.0.0.1:7433`).
