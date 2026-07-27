@@ -360,14 +360,13 @@ impl TmuxDriver {
     pub async fn create_session(
         &self,
         name: &str,
-        cwd: &Path,
+        cwd: &str,
         cols: u16,
         rows: u16,
         window_cmd: &[String],
     ) -> anyhow::Result<String> {
         let cols_s = cols.clamp(1, 10_000).to_string();
         let rows_s = rows.clamp(1, 10_000).to_string();
-        let cwd_s = cwd.to_string_lossy().into_owned();
         // `-P -F` prints the pane id from the same invocation that
         // creates the session. One call, not new-session followed by a
         // display-message query: if the follow-up query failed, the
@@ -387,7 +386,7 @@ impl TmuxDriver {
             "-y",
             &rows_s,
             "-c",
-            &cwd_s,
+            cwd,
         ];
         args.extend(window_cmd.iter().map(String::as_str));
         let pane = self.run(&args).await?;

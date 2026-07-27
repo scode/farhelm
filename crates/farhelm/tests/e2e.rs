@@ -1629,7 +1629,7 @@ async fn control_mode_attach_to_missing_session_reports_tmux_reason() {
     driver
         .create_session(
             "decoy",
-            state.path(),
+            state.path().to_str().expect("tempdir path is UTF-8"),
             80,
             24,
             &["sleep".to_string(), "60".to_string()],
@@ -1965,7 +1965,7 @@ async fn failed_paste_leaves_no_input_buffer_behind() {
     driver
         .create_session(
             "decoy",
-            state.path(),
+            state.path().to_str().expect("tempdir path is UTF-8"),
             80,
             24,
             &["sleep".to_string(), "60".to_string()],

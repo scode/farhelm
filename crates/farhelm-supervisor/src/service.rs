@@ -306,10 +306,25 @@ impl Supervisor {
         let short = &id[..8];
         let tmux_name = format!("fh-{short}");
         let title = title.unwrap_or_else(|| {
+            // `cwd` arrived as a `String` over the protocol — farhelm-proto's
+            // UTF-8-only wire contract — so every component of `cwd_path`,
+            // including its basename, is UTF-8 by construction and
+            // `to_str()` on it cannot fail today. The `expect` documents and
+            // *enforces* that invariant rather than quietly relying on it:
+            // if `cwd` ever stopped being a validated `String` (e.g. a
+            // future caller threading an `OsString` through), this panics
+            // at the point of violation instead of falling back to
+            // "session" and silently mislabeling the session. The
+            // `unwrap_or` fallback below is unrelated to UTF-8 — it only
+            // covers a `cwd` with no basename at all (e.g. "/").
             cwd_path
                 .file_name()
-                .map(|n| n.to_string_lossy().into_owned())
-                .unwrap_or_else(|| "session".to_string())
+                .map(|n| {
+                    n.to_str()
+                        .expect("cwd arrived as UTF-8 via the protocol; its components are UTF-8")
+                })
+                .unwrap_or("session")
+                .to_owned()
         });
 
         let spec_path = self.state_dir.join("launch").join(format!("{id}.json"));
@@ -332,7 +347,7 @@ impl Supervisor {
         let cmd = window_command(&shell, &self.farhelm_exe, &spec_path);
         let pane = match self
             .tmux
-            .create_session(&tmux_name, &cwd_path, cols, rows, &cmd)
+            .create_session(&tmux_name, cwd, cols, rows, &cmd)
             .await
         {
             Ok(pane) => pane,
