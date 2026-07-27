@@ -49,10 +49,10 @@ pub struct SupervisorError {
 /// and `truncated` survive this call — the HTTP surface (PR6, PLAN_M2.md
 /// step 6) needs both to tell a user "showing N of M" instead of quietly
 /// truncating the list with no indication anything was cut. `GET
-/// /api/sessions` itself still serializes only `sessions` for now (see
-/// that handler); passing the other two through the wire is the next
-/// PR's job, not this one's.
-#[derive(Debug, Clone, PartialEq, Eq)]
+/// /api/sessions` now serializes this whole struct as its JSON body
+/// (`sessions`/`total`/`truncated`), which is why `Serialize` is derived
+/// below: the field names are the wire contract, not a private detail.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 pub struct SessionListing {
     pub sessions: Vec<SessionInfo>,
     /// The supervisor's full session count before any truncation — see

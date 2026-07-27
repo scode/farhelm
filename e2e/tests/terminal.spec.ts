@@ -170,6 +170,79 @@ test("create API reports precondition failures verbatim", async ({ request }) =>
   expect(await resp.text()).toContain("working directory does not exist");
 });
 
+// Request-level coverage for the stop/delete HTTP surface (PLAN_M2.md step
+// 6): the full UI flows (list view, stop/delete buttons, delete's
+// confirmation dialog) are the next two PRs, so this exercises the API
+// directly against the real stack, following the request-fixture style of
+// the create-API test above rather than driving a page. It creates its
+// own session (a long-running `sleep`, distinct from the shared
+// "e2e-session" every terminal test above depends on) so it can freely
+// stop and delete it without perturbing the rest of the suite.
+test("stop and delete a session through the HTTP API", async ({ request }) => {
+  const totalBefore = (await (await request.get("/api/sessions")).json())
+    .total;
+
+  const created = await request.post("/api/sessions", {
+    data: { cwd: "/tmp", invocation: "sleep 300" },
+  });
+  expect(created.status()).toBe(200);
+  const { id } = await created.json();
+
+  // Everything past creation is wrapped so a failed assertion here still
+  // cleans up: this suite is one shared, serially-run stack (see the
+  // config's fullyParallel/workers comment), so a leaked long-running
+  // `sleep 300` session would keep sitting in the list for every test
+  // after this one — and could cascade-fail any of them that assumes
+  // something about which sessions exist. The `finally` delete tolerates
+  // a 404 (and any other failure) because the happy path below already
+  // deletes the session itself; the cleanup call is only load-bearing
+  // when an assertion above threw first.
+  try {
+    const afterCreate = await (await request.get("/api/sessions")).json();
+    expect(afterCreate.total).toBe(totalBefore + 1);
+
+    const stopped = await request.post(`/api/sessions/${id}/stop`);
+    expect(stopped.status()).toBe(200);
+    expect(await stopped.json()).toEqual({});
+
+    // tmux marks the pane dead asynchronously once the killed process is
+    // reaped, so the next list poll (not the stop response itself) is what
+    // proves the kill actually took effect.
+    await expect
+      .poll(
+        async () => {
+          const listing = await (await request.get("/api/sessions")).json();
+          const session = listing.sessions.find((s: any) => s.id === id);
+          return session?.status?.state;
+        },
+        { timeout: 10_000, message: "stopped session must show as exited" },
+      )
+      .toBe("exited");
+
+    const deleted = await request.delete(`/api/sessions/${id}`);
+    expect(deleted.status()).toBe(200);
+    expect(await deleted.json()).toEqual({});
+
+    await expect
+      .poll(
+        async () => {
+          const listing = await (await request.get("/api/sessions")).json();
+          return listing.sessions.some((s: any) => s.id === id);
+        },
+        { timeout: 10_000, message: "deleted session must disappear from the list" },
+      )
+      .toBe(false);
+
+    const afterDelete = await (await request.get("/api/sessions")).json();
+    expect(afterDelete.total).toBe(totalBefore);
+  } finally {
+    // Best-effort: swallow everything, including a 404 for the (expected)
+    // case where the happy path already deleted the session. This must
+    // never throw over the top of a real assertion failure above.
+    await request.delete(`/api/sessions/${id}`).catch(() => {});
+  }
+});
+
 // Host/Origin validation is what keeps a hostile page from driving the
 // helm through DNS rebinding; loopback binding alone does not.
 test("requests from a foreign origin are refused", async ({ request }) => {

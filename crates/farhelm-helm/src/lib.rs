@@ -108,6 +108,8 @@ fn build_router(
 ) -> Router {
     let mut app = Router::new()
         .route("/api/sessions", get(list_sessions).post(create_session))
+        .route("/api/sessions/{id}/stop", axum::routing::post(stop_session))
+        .route("/api/sessions/{id}", axum::routing::delete(delete_session))
         .route("/api/sessions/{id}/term", get(term_ws))
         .with_state(Arc::new(AppState { client }));
 
@@ -410,22 +412,23 @@ async fn connect_supervisor(
     }
 }
 
-/// `GET /api/sessions` — today, just the supervisor's `sessions` vec,
-/// JSON-encoded as a bare array (each entry gaining the additive `status`
-/// field for free). `total`/`truncated` are NOT yet in the response body
-/// — threading them through the HTTP surface is PLAN_M2.md step 6, the
-/// next PR; this handler already has both in hand (`SessionListing`) but
-/// deliberately does not shape them into the body yet. The helm caches
+/// `GET /api/sessions` — the full `SessionListing` as JSON:
+/// `{"sessions": [...], "total": N, "truncated": bool}` (PLAN_M2.md step
+/// 6). This is a breaking shape change from M1's bare array, so this PR
+/// also updates the UI's `fetch_sessions` (farhelm-ui/src/lib.rs) in the
+/// same change — the object shape itself, and the `sessions` key
+/// specifically, are load-bearing for that caller today. `total` and
+/// `truncated` are threaded through the wire here but not yet consumed
+/// by the production UI (the tests here and in Playwright do read them):
+/// they are the contract the next PR's list UI ("showing N of M") builds
+/// against. The helm caches
 /// nothing before M6; supervisors are the authority (SPEC.md). The
 /// last-known-session cache that survives helm restarts arrives with
 /// M6's registry and stale-cache semantics (PLAN.md) — with one
 /// always-connected supervisor there is nothing for a cache to add.
 async fn list_sessions(State(state): State<Arc<AppState>>) -> impl IntoResponse {
     match state.client.list_sessions().await {
-        // `total`/`truncated` are not yet threaded through the HTTP body —
-        // that is the NEXT PR's job (PLAN_M2.md step 6); today's JSON
-        // gains only the per-session `status` field, additively.
-        Ok(listing) => axum::Json(listing.sessions).into_response(),
+        Ok(listing) => axum::Json(listing).into_response(),
         Err(e) => http_error(e),
     }
 }
@@ -466,6 +469,41 @@ async fn create_session(
         .await
     {
         Ok(session) => axum::Json(session).into_response(),
+        Err(e) => http_error(e),
+    }
+}
+
+/// `POST /api/sessions/{id}/stop` — kill the agent's process tree, leaving
+/// the session listed and its terminal viewable (SPEC.md's "stop", the
+/// recoverable operation the UI does not confirm). The body carries no
+/// information beyond success — an empty JSON object, so the response
+/// shape stays uniform with `delete_session` below and callers do not
+/// need to special-case "no content" bodies — and an unknown `id` reaches
+/// the browser as a 404 through `http_error`'s `SupervisorError` downcast.
+async fn stop_session(
+    State(state): State<Arc<AppState>>,
+    AxPath(id): AxPath<String>,
+) -> impl IntoResponse {
+    match state.client.stop_session(&id).await {
+        Ok(()) => axum::Json(serde_json::json!({})).into_response(),
+        Err(e) => http_error(e),
+    }
+}
+
+/// `DELETE /api/sessions/{id}` — remove a session and all its stored state
+/// (SPEC.md's "delete"). This handler enforces nothing about liveness: it
+/// deletes unconditionally, in any state. SPEC.md's confirm-when-alive
+/// rule is normatively a CLIENT responsibility — no UI calls this route
+/// yet, and when the UI PR adds the delete action, confirming before it
+/// sends this request is that PR's job, not something to retrofit here.
+/// Same empty-object success body as `stop_session`; an unknown `id` maps
+/// to 404.
+async fn delete_session(
+    State(state): State<Arc<AppState>>,
+    AxPath(id): AxPath<String>,
+) -> impl IntoResponse {
+    match state.client.delete_session(&id).await {
+        Ok(()) => axum::Json(serde_json::json!({})).into_response(),
         Err(e) => http_error(e),
     }
 }
@@ -1007,6 +1045,354 @@ mod tests {
         let session: SessionInfo = serde_json::from_slice(&body).unwrap();
         assert_eq!(session.id, "sess-1");
         assert_eq!(session.cwd, "/some/dir");
+
+        peer.await.unwrap();
+    }
+
+    /// `POST /api/sessions/{id}/stop` end to end: a scripted peer replies
+    /// `SessionStopped`, and the route must answer 200 with an empty JSON
+    /// object — the uniform success body `stop`/`delete` share so a caller
+    /// does not need to special-case "no content".
+    #[tokio::test]
+    async fn stop_session_happy_path_returns_200_with_empty_object_body() {
+        use farhelm_proto::ControlMsg;
+        use farhelm_proto::io::{FrameReader, FrameWriter, handshake, parse_control};
+        use tower::ServiceExt;
+
+        let (client_side, peer_side) = tokio::io::duplex(64 * 1024);
+        let peer = tokio::spawn(async move {
+            let (r, w) = tokio::io::split(peer_side);
+            let mut reader = FrameReader::new(r);
+            let mut writer = FrameWriter::new(w);
+            handshake(&mut reader, &mut writer, "supervisor")
+                .await
+                .unwrap();
+            let request = parse_control(&reader.read_frame().await.unwrap().unwrap()).unwrap();
+            let ControlMsg::StopSession { req_id, session_id } = request else {
+                panic!("expected StopSession, got {request:?}");
+            };
+            assert_eq!(session_id, "sess-1");
+            writer
+                .write_control(&ControlMsg::SessionStopped { req_id })
+                .await
+                .unwrap();
+        });
+
+        let (r, w) = tokio::io::split(client_side);
+        let client = super::SupervisorClient::start(r, w).await.unwrap();
+        let app = build_router(client, None, 7433);
+
+        let request = axum::http::Request::builder()
+            .method("POST")
+            .uri("/api/sessions/sess-1/stop")
+            .header("host", "127.0.0.1:7433")
+            .body(axum::body::Body::empty())
+            .unwrap();
+
+        let response = app.oneshot(request).await.unwrap();
+        assert_eq!(response.status(), axum::http::StatusCode::OK);
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let value: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(value, serde_json::json!({}));
+
+        peer.await.unwrap();
+    }
+
+    /// Stopping an unknown id must surface as a 404 carrying the
+    /// supervisor's own message verbatim — the same `SupervisorError`
+    /// downcast `http_error` uses everywhere else, exercised here through
+    /// the stop route specifically rather than assumed from the create/
+    /// attach coverage above.
+    ///
+    /// The scripted message is a sentinel unlikely to appear by accident
+    /// (not the generic "no such session" prose a supervisor might
+    /// plausibly emit for unrelated reasons), and the assertion checks the
+    /// COMPLETE body against it — a substring check would still pass if
+    /// `http_error` silently truncated, reworded, or wrapped the message in
+    /// extra context, none of which "verbatim" allows.
+    #[tokio::test]
+    async fn stop_session_unknown_id_returns_404_with_supervisor_message() {
+        use farhelm_proto::io::{FrameReader, FrameWriter, handshake, parse_control};
+        use farhelm_proto::{ControlMsg, ErrorKind};
+        use tower::ServiceExt;
+
+        const SENTINEL: &str = "SENTINEL-stop-9f3ac2: no such session";
+
+        let (client_side, peer_side) = tokio::io::duplex(64 * 1024);
+        let peer = tokio::spawn(async move {
+            let (r, w) = tokio::io::split(peer_side);
+            let mut reader = FrameReader::new(r);
+            let mut writer = FrameWriter::new(w);
+            handshake(&mut reader, &mut writer, "supervisor")
+                .await
+                .unwrap();
+            let request = parse_control(&reader.read_frame().await.unwrap().unwrap()).unwrap();
+            let ControlMsg::StopSession { req_id, .. } = request else {
+                panic!("expected StopSession, got {request:?}");
+            };
+            writer
+                .write_control(&ControlMsg::Error {
+                    req_id,
+                    message: SENTINEL.to_string(),
+                    kind: ErrorKind::NotFound,
+                })
+                .await
+                .unwrap();
+        });
+
+        let (r, w) = tokio::io::split(client_side);
+        let client = super::SupervisorClient::start(r, w).await.unwrap();
+        let app = build_router(client, None, 7433);
+
+        let request = axum::http::Request::builder()
+            .method("POST")
+            .uri("/api/sessions/sess-missing/stop")
+            .header("host", "127.0.0.1:7433")
+            .body(axum::body::Body::empty())
+            .unwrap();
+
+        let response = app.oneshot(request).await.unwrap();
+        assert_eq!(response.status(), axum::http::StatusCode::NOT_FOUND);
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        assert_eq!(
+            String::from_utf8_lossy(&body),
+            SENTINEL,
+            "body must carry the supervisor's own message verbatim, not a substring of it"
+        );
+
+        peer.await.unwrap();
+    }
+
+    /// `DELETE /api/sessions/{id}` happy path, mirroring the stop test
+    /// above: a scripted `SessionDeleted` reply must reach the caller as
+    /// 200 with the same empty-object body shape.
+    #[tokio::test]
+    async fn delete_session_happy_path_returns_200_with_empty_object_body() {
+        use farhelm_proto::ControlMsg;
+        use farhelm_proto::io::{FrameReader, FrameWriter, handshake, parse_control};
+        use tower::ServiceExt;
+
+        let (client_side, peer_side) = tokio::io::duplex(64 * 1024);
+        let peer = tokio::spawn(async move {
+            let (r, w) = tokio::io::split(peer_side);
+            let mut reader = FrameReader::new(r);
+            let mut writer = FrameWriter::new(w);
+            handshake(&mut reader, &mut writer, "supervisor")
+                .await
+                .unwrap();
+            let request = parse_control(&reader.read_frame().await.unwrap().unwrap()).unwrap();
+            let ControlMsg::DeleteSession { req_id, session_id } = request else {
+                panic!("expected DeleteSession, got {request:?}");
+            };
+            assert_eq!(session_id, "sess-1");
+            writer
+                .write_control(&ControlMsg::SessionDeleted { req_id })
+                .await
+                .unwrap();
+        });
+
+        let (r, w) = tokio::io::split(client_side);
+        let client = super::SupervisorClient::start(r, w).await.unwrap();
+        let app = build_router(client, None, 7433);
+
+        let request = axum::http::Request::builder()
+            .method("DELETE")
+            .uri("/api/sessions/sess-1")
+            .header("host", "127.0.0.1:7433")
+            .body(axum::body::Body::empty())
+            .unwrap();
+
+        let response = app.oneshot(request).await.unwrap();
+        assert_eq!(response.status(), axum::http::StatusCode::OK);
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let value: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(value, serde_json::json!({}));
+
+        peer.await.unwrap();
+    }
+
+    /// Deleting an unknown id must 404 with the supervisor's message
+    /// verbatim, the delete-side twin of
+    /// `stop_session_unknown_id_returns_404_with_supervisor_message` — see
+    /// that test's docs for why the assertion checks the complete body
+    /// against a sentinel rather than a generic substring.
+    #[tokio::test]
+    async fn delete_session_unknown_id_returns_404_with_supervisor_message() {
+        use farhelm_proto::io::{FrameReader, FrameWriter, handshake, parse_control};
+        use farhelm_proto::{ControlMsg, ErrorKind};
+        use tower::ServiceExt;
+
+        const SENTINEL: &str = "SENTINEL-delete-7b1e04: no such session";
+
+        let (client_side, peer_side) = tokio::io::duplex(64 * 1024);
+        let peer = tokio::spawn(async move {
+            let (r, w) = tokio::io::split(peer_side);
+            let mut reader = FrameReader::new(r);
+            let mut writer = FrameWriter::new(w);
+            handshake(&mut reader, &mut writer, "supervisor")
+                .await
+                .unwrap();
+            let request = parse_control(&reader.read_frame().await.unwrap().unwrap()).unwrap();
+            let ControlMsg::DeleteSession { req_id, .. } = request else {
+                panic!("expected DeleteSession, got {request:?}");
+            };
+            writer
+                .write_control(&ControlMsg::Error {
+                    req_id,
+                    message: SENTINEL.to_string(),
+                    kind: ErrorKind::NotFound,
+                })
+                .await
+                .unwrap();
+        });
+
+        let (r, w) = tokio::io::split(client_side);
+        let client = super::SupervisorClient::start(r, w).await.unwrap();
+        let app = build_router(client, None, 7433);
+
+        let request = axum::http::Request::builder()
+            .method("DELETE")
+            .uri("/api/sessions/sess-missing")
+            .header("host", "127.0.0.1:7433")
+            .body(axum::body::Body::empty())
+            .unwrap();
+
+        let response = app.oneshot(request).await.unwrap();
+        assert_eq!(response.status(), axum::http::StatusCode::NOT_FOUND);
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        assert_eq!(
+            String::from_utf8_lossy(&body),
+            SENTINEL,
+            "body must carry the supervisor's own message verbatim, not a substring of it"
+        );
+
+        peer.await.unwrap();
+    }
+
+    /// `GET /api/sessions` now serializes the WHOLE `SessionListing`, not
+    /// just the bare `sessions` array (PLAN_M2.md step 6) — this pins the
+    /// object shape end to end, with sentinel `total`/`truncated` values
+    /// deliberately far from `sessions.len()` so a regression that drops
+    /// either field, or recomputes `total` from the list length instead of
+    /// forwarding the supervisor's own count, shows up immediately.
+    #[tokio::test]
+    async fn list_sessions_returns_full_listing_object_shape() {
+        use farhelm_proto::ControlMsg;
+        use farhelm_proto::io::{FrameReader, FrameWriter, handshake, parse_control};
+
+        let (client_side, peer_side) = tokio::io::duplex(64 * 1024);
+        let peer = tokio::spawn(async move {
+            let (r, w) = tokio::io::split(peer_side);
+            let mut reader = FrameReader::new(r);
+            let mut writer = FrameWriter::new(w);
+            handshake(&mut reader, &mut writer, "supervisor")
+                .await
+                .unwrap();
+            let request = parse_control(&reader.read_frame().await.unwrap().unwrap()).unwrap();
+            let ControlMsg::ListSessions { req_id } = request else {
+                panic!("expected ListSessions, got {request:?}");
+            };
+            writer
+                .write_control(&ControlMsg::SessionList {
+                    req_id,
+                    sessions: vec![farhelm_proto::SessionInfo {
+                        id: "sess-1".into(),
+                        title: "sess-1".into(),
+                        cwd: "/sess-1".into(),
+                        invocation: "agent".into(),
+                        status: farhelm_proto::SessionStatus::Alive,
+                    }],
+                    total: 42,
+                    truncated: true,
+                })
+                .await
+                .unwrap();
+        });
+
+        let (r, w) = tokio::io::split(client_side);
+        let client = super::SupervisorClient::start(r, w).await.unwrap();
+        let app = build_router(client, None, 7433);
+
+        let request = axum::http::Request::builder()
+            .method("GET")
+            .uri("/api/sessions")
+            .header("host", "127.0.0.1:7433")
+            .body(axum::body::Body::empty())
+            .unwrap();
+
+        let response = tower::ServiceExt::oneshot(app, request).await.unwrap();
+        assert_eq!(response.status(), axum::http::StatusCode::OK);
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let value: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(value["total"], 42);
+        assert_eq!(value["truncated"], true);
+        assert_eq!(value["sessions"][0]["id"], "sess-1");
+
+        peer.await.unwrap();
+    }
+
+    /// The DNS-rebinding origin guard is route-agnostic middleware, and the
+    /// Playwright suite (`terminal.spec.ts`, "requests from a foreign
+    /// origin are refused") already proves it holds through the real
+    /// stack. What that suite does NOT cover is this PR's own change: that
+    /// the guard sits in front of the new mutating routes too, not just
+    /// `GET /api/sessions`, and that a refused request never reaches the
+    /// supervisor at all. A loopback `Host` (same-origin by that half of
+    /// the check) paired with a foreign `Origin` isolates exactly the
+    /// half the browser itself supplies from the requesting page's origin
+    /// — same setup as `foreign_or_missing_authorities_are_refused`
+    /// above, aimed at the stop route instead of the pure function.
+    ///
+    /// Proof that no frame reached the supervisor comes from EOF, not a
+    /// timeout: `oneshot` consumes the router (and with it the only
+    /// remaining `Arc<SupervisorClient>`) once the response is produced, so
+    /// the transport closes right after — the scripted peer reading a clean
+    /// `Ok(None)` at that point means nothing but the handshake was ever
+    /// written to it. A frame arriving instead (a bypassed guard) would read
+    /// as `Ok(Some(_))`, which is what this actually distinguishes.
+    #[tokio::test]
+    async fn foreign_origin_is_refused_on_the_stop_route() {
+        use farhelm_proto::io::{FrameReader, FrameWriter, handshake};
+        use tower::ServiceExt;
+
+        let (client_side, peer_side) = tokio::io::duplex(64 * 1024);
+        let peer = tokio::spawn(async move {
+            let (r, w) = tokio::io::split(peer_side);
+            let mut reader = FrameReader::new(r);
+            let mut writer = FrameWriter::new(w);
+            handshake(&mut reader, &mut writer, "supervisor")
+                .await
+                .unwrap();
+            assert!(
+                reader.read_frame().await.unwrap().is_none(),
+                "stop request must never reach the supervisor for a foreign origin"
+            );
+        });
+
+        let (r, w) = tokio::io::split(client_side);
+        let client = super::SupervisorClient::start(r, w).await.unwrap();
+        let app = build_router(client, None, 7433);
+
+        let request = axum::http::Request::builder()
+            .method("POST")
+            .uri("/api/sessions/sess-1/stop")
+            .header("host", "127.0.0.1:7433")
+            .header("origin", "http://evil.example")
+            .body(axum::body::Body::empty())
+            .unwrap();
+
+        let response = app.oneshot(request).await.unwrap();
+        assert_eq!(response.status(), axum::http::StatusCode::FORBIDDEN);
 
         peer.await.unwrap();
     }
