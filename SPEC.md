@@ -77,9 +77,9 @@ helm running on a Linux host is reached through its web UI, period.
 The Mac is not architecturally special: it runs a normal supervisor that any
 helm — the app's embedded one, or one on a Linux host — can register and
 drive. The supervisor is a plain command-line process on every platform:
-run the binary with arguments in a terminal and you have a working host —
-that path always exists, on any platform, and is how you try Farhelm without
-a bunch of fuss. System integration is layered on top of that, not baked in.
+`farhelm supervisor run` in a terminal and you have a working host — that
+path always exists, on any platform, and is how you try Farhelm without a
+bunch of fuss. System integration is layered on top of that, not baked in.
 On Linux, v1 ships that layer as user-level systemd units (auto-start at
 boot, which the durability promises assume) — never system units, never
 root. On the Mac, v1 ships no system integration
@@ -548,7 +548,8 @@ deliberately local one.
   context, so browser clipboard features work fully. The token still
   matters on loopback: it keeps other local processes and users out. The
   helm generates it on first run; the user views or rotates it on the
-  helm's machine (app UI or helm CLI), and the browser asks for it once per
+  helm's machine (the app UI, or `farhelm helm token show|rotate`), and the
+  browser asks for it once per
   device and keeps a session thereafter. Rotating the token invalidates
   every device session — that is what rotation is for. The native app embeds its helm;
   that edge is local.
