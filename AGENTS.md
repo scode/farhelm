@@ -27,6 +27,8 @@ Before creating or updating a PR, or claiming work is done, run exactly what CI 
 - `cargo fmt --all -- --check`
 - `cargo clippy --all-targets -- -D warnings`
 - `cargo test`
+- `cargo check -p farhelm-ui --features desktop` — the desktop renderer compiles nowhere else; needs the webkit2gtk/gtk
+  dev packages (see the CI job for the apt list).
 - `dprint check`
 - `cd e2e && npx playwright test` — the browser end-to-end suite. It needs `cargo build` and
   `cd crates/farhelm-ui && dx build --platform web --release` first (it drives the built web UI against a real helm and
