@@ -85,6 +85,37 @@ struct AppState {
     client: Arc<SupervisorClient>,
 }
 
+/// Assemble the routes, optional static UI service, and loopback-origin
+/// middleware that `run()` serves.
+///
+/// Pulled out of `run()` so tests can drive the real middleware stack
+/// in-process (via `tower::ServiceExt::oneshot`) against a scripted
+/// `SupervisorClient`, instead of only exercising handlers directly and
+/// silently skipping the origin guard and its response headers.
+fn build_router(
+    client: Arc<SupervisorClient>,
+    ui_dist: Option<&std::path::Path>,
+    port: u16,
+) -> Router {
+    let mut app = Router::new()
+        .route("/api/sessions", get(list_sessions).post(create_session))
+        .route("/api/sessions/{id}/term", get(term_ws))
+        .with_state(Arc::new(AppState { client }));
+
+    if let Some(dist) = ui_dist {
+        let serve = tower_http::services::ServeDir::new(dist).fallback(
+            tower_http::services::ServeFile::new(dist.join("index.html")),
+        );
+        app = app.fallback_service(serve);
+    }
+
+    app.layer(axum::middleware::from_fn(
+        move |req: axum::extract::Request, next: axum::middleware::Next| {
+            require_loopback_origin(port, req, next)
+        },
+    ))
+}
+
 /// Run the helm until the process is killed: connect to the one
 /// supervisor, optionally create the argv-specified startup session, and
 /// serve the API and UI on loopback.
@@ -130,24 +161,7 @@ pub async fn run(args: HelmArgs) -> anyhow::Result<()> {
         info!(id = %session.id, title = %session.title, "startup session created");
     }
 
-    let mut app = Router::new()
-        .route("/api/sessions", get(list_sessions).post(create_session))
-        .route("/api/sessions/{id}/term", get(term_ws))
-        .with_state(Arc::new(AppState { client }));
-
-    if let Some(dist) = &args.ui_dist {
-        let serve = tower_http::services::ServeDir::new(dist).fallback(
-            tower_http::services::ServeFile::new(dist.join("index.html")),
-        );
-        app = app.fallback_service(serve);
-    }
-
-    let port = addr.port();
-    let app = app.layer(axum::middleware::from_fn(
-        move |req: axum::extract::Request, next: axum::middleware::Next| async move {
-            require_loopback_origin(port, req, next).await
-        },
-    ));
+    let app = build_router(client, args.ui_dist.as_deref(), addr.port());
 
     // Printed on stdout, not logged: the README tells the user to open
     // this URL, and tracing goes to stderr behind an env filter.
@@ -561,7 +575,7 @@ async fn serve_term(
 
 #[cfg(test)]
 mod tests {
-    use super::origin_is_allowed;
+    use super::{build_router, origin_is_allowed};
     use axum::http::HeaderMap;
 
     const PORT: u16 = 7433;
@@ -759,5 +773,98 @@ mod tests {
             ),
             PORT
         ));
+    }
+
+    /// `POST /api/sessions` end to end through the real axum handler and
+    /// middleware stack, with a scripted supervisor peer standing in for
+    /// `farhelm-supervisor`.
+    ///
+    /// PLAN_M1.md makes this endpoint the single creation path: every
+    /// caller — the M1 CLI flags today, the M2 GUI session-creation dialog
+    /// next — lands on the same API, never bypassing it. Despite that, no
+    /// *successful* request previously exercised the handler: the
+    /// Playwright e2e suite deliberately covers only a failure path
+    /// (create in a nonexistent working directory), and the Rust e2e
+    /// tests call `SupervisorClient::create_session` directly, which
+    /// bypasses both the handler and the `CreateReq` struct's
+    /// `#[serde(default)]` cols/rows fields entirely. That left the 80x24
+    /// default — the size an agent's first output wraps to before any
+    /// browser has attached and reported a real size — pinned nowhere.
+    /// This test closes that gap: it omits cols/rows/title from the
+    /// request body, asserts the peer received exactly the defaults, and
+    /// checks the JSON reply shape a caller actually depends on.
+    #[tokio::test]
+    async fn create_session_request_with_omitted_dimensions_uses_80x24_defaults() {
+        use farhelm_proto::io::{FrameReader, FrameWriter, handshake, parse_control};
+        use farhelm_proto::{ControlMsg, Frame, SessionInfo};
+        use tower::ServiceExt;
+
+        let (client_side, peer_side) = tokio::io::duplex(64 * 1024);
+        let peer = tokio::spawn(async move {
+            let (r, w) = tokio::io::split(peer_side);
+            let mut reader = FrameReader::new(r);
+            let mut writer = FrameWriter::new(w);
+            handshake(&mut reader, &mut writer, "supervisor")
+                .await
+                .unwrap();
+            let request = parse_control(&reader.read_frame().await.unwrap().unwrap()).unwrap();
+            let ControlMsg::CreateSession {
+                req_id,
+                cwd,
+                invocation,
+                title,
+                cols,
+                rows,
+            } = request
+            else {
+                panic!("expected CreateSession, got {request:?}");
+            };
+            // The contract under test: a caller that omits cols/rows must
+            // still reach the supervisor with the documented 80x24
+            // defaults. (Without the serde defaults the request would not
+            // reach the supervisor at all — axum rejects a body missing
+            // non-optional fields during deserialization.)
+            assert_eq!((cols, rows), (80, 24), "serde defaults must be 80x24");
+            assert_eq!(cwd, "/some/dir");
+            assert_eq!(invocation, "some-agent");
+            assert_eq!(title, None);
+            writer
+                .write_frame(&Frame::control(&ControlMsg::SessionCreated {
+                    req_id,
+                    session: SessionInfo {
+                        id: "sess-1".into(),
+                        title: "some-agent".into(),
+                        cwd: "/some/dir".into(),
+                        invocation: "some-agent".into(),
+                    },
+                }))
+                .await
+                .unwrap();
+        });
+
+        let (r, w) = tokio::io::split(client_side);
+        let client = super::SupervisorClient::start(r, w).await.unwrap();
+        let app = build_router(client, None, 7433);
+
+        let request = axum::http::Request::builder()
+            .method("POST")
+            .uri("/api/sessions")
+            .header("host", "127.0.0.1:7433")
+            .header("content-type", "application/json")
+            .body(axum::body::Body::from(
+                serde_json::json!({"cwd": "/some/dir", "invocation": "some-agent"}).to_string(),
+            ))
+            .unwrap();
+
+        let response = app.oneshot(request).await.unwrap();
+        assert_eq!(response.status(), axum::http::StatusCode::OK);
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let session: SessionInfo = serde_json::from_slice(&body).unwrap();
+        assert_eq!(session.id, "sess-1");
+        assert_eq!(session.cwd, "/some/dir");
+
+        peer.await.unwrap();
     }
 }

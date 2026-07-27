@@ -1734,6 +1734,7 @@ dependencies = [
  "serde_json",
  "shell-words",
  "tokio",
+ "tower",
  "tower-http",
  "tracing",
 ]

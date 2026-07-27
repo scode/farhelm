@@ -19,3 +19,6 @@ shell-words.workspace = true
 tokio.workspace = true
 tower-http.workspace = true
 tracing.workspace = true
+
+[dev-dependencies]
+tower.workspace = true
