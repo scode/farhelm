@@ -1,8 +1,9 @@
 # Farhelm plan
 
 NOTE: This is the overall build plan: the motivation for how the work is ordered, and the coarse milestone ladder. Only
-the current milestone is ever planned in detail — see PLAN_M1.md. Later milestones get their own PLAN_M*.md when their
-turn comes; pre-emptive detail would just be fiction that dogfooding invalidates.
+the current milestone is ever planned in detail — see PLAN_M2.md (PLAN_M0.md and PLAN_M1.md are history). Later
+milestones get their own PLAN_M*.md when their turn comes; pre-emptive detail would just be fiction that dogfooding
+invalidates.
 
 ## How this gets built
 
@@ -28,9 +29,11 @@ Consequences of that stance:
 - **M1 — walking skeleton.** One remote session end to end: real helm, protocol, supervisor, tmux, xterm.js; reconnect
   with replay; fake agent and Playwright harness; web and desktop UI from one crate. Planned in detail in PLAN_M1.md.
 - **M2 — sessions as a managed thing.** Multiple sessions, the flat list, create/open/stop/delete from the GUI,
-  supervisor SQLite, helm session cache. Also the protocol growth the list forces: caps or pagination for the
+  supervisor SQLite. Also the protocol growth the list forces: a hard cap with total count and truncated flag on the
   session-list response (today it is one frame, defused to a per-request error when oversize), and widening the protocol
-  error taxonomy as the GUI's error surfacing demands it. Dogfooding starts here.
+  error taxonomy as the GUI's error surfacing demands it. The list is poll-refreshed in M2; live push is M5's. Real
+  cursor pagination of the list is deferred to M6 with the cap standing in. Dogfooding starts here. Planned in detail in
+  PLAN_M2.md.
 - **M2.5 — terminal-path backpressure.** The end-to-end flow control SPEC_impl.md already specifies: `term.write()`
   completion callbacks drive watermark pause/resume over the WebSocket, the supervisor throttles its pane reads, and the
   internal queues become bounded. Deferred out of M1 (the review flagged the unbounded queues); scheduled right after
@@ -42,14 +45,22 @@ Consequences of that stance:
   about.
 - **M4 — attachments and terminal tabs.** Paste/drop to path-at-cursor; tabs in the session cwd.
 - **M5 — status and profiles.** Running/waiting/idle heuristics with per-agent sharpening, list filtering, profile CRUD
-  and starter profiles.
-- **M6 — multi-host.** Registry and host management, local-host supervisor, stale-cache semantics, version-skew refusal.
+  and starter profiles. Also live push of session-list changes to connected clients, replacing M2's polling — placed
+  here because status transitions are what make polling genuinely painful, and the push channel serves both.
+- **M6 — multi-host.** Registry and host management, local-host supervisor, stale-cache semantics — including the
+  helm-side persistent last-known session cache (helm.db) that SPEC.md's stale-list behavior needs, deferred out of M2
+  where a single always-connected supervisor made it dead weight. Version-skew refusal. Real cursor pagination of the
+  session list replaces M2's hard cap here, when multi-host aggregation is what could actually grow lists past it.
   Deliberately late: M1's argv-specified single host carries dogfooding a long way, and the registry is bookkeeping, not
   risk.
 - **M6.5 — test-coverage backfill.** Coverage debt deliberately parked while the focus was end-to-end progress, tracked
-  here so it cannot be quietly forgotten. Known entry: unit coverage for terminal.js's `onBinary` byte conversion, which
-  needs a JS test-harness decision first (the repo has only Playwright today, and adopting a JS unit runner for one
-  small function was judged premature during the M1 review). Placed late because the parked items are small, stable code
-  with low regression risk; anything that starts changing often should be pulled forward instead of waiting here.
+  here so it cannot be quietly forgotten. Known entries: unit coverage for terminal.js's `onBinary` byte conversion,
+  which needs a JS test-harness decision first (the repo has only Playwright today, and adopting a JS unit runner for
+  one small function was judged premature during the M1 review); a fake-agent script that enables mouse modes on cue
+  plus an e2e test pinning mouse-mode restoration on reattach (the restoration code shipped in M1 untested — PaneModes
+  captures the modes, but nothing exercises them end to end); and a reusable drive-a-real-agent Playwright helper that
+  bakes in the lessons from the first agent-driven smoke test (Claude Code's trust dialog, its fast-typing paste
+  heuristic swallowing Enter, reply-marker detection). Placed late because the parked items are small, stable code with
+  low regression risk; anything that starts changing often should be pulled forward instead of waiting here.
 - **M7 — the outer ring.** Web-token auth and device sessions, `farhelm spawn` and agent-spawned sessions (deliberately
   late as well), archive, provisioning, Mac app bundling.
