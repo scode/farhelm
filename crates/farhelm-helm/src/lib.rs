@@ -20,6 +20,7 @@ use axum::{
     routing::get,
 };
 use clap::Args;
+use farhelm_proto::ErrorKind;
 use serde::Deserialize;
 use std::net::{Ipv4Addr, SocketAddr};
 use std::path::PathBuf;
@@ -28,7 +29,7 @@ use std::sync::Arc;
 use tracing::{error, info};
 
 mod client;
-pub use client::{SupervisorClient, TermEvent};
+pub use client::{SupervisorClient, SupervisorError, TermEvent};
 
 /// CLI arguments for `farhelm helm run`. Lives here (not in the bin
 /// crate) so the helm's surface and its implementation evolve together.
@@ -460,24 +461,41 @@ async fn create_session(
     }
 }
 
-/// Render an error as a 500 whose body is the error chain in full.
+/// Render an error as an HTTP response whose body is the error chain in
+/// full and whose status reflects what the supervisor actually classified.
 ///
-/// Deliberately unsanitized: SPEC.md requires concrete, actionable errors
-/// in the client, and the intended reader is the user's own UI. Note the
-/// honest caveat: until the web token lands (M7), the loopback port is
-/// reachable by every local account, so "no untrusted caller" is not yet
-/// true — which is a reason to keep credentials out of error text (see
-/// the invocation-parse context in the supervisor), not to strip detail
-/// the user needs. The body is displayed as text, never interpreted,
-/// which is what makes it safe to pass a remote supervisor's message
-/// through verbatim.
+/// The status mapping is only as honest as the M1 supervisor's own
+/// classification: `NotFound` and `InvalidRequest` map to 404/400
+/// respectively when a `SupervisorClient` request surfaces a
+/// [`SupervisorError`] with that kind anywhere in its chain (the walk
+/// mirrors the supervisor's own `error_kind` helper, for the same
+/// reason — a `SupervisorError` can sit under context layers this client
+/// or an intermediate caller added). Anything else — no `SupervisorError`
+/// in the chain at all, or one explicitly carrying `Internal` — is a 500:
+/// the honest default for a failure the caller could not have avoided by
+/// sending a different request.
+///
+/// The body itself is deliberately unsanitized regardless of status:
+/// SPEC.md requires concrete, actionable errors in the client, and the
+/// intended reader is the user's own UI. Note the honest caveat: until the
+/// web token lands (M7), the loopback port is reachable by every local
+/// account, so "no untrusted caller" is not yet true — which is a reason
+/// to keep credentials out of error text (see the invocation-parse context
+/// in the supervisor), not to strip detail the user needs. The body is
+/// displayed as text, never interpreted, which is what makes it safe to
+/// pass a remote supervisor's message through verbatim.
 fn http_error(e: anyhow::Error) -> axum::response::Response {
+    let status = match e
+        .chain()
+        .find_map(|c| c.downcast_ref::<SupervisorError>())
+        .map(|s| s.kind)
+    {
+        Some(ErrorKind::NotFound) => axum::http::StatusCode::NOT_FOUND,
+        Some(ErrorKind::InvalidRequest) => axum::http::StatusCode::BAD_REQUEST,
+        Some(ErrorKind::Internal) | None => axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+    };
     // The UI shows this body verbatim.
-    (
-        axum::http::StatusCode::INTERNAL_SERVER_ERROR,
-        format!("{e:#}"),
-    )
-        .into_response()
+    (status, format!("{e:#}")).into_response()
 }
 
 /// Initial terminal size, carried as query parameters because a WebSocket
@@ -613,7 +631,7 @@ async fn serve_term(
 
 #[cfg(test)]
 mod tests {
-    use super::{HelmArgs, build_router, origin_is_allowed};
+    use super::{HelmArgs, SupervisorError, build_router, origin_is_allowed};
     use axum::http::HeaderMap;
 
     const PORT: u16 = 7433;
@@ -978,5 +996,122 @@ mod tests {
         assert_eq!(session.cwd, "/some/dir");
 
         peer.await.unwrap();
+    }
+
+    /// `http_error`'s status mapping, pinned through the real handler and
+    /// middleware stack rather than by calling `http_error` directly: what
+    /// actually matters is that a `ControlMsg::Error`'s `kind` survives
+    /// `SupervisorClient::request`'s downcast and reaches the HTTP status,
+    /// not just that the mapping function has the right match arms.
+    ///
+    /// `InvalidRequest` is exercised here (400) rather than `NotFound`
+    /// (404): both go through the identical downcast path in `http_error`,
+    /// and the supervisor-side classification for a bad cwd — the
+    /// realistic `InvalidRequest` case — is itself pinned end-to-end
+    /// against a real supervisor in `farhelm/tests/e2e.rs`
+    /// (`create_in_missing_directory_errors`). This test's job is narrower
+    /// and complementary: prove the *client-and-HTTP* half of the chain
+    /// (scripted `Error` reply in, status code out) without needing a real
+    /// supervisor, tmux, or filesystem precondition to produce one.
+    #[tokio::test]
+    async fn create_session_error_reply_maps_to_bad_request_status() {
+        use farhelm_proto::io::{FrameReader, FrameWriter, handshake, parse_control};
+        use farhelm_proto::{ControlMsg, ErrorKind, Frame};
+        use tower::ServiceExt;
+
+        let (client_side, peer_side) = tokio::io::duplex(64 * 1024);
+        let peer = tokio::spawn(async move {
+            let (r, w) = tokio::io::split(peer_side);
+            let mut reader = FrameReader::new(r);
+            let mut writer = FrameWriter::new(w);
+            handshake(&mut reader, &mut writer, "supervisor")
+                .await
+                .unwrap();
+            let request = parse_control(&reader.read_frame().await.unwrap().unwrap()).unwrap();
+            let ControlMsg::CreateSession { req_id, .. } = request else {
+                panic!("expected CreateSession, got {request:?}");
+            };
+            writer
+                .write_frame(&Frame::control(&ControlMsg::Error {
+                    req_id,
+                    message: "working directory does not exist: /nope".into(),
+                    kind: ErrorKind::InvalidRequest,
+                }))
+                .await
+                .unwrap();
+        });
+
+        let (r, w) = tokio::io::split(client_side);
+        let client = super::SupervisorClient::start(r, w).await.unwrap();
+        let app = build_router(client, None, 7433);
+
+        let request = axum::http::Request::builder()
+            .method("POST")
+            .uri("/api/sessions")
+            .header("host", "127.0.0.1:7433")
+            .header("content-type", "application/json")
+            .body(axum::body::Body::from(
+                serde_json::json!({"cwd": "/nope", "invocation": "some-agent"}).to_string(),
+            ))
+            .unwrap();
+
+        let response = app.oneshot(request).await.unwrap();
+        assert_eq!(response.status(), axum::http::StatusCode::BAD_REQUEST);
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        assert!(
+            String::from_utf8_lossy(&body).contains("does not exist"),
+            "body must still carry the supervisor's concrete message"
+        );
+
+        peer.await.unwrap();
+    }
+
+    /// `http_error`'s downcast must find a [`SupervisorError`] under a
+    /// `.context(...)` layer, not just at the root — an intermediate
+    /// caller (`connect_supervisor`, say) is free to add its own context
+    /// on the way out, and the status mapping must survive that. Spec:
+    /// `NotFound` → 404 regardless of how many context layers sit on top.
+    #[test]
+    fn http_error_maps_context_wrapped_not_found_to_404() {
+        let err = anyhow::Error::new(SupervisorError {
+            kind: farhelm_proto::ErrorKind::NotFound,
+            message: "no such session: s1".to_string(),
+        })
+        .context("attaching to terminal");
+        let response = super::http_error(err);
+        assert_eq!(response.status(), axum::http::StatusCode::NOT_FOUND);
+    }
+
+    /// Spec: a `SupervisorError` explicitly carrying `Internal` maps to
+    /// 500 — the honest default for a failure the caller could not have
+    /// avoided by sending a different request, distinct from `NotFound`/
+    /// `InvalidRequest` mapping to their own codes above.
+    #[test]
+    fn http_error_maps_internal_supervisor_error_to_500() {
+        let err = anyhow::Error::new(SupervisorError {
+            kind: farhelm_proto::ErrorKind::Internal,
+            message: "tmux hiccup".to_string(),
+        });
+        let response = super::http_error(err);
+        assert_eq!(
+            response.status(),
+            axum::http::StatusCode::INTERNAL_SERVER_ERROR
+        );
+    }
+
+    /// Spec: an error chain with no `SupervisorError` anywhere in it — a
+    /// bare `anyhow` error from a layer that never classified anything —
+    /// must default to 500 rather than panicking or silently guessing a
+    /// more specific status.
+    #[test]
+    fn http_error_maps_unclassified_error_to_500() {
+        let err = anyhow::anyhow!("supervisor connection closed");
+        let response = super::http_error(err);
+        assert_eq!(
+            response.status(),
+            axum::http::StatusCode::INTERNAL_SERVER_ERROR
+        );
     }
 }

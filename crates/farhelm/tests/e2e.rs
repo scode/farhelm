@@ -15,9 +15,9 @@
 //! (the built multi-call binary, which carries the fake agent and the
 //! launch shim) is only available to the defining crate's tests.
 
-use farhelm_helm::{SupervisorClient, TermEvent};
+use farhelm_helm::{SupervisorClient, SupervisorError, TermEvent};
 use farhelm_proto::io::parse_control;
-use farhelm_proto::{ControlMsg, Frame, FrameKind, SessionInfo};
+use farhelm_proto::{ControlMsg, ErrorKind, Frame, FrameKind, SessionInfo};
 use farhelm_supervisor::service::{Supervisor, handle_connection};
 use std::io;
 use std::pin::Pin;
@@ -618,7 +618,11 @@ async fn attachment_channels_must_be_nonzero_and_unique() {
         .unwrap();
     assert!(matches!(
         parse_control(&reader.read_frame().await.unwrap().unwrap()).unwrap(),
-        ControlMsg::Error { req_id: 1, .. }
+        ControlMsg::Error {
+            req_id: 1,
+            kind: ErrorKind::InvalidRequest,
+            ..
+        }
     ));
 
     writer
@@ -656,7 +660,11 @@ async fn attachment_channels_must_be_nonzero_and_unique() {
                 continue;
             }
             match parse_control(&frame).unwrap() {
-                ControlMsg::Error { req_id: 3, .. } => break,
+                ControlMsg::Error {
+                    req_id: 3,
+                    kind: ErrorKind::InvalidRequest,
+                    ..
+                } => break,
                 ControlMsg::Attached { req_id: 3, .. } => {
                     panic!("duplicate attachment channel was accepted")
                 }
@@ -679,6 +687,13 @@ async fn create_in_missing_directory_errors() {
         .await
         .expect_err("create should fail");
     assert!(err.to_string().contains("working directory does not exist"));
+    assert_eq!(
+        err.downcast_ref::<SupervisorError>()
+            .expect("a bad-cwd failure must carry a SupervisorError")
+            .kind,
+        ErrorKind::InvalidRequest,
+        "a missing directory is the caller's mistake, not a server fault"
+    );
     assert!(h.client.list_sessions().await.unwrap().is_empty());
 }
 
@@ -695,6 +710,64 @@ async fn create_in_a_regular_file_reports_not_a_directory() {
         .await
         .expect_err("create should reject a regular file as cwd");
     assert!(err.to_string().contains("is not a directory"));
+    assert_eq!(
+        err.downcast_ref::<SupervisorError>()
+            .expect("a not-a-directory failure must carry a SupervisorError")
+            .kind,
+        ErrorKind::InvalidRequest,
+        "cwd being a file is the caller's mistake, not a server fault"
+    );
+    assert!(h.client.list_sessions().await.unwrap().is_empty());
+}
+
+/// A cwd nested UNDER a regular file (`/tmp/somefile/child`) is a
+/// different OS error than either "missing" or "cwd itself is a file": the
+/// non-final path component being a file surfaces as
+/// `io::ErrorKind::NotADirectory`, not `NotFound`. Still the caller's
+/// mistake — a typo'd path segment, most likely — so it must classify the
+/// same way as the sibling cases above, not fall through to the
+/// catch-all `Internal` default.
+#[tokio::test]
+async fn create_under_a_regular_file_is_invalid_request() {
+    let h = harness().await;
+    let file = tempfile::NamedTempFile::new().unwrap();
+    let nested = file.path().join("child");
+    let err = h
+        .client
+        .create_session(&nested.to_string_lossy(), "true", None, 80, 24)
+        .await
+        .expect_err("create should reject a cwd nested under a regular file");
+    assert_eq!(
+        err.downcast_ref::<SupervisorError>()
+            .expect("a not-a-directory failure must carry a SupervisorError")
+            .kind,
+        ErrorKind::InvalidRequest,
+        "a path nested under a file is the caller's mistake, not a server fault"
+    );
+    assert!(h.client.list_sessions().await.unwrap().is_empty());
+}
+
+/// A NUL byte in the cwd text cannot address anything on a POSIX
+/// filesystem; the OS rejects it before `create_session` ever reaches a
+/// syscall that could distinguish "missing" from "exists". This surfaces
+/// as `io::ErrorKind::InvalidInput`, the same caller-fault bucket as the
+/// other malformed-path cases.
+#[tokio::test]
+async fn create_with_nul_byte_in_cwd_is_invalid_request() {
+    let h = harness().await;
+    let cwd = "/tmp/has-a-\u{0}-nul-byte";
+    let err = h
+        .client
+        .create_session(cwd, "true", None, 80, 24)
+        .await
+        .expect_err("create should reject a cwd containing a NUL byte");
+    assert_eq!(
+        err.downcast_ref::<SupervisorError>()
+            .expect("an invalid-cwd-text failure must carry a SupervisorError")
+            .kind,
+        ErrorKind::InvalidRequest,
+        "a NUL byte in the cwd is the caller's mistake, not a server fault"
+    );
     assert!(h.client.list_sessions().await.unwrap().is_empty());
 }
 
@@ -1030,16 +1103,37 @@ async fn unparseable_invocations_error_without_creating_a_session() {
         .await
         .expect_err("empty invocation must fail");
     assert!(empty.to_string().contains("empty"));
+    assert_eq!(
+        empty
+            .downcast_ref::<SupervisorError>()
+            .expect("an empty invocation must carry a SupervisorError")
+            .kind,
+        ErrorKind::InvalidRequest,
+        "an empty invocation is the caller's mistake, not a server fault"
+    );
 
     let unterminated = h
         .client
         .create_session(&cwd, "claude 'unterminated", None, 80, 24)
         .await
         .expect_err("unparseable invocation must fail");
+    let unterminated_text = unterminated.to_string();
+    assert!(unterminated_text.contains("parsing agent invocation"));
+    // `RequestError` is attached as `.context(...)` over the `shell_words`
+    // parse failure specifically so its own diagnostic keeps reaching the
+    // user (see that struct's docs) — pin that it actually does, not just
+    // that our own classification message survives.
     assert!(
+        unterminated_text.contains("missing closing quote"),
+        "error lost shell_words's own diagnostic: {unterminated_text}"
+    );
+    assert_eq!(
         unterminated
-            .to_string()
-            .contains("parsing agent invocation")
+            .downcast_ref::<SupervisorError>()
+            .expect("an unparseable invocation must carry a SupervisorError")
+            .kind,
+        ErrorKind::InvalidRequest,
+        "a shell-syntax error in the invocation is the caller's mistake, not a server fault"
     );
 
     assert!(h.client.list_sessions().await.unwrap().is_empty());
@@ -1694,6 +1788,13 @@ async fn attach_to_unknown_session_errors_and_connection_survives() {
         err.to_string().contains("no such session"),
         "error must name the problem, got: {err:#}"
     );
+    assert_eq!(
+        err.downcast_ref::<SupervisorError>()
+            .expect("an unknown-session attach must carry a SupervisorError")
+            .kind,
+        ErrorKind::NotFound,
+        "an unknown session id is a not-found, not a bad request or server fault"
+    );
 
     // The connection is still serviceable after the refused request.
     assert!(
@@ -1734,6 +1835,18 @@ async fn cutover_failure_is_request_local() {
     assert!(
         format!("{error:#}").contains("no sessions"),
         "attach error lost tmux's diagnostic: {error:#}"
+    );
+    // A tmux hiccup has no `RequestError` opinion attached anywhere in the
+    // supervisor, so `error_kind` falls through to its `Internal` default —
+    // pin that default explicitly, since it is the realistic path most
+    // unclassified supervisor failures take.
+    assert_eq!(
+        error
+            .downcast_ref::<SupervisorError>()
+            .expect("a tmux failure during cutover must still carry a SupervisorError")
+            .kind,
+        ErrorKind::Internal,
+        "an unclassified tmux failure is a server fault, not the caller's mistake"
     );
     let listed = h
         .client

@@ -155,11 +155,17 @@ test("second client takes over; first shows the detach banner", async ({
 // even though M1's UI never POSTs. Only the failure case is exercised
 // here: a successful POST would add a second session to a stack whose UI
 // shows one, which would perturb the tests above.
+// The status code is part of the contract, not an implementation detail:
+// a missing cwd is the caller's own precondition failure (4xx), distinct
+// from a server-side fault (5xx) the caller could not have avoided by
+// sending a different request. The supervisor classifies this as
+// InvalidRequest and farhelm-helm's http_error maps that to 400 — see
+// ErrorKind in farhelm-proto.
 test("create API reports precondition failures verbatim", async ({ request }) => {
   const resp = await request.post("/api/sessions", {
     data: { cwd: "/nonexistent/definitely/not/here", invocation: "true" },
   });
-  expect(resp.status()).toBe(500);
+  expect(resp.status()).toBe(400);
   expect(await resp.text()).toContain("working directory does not exist");
 });
 

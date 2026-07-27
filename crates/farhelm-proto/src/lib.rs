@@ -63,7 +63,15 @@ pub mod io;
 /// frame or message changes; the receiving side refuses a mismatch with a
 /// clear error per SPEC.md's version-skew rule. Build versions travel
 /// alongside for diagnostics only and never gate anything.
-pub const PROTOCOL_VERSION: u32 = 1;
+///
+/// Bumped to 2 when `ControlMsg::Error` gained its required `kind` field.
+/// That is a wire-format change, not a compatible addition: an old peer's
+/// decoder has no default for a missing field and errors on the first
+/// `Error` message it receives — which, unlike a refused handshake, tears
+/// down an already-established, possibly multi-session connection instead
+/// of failing cleanly before anything was shared. Version skew must be
+/// caught at the hello, not discovered mid-connection.
+pub const PROTOCOL_VERSION: u32 = 2;
 
 /// The build version compiled into this binary, carried in the hello for
 /// diagnostics.
@@ -84,6 +92,28 @@ pub struct Frame {
     pub kind: FrameKind,
     pub channel: u32,
     pub body: Vec<u8>,
+}
+
+/// Coarse classification of `ControlMsg::Error`, deliberately minimal: the
+/// three kinds are exactly the statuses the M1 HTTP surface can honestly
+/// distinguish (404 / 400 / 500). M2's GUI error surfacing grows this
+/// taxonomy (PLAN.md) once there is a UI that can act on finer distinctions.
+/// Adding a variant here is still a wire-format change — an older peer's
+/// decoder has no fallback for a tag it does not recognize — so it takes
+/// the same `PROTOCOL_VERSION` bump as any other incompatible change; there
+/// is just no need to over-design the set now, before M2's requirements are
+/// known.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ErrorKind {
+    /// The referenced resource (a session id, typically) does not exist.
+    NotFound,
+    /// The request itself is malformed or fails a precondition the caller
+    /// could have avoided (bad cwd, empty invocation, oversized request).
+    InvalidRequest,
+    /// Anything else: a server-side fault the caller could not have
+    /// prevented by sending a different request.
+    Internal,
 }
 
 /// Frames larger than this are rejected at decode time. Terminal output is
@@ -336,6 +366,9 @@ pub enum ControlMsg {
         /// 0 when the error is not tied to a specific request.
         req_id: u64,
         message: String,
+        /// Coarse classification an HTTP-facing caller can map to a status
+        /// code without parsing `message` (see [`ErrorKind`]).
+        kind: ErrorKind,
     },
 }
 
@@ -491,6 +524,31 @@ mod tests {
                 "channel": 9,
                 "cols": 80,
                 "rows": 24,
+            })
+        );
+    }
+
+    /// `ControlMsg::Error`'s `kind` field is the thing `PROTOCOL_VERSION`
+    /// was bumped for (see that const's docs), so its exact snake_case wire
+    /// form deserves the same golden-JSON pinning as any other message: a
+    /// serde attribute change here (dropping `rename_all`, renaming a
+    /// variant) would compile and pass every round-trip test while quietly
+    /// producing bytes an unmodified peer cannot parse.
+    #[test]
+    fn error_kind_json_shape_is_pinned() {
+        let msg = ControlMsg::Error {
+            req_id: 7,
+            message: "no such session: abc".to_string(),
+            kind: ErrorKind::NotFound,
+        };
+        let json = serde_json::to_value(&msg).unwrap();
+        assert_eq!(
+            json,
+            serde_json::json!({
+                "type": "error",
+                "req_id": 7,
+                "message": "no such session: abc",
+                "kind": "not_found",
             })
         );
     }

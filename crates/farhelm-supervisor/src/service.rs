@@ -14,7 +14,7 @@ use crate::launch::{LaunchSpec, resolve_shell, window_command};
 use crate::tmux::TmuxDriver;
 use anyhow::Context;
 use farhelm_proto::io::{FrameReader, FrameWriter, handshake, parse_control};
-use farhelm_proto::{ControlMsg, Frame, SessionInfo};
+use farhelm_proto::{ControlMsg, ErrorKind, Frame, SessionInfo};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -67,6 +67,62 @@ const CREATE_FIELD_CAP: usize = 64 * 1024;
 /// steady-state backpressure while a connection is still active is out of
 /// scope here (M2.5, PLAN.md).
 const WRITER_DRAIN_TIMEOUT: Duration = Duration::from_secs(5);
+
+/// A classified request failure: attached at the few call sites that
+/// actually know *why* a request failed (bad cwd, unparseable invocation,
+/// ...), and recovered later by `error_kind` to pick the `ControlMsg::Error`
+/// reply's `kind`.
+///
+/// This is deliberately the only place `ErrorKind` gets decided: everything
+/// else that can fail (a tmux hiccup, an I/O error reading directory
+/// metadata) has no opinion on classification and is left to default to
+/// `ErrorKind::Internal` via `error_kind`'s fallback — every fallible call
+/// site does not have to pick a kind for errors it cannot actually
+/// distinguish. (Some handlers build a classified `ControlMsg::Error` reply
+/// directly instead of going through `anyhow`, e.g. the `Attach` handler's
+/// channel-in-use check — this type covers only the `anyhow::Result`-typed
+/// paths through `create_session`.)
+///
+/// Attach this either as the root cause (`anyhow::Error::new`, when there
+/// is no underlying error worth preserving) or as `.context(...)` layered
+/// over one (when there is, e.g. a `shell_words` parse failure — see the
+/// invocation-parsing call site). Both work identically for classification:
+/// `anyhow::Error::downcast_ref` searches the root error AND every context
+/// layer at any depth, so `error_kind` finds a `RequestError` wherever it
+/// was attached, however much further context piles on top afterwards.
+/// Using it as context also means its own `Display` (`"{message}"`) layers
+/// over the wrapped cause's, so `{e:#}` — what callers render for the user
+/// — still shows both.
+#[derive(Debug, thiserror::Error)]
+#[error("{message}")]
+struct RequestError {
+    kind: ErrorKind,
+    message: String,
+}
+
+impl RequestError {
+    fn new(kind: ErrorKind, message: impl Into<String>) -> RequestError {
+        RequestError {
+            kind,
+            message: message.into(),
+        }
+    }
+}
+
+/// Recovers the `ErrorKind` a handler attached via [`RequestError`].
+///
+/// `downcast_ref` (not a hand-rolled `Error::source()` walk) is what makes
+/// this indifferent to whether `RequestError` sits at the root of the
+/// `anyhow::Error` or several `.context(...)` layers down — see that
+/// struct's docs. Anything with no `RequestError` anywhere in its chain — a
+/// tmux failure, a filesystem error with no classification opinion —
+/// reports `ErrorKind::Internal`, the honest default for a failure no call
+/// site claimed a more specific reason for.
+fn error_kind(e: &anyhow::Error) -> ErrorKind {
+    e.downcast_ref::<RequestError>()
+        .map(|r| r.kind)
+        .unwrap_or(ErrorKind::Internal)
+}
 
 /// A session as the supervisor tracks it: the wire-visible metadata plus
 /// the two tmux handles that address its terminal.
@@ -284,11 +340,44 @@ impl Supervisor {
         // symlink loop, or a failing filesystem.
         match tokio::fs::metadata(&cwd_path).await {
             Ok(metadata) if metadata.is_dir() => {}
-            Ok(_) => anyhow::bail!("working directory is not a directory: {cwd}"),
+            Ok(_) => {
+                return Err(RequestError::new(
+                    ErrorKind::InvalidRequest,
+                    format!("working directory is not a directory: {cwd}"),
+                )
+                .into());
+            }
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-                anyhow::bail!("working directory does not exist: {cwd}");
+                return Err(RequestError::new(
+                    ErrorKind::InvalidRequest,
+                    format!("working directory does not exist: {cwd}"),
+                )
+                .into());
+            }
+            // `NotADirectory` is a path like `/tmp/some-file/child`, where a
+            // non-final component is a regular file — a distinct precondition
+            // from the top-level "cwd itself is a file" case above, but the
+            // same caller mistake. `InvalidInput` is the OS rejecting the
+            // path text itself (a NUL byte, say) before it ever reaches the
+            // filesystem. Both are things the caller could have avoided by
+            // sending a different `cwd`, unlike the fallback below.
+            Err(error)
+                if matches!(
+                    error.kind(),
+                    std::io::ErrorKind::NotADirectory | std::io::ErrorKind::InvalidInput
+                ) =>
+            {
+                return Err(RequestError::new(
+                    ErrorKind::InvalidRequest,
+                    format!("working directory is not usable: {cwd} ({error})"),
+                )
+                .into());
             }
             Err(error) => {
+                // Not classified: this is an I/O failure the caller could
+                // not have avoided by sending a different request (a
+                // permission problem, a symlink loop, a failing
+                // filesystem), so it defaults to `ErrorKind::Internal`.
                 return Err(error)
                     .with_context(|| format!("reading working directory metadata for {cwd}"));
             }
@@ -296,10 +385,18 @@ impl Supervisor {
         // The invocation itself stays out of the error: it may carry
         // credentials (`--api-key ...`), and this message travels into
         // the HTTP error body and the helm's stderr/journal. shell-words'
-        // own error names the syntax problem.
-        let argv = shell_words::split(invocation).context("parsing agent invocation")?;
+        // own error names the syntax problem. Attached as `.context(...)`
+        // (not the root cause) specifically so that diagnostic keeps
+        // reaching the user through the `{e:#}` chain — `RequestError` is
+        // still findable via `downcast_ref` at this depth (see its docs).
+        let argv = shell_words::split(invocation).context(RequestError::new(
+            ErrorKind::InvalidRequest,
+            "parsing agent invocation",
+        ))?;
         if argv.is_empty() {
-            anyhow::bail!("agent invocation is empty");
+            return Err(
+                RequestError::new(ErrorKind::InvalidRequest, "agent invocation is empty").into(),
+            );
         }
 
         let id = uuid::Uuid::new_v4().to_string();
@@ -635,11 +732,15 @@ fn reply_frame(msg: &ControlMsg) -> Frame {
         Frame::control(&ControlMsg::Error {
             req_id,
             message: format!(
-                "response too large to send ({} bytes; limit {}); session list pagination \
-                 is planned for M2, which will avoid this for ListSessions",
+                "reply encodes to {} bytes, exceeding the {}-byte frame limit; session list \
+                 pagination is planned for M2, which will avoid this for ListSessions",
                 frame.encoded_len(),
                 farhelm_proto::MAX_FRAME_LEN,
             ),
+            // Encoding succeeded; the encoded frame is simply too big for
+            // the wire. Still the server's own limit, not something the
+            // caller's request got wrong.
+            kind: ErrorKind::Internal,
         })
     } else {
         frame
@@ -683,6 +784,7 @@ async fn handle_control(
                         "cwd, invocation, and title together are {field_len} bytes, \
                          exceeding the {CREATE_FIELD_CAP}-byte limit"
                     ),
+                    kind: ErrorKind::InvalidRequest,
                 });
                 return;
             }
@@ -694,6 +796,7 @@ async fn handle_control(
                 Err(e) => send(&ControlMsg::Error {
                     req_id,
                     message: format!("{e:#}"),
+                    kind: error_kind(&e),
                 }),
             }
         }
@@ -720,7 +823,11 @@ async fn handle_control(
                 } else {
                     format!("attachment channel {channel} is already in use")
                 };
-                send(&ControlMsg::Error { req_id, message });
+                send(&ControlMsg::Error {
+                    req_id,
+                    message,
+                    kind: ErrorKind::InvalidRequest,
+                });
                 return;
             }
             let entry = sup.sessions.lock().await.get(&session_id).cloned();
@@ -728,6 +835,7 @@ async fn handle_control(
                 send(&ControlMsg::Error {
                     req_id,
                     message: format!("no such session: {session_id}"),
+                    kind: ErrorKind::NotFound,
                 });
                 return;
             };
@@ -787,6 +895,7 @@ async fn handle_control(
                     send(&ControlMsg::Error {
                         req_id,
                         message: format!("{e:#}"),
+                        kind: error_kind(&e),
                     });
                     return;
                 }
@@ -963,8 +1072,9 @@ mod tests {
     /// every attachment on it) over what should have been a single
     /// request's failure. Assert the substitute frame decodes as an
     /// `Error` correlated to the same `req_id` the caller was waiting on,
-    /// and that its message actually names the problem (a size figure and
-    /// the word "large") rather than being an opaque placeholder string.
+    /// and that its message actually names the problem (both the size
+    /// figure and the fact that it exceeds the limit) rather than being an
+    /// opaque placeholder string.
     ///
     /// `ListSessions` is the one M1 reply built entirely from unbounded
     /// caller-controlled data (session titles), with no pagination until
@@ -996,6 +1106,7 @@ mod tests {
             ControlMsg::Error {
                 req_id: got_req_id,
                 message,
+                kind,
             } => {
                 assert_eq!(got_req_id, req_id);
                 assert!(
@@ -1003,8 +1114,13 @@ mod tests {
                     "error message must name the limit that was exceeded: {message}"
                 );
                 assert!(
-                    message.contains("large"),
+                    message.contains("exceeding"),
                     "error message must describe the problem concretely: {message}"
+                );
+                assert_eq!(
+                    kind,
+                    ErrorKind::Internal,
+                    "the reply was too big for the wire, not something the caller's request got wrong"
                 );
             }
             other => panic!("expected ControlMsg::Error, got {other:?}"),
@@ -1094,11 +1210,17 @@ mod tests {
             ControlMsg::Error {
                 req_id: got_req_id,
                 message,
+                kind,
             } => {
                 assert_eq!(got_req_id, req_id);
                 assert!(
                     message.contains(&CREATE_FIELD_CAP.to_string()),
                     "error message must name the limit that was exceeded: {message}"
+                );
+                assert_eq!(
+                    kind,
+                    ErrorKind::InvalidRequest,
+                    "an oversized request is the caller's mistake, not a server fault"
                 );
             }
             other => panic!("expected ControlMsg::Error, got {other:?}"),

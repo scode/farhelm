@@ -6,7 +6,7 @@
 //! transport" true in practice. Kept separate from the codec so the codec
 //! stays IO-free and golden-testable.
 
-use crate::{ControlMsg, Frame, PROTOCOL_VERSION};
+use crate::{ControlMsg, ErrorKind, Frame, PROTOCOL_VERSION};
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 
 /// Incremental frame reader: buffers bytes from the stream and yields
@@ -159,11 +159,17 @@ pub async fn handshake<R: AsyncRead + Unpin, W: AsyncWrite + Unpin>(
         PROTOCOL_VERSION,
         crate::BUILD_VERSION
     );
-    // Best effort: tell the peer why before hanging up.
+    // Best effort: tell the peer why before hanging up. Both the helm and
+    // the supervisor call `handshake` and refuse a mismatch the same way —
+    // there is no distinguished "server" side here, just whichever end
+    // notices the peer's version differs from its own.
     let _ = writer
         .write_control(&ControlMsg::Error {
             req_id: 0,
             message: err.clone(),
+            // This side's own refusal to proceed, not a complaint about
+            // anything the peer's request body contained.
+            kind: ErrorKind::Internal,
         })
         .await;
     Err(std::io::Error::other(err))
@@ -198,10 +204,21 @@ mod tests {
         })
         .await
         .unwrap();
-        // It receives our hello, then the refusal.
+        // It receives our hello, then the refusal — pinning both fields a
+        // caller relies on to tell this apart from a request-scoped
+        // failure: `req_id: 0` (nothing was waiting on this reply) and
+        // `kind: Internal` (this side's own refusal, not a complaint about
+        // the peer's request).
         let _their_hello = r.read_frame().await.unwrap().unwrap();
         let refusal = parse_control(&r.read_frame().await.unwrap().unwrap()).unwrap();
-        assert!(matches!(refusal, ControlMsg::Error { .. }));
+        assert!(matches!(
+            refusal,
+            ControlMsg::Error {
+                req_id: 0,
+                kind: ErrorKind::Internal,
+                ..
+            }
+        ));
 
         let err = good.await.unwrap().unwrap_err();
         assert!(err.to_string().contains("protocol version mismatch"));
