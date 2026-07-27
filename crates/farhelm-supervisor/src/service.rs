@@ -7,10 +7,20 @@
 //! port (SPEC.md): the unix socket plus ssh exec is the entire reachable
 //! surface.
 //!
-//! M1 scope: sessions live in memory and tmux is the truth. SQLite
-//! arrives with multi-session management in M2 (PLAN_M1.md).
+//! M2 scope: SQLite (`crate::store`) is the truth that a session exists
+//! and what its metadata is, written at creation and reloaded at startup
+//! so sessions survive a supervisor restart. tmux stays the truth for
+//! whether a session's terminal is currently alive; a session whose own
+//! tmux session no longer exists — whether because the whole private tmux
+//! server did not survive a restart, or because just that one session was
+//! killed independently — is still listed (metadata came back from the
+//! DB) but loses its terminal handle — see `SessionEntry`'s `terminal`
+//! field and the `Attach`/`Resize` handlers' handling of `None`.
+//! PLAN_M2.md's "restart gap" paragraph is the contract; M3 replaces this
+//! crude exited-unknown answer with real interrupted classification.
 
 use crate::launch::{LaunchSpec, resolve_shell, window_command};
+use crate::store::{SessionStore, StoredSession};
 use crate::tmux::{InputClient, TmuxDriver};
 use anyhow::Context;
 use farhelm_proto::io::{FrameReader, FrameWriter, handshake, parse_control};
@@ -124,19 +134,50 @@ fn error_kind(e: &anyhow::Error) -> ErrorKind {
         .unwrap_or(ErrorKind::Internal)
 }
 
-/// A session as the supervisor tracks it: the wire-visible metadata plus
-/// the two tmux handles that address its terminal.
+/// Best-effort credential-hygiene cleanup: remove `path`, treating its
+/// absence as success (the shim may already have consumed and unlinked
+/// it) and logging anything else as a warning naming both the file and
+/// what it was, rather than propagating — every call site here is itself
+/// already unwinding a different failure, and this cleanup must not mask
+/// that original error with an unrelated filesystem one.
+async fn best_effort_remove(path: &Path, what: &str) {
+    match tokio::fs::remove_file(path).await {
+        Ok(()) => {}
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+        Err(e) => {
+            warn!(path = %path.display(), error = %e, "could not remove {what}");
+        }
+    }
+}
+
+/// The two tmux handles that address one session's terminal.
 ///
-/// Both handles are needed and neither substitutes for the other: session
-/// name is the target for anything window-scoped (`resize-window`, the
+/// Both are needed and neither substitutes for the other: session name is
+/// the target for anything window-scoped (`resize-window`, the
 /// control-mode attach), pane id (`%N`) for anything pane-scoped
-/// (`send-keys`, `capture-pane`, format queries). Entries are immutable
-/// once created — shared as `Arc` and never mutated in place — so nothing
-/// has to hold the session map while talking to tmux.
-struct SessionEntry {
-    info: SessionInfo,
+/// (`send-keys`, `capture-pane`, format queries).
+struct Terminal {
     tmux_name: String,
     pane: String,
+}
+
+/// A session as the supervisor tracks it: the wire-visible metadata plus
+/// its terminal handle, if it still has one.
+///
+/// `terminal` is `None` for exactly one reason: this entry was
+/// reconstructed from a SQLite row whose tmux session `has_session` no
+/// longer finds (`Supervisor::reload_sessions`) — the restart-gap case
+/// PLAN_M2.md specifies. A session created
+/// in this same process always gets `Some` immediately; nothing in a
+/// live process ever demotes an entry from `Some` to `None` after the
+/// fact — that would require noticing an already-open terminal died,
+/// which is M3's interrupted-classification job, not this PR's. Entries
+/// are otherwise immutable once created — shared as `Arc` and never
+/// mutated in place — so nothing has to hold the session map while
+/// talking to tmux.
+struct SessionEntry {
+    info: SessionInfo,
+    terminal: Option<Terminal>,
 }
 
 /// The one live attachment a session may have (SPEC.md: at most one,
@@ -187,6 +228,9 @@ struct ActiveAttach {
 pub struct Supervisor {
     state_dir: PathBuf,
     tmux: TmuxDriver,
+    /// Session metadata's durable half — see `crate::store` and the
+    /// module docs above for the split of truth this implements.
+    store: SessionStore,
     sessions: Mutex<HashMap<String, Arc<SessionEntry>>>,
     attachments: Mutex<HashMap<String, ActiveAttach>>,
     /// This binary's own path: the launch shim is a subcommand of it.
@@ -210,18 +254,92 @@ impl Supervisor {
         farhelm_exe: PathBuf,
     ) -> anyhow::Result<Arc<Supervisor>> {
         // 0700 on both: the socket and the launch specs (which hold full
-        // agent command lines) live here. See ensure_private_dir.
+        // agent command lines) live here. See ensure_private_dir. The
+        // database opened just below relies on this same boundary for its
+        // own confidentiality (see `SessionStore::open`'s docs), so it
+        // must not be opened before this call.
         crate::ensure_private_dir(state_dir).await?;
         crate::ensure_private_dir(&state_dir.join("launch")).await?;
+
+        // Store before tmux, deliberately: opening the DB (or applying its
+        // schema) is the one step in this constructor that can fail for
+        // reasons unrelated to tmux at all (a corrupt file, an
+        // unrecognized schema version), and rows can be loaded without a
+        // tmux server yet existing — liveness is only decided later, once
+        // one does. Doing this first means a DB failure aborts
+        // construction having started nothing persistent; the old
+        // ordering (`ensure_server` first) left a freshly started tmux
+        // server — `exit-empty off`, so it does not even exit on its own —
+        // behind a constructor that then failed on the database.
+        let store = SessionStore::open(&state_dir.join("supervisor.db")).await?;
         let tmux = TmuxDriver::new(state_dir);
         tmux.ensure_server().await?;
+
+        let sessions = Self::reload_sessions(&store, &tmux).await?;
+
         Ok(Arc::new(Supervisor {
             state_dir: state_dir.to_path_buf(),
             tmux,
-            sessions: Mutex::new(HashMap::new()),
+            store,
+            sessions: Mutex::new(sessions),
             attachments: Mutex::new(HashMap::new()),
             farhelm_exe,
         }))
+    }
+
+    /// Rebuild the in-memory session map from SQLite plus a tmux liveness
+    /// probe per row: alive rows become a normal live `SessionEntry`, rows
+    /// whose tmux session tmux no longer recognizes become the
+    /// restart-gap's terminal-less entry.
+    ///
+    /// Called twice, for two different reasons. `new_with_exe` calls it
+    /// once so an embedder or test that only ever constructs a
+    /// `Supervisor` — never calling `serve()` — still gets a populated
+    /// map. `serve()` calls it AGAIN, immediately after acquiring the
+    /// exclusivity lock and before accepting any connection, because the
+    /// first call can be stale: two supervisor processes can overlap
+    /// during a handoff (the old one still running, the new one
+    /// constructing), and the old process can create a session — an
+    /// insert this process's earlier load already missed — and only then
+    /// exit, releasing the lock. Without a second load taken under the
+    /// lock, this process would serve a map missing that session for its
+    /// entire lifetime, since nothing else ever refreshes it wholesale.
+    /// Replacing `self.sessions` wholesale is only safe where no
+    /// attachment can yet exist against the entries being replaced —
+    /// true at both call sites (construction, and pre-accept in `serve`)
+    /// but not a general-purpose operation this type exposes elsewhere.
+    async fn reload_sessions(
+        store: &SessionStore,
+        tmux: &TmuxDriver,
+    ) -> anyhow::Result<HashMap<String, Arc<SessionEntry>>> {
+        let mut sessions = HashMap::new();
+        for row in store.load_all().await? {
+            let terminal = if tmux.has_session(&row.tmux_name).await? {
+                Some(Terminal {
+                    tmux_name: row.tmux_name,
+                    pane: row.pane,
+                })
+            } else {
+                info!(
+                    session = %row.id,
+                    "session's tmux session no longer exists; listing without a terminal"
+                );
+                None
+            };
+            sessions.insert(
+                row.id.clone(),
+                Arc::new(SessionEntry {
+                    info: SessionInfo {
+                        id: row.id,
+                        title: row.title,
+                        cwd: row.cwd,
+                        invocation: row.invocation,
+                    },
+                    terminal,
+                }),
+            );
+        }
+        Ok(sessions)
     }
 
     /// The supervisor's unix socket path within a state dir. Shared with
@@ -260,6 +378,18 @@ impl Supervisor {
                 self.state_dir.display()
             );
         }
+        // Reload the session map now that exclusivity is actually held.
+        // The load `new_with_exe` already did can be stale: this
+        // process's construction can overlap a still-running predecessor
+        // during a handoff, which can insert a session (and exit,
+        // releasing the lock) after that first load already ran. Nothing
+        // else in this process ever refreshes the map wholesale, so
+        // without this second pass such a session would be permanently
+        // missing from `sessions` for this process's entire lifetime.
+        // Safe to replace outright here: the lock was just acquired and
+        // no connection has been accepted yet, so no attachment can exist
+        // against any entry this replaces.
+        *self.sessions.lock().await = Self::reload_sessions(&self.store, &self.tmux).await?;
         // Holding the lock proves any existing socket file is a leftover
         // from a dead supervisor (the lock dies with its process), so
         // removing it is safe.
@@ -410,8 +540,17 @@ impl Supervisor {
         }
 
         let id = uuid::Uuid::new_v4().to_string();
-        let short = &id[..8];
-        let tmux_name = format!("fh-{short}");
+        // The FULL uuid, not a truncated prefix: an 8-hex-char prefix
+        // collides often enough in practice for two sessions — one live,
+        // one a dead row surviving in SQLite across a restart — to
+        // plausibly share a tmux name, which would cross-wire attach
+        // between an unrelated pair of sessions after a reload. The
+        // schema's `UNIQUE` constraint on `tmux_name` (see `store.rs`)
+        // backstops this at the DB layer; a full UUID is what makes that
+        // constraint never fire in the first place. Dashes are legal in
+        // tmux session names (verified empirically against a scratch
+        // server).
+        let tmux_name = format!("fh-{id}");
         let title = title.unwrap_or_else(|| {
             // `cwd` arrived as a `String` over the protocol — farhelm-proto's
             // UTF-8-only wire contract — so every component of `cwd_path`,
@@ -435,9 +574,10 @@ impl Supervisor {
         });
 
         let spec_path = self.state_dir.join("launch").join(format!("{id}.json"));
+        let status_file_path = self.state_dir.join("launch").join(format!("{id}.status"));
         let spec = LaunchSpec {
             argv,
-            status_file: self.state_dir.join("launch").join(format!("{id}.status")),
+            status_file: status_file_path.clone(),
         };
         // 0600 from the first byte: the spec holds the full agent command
         // line, which users do put credentials into (`--api-key ...`).
@@ -479,13 +619,64 @@ impl Supervisor {
             cwd: cwd.to_string(),
             invocation: invocation.to_string(),
         };
+
+        // DB insert AFTER the tmux session already exists: a session that
+        // exists in tmux but was never recorded would silently vanish from
+        // the list on the next restart, so a failure here must fail the
+        // whole create — the tmux session just created is torn back down
+        // (best effort) rather than left running and unlisted with no way
+        // for the caller to learn its id.
+        if let Err(e) = self
+            .store
+            .insert_session(StoredSession {
+                id: id.clone(),
+                title: info.title.clone(),
+                cwd: info.cwd.clone(),
+                invocation: info.invocation.clone(),
+                tmux_name: tmux_name.clone(),
+                pane: pane.clone(),
+            })
+            .await
+        {
+            // The DB error is the root cause throughout — it is what
+            // actually failed the create — but a kill failure on top of it
+            // is not safe to only log: it means an untracked tmux session
+            // may now be running with nobody able to learn its id from the
+            // caller's point of view, which the returned error must say so
+            // the caller (and whoever reads the resulting log/HTTP body)
+            // has a chance of noticing and cleaning it up by hand.
+            let mut result = e.context("recording new session in the database");
+            if let Err(kill_err) = self.tmux.kill_session(&tmux_name).await {
+                warn!(
+                    session = %id, error = %kill_err,
+                    "could not kill tmux session after its DB insert failed; \
+                     it may now be running unlisted"
+                );
+                result = result.context(format!(
+                    "additionally, could not kill tmux session {tmux_name} for session {id} \
+                     after the DB insert failed ({kill_err:#}); the agent may still be running \
+                     unlisted"
+                ));
+            }
+            // The shim may already have consumed and unlinked the spec by
+            // now (it does so as soon as it has read it) — that is the
+            // ordinary case and not a problem, hence tolerating NotFound.
+            // But if it has NOT run yet, killing the session guarantees it
+            // never will, and nothing else would ever unlink a file
+            // holding the agent's full command line, credentials
+            // included. Same reasoning for the status file, which the
+            // shim may have started writing.
+            best_effort_remove(&spec_path, "launch spec").await;
+            best_effort_remove(&status_file_path, "launch status file").await;
+            return Err(result);
+        }
+
         info!(session = %id, tmux = %tmux_name, %pane, "session created");
         self.sessions.lock().await.insert(
             id,
             Arc::new(SessionEntry {
                 info: info.clone(),
-                tmux_name,
-                pane,
+                terminal: Some(Terminal { tmux_name, pane }),
             }),
         );
         Ok(info)
@@ -866,6 +1057,23 @@ async fn handle_control(
                 });
                 return;
             };
+            // The restart-gap case (PLAN_M2.md): this entry was reloaded
+            // from SQLite at startup and its tmux session was gone by
+            // then. Reporting `NotFound` here — rather than fabricating a
+            // dead terminal to attach to — is the same "do not guess"
+            // discipline SPEC.md applies elsewhere; the session stays
+            // visible in the list either way.
+            let Some(terminal) = entry.terminal.as_ref() else {
+                send(&ControlMsg::Error {
+                    req_id,
+                    message: format!(
+                        "session {session_id} has no terminal: the supervisor (or its tmux \
+                         server) restarted after the agent ended"
+                    ),
+                    kind: ErrorKind::NotFound,
+                });
+                return;
+            };
 
             // The whole takeover — kick the old attachment, set up tmux,
             // install the new one — runs under one lock. Without it, two
@@ -895,7 +1103,11 @@ async fn handle_control(
             // mutation the incumbent would have seen, and a later prep
             // failure would have left its terminal reflowed to a size
             // nobody is using.
-            if let Err(e) = sup.tmux.resize_window(&entry.tmux_name, cols, rows).await {
+            if let Err(e) = sup
+                .tmux
+                .resize_window(&terminal.tmux_name, cols, rows)
+                .await
+            {
                 warn!(session = %session_id, error = %e, "resize during attach failed");
             }
 
@@ -913,7 +1125,7 @@ async fn handle_control(
             // detached and reports only this attach request as failed.
             let (modes, prefill, mut stream) = match sup
                 .tmux
-                .open_replay_stream(&entry.tmux_name, &entry.pane)
+                .open_replay_stream(&terminal.tmux_name, &terminal.pane)
                 .await
             {
                 Ok(parts) => parts,
@@ -934,7 +1146,7 @@ async fn handle_control(
             // stdin. A failure here must tear down the replay stream just
             // opened above: leaving it live would attach this session to
             // a client nothing will ever read from or write to again.
-            let input = match sup.tmux.open_input_client(&entry.pane).await {
+            let input = match sup.tmux.open_input_client(&terminal.pane).await {
                 Ok(input) => input,
                 Err(e) => {
                     drop(attachments);
@@ -1072,10 +1284,24 @@ async fn handle_control(
                     .get(&session_id)
                     .is_some_and(|a| a.channel == channel && a.notify.same_channel(tx));
                 if owns {
+                    // `owns` being true is only possible if a terminal
+                    // exists: the Attach handler never registers an
+                    // attachment for a terminal-less entry (see its
+                    // restart-gap check), so an owned attachment with no
+                    // terminal here means that invariant broke elsewhere —
+                    // worth failing loudly over, not papering past.
+                    let terminal = entry.terminal.as_ref().expect(
+                        "attachments are only ever registered for entries with a terminal — \
+                         see the Attach handler",
+                    );
                     // Fire-and-forget: a resize has no req_id to answer,
                     // and a tmux failure here must not take the
                     // connection (and every other session on it) down.
-                    if let Err(e) = sup.tmux.resize_window(&entry.tmux_name, cols, rows).await {
+                    if let Err(e) = sup
+                        .tmux
+                        .resize_window(&terminal.tmux_name, cols, rows)
+                        .await
+                    {
                         warn!(session = %session_id, error = %e, "resize failed");
                     }
                 }
@@ -1307,8 +1533,10 @@ mod tests {
                     cwd: "/tmp".to_string(),
                     invocation: "agent".to_string(),
                 },
-                tmux_name: "fh-fake".to_string(),
-                pane: "%0".to_string(),
+                terminal: Some(Terminal {
+                    tmux_name: "fh-fake".to_string(),
+                    pane: "%0".to_string(),
+                }),
             }),
         );
 

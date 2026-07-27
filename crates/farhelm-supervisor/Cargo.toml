@@ -10,6 +10,7 @@ description = "Per-host session management: tmux driver, agent integrations, sta
 anyhow.workspace = true
 farhelm-proto.workspace = true
 libc.workspace = true
+rusqlite.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 shell-words.workspace = true

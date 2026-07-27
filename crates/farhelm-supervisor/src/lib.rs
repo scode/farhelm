@@ -7,11 +7,14 @@
 //! through the user's ssh. The terminal substrate is a private headless
 //! tmux server (`tmux` module); the wire protocol is farhelm-proto
 //! (`service` module); the launch path through the user's login shell and
-//! the exec shim lives in `launch`.
+//! the exec shim lives in `launch`; SQLite-backed session metadata lives
+//! in `store`.
 //!
-//! M1 state model: in-memory sessions with tmux as the truth. Durability
-//! classification, SQLite, and agent-kind integrations arrive in later
-//! milestones (PLAN.md).
+//! M2 state model: SQLite (`store` module) is the truth that a session
+//! exists and what its metadata is; tmux remains the truth for whether
+//! its terminal is currently alive. Durability classification proper
+//! (interrupted-vs-exited via boot-id comparison) and agent-kind
+//! integrations arrive in later milestones (PLAN.md).
 //!
 //! Unix-only, unconditionally: the doorway is a unix socket and the
 //! substrate is tmux, so unix APIs are used without cfg gates — a
@@ -19,6 +22,7 @@
 
 pub mod launch;
 pub mod service;
+pub mod store;
 pub mod tmux;
 
 /// Create a state directory (and parents) restricted to the owning user.
