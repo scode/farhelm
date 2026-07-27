@@ -1,0 +1,32 @@
+# Stacked-PR guard: GitHub does not understand stack ancestry, and merging
+# a child PR through the web UI folds it into its parent branch instead of
+# landing anything on main. This check goes red on every stacked PR by
+# design — it turns green only when the PR has been retargeted to main
+# during the normal bottom-up landing flow. It must run on ALL pull
+# requests (no branches filter), because the PRs it exists to reject are
+# exactly the ones not targeting main.
+name: PR Base
+
+on:
+  pull_request:
+    # `edited` matters: retargeting a PR's base fires only that activity
+    # type, and retarget-to-main is precisely when this check must re-run
+    # and turn green. The defaults (opened/synchronize/reopened) would
+    # leave the check stale-red after a retarget.
+    types: [opened, synchronize, reopened, edited]
+
+permissions:
+  contents: read
+
+jobs:
+  require-main-base:
+    runs-on: ubicloud
+    steps:
+      - name: Require main as PR base
+        env:
+          BASE_REF: ${{ github.base_ref }}
+        run: |
+          if [ "$BASE_REF" != "main" ]; then
+            echo "PR base must be main, got '$BASE_REF'." >&2
+            exit 1
+          fi

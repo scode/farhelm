@@ -1,0 +1,9 @@
+[package]
+name = "farhelm"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "The multi-call farhelm binary: helm, supervisor, spawn, internal"
+
+[dependencies]

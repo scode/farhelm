@@ -1,0 +1,9 @@
+[package]
+name = "farhelm-supervisor"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Per-host session management: tmux driver, agent integrations, state"
+
+[dependencies]
