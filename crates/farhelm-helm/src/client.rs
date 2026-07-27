@@ -9,7 +9,7 @@
 
 use anyhow::{Context, bail};
 use farhelm_proto::io::{FrameReader, FrameWriter, handshake, parse_control};
-use farhelm_proto::{ControlMsg, Frame, FrameKind, SessionInfo};
+use farhelm_proto::{ControlMsg, ErrorKind, Frame, FrameKind, SessionInfo};
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -20,6 +20,26 @@ use tracing::warn;
 /// Input chunk size. Well under `MAX_FRAME_LEN`, and matched to the
 /// supervisor's replay chunking so both directions behave alike.
 const INPUT_CHUNK: usize = 32 * 1024;
+
+/// A supervisor-side request failure, carried through as a distinct type
+/// (rather than a bare string `anyhow` error) so callers above this client
+/// — the HTTP layer's `http_error`, in particular — can recover `kind`
+/// without parsing `message`. `request()` is the one place this gets
+/// constructed, from the `kind` a `ControlMsg::Error` reply already
+/// carries; from there it rides the ordinary `anyhow::Error` chain, so a
+/// caller downcasts with `error.downcast_ref::<SupervisorError>()` —
+/// `anyhow`'s own `downcast_ref` searches the root cause and every
+/// `.context(...)` layer above it, so this finds a `SupervisorError`
+/// whatever later callers stack on top, whether it was attached as the
+/// root or as context. `Display` is just `message`, matching the existing
+/// contract that a supervisor error reaches the user's terminal or HTTP
+/// body verbatim.
+#[derive(Debug, thiserror::Error)]
+#[error("{message}")]
+pub struct SupervisorError {
+    pub kind: ErrorKind,
+    pub message: String,
+}
 
 /// What an attached terminal receives from the supervisor side.
 #[derive(Debug)]
@@ -292,12 +312,13 @@ impl SupervisorClient {
     /// the message too — caller and registry must agree on the same value,
     /// so it is minted once by `req_id()` and threaded through both.
     ///
-    /// A supervisor `Error` reply becomes an `Err` carrying its message
-    /// verbatim, which is how a remote precondition failure reaches the
-    /// user as prose instead of a status code. There is no timeout: the
-    /// connection dying is what unblocks a waiter, and inventing a
-    /// deadline here would abandon slow-but-fine operations on a loaded
-    /// host.
+    /// A supervisor `Error` reply becomes an `Err` wrapping a
+    /// [`SupervisorError`], which carries both the message verbatim (so a
+    /// remote precondition failure still reaches the user as prose) and
+    /// its `kind` (so `http_error` can pick a status code without parsing
+    /// that prose). There is no timeout: the connection dying is what
+    /// unblocks a waiter, and inventing a deadline here would abandon
+    /// slow-but-fine operations on a loaded host.
     async fn request(&self, req_id: u64, msg: ControlMsg) -> anyhow::Result<ControlMsg> {
         let (tx, rx) = oneshot::channel();
         {
@@ -316,10 +337,16 @@ impl SupervisorClient {
             return Err(anyhow::Error::new(e).context("supervisor connection closed"));
         }
         let reply = rx.await.context("supervisor connection closed")?;
-        if let ControlMsg::Error { message, .. } = &reply {
-            bail!("{message}");
+        // Matched by value, not `if let ... = &reply`: an owned `message`
+        // moves straight into `SupervisorError` instead of a borrow forcing
+        // a clone here for no reason (the reply is not used afterwards
+        // either way).
+        match reply {
+            ControlMsg::Error { message, kind, .. } => {
+                Err(anyhow::Error::new(SupervisorError { kind, message }))
+            }
+            reply => Ok(reply),
         }
-        Ok(reply)
     }
 
     fn req_id(&self) -> u64 {
