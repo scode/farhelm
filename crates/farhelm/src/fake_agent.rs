@@ -12,7 +12,7 @@
 //! its modes are set and it is listening — tests key on that marker
 //! instead of sleeping.
 
-use std::io::{BufRead, Write};
+use std::io::{BufRead, Read, Write};
 
 /// Which terminal behavior to act out. A closed set, so clap validates it
 /// at parse time and `--help` documents it, rather than failing at
@@ -27,6 +27,8 @@ pub enum Script {
     Binary,
     /// Continuous numbered records for replay/live cutover tests.
     Counter,
+    /// Raw-mode hex echo of every input byte, for input-fidelity tests.
+    Hexecho,
 }
 
 /// Act out one script and exit. Runs synchronously on blocking stdio on
@@ -38,6 +40,7 @@ pub fn run(script: Script) -> anyhow::Result<()> {
         Script::Altscreen => altscreen(),
         Script::Binary => binary(),
         Script::Counter => counter(),
+        Script::Hexecho => hexecho(),
     }
 }
 
@@ -168,4 +171,88 @@ fn counter() -> anyhow::Result<()> {
         std::thread::sleep(std::time::Duration::from_millis(2));
     }
     unreachable!("the counter fixture runs until its session is killed")
+}
+
+/// Echo every input byte back as lowercase hex, one space-separated line
+/// per read, so a test can observe input-byte fidelity through terminal
+/// OUTPUT.
+///
+/// Exists because the tmux `paste-buffer` input-mangling bug (control
+/// bytes like DEL/ESC/ETX arriving caret-escaped as `^?`/`^[`/`^C`) was
+/// invisible to `basic` and every other script here: they read stdin in
+/// the pty's default canonical mode, where the kernel line discipline
+/// itself intercepts or reinterprets those bytes (erase, escape, SIGINT)
+/// before an app ever sees them — so a mangled byte and a correct one
+/// produced the same visible effect. `hexecho` puts its stdin into raw
+/// mode specifically to remove that filter: whatever byte crosses the
+/// wire is exactly the byte printed here, which is what makes the fixture
+/// able to tell "arrived as 0x7f" apart from "arrived as the two
+/// characters `^` and `?`".
+fn hexecho() -> anyhow::Result<()> {
+    let mut out = std::io::stdout().lock();
+
+    // Raw mode BEFORE the ready marker — unlike `basic`'s bracketed-paste
+    // enable, which is a pane escape sequence tmux records the instant it
+    // is written. Terminal mode bits live in the pty's line discipline,
+    // not the pane, so a test that sends input the instant it sees READY
+    // must always find raw mode already established; printing READY
+    // first would let a fast test race a still-canonical pty and land its
+    // control bytes in cooked mode, defeating the whole point of this
+    // fixture.
+    set_raw_mode()?;
+
+    writeln!(out, "FAKE-AGENT READY\r")?;
+    out.flush()?;
+
+    use std::fmt::Write as _;
+    let mut stdin = std::io::stdin().lock();
+    let mut buf = [0u8; 4096];
+    loop {
+        let n = stdin.read(&mut buf)?;
+        if n == 0 {
+            return Ok(());
+        }
+        let mut line = String::with_capacity(n * 3);
+        for (i, byte) in buf[..n].iter().enumerate() {
+            if i > 0 {
+                line.push(' ');
+            }
+            write!(line, "{byte:02x}").expect("String write is infallible");
+        }
+        writeln!(out, "{line}\r")?;
+        out.flush()?;
+    }
+}
+
+/// Put this process's controlling terminal into raw mode: no canonical
+/// line editing, no signal-generating control characters, no local echo.
+///
+/// Nothing upstream configures the pty this way — tmux hands out an
+/// ordinary cooked-mode pty, and `basic` deliberately reads via
+/// `BufRead::lines` to exercise that default. `cfmakeraw` is not POSIX
+/// itself (POSIX standardizes termios but not this convenience function);
+/// it is a BSD-originated libc extension present on Linux and every other
+/// target this project builds for, and it flips every relevant termios
+/// flag at once, rather than hand-listing `ICANON`/`ECHO`/`ISIG`/`IXON`
+/// and hoping the list stays complete.
+fn set_raw_mode() -> anyhow::Result<()> {
+    use std::os::fd::AsRawFd;
+
+    let fd = std::io::stdin().as_raw_fd();
+    let mut term: libc::termios = unsafe { std::mem::zeroed() };
+    // SAFETY: `fd` is stdin's own fd, valid for the process lifetime, and
+    // `term` is a plain-old-data struct large enough for `tcgetattr` to
+    // fill in (zero-initialized so any field it doesn't touch is still
+    // well-defined).
+    if unsafe { libc::tcgetattr(fd, &mut term) } != 0 {
+        anyhow::bail!("tcgetattr failed: {}", std::io::Error::last_os_error());
+    }
+    // SAFETY: `term` was just populated by `tcgetattr` above.
+    unsafe { libc::cfmakeraw(&mut term) };
+    // SAFETY: same fd and a `term` value `cfmakeraw` just produced from a
+    // real `tcgetattr` snapshot.
+    if unsafe { libc::tcsetattr(fd, libc::TCSANOW, &term) } != 0 {
+        anyhow::bail!("tcsetattr failed: {}", std::io::Error::last_os_error());
+    }
+    Ok(())
 }

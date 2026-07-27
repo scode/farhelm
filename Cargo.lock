@@ -1713,6 +1713,7 @@ dependencies = [
  "farhelm-helm",
  "farhelm-proto",
  "farhelm-supervisor",
+ "libc",
  "serde_json",
  "shell-words",
  "tempfile",

@@ -2,14 +2,18 @@
 //! holder and history store (SPEC_impl.md, "Terminal substrate").
 //!
 //! Nothing here ever runs a rendering `tmux attach`. Output is consumed
-//! through a non-rendering control-mode client (`tmux -C`), input goes in
-//! via `load-buffer`/`paste-buffer` over stdin, sizing is pinned by
-//! explicit `resize-window` calls, and replay is `capture-pane -e`
-//! history plus re-synthesized pane modes. The motivations — native xterm.js
-//! scrolling, no tmux UI anywhere — are recorded in SPEC_impl.md; this
-//! module is that design made concrete.
+//! through a non-rendering control-mode client (`tmux -C`) — see
+//! [`OutputStream`] — and input goes in as `send-keys -H` commands carried
+//! by a SECOND, dedicated no-output control-mode client — see
+//! [`InputClient`] for why a second client, rather than the output
+//! client's stdin, is what carries input. Sizing is pinned by explicit
+//! `resize-window` calls, and replay is `capture-pane -e` history plus
+//! re-synthesized pane modes. The motivations — native xterm.js scrolling,
+//! no tmux UI anywhere — are recorded in SPEC_impl.md; this module is that
+//! design made concrete.
 
 use anyhow::{Context, bail};
+use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use tokio::io::{AsyncBufReadExt, AsyncRead, AsyncWriteExt, BufReader};
@@ -294,35 +298,6 @@ impl TmuxDriver {
         Ok(out.stdout)
     }
 
-    /// Like [`TmuxDriver::run`], but feeding `input` to tmux's stdin.
-    /// Exists for `load-buffer -`: bytes that travel via stdin never
-    /// appear in `/proc/<pid>/cmdline`, which is the point (see
-    /// `send_input`).
-    async fn run_with_stdin(&self, args: &[&str], input: &[u8]) -> anyhow::Result<()> {
-        use tokio::io::AsyncWriteExt;
-        let mut child = self
-            .command()
-            .args(args)
-            .stdin(Stdio::piped())
-            .stdout(Stdio::null())
-            .stderr(Stdio::piped())
-            .spawn()
-            .context("spawning tmux")?;
-        let mut stdin = child.stdin.take().expect("piped stdin");
-        stdin.write_all(input).await.context("writing tmux stdin")?;
-        drop(stdin);
-        let out = child.wait_with_output().await.context("waiting for tmux")?;
-        if !out.status.success() {
-            bail!(
-                "tmux {:?} failed ({}): {}",
-                args,
-                out.status,
-                String::from_utf8_lossy(&out.stderr).trim()
-            );
-        }
-        Ok(())
-    }
-
     /// Start (or adopt) the private server. Idempotent: an already
     /// running server on this socket is left exactly as it is, per the
     /// discovery-first rule — never restart a running substrate.
@@ -413,67 +388,6 @@ impl TmuxDriver {
         Ok(())
     }
 
-    /// Send raw bytes as pane input, via a tmux paste buffer loaded over
-    /// stdin.
-    ///
-    /// stdin delivery is a security property, not a convenience: input
-    /// includes credentials users type at agent login/API-key prompts,
-    /// and the previous `send-keys -H` shape put every input byte,
-    /// hex-encoded, on a spawned process's argv — world-readable through
-    /// `/proc/<pid>/cmdline` for the life of each spawn. (It also capped
-    /// chunks at 512 bytes because tmux rejects ~1000-argument commands;
-    /// buffers have no such limit, so one call handles any paste.)
-    ///
-    /// Flags are load-bearing: `-r` stops `paste-buffer`'s default
-    /// LF→CR rewriting — bytes here are exact terminal input (escape
-    /// sequences, mouse reports, bracketed pastes xterm.js already
-    /// wrapped) and must arrive verbatim; `-d` deletes the buffer after
-    /// pasting so the input does not linger, readable, in the tmux
-    /// server's buffer list.
-    ///
-    /// The buffer name carries a per-call counter, not just the pane id:
-    /// two overlapping sends to one pane would otherwise share a buffer,
-    /// and the interleaving load/load/paste/paste pastes one caller's
-    /// bytes under the other's name and then fails the second paste with
-    /// "no buffer" — input silently swapped or dropped. A failed paste
-    /// also deletes the buffer explicitly, since `-d` never ran and the
-    /// bytes may be credentials typed at an agent prompt.
-    pub async fn send_input(&self, pane: &str, bytes: &[u8]) -> anyhow::Result<()> {
-        use std::sync::atomic::{AtomicU64, Ordering};
-        static NEXT: AtomicU64 = AtomicU64::new(0);
-
-        if bytes.is_empty() {
-            return Ok(());
-        }
-        let buf = format!(
-            "farhelm-in-{}-{}",
-            pane.trim_start_matches('%'),
-            NEXT.fetch_add(1, Ordering::Relaxed)
-        );
-        // Cleanup runs on BOTH failure paths: a failed load can still
-        // have created the buffer (a mid-write stdin error leaves the
-        // child free to finish with a truncated payload), and a failed
-        // paste means `-d` never ran. Either way the bytes must not
-        // linger; deleting a buffer that never existed is harmless.
-        let result = async {
-            self.run_with_stdin(&["load-buffer", "-b", &buf, "-"], bytes)
-                .await?;
-            self.run(&["paste-buffer", "-d", "-r", "-b", &buf, "-t", pane])
-                .await?;
-            Ok(())
-        }
-        .await;
-        if result.is_err()
-            && let Err(e) = self.run(&["delete-buffer", "-b", &buf]).await
-        {
-            // Best-effort, but never silent: if this ALSO failed, bytes
-            // that may be credentials are sitting readable in the tmux
-            // server's buffer list, and no other diagnostic says so.
-            tracing::warn!(buffer = %buf, error = %e, "could not delete input buffer");
-        }
-        result
-    }
-
     /// Open one control client, capture replay, then turn on its live
     /// output without leaving a gap between the two.
     ///
@@ -516,6 +430,11 @@ impl TmuxDriver {
         let stdout = child.stdout.take().expect("piped stdout");
         let mut stream = OutputStream {
             child,
+            // Exclusively owned: this client carries only its own
+            // one-shot replay-cutover command group (below) and then
+            // never writes again. Input travels on a wholly separate
+            // client — see `open_input_client` — so there is no sharing
+            // concern here.
             stdin,
             reader: BufReader::new(stdout),
             line: Vec::with_capacity(8192),
@@ -531,6 +450,50 @@ impl TmuxDriver {
         let (modes, prefill) = stream.snapshot_then_enable(pane, deadline).await?;
         Ok((modes, prefill, stream))
     }
+
+    /// Open a control-mode client dedicated to carrying input into `pane`.
+    ///
+    /// Attaches with `-f no-output` PERMANENTLY, unlike the replay
+    /// client's transient use of the same flag: this client must never
+    /// see a `%output` notification, because [`InputClient::send`] reads
+    /// exactly one command-reply block per chunk it writes, and an
+    /// interleaved pane-output line would desynchronize that read from
+    /// the write that produced it. See [`InputClient`] for why input gets
+    /// its own client at all rather than riding the replay client's
+    /// stdin.
+    pub async fn open_input_client(&self, pane: &str) -> anyhow::Result<InputClient> {
+        let deadline = tokio::time::Instant::now() + CONTROL_EXCHANGE_TIMEOUT;
+        let mut child = self
+            .command()
+            .arg("-C")
+            .arg("attach")
+            .arg("-f")
+            .arg("no-output")
+            .arg("-t")
+            .arg(pane)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null())
+            .kill_on_drop(true)
+            .spawn()
+            .context("spawning tmux input-control client")?;
+        let stdin = child.stdin.take().expect("piped stdin");
+        let stdout = child.stdout.take().expect("piped stdout");
+        let mut reader = BufReader::new(stdout);
+        let mut line = Vec::with_capacity(8192);
+        // Mirrors `open_replay_stream`'s handshake: the very first thing
+        // this client's stdout carries is the reply to its own implicit
+        // `attach-session`, which must be drained before any `send-keys`
+        // reply can be read cleanly.
+        read_command_block(&mut reader, &mut line, deadline, "input-client attach").await?;
+        Ok(InputClient {
+            child,
+            stdin,
+            reader,
+            line,
+            pane: pane.to_string(),
+        })
+    }
 }
 
 /// A control-mode client streaming one session's pane output.
@@ -544,8 +507,11 @@ impl TmuxDriver {
 /// server and pane are unaffected.
 pub struct OutputStream {
     child: Child,
-    /// Held open for the lifetime of the client. It also carries the
-    /// single command group that performs replay cutover.
+    /// Held open for the lifetime of the client. Carries only the
+    /// one-shot replay-cutover command group written at attach time;
+    /// nothing writes to it afterwards. Input travels on a wholly
+    /// separate [`InputClient`], so this is a plain, exclusively-owned
+    /// handle rather than a shared, lockable one.
     stdin: ChildStdin,
     reader: BufReader<tokio::process::ChildStdout>,
     line: Vec<u8>,
@@ -673,6 +639,151 @@ impl OutputStream {
     /// attach handler's open-stream comment tells the same story.
     pub async fn shutdown(mut self) {
         let _ = self.child.kill().await;
+    }
+}
+
+/// A SECOND control-mode client, dedicated to carrying input into one
+/// pane, opened by [`TmuxDriver::open_input_client`].
+///
+/// This replaced two earlier designs, each broken in its own way.
+/// `load-buffer -`/`paste-buffer -d -r` avoided hex-encoded input bytes on
+/// a spawned process's argv (world-readable via `/proc/<pid>/cmdline`, and
+/// input includes credentials typed at agent prompts — see SPEC_impl.md),
+/// but paste-buffer caret-escapes control bytes on its way into the pane —
+/// verified empirically against tmux 3.7b, DEL (0x7f) arrives as the two
+/// literal characters `^?`, ESC as `^[`, ctrl-C as `^C` — so backspace,
+/// arrow keys, and ctrl-C were all silently mangled. `send-keys -H`
+/// delivers bytes verbatim and fixed that, but writing it to the shared
+/// `OutputStream` client's stdin (the very next design) opened a
+/// different hole: that call returned once `write_all`/`flush` proved the
+/// OS pipe accepted the bytes, which is not the same as tmux having
+/// executed them. Two failure modes hid behind that gap — an `%error`
+/// reply had nowhere to go, because `OutputStream::next_output` discards
+/// every non-`%output` notification by design (command replies,
+/// layout-change chatter, `%exit`), so a rejected `send-keys` vanished
+/// silently instead of surfacing as dropped input; and a takeover could
+/// kill the shared client after `send` returned `Ok` but before tmux
+/// processed the buffered command, losing input that had already been
+/// reported delivered.
+///
+/// A dedicated client closes both: nothing else ever writes to or reads
+/// from it, so each `send-keys` command's `%begin`/`%end`/`%error` reply
+/// can be read synchronously, in-line, via the same
+/// `read_command_block` machinery `OutputStream` uses for its own
+/// one-shot command group. `send` returning `Ok` now means tmux actually
+/// executed the command — not merely that the pipe accepted the bytes.
+/// The alternative — correlating replies on the shared output stream —
+/// would need an actor owning that stream's stdout so a concurrent reader
+/// could hand back the right reply; a second no-output client gets the
+/// same synchronous request/reply property for free from machinery that
+/// already exists.
+///
+/// Chunked at [`InputClient::MAX_CHUNK`] bytes per `send-keys` line
+/// because tmux rejects a command carrying on the order of ~1000
+/// arguments as "command too long", and each input byte becomes one hex
+/// argument; 256 stays far below that ceiling with comfortable margin.
+/// Chunks are written and their replies read strictly one at a time —
+/// there is no pipelining — which is fine because nothing else ever
+/// contends for this client's stdin/stdout: unlike `OutputStream`'s
+/// former shared-stdin design, there is no concurrent-caller reordering
+/// hazard here to guard against.
+pub struct InputClient {
+    /// Never read directly — `#[allow(dead_code)]` documents that this is
+    /// deliberate, not an oversight. Kept alive purely so dropping this
+    /// value (from any teardown path — takeover, detach, connection loss,
+    /// or a failed `send`) kills the process via `kill_on_drop`, exactly
+    /// like `OutputStream`'s client. Unlike `OutputStream`, there is no
+    /// long-lived task driving this client's stdout in a loop, so
+    /// `kill_on_drop` alone is enough; there is no
+    /// cancelled-task-vs-clean-shutdown distinction to make, and so no
+    /// explicit `shutdown` method that would read this field either.
+    #[allow(dead_code)]
+    child: Child,
+    stdin: ChildStdin,
+    reader: BufReader<tokio::process::ChildStdout>,
+    line: Vec<u8>,
+    /// The pane this client addresses every `send-keys -t <pane>` at.
+    pane: String,
+}
+
+impl InputClient {
+    /// Bytes of input per `send-keys -H` command line. See the struct
+    /// docs for why this exists and why 256 was chosen.
+    const MAX_CHUNK: usize = 256;
+
+    /// Commands in flight before replies are drained. See `send` for why
+    /// this bound is deadlock avoidance, not tuning: 64 replies ≈ 2 KiB,
+    /// comfortably inside the ~64 KiB pipe capacity that an unbounded
+    /// pipeline would wedge against.
+    const PIPELINE_BATCH: usize = 64;
+
+    /// Deliver `bytes` to the pane as keystrokes, verbatim, confirming
+    /// every chunk executed before returning.
+    ///
+    /// Returning `Ok` is the whole point of this type existing: it means
+    /// tmux's control-mode protocol closed every chunk's command block
+    /// with `%end`, not merely that the OS pipe accepted the writes. A
+    /// `%error` reply becomes an `Err` here instead of vanishing the way
+    /// it did on the old shared-stdin design.
+    ///
+    /// Pipelined in bounded batches, not lock-step: up to
+    /// [`Self::PIPELINE_BATCH`] chunk commands are written and flushed,
+    /// then that batch's replies are read in order, then the next batch.
+    /// tmux replies to control-mode commands in submission order, so
+    /// pairing the Nth reply with the Nth chunk needs no correlation
+    /// beyond counting — and the guarantee is unchanged, since nothing
+    /// returns until the final `%end`. Lock-step write/read was measured
+    /// at ~70 KB/s on a multi-megabyte paste (one round trip per 256-byte
+    /// chunk); batching removes most of that per-chunk latency.
+    ///
+    /// The batch bound is not an optimization knob, it is deadlock
+    /// avoidance: writing every command before reading any reply lets an
+    /// unbounded reply volume accumulate against the client's ~64 KiB
+    /// stdout pipe. Once that fills, tmux stops relaying, backpressure
+    /// reaches this side's writes, and both ends block until the timeout
+    /// fires — a large paste would fail instead of being slow. One
+    /// batch's replies (~30 bytes each) stay far below the pipe capacity.
+    pub async fn send(&mut self, bytes: &[u8]) -> anyhow::Result<()> {
+        if bytes.is_empty() {
+            return Ok(());
+        }
+        let mut line = String::with_capacity(32 + Self::MAX_CHUNK * 3);
+        let chunks: Vec<&[u8]> = bytes.chunks(Self::MAX_CHUNK).collect();
+        for batch in chunks.chunks(Self::PIPELINE_BATCH) {
+            for chunk in batch {
+                line.clear();
+                write!(line, "send-keys -t {} -H", self.pane).expect("String write is infallible");
+                for byte in *chunk {
+                    write!(line, " {byte:02x}").expect("String write is infallible");
+                }
+                line.push('\n');
+                tokio::time::timeout(
+                    CONTROL_EXCHANGE_TIMEOUT,
+                    self.stdin.write_all(line.as_bytes()),
+                )
+                .await
+                .context("timed out writing tmux send-keys command")?
+                .context("writing tmux send-keys command")?;
+            }
+            tokio::time::timeout(CONTROL_EXCHANGE_TIMEOUT, self.stdin.flush())
+                .await
+                .context("timed out flushing tmux send-keys commands")?
+                .context("flushing tmux send-keys commands")?;
+            for _ in 0..batch.len() {
+                // One deadline per reply, not one for the whole batch: a
+                // wedged tmux on one reply must not inherit the unspent
+                // budget of every reply before it.
+                let deadline = tokio::time::Instant::now() + CONTROL_EXCHANGE_TIMEOUT;
+                read_command_block(
+                    &mut self.reader,
+                    &mut self.line,
+                    deadline,
+                    "send-keys input",
+                )
+                .await?;
+            }
+        }
+        Ok(())
     }
 }
 
