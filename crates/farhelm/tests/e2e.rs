@@ -6,7 +6,7 @@
 //! `handle_connection` the unix socket serves and the same
 //! `SupervisorClient` the helm uses — over an in-process duplex pipe.
 //! What they deliberately do NOT fake: tmux, control-mode streaming,
-//! `paste-buffer` input, `capture-pane` replay, and pane-mode
+//! `send-keys -H` input, `capture-pane` replay, and pane-mode
 //! restoration.
 //! If tmux behavior drifts from the audited assumptions in SPEC_impl.md,
 //! it fails here first.
@@ -1601,11 +1601,13 @@ async fn stdio_proxy_carries_a_real_session() {
 ///
 /// One `send_input` call of ~48 KiB crosses the frame-chunking boundary:
 /// the helm client splits it into two 32 KiB-capped frames, with a line
-/// straddling the split, and the supervisor pastes each arriving frame
-/// as its own tmux buffer. Every other test sends a dozen bytes, so a
-/// truncation, a reorder, or a lost frame at that boundary — including
-/// two pastes racing through one buffer name — would otherwise go
-/// unnoticed.
+/// straddling the split, and each arriving frame is handed to
+/// `InputClient::send`, which further chunks it into many 256-byte
+/// `send-keys -H` commands against the same dedicated input client (see
+/// `tmux.rs`). Every other test sends a dozen bytes, so a truncation, a
+/// reorder, or a dropped chunk at either boundary — the frame split or
+/// any of the many `send-keys` chunk splits inside it — would otherwise
+/// go unnoticed.
 ///
 /// The payload is many short lines, not one long one, by necessity: the
 /// pane's PTY is in canonical mode, where the kernel caps a single input
@@ -2058,47 +2060,86 @@ async fn create_with_degenerate_size_clamps_to_1x1() {
     assert!(listed.iter().any(|s| s.id == session.id));
 }
 
-/// A failed paste must not leave the input bytes behind in the tmux
-/// server's buffer list.
+/// Extract every two-hex-digit token from `hexecho`'s output, discarding
+/// which line or read() call each token arrived on.
 ///
-/// The buffer may hold credentials typed at an agent prompt — the whole
-/// reason input moved off argv onto buffers — and `-d` only deletes on
-/// SUCCESSFUL paste, so the failure path has its own cleanup. Deleting
-/// that cleanup used to fail nothing. Driven at the driver level: a
-/// paste into a nonexistent pane fails after the load succeeded.
-#[tokio::test]
-async fn failed_paste_leaves_no_input_buffer_behind() {
-    use farhelm_supervisor::tmux::TmuxDriver;
+/// `hexecho` flushes a fresh line per raw `read()`, and reads can split
+/// arbitrarily at PTY/tmux boundaries — a single input byte sequence can
+/// legitimately arrive as hex tokens on two or more separate lines. A
+/// prior version of this test's assertion instead required the whole
+/// expected payload's hex to appear on one line, which is only true when
+/// the PTY happens not to split that particular read; this reassembles
+/// the byte stream in order regardless of where the line breaks fell, so
+/// the assertion below holds independent of read-boundary behavior.
+fn hex_tokens(text: &str) -> Vec<u8> {
+    text.split_whitespace()
+        .filter(|token| token.len() == 2 && token.bytes().all(|b| b.is_ascii_hexdigit()))
+        .map(|token| u8::from_str_radix(token, 16).expect("validated two ASCII hex digits"))
+        .collect()
+}
 
-    let _slot = SLOTS.acquire().await.expect("semaphore is never closed");
-    let state = tempfile::tempdir().expect("tempdir");
-    let driver = TmuxDriver::new(state.path());
-    driver.ensure_server().await.expect("ensure server");
-    let _tmux = TmuxServerGuard(state.path().join("tmux.sock"));
-    driver
+/// Byte-verbatim input delivery, pinned end to end through a raw-mode
+/// fixture the paste-buffer bug could not hide from.
+///
+/// This is the regression test for the paste-buffer input-mangling bug:
+/// `paste-buffer -d -r`, the mechanism this replaced, caret-escaped
+/// control bytes on their way into the pane (DEL arrived as the two
+/// characters `^?`, ESC as `^[`, ctrl-C as `^C` — verified against tmux
+/// 3.7b) while passing every other test in this file, because `basic`'s
+/// canonical-mode reading let the pty's own line discipline mask the
+/// difference. `hexecho` reads its stdin in raw mode specifically so
+/// nothing between the wire and this assertion can paper over a mangled
+/// byte.
+#[tokio::test]
+async fn input_bytes_survive_verbatim_through_hexecho() {
+    let h = harness().await;
+    let work = tempfile::tempdir().unwrap();
+    let session = h
+        .client
         .create_session(
-            "decoy",
-            state.path().to_str().expect("tempdir path is UTF-8"),
+            &work.path().to_string_lossy(),
+            &agent_cmd("internal fake-agent --script hexecho"),
+            None,
             80,
             24,
-            &["sleep".to_string(), "60".to_string()],
         )
         .await
-        .expect("decoy session so the server stays inspectable");
+        .expect("create");
 
-    driver
-        .send_input("%999", b"pretend-credential")
-        .await
-        .expect_err("pasting into a nonexistent pane must fail");
+    let (chan, mut rx) = h.client.attach(&session.id, 80, 24).await.expect("attach");
+    let mut seen = Vec::new();
+    wait_for(&mut rx, &mut seen, "FAKE-AGENT READY", 20).await;
 
-    let out = tmux_query(
-        &state.path().join("tmux.sock"),
-        &["list-buffers", "-F", "#{buffer_name}"],
-    )
-    .await;
-    let buffers = String::from_utf8_lossy(&out.stdout);
+    // Exactly the bytes paste-buffer was observed to mangle: DEL, ESC
+    // (as the opener of the ArrowUp sequence "\x1b[A"), and ETX (ctrl-C).
+    h.client.send_input(chan, b"a\x7fb\x1b[A\x03".to_vec());
+    // A plain printable byte with no special meaning to tmux or a
+    // raw-mode pty, sent as a separate call. Its own hex line is the sync
+    // point that proves the control-byte input above already made it
+    // through, without depending on how `hexecho`'s read() calls happen
+    // to chunk the payload into lines.
+    h.client.send_input(chan, b"z".to_vec());
+    wait_for(&mut rx, &mut seen, "7a", 10).await;
+
+    // Reassemble the hex byte stream across every line before asserting:
+    // see `hex_tokens` for why line boundaries cannot be trusted here.
+    let transcript = String::from_utf8_lossy(&seen);
+    let bytes = hex_tokens(&transcript);
+    let contains_sequence = |needle: &[u8]| bytes.windows(needle.len()).any(|w| w == needle);
     assert!(
-        !buffers.contains("farhelm-in-"),
-        "input buffer must be deleted when the paste fails, found: {buffers}"
+        contains_sequence(&[0x61, 0x7f, 0x62, 0x1b, 0x5b, 0x41, 0x03]),
+        "control bytes must arrive verbatim; transcript:\n{transcript}"
+    );
+    assert!(
+        !contains_sequence(&[0x5e, 0x3f]),
+        "DEL must not arrive caret-escaped as ^?: {transcript}"
+    );
+    assert!(
+        !contains_sequence(&[0x5e, 0x5b]),
+        "ESC must not arrive caret-escaped as ^[: {transcript}"
+    );
+    assert!(
+        !contains_sequence(&[0x5e, 0x43]),
+        "ETX (ctrl-C) must not arrive caret-escaped as ^C: {transcript}"
     );
 }

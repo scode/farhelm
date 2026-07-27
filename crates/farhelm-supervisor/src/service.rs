@@ -11,7 +11,7 @@
 //! arrives with multi-session management in M2 (PLAN_M1.md).
 
 use crate::launch::{LaunchSpec, resolve_shell, window_command};
-use crate::tmux::TmuxDriver;
+use crate::tmux::{InputClient, TmuxDriver};
 use anyhow::Context;
 use farhelm_proto::io::{FrameReader, FrameWriter, handshake, parse_control};
 use farhelm_proto::{ControlMsg, ErrorKind, Frame, SessionInfo};
@@ -130,7 +130,7 @@ fn error_kind(e: &anyhow::Error) -> ErrorKind {
 /// Both handles are needed and neither substitutes for the other: session
 /// name is the target for anything window-scoped (`resize-window`, the
 /// control-mode attach), pane id (`%N`) for anything pane-scoped
-/// (`paste-buffer`, `capture-pane`, format queries). Entries are immutable
+/// (`send-keys`, `capture-pane`, format queries). Entries are immutable
 /// once created — shared as `Arc` and never mutated in place — so nothing
 /// has to hold the session map while talking to tmux.
 struct SessionEntry {
@@ -151,6 +151,16 @@ struct ActiveAttach {
     /// control-mode client's process would otherwise still be alive when
     /// the new one starts.
     forwarder: tokio::task::JoinHandle<()>,
+    /// A second control-mode client, dedicated to this attachment's input,
+    /// opened alongside the replay stream in the attach handler. `send`
+    /// on it only returns once tmux has actually executed the command —
+    /// see [`InputClient`] — which is what lets a failed send here mean
+    /// "this attachment's input is broken" rather than "the bytes went
+    /// somewhere unconfirmed". Dropped (and so killed, via
+    /// `kill_on_drop`) whenever this `ActiveAttach` is removed from the
+    /// map, on every teardown path: takeover, detach, connection loss, and
+    /// the input-failure branch below.
+    input: InputClient,
 }
 
 /// One host's session authority, shared by every connection.
@@ -544,15 +554,16 @@ where
                     // longer owns, and the supervisor enforces that
                     // rather than trusting clients to stop.
                     if let Some(entry) = input_routes.get(&frame.channel).cloned() {
-                        // The check and the paste run under ONE lock hold,
-                        // like the Resize arm: releasing between them is a
-                        // TOCTOU where a takeover completes in the gap and
-                        // the kicked client's already-validated keystrokes
-                        // land in the winner's pane — and keystrokes into
-                        // an agent terminal are command execution. Safe
-                        // against deadlock because forwarders never take
-                        // this lock, and the Attach handler already holds
-                        // it across its own tmux calls.
+                        // The check and the send-keys delivery run under
+                        // ONE lock hold, like the Resize arm: releasing
+                        // between them is a TOCTOU where a takeover
+                        // completes in the gap and the kicked client's
+                        // already-validated keystrokes land in the
+                        // winner's pane — and keystrokes into an agent
+                        // terminal are command execution. Safe against
+                        // deadlock because forwarders never take this
+                        // lock, and the Attach handler already holds it
+                        // across its own tmux calls.
                         //
                         // Both halves of the check matter: channel ids are
                         // unique only within a connection (every client
@@ -561,16 +572,30 @@ where
                         // pass whenever the numbers collide.
                         // `same_channel` identifies the owning connection.
                         let mut attachments = sup.attachments.lock().await;
-                        let live = attachments.get(&entry.info.id).is_some_and(|a| {
-                            a.channel == frame.channel && a.notify.same_channel(&tx)
-                        });
-                        if live {
-                            // A failed paste is this session's problem,
+                        // Borrow the matched `ActiveAttach` directly and
+                        // send on it in place, rather than cloning a
+                        // handle out of the map: `InputClient` owns a
+                        // child process and its pipes, so unlike the old
+                        // `InputWriter` there is nothing cheap to clone.
+                        // The borrow (via `a`) ends when this match
+                        // expression finishes evaluating, which is what
+                        // lets the failure arm below still mutate
+                        // `attachments` (`.remove`) under the SAME lock
+                        // hold — no gap where a takeover could interleave.
+                        let send_result = match attachments.get_mut(&entry.info.id) {
+                            Some(a) if a.channel == frame.channel && a.notify.same_channel(&tx) => {
+                                Some(a.input.send(&frame.body).await)
+                            }
+                            _ => None,
+                        };
+                        match send_result {
+                            Some(Ok(())) => {}
+                            // A failed send is this session's problem,
                             // not the shared connection's. It is still
                             // fatal to this attachment: accepting later
                             // chunks after silently losing one can turn
                             // a command into a different command.
-                            if let Err(e) = sup.tmux.send_input(&entry.pane, &frame.body).await {
+                            Some(Err(e)) => {
                                 warn!(session = %entry.info.id, error = %e, "input dropped");
                                 if let Some(old) = attachments.remove(&entry.info.id) {
                                     old.forwarder.abort();
@@ -583,11 +608,12 @@ where
                                 }
                                 input_routes.remove(&frame.channel);
                             }
-                        } else {
-                            drop(attachments);
-                            // This channel lost its attachment; stop
-                            // holding the session entry alive for it.
-                            input_routes.remove(&frame.channel);
+                            None => {
+                                drop(attachments);
+                                // This channel lost its attachment; stop
+                                // holding the session entry alive for it.
+                                input_routes.remove(&frame.channel);
+                            }
                         }
                     }
                 }
@@ -900,6 +926,26 @@ async fn handle_control(
                     return;
                 }
             };
+            // A second, dedicated control-mode client for this
+            // attachment's input (see `InputClient`) — opened here rather
+            // than derived from `stream`, since the two are now
+            // independent control connections rather than one shared
+            // stdin. A failure here must tear down the replay stream just
+            // opened above: leaving it live would attach this session to
+            // a client nothing will ever read from or write to again.
+            let input = match sup.tmux.open_input_client(&entry.pane).await {
+                Ok(input) => input,
+                Err(e) => {
+                    drop(attachments);
+                    stream.shutdown().await;
+                    send(&ControlMsg::Error {
+                        req_id,
+                        message: format!("{e:#}"),
+                        kind: error_kind(&e),
+                    });
+                    return;
+                }
+            };
 
             send(&ControlMsg::Attached { req_id, channel });
             // Order is load-bearing: the alternate-screen switch must
@@ -968,6 +1014,7 @@ async fn handle_control(
                     channel,
                     notify: tx.clone(),
                     forwarder: task,
+                    input,
                 },
             );
             drop(attachments);

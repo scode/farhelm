@@ -11,6 +11,9 @@ anyhow.workspace = true
 clap.workspace = true
 farhelm-helm.workspace = true
 farhelm-supervisor.workspace = true
+# Only for the `hexecho` fake-agent script's raw-mode termios calls
+# (fake_agent.rs); everything else in this binary stays on tokio/std.
+libc.workspace = true
 tokio.workspace = true
 tracing-subscriber.workspace = true
 

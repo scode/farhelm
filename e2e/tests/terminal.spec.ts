@@ -62,9 +62,10 @@ test("renders the session and the agent's TUI output", async ({ page }) => {
 });
 
 // Real keystrokes through the whole chain: xterm's onData, the WebSocket,
-// the framing protocol, tmux paste-buffer, and back out as pane output. This
-// is the one test that would catch an input path wired up but dead — the
-// failure a user would describe as "typing goes nowhere".
+// the framing protocol, tmux send-keys on the dedicated input control
+// client, and back out as pane output. This is the one test that would
+// catch an input path wired up but dead — the failure a user would
+// describe as "typing goes nowhere".
 test("input round-trips through the real terminal path", async ({ page }) => {
   await openTerminal(page);
   await page.locator("#terminal").click();
@@ -230,13 +231,15 @@ test("a terminal socket for an unknown session reports why", async ({
 // direct socket send can produce a multi-megabyte message, hence the
 // __farhelmWs test hook.
 //
-// LAST in the file on purpose: the suite shares one session and runs in
-// file order, and this payload's PTY echo pollutes the terminal state —
-// observed directly: with the takeover test after this one, its fresh
-// page's READY wait found only a wall of echoed 'a's. (How much echoes
-// is bounded by canonical-mode input handling and was not pinned down;
-// the placement rule, not the mechanism, is the contract.) Nothing may
-// come after this test that depends on replay content.
+// SECOND TO LAST in the file on purpose: the suite shares one session and
+// runs in file order, and this payload's PTY echo pollutes the terminal
+// state — observed directly: with the takeover test after this one, its
+// fresh page's READY wait found only a wall of echoed 'a's. (How much
+// echoes is bounded by canonical-mode input handling and was not pinned
+// down; the placement rule, not the mechanism, is the contract.) The one
+// test allowed after this one is the ctrl-c regression below, which kills
+// the shared session's fake agent outright — nothing may come after THAT
+// depends on this session at all.
 test("a multi-megabyte message does not drop the terminal socket", async ({
   page,
 }) => {
@@ -260,5 +263,125 @@ test("a multi-megabyte message does not drop the terminal socket", async ({
   await page.keyboard.press("Enter");
   await page.keyboard.type("after-big-message");
   await page.keyboard.press("Enter");
-  await waitForTermText(page, "echo:after-big-message", 15_000);
+  // A generous timeout, not the suite's usual 10-15s: the supervisor's
+  // dedicated input control client (`InputClient::send`, tmux.rs) now
+  // waits for tmux's `%end` reply to each 256-byte `send-keys` chunk
+  // before sending the next, so tmux must fully process this 2 MiB
+  // payload — many thousands of chunk round trips — before it even
+  // reaches the "after-big-message" line queued behind it on the same
+  // connection. That synchronous-per-chunk design is deliberate (a
+  // fire-and-forget write could not distinguish "tmux accepted the bytes"
+  // from "tmux executed them"), so this test's budget reflects the real
+  // cost of validating a payload this large rather than papering over it.
+  await waitForTermText(page, "echo:after-big-message", 60_000);
+});
+
+// Regression test for the tmux paste-buffer input-mangling bug at the
+// browser level: real Backspace and Ctrl+C keypresses go through xterm.js's
+// own key handling (DEL, ETX — no custom key binding intercepts them, see
+// terminal.js), the WebSocket, and the framing protocol exactly like any
+// other keystroke, landing on `basic`'s pty in its ordinary canonical/cooked
+// mode (nothing here puts it in raw mode, unlike the `hexecho` fixture the
+// Rust e2e suite uses for byte-exact coverage of every mangled control byte,
+// including ESC/arrow-up).
+//
+// ArrowUp is deliberately NOT exercised here, after checking what a
+// canonical-mode pty actually does with it: Linux's ECHOCTL local-echo
+// renders ANY control byte with no special canonical role — ESC included —
+// as two-character caret notation ("^["), regardless of whether it arrived
+// as a genuine 0x1b byte or as the bug's literal caret text. The pane's
+// rendered output is identical either way, so `basic`'s canonical pty gives
+// no browser-observable signal for ESC at all; that gap is exactly what
+// `hexecho`'s raw mode (no ECHOCTL, no canonical processing) exists to
+// close, and the Rust e2e suite's `input_bytes_survive_verbatim_through_hexecho`
+// covers it directly.
+//
+// Backspace escapes that trap because DEL, unlike ESC, has a special
+// canonical-mode role: a correctly delivered 0x7f is consumed as the ERASE
+// character (removing the previous character, never echoed as text at
+// all), while the bug's mangled delivery is two ordinary printable
+// characters that erase nothing and sit in the buffer as literal `^?`. That
+// gives a real positive/negative pair to assert on, checked below.
+//
+// Ctrl+C escapes it differently: ECHOCTL still renders a correctly
+// delivered ETX as "^C" text, so the caret text alone proves nothing. What
+// DOES distinguish the two is what happens next — a correct ETX is also
+// consumed as INTR, raising SIGINT on the fake agent's foreground process
+// group and killing it (default disposition; `basic` installs no handler),
+// while the bug's mangled two-character delivery is inert text that leaves
+// the process running. So the assertion below is "the pane no longer echoes
+// new input", not "no ^C text appeared" — and it must reject the marker
+// appearing ANYWHERE on an echoed line, not just as an exact substring: a
+// mangled ctrl-c leaves the buffered "x" (see below) sitting in canonical
+// input, so a later Enter would flush "x" plus the marker together as one
+// line, echoing as `echo:x^Cpost-ctrlc-marker` — which a bare
+// `.not.toContain("echo:post-ctrlc-marker")` would miss entirely, since
+// that exact substring never occurs even though the marker plainly reached
+// the (still-alive, still-buggy) agent.
+//
+// This does NOT end the tmux session, despite ending the fake-agent
+// process: `remain-on-exit on` (SPEC.md) keeps a dead pane's session and
+// window around so its terminal stays viewable, it just stops accepting
+// input. Killing the agent is still sufficient for the assertion, and is
+// LAST in the file because it is destructive to every other test's shared
+// fixture: a correct fix permanently kills the fake agent every other test
+// in this file was typing into.
+test("real backspace erases; real ctrl-c kills the fake agent", async ({
+  page,
+}) => {
+  // NOT `openTerminal()`: that helper waits for the "FAKE-AGENT READY"
+  // banner, but the multi-megabyte test just before this one pushed well
+  // over tmux's 12,000-line history-limit through this same session —
+  // observed directly, the banner is gone from replay by the time this
+  // test's fresh page attaches. The session is still alive underneath
+  // (only its scrollback was evicted), so liveness is reproven below with
+  // a fresh marker instead of the banner.
+  await page.goto("/");
+  await page.waitForFunction(() => (window as any).__farhelmTermReady === true);
+  await page.locator("#terminal").click();
+
+  // Backspace: type a two-character marker, erase the second character,
+  // and require the marker to actually disappear — not just that nothing
+  // new appeared. A caret-escaped DEL would leave "xy^?" in the buffer
+  // (marker intact, artifact appended); a correct erase leaves neither.
+  await page.keyboard.type("xy");
+  await waitForTermText(page, "xy");
+  await page.keyboard.press("Backspace");
+  await expect
+    .poll(() => termText(page), {
+      message: "backspace must erase the typed marker, not print ^?",
+    })
+    .not.toContain("xy");
+
+  // Flush the "x" still sitting in canonical input BEFORE ctrl-c, and wait
+  // for its echo. Without this, ctrl-c's own canonical-mode fate (consumed
+  // as INTR vs. left as inert "^C" text) is entangled with "x": a mangled
+  // ctrl-c would leave "x^C" buffered together, and the marker typed below
+  // would flush on the SAME line as "x", one line earlier than expected.
+  // Waiting for "x" to echo here is what makes the post-ctrlc assertion
+  // unambiguous about what ctrl-c itself did.
+  await page.keyboard.press("Enter");
+  await waitForTermText(page, "echo:x");
+
+  await page.keyboard.press("Control+c");
+
+  // A mangled ctrl-c leaves `basic` alive and still echoing; only a real
+  // SIGINT kills it. Typing a fresh marker and requiring it to NEVER echo
+  // is the proof — and, being an absence, needs sustained observation
+  // rather than one poll: the process take-down is not instantaneous, and
+  // a single early check could pass before a still-alive process would
+  // have replied. The regex (not a plain substring) is deliberate: a
+  // mangled ctrl-c is inert TEXT, not a control action, so it stays in the
+  // canonical buffer ahead of the marker and both flush together on the
+  // same line — e.g. `echo:^Cpost-ctrlc-marker` — which
+  // `.not.toContain("echo:post-ctrlc-marker")` would not catch since that
+  // exact substring never appears. Matching the marker anywhere after
+  // `echo:` on one line closes that gap.
+  await page.keyboard.type("post-ctrlc-marker");
+  await page.keyboard.press("Enter");
+  const deadline = Date.now() + 3_000;
+  while (Date.now() < deadline) {
+    expect(await termText(page)).not.toMatch(/echo:.*post-ctrlc-marker/);
+    await new Promise((resolve) => setTimeout(resolve, 200));
+  }
 });

@@ -102,23 +102,31 @@ from explicit `resize-window` calls tracking the attached GUI client's dimension
 `window-size manual` on the window it touches, which is where that setting comes from). NOTE: setting
 `window-size manual` globally in the config crashes the tmux 3.4 server outright — the version Ubuntu 24.04 ships — so
 it must stay out of the generated config; the two mechanisms above make it redundant anyway. The supervisor streams raw
-pane output to the client; input goes in via `load-buffer -` over stdin followed by `paste-buffer -d -r` (`-r` so tmux
-does not rewrite LF to CR — the bytes are exact terminal input; `-d` so the input does not linger in the server's buffer
-list). Stdin delivery is a security choice, not a performance one: the earlier `send-keys -H` shape put every input
-byte, hex-encoded, on a spawned process's argv — world-readable via `/proc/<pid>/cmdline`, which matters because input
-includes credentials typed at agent prompts. It also removed `send-keys`'s 512-byte chunking, which existed only because
-tmux rejects a command with ~1000 arguments as "command too long". Passthrough sequences (audited): the control-mode
-`%output` stream carries `\ePtmux;...\e\\`-wrapped payloads still wrapped, regardless of the `allow-passthrough` option
-— that option only gates forwarding to rendering clients, which Farhelm has none of — so the supervisor unwraps
-passthrough payloads itself before they reach xterm.js. Reconnect replay prefills xterm.js from `capture-pane -e`
-history, then continues with live bytes from the same control client — that is how the 10,000-line floor is met without
-a gap between the two. The handoff ordering is load-bearing: the incumbent control client is killed and awaited, the
-window is resized, and the replacement attaches with `no-output`. Pane modes, a history snapshot, a visible-screen
-snapshot, and `refresh-client -f !no-output` are submitted as one semicolon-separated command group through that
-replacement. The matching `%end` for the final refresh block is the cutover: earlier pane bytes are represented by the
-snapshot, later ones arrive as `%output`, and `no-output` advances rather than queueing a second copy for delivery.
-Normal-screen replay selects the history snapshot; alternate-screen replay selects the visible snapshot so normal
-history is not mixed into a full-screen app.
+pane output to the client; input goes in as `send-keys -t <pane> -H <hex bytes...>` commands written to the same
+attached control-mode client's stdin that streams that attachment's output. An earlier design tried `load-buffer -` over
+stdin followed by `paste-buffer -d -r` instead, specifically to keep input bytes off a process's argv (see below) — and
+had to be abandoned: verified empirically against tmux 3.7b, `paste-buffer` caret-escapes control bytes on the way into
+the pane (DEL arrives as the two literal characters `^?`, ESC as `^[`, ctrl-C as `^C`), silently breaking backspace,
+arrow keys, and ctrl-C. Keystrokes are not pastes, and no `paste-buffer` flag changes that. `send-keys -H` delivers
+bytes verbatim instead (also verified against 3.7b) and keeps the security property that motivated stdin delivery in the
+first place: hex-encoded input never touches a process's argv, because it rides an _already-running_ process's stdin
+rather than a freshly spawned `tmux send-keys` command's arguments — the earlier concern was a spawned process's argv
+being world-readable via `/proc/<pid>/cmdline`, which matters because input includes credentials typed at agent prompts,
+and that risk never applied to bytes written to a pipe. Each `send-keys` command is chunked at 256 bytes because tmux
+rejects a command carrying on the order of ~1000 arguments as "command too long" and each input byte becomes one hex
+argument; every command's `%begin`/`%end` reply rides back on the same stdout the client's other notifications use,
+which is safe to ignore because the output-streaming loop already discards every non-`%output` notification by design
+(see below). Passthrough sequences (audited): the control-mode `%output` stream carries `\ePtmux;...\e\\`-wrapped
+payloads still wrapped, regardless of the `allow-passthrough` option — that option only gates forwarding to rendering
+clients, which Farhelm has none of — so the supervisor unwraps passthrough payloads itself before they reach xterm.js.
+Reconnect replay prefills xterm.js from `capture-pane -e` history, then continues with live bytes from the same control
+client — that is how the 10,000-line floor is met without a gap between the two. The handoff ordering is load-bearing:
+the incumbent control client is killed and awaited, the window is resized, and the replacement attaches with
+`no-output`. Pane modes, a history snapshot, a visible-screen snapshot, and `refresh-client -f !no-output` are submitted
+as one semicolon-separated command group through that replacement. The matching `%end` for the final refresh block is
+the cutover: earlier pane bytes are represented by the snapshot, later ones arrive as `%output`, and `no-output`
+advances rather than queueing a second copy for delivery. Normal-screen replay selects the history snapshot;
+alternate-screen replay selects the visible snapshot so normal history is not mixed into a full-screen app.
 
 This boundary was checked against tmux 3.3a, 3.4, and 3.7b with `scripts/check-tmux-cutover.py` under a continuously
 busy pane. The corresponding tmux source has the same ordering in all three versions: one input line appends the
