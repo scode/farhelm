@@ -757,6 +757,11 @@ impl TmuxDriver {
     ///   second, showing up as visibly laggy Esc handling in agent TUIs
     ///   and vim; 0 removes it entirely.
     ///
+    /// NOT set here: `focus-events`. It is a server option that must be
+    /// reconciled on EVERY `ensure_server` call, not just a fresh start —
+    /// see `ensure_server`'s own doc for why a config-file line alone
+    /// cannot do that job, and for what the option actually buys us.
+    ///
     /// NOT set here: `window-size manual`. It crashes the tmux 3.4 server
     /// outright — `new-session` then returns "server exited unexpectedly",
     /// in any spelling (`set -g`, `setw -g`, `set -w -g`) — and 3.4 is
@@ -850,9 +855,19 @@ impl TmuxDriver {
         Ok(out.stdout)
     }
 
-    /// Start (or adopt) the private server. Idempotent: an already
-    /// running server on this socket is left exactly as it is, per the
-    /// discovery-first rule — never restart a running substrate.
+    /// Start (or adopt) the private server, then reconcile the one live
+    /// option this driver actively manages after the fact, regardless of
+    /// which path was taken.
+    ///
+    /// The running substrate itself — sessions, panes, scrollback history
+    /// — is left exactly as it is on adoption, per the discovery-first
+    /// rule: never restart a running substrate. `focus-events` is the one
+    /// deliberate exception, normalized on every call rather than only on
+    /// a fresh start, because a server started before this option existed
+    /// (or by an older farhelm build) would otherwise keep whatever stale
+    /// value it already had for the rest of its life — see the
+    /// `set-option` call below for why a config-file line cannot do this
+    /// job alone, and for what the option actually buys us.
     pub async fn ensure_server(&self) -> anyhow::Result<()> {
         let version = Command::new("tmux")
             .arg("-V")
@@ -872,6 +887,39 @@ impl TmuxDriver {
         }
         tokio::fs::write(&self.config, Self::config_body()).await?;
         self.run(&["start-server"]).await?;
+
+        // `focus-events` is deliberately NOT part of `config_body`: tmux
+        // only reads a `-f` config when it STARTS a server, so a config
+        // line would take effect on a fresh server but be silently
+        // skipped when this call instead ADOPTS one already running (the
+        // ordinary case across a supervisor restart or upgrade) — exactly
+        // the gap this explicit, unconditional `set-option` closes,
+        // cheaply (one more tmux round trip at startup) and idempotently
+        // (setting an already-on option to on is a no-op) on both paths
+        // alike, rather than trying to detect "did we just start this
+        // server or adopt it" first.
+        //
+        // Why it matters at all: Claude Code inspects this option and
+        // nags in-session when it reads off ("tmux focus-events off · add
+        // 'set -g focus-events on' to ~/.tmux.conf and reattach"); turning
+        // it on silences that nag and keeps the option truthful for any
+        // app that queries it. That is ALL it does for us, verified
+        // empirically (a scratch tmux plus a pane app enabling DEC
+        // private mode 1004, probed with a real attached client): the
+        // option only gates whether tmux relays a focus escape it
+        // receives from a NORMAL ATTACHED CLIENT's pty down to a pane
+        // that asked for it. Neither of our two byte paths is such a
+        // client — input goes in as `send-keys -H` (see [`InputClient`]),
+        // handing the pane literal bytes directly, never through the
+        // client-side escape parsing this option gates; output comes out
+        // through a non-rendering control-mode client (`tmux -C`, see
+        // [`OutputStream`]), which has no pty and originates no
+        // client-side escapes for this option to gate in the first place.
+        // So this call does not, and cannot, deliver real focus-in/out
+        // awareness through this system — it only makes the option's
+        // advertised state match what a well-behaved agent expects to see.
+        self.run(&["set-option", "-s", "focus-events", "on"])
+            .await?;
         Ok(())
     }
 

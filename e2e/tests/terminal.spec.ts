@@ -584,6 +584,115 @@ test("second client takes over; first shows the detach banner", async ({
   await second.close();
 });
 
+// PLAN_M2.md acceptance 4: a restart-gap session (tmux gone, metadata
+// intact) must open to "metadata plus why there is no terminal", not a
+// silently blank pane. Nothing before this test pinned the UI half of
+// that criterion — the Rust suite covers only the supervisor side, in
+// `restart_gap_lists_sessions_without_a_terminal_and_attach_fails`
+// (crates/farhelm/tests/e2e.rs).
+//
+// This suite's stack cannot restart its supervisor mid-run
+// (start-stack.sh boots one long-lived supervisor for the whole file), so
+// a genuine restart gap is out of reach here. The stand-in: a session row
+// the real supervisor has never heard of. That is a DIFFERENT failure
+// branch on the supervisor side — an id absent from `sup.sessions`
+// entirely takes the "no such session: {id}" arm of `ControlMsg::Attach`'s
+// handler (service.rs), while a genuine restart-gap row (present in the
+// map, `entry.terminal` empty) takes the sibling "session {id} has no
+// terminal: the supervisor (or its tmux server) restarted after the agent
+// ended" arm right below it — distinct branch, distinct wording, not
+// reproduced here. What the two DO share, and what this test actually
+// exercises, is everything downstream of that error: `serve_term` in
+// farhelm-helm/src/lib.rs attaches over a REAL WebSocket, gets back
+// whichever error, and relays it as a genuine `detached` control message
+// the same way regardless of which arm produced it; the browser side
+// (terminal.js's `showBanner`) and the list UI's metadata rendering have
+// no way to tell the two apart either. So this pins the shared
+// helm/WebSocket/UI error-display path — the UI CONTRACT of "metadata
+// shown, plus a server-provided explanation instead of a silently blank
+// terminal" — not the restart-gap-specific message, which belongs to the
+// Rust test named above.
+//
+// Only the row's EXISTENCE is synthetic: route-intercepted GET
+// /api/sessions, injecting one extra row alongside the real ones (rather
+// than fabricating the whole response) so the shared "e2e-session" row
+// every other test in this file depends on still comes from the real
+// supervisor on THIS request. That protection is necessarily local to
+// this one route handler and this one page, though: Playwright routes are
+// page-scoped, so nothing here could leak into another test's page even
+// if it wanted to. The banner text is asserted only to be non-empty and
+// to name the session, whatever exact prose this particular arm's error
+// happens to carry.
+test("opening a terminal-less session shows its metadata and the server's own explanation", async ({
+  page,
+}) => {
+  // A well-formed but unknown UUID: recognizable in the banner text
+  // without colliding with any id a real session in this run could have.
+  const bogusId = "00000000-0000-0000-0000-000000000000";
+  const title = `terminal-less-${Date.now()}`;
+  const cwd = "/tmp/terminal-less-fixture";
+  const invocation = "true";
+
+  // This test only ever issues GETs against this route (no create/stop/
+  // delete call in its body), so there is no other method to fall through
+  // to `route.continue()` for.
+  await page.route("**/api/sessions", async (route) => {
+    // Fetch the REAL listing and append one row, rather than fabricating
+    // the whole response: every other row (in particular the shared
+    // "e2e-session" other tests in this file depend on) must keep coming
+    // from the real supervisor, unmodified.
+    const response = await route.fetch();
+    const listing = await response.json();
+    listing.sessions.push({
+      id: bogusId,
+      title,
+      cwd,
+      invocation,
+      // Exactly the shape a restart-gap row has (PLAN_M2.md, and
+      // `SessionStatus::Exited` in farhelm-proto/src/lib.rs): known dead,
+      // no code to fabricate.
+      status: { state: "exited", exit_code: null },
+    });
+    listing.total += 1;
+    await route.fulfill({ response, json: listing });
+  });
+
+  await page.goto("/");
+  // `.click()` already waits for the target to be visible and stable, so
+  // there is nothing an upfront `toBeVisible` would add here.
+  await rowByTitle(page, title).locator(".session-row-open").click();
+
+  // (a) metadata IS shown — title and titlebar `.meta` (cwd — invocation,
+  // farhelm-ui/src/lib.rs) render from the row's own fields, independent
+  // of whether a terminal ever comes up behind them. `toHaveText` retries
+  // on its own, so this needs no separate mount-readiness wait first.
+  await expect(page.locator(".titlebar .title")).toHaveText(title);
+  await expect(page.locator(".titlebar .meta")).toHaveText(
+    `${cwd} — ${invocation}`,
+  );
+
+  // (b) the banner becomes visible and carries the server's own reason
+  // (farhelm-ui/assets/terminal.js's showBanner, fed by serve_term's
+  // `detached` notice — "Detached: <reason>"), not a blank pane or a
+  // generic "connection closed". This IS this test's real synchronization
+  // point: the banner is asynchronous, arriving only after the WS
+  // round-trips through the real attach failure, so waiting on it (rather
+  // than on `__farhelmTermReady`, which flips as soon as mount() opens the
+  // socket and says nothing about how the attach behind it resolves) is
+  // what actually proves the failure was relayed all the way to the DOM.
+  const banner = page.locator("#term-banner");
+  await expect(banner).toBeVisible({ timeout: 10_000 });
+  // The visibility assertion above guarantees the element exists, so
+  // `textContent()` cannot be null here.
+  const bannerText = await banner.textContent();
+  expect(bannerText).toMatch(/^Detached: .+/);
+  expect(bannerText).toContain(bogusId);
+
+  // (c) no agent output ever reached the terminal: the attach failed
+  // before any `TermEvent::Data` could exist to write into the buffer.
+  expect((await termText(page)).trim()).toBe("");
+});
+
 // The creation API is the one true path (PLAN_M1.md: CLI flags AND the UI
 // dialog (PLAN_M2.md step 8) both feed this same endpoint), so its HTTP
 // surface needs its own direct coverage. Only the failure case is

@@ -1362,6 +1362,81 @@ async fn exited_agent_leaves_a_viewable_terminal() {
         .expect("a session whose agent exited must still be attachable");
 }
 
+/// The adopted-server gap: tmux reads a `-f` config only when it STARTS a
+/// server, so `ensure_server`'s adopt-a-surviving-server path (the
+/// ordinary case across a supervisor restart or upgrade) never rereads
+/// `TmuxDriver::config_body` at all — which is exactly why `focus-events`
+/// is not in that config in the first place, and is instead reconciled by
+/// an explicit, unconditional `set-option` every time `ensure_server` runs
+/// (see that call's own doc for the full rationale, including what this
+/// option does and does not actually change for us). A test that only
+/// ever hits the fresh-start path would keep passing even if that
+/// explicit reconciliation silently regressed back to "rely on the config
+/// file", because fresh starts read the config regardless. This test
+/// provokes adoption specifically: a server is started by hand, on this
+/// state dir's socket, with focus-events deliberately off — standing in
+/// for a survived server an upgraded supervisor binary reattaches to,
+/// whose config predates this option (or simply had it off) — and only
+/// THEN does a `Supervisor` get constructed against the same socket,
+/// which `ensure_server` must adopt rather than start fresh.
+///
+/// `focus-events` is a SERVER option (`set -s`), so the live query below
+/// uses `show-options -s` to match — a `-g` query would rely on tmux's
+/// scope inference rather than pinning the same table the fix itself
+/// names explicitly.
+#[tokio::test]
+async fn adopted_tmux_server_gets_focus_events_explicitly_not_just_from_config() {
+    let _slot = SLOTS.acquire().await.expect("semaphore is never closed");
+    let state = tempfile::tempdir().expect("state");
+    let sock = state.path().join("tmux.sock");
+    let _tmux = TmuxServerGuard(sock.clone());
+
+    // Hand-roll a server on this socket BEFORE any farhelm code touches
+    // this state dir, deliberately with the option off — this is the
+    // "survived server" half of the adoption gap, so it must exist first.
+    // `start-server` alone (rather than `new-session`) is enough to leave
+    // a live, queryable server: `exit-empty off` keeps it up with no
+    // sessions, so there is no need to spawn a pointless shell just to
+    // give it something to hold open.
+    let off_conf = state.path().join("pre-existing.conf");
+    tokio::fs::write(
+        &off_conf,
+        "set -s exit-empty off\nset -s focus-events off\n",
+    )
+    .await
+    .expect("write throwaway pre-existing config");
+    let started = tokio::process::Command::new("tmux")
+        .arg("-S")
+        .arg(&sock)
+        .arg("-f")
+        .arg(&off_conf)
+        .arg("start-server")
+        .status()
+        .await
+        .expect("spawn scratch tmux");
+    assert!(started.success(), "test setup: scratch tmux must start");
+
+    // Now let the real code run: `ensure_server` (via `Supervisor::new_with_exe`)
+    // finds this socket already live and must ADOPT it, not start a fresh
+    // server whose config it would otherwise get to read.
+    Supervisor::new_with_exe(state.path(), farhelm_bin().into())
+        .await
+        .expect("supervisor construction must adopt the pre-existing server");
+
+    let out = tmux_query(&sock, &["show-options", "-s", "focus-events"]).await;
+    assert!(
+        out.status.success(),
+        "show-options -s focus-events failed: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert_eq!(
+        String::from_utf8_lossy(&out.stdout).trim(),
+        "focus-events on",
+        "adopting a pre-existing server must still bring focus-events on, not just \
+         a fresh server's config"
+    );
+}
+
 /// PLAN_M2.md's list-status contract: once an agent exits ON ITS OWN — no
 /// stop or delete involved — the next `ListSessions` must reflect that as
 /// `Exited` with the exact exit code tmux observed, not stay `Alive`
