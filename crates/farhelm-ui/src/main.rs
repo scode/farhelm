@@ -34,9 +34,24 @@ fn main() {
     // so this is a no-op on the web path.
     let base = base.trim_end_matches('/').to_string();
 
-    dioxus::LaunchBuilder::new()
-        .with_context(ApiBase(base))
-        .launch(App);
+    let builder = dioxus::LaunchBuilder::new().with_context(ApiBase(base));
+
+    // Desktop windows need an explicit WindowBuilder, and not only for the
+    // title: dioxus-desktop's `Config::new()` marks debug-build windows
+    // always-on-top whenever the app is NOT launched through `dx`
+    // (`dioxus_cli_config::always_on_top().unwrap_or(true)` — a
+    // convenience for `dx serve` development that misfires for a real app
+    // started via `cargo run`, leaving the window permanently above
+    // everything). `Config::with_window` replaces the default builder
+    // wholesale, which discards that always-on-top default along with the
+    // "Dioxus App" placeholder title.
+    #[cfg(feature = "desktop")]
+    let builder = builder.with_cfg(
+        dioxus::desktop::Config::new()
+            .with_window(dioxus::desktop::WindowBuilder::new().with_title("farhelm")),
+    );
+
+    builder.launch(App);
 }
 
 #[cfg(not(any(feature = "web", feature = "desktop")))]
