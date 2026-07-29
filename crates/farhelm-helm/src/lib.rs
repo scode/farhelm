@@ -444,6 +444,12 @@ struct CreateReq {
     cols: u16,
     #[serde(default = "default_rows")]
     rows: u16,
+    /// The caller's idempotency key for this create (PLAN_M3.md item 6),
+    /// passed straight through to the supervisor. Optional — like `title`,
+    /// an absent field decodes as `None` — so every pre-M3 caller (curl, an
+    /// older UI build, the CLI's startup create) keeps working unchanged,
+    /// with each request its own create.
+    intent_key: Option<String>,
 }
 
 // Dimensions for a caller that has no terminal yet — the CLI, a script,
@@ -461,13 +467,27 @@ fn default_rows() -> u16 {
 /// `POST /api/sessions` — the creation API SPEC_impl.md calls the one true
 /// path. The CLI's `--cwd/--agent` flags and any future UI dialog both
 /// land on the same supervisor call this reaches.
+///
+/// A body carrying `intent_key` gets server-enforced idempotency
+/// (PLAN_M3.md item 6): a retry of the same request under the same key
+/// yields the same session rather than a second one, and a key reused for
+/// a DIFFERENT request comes back 409 through `http_error`. Everything
+/// else about this handler is unchanged, including for bodies that omit
+/// the field entirely.
 async fn create_session(
     State(state): State<Arc<AppState>>,
     axum::Json(req): axum::Json<CreateReq>,
 ) -> impl IntoResponse {
     match state
         .client
-        .create_session(&req.cwd, &req.invocation, req.title, req.cols, req.rows)
+        .create_session_with_key(
+            &req.cwd,
+            &req.invocation,
+            req.title,
+            req.cols,
+            req.rows,
+            req.intent_key,
+        )
         .await
     {
         Ok(session) => axum::Json(session).into_response(),
@@ -1498,6 +1518,81 @@ mod tests {
         assert_eq!(session.id, "sess-1");
         assert_eq!(session.cwd, "/some/dir");
 
+        peer.await.unwrap();
+    }
+
+    /// The create body's `intent_key` reaches the supervisor verbatim
+    /// (PLAN_M3.md item 6).
+    ///
+    /// Worth its own test because the helm is a pure pass-through here and
+    /// pass-throughs are exactly what silently stop passing things
+    /// through: nothing else in this crate would notice if the field were
+    /// dropped, and the symptom in production would not be an error but a
+    /// SECOND session appearing on a retry — the failure the whole feature
+    /// exists to prevent, visible only under a lost reply.
+    #[tokio::test]
+    async fn create_session_forwards_the_bodys_intent_key_to_the_supervisor() {
+        use farhelm_proto::io::{FrameReader, FrameWriter, handshake, parse_control};
+        use farhelm_proto::{ControlMsg, Frame, SessionInfo};
+        use tower::ServiceExt;
+
+        let (client_side, peer_side) = tokio::io::duplex(64 * 1024);
+        let peer = tokio::spawn(async move {
+            let (r, w) = tokio::io::split(peer_side);
+            let mut reader = FrameReader::new(r);
+            let mut writer = FrameWriter::new(w);
+            handshake(&mut reader, &mut writer, "supervisor")
+                .await
+                .unwrap();
+            let request = parse_control(&reader.read_frame().await.unwrap().unwrap()).unwrap();
+            let ControlMsg::CreateSession {
+                req_id, intent_key, ..
+            } = request
+            else {
+                panic!("expected CreateSession, got {request:?}");
+            };
+            assert_eq!(
+                intent_key.as_deref(),
+                Some("intent-from-the-browser"),
+                "the key belongs to whoever can retry, so it must arrive unaltered"
+            );
+            writer
+                .write_frame(&Frame::control(&ControlMsg::SessionCreated {
+                    req_id,
+                    session: SessionInfo {
+                        id: "sess-1".into(),
+                        title: "t".into(),
+                        cwd: "/some/dir".into(),
+                        invocation: "some-agent".into(),
+                        status: farhelm_proto::SessionStatus::Unknown,
+                        annotation: None,
+                        restart_offer: farhelm_proto::RestartOffer::default(),
+                    },
+                }))
+                .await
+                .unwrap();
+        });
+
+        let (r, w) = tokio::io::split(client_side);
+        let client = super::SupervisorClient::start(r, w).await.unwrap();
+        let app = build_router(client, None, 7433);
+        let request = axum::http::Request::builder()
+            .method("POST")
+            .uri("/api/sessions")
+            .header("host", "127.0.0.1:7433")
+            .header("content-type", "application/json")
+            .body(axum::body::Body::from(
+                serde_json::json!({
+                    "cwd": "/some/dir",
+                    "invocation": "some-agent",
+                    "intent_key": "intent-from-the-browser",
+                })
+                .to_string(),
+            ))
+            .unwrap();
+
+        let response = app.oneshot(request).await.unwrap();
+        assert_eq!(response.status(), axum::http::StatusCode::OK);
         peer.await.unwrap();
     }
 

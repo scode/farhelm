@@ -726,6 +726,14 @@ impl SupervisorClient {
     /// its diagnostic remains visible, but does not yet expose structured
     /// launch status. An `Err` here is a precondition failure that left
     /// nothing behind and carries the supervisor's message for display.
+    ///
+    /// No idempotency: every call is its own create. That is the right
+    /// default for the callers this wrapper has — a CLI invocation the user
+    /// typed again IS a second intent, and SPEC.md explicitly sanctions two
+    /// sessions with identical parameters, so a key derived from the fields
+    /// would block something the product allows. Intent identity belongs to
+    /// the surface that can distinguish a retry from a new request, which
+    /// is the GUI; see [`SupervisorClient::create_session_with_key`].
     pub async fn create_session(
         &self,
         cwd: &str,
@@ -733,6 +741,39 @@ impl SupervisorClient {
         title: Option<String>,
         cols: u16,
         rows: u16,
+    ) -> anyhow::Result<SessionInfo> {
+        self.create_session_with_key(cwd, invocation, title, cols, rows, None)
+            .await
+    }
+
+    /// [`SupervisorClient::create_session`] carrying a client-supplied
+    /// idempotency key (PLAN_M3.md item 6).
+    ///
+    /// The key belongs to whoever can RETRY — the browser, ultimately —
+    /// which is why this parameter is threaded through from the HTTP
+    /// request body rather than minted here: a key the helm invented would
+    /// be a fresh one on every retry the browser made, deduplicating
+    /// nothing. `None` is the pre-M3 path, where each request is its own
+    /// create.
+    ///
+    /// Same key with the same request replays whatever that intent
+    /// resolved to: the session it created, an explicit gone-error if that
+    /// session has since been deleted, or the ORIGINAL error — including
+    /// one from a precondition the request never got past, which is
+    /// replayed rather than re-evaluated against a filesystem that may
+    /// have changed. Same key with a DIFFERENT request is refused with
+    /// `ErrorKind::Conflict`, which `http_error` renders as a 409. A key
+    /// whose create is still being reconciled can also come back as an
+    /// `Internal` failure that says so; retrying it is the intended
+    /// response.
+    pub async fn create_session_with_key(
+        &self,
+        cwd: &str,
+        invocation: &str,
+        title: Option<String>,
+        cols: u16,
+        rows: u16,
+        intent_key: Option<String>,
     ) -> anyhow::Result<SessionInfo> {
         let req_id = self.req_id();
         match self
@@ -745,12 +786,12 @@ impl SupervisorClient {
                     title,
                     cols,
                     rows,
-                    // This helper is the pre-M3 raw create path with no
-                    // idempotency or snapshot-override support of its own
-                    // yet (PLAN_M3.md items 6/7 land their own call-site
-                    // plumbing later); `None` here is exactly the
-                    // behavior-preserving default those fields document.
-                    intent_key: None,
+                    intent_key,
+                    // PLAN_M3.md item 7's snapshot overrides have no
+                    // caller yet; `None` is the behavior-preserving
+                    // default those fields document (the supervisor still
+                    // FINGERPRINTS them, so a future sender of these gets
+                    // key-reuse detection for free).
                     agent_kind: None,
                     resume_template: None,
                 },

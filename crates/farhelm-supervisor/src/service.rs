@@ -29,14 +29,18 @@
 //! comparison on `Supervisor::reload_sessions`.
 
 use crate::launch::{LaunchSpec, resolve_shell, window_command};
-use crate::store::{LastOutcome, SessionStore, StoredSession, Transition};
+use crate::store::{
+    Claimed, IntentClaim, LastOutcome, Reservation, ReservationOutcome, RetryClaim, SessionStore,
+    Settlement, StoredSession, Transition,
+};
 use crate::tmux::{InputClient, OutputEvent, OutputStream, PaneModes, PaneState, TmuxDriver};
 use anyhow::Context;
 use farhelm_proto::io::{
     FrameReader, FrameWriter, ProgressWrite, handshake, parse_control, write_frame_before_stall,
 };
 use farhelm_proto::{
-    ControlMsg, DETACH_REASON_STALLED, ErrorKind, Frame, RestartOffer, SessionInfo, SessionStatus,
+    AgentKind, ControlMsg, DETACH_REASON_STALLED, ErrorKind, Frame, RestartOffer, SessionInfo,
+    SessionStatus,
 };
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
@@ -197,23 +201,74 @@ impl Default for SupervisorTimeouts {
 ///   condition. Reload therefore degrades instead (see `reload_sessions`).
 pub type BootIdSource = Arc<dyn Fn() -> anyhow::Result<Option<String>> + Send + Sync>;
 
-/// A simulated crash in `create_session`, immediately after the durable
-/// launching record is committed and before ANY external side effect (the
-/// launch spec, the tmux session).
+/// The boundaries inside a create at which a crash can be simulated —
+/// the create-LIFECYCLE seam (PLAN_M3.md items 2 and 6), distinct from
+/// item 5's file-write seam, which covers none of these windows.
+///
+/// Every stage is a point where a real crash leaves durable state in a
+/// DIFFERENT shape, and the three shapes are exactly what item 6's
+/// reconciliation has to tell apart — which is why they are named stages
+/// rather than one undifferentiated "crash now" hook.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CreateStage {
+    /// After the durable launching row is committed — together with a
+    /// first-time intent's reservation, or by the takeover that reclaimed
+    /// a pending one — and before ANY external side effect: no launch spec
+    /// on disk, no tmux session. What survives is a row describing an
+    /// attempt that provably never got anywhere, which is the state item
+    /// 2's ordering rule exists to guarantee and the only one a retry may
+    /// relaunch over.
+    AfterRecord,
+    /// After tmux has the session and its pane, and before that launch is
+    /// confirmed durably. What survives is a `Launching` row with no pane
+    /// recorded while the tmux session genuinely exists — reload's pane
+    /// rediscovery is what reconciles it. (Whether the AGENT is running is
+    /// a separate question at this instant: the shim may not have reached
+    /// its `exec` yet, and may yet fail it.)
+    DuringLaunch,
+    /// After the launch is confirmed durably and before the reservation's
+    /// outcome is recorded. The session fully exists; only the intent
+    /// table does not yet know it. This is acceptance 7's "the reply is
+    /// dropped AFTER the session durably exists", from the inside.
+    ///
+    /// Reached only by a create that CARRIES an intent key: an unkeyed
+    /// create has no outcome to precede, so there is no window here to
+    /// crash in.
+    BeforeOutcome,
+}
+
+/// Marks an error as having come from the create-lifecycle seam rather
+/// than from the create itself.
+///
+/// The distinction is load-bearing, not cosmetic: an ordinary create
+/// failure settles its reservation (so a retry replays the same error),
+/// while a CRASH runs no further code at all — every durable write after
+/// the injected point simply never happens, which is the entire state the
+/// stage is there to produce. Without this marker, the injected error
+/// would flow into the settlement path and durably record a failure a real
+/// crash could never have recorded, making all three stages replay an
+/// error instead of reconciling.
+///
+/// Attached as a context layer by `Supervisor::simulate_crash`, so it is
+/// findable by `downcast_ref` wherever the error ends up.
+#[derive(Debug, thiserror::Error)]
+#[error("simulated create crash")]
+struct SimulatedCrash;
+
+/// A simulated crash at one of [`CreateStage`]'s boundaries in
+/// `create_session`.
 ///
 /// Returning an error aborts the create immediately, skipping the cleanup
 /// an ordinary in-process failure performs — which is the point: a real
 /// crash does not get to run cleanup either, and the durable record it
-/// leaves behind is exactly what item 2's ordering rule is about.
-/// Production never sets one. PLAN_M3.md item 6 adds further injection
-/// points (crash after reservation, during launch, before outcome commit)
-/// and may grow this into a staged seam then; one zero-argument closure is
-/// what today's single boundary needs.
-pub type CreateCrashSeam = Arc<dyn Fn() -> anyhow::Result<()> + Send + Sync>;
+/// leaves behind is exactly what item 2's ordering rule and item 6's
+/// reconciliation are about. Production never sets one; a seam that does
+/// not care about a given stage returns `Ok(())` for it.
+pub type CreateCrashSeam = Arc<dyn Fn(CreateStage) -> anyhow::Result<()> + Send + Sync>;
 
 /// The injectable seams a `Supervisor` is built with. All default to
-/// production behavior; grouped into one struct so adding item 6's
-/// injection points later does not grow the constructor's signature again.
+/// production behavior; grouped into one struct so a new injection point
+/// does not grow the constructor's signature again.
 #[derive(Clone)]
 pub struct SupervisorSeams {
     /// See [`BootIdSource`]. Defaults to reading this host's real boot id.
@@ -394,6 +449,30 @@ impl StateDirOwnership {
 /// before `create_session` has touched tmux or the filesystem.
 const CREATE_FIELD_CAP: usize = 64 * 1024;
 
+/// Byte cap on `CreateSession`'s `intent_key` (PLAN_M3.md item 6),
+/// enforced alongside `CREATE_FIELD_CAP` before any lookup or write.
+///
+/// Separate from that cap rather than folded into it, because what the two
+/// protect is different in kind: the field cap bounds a REPLY that would
+/// otherwise be undeliverable, while this one bounds a durable, deliberately
+/// un-pruned table (see `store::Reservation`'s tombstone docs) whose primary
+/// key is whatever the client sent. Without a bound, one client can spend
+/// unbounded disk on keys nothing will ever replay. 512 bytes is two orders
+/// of magnitude beyond a UUID — the shape the UI actually sends — while
+/// still leaving room for a caller that prefers structured keys.
+const INTENT_KEY_CAP: usize = 512;
+
+/// Cap on how many argv elements `CreateSession`'s `resume_template`
+/// override may carry (PLAN_M3.md items 6 and 7).
+///
+/// Independent of the byte cap it is enforced alongside, because the two
+/// bound different things: a template of ten thousand EMPTY elements costs
+/// almost nothing in bytes while still being nothing a resume invocation
+/// could legitimately be, and it lands in the same never-pruned
+/// reservation row. 64 elements is far beyond every real resume
+/// invocation (`claude --resume {conversation}` is three).
+const RESUME_TEMPLATE_ELEMENT_CAP: usize = 64;
+
 /// The no-progress window `handle_connection`'s shutdown tail allows the
 /// writer task before giving up on it — NOT a total deadline on the drain.
 ///
@@ -517,6 +596,342 @@ fn error_kind(e: &anyhow::Error) -> ErrorKind {
     e.downcast_ref::<RequestError>()
         .map(|r| r.kind)
         .unwrap_or(ErrorKind::Internal)
+}
+
+/// The canonical form of everything an intent key is bound to
+/// (PLAN_M3.md item 6): a create replays only when its key AND this string
+/// both match what the key was claimed with.
+///
+/// ## What is in it, and what is deliberately not
+///
+/// Every SESSION-shaping field: `cwd`, `invocation`, `title` (as SENT —
+/// `None` means "auto-generate", which is a different request from an
+/// explicit title that happens to equal the derived one), and item 7's
+/// `agent_kind`/`resume_template` overrides. `cols`/`rows` are excluded by
+/// design: they shape the ATTACHMENT, not the session, so the same intent
+/// retried from a differently-sized client is still the same intent — a
+/// point the plan makes explicitly, and the reason this function takes no
+/// dimensions at all rather than taking and ignoring them.
+///
+/// The overrides are threaded in here BEFORE anything else reads them: as
+/// of this PR they shape nothing but the fingerprint (item 7 is what makes
+/// them shape the session), and that is not a placeholder — acceptance 7
+/// requires a request differing ONLY in an override to be rejected as a
+/// key reuse, which is a property of the fingerprint alone.
+///
+/// ## Representation
+///
+/// The canonical FIELDS, JSON-encoded as a fixed-order tuple — not a
+/// digest. A JSON array is unambiguous (no field can bleed into its
+/// neighbour the way a delimiter-joined string can, since every element is
+/// separately quoted and escaped), deterministic (element order is this
+/// function's, and no map is involved to have an ordering question),
+/// comparable with `==`, and readable by a human debugging a database.
+///
+/// The `agent_kind` element is spelled with this module's OWN stable
+/// vocabulary rather than the wire type's serde representation: the two
+/// agree today, but a future protocol rename would otherwise change every
+/// stored fingerprint at once and turn identical requests into key-reuse
+/// conflicts across an upgrade. The persisted spelling is pinned by a
+/// golden test for the same reason `LastOutcome`'s column vocabulary is.
+///
+/// What a DIGEST would have bought, and why it is not here: a constant-size
+/// row, and an end to the `invocation` — which may embed credentials —
+/// being retained past its session's deletion in a tombstone. Only the
+/// second is a real property, and it is about RETENTION rather than
+/// exposure: the same string already sits in `sessions.invocation`, in the
+/// same 0600 database inside the same 0700 state directory, so what changes
+/// is how long a copy outlives its session, not who can read it. That is a
+/// separate piece of work from bounding the row COUNT (see
+/// `store::Reservation`), and neither is owned here.
+fn create_fingerprint(
+    cwd: &str,
+    invocation: &str,
+    title: Option<&str>,
+    agent_kind: Option<AgentKind>,
+    resume_template: Option<&[String]>,
+) -> String {
+    // Infallible in practice: every element is a string, an option, or an
+    // array of strings, none of which can fail to serialize. The `expect`
+    // documents that rather than inviting a caller to handle an error that
+    // cannot occur.
+    serde_json::to_string(&(
+        cwd,
+        invocation,
+        title,
+        agent_kind.map(agent_kind_fingerprint),
+        resume_template,
+    ))
+    .expect("a fingerprint of strings and options always serializes")
+}
+
+/// This module's own stable spelling of an [`AgentKind`] for
+/// [`create_fingerprint`]; see that function's representation notes for why
+/// the wire encoding is deliberately not reused.
+fn agent_kind_fingerprint(kind: AgentKind) -> &'static str {
+    match kind {
+        AgentKind::Claude => "claude",
+        AgentKind::Codex => "codex",
+        AgentKind::Generic => "generic",
+    }
+}
+
+/// Serializes creates that share an intent key, so concurrent retries of
+/// one intent collapse to ONE launch (PLAN_M3.md item 6) instead of racing
+/// each other's reservation lookup.
+///
+/// ## Why an in-process lock is enough
+///
+/// Cross-process collapse is not needed because cross-process creates
+/// cannot happen: SPEC.md allows at most one supervisor per user per host,
+/// and this build enforces it before anything durable is touched — an
+/// `flock` on the state directory taken in the constructor
+/// (`StateDirOwnership`) plus the serve-right swap that refuses a second
+/// `serve` even in-process. Every create against one state directory
+/// therefore flows through one process, so one process's locks cover every
+/// racer there is.
+///
+/// ## What the lock is, and is not, responsible for
+///
+/// The durable reservation is the mechanism that makes a duplicate
+/// IMPOSSIBLE, and it does so without help: the claim is atomic
+/// (`store::Claimed`), and a relaunch takes its pending reservation over
+/// through an atomic conditional transition (`store::RetryClaim`), so a
+/// racer that bypassed this lock entirely still cannot launch twice — it
+/// loses one of those two transitions and answers from the winner instead.
+///
+/// What the lock adds is that a concurrent retry gets the RIGHT answer
+/// rather than merely a safe one. Without it, a second request arriving
+/// mid-launch would find a pending reservation whose side effects do not
+/// exist YET and would be entitled to conclude the first attempt never
+/// launched — evidence-gathering cannot distinguish "in flight right now"
+/// from "died before doing anything", because they look identical from
+/// outside the process. Serializing on the key removes that ambiguity at
+/// the source: by the time the second request looks, the first has an
+/// outcome. Nothing about correctness rests on WHEN the guard is released
+/// relative to the settlement — a late settlement simply means the next
+/// request reconciles instead of replaying.
+///
+/// Entries are pruned when the last holder leaves, so the map is bounded
+/// by in-flight creates rather than by every key ever seen.
+#[derive(Debug, Default)]
+struct IntentLocks {
+    /// `Weak` so an entry dies with its last guard; see [`IntentGuard`]'s
+    /// `Drop`. A std mutex, not a tokio one: it is held only for the map
+    /// lookup itself, never across the `await` that acquires the per-key
+    /// lock.
+    locks: std::sync::Mutex<HashMap<String, std::sync::Weak<tokio::sync::Mutex<()>>>>,
+}
+
+impl IntentLocks {
+    /// Hold this key's lock until the returned guard is dropped, waiting
+    /// out any create already running under the same key.
+    async fn claim(self: &Arc<Self>, key: &str) -> IntentGuard {
+        let lock = {
+            let mut locks = self.locks.lock().expect("intent lock map poisoned");
+            match locks.get(key).and_then(std::sync::Weak::upgrade) {
+                Some(existing) => existing,
+                None => {
+                    let fresh = Arc::new(tokio::sync::Mutex::new(()));
+                    locks.insert(key.to_string(), Arc::downgrade(&fresh));
+                    fresh
+                }
+            }
+        };
+        IntentGuard {
+            registry: Arc::clone(self),
+            key: key.to_string(),
+            _held: lock.lock_owned().await,
+        }
+    }
+}
+
+/// One create's exclusive hold on its intent key; see [`IntentLocks`].
+struct IntentGuard {
+    registry: Arc<IntentLocks>,
+    key: String,
+    /// Owned rather than borrowed so the guard is `'static` and can be
+    /// held across every await in a create.
+    _held: tokio::sync::OwnedMutexGuard<()>,
+}
+
+impl Drop for IntentGuard {
+    fn drop(&mut self) {
+        let Ok(mut locks) = self.registry.locks.lock() else {
+            return;
+        };
+        // Only when this guard is the LAST holder: a waiter that has
+        // already upgraded the `Weak` is counted here (strong count above
+        // one), and removing the entry out from under it would let a third
+        // create insert a DIFFERENT mutex for the same key and run
+        // alongside it. Racers still inside `claim` are excluded by the map
+        // mutex this holds.
+        //
+        // The residual window is deliberate and bounded by the durable
+        // transitions rather than by this lock: a create arriving after
+        // this removal but before this guard's own mutex is released gets
+        // a fresh lock and proceeds concurrently. The departing create has
+        // by then finished its launch and its rollback (whichever
+        // happened), so the newcomer either finds a settled outcome or
+        // finds a pending one whose takeover is itself atomic — it cannot
+        // launch a second agent either way.
+        if locks
+            .get(&self.key)
+            .is_some_and(|existing| existing.strong_count() <= 1)
+        {
+            locks.remove(&self.key);
+        }
+    }
+}
+
+/// The identities one launch will wear: the session id, and the tmux
+/// session name derived from it.
+///
+/// Assigned BEFORE the launch (and, for a keyed create, stored with the
+/// reservation) rather than discovered from it, because every later
+/// reconciliation is a question about these two names — "did anything
+/// happen under them?" — which cannot be asked about a name that was never
+/// written down.
+#[derive(Debug, Clone)]
+struct SessionIdentity {
+    session_id: String,
+    tmux_name: String,
+}
+
+/// Mint identities for a launch that does not inherit any.
+///
+/// The FULL uuid, not a truncated prefix: an 8-hex-char prefix collides
+/// often enough in practice for two sessions — one live, one a dead row
+/// surviving in SQLite across a restart — to plausibly share a tmux name,
+/// which would cross-wire attach between an unrelated pair of sessions
+/// after a reload. The schema's `UNIQUE` constraint on `tmux_name` (see
+/// `store.rs`) backstops this at the DB layer; a full UUID is what makes
+/// that constraint never fire in the first place. Dashes are legal in tmux
+/// session names (verified empirically against a scratch server).
+fn new_session_identity() -> SessionIdentity {
+    let session_id = uuid::Uuid::new_v4().to_string();
+    let tmux_name = format!("fh-{session_id}");
+    SessionIdentity {
+        session_id,
+        tmux_name,
+    }
+}
+
+/// What an existing reservation means for the request that found it.
+enum Resolution {
+    /// This intent already has an answer — the session it created, the
+    /// gone-error, the original failure, a key-reuse refusal, or an
+    /// honest "cannot tell". Whatever it is, it is what the caller
+    /// returns, unchanged.
+    Answer(anyhow::Result<SessionInfo>),
+    /// Nothing was ever launched under this reservation, so the caller
+    /// performs the create under it — same key, same identities.
+    Relaunch(Box<Reservation>),
+}
+
+/// What is known about whether a reserved launch reached tmux; see
+/// `Supervisor::reserved_launch_evidence` for the sources and for why
+/// absence must be POSITIVE rather than merely unobserved.
+enum LaunchEvidence {
+    Present,
+    Absent,
+    /// A source that should have answered could not be read. Carries the
+    /// cause, which reaches the client: this is a state a human can
+    /// usually clear (a wedged tmux, an unreadable state directory), and
+    /// the retry that follows is expected to resolve properly.
+    Unresolved(anyhow::Error),
+}
+
+/// Wrap a create failure whose OUTCOME could not be recorded against its
+/// intent key.
+///
+/// The caller must not be handed the original error alone: doing so claims
+/// a durability this create does not have. A client that sees "working
+/// directory does not exist" reasonably concludes the key is spent and
+/// that retrying is pointless, when in fact nothing was recorded and a
+/// retry may do something entirely different. `Internal` because no
+/// different request would have avoided it.
+fn unrecorded_outcome(original: anyhow::Error, settle: anyhow::Error) -> anyhow::Error {
+    let message = format!(
+        "the create failed ({original:#}), and recording that outcome against its intent key \
+         also failed ({settle:#}); the key is therefore NOT spent — a retry may produce a \
+         different answer"
+    );
+    original.context(RequestError::new(ErrorKind::Internal, message))
+}
+
+/// One create's inputs, VALIDATED: the working directory exists, the
+/// invocation parsed, and the title has already been defaulted from the
+/// cwd if the caller omitted it.
+///
+/// Grouped rather than passed as six parameters because the idempotency
+/// state machine has to hand the same bundle to a launch from three
+/// different branches, and because the type is what says "these have been
+/// checked" — `Supervisor::launch_session` performs no validation of its
+/// own and would have no way to.
+struct LaunchRequest<'a> {
+    cwd: &'a str,
+    invocation: &'a str,
+    argv: Vec<String>,
+    title: String,
+    cols: u16,
+    rows: u16,
+}
+
+/// What a launch owes the reservation table — the three cases
+/// `Supervisor::launch_session` can be asked to run under — and, in every
+/// case, the identities it runs under.
+enum Reserved {
+    /// A create with no intent key at all: pre-M3 behavior, no
+    /// deduplication, nothing written to the reservation table.
+    Unkeyed(SessionIdentity),
+    /// A key seen for the first time. Its reservation is claimed in the
+    /// same transaction as the launching row (`SessionStore::insert_session`).
+    New {
+        claim: IntentClaim,
+        identity: SessionIdentity,
+    },
+    /// A key whose reservation is already `Pending` and under whose
+    /// identities nothing was ever launched — a crash between the claim and
+    /// the launch. This attempt redoes the launch under those SAME
+    /// identities, so however many attempts an intent takes, it can only
+    /// ever leave one session id and one tmux name behind.
+    Retry(Box<Reservation>),
+}
+
+impl Reserved {
+    /// The session id this launch runs under.
+    fn session_id(&self) -> &str {
+        match self {
+            Reserved::Unkeyed(identity) | Reserved::New { identity, .. } => &identity.session_id,
+            Reserved::Retry(reservation) => &reservation.session_id,
+        }
+    }
+
+    /// The tmux session name this launch runs under.
+    fn tmux_name(&self) -> &str {
+        match self {
+            Reserved::Unkeyed(identity) | Reserved::New { identity, .. } => &identity.tmux_name,
+            Reserved::Retry(reservation) => &reservation.tmux_name,
+        }
+    }
+
+    /// The settlement that records `outcome` against this launch's intent,
+    /// or `None` for an unkeyed create. Identity-conditioned by
+    /// construction (see `store::Settlement`), so a settlement built here
+    /// can never land on a reservation pointing somewhere else.
+    fn settlement(&self, outcome: ReservationOutcome) -> Option<Settlement> {
+        let intent_key = match self {
+            Reserved::Unkeyed(_) => return None,
+            Reserved::New { claim, .. } => claim.intent_key.clone(),
+            Reserved::Retry(reservation) => reservation.intent_key.clone(),
+        };
+        Some(Settlement {
+            intent_key,
+            session_id: self.session_id().to_string(),
+            outcome,
+        })
+    }
 }
 
 /// Async wrapper around [`crate::launch::read_launch_sentinel`] for the
@@ -2072,6 +2487,10 @@ pub struct Supervisor {
     /// rather than a plain bool: `serve`'s reload can flip it while
     /// handlers are already running.
     may_record: std::sync::atomic::AtomicBool,
+    /// Collapses concurrent creates that share an intent key into one
+    /// launch; see [`IntentLocks`] for why an in-process lock is the whole
+    /// mechanism and what it is (and is not) responsible for.
+    intent_locks: Arc<IntentLocks>,
 }
 
 impl Supervisor {
@@ -2192,6 +2611,7 @@ impl Supervisor {
             seams,
             ownership,
             may_record: std::sync::atomic::AtomicBool::new(may_record),
+            intent_locks: Arc::new(IntentLocks::default()),
         }))
     }
 
@@ -2608,12 +3028,23 @@ impl Supervisor {
         };
 
         let mut sessions = HashMap::new();
+        // Sessions this pass can say REACHED tmux at some point; the
+        // provenance the reservation settlement below requires, and
+        // deliberately narrower than "has a terminal outcome". See that
+        // settlement's own comment for what each source proves.
+        let mut launched: HashSet<String> = HashSet::new();
         for row in rows {
             let terminal = found_panes.remove(&row.id).map(|(pane, _)| Terminal {
                 tmux_name: row.tmux_name.clone(),
                 pane,
             });
             let outcome = committed.get(&row.id).cloned().unwrap_or(row.outcome);
+            if terminal.is_some()
+                || !row.pane.is_empty()
+                || matches!(outcome, LastOutcome::Error { .. })
+            {
+                launched.insert(row.id.clone());
+            }
             sessions.insert(
                 row.id.clone(),
                 Arc::new(SessionEntry {
@@ -2642,7 +3073,77 @@ impl Supervisor {
                 }),
             );
         }
+
+        // Create reservations (PLAN_M3.md item 6), reconciled from the
+        // same verdicts this pass just reached rather than by a second,
+        // parallel probe: a pending reservation whose launching row this
+        // pass resolved is the SAME case a retry sees from the other side
+        // (`reserved_launch_evidence`, which carries the full rationale for
+        // the provenance rule both share). Settling here is what makes the
+        // crash windows survivable across a RESTART with no retry in sight
+        // — by the time a client retries, the answer is already recorded.
+        //
+        // Settlement requires PROVENANCE, not merely a non-launching
+        // status. A pane (recorded, or found by this pass) means something
+        // saw this session in tmux; an `Error` outcome means the shim ran.
+        // `Interrupted` proves nothing on its own — the reboot conversion
+        // blankets `Launching` rows too, so a create that crashed before
+        // ever reaching tmux comes back from a reboot looking terminal, and
+        // settling THAT as created would replay a session that never
+        // existed and can never run. Those, like every other reservation
+        // whose launch left no trace, stay pending: only a retry can create
+        // the session the client asked for, under the identities the
+        // reservation already holds.
+        if may_write {
+            match store.pending_reservations().await {
+                Ok(pending) => {
+                    let settled: Vec<Settlement> = pending
+                        .into_iter()
+                        .filter_map(|reservation| {
+                            launched
+                                .contains(&reservation.session_id)
+                                .then_some(Settlement {
+                                    intent_key: reservation.intent_key,
+                                    session_id: reservation.session_id,
+                                    outcome: ReservationOutcome::Created,
+                                })
+                        })
+                        .collect();
+                    if let Err(e) = store.settle_reservations(settled).await {
+                        warn!(
+                            error = %format!("{e:#}"),
+                            "could not settle this reload's create reservations; \
+                             a retry of those intents will reconcile them itself"
+                        );
+                    }
+                }
+                // Tolerated like the reconciliation write above, and for
+                // the same reason: a supervisor that refused to start over
+                // idempotency bookkeeping would strand every live session
+                // it was supposed to be reattaching. The cost of skipping
+                // it is bounded — a retry reaching `create_session` does
+                // the same reconciliation itself.
+                Err(e) => warn!(
+                    error = %format!("{e:#}"),
+                    "could not load pending create reservations; leaving them for a retry"
+                ),
+            }
+        }
         Ok((sessions, may_write))
+    }
+
+    /// Whether this supervisor holds its state directory's claim (see
+    /// [`StateDirOwnership`]) — that is, whether it may migrate the schema,
+    /// write reconciliation, and serve at all.
+    ///
+    /// Public for the restart tests, and it is not a convenience there but
+    /// a correctness check on the TEST: a "restarted" supervisor
+    /// constructed while its predecessor is still alive starts read-only
+    /// and reconciles nothing, so a handoff test that forgot to release the
+    /// old one would exercise a path production never takes and would pass
+    /// for the wrong reason. Also honest diagnostics for an embedder.
+    pub fn owns_state_dir(&self) -> bool {
+        self.ownership.is_some()
     }
 
     /// The supervisor's unix socket path within a state dir. Shared with
@@ -2754,6 +3255,50 @@ impl Supervisor {
     ///
     /// `title` defaults to the working directory's basename, which is what
     /// SPEC.md's "auto-generated when omitted" means in M1.
+    ///
+    /// ## Idempotency (PLAN_M3.md item 6)
+    ///
+    /// `claim` is the client's assertion that this request and any retry of
+    /// it are ONE intended create. Without it nothing below changes at all:
+    /// every call is its own create, exactly as before M3. With it, this
+    /// function is a state machine over a durable reservation, run as a
+    /// whole under that key's lock ([`IntentLocks`]) so concurrent retries
+    /// collapse instead of racing:
+    ///
+    /// - **A settled reservation, same fingerprint** — replay: the session
+    ///   it created (or the gone-error, if that session has since been
+    ///   deleted), or the exact error the first attempt reported, kind
+    ///   included.
+    /// - **A reservation with a different fingerprint** — the client reused
+    ///   a key for a different request. That is a client bug, never a
+    ///   merge, so it is refused with `Conflict`.
+    /// - **A pending reservation, same fingerprint** — reconcile against
+    ///   reality using the identities the reservation carries. Evidence of
+    ///   a launch means finish the bookkeeping and replay; positive
+    ///   evidence of NO launch means perform the create under that same
+    ///   reservation and its already-assigned ids.
+    /// - **No reservation** — a genuinely new intent: claim it in the same
+    ///   transaction as the launching row and launch.
+    ///
+    /// ## Why the lookup precedes validation
+    ///
+    /// Validation reads the FILESYSTEM, which changes underneath a
+    /// reservation that does not. A replay must answer with what the intent
+    /// already resolved to, not with what the world happens to look like
+    /// now: a settled key whose working directory has since been removed
+    /// must still replay its session (the session is running in a directory
+    /// that no longer exists — an unusual state, but a real one), and a
+    /// changed-fingerprint request must be refused as a key reuse even when
+    /// its own cwd is nonsense. So the reservation lookup runs FIRST, and
+    /// validation runs only for the two branches that are about to touch
+    /// the world: a new intent and a pending relaunch.
+    ///
+    /// A keyed request refused BY that validation is itself an outcome and
+    /// is recorded as one — acceptance 7's "a failed create replays its
+    /// original error" has no precondition exception, so a retry of the
+    /// same key gets the same "working directory does not exist" answer
+    /// rather than a different one derived from a filesystem that changed
+    /// in between.
     async fn create_session(
         &self,
         cwd: &str,
@@ -2761,7 +3306,56 @@ impl Supervisor {
         title: Option<String>,
         cols: u16,
         rows: u16,
+        claim: Option<IntentClaim>,
     ) -> anyhow::Result<SessionInfo> {
+        let Some(claim) = claim else {
+            let request = Self::validate_create(cwd, invocation, title, cols, rows).await?;
+            return self
+                .launch_session(request, Reserved::Unkeyed(new_session_identity()))
+                .await;
+        };
+        // Held for the whole of the rest of this create — lookup, launch,
+        // and outcome settlement alike — so a concurrent retry of the same
+        // intent waits for this one's answer instead of racing it.
+        let _intent = self.intent_locks.claim(&claim.intent_key).await;
+        let existing = self
+            .store
+            .reservation(&claim.intent_key)
+            .await
+            .context("reading the create reservation for this intent key")?;
+        let reserved = match existing {
+            Some(reservation) => match self.resolve_reservation(reservation, &claim).await {
+                Resolution::Answer(answer) => return answer,
+                Resolution::Relaunch(reservation) => Reserved::Retry(reservation),
+            },
+            None => Reserved::New {
+                claim: claim.clone(),
+                identity: new_session_identity(),
+            },
+        };
+        let request = match Self::validate_create(cwd, invocation, title, cols, rows).await {
+            Ok(request) => request,
+            Err(refusal) => return self.record_refused_create(&reserved, refusal).await,
+        };
+        self.launch_session(request, reserved).await
+    }
+
+    /// Everything checkable before the world is touched: the working
+    /// directory is usable, the invocation parses into an argv, and the
+    /// title is defaulted from the cwd when the caller omitted one.
+    ///
+    /// Split out of `create_session` because the idempotency state machine
+    /// must be able to run its reservation lookup WITHOUT it (see that
+    /// function's docs on ordering) and then apply it to only the branches
+    /// that are about to launch something. Associated rather than a method
+    /// because it touches no supervisor state at all.
+    async fn validate_create<'a>(
+        cwd: &'a str,
+        invocation: &'a str,
+        title: Option<String>,
+        cols: u16,
+        rows: u16,
+    ) -> anyhow::Result<LaunchRequest<'a>> {
         let cwd_path = PathBuf::from(cwd);
         // Preserve the distinction between a bad caller precondition and
         // a host I/O failure. Calling both "does not exist" sends users
@@ -2827,19 +3421,6 @@ impl Supervisor {
                 RequestError::new(ErrorKind::InvalidRequest, "agent invocation is empty").into(),
             );
         }
-
-        let id = uuid::Uuid::new_v4().to_string();
-        // The FULL uuid, not a truncated prefix: an 8-hex-char prefix
-        // collides often enough in practice for two sessions — one live,
-        // one a dead row surviving in SQLite across a restart — to
-        // plausibly share a tmux name, which would cross-wire attach
-        // between an unrelated pair of sessions after a reload. The
-        // schema's `UNIQUE` constraint on `tmux_name` (see `store.rs`)
-        // backstops this at the DB layer; a full UUID is what makes that
-        // constraint never fire in the first place. Dashes are legal in
-        // tmux session names (verified empirically against a scratch
-        // server).
-        let tmux_name = format!("fh-{id}");
         let title = title.unwrap_or_else(|| {
             // `cwd` arrived as a `String` over the protocol — farhelm-proto's
             // UTF-8-only wire contract — so every component of `cwd_path`,
@@ -2861,6 +3442,436 @@ impl Supervisor {
                 .unwrap_or("session")
                 .to_owned()
         });
+        Ok(LaunchRequest {
+            cwd,
+            invocation,
+            argv,
+            title,
+            cols,
+            rows,
+        })
+    }
+
+    /// Turn an existing reservation into either this request's answer or
+    /// the decision to relaunch under it.
+    ///
+    /// The fingerprint is checked before anything else, including before
+    /// the outcome: a reused key is refused whatever the original intent
+    /// went on to do, and answering about the ORIGINAL session would hand
+    /// the caller a session it never asked for.
+    async fn resolve_reservation(
+        &self,
+        reservation: Reservation,
+        claim: &IntentClaim,
+    ) -> Resolution {
+        if reservation.fingerprint != claim.fingerprint {
+            return Resolution::Answer(Err(RequestError::new(
+                ErrorKind::Conflict,
+                format!(
+                    "intent key {} was already used for a different create request; \
+                     a reused key is a client bug rather than a merge, so this request \
+                     is refused — send a new key for a new request",
+                    truncate_for_error(&claim.intent_key)
+                ),
+            )
+            .into()));
+        }
+        match &reservation.outcome {
+            // Settled either way: the answer is whatever was recorded, and
+            // `answer_from` is the one place that decides what that means
+            // so every caller of it agrees (`ReservationOutcome::Failed`'s
+            // own docs on why the kind rides along with the message).
+            ReservationOutcome::Created | ReservationOutcome::Failed { .. } => {
+                Resolution::Answer(self.answer_from(&reservation).await)
+            }
+            ReservationOutcome::Pending => {
+                match self.reserved_launch_evidence(&reservation).await {
+                    LaunchEvidence::Present => {
+                        Resolution::Answer(self.settle_and_replay(&reservation).await)
+                    }
+                    LaunchEvidence::Absent => Resolution::Relaunch(Box::new(reservation)),
+                    // Neither relaunch nor replay: this process cannot tell
+                    // which is true, and both wrong answers are permanent (a
+                    // duplicate agent, or a success that never ran). The
+                    // reservation stays pending, so a later retry — or the next
+                    // reload, once whatever failed is readable again — resolves
+                    // it against evidence instead of a guess.
+                    LaunchEvidence::Unresolved(why) => {
+                        Resolution::Answer(Err(why.context(format!(
+                            "cannot tell whether intent key {}'s create ever launched, so it is \
+                     neither replayed nor retried; try again once the cause is cleared",
+                            truncate_for_error(&claim.intent_key)
+                        ))))
+                    }
+                }
+            }
+        }
+    }
+
+    /// What is durably known about whether a reserved launch ever reached
+    /// tmux (PLAN_M3.md item 6's "the reserved identities' side effects").
+    ///
+    /// The bias is deliberate and asymmetric: relaunching requires POSITIVE
+    /// evidence of absence, and everything else counts as present. The two
+    /// wrong answers are not equally bad — a wrongly-replayed session hands
+    /// the user a session that never ran (visible, recoverable, and
+    /// classified honestly by the status rules), while a wrongly-relaunched
+    /// one starts a second agent beside a first that is quietly still
+    /// running, which is the exact duplicate SPEC.md forbids and which
+    /// nothing downstream can detect.
+    ///
+    /// Three independent sources, any one of which is enough to say a
+    /// launch happened:
+    ///
+    /// - **The durable row.** A recorded pane means something once saw this
+    ///   session in tmux. An outcome past `Launching` means the same, with
+    ///   ONE exception that is exactly why the pane is checked separately:
+    ///   `Interrupted` is written by the reboot conversion, which blankets
+    ///   `Launching` rows too — so an interrupted row with no pane is a
+    ///   create that may never have launched at all, and treating the
+    ///   status alone as provenance would replay a session that never
+    ///   existed.
+    /// - **The launch sentinel.** The shim wrote it, so the shim ran, so
+    ///   tmux started something — even when no pane was ever recorded.
+    /// - **tmux itself, right now.** Asked at DECISION time rather than
+    ///   inferred from the session map, because the map is a snapshot taken
+    ///   at reload: a create that completed after that snapshot (a
+    ///   cancelled request whose work continued) is invisible to it and
+    ///   very visible to tmux.
+    ///
+    /// A source that ERRORS is never read as absence: an unreadable
+    /// sentinel or an unreachable tmux is exactly the situation in which a
+    /// wrong relaunch is most likely, so it yields `Unresolved`.
+    async fn reserved_launch_evidence(&self, reservation: &Reservation) -> LaunchEvidence {
+        match self.store.session(&reservation.session_id).await {
+            Ok(Some(row)) => {
+                if !row.pane.is_empty()
+                    || !matches!(
+                        row.outcome,
+                        LastOutcome::Launching | LastOutcome::Interrupted
+                    )
+                {
+                    return LaunchEvidence::Present;
+                }
+            }
+            Ok(None) => {}
+            Err(e) => {
+                return LaunchEvidence::Unresolved(e.context("reading the reserved session row"));
+            }
+        }
+        match read_launch_sentinel(&self.state_dir, &reservation.session_id).await {
+            Ok(Some(_)) => return LaunchEvidence::Present,
+            Ok(None) => {}
+            Err(e) => {
+                return LaunchEvidence::Unresolved(
+                    e.context("reading the reserved launch's sentinel"),
+                );
+            }
+        }
+        match self.tmux.has_session(&reservation.tmux_name).await {
+            Ok(true) => LaunchEvidence::Present,
+            Ok(false) => LaunchEvidence::Absent,
+            Err(e) => LaunchEvidence::Unresolved(e.context(format!(
+                "asking tmux whether the reserved session {} exists",
+                reservation.tmux_name
+            ))),
+        }
+    }
+
+    /// Record that this intent's session exists, then replay it.
+    ///
+    /// A failed settlement is logged rather than propagated: the session
+    /// exists and returning it is the correct answer, and the reservation
+    /// simply stays pending for the next retry (or the next reload) to
+    /// settle. Monotonic settlement makes that harmless — the eventual
+    /// record says the same thing whenever it lands.
+    async fn settle_and_replay(&self, reservation: &Reservation) -> anyhow::Result<SessionInfo> {
+        if let Err(e) = self
+            .store
+            .settle_reservations(vec![Settlement {
+                intent_key: reservation.intent_key.clone(),
+                session_id: reservation.session_id.clone(),
+                outcome: ReservationOutcome::Created,
+            }])
+            .await
+        {
+            warn!(
+                session = %reservation.session_id, error = %format!("{e:#}"),
+                "could not record that this intent key's session was created; \
+                 replaying it anyway and leaving the reservation for a later pass"
+            );
+        }
+        self.replay_created_session(reservation).await
+    }
+
+    /// Replay a reservation whose session was created — or say honestly
+    /// that it is gone (PLAN_M3.md item 6's tombstone rule).
+    ///
+    /// The STORE, not the session map, is what decides whether the session
+    /// still exists. The map is a mirror the delete handler updates only
+    /// after its own commit, so a replay landing inside that window would
+    /// otherwise return a live-looking success for a session whose row was
+    /// already gone — a dead id handed to a caller that will attach to
+    /// nothing.
+    ///
+    /// The gone case is a `Conflict`, not a `NotFound`, and the distinction
+    /// is deliberate. Nothing the client asked about is missing: the intent
+    /// key was found, and its answer is that the key is spent. `NotFound`
+    /// (a 404 at the helm) on a create POST reads as "no such endpoint or
+    /// resource" and invites a client to retry as if it had asked for the
+    /// wrong thing, while `Conflict` (409) is the same "this identifier
+    /// already means something else" this handler returns for a fingerprint
+    /// mismatch — the two cases really are one rule: the key is used up.
+    /// The message names what happened, because a bare conflict would
+    /// otherwise be indistinguishable from a key-reuse bug.
+    ///
+    /// The replayed `SessionInfo` is rebuilt from the stored row with the
+    /// same create-time placeholders a first attempt's reply carries
+    /// (`status: Unknown`, no annotation, the default restart offer) — a
+    /// replay is the same answer, so it must have the same shape.
+    async fn replay_created_session(
+        &self,
+        reservation: &Reservation,
+    ) -> anyhow::Result<SessionInfo> {
+        let row = self
+            .store
+            .session(&reservation.session_id)
+            .await
+            .context("reading the session this intent key created")?;
+        match row {
+            Some(row) => Ok(SessionInfo {
+                id: row.id,
+                title: row.title,
+                cwd: row.cwd,
+                invocation: row.invocation,
+                status: SessionStatus::Unknown,
+                annotation: None,
+                restart_offer: RestartOffer::default(),
+            }),
+            None => Err(RequestError::new(
+                ErrorKind::Conflict,
+                format!(
+                    "intent key {} already created session {}, which has since been deleted; \
+                     it will not be recreated under the same key — send a new key to create \
+                     a new session",
+                    truncate_for_error(&reservation.intent_key),
+                    truncate_for_error(&reservation.session_id)
+                ),
+            )
+            .into()),
+        }
+    }
+
+    /// Record a keyed create refused by validation, so the retry replays
+    /// the refusal instead of re-deriving it from a changed filesystem.
+    ///
+    /// Returns the error the caller should report, which is NOT always the
+    /// one passed in: when the refusal itself could not be recorded, the
+    /// caller is told that instead. Presenting the original error alone
+    /// would claim a durability this create does not have — the client
+    /// would reasonably conclude the key is spent, when in fact a retry can
+    /// still do something else entirely.
+    async fn record_refused_create(
+        &self,
+        reserved: &Reserved,
+        refusal: anyhow::Error,
+    ) -> anyhow::Result<SessionInfo> {
+        let kind = error_kind(&refusal);
+        let message = format!("{refusal:#}");
+        let recorded = match reserved {
+            // No key: nothing to record, and today's behavior exactly.
+            Reserved::Unkeyed(_) => return Err(refusal),
+            Reserved::New { claim, identity } => {
+                self.store
+                    .record_failed_intent(
+                        claim.clone(),
+                        &identity.session_id,
+                        &identity.tmux_name,
+                        kind,
+                        &message,
+                    )
+                    .await
+            }
+            // A relaunch refused by validation settles the reservation it
+            // was about to take over — and takes the stranded launching row
+            // with it, in the same transaction. That row exists because a
+            // previous attempt crashed after recording it, and this
+            // request only got as far as validation BECAUSE the evidence
+            // said nothing was ever launched under it. With the intent now
+            // closed, nothing will ever reconcile that row again, so
+            // leaving it would strand a session in the list that can never
+            // resolve.
+            Reserved::Retry(reservation) => {
+                let removed = self
+                    .store
+                    .delete_session(
+                        &reservation.session_id,
+                        Some(Settlement {
+                            intent_key: reservation.intent_key.clone(),
+                            session_id: reservation.session_id.clone(),
+                            outcome: ReservationOutcome::Failed { kind, message },
+                        }),
+                    )
+                    .await;
+                if removed.is_ok() {
+                    self.sessions.lock().await.remove(&reservation.session_id);
+                }
+                removed
+            }
+        };
+        Err(match recorded {
+            Ok(()) => refusal,
+            Err(e) => unrecorded_outcome(refusal, e),
+        })
+    }
+
+    /// Perform one launch: the durable launching record, the launch spec,
+    /// the tmux session, and the confirmation — under whatever the
+    /// reservation table owes for it (see [`Reserved`]).
+    ///
+    /// Split out of `create_session` so that every one of the many failure
+    /// exits below settles the reservation exactly once, in one place,
+    /// rather than each rollback path having to remember to. Callers have
+    /// already validated `cwd` and parsed `argv`.
+    ///
+    /// ## Which failures settle, and which stay pending
+    ///
+    /// Only a failure that CONFIRMED nothing is running settles `Failed`,
+    /// and it does so where it happens rather than here: the rollback
+    /// paths settle atomically with the row removal they already perform
+    /// (`Supervisor::abandon_launching_record`), because a rollback whose
+    /// settlement did not commit would leave a reservation pointing at a
+    /// row that no longer exists. This wrapper therefore settles ONLY on
+    /// success, and every other failure deliberately leaves the
+    /// reservation PENDING.
+    ///
+    /// That is the important half: a failure that had to retain the
+    /// launching row because an agent may be alive under it must not
+    /// record `Failed`, because that would tell every later retry the
+    /// intent is closed while a real agent kept running under a row
+    /// nothing would ever reconcile — hiding it until the next restart.
+    /// Pending is exactly the "side effects may be present → reconcile"
+    /// state the retry path exists to resolve. The same goes for a
+    /// relaunch that never started at all: nothing about the intent was
+    /// decided, so nothing about it should be recorded.
+    async fn launch_session(
+        &self,
+        request: LaunchRequest<'_>,
+        reserved: Reserved,
+    ) -> anyhow::Result<SessionInfo> {
+        let result = self.launch_reserved(request, &reserved).await;
+        // The last crash window item 6 names, and the one acceptance 7
+        // describes directly: the session durably exists, but the intent
+        // table does not yet know it. Returning here — before the
+        // settlement below — leaves exactly the state a real crash would,
+        // for the next reload (or the next retry) to reconcile.
+        if result.is_ok() {
+            self.simulate_crash(CreateStage::BeforeOutcome)?;
+        }
+        let outcome = match &result {
+            Ok(_) => ReservationOutcome::Created,
+            // No failure settles here, and the docs above say why for
+            // each class: a crash never got to write an outcome at all
+            // ([`SimulatedCrash`]), a retained-evidence failure must stay
+            // reconcilable, and a confirmed-absence failure has already
+            // settled itself atomically with its own rollback. What
+            // reaches this point is therefore either a success or a
+            // failure that must not settle.
+            Err(_) => return result,
+        };
+        let Some(settlement) = reserved.settlement(outcome) else {
+            return result;
+        };
+        if let Err(e) = self.store.settle_reservations(vec![settlement]).await {
+            // Not fatal: the session genuinely exists, and failing the
+            // create over a bookkeeping write would tell the caller a lie
+            // about the world. The reservation stays pending, which the
+            // next reload or retry reconciles against what actually
+            // happened — and finds this very session.
+            warn!(
+                error = %format!("{e:#}"),
+                "could not record this create's outcome against its intent key; \
+                 a retry will reconcile it against what actually happened"
+            );
+        }
+        result
+    }
+
+    /// The launch itself; see [`Supervisor::launch_session`], which wraps
+    /// this to settle the reservation on the paths that may settle it.
+    async fn launch_reserved(
+        &self,
+        request: LaunchRequest<'_>,
+        reserved: &Reserved,
+    ) -> anyhow::Result<SessionInfo> {
+        let LaunchRequest {
+            cwd,
+            invocation,
+            argv,
+            title,
+            cols,
+            rows,
+        } = request;
+        let id = reserved.session_id().to_string();
+        let tmux_name = reserved.tmux_name().to_string();
+        if let Reserved::Retry(reservation) = reserved {
+            // Clear the interrupted attempt's leftovers before reusing its
+            // identities, FAIL-CLOSED: this id's spec and sentinel paths
+            // are derived from the id alone (`spec_path_for_session`), so
+            // anything left at them would sit exactly where this launch's
+            // own files go — and a sentinel that survived would be read as
+            // evidence about a launch that has not happened yet. A cleanup
+            // that cannot be confirmed therefore ABORTS the relaunch
+            // rather than proceeding: destroying evidence is bad, but
+            // launching on top of evidence this process could not remove
+            // is worse.
+            let spec_path = crate::launch::spec_path_for_session(&self.state_dir, &id);
+            let status_path = crate::launch::status_path_for_spec(&spec_path);
+            for (path, what) in [
+                (&status_path, "the interrupted attempt's launch sentinel"),
+                (&spec_path, "the interrupted attempt's launch spec"),
+            ] {
+                if let Err(e) = remove_fail_closed(path, what).await {
+                    return Err(anyhow::anyhow!(
+                        "not relaunching intent key {}: {e}; the intent stays pending, so a \
+                         retry can resolve it once the cause is cleared",
+                        truncate_for_error(&reservation.intent_key)
+                    ));
+                }
+            }
+            // The atomic re-check of the decision that got us here: the
+            // evidence was gathered a moment ago, and a delete or a
+            // late-landing launch since then must win over it. See
+            // `SessionStore::restart_pending_launch`.
+            let row = StoredSession {
+                id: id.clone(),
+                title: title.clone(),
+                cwd: cwd.to_string(),
+                invocation: invocation.to_string(),
+                tmux_name: tmux_name.clone(),
+                pane: String::new(),
+                outcome: LastOutcome::Launching,
+            };
+            match self
+                .store
+                .restart_pending_launch(row, &reservation.intent_key)
+                .await
+                .context("taking over the interrupted attempt's reservation")?
+            {
+                RetryClaim::Acquired => {}
+                RetryClaim::Resolved(settled) => return self.answer_from(&settled).await,
+                RetryClaim::Launched => return self.settle_and_replay(reservation).await,
+            }
+            // The in-memory mirror follows the row it mirrors, and it is
+            // also what serializes this relaunch against `StopSession` and
+            // `DeleteSession`: both resolve the session through this map,
+            // so while a relaunch is in flight they answer `NotFound`
+            // rather than tearing down a launch that is half-built. The
+            // residual window — a delete that read the map just before
+            // this removal — is closed at the other end, where the
+            // confirmation below finds its row already gone.
+            self.sessions.lock().await.remove(&id);
+        }
 
         // Named after the SESSION id, not a separate per-launch id — a
         // deliberate, minimal choice made while settling PLAN_M3.md item 5's
@@ -2893,32 +3904,59 @@ impl Supervisor {
         // has since been relaunched.
         //
         // A failure here fails the create with nothing to clean up, which
-        // is exactly why this is the first step. PLAN_M3.md item 6 threads
-        // its create reservation through this same commit; the row written
-        // here is the generation that reservation will carry.
-        if let Err(e) = self
-            .store
-            .insert_session(StoredSession {
-                id: id.clone(),
-                title: title.clone(),
-                cwd: cwd.to_string(),
-                invocation: invocation.to_string(),
-                tmux_name: tmux_name.clone(),
-                // Not known until tmux has created the session — see
-                // `StoredSession::pane`.
-                pane: String::new(),
-                outcome: LastOutcome::Launching,
-            })
-            .await
-        {
-            return Err(e.context("recording new session in the database"));
+        // is exactly why this is the first step. A first-time intent key
+        // (PLAN_M3.md item 6) is claimed in this SAME transaction — the
+        // launching row IS the generation the reservation carries, and
+        // committing them together is what leaves no window in which one
+        // exists without the other (`SessionStore::insert_session`'s docs
+        // spell out both failure modes that would otherwise open).
+        //
+        // A RETRY skips this step entirely: its reservation was claimed by
+        // the attempt that crashed and its launching row was committed by
+        // the takeover above (`restart_pending_launch`), which had to write
+        // it there anyway to make the takeover atomic. Inserting again here
+        // would collide with that row on the primary key it deliberately
+        // reuses.
+        if let Reserved::Unkeyed(_) | Reserved::New { .. } = reserved {
+            let claim = match &reserved {
+                Reserved::New { claim, .. } => Some(claim.clone()),
+                _ => None,
+            };
+            let claimed = self
+                .store
+                .insert_session(
+                    StoredSession {
+                        id: id.clone(),
+                        title: title.clone(),
+                        cwd: cwd.to_string(),
+                        invocation: invocation.to_string(),
+                        tmux_name: tmux_name.clone(),
+                        // Not known until tmux has created the session —
+                        // see `StoredSession::pane`.
+                        pane: String::new(),
+                        outcome: LastOutcome::Launching,
+                    },
+                    claim,
+                )
+                .await
+                .context("recording new session in the database")?;
+            if let Claimed::TakenBy(winner) = claimed {
+                // Someone else holds this key. Nothing was committed, so
+                // there is nothing to roll back and nothing of ours to
+                // settle — the honest answer is the WINNER's, which is what
+                // a replay of that key would have returned had this request
+                // arrived a moment later. Only reachable past the per-key
+                // lock, i.e. from a second process, which the
+                // state-directory claim already excludes; handled rather
+                // than asserted because "cannot happen" is a poor thing to
+                // stake a duplicate agent on.
+                return self.answer_from(&winner).await;
+            }
         }
-        if let Some(crash) = self.seams.create_crash.as_ref() {
-            // Deliberately BEFORE the cleanup-bearing paths below: a
-            // simulated crash must leave the launching row exactly as a
-            // real one would, with nothing tidied up after it.
-            crash()?;
-        }
+        // Deliberately BEFORE the cleanup-bearing paths below: a simulated
+        // crash must leave the launching row (and its reservation) exactly
+        // as a real one would, with nothing tidied up after it.
+        self.simulate_crash(CreateStage::AfterRecord)?;
 
         let spec_path = crate::launch::spec_path_for_session(&self.state_dir, &id);
         // Derived the SAME way the shim derives it from its own copy of
@@ -2951,7 +3989,7 @@ impl Supervisor {
             Err(e) => {
                 return Err(self
                     .abandon_launching_record(
-                        &id,
+                        reserved,
                         anyhow::Error::new(e).context("encoding launch spec"),
                     )
                     .await);
@@ -2965,7 +4003,10 @@ impl Supervisor {
             // reconciles; this path can do better because the process is
             // still alive to know.
             return Err(self
-                .abandon_launching_record(&id, anyhow::Error::new(e).context("writing launch spec"))
+                .abandon_launching_record(
+                    reserved,
+                    anyhow::Error::new(e).context("writing launch spec"),
+                )
                 .await);
         }
 
@@ -2990,12 +4031,13 @@ impl Supervisor {
                 let mut error = e.context("creating the session's tmux session");
                 match self.tmux.has_session(&tmux_name).await {
                     Ok(false) => {
-                        error = self.abandon_launching_record(&id, error).await;
                         // The shim unlinks the spec once it has read it,
                         // so a launch that never happened would strand a
                         // file holding the agent's full command line —
                         // credentials included — with nothing left to
-                        // clean it up.
+                        // clean it up. Removed BEFORE the row is abandoned
+                        // so whatever this adds to the error is part of
+                        // what gets recorded against the intent key.
                         if let Err(cleanup) = tokio::fs::remove_file(&spec_path).await {
                             error = error.context(format!(
                                 "could not remove launch spec {} after tmux creation failed: \
@@ -3003,7 +4045,15 @@ impl Supervisor {
                                 spec_path.display()
                             ));
                         }
+                        error = self.abandon_launching_record(reserved, error).await;
                     }
+                    // Both remaining arms RETAIN the launching row, so
+                    // neither may settle the reservation: an agent may be
+                    // running under it, and a `Failed` outcome would tell
+                    // every later retry the intent is closed while that
+                    // agent kept running unreconciled. Returning without
+                    // going through `abandon_launching_record` is what
+                    // leaves it pending (see `launch_session`'s docs).
                     Ok(true) => {
                         error = error.context(format!(
                             "the tmux session {tmux_name} exists despite the failure, so \
@@ -3022,6 +4072,15 @@ impl Supervisor {
                 return Err(error);
             }
         };
+        // The launch reached tmux — the session and its pane exist, and
+        // the shim is on its way to `exec` (whether the agent itself then
+        // starts is a separate question this create never answers) — but
+        // nothing durable says so yet: the row is still `Launching` with
+        // no pane, and the reservation still pending. Placed before the
+        // confirmation below rather than after it so a simulated crash
+        // leaves precisely that state for reload's pane rediscovery to
+        // reconcile.
+        self.simulate_crash(CreateStage::DuringLaunch)?;
 
         let info = SessionInfo {
             id: id.clone(),
@@ -3056,11 +4115,48 @@ impl Supervisor {
         // terminal handle was never recorded — so the tmux session just
         // created is torn back down (best effort) rather than left running
         // and unlisted with no way for the caller to learn its id.
-        if let Err(e) = self
+        let confirmed = self
             .store
             .transition(&id, Transition::ConfirmRunning { pane: pane.clone() })
-            .await
-        {
+            .await;
+        if let Ok(None) = confirmed {
+            // The row is GONE: a `DeleteSession` for this id resolved its
+            // entry before this launch removed it from the map and then
+            // committed while the launch was mid-flight. The delete won —
+            // it was a deliberate user action against a session that
+            // existed when it was issued — so this launch tears its own
+            // work back down rather than leaving a tmux session and an
+            // agent behind with no row that knows about them. Reported as
+            // the same spent-key `Conflict` a replay for a deleted session
+            // gets, because that is what the client is looking at.
+            let mut error = anyhow::Error::new(RequestError::new(
+                ErrorKind::Conflict,
+                format!(
+                    "session {} was deleted while it was being created, so the launch was \
+                     torn back down; it will not be recreated under the same intent key",
+                    truncate_for_error(&id)
+                ),
+            ));
+            if let Err(kill_err) = self.tmux.kill_session(&tmux_name).await {
+                warn!(
+                    session = %id, error = %kill_err,
+                    "could not kill the tmux session of a create that raced a delete; \
+                     it may now be running unlisted"
+                );
+                error = error.context(format!(
+                    "additionally, tmux session {tmux_name} could not be killed ({kill_err:#}); \
+                     the agent may still be running with no session record left"
+                ));
+            }
+            best_effort_remove(&spec_path, "launch spec").await;
+            best_effort_remove(&status_file_path, "launch status file").await;
+            // The deleter already tombstoned the reservation (its own
+            // transaction settles every pending one for this session), so
+            // there is nothing left to settle here — and settling `Failed`
+            // would be refused as non-pending anyway.
+            return Err(error);
+        }
+        if let Err(e) = confirmed {
             // The DB error is the root cause throughout — it is what
             // actually failed the create — but a kill failure on top of it
             // is not safe to only log: it means an untracked tmux session
@@ -3096,9 +4192,12 @@ impl Supervisor {
             // session may still be running the agent, and the launching
             // row is then the sole record anyone could use to find it
             // again. Retaining it is the recoverable failure; deleting it
-            // is not.
+            // is not — and a retained row must leave its reservation
+            // pending for reconciliation rather than settling a failure
+            // over a possibly-live agent, which is what skipping the
+            // rollback below also skips.
             if killed.is_ok() {
-                result = self.abandon_launching_record(&id, result).await;
+                result = self.abandon_launching_record(reserved, result).await;
             }
             return Err(result);
         }
@@ -3116,23 +4215,91 @@ impl Supervisor {
     }
 
     /// Drop the durable launching record for a create this process is
-    /// about to report as failed.
+    /// about to report as failed, and — in the SAME transaction — record
+    /// that failure against the create's intent key.
+    ///
+    /// Reached only from the paths that CONFIRMED nothing is running (the
+    /// spec never landed; tmux said the session does not exist; the
+    /// terminal was killed successfully), which is what makes settling
+    /// `Failed` honest here and nowhere else: every retry of this intent
+    /// now replays this exact error rather than re-deriving one from a
+    /// world that has since changed. Paths that had to retain the row take
+    /// the other branch entirely: they return without calling this at all,
+    /// which is what leaves their reservation pending.
+    ///
+    /// The two writes are one transaction because a settlement that did not
+    /// commit alongside the removal would leave a reservation pointing at a
+    /// row that no longer exists, and the retry that found it would relaunch
+    /// an intent whose failure the client was already told about.
     ///
     /// Every rollback path is best-effort at DELETING but never silent at
     /// FAILING: the create error the caller receives is returned enriched,
-    /// so a row this process could not remove is named to whoever reads
-    /// the log or the HTTP body rather than only appearing in a log line
-    /// this process may not survive to have flushed. What a leftover row
-    /// costs is bounded — the next reload finds a launching session and
-    /// leaves it pending (it never claims the agent ran) — but it is still
-    /// a row a human may want to delete.
-    async fn abandon_launching_record(&self, id: &str, error: anyhow::Error) -> anyhow::Error {
-        match self.store.delete_session(id).await {
+    /// so a row this process could not remove is named to whoever reads the
+    /// log or the HTTP body. A failed rollback also means the failure was
+    /// not recorded, so the caller is told that too
+    /// ([`unrecorded_outcome`]) rather than being handed an error it would
+    /// reasonably read as final.
+    async fn abandon_launching_record(
+        &self,
+        reserved: &Reserved,
+        error: anyhow::Error,
+    ) -> anyhow::Error {
+        let settlement = reserved.settlement(ReservationOutcome::Failed {
+            kind: error_kind(&error),
+            message: format!("{error:#}"),
+        });
+        let keyed = settlement.is_some();
+        let id = reserved.session_id();
+        match self.store.delete_session(id, settlement).await {
             Ok(()) => error,
-            Err(e) => error.context(format!(
-                "additionally, the launching record for session {id} could not be removed \
-                 ({e:#}); it will list as unknown until it is deleted"
+            Err(e) => {
+                let removal = format!(
+                    "additionally, the launching record for session {id} could not be removed \
+                     ({e:#}); it will list as unknown until it is deleted"
+                );
+                if keyed {
+                    unrecorded_outcome(error, anyhow::anyhow!(removal))
+                } else {
+                    error.context(removal)
+                }
+            }
+        }
+    }
+
+    /// The answer a SETTLED reservation gives: the session it created (or
+    /// the gone-error), or the failure it recorded.
+    ///
+    /// Shared by every place that finds an outcome already recorded — the
+    /// ordinary replay, a lost claim race, and a relaunch takeover that
+    /// discovered someone settled first — so all three answer identically.
+    /// A reservation still `Pending` cannot be answered from at all: that
+    /// means something settled it and then un-settled it, which nothing in
+    /// this module can do, so it is reported rather than guessed at.
+    async fn answer_from(&self, reservation: &Reservation) -> anyhow::Result<SessionInfo> {
+        match &reservation.outcome {
+            ReservationOutcome::Created => self.replay_created_session(reservation).await,
+            ReservationOutcome::Failed { kind, message } => {
+                Err(RequestError::new(*kind, message.clone()).into())
+            }
+            ReservationOutcome::Pending => Err(anyhow::anyhow!(
+                "intent key {} is still pending after another create claimed it; \
+                 retry to reconcile it",
+                truncate_for_error(&reservation.intent_key)
             )),
+        }
+    }
+
+    /// Run the create-lifecycle seam for `stage`, if one is installed.
+    ///
+    /// The only way a crash reaches the create path, and the one place the
+    /// [`SimulatedCrash`] marker is attached — see its docs for why an
+    /// injected crash must not be mistaken for a create that merely
+    /// failed. Production installs no seam, so this is an `Ok(())` after
+    /// one `Option` check.
+    fn simulate_crash(&self, stage: CreateStage) -> anyhow::Result<()> {
+        match self.seams.create_crash.as_ref() {
+            Some(crash) => crash(stage).map_err(|e| e.context(SimulatedCrash)),
+            None => Ok(()),
         }
     }
 
@@ -4458,31 +5625,89 @@ async fn handle_control(
             title,
             cols,
             rows,
-            // PLAN_M3.md item 1's snapshot-override and idempotency-key
-            // fields are wire vocabulary only as of this PR: no handler
-            // reads them yet (item 6 wires `intent_key` dedup, item 7
-            // wires `agent_kind`/`resume_template`), so this arm ignores
-            // them via `..` rather than binding unused names.
-            ..
+            intent_key,
+            // Bound, but only to be FINGERPRINTED: PLAN_M3.md item 7 is
+            // what makes these overrides shape the session itself. Item
+            // 6's contract already needs them here, though — a retry
+            // differing only in an override is a different request and
+            // must be refused as a key reuse, which is a property of the
+            // fingerprint alone (`create_fingerprint`).
+            agent_kind,
+            resume_template,
         } => {
-            let field_len = cwd.len() + invocation.len() + title.as_deref().map_or(0, str::len);
-            if field_len > CREATE_FIELD_CAP {
+            // One accounting for every caller-supplied field that this
+            // request can make the supervisor STORE — the reply-size
+            // argument `CREATE_FIELD_CAP` was introduced for, plus item
+            // 6's: the fingerprint holds a copy of all of them, in a
+            // reservation row that is never pruned, so an unbounded
+            // override is an unbounded permanent write.
+            let template_bytes: usize = resume_template
+                .iter()
+                .flatten()
+                .map(|element| element.len())
+                .sum();
+            let field_len = cwd.len()
+                + invocation.len()
+                + title.as_deref().map_or(0, str::len)
+                + template_bytes;
+            let refusal = if field_len > CREATE_FIELD_CAP {
+                Some(format!(
+                    "cwd, invocation, title, and resume template together are {field_len} bytes, \
+                     exceeding the {CREATE_FIELD_CAP}-byte limit"
+                ))
+            } else if resume_template
+                .as_ref()
+                .is_some_and(|template| template.len() > RESUME_TEMPLATE_ELEMENT_CAP)
+            {
+                // Bounded separately from the byte total because the two
+                // are independent: a template of ten thousand EMPTY
+                // elements costs almost no bytes and is still nothing a
+                // resume invocation could legitimately be.
+                Some(format!(
+                    "resume template has {} elements, exceeding the \
+                     {RESUME_TEMPLATE_ELEMENT_CAP}-element limit",
+                    resume_template.as_ref().map_or(0, Vec::len)
+                ))
+            } else {
+                // Both refusals below are about a key that could never do
+                // its job: an empty one would collapse every create that
+                // forgot to set it into a single intent, and an unbounded
+                // one buys durable, un-pruned table space with a request
+                // (see `INTENT_KEY_CAP`). Checked before the lookup so
+                // neither ever reaches the store.
+                match intent_key.as_deref() {
+                    Some("") => Some("intent key must not be empty".to_string()),
+                    Some(key) if key.len() > INTENT_KEY_CAP => Some(format!(
+                        "intent key is {} bytes, exceeding the {INTENT_KEY_CAP}-byte limit",
+                        key.len()
+                    )),
+                    _ => None,
+                }
+            };
+            if let Some(message) = refusal {
                 send_reply(
                     tx,
                     &ControlMsg::Error {
                         req_id,
-                        message: format!(
-                            "cwd, invocation, and title together are {field_len} bytes, \
-                         exceeding the {CREATE_FIELD_CAP}-byte limit"
-                        ),
+                        message,
                         kind: ErrorKind::InvalidRequest,
                     },
                 )
                 .await;
                 return;
             }
+            let idempotency = intent_key.map(|intent_key| IntentClaim {
+                intent_key,
+                fingerprint: create_fingerprint(
+                    &cwd,
+                    &invocation,
+                    title.as_deref(),
+                    agent_kind,
+                    resume_template.as_deref(),
+                ),
+            });
             match sup
-                .create_session(&cwd, &invocation, title, cols, rows)
+                .create_session(&cwd, &invocation, title, cols, rows, idempotency)
                 .await
             {
                 Ok(session) => {
@@ -5255,8 +6480,15 @@ async fn handle_control(
                         "alt-screen snapshot",
                     )
                     .await?;
+                    // Settles this session's create reservations in the
+                    // same transaction as the row removal, which is what
+                    // turns them into TOMBSTONES rather than stale claims:
+                    // a replay of one of those intent keys must report the
+                    // gone-error, never a dead id and never a fresh
+                    // duplicate (PLAN_M3.md item 6; the store method's own
+                    // docs carry the argument).
                     sup.store
-                        .delete_session(&session_id)
+                        .delete_session_settling_reservations(&session_id)
                         .await
                         .map_err(|e| format!("{e:#}"))
                 }
@@ -6379,15 +7611,18 @@ mod tests {
         }
         for (id, tmux_name) in [("live", "fh-live"), ("dead", "fh-dead")] {
             sup.store
-                .insert_session(StoredSession {
-                    id: id.to_string(),
-                    title: id.to_string(),
-                    cwd: "/tmp".to_string(),
-                    invocation: "agent".to_string(),
-                    tmux_name: tmux_name.to_string(),
-                    pane: String::new(),
-                    outcome: LastOutcome::Launching,
-                })
+                .insert_session(
+                    StoredSession {
+                        id: id.to_string(),
+                        title: id.to_string(),
+                        cwd: "/tmp".to_string(),
+                        invocation: "agent".to_string(),
+                        tmux_name: tmux_name.to_string(),
+                        pane: String::new(),
+                        outcome: LastOutcome::Launching,
+                    },
+                    None,
+                )
                 .await
                 .expect("insert a launching row");
         }
@@ -6483,15 +7718,18 @@ mod tests {
                 .await
                 .expect("create a tmux session directly");
             sup.store
-                .insert_session(StoredSession {
-                    id: id.to_string(),
-                    title: id.to_string(),
-                    cwd: "/tmp".to_string(),
-                    invocation: "agent".to_string(),
-                    tmux_name,
-                    pane: pane.clone(),
-                    outcome: LastOutcome::Running,
-                })
+                .insert_session(
+                    StoredSession {
+                        id: id.to_string(),
+                        title: id.to_string(),
+                        cwd: "/tmp".to_string(),
+                        invocation: "agent".to_string(),
+                        tmux_name,
+                        pane: pane.clone(),
+                        outcome: LastOutcome::Running,
+                    },
+                    None,
+                )
                 .await
                 .expect("insert");
             // Through the real transition, so the fixture is the state a
@@ -6570,15 +7808,18 @@ mod tests {
             .await
             .expect("supervisor");
         sup.store
-            .insert_session(StoredSession {
-                id: "s1".to_string(),
-                title: "t".to_string(),
-                cwd: "/tmp".to_string(),
-                invocation: "agent".to_string(),
-                tmux_name: "fh-1".to_string(),
-                pane: "%0".to_string(),
-                outcome: LastOutcome::Running,
-            })
+            .insert_session(
+                StoredSession {
+                    id: "s1".to_string(),
+                    title: "t".to_string(),
+                    cwd: "/tmp".to_string(),
+                    invocation: "agent".to_string(),
+                    tmux_name: "fh-1".to_string(),
+                    pane: "%0".to_string(),
+                    outcome: LastOutcome::Running,
+                },
+                None,
+            )
             .await
             .expect("insert");
         sup.sessions.lock().await.insert(
@@ -6638,15 +7879,18 @@ mod tests {
             .await
             .expect("supervisor construction touches only tmux, not the launch shim");
         sup.store
-            .insert_session(StoredSession {
-                id: "s1".to_string(),
-                title: "t".to_string(),
-                cwd: "/tmp".to_string(),
-                invocation: "agent".to_string(),
-                tmux_name: "fh-1".to_string(),
-                pane: "%0".to_string(),
-                outcome: LastOutcome::Running,
-            })
+            .insert_session(
+                StoredSession {
+                    id: "s1".to_string(),
+                    title: "t".to_string(),
+                    cwd: "/tmp".to_string(),
+                    invocation: "agent".to_string(),
+                    tmux_name: "fh-1".to_string(),
+                    pane: "%0".to_string(),
+                    outcome: LastOutcome::Running,
+                },
+                None,
+            )
             .await
             .expect("insert");
         {
@@ -6698,15 +7942,18 @@ mod tests {
         let db_path = state.path().join("supervisor.db");
         let store = SessionStore::open(&db_path, true).await.expect("store");
         store
-            .insert_session(StoredSession {
-                id: "s1".to_string(),
-                title: "t".to_string(),
-                cwd: "/tmp".to_string(),
-                invocation: "agent".to_string(),
-                tmux_name: "fh-does-not-exist".to_string(),
-                pane: "%0".to_string(),
-                outcome: LastOutcome::Running,
-            })
+            .insert_session(
+                StoredSession {
+                    id: "s1".to_string(),
+                    title: "t".to_string(),
+                    cwd: "/tmp".to_string(),
+                    invocation: "agent".to_string(),
+                    tmux_name: "fh-does-not-exist".to_string(),
+                    pane: "%0".to_string(),
+                    outcome: LastOutcome::Running,
+                },
+                None,
+            )
             .await
             .expect("insert");
         drop(store);
@@ -6919,6 +8166,787 @@ mod tests {
         );
     }
 
+    /// The fingerprint binds every SESSION-shaping field and nothing else
+    /// (PLAN_M3.md item 6).
+    ///
+    /// The override cases are the ones with teeth: acceptance 7 requires a
+    /// request differing ONLY in `agent_kind` or `resume_template` to be
+    /// refused as a key reuse, and as of this PR the fingerprint is the
+    /// only thing in the supervisor that reads those fields at all — so
+    /// nothing else would catch a change that quietly dropped them. The
+    /// `None`-vs-`Some` title case pins the other easy mistake: an omitted
+    /// title asks the server to derive one, which is a different request
+    /// from spelling out the same string by hand.
+    #[test]
+    fn the_create_fingerprint_covers_every_session_shaping_field() {
+        let base = create_fingerprint("/work", "agent --flag", Some("t"), None, None);
+        let cases = [
+            (
+                create_fingerprint("/other", "agent --flag", Some("t"), None, None),
+                "cwd",
+            ),
+            (
+                create_fingerprint("/work", "agent --other", Some("t"), None, None),
+                "invocation",
+            ),
+            (
+                create_fingerprint("/work", "agent --flag", Some("other"), None, None),
+                "title",
+            ),
+            (
+                create_fingerprint("/work", "agent --flag", None, None, None),
+                "an omitted title",
+            ),
+            (
+                create_fingerprint(
+                    "/work",
+                    "agent --flag",
+                    Some("t"),
+                    Some(AgentKind::Claude),
+                    None,
+                ),
+                "the agent-kind override",
+            ),
+            (
+                create_fingerprint(
+                    "/work",
+                    "agent --flag",
+                    Some("t"),
+                    None,
+                    Some(&["claude".to_string(), "{conversation}".to_string()]),
+                ),
+                "the resume-template override",
+            ),
+        ];
+        for (fingerprint, what) in cases {
+            assert_ne!(fingerprint, base, "{what} must change the fingerprint");
+        }
+        assert_eq!(
+            create_fingerprint("/work", "agent --flag", Some("t"), None, None),
+            base,
+            "the same request must fingerprint identically every time"
+        );
+        // Adjacent fields cannot bleed into one another: a delimiter-joined
+        // encoding would make these two requests indistinguishable.
+        assert_ne!(
+            create_fingerprint("/a", "bc", None, None, None),
+            create_fingerprint("/ab", "c", None, None, None),
+        );
+        // Distinct override VALUES are distinguished, not merely the
+        // presence of an override: two integrated kinds are two different
+        // requests, and so are two templates of the same length.
+        assert_ne!(
+            create_fingerprint("/work", "a", None, Some(AgentKind::Claude), None),
+            create_fingerprint("/work", "a", None, Some(AgentKind::Codex), None),
+        );
+        assert_ne!(
+            create_fingerprint("/work", "a", None, None, Some(&["x".to_string()])),
+            create_fingerprint("/work", "a", None, None, Some(&["y".to_string()])),
+        );
+    }
+
+    /// The PERSISTED fingerprint, byte for byte.
+    ///
+    /// A golden test because this string is written into a durable,
+    /// never-pruned table and compared verbatim on every replay: any change
+    /// to the encoding — a reordered element, a different `AgentKind`
+    /// spelling, a switch to a digest — turns every stored fingerprint into
+    /// a mismatch, so identical requests across the upgrade would be
+    /// refused as key reuse. That is a migration, and this test is what
+    /// makes it impossible to perform by accident. In particular the kind
+    /// is spelled with this module's own vocabulary, so a future rename of
+    /// the WIRE representation fails here rather than in the field.
+    #[test]
+    fn the_persisted_fingerprint_encoding_is_pinned() {
+        assert_eq!(
+            create_fingerprint(
+                "/work",
+                "claude --flag",
+                Some("title"),
+                Some(AgentKind::Claude),
+                Some(&["claude".to_string(), "{conversation}".to_string()]),
+            ),
+            r#"["/work","claude --flag","title","claude",["claude","{conversation}"]]"#
+        );
+        assert_eq!(
+            create_fingerprint("/work", "agent", None, None, None),
+            r#"["/work","agent",null,null,null]"#
+        );
+    }
+
+    /// Drive `handle_control`'s create arm three times against one intent
+    /// key to pin the two halves of item 6 that need no successful launch:
+    /// a failed create REPLAYS its original error, and a key reused for a
+    /// request differing only in an override is a `Conflict`.
+    ///
+    /// The failure is provoked by an unwritable `launch/` (the same
+    /// genuine `EACCES` `create_session_never_launches_tmux_after_a_failed_
+    /// spec_publish` uses), and permissions are RESTORED before the
+    /// replays — so a replay that re-ran the create instead of reading the
+    /// stored outcome would visibly succeed rather than quietly return the
+    /// same text, and this test would fail. The `kind` assertion is the
+    /// other half of "the same answer": a replay that decayed to
+    /// `Internal` would turn the first attempt's 400 into a 500.
+    #[tokio::test]
+    async fn a_failed_create_replays_its_error_and_a_changed_override_conflicts() {
+        let state = tempfile::tempdir().expect("state dir");
+        let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
+            .await
+            .expect("supervisor");
+        let (tx, mut rx) = mpsc::channel(CONNECTION_WRITER_QUEUE);
+        let mut input_routes = HashMap::new();
+        let mut tasks = tokio::task::JoinSet::new();
+        let launch_dir = state.path().join("launch");
+        let request = |req_id: u64, agent_kind: Option<AgentKind>| ControlMsg::CreateSession {
+            req_id,
+            cwd: "/".to_string(),
+            invocation: "agent".to_string(),
+            title: None,
+            cols: 80,
+            rows: 24,
+            intent_key: Some("one-intent".to_string()),
+            agent_kind,
+            resume_template: None,
+        };
+        let reply = |rx: &mut mpsc::Receiver<Frame>| {
+            let frame = rx.try_recv().expect("a reply must have been sent");
+            serde_json::from_slice::<ControlMsg>(&frame.body).expect("decode")
+        };
+
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&launch_dir, std::fs::Permissions::from_mode(0o500))
+                .expect("removing write permission from launch/");
+        }
+        handle_control(&sup, request(1, None), &tx, &mut input_routes, &mut tasks).await;
+        let ControlMsg::Error {
+            message: first_message,
+            kind: first_kind,
+            ..
+        } = reply(&mut rx)
+        else {
+            panic!("the create must fail while launch/ is unwritable");
+        };
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&launch_dir, std::fs::Permissions::from_mode(0o700))
+                .expect("restoring launch/");
+        }
+
+        // Same key, same request: the ORIGINAL error, verbatim.
+        handle_control(&sup, request(2, None), &tx, &mut input_routes, &mut tasks).await;
+        let ControlMsg::Error { message, kind, .. } = reply(&mut rx) else {
+            panic!("a replayed failure must still be an error");
+        };
+        assert_eq!(message, first_message, "the replay must be the same answer");
+        assert_eq!(kind, first_kind);
+        assert_eq!(
+            kind,
+            ErrorKind::Internal,
+            "an unwritable state directory is not something the caller could have avoided"
+        );
+
+        // Same key, a request differing ONLY in the agent-kind override:
+        // a reused key, refused rather than merged.
+        handle_control(
+            &sup,
+            request(3, Some(AgentKind::Claude)),
+            &tx,
+            &mut input_routes,
+            &mut tasks,
+        )
+        .await;
+        let ControlMsg::Error { message, kind, .. } = reply(&mut rx) else {
+            panic!("a key reused for a different request must be refused");
+        };
+        assert_eq!(kind, ErrorKind::Conflict);
+        assert!(
+            message.contains("one-intent") && message.contains("different create request"),
+            "the refusal must name the key and say why: {message}"
+        );
+
+        assert!(
+            sup.sessions.lock().await.is_empty(),
+            "none of the three attempts may have created a session"
+        );
+    }
+
+    /// The per-key lock actually excludes, actually hands off, and
+    /// actually prunes.
+    ///
+    /// All three are load-bearing and none is visible from the outside: a
+    /// lock that did not exclude would let two creates gather evidence
+    /// about each other's in-flight launch (see [`IntentLocks`] for why
+    /// that specific ambiguity is what it exists to remove), one that
+    /// pruned too eagerly would hand a waiter a DIFFERENT mutex for the
+    /// same key, and one that never pruned would grow a map entry per key
+    /// this process has ever seen.
+    #[tokio::test]
+    async fn intent_locks_exclude_hand_off_and_prune() {
+        let locks = Arc::new(IntentLocks::default());
+        let first = locks.claim("key").await;
+        assert_eq!(locks.locks.lock().unwrap().len(), 1);
+
+        // A second claim on the same key blocks; a claim on a different
+        // key does not.
+        let waiter = {
+            let locks = Arc::clone(&locks);
+            tokio::spawn(async move { locks.claim("key").await })
+        };
+        let other = locks.claim("other-key").await;
+        assert_eq!(locks.locks.lock().unwrap().len(), 2);
+        tokio::task::yield_now().await;
+        assert!(!waiter.is_finished(), "the same key must still be blocked");
+
+        // Releasing hands the key over rather than dropping its entry: the
+        // waiter is holding the SAME mutex it queued on, which is only
+        // true if pruning skipped an entry with a live waiter.
+        drop(first);
+        let handed_over = waiter.await.expect("the waiter must acquire");
+        assert!(
+            locks.locks.lock().unwrap().contains_key("key"),
+            "an entry with a live holder must not be pruned"
+        );
+        drop(handed_over);
+        drop(other);
+        assert!(
+            locks.locks.lock().unwrap().is_empty(),
+            "every entry must be gone once its last holder leaves"
+        );
+    }
+
+    /// A delete that commits WHILE a create is mid-launch wins, and the
+    /// create tears its own work back down instead of leaving an orphan.
+    ///
+    /// The race is the one item 6 of the review batch names, forced
+    /// deterministically through the create-lifecycle seam: the delete is
+    /// performed from inside the `DuringLaunch` stage, i.e. after tmux has
+    /// the session and before the launch is confirmed — the exact window in
+    /// which the create is about to write a row that no longer exists.
+    /// Without the vanished-row check, that write is a silent no-op and the
+    /// create returns success for a session with no record, leaving a real
+    /// agent running that nothing can list, stop, or reap.
+    ///
+    /// A second connection is not needed to make this real: what matters is
+    /// the ORDER of the durable operations, and the seam pins it exactly
+    /// rather than hoping a spawned task interleaves the right way.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_delete_that_lands_mid_launch_wins_and_the_create_tears_down() {
+        let state = tempfile::tempdir().expect("state dir");
+        let db = state.path().join("supervisor.db");
+        let deleted: Arc<std::sync::atomic::AtomicBool> = Arc::default();
+        let sup = {
+            let db = db.clone();
+            let deleted = Arc::clone(&deleted);
+            Supervisor::new_with_seams(
+                state.path(),
+                dummy_exe(),
+                SupervisorTimeouts::default(),
+                SupervisorSeams {
+                    create_crash: Some(Arc::new(move |stage| {
+                        if stage != CreateStage::DuringLaunch {
+                            return Ok(());
+                        }
+                        // A second connection to the same database, which
+                        // is what a concurrent handler would have: the
+                        // busy timeout covers the overlap.
+                        let db = db.clone();
+                        let deleted = Arc::clone(&deleted);
+                        tokio::task::block_in_place(move || {
+                            tokio::runtime::Handle::current().block_on(async move {
+                                let store = SessionStore::open(&db, false).await?;
+                                for row in store.load_all().await? {
+                                    store.delete_session_settling_reservations(&row.id).await?;
+                                }
+                                deleted.store(true, std::sync::atomic::Ordering::SeqCst);
+                                anyhow::Ok(())
+                            })
+                        })?;
+                        Ok(())
+                    })),
+                    ..SupervisorSeams::default()
+                },
+            )
+            .await
+            .expect("supervisor")
+        };
+
+        let error = sup
+            .create_session(
+                "/",
+                "agent",
+                None,
+                80,
+                24,
+                Some(IntentClaim {
+                    intent_key: "key".to_string(),
+                    fingerprint: create_fingerprint("/", "agent", None, None, None),
+                }),
+            )
+            .await
+            .expect_err("a create whose session was deleted mid-launch must not report success");
+        assert!(
+            deleted.load(std::sync::atomic::Ordering::SeqCst),
+            "test fixture: the delete must actually have run"
+        );
+        assert_eq!(error_kind(&error), ErrorKind::Conflict);
+        assert!(
+            format!("{error:#}").contains("deleted while it was being created"),
+            "the caller must be told which way the race went: {error:#}"
+        );
+        assert!(
+            sup.store.load_all().await.expect("load").is_empty(),
+            "the delete's removal must stand — the create must not have re-created a row"
+        );
+        let names = sup.tmux.pane_states().await.expect("pane states");
+        assert!(
+            names.is_empty(),
+            "the create must have torn its own tmux session down rather than orphaning it: \
+             {names:?}"
+        );
+        // And the intent is a tombstone, so a retry says so rather than
+        // resurrecting the session the delete removed.
+        let retry = sup
+            .create_session(
+                "/",
+                "agent",
+                None,
+                80,
+                24,
+                Some(IntentClaim {
+                    intent_key: "key".to_string(),
+                    fingerprint: create_fingerprint("/", "agent", None, None, None),
+                }),
+            )
+            .await
+            .expect_err("the key is spent");
+        assert_eq!(error_kind(&retry), ErrorKind::Conflict);
+        assert!(
+            format!("{retry:#}").contains("deleted"),
+            "the retry must report the tombstone: {retry:#}"
+        );
+    }
+
+    /// A keyed create refused by VALIDATION is recorded as that intent's
+    /// outcome and replayed — and the replay happens before validation
+    /// runs again (PLAN_M3.md item 6's replay contract, and the ordering
+    /// item 1 of the review batch pins).
+    ///
+    /// The working directory is CREATED between the two attempts, which is
+    /// what makes this a real test of the ordering rather than of
+    /// determinism: a retry that re-validated would now succeed and create
+    /// a session, so the replayed refusal proves the reservation was
+    /// consulted first. That is the contract acceptance 7 states without a
+    /// precondition exception — one intent, one outcome, however the world
+    /// moves underneath it.
+    ///
+    /// The third request pins the other half of the same ordering: a
+    /// DIFFERENT fingerprint is refused as a key reuse even though its own
+    /// cwd is invalid, which can only happen if the fingerprint is compared
+    /// before the directory is looked at.
+    #[tokio::test]
+    async fn a_keyed_precondition_failure_is_recorded_and_replayed_verbatim() {
+        let state = tempfile::tempdir().expect("state dir");
+        let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
+            .await
+            .expect("supervisor");
+        let work = state.path().join("appears-later");
+        let cwd = work.to_string_lossy().to_string();
+        let claim = |fingerprint_cwd: &str, invocation: &str| IntentClaim {
+            intent_key: "one-intent".to_string(),
+            fingerprint: create_fingerprint(fingerprint_cwd, invocation, None, None, None),
+        };
+
+        let first = sup
+            .create_session(&cwd, "agent", None, 80, 24, Some(claim(&cwd, "agent")))
+            .await
+            .expect_err("the working directory does not exist yet");
+        assert_eq!(error_kind(&first), ErrorKind::InvalidRequest);
+        assert!(
+            format!("{first:#}").contains("does not exist"),
+            "the refusal must name what was wrong: {first:#}"
+        );
+
+        std::fs::create_dir(&work).expect("the directory the user was about to create");
+        let replay = sup
+            .create_session(&cwd, "agent", None, 80, 24, Some(claim(&cwd, "agent")))
+            .await
+            .expect_err("the same intent must replay its refusal, not re-evaluate it");
+        assert_eq!(format!("{replay:#}"), format!("{first:#}"));
+        assert_eq!(error_kind(&replay), ErrorKind::InvalidRequest);
+        assert!(
+            sup.sessions.lock().await.is_empty(),
+            "and must not have created a session on the retry"
+        );
+
+        // Same key, different request, cwd still bad: refused for the
+        // REUSE, which only the lookup-before-validation ordering can do.
+        let reused = sup
+            .create_session(
+                "/nonexistent/definitely/not/here",
+                "agent",
+                None,
+                80,
+                24,
+                Some(claim("/nonexistent/definitely/not/here", "agent")),
+            )
+            .await
+            .expect_err("a reused key must be refused");
+        assert_eq!(error_kind(&reused), ErrorKind::Conflict);
+    }
+
+    /// While a relaunch is in flight its session is absent from the
+    /// session map, which is what serializes it against `StopSession` and
+    /// `DeleteSession`.
+    ///
+    /// Both handlers resolve their target through that map and reply
+    /// `NotFound` when it has no entry (their own arms in `handle_control`
+    /// do the lookup first), so this absence is not an implementation
+    /// detail — it is the mechanism that keeps a stop or a delete from
+    /// tearing down a launch that is half-built, with no lock held across
+    /// the multi-second work either of them does. The window at the other
+    /// end, where a delete resolved its entry just BEFORE the relaunch
+    /// removed it, is closed by the vanished-row check that
+    /// `a_delete_that_lands_mid_launch_wins_and_the_create_tears_down`
+    /// pins.
+    ///
+    /// Observed from inside the launch through the create-lifecycle seam,
+    /// because that is the only instant the property is about.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_relaunch_hides_its_session_from_stop_and_delete_until_it_completes() {
+        let state = tempfile::tempdir().expect("state dir");
+        let seen: Arc<std::sync::Mutex<Option<bool>>> = Arc::default();
+        let handle: Arc<std::sync::OnceLock<std::sync::Weak<Supervisor>>> = Arc::default();
+        let sup = {
+            let seen = Arc::clone(&seen);
+            let handle = Arc::clone(&handle);
+            Supervisor::new_with_seams(
+                state.path(),
+                dummy_exe(),
+                SupervisorTimeouts::default(),
+                SupervisorSeams {
+                    create_crash: Some(Arc::new(move |stage| {
+                        if stage == CreateStage::DuringLaunch
+                            && let Some(sup) = handle.get().and_then(std::sync::Weak::upgrade)
+                        {
+                            let present = tokio::task::block_in_place(|| {
+                                tokio::runtime::Handle::current().block_on(async {
+                                    sup.sessions.lock().await.contains_key("stranded")
+                                })
+                            });
+                            *seen.lock().expect("seen mutex") = Some(present);
+                        }
+                        Ok(())
+                    })),
+                    ..SupervisorSeams::default()
+                },
+            )
+            .await
+            .expect("supervisor")
+        };
+        handle.set(Arc::downgrade(&sup)).expect("set once");
+
+        // A pending reservation whose attempt never launched: the shape a
+        // crash after the claim leaves, and the one a retry relaunches.
+        let fingerprint = create_fingerprint("/", "agent", None, None, None);
+        sup.store
+            .insert_session(
+                StoredSession {
+                    id: "stranded".to_string(),
+                    title: "stranded".to_string(),
+                    cwd: "/".to_string(),
+                    invocation: "agent".to_string(),
+                    tmux_name: "fh-stranded".to_string(),
+                    pane: String::new(),
+                    outcome: LastOutcome::Launching,
+                },
+                Some(IntentClaim {
+                    intent_key: "key".to_string(),
+                    fingerprint: fingerprint.clone(),
+                }),
+            )
+            .await
+            .expect("seed");
+        sup.sessions.lock().await.insert(
+            "stranded".to_string(),
+            Arc::new(entry_with(None, LastOutcome::Launching)),
+        );
+
+        let session = sup
+            .create_session(
+                "/",
+                "agent",
+                None,
+                80,
+                24,
+                Some(IntentClaim {
+                    intent_key: "key".to_string(),
+                    fingerprint,
+                }),
+            )
+            .await
+            .expect("the retry performs the create");
+        assert_eq!(session.id, "stranded", "under the reserved identity");
+        assert_eq!(
+            *seen.lock().expect("seen mutex"),
+            Some(false),
+            "mid-relaunch, the session must not be resolvable — that is what makes a \
+             concurrent stop or delete answer NotFound instead of racing the launch"
+        );
+        assert!(
+            sup.sessions.lock().await.contains_key("stranded"),
+            "and it must be back in the map once the launch completes"
+        );
+    }
+
+    /// A pending reservation whose session has already ENDED replays it
+    /// rather than relaunching under it.
+    ///
+    /// The row is `Exited` with no terminal, which is exactly the shape
+    /// that tempts a naive "is it alive?" check into concluding nothing is
+    /// there. It is not evidence of absence: the session ran and finished,
+    /// the create that made it succeeded, and relaunching would start a
+    /// second agent for an intent that already had its one. The same
+    /// applies to an `Error` row (the agent never execed) — both are
+    /// outcomes of a launch that happened.
+    #[tokio::test]
+    async fn a_pending_reservation_whose_session_ended_replays_it() {
+        let state = tempfile::tempdir().expect("state dir");
+        let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
+            .await
+            .expect("supervisor");
+        let fingerprint = create_fingerprint("/", "agent", None, None, None);
+        sup.store
+            .insert_session(
+                StoredSession {
+                    id: "ended".to_string(),
+                    title: "ended".to_string(),
+                    cwd: "/".to_string(),
+                    invocation: "agent".to_string(),
+                    tmux_name: "fh-ended".to_string(),
+                    pane: String::new(),
+                    outcome: LastOutcome::Launching,
+                },
+                Some(IntentClaim {
+                    intent_key: "key".to_string(),
+                    fingerprint: fingerprint.clone(),
+                }),
+            )
+            .await
+            .expect("seed a pending reservation");
+        sup.store
+            .transition("ended", Transition::ObservedExit { exit_code: Some(1) })
+            .await
+            .expect("the session ran and finished");
+
+        let replayed = sup
+            .create_session(
+                "/",
+                "agent",
+                None,
+                80,
+                24,
+                Some(IntentClaim {
+                    intent_key: "key".to_string(),
+                    fingerprint,
+                }),
+            )
+            .await
+            .expect("an ended session is still this intent's session");
+        assert_eq!(replayed.id, "ended");
+        assert_eq!(
+            sup.store.load_all().await.expect("load").len(),
+            1,
+            "no second session may have been launched"
+        );
+        assert_eq!(
+            sup.store
+                .reservation("key")
+                .await
+                .expect("read")
+                .expect("still there")
+                .outcome,
+            ReservationOutcome::Created,
+            "and the replay settles the intent it just reconciled"
+        );
+    }
+
+    /// An intent key that could never do its job is refused at the edge,
+    /// before it can reach the durable, deliberately un-pruned reservation
+    /// table (`INTENT_KEY_CAP`).
+    ///
+    /// The empty key is the one worth spelling out: accepted, it would
+    /// collapse every create from a client that forgot to fill the field
+    /// into a single intent — the second such create would replay the
+    /// first's session instead of making its own.
+    #[tokio::test]
+    async fn a_degenerate_intent_key_is_rejected_before_anything_is_stored() {
+        let state = tempfile::tempdir().expect("state dir");
+        let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
+            .await
+            .expect("supervisor");
+        let (tx, mut rx) = mpsc::channel(CONNECTION_WRITER_QUEUE);
+        let mut input_routes = HashMap::new();
+        let mut tasks = tokio::task::JoinSet::new();
+
+        // Every refusal shape, including the boundary either side of the
+        // cap and a multibyte key whose CHARACTER count is comfortably
+        // under it — the cap is bytes, because bytes are what the row
+        // costs, and a char-counted cap would let a four-byte-per-char key
+        // store four times the intended maximum.
+        let over_by_one_char = "\u{1f600}".repeat(INTENT_KEY_CAP / 4 + 1);
+        assert!(
+            over_by_one_char.chars().count() < INTENT_KEY_CAP,
+            "test fixture: this key is over the cap only when counted in bytes"
+        );
+        for (req_id, key) in [
+            (1u64, String::new()),
+            (2, "k".repeat(INTENT_KEY_CAP + 1)),
+            (3, over_by_one_char),
+        ] {
+            handle_control(
+                &sup,
+                ControlMsg::CreateSession {
+                    req_id,
+                    cwd: "/".to_string(),
+                    invocation: "agent".to_string(),
+                    title: None,
+                    cols: 80,
+                    rows: 24,
+                    intent_key: Some(key),
+                    agent_kind: None,
+                    resume_template: None,
+                },
+                &tx,
+                &mut input_routes,
+                &mut tasks,
+            )
+            .await;
+            let frame = rx.try_recv().expect("a reply must have been sent");
+            let decoded: ControlMsg = serde_json::from_slice(&frame.body).expect("decode");
+            let ControlMsg::Error { kind, message, .. } = decoded else {
+                panic!("a degenerate intent key must be refused: {decoded:?}");
+            };
+            assert_eq!(kind, ErrorKind::InvalidRequest);
+            assert!(
+                message.contains("intent key"),
+                "the refusal must name what was wrong: {message}"
+            );
+        }
+        assert!(
+            sup.store.load_all().await.expect("load").is_empty(),
+            "a refused request must not have reached the store at all"
+        );
+        assert!(
+            sup.store
+                .pending_reservations()
+                .await
+                .expect("reservations")
+                .is_empty(),
+            "and must not have left a reservation either — a key refused at the edge is not \
+             spent, so a corrected retry with the same key must still be able to use it"
+        );
+        // A key EXACTLY at the cap is accepted, which is what makes the
+        // refusals above a boundary rather than a vague limit. It fails on
+        // the working directory instead, well past the key check.
+        handle_control(
+            &sup,
+            ControlMsg::CreateSession {
+                req_id: 4,
+                cwd: "/nonexistent/definitely/not/here".to_string(),
+                invocation: "agent".to_string(),
+                title: None,
+                cols: 80,
+                rows: 24,
+                intent_key: Some("k".repeat(INTENT_KEY_CAP)),
+                agent_kind: None,
+                resume_template: None,
+            },
+            &tx,
+            &mut input_routes,
+            &mut tasks,
+        )
+        .await;
+        let frame = rx.try_recv().expect("a reply must have been sent");
+        let decoded: ControlMsg = serde_json::from_slice(&frame.body).expect("decode");
+        let ControlMsg::Error { message, .. } = decoded else {
+            panic!("expected the cwd refusal: {decoded:?}");
+        };
+        assert!(
+            message.contains("working directory"),
+            "a key at exactly the cap must be accepted and the request judged on its merits: \
+             {message}"
+        );
+    }
+
+    /// The resume-template override is bounded on BOTH axes, before it can
+    /// reach the never-pruned reservation row that stores a copy of it.
+    ///
+    /// Two independent limits because they fail independently: a template
+    /// of a few enormous elements is caught by the shared byte cap (which
+    /// it now counts against, alongside cwd/invocation/title), while a
+    /// template of very many tiny ones costs almost no bytes and is caught
+    /// by the element cap. Either shape unbounded is a permanent write
+    /// sized by the request.
+    #[tokio::test]
+    async fn an_oversized_resume_template_is_refused_before_anything_is_stored() {
+        let state = tempfile::tempdir().expect("state dir");
+        let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
+            .await
+            .expect("supervisor");
+        let (tx, mut rx) = mpsc::channel(CONNECTION_WRITER_QUEUE);
+        let mut input_routes = HashMap::new();
+        let mut tasks = tokio::task::JoinSet::new();
+
+        for (req_id, template, expected) in [
+            (1u64, vec!["x".repeat(CREATE_FIELD_CAP)], "exceeding the"),
+            (
+                2,
+                vec![String::new(); RESUME_TEMPLATE_ELEMENT_CAP + 1],
+                "element limit",
+            ),
+        ] {
+            handle_control(
+                &sup,
+                ControlMsg::CreateSession {
+                    req_id,
+                    cwd: "/".to_string(),
+                    invocation: "agent".to_string(),
+                    title: None,
+                    cols: 80,
+                    rows: 24,
+                    intent_key: Some("key".to_string()),
+                    agent_kind: None,
+                    resume_template: Some(template),
+                },
+                &tx,
+                &mut input_routes,
+                &mut tasks,
+            )
+            .await;
+            let frame = rx.try_recv().expect("a reply must have been sent");
+            let decoded: ControlMsg = serde_json::from_slice(&frame.body).expect("decode");
+            let ControlMsg::Error { kind, message, .. } = decoded else {
+                panic!("an oversized resume template must be refused: {decoded:?}");
+            };
+            assert_eq!(kind, ErrorKind::InvalidRequest);
+            assert!(
+                message.contains(expected),
+                "the refusal must name the limit that was exceeded: {message}"
+            );
+        }
+        assert!(
+            sup.store.load_all().await.expect("load").is_empty()
+                && sup
+                    .store
+                    .pending_reservations()
+                    .await
+                    .expect("reservations")
+                    .is_empty(),
+            "neither refusal may have written anything"
+        );
+    }
+
     /// The opposite rollback rule, and the one that costs something to
     /// get wrong: when a create fails AMBIGUOUSLY, the launching row is
     /// KEPT.
@@ -6961,6 +8989,16 @@ mod tests {
                 None,
                 80,
                 24,
+                Some(IntentClaim {
+                    intent_key: "key".to_string(),
+                    fingerprint: create_fingerprint(
+                        &work.path().to_string_lossy(),
+                        "sh -c 'sleep 300'",
+                        None,
+                        None,
+                        None,
+                    ),
+                }),
             )
             .await
             .expect_err("tmux cannot create a session without a socket");
@@ -6977,6 +9015,265 @@ mod tests {
         assert!(
             rendered.contains("kept as a launching record"),
             "the caller must be told the row survives and why: {rendered}"
+        );
+        // The idempotency half of the same rule (PLAN_M3.md item 6 meeting
+        // the retention rules above): a failure that RETAINED evidence must
+        // leave its reservation pending. Settling it `Failed` would tell
+        // every later retry the intent is closed while an agent may still
+        // be running under that retained row — hiding it until the next
+        // restart, when the reload that would have reconciled it finds a
+        // reservation that no longer wants reconciling.
+        assert_eq!(
+            sup.store
+                .reservation("key")
+                .await
+                .expect("read")
+                .expect("the claim committed with the launching row")
+                .outcome,
+            ReservationOutcome::Pending,
+            "an ambiguous failure is exactly the reconcile-me state, not a recorded failure"
+        );
+    }
+
+    /// Evidence that cannot be READ is never read as absence (PLAN_M3.md
+    /// item 6, and the same no-guessing stance item 3 takes for a deferred
+    /// sentinel).
+    ///
+    /// A sentinel whose read fails is the case where a wrong relaunch is
+    /// most likely — something is already wrong with the state directory —
+    /// and it is indistinguishable from "the shim recorded an exec failure
+    /// for a launch that did happen". So the retry does neither: it
+    /// reports, leaves the reservation pending, and expects a human or a
+    /// later pass to clear whatever broke. Provoked with a DIRECTORY at the
+    /// sentinel's path, which fails the read with `EISDIR` rather than
+    /// merely being absent.
+    #[tokio::test]
+    async fn an_unreadable_sentinel_blocks_the_relaunch_rather_than_guessing() {
+        let state = tempfile::tempdir().expect("state dir");
+        let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
+            .await
+            .expect("supervisor");
+        let fingerprint = create_fingerprint("/", "agent", None, None, None);
+        sup.store
+            .insert_session(
+                StoredSession {
+                    id: "stranded".to_string(),
+                    title: "stranded".to_string(),
+                    cwd: "/".to_string(),
+                    invocation: "agent".to_string(),
+                    tmux_name: "fh-stranded".to_string(),
+                    pane: String::new(),
+                    outcome: LastOutcome::Launching,
+                },
+                Some(IntentClaim {
+                    intent_key: "key".to_string(),
+                    fingerprint: fingerprint.clone(),
+                }),
+            )
+            .await
+            .expect("seed a pending reservation");
+        let spec = crate::launch::spec_path_for_session(state.path(), "stranded");
+        std::fs::create_dir(crate::launch::status_path_for_spec(&spec))
+            .expect("plant an unreadable sentinel");
+
+        let error = sup
+            .create_session(
+                "/",
+                "agent",
+                None,
+                80,
+                24,
+                Some(IntentClaim {
+                    intent_key: "key".to_string(),
+                    fingerprint,
+                }),
+            )
+            .await
+            .expect_err("unreadable evidence must not be resolved either way");
+        let rendered = format!("{error:#}");
+        assert!(
+            rendered.contains("cannot tell whether"),
+            "the caller must be told why it got no answer: {rendered}"
+        );
+        assert_eq!(
+            sup.store
+                .reservation("key")
+                .await
+                .expect("read")
+                .expect("still there")
+                .outcome,
+            ReservationOutcome::Pending,
+            "and the intent must stay reconcilable rather than being closed on a guess"
+        );
+        assert_eq!(
+            sup.store.load_all().await.expect("load").len(),
+            1,
+            "no second session may have been launched"
+        );
+    }
+
+    /// A relaunch whose leftover artifacts cannot be removed does not
+    /// launch (PLAN_M3.md item 6 meeting item 5's launch-spec rules).
+    ///
+    /// The spec and sentinel paths are derived from the session id alone,
+    /// so a relaunch reuses them exactly. Launching on top of a spec this
+    /// process could not remove would leave the shim reading a file from a
+    /// dead attempt — and a surviving sentinel would be read as evidence
+    /// about a launch that has not happened yet. Failing closed leaves the
+    /// reservation pending, which is recoverable; launching anyway is not.
+    #[tokio::test]
+    async fn a_relaunch_refuses_to_start_over_artifacts_it_cannot_remove() {
+        let state = tempfile::tempdir().expect("state dir");
+        let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
+            .await
+            .expect("supervisor");
+        let fingerprint = create_fingerprint("/", "agent", None, None, None);
+        sup.store
+            .insert_session(
+                StoredSession {
+                    id: "stranded".to_string(),
+                    title: "stranded".to_string(),
+                    cwd: "/".to_string(),
+                    invocation: "agent".to_string(),
+                    tmux_name: "fh-stranded".to_string(),
+                    pane: String::new(),
+                    outcome: LastOutcome::Launching,
+                },
+                Some(IntentClaim {
+                    intent_key: "key".to_string(),
+                    fingerprint: fingerprint.clone(),
+                }),
+            )
+            .await
+            .expect("seed a pending reservation");
+        // A leftover spec (but no sentinel — a sentinel would itself be
+        // evidence the launch happened) in a directory that refuses
+        // unlinking.
+        let spec = crate::launch::spec_path_for_session(state.path(), "stranded");
+        std::fs::write(&spec, b"{}").expect("plant a leftover spec");
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(
+                state.path().join("launch"),
+                std::fs::Permissions::from_mode(0o500),
+            )
+            .expect("freeze launch/");
+        }
+
+        let error = sup
+            .create_session(
+                "/",
+                "agent",
+                None,
+                80,
+                24,
+                Some(IntentClaim {
+                    intent_key: "key".to_string(),
+                    fingerprint,
+                }),
+            )
+            .await
+            .expect_err("a relaunch that cannot clear its own path must not start");
+
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(
+                state.path().join("launch"),
+                std::fs::Permissions::from_mode(0o700),
+            )
+            .expect("restore launch/");
+        }
+        assert!(
+            format!("{error:#}").contains("not relaunching"),
+            "the caller must be told the relaunch was refused and why: {error:#}"
+        );
+        assert_eq!(
+            sup.store
+                .reservation("key")
+                .await
+                .expect("read")
+                .expect("still there")
+                .outcome,
+            ReservationOutcome::Pending,
+            "the intent stays reconcilable: nothing about it was resolved"
+        );
+        assert!(
+            sup.tmux
+                .pane_states()
+                .await
+                .expect("pane states")
+                .is_empty(),
+            "and nothing was launched"
+        );
+    }
+
+    /// When the FAILURE cannot be recorded, the caller is told that —
+    /// never handed the original error as though the key were spent.
+    ///
+    /// A client that sees "working directory does not exist" reasonably
+    /// concludes retrying is pointless. That conclusion is only safe when
+    /// the outcome is durable; if it is not, the same key may still do
+    /// something entirely different, and the reply has to say so. Forced
+    /// with a trigger that refuses the settlement, so the rollback
+    /// transaction (which carries it) fails as a whole.
+    #[tokio::test]
+    async fn a_create_whose_outcome_cannot_be_recorded_reports_the_ambiguity() {
+        let state = tempfile::tempdir().expect("state dir");
+        let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
+            .await
+            .expect("supervisor");
+        {
+            use rusqlite::Connection;
+            let conn = Connection::open(state.path().join("supervisor.db")).expect("open raw");
+            conn.execute_batch(
+                "CREATE TRIGGER refuse_settlement BEFORE UPDATE ON create_reservations \
+                 BEGIN SELECT RAISE(ABORT, 'refused by test trigger'); END;",
+            )
+            .expect("plant the trigger");
+        }
+        // The spec write fails (a frozen launch directory), which is a
+        // CONFIRMED-absence failure and therefore one that tries to settle.
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(
+                state.path().join("launch"),
+                std::fs::Permissions::from_mode(0o500),
+            )
+            .expect("freeze launch/");
+        }
+
+        let error = sup
+            .create_session(
+                "/",
+                "agent",
+                None,
+                80,
+                24,
+                Some(IntentClaim {
+                    intent_key: "key".to_string(),
+                    fingerprint: create_fingerprint("/", "agent", None, None, None),
+                }),
+            )
+            .await
+            .expect_err("the create fails either way");
+
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(
+                state.path().join("launch"),
+                std::fs::Permissions::from_mode(0o700),
+            )
+            .expect("restore launch/");
+        }
+        let rendered = format!("{error:#}");
+        assert_eq!(error_kind(&error), ErrorKind::Internal);
+        assert!(
+            rendered.contains("NOT spent"),
+            "the caller must be told the outcome was not recorded: {rendered}"
+        );
+        assert!(
+            rendered.contains("writing launch spec"),
+            "and must still carry the original failure: {rendered}"
         );
     }
 

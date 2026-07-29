@@ -217,11 +217,19 @@ const POLL_INTERVAL_MS: u64 = 3_000;
 /// whitespace is stripped before display (and before the empty-body
 /// fallback check below), so "the helm's own message" means modulo
 /// incidental surrounding whitespace, not an exact-bytes guarantee.
+///
+/// `intent_key` is the create's idempotency key (PLAN_M3.md item 6): the
+/// server treats two requests carrying the same key and the same fields as
+/// ONE intended create, so a retry after an ambiguous failure returns the
+/// original session instead of launching a second agent. It is a required
+/// argument, not an option — a create from this UI always carries one (see
+/// `CreateSessionForm`).
 async fn create_session(
     base: &str,
     cwd: &str,
     invocation: &str,
     title: &str,
+    intent_key: &str,
 ) -> Result<Session, String> {
     let url = format!("{base}/api/sessions");
     // `title` is the API's `Option<String>`, not a bare string: an empty
@@ -229,7 +237,12 @@ async fn create_session(
     // auto-generated when omitted" — sending `Some("")` would instead ask
     // the supervisor to name the session the empty string.
     let title = (!title.trim().is_empty()).then_some(title);
-    let body = serde_json::json!({ "cwd": cwd, "invocation": invocation, "title": title });
+    let body = serde_json::json!({
+        "cwd": cwd,
+        "invocation": invocation,
+        "title": title,
+        "intent_key": intent_key,
+    });
     let resp = reqwest::Client::new()
         .post(&url)
         .json(&body)
@@ -251,6 +264,25 @@ async fn create_session(
     }
     resp.json::<Session>().await.map_err(|e| e.to_string())
 }
+
+/// The JavaScript one intended create's idempotency key comes from.
+///
+/// `crypto.randomUUID()` is the real generator; the branch exists because
+/// it is only defined in a SECURE context, which the web build always has
+/// (the helm serves it over loopback) but a desktop webview's custom
+/// scheme need not. The fallback is not cryptographically random and does
+/// not need to be: a key only has to be unique among the creates ONE user
+/// is making, and a millisecond timestamp plus two `Math.random()` draws
+/// is far past that. It is never a security boundary — the key names an
+/// intent, it does not authorize anything.
+///
+/// What there is deliberately NO fallback for is producing no key at all;
+/// see `CreateSessionForm`'s own docs on why an unkeyed create is not an
+/// acceptable degradation.
+const INTENT_KEY_JS: &str = "return (globalThis.crypto && crypto.randomUUID) \
+     ? crypto.randomUUID() \
+     : Date.now().toString(36) + '-' + Math.random().toString(36).slice(2) \
+       + Math.random().toString(36).slice(2);";
 
 /// POST the stop endpoint for one session. The empty `Ok(())` on success
 /// mirrors the helm's own reply (`{}` — see farhelm-helm's `stop_session`);
@@ -763,6 +795,41 @@ fn ListView(on_open: EventHandler<Session>) -> Element {
 /// this whole component immediately (closing the form and navigating
 /// away), so there is no one left to observe a reset — only the failure
 /// path needs to leave the control usable again.
+///
+/// ## The intent key (PLAN_M3.md item 6)
+///
+/// One key per INTENDED create, reused across every retry of it. The
+/// lifecycle is deliberately tied to the form's values rather than to its
+/// mount: minted at first submit, kept across a failed submit (the retry
+/// case the key exists for), and dropped the moment any field changes
+/// (which makes the next submit a different intent). Both edges matter —
+/// keeping it across an edit would send a request the server refuses as a
+/// key reuse once the first attempt has a durable outcome, and dropping it
+/// on failure would make a retry able to create a second session for the
+/// same intent, which is the exact gap this closes.
+///
+/// The inputs are DISABLED while a create is in flight, which is what makes
+/// that lifecycle a rule rather than a race: key generation is itself
+/// asynchronous (`INTENT_KEY_JS` runs in the renderer), so without it a
+/// keystroke could land between minting a key and sending it, publishing a
+/// key that belongs to values the user has already changed. Disabling was
+/// chosen over reconciling generations afterwards because the form is inert
+/// for that window anyway — the submit button and both navigation controls
+/// are already disabled by the same flag.
+///
+/// A create from this form ALWAYS carries a key. If the key cannot be
+/// generated the create is refused locally, with the failure shown like any
+/// other: falling back to an unkeyed create would silently drop the one
+/// protection this whole feature exists to provide, at exactly the moment
+/// something is already wrong with the environment, and a user who retries
+/// after a dropped reply would get a duplicate agent with nothing to
+/// indicate why.
+///
+/// The server's key-reuse and already-deleted refusals need no handling of
+/// their own here: they arrive as ordinary create failures (a 409 with the
+/// supervisor's own message) and render in the same `.create-session-error`
+/// line as every other one, which is what SPEC.md's "concrete, actionable
+/// errors" asks for — the message names the key and what happened to it.
 #[component]
 fn CreateSessionForm(mut submitting: Signal<bool>, on_created: EventHandler<Session>) -> Element {
     let base = use_context::<ApiBase>().0;
@@ -770,6 +837,12 @@ fn CreateSessionForm(mut submitting: Signal<bool>, on_created: EventHandler<Sess
     let mut invocation = use_signal(String::new);
     let mut title = use_signal(String::new);
     let mut error = use_signal(|| None::<String>);
+    // This form's current intended create, if one has been submitted yet
+    // (PLAN_M3.md item 6). Minted at FIRST SUBMIT and reused by every later
+    // submit of the same values; cleared inline by every field's `oninput`,
+    // because an edit makes the next submit a different intent. See this
+    // component's own docs for both edges of that rule.
+    let mut intent_key = use_signal(|| None::<String>);
 
     rsx! {
         form {
@@ -779,13 +852,15 @@ fn CreateSessionForm(mut submitting: Signal<bool>, on_created: EventHandler<Sess
                 // Double-submission guard: covers concurrent clicks on
                 // THIS mounted form (a double-click, or a stray repeat
                 // event) — the control is inert for the whole round trip,
-                // not just until the first click handler returns. It does
-                // NOT cover a retry after an ambiguous transport failure
-                // (request sent, response lost) reaching the supervisor a
-                // second time; closing that gap needs server-side
-                // deduplication, which PLAN.md's M3 entry ("server-enforced
-                // create idempotency") schedules as durability-milestone
-                // work, not something a client-side flag can provide.
+                // not just until the first click handler returns.
+                //
+                // The OTHER half — a retry after an ambiguous transport
+                // failure (request sent, response lost) reaching the
+                // supervisor a second time — is what `intent_key` closes,
+                // and it cannot be closed here: only the server knows
+                // whether the lost reply belonged to a session that
+                // actually exists. This handler's job is merely to send
+                // the SAME key for every retry of one intent.
                 if submitting() {
                     return;
                 }
@@ -793,13 +868,60 @@ fn CreateSessionForm(mut submitting: Signal<bool>, on_created: EventHandler<Sess
                 let cwd_value = cwd();
                 let invocation_value = invocation();
                 let title_value = title();
+                // Created here, in the component's own scope, and awaited
+                // inside the task: `document::eval` needs the renderer's
+                // document from context, which is unambiguously available
+                // at this point. No edit can land while it runs — the
+                // inputs below are disabled for the whole submission.
+                let pending_key = intent_key()
+                    .is_none()
+                    .then(|| dioxus::document::eval(INTENT_KEY_JS));
                 submitting.set(true);
                 error.set(None);
                 spawn(async move {
-                    match create_session(&base, &cwd_value, &invocation_value, &title_value).await
+                    if let Some(eval) = pending_key {
+                        match eval.await {
+                            Ok(serde_json::Value::String(key)) if !key.is_empty() => {
+                                intent_key.set(Some(key));
+                            }
+                            outcome => {
+                                // No key, no create: see this component's
+                                // docs on why an unkeyed create is not an
+                                // acceptable degradation. The message says
+                                // what failed rather than blaming the
+                                // request, since nothing the user typed
+                                // caused it.
+                                error.set(Some(format!(
+                                    "could not generate an idempotency key for this create, so \
+                                     it was not sent (a retry could otherwise create a second \
+                                     session): {outcome:?}"
+                                )));
+                                submitting.set(false);
+                                return;
+                            }
+                        }
+                    }
+                    let key = intent_key().expect("a key was just generated or already held");
+                    match create_session(
+                            &base,
+                            &cwd_value,
+                            &invocation_value,
+                            &title_value,
+                            &key,
+                        )
+                        .await
                     {
                         Ok(session) => on_created.call(session),
                         Err(e) => {
+                            // The key deliberately SURVIVES a failure:
+                            // this is exactly the case it exists for. A
+                            // failure whose cause was an ambiguous
+                            // transport error may have created a session
+                            // the user cannot see, and resubmitting
+                            // unchanged must reach that same session
+                            // rather than launch a second agent. A user
+                            // who instead fixes the form gets a new key
+                            // from the fields' own `oninput`.
                             error.set(Some(e));
                             submitting.set(false);
                         }
@@ -832,7 +954,15 @@ fn CreateSessionForm(mut submitting: Signal<bool>, on_created: EventHandler<Sess
                     autocapitalize: "none",
                     spellcheck: "false",
                     value: "{cwd}",
-                    oninput: move |evt| cwd.set(evt.value()),
+                    disabled: submitting(),
+                    oninput: move |evt| {
+                        cwd.set(evt.value());
+                        // An edit makes the next submit a DIFFERENT
+                        // intent, so the key the last one used stops
+                        // applying here (this component's docs carry the
+                        // full argument for both edges of that rule).
+                        intent_key.set(None);
+                    },
                 }
             }
             label {
@@ -845,7 +975,15 @@ fn CreateSessionForm(mut submitting: Signal<bool>, on_created: EventHandler<Sess
                     autocapitalize: "none",
                     spellcheck: "false",
                     value: "{invocation}",
-                    oninput: move |evt| invocation.set(evt.value()),
+                    disabled: submitting(),
+                    oninput: move |evt| {
+                        invocation.set(evt.value());
+                        // An edit makes the next submit a DIFFERENT
+                        // intent, so the key the last one used stops
+                        // applying here (this component's docs carry the
+                        // full argument for both edges of that rule).
+                        intent_key.set(None);
+                    },
                 }
             }
             label {
@@ -857,7 +995,15 @@ fn CreateSessionForm(mut submitting: Signal<bool>, on_created: EventHandler<Sess
                     autocapitalize: "none",
                     spellcheck: "false",
                     value: "{title}",
-                    oninput: move |evt| title.set(evt.value()),
+                    disabled: submitting(),
+                    oninput: move |evt| {
+                        title.set(evt.value());
+                        // An edit makes the next submit a DIFFERENT
+                        // intent, so the key the last one used stops
+                        // applying here (this component's docs carry the
+                        // full argument for both edges of that rule).
+                        intent_key.set(None);
+                    },
                 }
             }
             button {

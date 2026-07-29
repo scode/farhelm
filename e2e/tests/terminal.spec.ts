@@ -3701,3 +3701,291 @@ test("real backspace erases; real ctrl-c kills the fake agent", async ({
     await new Promise((resolve) => setTimeout(resolve, 200));
   }
 });
+
+
+// Server-enforced create idempotency, at the level only the browser can
+// exercise: the UI's own key lifecycle (PLAN_M3.md item 6, "the UI
+// generates one key per intended create and reuses it across retries of
+// that intent"). The supervisor's side of the contract — replay, conflict,
+// crash reconciliation, the gone-error — is pinned in the Rust e2e suite,
+// which can restart supervisors and inject crashes; what only this suite
+// can show is that the retry a USER performs actually carries the same key
+// the first attempt did.
+
+/**
+ * Delete every session with this title, however many exist.
+ *
+ * Plural on purpose: these tests exist because a duplicate is possible, so
+ * their cleanup must not assume the thing they are testing for. A
+ * single-session cleanup would leave a stray agent running for the rest of
+ * the suite exactly when the test failed.
+ */
+async function cleanUpSessionsTitled(request: APIRequestContext, title: string) {
+  const listing = await (await request.get("/api/sessions")).json().catch(() => null);
+  for (const session of listing?.sessions ?? []) {
+    if (session.title !== title) continue;
+    await request.post(`/api/sessions/${session.id}/stop`).catch(() => {});
+    await request.delete(`/api/sessions/${session.id}`).catch(() => {});
+  }
+}
+
+test("a create whose reply is lost is retried with the same key and yields one session", async ({
+  page,
+  request,
+}) => {
+  const title = `intent-retry-${Date.now()}`;
+  const keys: (string | undefined)[] = [];
+  let firstStatus = 0;
+  // The first POST really reaches the server — `route.fetch()` performs
+  // it — and only its RESPONSE is thrown away, which is precisely the
+  // ambiguous failure this feature exists for: a session now exists that
+  // the browser has no way of knowing about. Aborting instead would test
+  // only that the key is reused, not that the server dedups against a
+  // session the client never heard of.
+  await page.route("**/api/sessions", async (route) => {
+    if (route.request().method() !== "POST") {
+      await route.continue();
+      return;
+    }
+    keys.push(JSON.parse(route.request().postData() ?? "{}").intent_key);
+    if (keys.length === 1) {
+      const response = await route.fetch();
+      firstStatus = response.status();
+      await route.abort();
+      return;
+    }
+    await route.continue();
+  });
+
+  try {
+    await page.goto("/");
+    const form = await fillCreateForm(page, {
+      cwd: "/tmp",
+      invocation: FAKE_AGENT_INVOCATION,
+      title,
+    });
+    await form.locator('button[type="submit"]').click();
+    // The dropped response surfaces as an ordinary create error, leaving
+    // the form usable — the state a user retries from.
+    await expect(form.locator(".create-session-error")).toBeVisible();
+    // The first attempt SUCCEEDED on the server; without that, the retry
+    // below would merely be creating the session for the first time and
+    // would prove nothing about deduplication.
+    expect(firstStatus).toBe(200);
+
+    await form.locator('button[type="submit"]').click();
+    await page.waitForFunction(() => (window as any).__farhelmTermReady === true, {
+      timeout: 15_000,
+    });
+    await expect(page.locator(".titlebar .title")).toHaveText(title);
+
+    expect(keys).toHaveLength(2);
+    expect(keys[0]).toBeTruthy();
+    expect(keys[1]).toBe(keys[0]);
+    // The point of all of it: one intended create, one session, even
+    // though the server genuinely handled two requests.
+    const listing = await (await request.get("/api/sessions")).json();
+    expect(listing.sessions.filter((s: any) => s.title === title)).toHaveLength(1);
+  } finally {
+    await cleanUpSessionsTitled(request, title);
+  }
+});
+
+// The other edge of the same rule, and the reason the key is minted at
+// first submit rather than when the form opens: editing a field makes the
+// next submit a DIFFERENT intent, so it must carry a different key.
+//
+// What reusing the old key would cost depends on how far the first attempt
+// got. Here it failed on a precondition, which the supervisor records as
+// that intent's outcome — so a resubmission under the same key would
+// REPLAY "working directory does not exist" no matter what the user fixed,
+// leaving the form permanently unable to succeed. Where the first attempt
+// got further, the same reuse is refused as a conflict instead. Both are
+// dead ends; minting a new key is what makes "fix it and try again" work.
+//
+// Each field gets its own pass, because the key is cleared by each input's
+// own handler and a missed one would only show up in whichever field the
+// user happened to edit.
+//
+// Each edit is to another value that ALSO fails, so the assertion is about
+// the key alone rather than about whether the corrected request happens to
+// succeed — and so both attempts land in the same observable state.
+for (const field of [
+  { name: "working directory", index: 0, edit: "/nonexistent/also/not/here" },
+  { name: "agent command", index: 1, edit: "also-not-an-agent" },
+]) {
+  test(`editing the ${field.name} after a failed create mints a new intent key`, async ({
+    page,
+    request,
+  }) => {
+    const title = `intent-new-${field.index}-${Date.now()}`;
+    const keys: (string | undefined)[] = [];
+    await page.route("**/api/sessions", async (route) => {
+      if (route.request().method() !== "POST") {
+        await route.continue();
+        return;
+      }
+      keys.push(JSON.parse(route.request().postData() ?? "{}").intent_key);
+      await route.continue();
+    });
+
+    try {
+      await page.goto("/");
+      // Both fields start wrong so that fixing EITHER one leaves a
+      // request that still differs from the first attempt.
+      const form = await fillCreateForm(page, {
+        cwd: "/nonexistent/definitely/not/here",
+        invocation: "definitely-not-an-agent",
+        title,
+      });
+      await form.locator('button[type="submit"]').click();
+      await expect(form.locator(".create-session-error")).toBeVisible();
+
+      await form.locator('input[type="text"]').nth(field.index).fill(field.edit);
+      await form.locator('button[type="submit"]').click();
+      await expect(form.locator(".create-session-error")).toBeVisible();
+
+      expect(keys).toHaveLength(2);
+      expect(keys[0]).toBeTruthy();
+      expect(keys[1]).toBeTruthy();
+      expect(keys[1]).not.toBe(keys[0]);
+    } finally {
+      await cleanUpSessionsTitled(request, title);
+    }
+  });
+}
+
+// The title is prose rather than something that gets executed, but it is
+// still part of what makes a create the create it is (the server
+// fingerprints it), so editing it starts a new intent exactly like the
+// other two fields. Kept separate from the loop above because a bad title
+// cannot fail a create — this one has to succeed to be observed at all.
+test("editing the title after a failed create mints a new intent key", async ({
+  page,
+  request,
+}) => {
+  const title = `intent-title-${Date.now()}`;
+  const keys: (string | undefined)[] = [];
+  await page.route("**/api/sessions", async (route) => {
+    if (route.request().method() !== "POST") {
+      await route.continue();
+      return;
+    }
+    keys.push(JSON.parse(route.request().postData() ?? "{}").intent_key);
+    await route.continue();
+  });
+
+  try {
+    await page.goto("/");
+    const form = await fillCreateForm(page, {
+      cwd: "/nonexistent/definitely/not/here",
+      invocation: FAKE_AGENT_INVOCATION,
+      title,
+    });
+    await form.locator('button[type="submit"]').click();
+    await expect(form.locator(".create-session-error")).toBeVisible();
+
+    await form.locator('input[type="text"]').nth(2).fill(`${title}-renamed`);
+    await form.locator('input[type="text"]').nth(0).fill("/tmp");
+    await form.locator('button[type="submit"]').click();
+    await page.waitForFunction(() => (window as any).__farhelmTermReady === true, {
+      timeout: 15_000,
+    });
+
+    expect(keys).toHaveLength(2);
+    expect(keys[1]).not.toBe(keys[0]);
+  } finally {
+    await cleanUpSessionsTitled(request, title);
+    await cleanUpSessionsTitled(request, `${title}-renamed`);
+  }
+});
+
+// The form is inert for the whole submission — inputs included, not just
+// the submit button — which is what makes the key lifecycle a rule rather
+// than a race: key generation runs in the renderer and is asynchronous, so
+// a keystroke landing between minting a key and sending it would otherwise
+// publish a key belonging to values the user has already changed.
+test("the create form's inputs are disabled while a create is in flight", async ({
+  page,
+  request,
+}) => {
+  const title = `intent-inert-${Date.now()}`;
+  await page.route("**/api/sessions", async (route) => {
+    if (route.request().method() !== "POST") {
+      await route.continue();
+      return;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 800));
+    await route.continue();
+  });
+
+  try {
+    await page.goto("/");
+    const form = await fillCreateForm(page, {
+      cwd: "/tmp",
+      invocation: FAKE_AGENT_INVOCATION,
+      title,
+    });
+    await form.locator('button[type="submit"]').click();
+    for (const index of [0, 1, 2]) {
+      await expect(form.locator('input[type="text"]').nth(index)).toBeDisabled();
+    }
+    await page.waitForFunction(() => (window as any).__farhelmTermReady === true, {
+      timeout: 15_000,
+    });
+  } finally {
+    await cleanUpSessionsTitled(request, title);
+  }
+});
+
+// The key generator's fallback path, exercised by taking
+// `crypto.randomUUID` away before the page loads — the shape a desktop
+// webview outside a secure context presents. A create must still carry a
+// key: the fallback is not cryptographically random and does not need to
+// be (see INTENT_KEY_JS in farhelm-ui), it only has to be unique among one
+// user's creates.
+test("a create still carries a key when crypto.randomUUID is unavailable", async ({
+  page,
+  request,
+}) => {
+  const title = `intent-fallback-${Date.now()}`;
+  const keys: (string | undefined)[] = [];
+  // Defined away on the PROTOTYPE, where it actually lives: deleting an
+  // own property of `crypto` would silently do nothing and the test would
+  // pass while exercising the ordinary path.
+  await page.addInitScript(() => {
+    Object.defineProperty(Crypto.prototype, "randomUUID", {
+      value: undefined,
+      configurable: true,
+    });
+  });
+  await page.route("**/api/sessions", async (route) => {
+    if (route.request().method() !== "POST") {
+      await route.continue();
+      return;
+    }
+    keys.push(JSON.parse(route.request().postData() ?? "{}").intent_key);
+    await route.continue();
+  });
+
+  try {
+    await page.goto("/");
+    expect(
+      await page.evaluate(() => typeof (globalThis.crypto as any)?.randomUUID),
+    ).not.toBe("function");
+    const form = await fillCreateForm(page, {
+      cwd: "/tmp",
+      invocation: FAKE_AGENT_INVOCATION,
+      title,
+    });
+    await form.locator('button[type="submit"]').click();
+    await page.waitForFunction(() => (window as any).__farhelmTermReady === true, {
+      timeout: 15_000,
+    });
+
+    expect(keys).toHaveLength(1);
+    expect(keys[0]).toBeTruthy();
+  } finally {
+    await cleanUpSessionsTitled(request, title);
+  }
+});
