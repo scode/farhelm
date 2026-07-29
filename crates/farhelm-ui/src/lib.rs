@@ -59,6 +59,14 @@ pub enum SessionStatus {
     /// could not reduce the death to a plain code (a signal, or no live
     /// pane to ask at all).
     Exited { exit_code: Option<i32> },
+    /// The host rebooted while this session was still live — launching,
+    /// running, or with a stop in flight — so its terminal is gone and
+    /// nothing can ever be asked about the agent again (PLAN_M3.md item
+    /// 2). Deliberately its own state rather than folded into `Exited`:
+    /// the user is being told the system LOST TRACK, not that their agent
+    /// finished — the two call for different actions (restart-with-resume
+    /// vs. nothing).
+    Interrupted,
 }
 
 /// Mirror of the helm's session JSON (farhelm-proto `SessionInfo`). Kept
@@ -72,6 +80,15 @@ pub struct Session {
     pub invocation: String,
     #[serde(default)]
     pub status: SessionStatus,
+    /// SPEC.md's qualifier on an ended session — "stopped by user" is the
+    /// only one that exists (PLAN_M3.md item 4). Rendered as part of the
+    /// status badge rather than as its own control, because SPEC.md is
+    /// explicit that "stopped" is NOT a distinct status: it is how an
+    /// exited session says who ended it. No `#[serde(default)]` is needed
+    /// or present, unlike the fields above: serde already decodes a
+    /// missing key on an `Option` as `None`, so the same old-peer
+    /// tolerance holds without the attribute.
+    pub annotation: Option<String>,
 }
 
 const VENDOR_XTERM_CSS: Asset = asset!("/assets/vendor/xterm.css");
@@ -551,7 +568,15 @@ fn ListView(on_open: EventHandler<Session>) -> Element {
             // deleting routine, already-finished sessions needlessly
             // noisy. Revisit if M5's status work ever gives the UI a
             // basis for a sharper answer.
-            SessionStatus::Exited { .. } => do_delete_on_confirm(target.id),
+            // `Interrupted` joins `Exited` here for a stronger version of
+            // the same argument: a host reboot is what produced this
+            // status, and a reboot leaves no descendants at all — there
+            // is not even the stray-MCP-server residual to accept. The
+            // session's agent is definitively not running, so confirming
+            // would be asking about a danger that cannot exist.
+            SessionStatus::Exited { .. } | SessionStatus::Interrupted => {
+                do_delete_on_confirm(target.id)
+            }
             // Unknown must not borrow Alive's "is still running" claim
             // it has no basis for — SPEC.md's no-guessing rule means an
             // unresolved status is presented as exactly that, uncertain,
@@ -931,7 +956,7 @@ fn SessionRow(
     on_confirm_delete: EventHandler<String>,
     on_cancel_delete: EventHandler<String>,
 ) -> Element {
-    let (badge_class, badge_text) = status_badge(&session.status);
+    let (badge_class, badge_text) = status_badge(&session.status, session.annotation.as_deref());
     let open_session = session.clone();
     let stop_id = session.id.clone();
     let delete_target = DeleteTarget {
@@ -1039,17 +1064,34 @@ fn SessionRow(
     }
 }
 
-/// Map a status to its badge's CSS modifier class and display text.
-/// Kept as one function so the four cases (`Exited` has two — a known
-/// code vs. an unrepresentable one) stay next to each other instead of
-/// drifting apart across separate match arms in the render tree.
-fn status_badge(status: &SessionStatus) -> (&'static str, String) {
+/// Map a status — and, for an ended session, its annotation — to the
+/// badge's CSS modifier class and display text. Kept as one function so
+/// every case stays next to its siblings instead of drifting apart across
+/// separate match arms in the render tree.
+///
+/// The annotation is a QUALIFIER on the exited status, never a
+/// replacement for it: SPEC.md is explicit that "stopped" is not a
+/// distinct status, so a user-stopped session reads "exited — stopped by
+/// user (code 0)". An earlier version rendered the annotation alone, which
+/// read as a fourth status word and quietly dropped the one fact every
+/// row's badge is supposed to state. The annotation is ignored for every
+/// other status — it describes how a run ENDED, and a live session has
+/// not.
+fn status_badge(status: &SessionStatus, annotation: Option<&str>) -> (&'static str, String) {
     match status {
         SessionStatus::Alive => ("alive", "alive".to_string()),
-        SessionStatus::Exited {
-            exit_code: Some(code),
-        } => ("exited", format!("exited (code {code})")),
-        SessionStatus::Exited { exit_code: None } => ("exited", "exited".to_string()),
+        SessionStatus::Exited { exit_code } => {
+            let mut text = "exited".to_string();
+            if let Some(annotation) = annotation {
+                text.push_str(" — ");
+                text.push_str(annotation);
+            }
+            if let Some(code) = exit_code {
+                text.push_str(&format!(" (code {code})"));
+            }
+            ("exited", text)
+        }
+        SessionStatus::Interrupted => ("interrupted", "interrupted".to_string()),
         SessionStatus::Unknown => ("unknown", "unknown".to_string()),
     }
 }
@@ -1075,8 +1117,19 @@ fn status_badge(status: &SessionStatus) -> (&'static str, String) {
 /// can flip to `Exited` under it (stopped from another client, say)
 /// before either button is clicked, and this function re-runs on every
 /// render off whatever status the row's LATEST prop carries. The
-/// `Exited` arm is that residual case's fallback, not a wording SPEC.md's
-/// confirm-contract actually specifies.
+/// `Exited` and `Interrupted` arms are that residual case's fallback, not
+/// wordings SPEC.md's confirm-contract actually specifies.
+///
+/// `Interrupted`'s wording is deliberately NOT a killing warning
+/// (PLAN_M3.md item 2): the status exists only because the HOST rebooted,
+/// which took the agent and every descendant of it with it, so there is
+/// nothing left for a delete to kill and claiming otherwise would be the
+/// mirror image of the fabricated-liveness mistake `Unknown`'s wording
+/// exists to avoid. What deleting actually costs is the session itself —
+/// worth saying, because an interrupted session is the one case where the
+/// record outlives everything it described and is all that is left to
+/// lose (and, once PLAN_M3.md item 9 lands, the only route back into that
+/// conversation).
 fn confirm_consequence(status: &SessionStatus) -> &'static str {
     match status {
         SessionStatus::Alive => "still running — deleting kills the agent:",
@@ -1084,6 +1137,9 @@ fn confirm_consequence(status: &SessionStatus) -> &'static str {
             "status unknown — the agent may still be running and will be killed:"
         }
         SessionStatus::Exited { .. } => "delete anyway:",
+        SessionStatus::Interrupted => {
+            "interrupted by a host reboot — nothing left to kill; deleting discards the session:"
+        }
     }
 }
 
@@ -1192,6 +1248,7 @@ mod tests {
             cwd: format!("/{id}"),
             invocation: format!("agent-{id}"),
             status: SessionStatus::Unknown,
+            annotation: None,
         }
     }
 
@@ -1225,20 +1282,60 @@ mod tests {
     #[test]
     fn status_badge_matches_text_and_class_for_each_status() {
         assert_eq!(
-            status_badge(&SessionStatus::Alive),
+            status_badge(&SessionStatus::Alive, None),
             ("alive", "alive".to_string())
         );
         assert_eq!(
-            status_badge(&SessionStatus::Exited { exit_code: Some(7) }),
+            status_badge(&SessionStatus::Exited { exit_code: Some(7) }, None),
             ("exited", "exited (code 7)".to_string())
         );
         assert_eq!(
-            status_badge(&SessionStatus::Exited { exit_code: None }),
+            status_badge(&SessionStatus::Exited { exit_code: None }, None),
             ("exited", "exited".to_string())
         );
         assert_eq!(
-            status_badge(&SessionStatus::Unknown),
+            status_badge(&SessionStatus::Unknown, None),
             ("unknown", "unknown".to_string())
+        );
+        assert_eq!(
+            status_badge(&SessionStatus::Interrupted, None),
+            ("interrupted", "interrupted".to_string())
+        );
+    }
+
+    /// SPEC.md: "'stopped' is not a distinct status" — a user-stopped
+    /// session is an EXITED session carrying a qualifier, so the badge
+    /// must still SAY exited and add the supervisor's own wording after
+    /// it, with the exit code still visible when there is one. Rendering
+    /// the annotation alone (an earlier shape of this) reads as a fourth
+    /// status word and drops the one fact the badge exists to state. The
+    /// `exited` CSS class is asserted alongside the text for the same
+    /// reason: a stopped session must still LOOK like an ended one.
+    ///
+    /// The live-session case is the one a naive implementation gets
+    /// wrong: an annotation describes how a run ENDED, so it must never
+    /// leak onto a session that is running (which, once restart lands, is
+    /// what a stopped-then-restarted session is).
+    #[test]
+    fn stop_annotation_qualifies_the_exited_badge_without_replacing_it() {
+        assert_eq!(
+            status_badge(
+                &SessionStatus::Exited { exit_code: None },
+                Some("stopped by user")
+            ),
+            ("exited", "exited — stopped by user".to_string())
+        );
+        assert_eq!(
+            status_badge(
+                &SessionStatus::Exited { exit_code: Some(0) },
+                Some("stopped by user")
+            ),
+            ("exited", "exited — stopped by user (code 0)".to_string())
+        );
+        assert_eq!(
+            status_badge(&SessionStatus::Alive, Some("stopped by user")),
+            ("alive", "alive".to_string()),
+            "an annotation must never describe a session that is running"
         );
     }
 
@@ -1262,6 +1359,45 @@ mod tests {
             confirm_consequence(&SessionStatus::Unknown),
             "status unknown — the agent may still be running and will be killed:"
         );
+    }
+
+    /// An interrupted session is NOT alive (a host reboot is what made it
+    /// interrupted), so its consequence line must not claim anything will
+    /// be killed — the same no-fabrication rule that keeps `Unknown` from
+    /// borrowing `Alive`'s wording, applied in the opposite direction.
+    /// Asserted as properties rather than as one exact string so the
+    /// wording can be improved without the test having to be rewritten
+    /// each time; what must not change is that it stops promising a kill
+    /// and starts naming what deleting actually costs.
+    #[test]
+    fn interrupted_consequence_promises_no_kill() {
+        let wording = confirm_consequence(&SessionStatus::Interrupted);
+        assert!(
+            !wording.contains("kills") && !wording.contains("will be killed"),
+            "nothing survives a reboot for a delete to kill: {wording}"
+        );
+        assert!(
+            wording.contains("reboot") && wording.contains("discard"),
+            "the honest consequence is losing the session record itself: {wording}"
+        );
+    }
+
+    /// A `Session` JSON with no `annotation` key (every session that was
+    /// never stopped, and every reply from a helm predating PLAN_M3.md
+    /// item 4) must decode as `None` rather than failing the whole
+    /// listing — the same decode tolerance `status` carries.
+    #[test]
+    fn session_without_annotation_field_decodes_as_none() {
+        let json = serde_json::json!({
+            "id": "s1",
+            "title": "demo",
+            "cwd": "/tmp",
+            "invocation": "agent",
+            "status": { "state": "interrupted" },
+        });
+        let decoded: Session = serde_json::from_value(json).unwrap();
+        assert_eq!(decoded.status, SessionStatus::Interrupted);
+        assert_eq!(decoded.annotation, None);
     }
 
     /// An old-shaped `Session` JSON (no `status` field at all — exactly

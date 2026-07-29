@@ -267,6 +267,15 @@ body,
   font-style: italic;
 }
 
+/* Interrupted (PLAN_M3.md item 2) is amber rather than `exited`'s grey:
+   a session lost to a host reboot is something the user may still want to
+   act on (restart with resume), unlike an agent that simply finished, and
+   the two must not read as the same outcome at a glance. Deliberately not
+   red — nothing failed, and this is not an error. */
+.status-badge.interrupted {
+  color: #d8b45f;
+}
+
 /* Create dialog (PLAN_M2.md step 8): an inline form toggled from the
    toolbar, not a modal library — see the design note in lib.rs's
    `CreateSessionForm` doc. Kept visually close to the row/badge styling

@@ -16,11 +16,20 @@
 //! killed independently — is still listed (metadata came back from the
 //! DB) but loses its terminal handle — see `SessionEntry`'s `terminal`
 //! field and the `Attach`/`Resize` handlers' handling of `None`.
-//! PLAN_M2.md's "restart gap" paragraph is the contract; M3 replaces this
-//! crude exited-unknown answer with real interrupted classification.
+//! PLAN_M2.md's "restart gap" paragraph is the contract.
+//!
+//! M3 adds the half M2 could not answer (PLAN_M3.md item 2): a durable
+//! last-known outcome per session, written wherever this process actually
+//! WITNESSES a transition, plus the host's boot id. Together they turn "the
+//! terminal is gone" into two distinguishable answers — the agent exited
+//! (with the code, when something still holds it) versus the host rebooted
+//! and took every terminal with it, which is **interrupted**. The
+//! classification precedence lives on `session_status`, the recording
+//! rules on `Supervisor::record_outcome`/`record_stop`, and the boot
+//! comparison on `Supervisor::reload_sessions`.
 
 use crate::launch::{LaunchSpec, resolve_shell, window_command};
-use crate::store::{SessionStore, StoredSession};
+use crate::store::{LastOutcome, SessionStore, StoredSession, Transition};
 use crate::tmux::{InputClient, OutputEvent, OutputStream, PaneModes, PaneState, TmuxDriver};
 use anyhow::Context;
 use farhelm_proto::io::{
@@ -159,6 +168,212 @@ impl Default for SupervisorTimeouts {
             stall_detach: STALL_DETACH_TIMEOUT,
             writer_stall: WRITER_STALL_TIMEOUT,
         }
+    }
+}
+
+/// Where the current boot id comes from (PLAN_M3.md item 2).
+///
+/// A closure rather than a path, because tests must be able to simulate a
+/// REBOOT — the one event this whole classification exists for and the one
+/// thing a test may not actually do — by simply answering differently on
+/// the second construction. Reading the real file is
+/// [`read_host_boot_id`]; environment variables are deliberately not a
+/// mechanism here (this project's tests never mutate the test process's
+/// environment).
+///
+/// Three outcomes, deliberately distinguished (PLAN_M3.md item 2):
+///
+/// - `Ok(Some(id))` — this boot, positively identified.
+/// - `Ok(None)` — this host does not publish a boot id AT ALL. Not an
+///   error and never becomes one: with no evidence in either direction,
+///   classification takes the same-boot path forever and nothing is ever
+///   marked interrupted, the same no-guessing stance a pre-M3 database's
+///   absent stored id gets.
+/// - `Err` — the host HAS one and reading it failed this time. Distinct
+///   from `Ok(None)` because the consequences are opposite: treating a
+///   transient failure as "unsupported host" would take the same-boot path
+///   and durably record exits for sessions a retry might have classified
+///   interrupted — an irreversible answer derived from a temporary
+///   condition. Reload therefore degrades instead (see `reload_sessions`).
+pub type BootIdSource = Arc<dyn Fn() -> anyhow::Result<Option<String>> + Send + Sync>;
+
+/// A simulated crash in `create_session`, immediately after the durable
+/// launching record is committed and before ANY external side effect (the
+/// launch spec, the tmux session).
+///
+/// Returning an error aborts the create immediately, skipping the cleanup
+/// an ordinary in-process failure performs — which is the point: a real
+/// crash does not get to run cleanup either, and the durable record it
+/// leaves behind is exactly what item 2's ordering rule is about.
+/// Production never sets one. PLAN_M3.md item 6 adds further injection
+/// points (crash after reservation, during launch, before outcome commit)
+/// and may grow this into a staged seam then; one zero-argument closure is
+/// what today's single boundary needs.
+pub type CreateCrashSeam = Arc<dyn Fn() -> anyhow::Result<()> + Send + Sync>;
+
+/// The injectable seams a `Supervisor` is built with. All default to
+/// production behavior; grouped into one struct so adding item 6's
+/// injection points later does not grow the constructor's signature again.
+#[derive(Clone)]
+pub struct SupervisorSeams {
+    /// See [`BootIdSource`]. Defaults to reading this host's real boot id.
+    pub boot_id: BootIdSource,
+    /// See [`CreateCrashSeam`]. `None` in production.
+    pub create_crash: Option<CreateCrashSeam>,
+}
+
+impl Default for SupervisorSeams {
+    fn default() -> Self {
+        SupervisorSeams {
+            boot_id: Arc::new(read_host_boot_id),
+            create_crash: None,
+        }
+    }
+}
+
+/// This host's current boot id (PLAN_M3.md item 2).
+///
+/// Linux publishes a per-boot UUID at `/proc/sys/kernel/random/boot_id`.
+/// A host that does not have the file at all is reported as `Ok(None)` —
+/// unsupported, honestly — while any OTHER read failure is an `Err`: see
+/// [`BootIdSource`] for why the two must not be collapsed.
+///
+/// macOS is NOT handled here. The Mac-supervisor work owns finding the
+/// equivalent (`kern.boottime`), recorded as a deferral in PLAN_M3.md's
+/// Out section beside the /proc-less process sweep it will land with;
+/// until then a Mac build would take the honest `Ok(None)` path and never
+/// claim a reboot.
+fn read_host_boot_id() -> anyhow::Result<Option<String>> {
+    const PATH: &str = "/proc/sys/kernel/random/boot_id";
+    let raw = match std::fs::read_to_string(PATH) {
+        Ok(raw) => raw,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(e) => return Err(anyhow::Error::new(e).context(format!("reading {PATH}"))),
+    };
+    let trimmed = raw.trim();
+    // An empty file is not a usable id, and storing "" would make a later
+    // real id look like a reboot on no evidence. Treated as unsupported
+    // rather than as a failure: there is nothing to retry.
+    Ok((!trimmed.is_empty()).then(|| trimmed.to_string()))
+}
+
+/// One process's claim on a state directory, and the token every mutating
+/// startup step requires (PLAN_M3.md item 2).
+///
+/// SPEC.md allows at most one supervisor per user per host, and M2 already
+/// enforced that with an `flock` — but only inside `serve`, which left the
+/// entire startup sequence (schema migration, reboot classification,
+/// outcome reconciliation) running BEFORE the claim was made. Two harms
+/// followed, both silent: a candidate that loses the race could first
+/// upgrade the incumbent's database out from under it, leaving an older
+/// build that will refuse its own state on its next restart; and a startup
+/// overlapping a still-running predecessor could record that predecessor's
+/// live sessions as ended. Acquiring the lock BEFORE the store is even
+/// opened is what closes both.
+///
+/// ## Why ownership is per (process, state dir), not per Supervisor
+///
+/// `flock` is exclusive across open file descriptions, INCLUDING two in
+/// the same process, so a naive per-`Supervisor` lock would make a second
+/// in-process `Supervisor` on the same directory impossible — the shape
+/// every restart test in this repo uses to stand in for a restarted
+/// process, and the shape `serve`'s own refusal test needs. The registry
+/// below therefore hands every `Supervisor` for the same directory the
+/// same claim: cross-process exclusivity is exactly as strict as before
+/// (the file lock is held for as long as any of them lives), while
+/// in-process construction stays possible. Production has one `Supervisor`
+/// per process (`run`), so nothing there depends on the difference.
+///
+/// "At most one SERVING supervisor" is enforced separately by `serving`,
+/// which is what `serve` swaps — so a second in-process `serve` is refused
+/// with the same message a second process gets.
+#[derive(Debug)]
+pub struct StateDirOwnership {
+    path: PathBuf,
+    /// Held open for the lifetime of this value: dropping the file
+    /// releases the `flock`, which is what makes ownership end when the
+    /// last `Supervisor` for this directory goes away.
+    _lock: std::fs::File,
+    serving: std::sync::atomic::AtomicBool,
+}
+
+/// Claims this process holds, keyed by state directory.
+///
+/// `Weak` so a dropped claim releases the underlying lock file; entries
+/// are removed by `StateDirOwnership`'s own `Drop`.
+static STATE_DIR_CLAIMS: std::sync::LazyLock<
+    std::sync::Mutex<HashMap<PathBuf, std::sync::Weak<StateDirOwnership>>>,
+> = std::sync::LazyLock::new(|| std::sync::Mutex::new(HashMap::new()));
+
+impl Drop for StateDirOwnership {
+    fn drop(&mut self) {
+        if let Ok(mut claims) = STATE_DIR_CLAIMS.lock() {
+            // Only remove an entry that is genuinely dead: a `Supervisor`
+            // constructed for this same directory while this one was
+            // dropping would already have replaced it.
+            if claims
+                .get(&self.path)
+                .is_some_and(|existing| existing.strong_count() == 0)
+            {
+                claims.remove(&self.path);
+            }
+        }
+    }
+}
+
+impl StateDirOwnership {
+    /// Claim `state_dir` for this process, reusing the claim if this
+    /// process already holds one.
+    ///
+    /// `Ok(None)` means another PROCESS holds it. That is not fatal here:
+    /// a `Supervisor` without the claim can still be constructed and can
+    /// still answer requests (which is what a handoff's brief overlap
+    /// looks like) — it simply may not migrate the schema or write any
+    /// reconciliation, and its `serve` will refuse.
+    ///
+    /// One benign race is left deliberately: a claim being DROPPED
+    /// concurrently with this call can leave the registry entry already
+    /// dead while its lock file has not finished closing, so the
+    /// `try_lock` below fails and this caller starts read-only as though
+    /// another process held the directory. It resolves itself on the next
+    /// construction, and it fails in the safe direction (no migration, no
+    /// reconciliation) — the only direction worth being sure of.
+    fn claim(state_dir: &Path) -> anyhow::Result<Option<Arc<StateDirOwnership>>> {
+        // Canonicalized so two spellings of the same directory cannot
+        // yield two claims; the directory exists by now (`ensure_private_dir`).
+        let path = std::fs::canonicalize(state_dir)
+            .with_context(|| format!("resolving state dir {}", state_dir.display()))?;
+        let mut claims = STATE_DIR_CLAIMS.lock().expect("claims mutex poisoned");
+        if let Some(existing) = claims.get(&path).and_then(std::sync::Weak::upgrade) {
+            return Ok(Some(existing));
+        }
+        let lock_path = path.join("supervisor.lock");
+        let lock = std::fs::OpenOptions::new()
+            .create(true)
+            .truncate(false)
+            .write(true)
+            .open(&lock_path)
+            .context("opening supervisor lock file")?;
+        if lock.try_lock().is_err() {
+            return Ok(None);
+        }
+        let owned = Arc::new(StateDirOwnership {
+            path: path.clone(),
+            _lock: lock,
+            serving: std::sync::atomic::AtomicBool::new(false),
+        });
+        claims.insert(path, Arc::downgrade(&owned));
+        Ok(Some(owned))
+    }
+
+    /// Take the right to serve, or report that something already has it.
+    ///
+    /// One-way: nothing ever hands the right back, because a supervisor
+    /// only stops serving by ending. `SeqCst` costs nothing at this
+    /// frequency (once per process) and keeps the ordering argument to
+    /// "there is none to make".
+    fn begin_serving(&self) -> bool {
+        !self.serving.swap(true, std::sync::atomic::Ordering::SeqCst)
     }
 }
 
@@ -1582,6 +1797,29 @@ async fn load_alt_screen_snapshot(sup: &Supervisor, session_id: &str) -> Option<
 struct SessionEntry {
     info: SessionInfo,
     terminal: Option<Terminal>,
+    /// In-memory mirror of this session's durable last-known outcome
+    /// (`crate::store::LastOutcome`, PLAN_M3.md item 2), so the common
+    /// case — a `ListSessions` reply for a session whose outcome has not
+    /// changed — needs no database round trip at all, and so the sticky-
+    /// terminal-state rule can be evaluated before deciding to write.
+    ///
+    /// A `std::sync::Mutex` inside the entry rather than another map on
+    /// `Supervisor`: the outcome belongs to the session, and a per-entry
+    /// lock is never contended by anything but that session's own
+    /// observers. It is NOT part of the `attachments`-then-`sessions`
+    /// lock-ordering rule (see the `Supervisor` struct's docs) because it
+    /// is never held across an await or across either of those mutexes —
+    /// every hold is a read or a store of one small value, which is also
+    /// why a blocking mutex is safe here inside async code.
+    ///
+    /// The mirror is only ever assigned the outcome the store reports as
+    /// COMMITTED (`Supervisor::record`, `SessionStore::transition`), never
+    /// the value a caller intended to write: transitions are arbitrated
+    /// inside the transaction, so a refusal or a merge with a concurrent
+    /// writer's result must be what lands here too. A failed write leaves
+    /// both sides on the old value and the next observation retries — the
+    /// conservative direction, matching the crash-ordering rule.
+    outcome: std::sync::Mutex<LastOutcome>,
 }
 
 /// The one live attachment a session may have (SPEC.md: at most one,
@@ -1738,6 +1976,33 @@ pub struct Supervisor {
     /// Per-supervisor state purely so integration tests can shorten
     /// these; see [`SupervisorTimeouts`].
     timeouts: SupervisorTimeouts,
+    /// Injection points; production builds carry the defaults. Held for
+    /// the process lifetime because `serve` reloads sessions again and
+    /// must consult the same boot-id source the constructor did — a second
+    /// reload that read a different source would classify the same host
+    /// two ways.
+    seams: SupervisorSeams,
+    /// This process's claim on the state directory, or `None` when another
+    /// process holds it. See [`StateDirOwnership`]: without a claim this
+    /// supervisor may not migrate the schema, may not write any
+    /// reconciliation, and may not serve.
+    ownership: Option<Arc<StateDirOwnership>>,
+    /// Whether this supervisor may record what it observes.
+    ///
+    /// Two independent conditions have to hold, and both can be false for
+    /// a supervisor that is otherwise perfectly able to serve requests:
+    /// this process must hold the state directory's claim (the sessions
+    /// belong to whoever does), and its last reload must have been able to
+    /// READ the host's boot id (PLAN_M3.md item 2 — an exit recorded while
+    /// the reboot detector is blind is an irreversible answer derived from
+    /// a temporary condition). Re-evaluated by every reload, so a boot-id
+    /// read that starts working again restores recording without a
+    /// restart.
+    ///
+    /// Read by the request paths that observe exits, so it is an atomic
+    /// rather than a plain bool: `serve`'s reload can flip it while
+    /// handlers are already running.
+    may_record: std::sync::atomic::AtomicBool,
 }
 
 impl Supervisor {
@@ -1768,6 +2033,23 @@ impl Supervisor {
         farhelm_exe: PathBuf,
         timeouts: SupervisorTimeouts,
     ) -> anyhow::Result<Arc<Supervisor>> {
+        Self::new_with_seams(state_dir, farhelm_exe, timeouts, SupervisorSeams::default()).await
+    }
+
+    /// The one real constructor: everything above delegates here with
+    /// production defaults.
+    ///
+    /// `seams` is what lets tests reach the two behaviors that are
+    /// otherwise unreachable in a test process — a host reboot (a
+    /// different boot id on the second construction) and a crash at an
+    /// exact ordering boundary inside `create_session`. See
+    /// [`SupervisorSeams`].
+    pub async fn new_with_seams(
+        state_dir: &Path,
+        farhelm_exe: PathBuf,
+        timeouts: SupervisorTimeouts,
+        seams: SupervisorSeams,
+    ) -> anyhow::Result<Arc<Supervisor>> {
         // 0700 on both: the socket and the launch specs (which hold full
         // agent command lines) live here. See ensure_private_dir. The
         // database opened just below relies on this same boundary for its
@@ -1792,6 +2074,24 @@ impl Supervisor {
             .await
             .context("fsyncing state dir after ensuring launch/ exists")?;
 
+        // Exclusivity FIRST, before the database is even opened: every
+        // startup step below this line either mutates durable state (the
+        // schema migration, the boot-id comparison, outcome
+        // reconciliation) or decides something on its basis, and none of
+        // it may happen to a state directory another supervisor owns. See
+        // [`StateDirOwnership`] for the two concrete harms — a bricked
+        // incumbent and a predecessor's live sessions recorded as ended —
+        // and for why an unclaimed supervisor is still constructible
+        // rather than fatal here.
+        let ownership = StateDirOwnership::claim(state_dir)?;
+        if ownership.is_none() {
+            warn!(
+                state_dir = %state_dir.display(),
+                "another supervisor holds this state directory; starting read-only \
+                 (no schema migration, no reconciliation, and serve will refuse)"
+            );
+        }
+
         // Store before tmux, deliberately: opening the DB (or applying its
         // schema) is the one step in this constructor that can fail for
         // reasons unrelated to tmux at all (a corrupt file, an
@@ -1802,11 +2102,13 @@ impl Supervisor {
         // ordering (`ensure_server` first) left a freshly started tmux
         // server — `exit-empty off`, so it does not even exit on its own —
         // behind a constructor that then failed on the database.
-        let store = SessionStore::open(&state_dir.join("supervisor.db")).await?;
+        let store =
+            SessionStore::open(&state_dir.join("supervisor.db"), ownership.is_some()).await?;
         let tmux = TmuxDriver::new(state_dir);
         tmux.ensure_server().await?;
 
-        let sessions = Self::reload_sessions(&store, &tmux).await?;
+        let (sessions, may_record) =
+            Self::reload_sessions(&store, &tmux, &seams, ownership.is_some()).await?;
 
         Ok(Arc::new(Supervisor {
             state_dir: state_dir.to_path_buf(),
@@ -1818,48 +2120,237 @@ impl Supervisor {
             farhelm_exe,
             admission: Arc::new(tokio::sync::Semaphore::new(HANDLER_ADMISSION_PERMITS)),
             timeouts,
+            seams,
+            ownership,
+            may_record: std::sync::atomic::AtomicBool::new(may_record),
         }))
     }
 
-    /// Rebuild the in-memory session map from SQLite plus a tmux liveness
-    /// probe per row: alive rows become a normal live `SessionEntry`, rows
-    /// whose tmux session tmux no longer recognizes become the
-    /// restart-gap's terminal-less entry.
+    /// Rebuild the in-memory session map from SQLite plus one bulk tmux
+    /// probe: rows with a live pane become normal live `SessionEntry`s,
+    /// rows whose pane tmux no longer knows become the restart-gap's
+    /// terminal-less entry, and every transition this pass witnesses is
+    /// reconciled into the durable outcome.
     ///
-    /// Called twice, for two different reasons. `new_with_exe` calls it
+    /// Called twice, for two different reasons. The constructor calls it
     /// once so an embedder or test that only ever constructs a
     /// `Supervisor` — never calling `serve()` — still gets a populated
-    /// map. `serve()` calls it AGAIN, immediately after acquiring the
-    /// exclusivity lock and before accepting any connection, because the
-    /// first call can be stale: two supervisor processes can overlap
-    /// during a handoff (the old one still running, the new one
-    /// constructing), and the old process can create a session — an
-    /// insert this process's earlier load already missed — and only then
-    /// exit, releasing the lock. Without a second load taken under the
-    /// lock, this process would serve a map missing that session for its
-    /// entire lifetime, since nothing else ever refreshes it wholesale.
-    /// Replacing `self.sessions` wholesale is only safe where no
-    /// attachment can yet exist against the entries being replaced —
-    /// true at both call sites (construction, and pre-accept in `serve`)
-    /// but not a general-purpose operation this type exposes elsewhere.
+    /// map. `serve()` calls it AGAIN, before accepting any connection,
+    /// because the first call can be stale: two supervisor processes can
+    /// overlap during a handoff (the old one still running, the new one
+    /// constructing), and the old process can create a session — an insert
+    /// this process's earlier load already missed — and only then exit.
+    /// Without a second load, this process would serve a map missing that
+    /// session for its entire lifetime, since nothing else ever refreshes
+    /// it wholesale. Replacing `self.sessions` wholesale is only safe
+    /// where no attachment can yet exist against the entries being
+    /// replaced — true at both call sites (construction, and pre-accept in
+    /// `serve`) but not a general-purpose operation this type exposes.
+    ///
+    /// ## Boot classification (PLAN_M3.md item 2)
+    ///
+    /// Before a single row is probed, the host's current boot id is
+    /// compared against the one the last supervisor stored:
+    ///
+    /// - **Different** — the host rebooted, so tmux took every terminal
+    ///   with it and no probe can say anything about what happened. Every
+    ///   still-live session becomes **interrupted**, in the same
+    ///   transaction that stores the new id (`SessionStore::record_boot`
+    ///   owns the argument for why that atomicity is not optional).
+    ///   Already-exited sessions keep their status, codes, and
+    ///   annotations.
+    /// - **Same** — M2's per-row probing still rules, now also recording
+    ///   what it observes so the NEXT reboot has ground to stand on.
+    /// - **Absent stored id** — a database written before this milestone.
+    ///   No evidence in either direction, so no reboot is claimed: the
+    ///   same-boot path runs and the id is adopted from now on.
+    /// - **Host publishes no boot id** (`Ok(None)`) — permanently
+    ///   evidence-free, so the same-boot path runs forever and nothing is
+    ///   ever interrupted. Nothing is stored either: there is no id to
+    ///   store, and writing a placeholder would make a host that LATER
+    ///   gains one look like it rebooted.
+    /// - **Boot id unreadable this time** (`Err`) — the reload runs
+    ///   DEGRADED: sessions are still classified in memory from what is
+    ///   stored, but nothing durable is written at all. A transient read
+    ///   failure must not be allowed to produce an irreversible answer
+    ///   (recording exits for sessions a successful read might have
+    ///   classified interrupted), and failing startup outright would take
+    ///   a whole host's sessions offline over a `/proc` hiccup.
+    ///
+    /// `may_write` is the other half of that: a supervisor without this
+    /// state directory's claim (see [`StateDirOwnership`]) classifies for
+    /// its own in-memory map but writes nothing, because the sessions it
+    /// is looking at belong to whichever process does hold the claim.
+    ///
+    /// The returned flag is `may_write` as this pass actually resolved it
+    /// — the caller's permission AND a boot-id read that worked — which
+    /// becomes [`Supervisor::may_record`] for the request paths that
+    /// witness exits later. Returned rather than recomputed there because
+    /// the degradation is decided here, and a request path re-deriving it
+    /// could disagree with the reload that just ran.
+    ///
+    /// Probing is ONE `pane_states` call for the whole map rather than
+    /// M2's per-row `has_session`: this pass needs each pane's dead flag
+    /// and exit code (not merely whether the session exists) to record a
+    /// witnessed exit with the true code a surviving dead pane still
+    /// holds, and asking tmux once is both cheaper and the only way to get
+    /// that answer at all. The transitions it produces are likewise
+    /// committed in ONE store call rather than one autocommit per row.
+    ///
+    /// Failing to WRITE the reconciliation is logged and tolerated, never
+    /// fatal: the map then holds what is actually durable, the next
+    /// observation retries, and a supervisor that refuses to start over a
+    /// bookkeeping write would strand every live session it was supposed
+    /// to be reattaching. A failed boot-id write IS fatal — continuing
+    /// would mean serving a reboot classification this process knows it
+    /// could not record, which the next startup would then contradict.
     async fn reload_sessions(
         store: &SessionStore,
         tmux: &TmuxDriver,
-    ) -> anyhow::Result<HashMap<String, Arc<SessionEntry>>> {
-        let mut sessions = HashMap::new();
-        for row in store.load_all().await? {
-            let terminal = if tmux.has_session(&row.tmux_name).await? {
-                Some(Terminal {
-                    tmux_name: row.tmux_name,
-                    pane: row.pane,
-                })
+        seams: &SupervisorSeams,
+        may_write: bool,
+    ) -> anyhow::Result<(HashMap<String, Arc<SessionEntry>>, bool)> {
+        let stored_boot = store.boot_id().await?;
+        let current_boot = (seams.boot_id)();
+        // A read failure degrades the whole pass to read-only; see the
+        // docs above for why this is neither fatal nor the same-boot path.
+        let mut may_write = may_write;
+        let rebooted = match (&current_boot, &stored_boot) {
+            (Err(e), _) => {
+                warn!(
+                    error = %format!("{e:#}"),
+                    "could not read this host's boot id; classifying from stored state \
+                     without recording anything this pass"
+                );
+                may_write = false;
+                false
+            }
+            (Ok(Some(current)), Some(previous)) => current != previous,
+            // Nothing stored, or nothing to compare: never a reboot claim.
+            (Ok(_), _) => false,
+        };
+        if may_write
+            && let Ok(Some(current)) = &current_boot
+            && stored_boot.as_ref() != Some(current)
+        {
+            if rebooted {
+                info!(
+                    "host boot id changed since the last supervisor ran; \
+                     sessions that were still live are now interrupted"
+                );
             } else {
+                info!("adopting this host's boot id without claiming a reboot");
+            }
+            store.record_boot(current, rebooted, None).await?;
+        }
+
+        let pane_states = tmux.pane_states().await?;
+        let rows = store.load_all().await?;
+        // Two passes over the rows: decide every transition against the
+        // freshly loaded outcomes, commit them together, then build the
+        // map from what was COMMITTED (which may differ from what this
+        // pass proposed — see `SessionStore::transition_many`).
+        let mut found_panes: HashMap<String, (String, PaneState)> = HashMap::new();
+        let mut transitions = Vec::new();
+        for row in &rows {
+            // A row still recorded as launching carries no pane (the id
+            // does not exist until tmux has made the session), so its
+            // pane — if the launch DID happen before whatever interrupted
+            // it — has to be found by session name instead. Deterministic
+            // by pane id so a session that somehow holds several panes
+            // resolves the same way on every reload; farhelm creates one
+            // pane per session, so that is a tie-break, not a feature.
+            let found = if row.pane.is_empty() {
+                pane_states
+                    .iter()
+                    .filter(|(_, state)| state.session_name == row.tmux_name)
+                    .min_by(|(a, _), (b, _)| a.cmp(b))
+                    .map(|(pane, state)| (pane.clone(), state.clone()))
+            } else {
+                pane_states
+                    .get(&row.pane)
+                    .filter(|state| state.session_name == row.tmux_name)
+                    .map(|state| (row.pane.clone(), state.clone()))
+            };
+            let Some((pane, state)) = found else {
                 info!(
                     session = %row.id,
-                    "session's tmux session no longer exists; listing without a terminal"
+                    "session's tmux pane no longer exists; listing without a terminal"
                 );
-                None
+                // Nothing to ask. A terminal outcome is left alone (it
+                // already knows more than this), and so is a LAUNCHING
+                // row: "no side effects found" is not evidence the agent
+                // ran, which is what `Exited` would claim — that row stays
+                // pending for PLAN_M3.md item 3's sentinel or item 6's
+                // reservation to resolve.
+                if matches!(
+                    row.outcome,
+                    LastOutcome::Running | LastOutcome::StopRequested
+                ) {
+                    transitions
+                        .push((row.id.clone(), Transition::ObservedExit { exit_code: None }));
+                }
+                continue;
             };
+            if !row.outcome.is_terminal() {
+                if state.dead {
+                    // The pane outlived its process (remain-on-exit) and
+                    // still holds the code — "exited with the code the
+                    // surviving dead pane retains". A rediscovered pane
+                    // rides the same commit as the outcome it evidences,
+                    // so no crash window can leave the pane recorded under
+                    // a still-`Running` row.
+                    transitions.push((
+                        row.id.clone(),
+                        if row.pane.is_empty() {
+                            Transition::RediscoveredExit {
+                                pane: pane.clone(),
+                                exit_code: state.exit_code,
+                            }
+                        } else {
+                            Transition::ObservedExit {
+                                exit_code: state.exit_code,
+                            }
+                        },
+                    ));
+                } else if row.outcome != LastOutcome::Running || row.pane != pane {
+                    // Live, and either not yet confirmed, confirmed
+                    // against a different pane, or carrying a stop intent
+                    // whose kill sweep evidently never landed — the last
+                    // being the reconciliation that keeps a crashed stop
+                    // from annotating a session that is still running.
+                    transitions.push((
+                        row.id.clone(),
+                        Transition::ConfirmRunning { pane: pane.clone() },
+                    ));
+                }
+            }
+            found_panes.insert(row.id.clone(), (pane, state));
+        }
+
+        let committed = if may_write && !transitions.is_empty() {
+            match store.transition_many(transitions).await {
+                Ok(committed) => committed,
+                Err(e) => {
+                    warn!(
+                        error = %format!("{e:#}"),
+                        "could not record this reload's reconciliation; \
+                         keeping the outcomes already stored"
+                    );
+                    HashMap::new()
+                }
+            }
+        } else {
+            HashMap::new()
+        };
+
+        let mut sessions = HashMap::new();
+        for row in rows {
+            let terminal = found_panes.remove(&row.id).map(|(pane, _)| Terminal {
+                tmux_name: row.tmux_name.clone(),
+                pane,
+            });
+            let outcome = committed.get(&row.id).cloned().unwrap_or(row.outcome);
             sessions.insert(
                 row.id.clone(),
                 Arc::new(SessionEntry {
@@ -1869,23 +2360,26 @@ impl Supervisor {
                         cwd: row.cwd,
                         invocation: row.invocation,
                         // Placeholder only: `ListSessions` recomputes
-                        // `status` fresh from tmux on every reply (see
-                        // `session_status`), so nothing ever reads this
-                        // particular value — `Unknown` is simply the
-                        // honest "not yet computed" default.
+                        // `status` fresh from tmux plus the recorded
+                        // outcome on every reply (see `session_status`),
+                        // so nothing ever reads this particular value —
+                        // `Unknown` is simply the honest "not yet
+                        // computed" default. The annotation beside it is
+                        // recomputed from the same place and for the same
+                        // reason.
                         status: SessionStatus::default(),
-                        // Neither field has a writer yet (PLAN_M3.md items
-                        // 4 and 9 land them); `None`/`FreshOnly` are the
-                        // honest "nothing has ever populated this" values,
-                        // matching `status` just above.
                         annotation: None,
+                        // No writer yet — PLAN_M3.md item 9 lands it;
+                        // `FreshOnly` is the honest "nothing has ever
+                        // populated this" value.
                         restart_offer: RestartOffer::default(),
                     },
                     terminal,
+                    outcome: std::sync::Mutex::new(outcome),
                 }),
             );
         }
-        Ok(sessions)
+        Ok((sessions, may_write))
     }
 
     /// The supervisor's unix socket path within a state dir. Shared with
@@ -1905,37 +2399,38 @@ impl Supervisor {
         // racing supervisors can each pass the probe, and the slower one
         // then unlinks the faster one's freshly bound socket — leaving
         // two processes driving the same tmux server with disjoint
-        // session maps. The flock is atomic, and holding it for the
-        // process lifetime is what makes the socket removal and the
-        // launch-dir sweep below single-owner. The file stays locked
-        // until this function returns, which for a healthy supervisor is
-        // never.
-        let lock_path = self.state_dir.join("supervisor.lock");
-        let lock = std::fs::OpenOptions::new()
-            .create(true)
-            .truncate(false)
-            .write(true)
-            .open(&lock_path)
-            .context("opening supervisor lock file")?;
-        if let Err(e) = lock.try_lock() {
+        // session maps. The lock itself is now taken in the CONSTRUCTOR
+        // (see `StateDirOwnership`, and PLAN_M3.md item 2's requirement
+        // that nothing durable be touched before it is held), so what
+        // remains here is claiming the right to serve under it — which is
+        // also what refuses a second `serve` inside one process, where the
+        // file lock alone cannot tell the two apart.
+        if !self
+            .ownership
+            .as_ref()
+            .is_some_and(|owned| owned.begin_serving())
+        {
             anyhow::bail!(
                 "a supervisor is already running against {} \n\
-                 (SPEC.md allows at most one supervisor per user per host; lock: {e})",
+                 (SPEC.md allows at most one supervisor per user per host)",
                 self.state_dir.display()
             );
         }
-        // Reload the session map now that exclusivity is actually held.
-        // The load `new_with_exe` already did can be stale: this
+        // Reload the session map now that the right to serve is actually
+        // held. The load the constructor already did can be stale: this
         // process's construction can overlap a still-running predecessor
         // during a handoff, which can insert a session (and exit,
         // releasing the lock) after that first load already ran. Nothing
         // else in this process ever refreshes the map wholesale, so
         // without this second pass such a session would be permanently
         // missing from `sessions` for this process's entire lifetime.
-        // Safe to replace outright here: the lock was just acquired and
-        // no connection has been accepted yet, so no attachment can exist
-        // against any entry this replaces.
-        *self.sessions.lock().await = Self::reload_sessions(&self.store, &self.tmux).await?;
+        // Safe to replace outright here: no connection has been accepted
+        // yet, so no attachment can exist against any entry this replaces.
+        let (sessions, may_record) =
+            Self::reload_sessions(&self.store, &self.tmux, &self.seams, true).await?;
+        *self.sessions.lock().await = sessions;
+        self.may_record
+            .store(may_record, std::sync::atomic::Ordering::SeqCst);
         // Holding the lock proves any existing socket file is a leftover
         // from a dead supervisor (the lock dies with its process), so
         // removing it is safe.
@@ -2123,6 +2618,44 @@ impl Supervisor {
         // sentinel behind for nothing to overwrite) is still open work,
         // deliberately left to whichever milestone item adds relaunching at
         // all.
+        // The durable launching record, committed BEFORE any external side
+        // effect exists (PLAN_M3.md item 2). The ordering is the whole
+        // point and it is the INVERSE of M2's, which inserted the row only
+        // after tmux had the session: a crash between the two must leave
+        // evidence that a launch was attempted — a launching row whose
+        // side effects reload then goes looking for — rather than either
+        // silence (M2: an unlisted running agent) or, once restart exists,
+        // the PREVIOUS run's outcome still standing over a session that
+        // has since been relaunched.
+        //
+        // A failure here fails the create with nothing to clean up, which
+        // is exactly why this is the first step. PLAN_M3.md item 6 threads
+        // its create reservation through this same commit; the row written
+        // here is the generation that reservation will carry.
+        if let Err(e) = self
+            .store
+            .insert_session(StoredSession {
+                id: id.clone(),
+                title: title.clone(),
+                cwd: cwd.to_string(),
+                invocation: invocation.to_string(),
+                tmux_name: tmux_name.clone(),
+                // Not known until tmux has created the session — see
+                // `StoredSession::pane`.
+                pane: String::new(),
+                outcome: LastOutcome::Launching,
+            })
+            .await
+        {
+            return Err(e.context("recording new session in the database"));
+        }
+        if let Some(crash) = self.seams.create_crash.as_ref() {
+            // Deliberately BEFORE the cleanup-bearing paths below: a
+            // simulated crash must leave the launching row exactly as a
+            // real one would, with nothing tidied up after it.
+            crash()?;
+        }
+
         let spec_path = self.state_dir.join("launch").join(format!("{id}.json"));
         // Derived the SAME way the shim derives it from its own copy of
         // `spec_path` (`launch::status_path_for_spec`) — never computed
@@ -2146,9 +2679,31 @@ impl Supervisor {
         // A failed write cleans up too: a partial spec (disk full after
         // create) would otherwise strand a credential prefix on disk
         // until the next supervisor restart's sweep.
-        crate::write_private_file(&spec_path, &serde_json::to_vec(&spec)?)
-            .await
-            .context("writing launch spec")?;
+        // Serialized before the write so the (practically impossible)
+        // encoding failure shares the write's rollback path rather than
+        // returning past it via `?` and stranding the launching row.
+        let spec_bytes = match serde_json::to_vec(&spec) {
+            Ok(bytes) => bytes,
+            Err(e) => {
+                return Err(self
+                    .abandon_launching_record(
+                        &id,
+                        anyhow::Error::new(e).context("encoding launch spec"),
+                    )
+                    .await);
+            }
+        };
+        if let Err(e) = crate::write_private_file(&spec_path, &spec_bytes).await {
+            // Nothing external happened yet — the spec is the FIRST side
+            // effect and it did not land — so the launching row is
+            // provably describing nothing and is rolled back. A crash
+            // here would leave it instead, which is the case reload
+            // reconciles; this path can do better because the process is
+            // still alive to know.
+            return Err(self
+                .abandon_launching_record(&id, anyhow::Error::new(e).context("writing launch spec"))
+                .await);
+        }
 
         let shell = resolve_shell().await;
         let cmd = window_command(&shell, &self.farhelm_exe, &spec_path);
@@ -2159,17 +2714,48 @@ impl Supervisor {
         {
             Ok(pane) => pane,
             Err(e) => {
-                // The shim unlinks the spec once it has read it, so a
-                // launch that never happens would strand a file holding
-                // the agent's full command line — credentials included —
-                // with nothing left to clean it up.
-                return match tokio::fs::remove_file(&spec_path).await {
-                    Ok(()) => Err(e),
-                    Err(cleanup) => Err(e.context(format!(
-                        "could not remove launch spec {} after tmux creation failed: {cleanup}",
-                        spec_path.display()
-                    ))),
-                };
+                // A tmux failure is AMBIGUOUS in a way the spec write is
+                // not: `new-session` can fail after the session already
+                // exists (a lost reply, a timeout mid-command), so
+                // deleting the row on the strength of the error alone
+                // would orphan a running agent — no row, no id, nothing
+                // left that knows to reap it. Ask tmux instead, and only
+                // roll back on a CONFIRMED absence; an ambiguous or failed
+                // probe keeps the row, which is the only record anything
+                // will ever have of that launch.
+                let mut error = e.context("creating the session's tmux session");
+                match self.tmux.has_session(&tmux_name).await {
+                    Ok(false) => {
+                        error = self.abandon_launching_record(&id, error).await;
+                        // The shim unlinks the spec once it has read it,
+                        // so a launch that never happened would strand a
+                        // file holding the agent's full command line —
+                        // credentials included — with nothing left to
+                        // clean it up.
+                        if let Err(cleanup) = tokio::fs::remove_file(&spec_path).await {
+                            error = error.context(format!(
+                                "could not remove launch spec {} after tmux creation failed: \
+                                 {cleanup}",
+                                spec_path.display()
+                            ));
+                        }
+                    }
+                    Ok(true) => {
+                        error = error.context(format!(
+                            "the tmux session {tmux_name} exists despite the failure, so \
+                             session {id} is kept as a launching record rather than deleted; \
+                             stop or delete it to reap whatever is running there"
+                        ));
+                    }
+                    Err(probe) => {
+                        error = error.context(format!(
+                            "could not determine whether tmux session {tmux_name} was created \
+                             ({probe:#}), so session {id} is kept as a launching record rather \
+                             than deleted"
+                        ));
+                    }
+                }
+                return Err(error);
             }
         };
 
@@ -2197,22 +2783,18 @@ impl Supervisor {
             restart_offer: RestartOffer::default(),
         };
 
-        // DB insert AFTER the tmux session already exists: a session that
-        // exists in tmux but was never recorded would silently vanish from
-        // the list on the next restart, so a failure here must fail the
-        // whole create — the tmux session just created is torn back down
-        // (best effort) rather than left running and unlisted with no way
-        // for the caller to learn its id.
+        // Launch confirmed: the pane exists, so the durable record moves
+        // from launching to running and gains the pane id it could not
+        // know before (PLAN_M3.md item 2's "confirmed running once the
+        // pane exists"). A failure here still fails the whole create — the
+        // row would otherwise stay launching while a real agent runs under
+        // it, and the caller would be told a create succeeded whose
+        // terminal handle was never recorded — so the tmux session just
+        // created is torn back down (best effort) rather than left running
+        // and unlisted with no way for the caller to learn its id.
         if let Err(e) = self
             .store
-            .insert_session(StoredSession {
-                id: id.clone(),
-                title: info.title.clone(),
-                cwd: info.cwd.clone(),
-                invocation: info.invocation.clone(),
-                tmux_name: tmux_name.clone(),
-                pane: pane.clone(),
-            })
+            .transition(&id, Transition::ConfirmRunning { pane: pane.clone() })
             .await
         {
             // The DB error is the root cause throughout — it is what
@@ -2222,8 +2804,9 @@ impl Supervisor {
             // caller's point of view, which the returned error must say so
             // the caller (and whoever reads the resulting log/HTTP body)
             // has a chance of noticing and cleaning it up by hand.
-            let mut result = e.context("recording new session in the database");
-            if let Err(kill_err) = self.tmux.kill_session(&tmux_name).await {
+            let mut result = e.context("confirming the new session's launch in the database");
+            let killed = self.tmux.kill_session(&tmux_name).await;
+            if let Err(kill_err) = &killed {
                 warn!(
                     session = %id, error = %kill_err,
                     "could not kill tmux session after its DB insert failed; \
@@ -2231,8 +2814,8 @@ impl Supervisor {
                 );
                 result = result.context(format!(
                     "additionally, could not kill tmux session {tmux_name} for session {id} \
-                     after the DB insert failed ({kill_err:#}); the agent may still be running \
-                     unlisted"
+                     after the DB insert failed ({kill_err:#}); the agent may still be running, \
+                     so session {id} is kept as a launching record rather than deleted"
                 ));
             }
             // The shim may already have consumed and unlinked the spec by
@@ -2245,6 +2828,14 @@ impl Supervisor {
             // shim may have started writing.
             best_effort_remove(&spec_path, "launch spec").await;
             best_effort_remove(&status_file_path, "launch status file").await;
+            // Only once the terminal is CONFIRMED gone: an unkillable tmux
+            // session may still be running the agent, and the launching
+            // row is then the sole record anyone could use to find it
+            // again. Retaining it is the recoverable failure; deleting it
+            // is not.
+            if killed.is_ok() {
+                result = self.abandon_launching_record(&id, result).await;
+            }
             return Err(result);
         }
 
@@ -2254,9 +2845,71 @@ impl Supervisor {
             Arc::new(SessionEntry {
                 info: info.clone(),
                 terminal: Some(Terminal { tmux_name, pane }),
+                outcome: std::sync::Mutex::new(LastOutcome::Running),
             }),
         );
         Ok(info)
+    }
+
+    /// Drop the durable launching record for a create this process is
+    /// about to report as failed.
+    ///
+    /// Every rollback path is best-effort at DELETING but never silent at
+    /// FAILING: the create error the caller receives is returned enriched,
+    /// so a row this process could not remove is named to whoever reads
+    /// the log or the HTTP body rather than only appearing in a log line
+    /// this process may not survive to have flushed. What a leftover row
+    /// costs is bounded — the next reload finds a launching session and
+    /// leaves it pending (it never claims the agent ran) — but it is still
+    /// a row a human may want to delete.
+    async fn abandon_launching_record(&self, id: &str, error: anyhow::Error) -> anyhow::Error {
+        match self.store.delete_session(id).await {
+            Ok(()) => error,
+            Err(e) => error.context(format!(
+                "additionally, the launching record for session {id} could not be removed \
+                 ({e:#}); it will list as unknown until it is deleted"
+            )),
+        }
+    }
+
+    /// Whether this supervisor may record what it observes right now; see
+    /// [`Supervisor::may_record`]. Everything that witnesses a transition
+    /// checks this first, so a supervisor that is only reading — a handoff
+    /// candidate, or one whose boot-id read failed — still answers
+    /// requests honestly from what is stored without writing conclusions
+    /// it has no standing to draw.
+    fn may_record(&self) -> bool {
+        self.may_record.load(std::sync::atomic::Ordering::SeqCst)
+    }
+
+    /// Offer a witnessed transition to `session`'s durable outcome and
+    /// bring the in-memory mirror in line with what was COMMITTED.
+    ///
+    /// The mirror deliberately follows the store's answer rather than the
+    /// caller's intent: `Transition::apply` may refuse (retained knowledge
+    /// beats a poorer observation) or merge (a concurrent writer got there
+    /// first), and copying the intent instead would leave the map claiming
+    /// something the database does not say. A failed write leaves both
+    /// unchanged, which is the conservative direction — the next
+    /// observation retries.
+    ///
+    /// Errors are returned, not swallowed: `StopSession` turns one into a
+    /// failed reply (SPEC.md surfaces every failure), while the list path
+    /// logs and carries on, because a list that failed to WRITE has still
+    /// computed an honest answer to READ.
+    async fn record(
+        &self,
+        session: &str,
+        entry: &SessionEntry,
+        transition: Transition,
+    ) -> anyhow::Result<()> {
+        if !self.may_record() {
+            return Ok(());
+        }
+        if let Some(committed) = self.store.transition(session, transition).await? {
+            *entry.outcome.lock().expect("outcome mutex poisoned") = committed;
+        }
+        Ok(())
     }
 }
 
@@ -2594,20 +3247,167 @@ const LIST_BYTE_BUDGET: usize = (farhelm_proto::MAX_FRAME_LEN / 2) as usize;
 /// Only a pane found under BOTH its remembered pane id and its remembered
 /// tmux session name gets to decide `Alive` vs. `Exited` from tmux's own
 /// dead flag and status.
-fn session_status(entry: &SessionEntry, pane_states: &HashMap<String, PaneState>) -> SessionStatus {
-    let Some(state) = entry.terminal.as_ref().and_then(|terminal| {
+///
+/// ## Classification precedence (PLAN_M3.md items 2 and 3)
+///
+/// As of M3 the live probe is no longer the only input: the session's
+/// durable last-known outcome answers the questions a vanished tmux
+/// cannot. The order below is the precedence, and it is deliberate:
+///
+/// 1. A recorded **error** — the launch shim's exec-failure sentinel —
+///    outranks every inference, because "the agent never started" is a
+///    fact about THIS launch that no amount of pane probing can discover
+///    (an unexec'd command leaves an ordinary dead pane behind, exactly
+///    like a command that ran and exited). PLAN_M3.md item 3 owns the
+///    READER that ever writes this state; this PR only makes sure it
+///    already sits above the inference so item 3 has nothing to
+///    restructure. **The sentinel is deliberately not read here.**
+/// 2. A live pane decides `Alive` vs. `Exited` exactly as M2 did — a
+///    stored outcome never overrides something still observable. What the
+///    record still contributes to a DEAD pane is what the pane cannot
+///    hold: the stop annotation, and an exit code the pane has already
+///    forgotten (`known code wins`, matching the store's own monotonic
+///    enrichment rule — tmux publishes `pane_dead` before
+///    `pane_dead_status` is readable, so the live reading can be the
+///    poorer of the two).
+/// 3. With no pane to ask, the recorded outcome speaks: `Interrupted`
+///    (the reboot conversion) and `Exited` (a previously witnessed exit,
+///    with the code and annotation it was witnessed with) are RETAINED
+///    KNOWLEDGE, not guesses, and outrank M2's blanket exited-unknown.
+/// 4. A `Launching` row with no pane is `Unknown`, not `Exited`: SPEC.md's
+///    exited means the agent RAN, and a launch whose side effects were
+///    never found has not established that. It stays pending for item 3's
+///    sentinel (error) or item 6's reservation (retry) to resolve.
+/// 5. Anything else with no pane — `Running`, or a stop whose sweep is in
+///    flight — falls back to M2's honest `Exited { exit_code: None }`.
+///
+/// The annotation returned alongside the status is SPEC.md's user-legible
+/// qualifier ("stopped by user"), which lives with the recorded outcome
+/// and therefore survives restarts and reboots. It is returned only for a
+/// status that ends up `Exited`: a session that has since been relaunched
+/// into a live pane must not still be labelled with how its PREVIOUS run
+/// ended.
+fn session_status(
+    entry: &SessionEntry,
+    pane_states: &HashMap<String, PaneState>,
+) -> (SessionStatus, Option<String>) {
+    // The guard is held across the whole match rather than cloned out of:
+    // this function is synchronous (no await can intervene) and every arm
+    // only reads, so the clone would have bought nothing but an allocation
+    // on the hottest path the list reply has.
+    let recorded = entry.outcome.lock().expect("outcome mutex poisoned");
+    let live = entry.terminal.as_ref().and_then(|terminal| {
         pane_states
             .get(&terminal.pane)
             .filter(|state| state.session_name == terminal.tmux_name)
-    }) else {
-        return SessionStatus::Exited { exit_code: None };
-    };
-    if state.dead {
-        SessionStatus::Exited {
-            exit_code: state.exit_code,
+    });
+    match (&*recorded, live) {
+        (LastOutcome::Error { detail }, _) => (
+            SessionStatus::Error {
+                detail: detail.clone(),
+            },
+            None,
+        ),
+        (_, Some(state)) if !state.dead => (SessionStatus::Alive, None),
+        (recorded, Some(state)) => {
+            let (recorded_code, annotation) = match recorded {
+                LastOutcome::Exited {
+                    exit_code,
+                    annotation,
+                } => (*exit_code, annotation.clone()),
+                _ => (None, None),
+            };
+            (
+                SessionStatus::Exited {
+                    exit_code: state.exit_code.or(recorded_code),
+                },
+                annotation,
+            )
         }
-    } else {
-        SessionStatus::Alive
+        (LastOutcome::Interrupted, None) => (SessionStatus::Interrupted, None),
+        (
+            LastOutcome::Exited {
+                exit_code,
+                annotation,
+            },
+            None,
+        ) => (
+            SessionStatus::Exited {
+                exit_code: *exit_code,
+            },
+            annotation.clone(),
+        ),
+        (LastOutcome::Launching, None) => (SessionStatus::Unknown, None),
+        (LastOutcome::Running | LastOutcome::StopRequested, None) => {
+            (SessionStatus::Exited { exit_code: None }, None)
+        }
+    }
+}
+
+/// The exit code tmux still holds for `terminal`'s pane, if the pane is
+/// dead and tmux could reduce its death to one.
+///
+/// `pane_states`, not `pane_process`: the latter answers "is it dead, and
+/// what pid did it have", and only the former carries
+/// `#{pane_dead_status}` at all. Used by `StopSession` at both of its
+/// exit-recording moments — a stop that found the agent already gone, and
+/// a stop whose kill sweep just finished — because in both the code is
+/// worth keeping for exactly as long as the pane survives to hold it, and
+/// nothing else will look again.
+///
+/// A failed query is logged and degrades to `None` rather than failing the
+/// stop: it costs the exit code, never the annotation, and the store's
+/// monotonic enrichment lets a later list fill the code in.
+async fn dead_pane_exit_code(
+    sup: &Supervisor,
+    terminal: Option<&Terminal>,
+    session_id: &str,
+) -> Option<i32> {
+    let terminal = terminal?;
+    match sup.tmux.pane_states().await {
+        Ok(states) => states
+            .get(&terminal.pane)
+            .filter(|state| state.session_name == terminal.tmux_name && state.dead)
+            .and_then(|state| state.exit_code),
+        Err(e) => {
+            warn!(
+                session = %session_id, error = %format!("{e:#}"),
+                "could not read the pane's exit code; recording the outcome without one"
+            );
+            None
+        }
+    }
+}
+
+/// What this observation should offer the durable record, or `None` when
+/// there is nothing worth telling the store.
+///
+/// Only the OBSERVATION is decided here; whether it changes anything is
+/// [`Transition::apply`]'s call, inside the transaction. Two cases produce
+/// nothing at all: a session whose outcome is already terminal (no probe
+/// can add to `Interrupted`, `Error`, or an exit that already has its
+/// code), and a `Launching` row with no pane — see `session_status`'s
+/// point 4 for why absence of side effects is not evidence of an exit.
+fn observation(recorded: &LastOutcome, live: Option<&PaneState>) -> Option<Transition> {
+    match live {
+        Some(state) if !state.dead => None,
+        Some(state) => {
+            let exit_code = state.exit_code;
+            match recorded {
+                // An already-recorded exit still accepts the code tmux may
+                // only now be able to report (monotonic enrichment).
+                LastOutcome::Exited {
+                    exit_code: recorded_code,
+                    ..
+                } if recorded_code.is_none() && exit_code.is_some() => {
+                    Some(Transition::ObservedExit { exit_code })
+                }
+                _ if recorded.is_terminal() => None,
+                _ => Some(Transition::ObservedExit { exit_code }),
+            }
+        }
+        None => matches!(recorded, LastOutcome::Running | LastOutcome::StopRequested)
+            .then_some(Transition::ObservedExit { exit_code: None }),
     }
 }
 
@@ -3480,8 +4280,8 @@ async fn handle_control(
                 // session (`TmuxDriver::pane_states`'s own docs on why
                 // that multiplies subprocess spawns under a polling UI) —
                 // and skipped altogether when it could not possibly
-                // change the answer: a terminal-less entry's status is
-                // `Exited` unconditionally (`session_status` never
+                // change the answer: a terminal-less entry is decided
+                // entirely by its recorded outcome (`session_status` never
                 // consults the map for one), so a capped subset that is
                 // ALL terminal-less (including the empty list) is fully
                 // decidable without asking tmux anything. This matters
@@ -3516,11 +4316,70 @@ async fn handle_control(
                 } else {
                     HashMap::new()
                 };
+                // A list request is one of the places this supervisor
+                // WITNESSES an exit (PLAN_M3.md item 2): the dead pane it
+                // just found may be gone entirely by the next reboot,
+                // taking its exit code with it, so the code is recorded
+                // now — while tmux still has it — rather than recomputed
+                // forever from a fact that expires. Every observation this
+                // pass produces commits in ONE transaction, and the store
+                // decides what each one means (`Transition::apply`), so a
+                // stop running concurrently cannot have its annotation
+                // erased by this list and this list cannot be misled by a
+                // stale reading of its own.
+                // Nothing is recorded at all by a supervisor that may not
+                // record (a handoff candidate, or one whose boot-id read
+                // failed — see `Supervisor::may_record`); the reply below
+                // is still computed and still honest, it just draws no
+                // conclusions this process has no standing to store.
+                let observations: Vec<(String, Transition)> = if sup.may_record() {
+                    entries
+                        .iter()
+                        .filter_map(|entry| {
+                            // The guard is held for the closure body only,
+                            // with no await inside it, so nothing has to be
+                            // cloned to be read.
+                            let recorded = entry.outcome.lock().expect("outcome mutex poisoned");
+                            let live = entry.terminal.as_ref().and_then(|terminal| {
+                                pane_states
+                                    .get(&terminal.pane)
+                                    .filter(|state| state.session_name == terminal.tmux_name)
+                            });
+                            observation(&recorded, live)
+                                .map(|transition| (entry.info.id.clone(), transition))
+                        })
+                        .collect()
+                } else {
+                    Vec::new()
+                };
+                if !observations.is_empty() {
+                    match sup.store.transition_many(observations).await {
+                        Ok(committed) => {
+                            for entry in &entries {
+                                if let Some(outcome) = committed.get(&entry.info.id) {
+                                    *entry.outcome.lock().expect("outcome mutex poisoned") =
+                                        outcome.clone();
+                                }
+                            }
+                        }
+                        // Logged, not fatal: the reply below is computed
+                        // from what this pass OBSERVED plus what is
+                        // durably recorded, both of which are still honest
+                        // when the write fails — and the next list retries.
+                        Err(e) => warn!(
+                            error = %format!("{e:#}"),
+                            "could not record observed session outcomes; \
+                             the next list will retry"
+                        ),
+                    }
+                }
                 let sessions: Vec<SessionInfo> = entries
                     .iter()
                     .map(|entry| {
+                        let (status, annotation) = session_status(entry, &pane_states);
                         let mut info = entry.info.clone();
-                        info.status = session_status(entry, &pane_states);
+                        info.status = status;
+                        info.annotation = annotation;
                         info
                     })
                     .collect();
@@ -3606,6 +4465,54 @@ async fn handle_control(
                 let alive_pane = pane_state.filter(|pane| !pane.dead);
                 let root_pid = alive_pane.map(|pane| pane.pid);
 
+                // The durable stop INTENT, before a single signal is sent
+                // (PLAN_M3.md item 4). `kill_process_tree` below runs for
+                // seconds — SIGTERM, a grace period, re-enumeration,
+                // SIGKILL — and a crash anywhere in there used to leave a
+                // session the next startup read as a plain exit, silently
+                // converting "the user stopped this" into "the agent
+                // finished on its own". With the intent recorded first,
+                // reload reconciles it: a dead pane means the stop landed
+                // (annotated exit), a live one means it never did (intent
+                // cleared), and a reboot straddling it interrupts like any
+                // other live session.
+                //
+                // Only for a pane observed ALIVE: an agent that had
+                // already exited on its own is not something the user
+                // stopped, and claiming otherwise would credit them with
+                // an ending they had nothing to do with. That case records
+                // the plain exit instead — with whatever code the dead
+                // pane still retains — because a stop is also the moment
+                // this supervisor witnesses an exit nobody had listed yet.
+                let stop_intent = if alive_pane.is_some() {
+                    Transition::StopRequested
+                } else {
+                    Transition::ObservedExit {
+                        exit_code: dead_pane_exit_code(&sup, entry.terminal.as_ref(), &session_id)
+                            .await,
+                    }
+                };
+                if let Err(e) = sup.record(&session_id, &entry, stop_intent).await {
+                    // Recording the intent is part of the stop's contract,
+                    // not bookkeeping around it: proceeding to kill a tree
+                    // whose intent could not be stored is exactly the
+                    // crash window this write exists to close, and SPEC.md
+                    // requires the failure to surface rather than be
+                    // logged past.
+                    send_reply(
+                        &tx,
+                        &ControlMsg::Error {
+                            req_id,
+                            message: format!(
+                                "recording the stop failed, so nothing was killed: {e:#}"
+                            ),
+                            kind: ErrorKind::Internal,
+                        },
+                    )
+                    .await;
+                    return;
+                }
+
                 // Capture the alt-screen snapshot (if any) BEFORE the kill
                 // destroys it, but do NOT write it to disk yet — see
                 // `publish_alt_screen_snapshot`'s docs for why publishing
@@ -3663,6 +4570,40 @@ async fn handle_control(
                     .await;
                     return;
                 }
+                // The stop's OUTCOME, committed before the snapshot is
+                // published and before the reply is sent: the kill has
+                // already happened, so any crash from here on must find a
+                // record that says so. Publishing a snapshot first would
+                // put a cosmetic write ahead of the durability the stop
+                // promised.
+                //
+                // The exit code is re-queried rather than assumed. A
+                // killed process usually leaves tmux nothing to reduce to
+                // a plain code, but where it does, that code is worth
+                // keeping — and `pane_states`, not `pane_process`, is what
+                // carries `#{pane_dead_status}` at all. A failed query is
+                // logged rather than swallowed: it costs the code, not the
+                // annotation, and a later list can still enrich the record
+                // (the store's transitions are monotonic).
+                let mut stop_error = None;
+                if alive_pane.is_some() {
+                    let exit_code =
+                        dead_pane_exit_code(&sup, entry.terminal.as_ref(), &session_id).await;
+                    if let Err(e) = sup
+                        .record(&session_id, &entry, Transition::StopCompleted { exit_code })
+                        .await
+                    {
+                        // The process tree IS stopped; what failed is
+                        // recording it. Reported rather than logged
+                        // (SPEC.md surfaces every failure), and worded so
+                        // the caller knows the kill itself succeeded.
+                        stop_error = Some(format!(
+                            "the session was stopped, but recording that outcome failed, so it \
+                             may list as a plain exit: {e:#}"
+                        ));
+                    }
+                }
+
                 if let Some(bytes) = pending_snapshot {
                     publish_alt_screen_snapshot(&sup, &session_id, &bytes, crate::files::RealFs)
                         .await;
@@ -3673,12 +4614,26 @@ async fn handle_control(
                 // capture-to-published-file window, not just up to this
                 // point — see `Supervisor::pending_snapshots`'s docs.
                 sup.pending_snapshots.lock().await.remove(&session_id);
+
                 // Deliberately untouched: the DB row, the sessions map, and
                 // any live attachment. The pane survives (remain-on-exit),
                 // so an attached client's stream simply goes quiet after the
                 // agent's death output — there is nothing here for it to be
                 // notified of, unlike delete below.
-                send_reply(&tx, &ControlMsg::SessionStopped { req_id }).await;
+                match stop_error {
+                    Some(message) => {
+                        send_reply(
+                            &tx,
+                            &ControlMsg::Error {
+                                req_id,
+                                message,
+                                kind: ErrorKind::Internal,
+                            },
+                        )
+                        .await
+                    }
+                    None => send_reply(&tx, &ControlMsg::SessionStopped { req_id }).await,
+                }
             })
             .await;
         }
@@ -4317,6 +5272,7 @@ mod tests {
                     restart_offer: RestartOffer::default(),
                 },
                 terminal: None,
+                outcome: std::sync::Mutex::new(LastOutcome::Running),
             }),
         );
 
@@ -4724,6 +5680,648 @@ mod tests {
         PathBuf::from("/nonexistent/farhelm")
     }
 
+    /// A session entry with the given terminal and recorded outcome, for
+    /// the classification tests below — which are about how those two
+    /// inputs combine, and need no tmux, no store, and no session at all.
+    fn entry_with(terminal: Option<Terminal>, outcome: LastOutcome) -> SessionEntry {
+        SessionEntry {
+            info: SessionInfo {
+                id: "s1".to_string(),
+                title: "t".to_string(),
+                cwd: "/tmp".to_string(),
+                invocation: "agent".to_string(),
+                status: SessionStatus::default(),
+                annotation: None,
+                restart_offer: RestartOffer::default(),
+            },
+            terminal,
+            outcome: std::sync::Mutex::new(outcome),
+        }
+    }
+
+    /// The one terminal the classification tests below use. A function
+    /// rather than a shared value because `Terminal` is deliberately not
+    /// `Clone` — no production path duplicates one, and adding the derive
+    /// for a test would weaken that.
+    fn a_terminal() -> Terminal {
+        Terminal {
+            tmux_name: "fh-1".to_string(),
+            pane: "%0".to_string(),
+        }
+    }
+
+    /// A `pane_states` map containing exactly [`a_terminal`]'s pane in the
+    /// given state.
+    fn pane_map(dead: bool, exit_code: Option<i32>) -> HashMap<String, PaneState> {
+        HashMap::from([(
+            "%0".to_string(),
+            PaneState {
+                session_name: "fh-1".to_string(),
+                dead,
+                exit_code,
+            },
+        )])
+    }
+
+    /// The classification precedence PLAN_M3.md items 2 and 3 define, in
+    /// one place: what a live probe says, what the durable record says,
+    /// and which wins where. Table-driven because the RELATIONSHIPS are
+    /// the contract — each case in isolation looks obvious, and only side
+    /// by side do the two inversions stand out (a live pane beating a
+    /// recorded outcome, and a recorded outcome beating "no pane found").
+    #[test]
+    fn classification_precedence_between_live_probing_and_the_recorded_outcome() {
+        let live = pane_map(false, None);
+        let dead = pane_map(true, Some(3));
+        let empty = HashMap::new();
+
+        // A live pane outranks a stale record: what can still be observed
+        // is never overridden by what was once written down.
+        assert_eq!(
+            session_status(
+                &entry_with(Some(a_terminal()), LastOutcome::Launching),
+                &live
+            ),
+            (SessionStatus::Alive, None)
+        );
+
+        // A dead pane's own code is the answer, and the record supplies
+        // the annotation the pane cannot know.
+        assert_eq!(
+            session_status(
+                &entry_with(
+                    Some(a_terminal()),
+                    LastOutcome::Exited {
+                        exit_code: None,
+                        annotation: Some("stopped by user".to_string()),
+                    }
+                ),
+                &dead
+            ),
+            (
+                SessionStatus::Exited { exit_code: Some(3) },
+                Some("stopped by user".to_string())
+            )
+        );
+
+        // No pane to ask: the record answers, and interrupted is NOT
+        // flattened into exited-unknown — the whole point of the state.
+        assert_eq!(
+            session_status(&entry_with(None, LastOutcome::Interrupted), &empty),
+            (SessionStatus::Interrupted, None)
+        );
+        assert_eq!(
+            session_status(
+                &entry_with(
+                    None,
+                    LastOutcome::Exited {
+                        exit_code: Some(7),
+                        annotation: Some("stopped by user".to_string()),
+                    }
+                ),
+                &empty
+            ),
+            (
+                SessionStatus::Exited { exit_code: Some(7) },
+                Some("stopped by user".to_string())
+            ),
+            "a code and annotation witnessed before the terminal vanished are retained \
+             knowledge, not a guess"
+        );
+
+        // Nothing observed and nothing recorded: M2's honest fallback.
+        assert_eq!(
+            session_status(&entry_with(None, LastOutcome::Running), &empty),
+            (SessionStatus::Exited { exit_code: None }, None)
+        );
+
+        // The seam PLAN_M3.md item 3 slots into: a recorded error outranks
+        // every inference, including a pane tmux would call alive.
+        assert_eq!(
+            session_status(
+                &entry_with(
+                    Some(a_terminal()),
+                    LastOutcome::Error {
+                        detail: "Permission denied".to_string()
+                    }
+                ),
+                &live
+            ),
+            (
+                SessionStatus::Error {
+                    detail: "Permission denied".to_string()
+                },
+                None
+            )
+        );
+    }
+
+    /// What each observation OFFERS the store, which is the half
+    /// `session_status` does not decide. Two silences matter more than the
+    /// writes: a terminal outcome is not re-observed at all (nothing a
+    /// probe can see adds to it), and a `Launching` row with no pane
+    /// offers nothing — "no side effects found" is not evidence the agent
+    /// ran, and recording an exit for it would claim exactly that
+    /// (PLAN_M3.md item 2 sends that row to item 3/6 instead).
+    ///
+    /// The enrichment case is the one a naive "already terminal, skip it"
+    /// rule gets wrong: tmux publishes `pane_dead` before
+    /// `pane_dead_status` is readable, so the poll that first sees the
+    /// death routinely has no code while the next one does.
+    #[test]
+    fn observations_offered_to_the_store_cover_silence_and_enrichment() {
+        let dead_with_code = PaneState {
+            session_name: "fh-1".to_string(),
+            dead: true,
+            exit_code: Some(3),
+        };
+        let dead_without_code = PaneState {
+            session_name: "fh-1".to_string(),
+            dead: true,
+            exit_code: None,
+        };
+        let alive = PaneState {
+            session_name: "fh-1".to_string(),
+            dead: false,
+            exit_code: None,
+        };
+
+        assert_eq!(observation(&LastOutcome::Running, Some(&alive)), None);
+        assert_eq!(
+            observation(&LastOutcome::Running, Some(&dead_with_code)),
+            Some(Transition::ObservedExit { exit_code: Some(3) })
+        );
+        assert_eq!(
+            observation(&LastOutcome::Running, None),
+            Some(Transition::ObservedExit { exit_code: None })
+        );
+        assert_eq!(
+            observation(&LastOutcome::StopRequested, None),
+            Some(Transition::ObservedExit { exit_code: None }),
+            "a stop whose terminal vanished still ended; the store decides it was the stop"
+        );
+        assert_eq!(
+            observation(&LastOutcome::Launching, None),
+            None,
+            "a launch with no side effects has not been shown to have run"
+        );
+        assert_eq!(
+            observation(&LastOutcome::Interrupted, None),
+            None,
+            "a reboot is never re-observed into something poorer"
+        );
+        assert_eq!(
+            observation(
+                &LastOutcome::Exited {
+                    exit_code: None,
+                    annotation: None
+                },
+                Some(&dead_with_code)
+            ),
+            Some(Transition::ObservedExit { exit_code: Some(3) }),
+            "a code tmux can only now report must still reach the record"
+        );
+        assert_eq!(
+            observation(
+                &LastOutcome::Exited {
+                    exit_code: Some(3),
+                    annotation: None
+                },
+                Some(&dead_without_code)
+            ),
+            None,
+            "a known code is never re-offered to be replaced by a missing one"
+        );
+    }
+
+    /// The launching row's OTHER reconciliation, and the one with no
+    /// coverage before this test: a crash between the durable launching
+    /// record and the confirmation leaves a row whose pane is unknown but
+    /// whose tmux session very much exists. Reload has to find that pane
+    /// by session name — the row has no pane id to look up — and then say
+    /// what it sees: a live pane confirms the launch (`Running`, with the
+    /// rediscovered pane now recorded), and a dead one is an exit with
+    /// whatever code the pane retained.
+    ///
+    /// Driven against a real tmux server through the real reload, because
+    /// the name-lookup path is exactly the kind of code that looks obvious
+    /// and silently matches nothing.
+    #[tokio::test]
+    async fn reload_rediscovers_the_pane_of_a_launching_row_that_did_launch() {
+        let state = tempfile::tempdir().expect("state dir");
+        let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
+            .await
+            .expect("supervisor");
+
+        // Two sessions tmux really has, neither of which any row knows
+        // the pane of: one still running, one already dead (the tmux
+        // config keeps dead panes around — that is what makes an exit
+        // code readable at all).
+        for (name, command) in [("fh-live", "sleep 300"), ("fh-dead", "exit 7")] {
+            let argv = ["sh".to_string(), "-c".to_string(), command.to_string()];
+            sup.tmux
+                .create_session(name, "/tmp", 80, 24, &argv)
+                .await
+                .expect("create a tmux session directly");
+        }
+        for (id, tmux_name) in [("live", "fh-live"), ("dead", "fh-dead")] {
+            sup.store
+                .insert_session(StoredSession {
+                    id: id.to_string(),
+                    title: id.to_string(),
+                    cwd: "/tmp".to_string(),
+                    invocation: "agent".to_string(),
+                    tmux_name: tmux_name.to_string(),
+                    pane: String::new(),
+                    outcome: LastOutcome::Launching,
+                })
+                .await
+                .expect("insert a launching row");
+        }
+        // The dead pane has to actually be dead before the reload asks.
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(30);
+        loop {
+            let states = sup.tmux.pane_states().await.expect("pane states");
+            if states
+                .values()
+                .any(|state| state.session_name == "fh-dead" && state.dead)
+            {
+                break;
+            }
+            assert!(
+                tokio::time::Instant::now() < deadline,
+                "the fixture pane never died"
+            );
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+
+        let (sessions, _) =
+            Supervisor::reload_sessions(&sup.store, &sup.tmux, &SupervisorSeams::default(), true)
+                .await
+                .expect("reload");
+
+        assert_eq!(
+            *sessions["live"].outcome.lock().unwrap(),
+            LastOutcome::Running,
+            "a launching row whose pane is alive is a launch that DID happen"
+        );
+        assert!(
+            sessions["live"].terminal.is_some(),
+            "and it must be attachable again, which needs the rediscovered pane"
+        );
+        let dead = sessions["dead"].outcome.lock().unwrap().clone();
+        match dead {
+            LastOutcome::Exited { exit_code, .. } => {
+                if let Some(code) = exit_code {
+                    assert_eq!(code, 7, "the pane's own retained status, not a guess");
+                }
+            }
+            other => panic!("a launching row whose pane is dead has exited, got {other:?}"),
+        }
+
+        // Both facts are DURABLE, and the rediscovered pane is stored
+        // with the outcome it evidences — a later reload must not have to
+        // rediscover anything.
+        let rows = sup.store.load_all().await.expect("load");
+        for row in rows {
+            assert!(
+                !row.pane.is_empty(),
+                "the rediscovered pane must be recorded, not merely used once"
+            );
+            assert_ne!(row.outcome, LastOutcome::Launching);
+        }
+    }
+
+    /// PLAN_M3.md item 4's crash boundary, both edges: what reload makes
+    /// of a stop intent whose sweep never reported back.
+    ///
+    /// The intent is written before any signal is sent, so a crash can
+    /// leave it standing over either outcome, and the two must be read
+    /// oppositely. A DEAD pane means the kill landed: the session ended
+    /// because the user stopped it, and the exit is annotated — without
+    /// this, a crash mid-sweep silently converted "the user stopped this"
+    /// into "the agent finished on its own". A LIVE pane means it never
+    /// landed: the intent is cleared and the session goes back to being
+    /// ordinary, because annotating a process that is still running would
+    /// be a claim about an ending that has not happened.
+    ///
+    /// Written against a real tmux server through the real reload, since
+    /// the reconciliation is a property of that pass and not of the
+    /// transition policy alone.
+    #[tokio::test]
+    async fn reload_reconciles_a_stop_intent_against_the_pane_it_left_behind() {
+        let state = tempfile::tempdir().expect("state dir");
+        let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
+            .await
+            .expect("supervisor");
+
+        let mut panes = HashMap::new();
+        for (id, command) in [("landed", "exit 0"), ("never-landed", "sleep 300")] {
+            let tmux_name = format!("fh-{id}");
+            let argv = ["sh".to_string(), "-c".to_string(), command.to_string()];
+            let pane = sup
+                .tmux
+                .create_session(&tmux_name, "/tmp", 80, 24, &argv)
+                .await
+                .expect("create a tmux session directly");
+            sup.store
+                .insert_session(StoredSession {
+                    id: id.to_string(),
+                    title: id.to_string(),
+                    cwd: "/tmp".to_string(),
+                    invocation: "agent".to_string(),
+                    tmux_name,
+                    pane: pane.clone(),
+                    outcome: LastOutcome::Running,
+                })
+                .await
+                .expect("insert");
+            // Through the real transition, so the fixture is the state a
+            // real interrupted stop leaves behind rather than a hand-made
+            // approximation of it.
+            sup.store
+                .transition(id, Transition::StopRequested)
+                .await
+                .expect("record the intent");
+            panes.insert(id, pane);
+        }
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(30);
+        loop {
+            let states = sup.tmux.pane_states().await.expect("pane states");
+            if states.get(&panes["landed"]).is_some_and(|state| state.dead) {
+                break;
+            }
+            assert!(
+                tokio::time::Instant::now() < deadline,
+                "the fixture pane never died"
+            );
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+
+        Supervisor::reload_sessions(&sup.store, &sup.tmux, &SupervisorSeams::default(), true)
+            .await
+            .expect("reload");
+
+        let rows: HashMap<String, LastOutcome> = sup
+            .store
+            .load_all()
+            .await
+            .expect("load")
+            .into_iter()
+            .map(|row| (row.id, row.outcome))
+            .collect();
+        match &rows["landed"] {
+            LastOutcome::Exited { annotation, .. } => assert_eq!(
+                annotation.as_deref(),
+                Some(farhelm_proto::STOP_ANNOTATION),
+                "a stop intent over a dead pane is a stop that landed"
+            ),
+            other => panic!("expected an annotated exit, got {other:?}"),
+        }
+        assert_eq!(
+            rows["never-landed"],
+            LastOutcome::Running,
+            "a stop intent over a LIVE pane never landed, and must not annotate a session \
+             that is still running"
+        );
+    }
+
+    /// SPEC.md surfaces every failure: a stop whose durable record cannot
+    /// be written must REPORT that, not quietly succeed.
+    ///
+    /// The intent is written before any signal is sent, so a failure there
+    /// means nothing was killed at all — and the reply says exactly that,
+    /// because a caller told "stopped" would otherwise stop asking about a
+    /// session whose agent is still running. (The other half, a failure
+    /// recording the outcome AFTER a successful kill, reports the opposite
+    /// nuance: the session really did stop, but may list as a plain exit.)
+    ///
+    /// The failure is injected by corrupting the row out of band, which is
+    /// how an unreadable row fails for real: inside the transaction,
+    /// before anything is written.
+    #[tokio::test]
+    async fn a_stop_that_cannot_record_its_intent_reports_instead_of_killing() {
+        let state = tempfile::tempdir().expect("state dir");
+        let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
+            .await
+            .expect("supervisor");
+        sup.store
+            .insert_session(StoredSession {
+                id: "s1".to_string(),
+                title: "t".to_string(),
+                cwd: "/tmp".to_string(),
+                invocation: "agent".to_string(),
+                tmux_name: "fh-1".to_string(),
+                pane: "%0".to_string(),
+                outcome: LastOutcome::Running,
+            })
+            .await
+            .expect("insert");
+        sup.sessions.lock().await.insert(
+            "s1".to_string(),
+            Arc::new(entry_with(None, LastOutcome::Running)),
+        );
+        {
+            let conn = rusqlite::Connection::open(state.path().join("supervisor.db"))
+                .expect("open the database directly");
+            conn.execute("UPDATE sessions SET outcome_state = 'teleported'", [])
+                .expect("corrupt the row");
+        }
+
+        let (tx, mut rx) = mpsc::channel(CONNECTION_WRITER_QUEUE);
+        let mut input_routes = HashMap::new();
+        let mut tasks = tokio::task::JoinSet::new();
+        handle_control(
+            &sup,
+            ControlMsg::StopSession {
+                req_id: 4,
+                session_id: "s1".to_string(),
+            },
+            &tx,
+            &mut input_routes,
+            &mut tasks,
+        )
+        .await;
+        let reply = tokio::time::timeout(Duration::from_secs(5), rx.recv())
+            .await
+            .expect("the spawned stop handler never replied")
+            .expect("reply channel closed");
+        let decoded: ControlMsg = serde_json::from_slice(&reply.body).unwrap();
+        let ControlMsg::Error { message, kind, .. } = decoded else {
+            panic!("a stop that could not be recorded must not report success: {decoded:?}");
+        };
+        assert_eq!(kind, ErrorKind::Internal);
+        assert!(
+            message.contains("nothing was killed"),
+            "the caller must be told the stop did not happen: {message}"
+        );
+    }
+
+    /// The mirror follows the DATABASE, never the caller's intent: a
+    /// failed write must leave the in-memory outcome exactly as it was, so
+    /// the map never claims something SQLite does not say, and the next
+    /// observation simply retries.
+    ///
+    /// The failure is injected by corrupting the row out of band (a state
+    /// string outside this build's vocabulary), which is how a real
+    /// unreadable row fails: inside the transaction, before anything is
+    /// written. No test-only seam is needed — the database is a file, and
+    /// this test opens it the same way a `sqlite3` prompt would.
+    #[tokio::test]
+    async fn a_failed_outcome_write_leaves_the_mirror_untouched() {
+        let state = tempfile::tempdir().expect("state dir");
+        let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
+            .await
+            .expect("supervisor construction touches only tmux, not the launch shim");
+        sup.store
+            .insert_session(StoredSession {
+                id: "s1".to_string(),
+                title: "t".to_string(),
+                cwd: "/tmp".to_string(),
+                invocation: "agent".to_string(),
+                tmux_name: "fh-1".to_string(),
+                pane: "%0".to_string(),
+                outcome: LastOutcome::Running,
+            })
+            .await
+            .expect("insert");
+        {
+            let conn = rusqlite::Connection::open(state.path().join("supervisor.db"))
+                .expect("open the database directly");
+            conn.execute("UPDATE sessions SET outcome_state = 'teleported'", [])
+                .expect("corrupt the row");
+        }
+
+        let entry = entry_with(None, LastOutcome::Running);
+        let err = sup
+            .record("s1", &entry, Transition::ObservedExit { exit_code: None })
+            .await
+            .expect_err("an unreadable row must fail the write");
+        assert!(format!("{err:#}").contains("teleported"));
+        assert_eq!(
+            *entry.outcome.lock().unwrap(),
+            LastOutcome::Running,
+            "a failed write must not advance the mirror"
+        );
+    }
+
+    /// PLAN_M3.md item 2's exclusivity requirement, in its second and
+    /// quieter form: a supervisor that does NOT hold the state
+    /// directory's claim must not reconcile anything durably.
+    ///
+    /// The scenario is an ordinary handoff — a candidate constructing
+    /// while the incumbent is still serving. Its reload sees the
+    /// incumbent's sessions and, with a tmux server that knows nothing
+    /// about this row, would conclude "exited, unknown code" for every one
+    /// of them. Writing that would be permanent (terminal outcomes are
+    /// sticky) and wrong (the incumbent's agent is running), so the
+    /// candidate classifies for its own map and writes nothing.
+    ///
+    /// The incumbent is a bare `flock` on the lock file rather than
+    /// another `Supervisor`, and that is the whole point: `flock`
+    /// conflicts across open file descriptions even within one process, so
+    /// this reproduces the CROSS-PROCESS refusal exactly, at the syscall
+    /// level, without spawning anything. (Two `Supervisor`s in one process
+    /// deliberately share a claim — see `StateDirOwnership` — so building
+    /// a second one here would test nothing.)
+    ///
+    /// Both halves are checked: the row must be untouched, and the
+    /// candidate must still have CLASSIFIED it — "wrote nothing" must not
+    /// be achieved by "computed nothing".
+    #[tokio::test]
+    async fn a_supervisor_without_the_state_dir_claim_reconciles_nothing_durably() {
+        let state = tempfile::tempdir().expect("state dir");
+        let db_path = state.path().join("supervisor.db");
+        let store = SessionStore::open(&db_path, true).await.expect("store");
+        store
+            .insert_session(StoredSession {
+                id: "s1".to_string(),
+                title: "t".to_string(),
+                cwd: "/tmp".to_string(),
+                invocation: "agent".to_string(),
+                tmux_name: "fh-does-not-exist".to_string(),
+                pane: "%0".to_string(),
+                outcome: LastOutcome::Running,
+            })
+            .await
+            .expect("insert");
+        drop(store);
+
+        let incumbent = std::fs::OpenOptions::new()
+            .create(true)
+            .truncate(false)
+            .write(true)
+            .open(state.path().join("supervisor.lock"))
+            .expect("lock file");
+        incumbent.try_lock().expect("the incumbent takes the claim");
+
+        let candidate = Supervisor::new_with_exe(state.path(), dummy_exe())
+            .await
+            .expect("a candidate may still construct during a handoff");
+        assert!(
+            candidate.ownership.is_none(),
+            "the incumbent holds the claim, so the candidate must have none"
+        );
+
+        let store = SessionStore::open(&db_path, true).await.expect("store");
+        assert_eq!(
+            store.load_all().await.expect("load")[0].outcome,
+            LastOutcome::Running,
+            "a claimless supervisor must not record the incumbent's live session as ended"
+        );
+        let entry = candidate
+            .sessions
+            .lock()
+            .await
+            .get("s1")
+            .cloned()
+            .expect("the candidate still lists the session");
+        assert_eq!(
+            *entry.outcome.lock().unwrap(),
+            LastOutcome::Running,
+            "the candidate's map holds what is durable, not an unwritten conclusion"
+        );
+        assert_eq!(
+            session_status(&entry, &HashMap::new()).0,
+            SessionStatus::Exited { exit_code: None },
+            "it still classifies honestly for its own replies"
+        );
+    }
+
+    /// `serve` is what enforces "at most one supervisor per user per
+    /// host": the file lock alone cannot tell two `Supervisor`s in ONE
+    /// process apart (they share the claim by design — see
+    /// `StateDirOwnership`), so the serving flag has to. Pinned here at
+    /// the unit level because the e2e suite exercises the cross-process
+    /// shape but constructs both supervisors in one process, which is
+    /// exactly the case this flag covers.
+    #[tokio::test]
+    async fn a_second_serve_on_the_same_state_dir_is_refused() {
+        let state = tempfile::tempdir().expect("state dir");
+        let first = Supervisor::new_with_exe(state.path(), dummy_exe())
+            .await
+            .expect("supervisor");
+        let second = Supervisor::new_with_exe(state.path(), dummy_exe())
+            .await
+            .expect("supervisor");
+        assert!(
+            first
+                .ownership
+                .as_ref()
+                .expect("the first construction claims the dir")
+                .begin_serving(),
+            "nothing is serving yet"
+        );
+        let err = second
+            .serve()
+            .await
+            .expect_err("a second serve must be refused");
+        assert!(
+            err.to_string().contains("already running"),
+            "the refusal must say why: {err:#}"
+        );
+    }
+
     /// The pre-side-effect half of the `CREATE_FIELD_CAP` guard: a request
     /// whose fields already exceed the cap must be rejected — with an
     /// `Error` reply correlated to its `req_id` and naming the cap — before
@@ -4846,6 +6444,76 @@ mod tests {
             "no session may be recorded — proving no tmux window was ever created for a spec \
              that never made it to disk"
         );
+        // The DURABLE half, which the in-memory map cannot show: the
+        // launching row this create committed before touching the disk
+        // must be rolled back, not merely left out of the session map.
+        // The spec write is the first side effect, so its failure proves
+        // nothing external happened and the row describes nothing.
+        assert!(
+            sup.store.load_all().await.expect("load").is_empty(),
+            "a create that failed before any side effect must leave no phantom row behind"
+        );
+    }
+
+    /// The opposite rollback rule, and the one that costs something to
+    /// get wrong: when a create fails AMBIGUOUSLY, the launching row is
+    /// KEPT.
+    ///
+    /// `tmux new-session` can fail after the session already exists (a
+    /// lost reply, a timeout mid-command), so deleting the row on the
+    /// strength of the error alone would orphan a running agent — no row,
+    /// no id, nothing left that knows to reap it. Provoked here by
+    /// removing the tmux binary from this supervisor's reach, which makes
+    /// both the create AND the has-session probe that follows it fail;
+    /// with the probe unable to confirm absence, the row must survive and
+    /// the error must say so.
+    #[tokio::test]
+    async fn an_ambiguous_tmux_failure_keeps_the_launching_record() {
+        let state = tempfile::tempdir().expect("state dir");
+        let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
+            .await
+            .expect("supervisor");
+        let work = tempfile::tempdir().expect("workdir");
+        // Kill the server and put a DIRECTORY where its socket belongs:
+        // tmux can then neither connect to it nor create it, so
+        // `new-session` fails AND the has-session probe that decides the
+        // rollback fails too — an unconfirmable failure. Deliberately not
+        // done by freezing the state directory, which would break SQLite
+        // (its journal lives there) and fail the create before a row was
+        // ever written, testing nothing.
+        std::process::Command::new("tmux")
+            .arg("-S")
+            .arg(state.path().join("tmux.sock"))
+            .arg("kill-server")
+            .output()
+            .expect("kill-server");
+        std::fs::remove_file(state.path().join("tmux.sock")).ok();
+        std::fs::create_dir(state.path().join("tmux.sock")).expect("block the socket path");
+
+        let error = sup
+            .create_session(
+                &work.path().to_string_lossy(),
+                "sh -c 'sleep 300'",
+                None,
+                80,
+                24,
+            )
+            .await
+            .expect_err("tmux cannot create a session without a socket");
+
+        let rows = sup.store.load_all().await.expect("load");
+        assert_eq!(
+            rows.len(),
+            1,
+            "an unconfirmable tmux failure must keep the only record of a possibly-running \
+             agent; error was: {error:#}"
+        );
+        assert_eq!(rows[0].outcome, LastOutcome::Launching);
+        let rendered = format!("{error:#}");
+        assert!(
+            rendered.contains("kept as a launching record"),
+            "the caller must be told the row survives and why: {rendered}"
+        );
     }
 
     /// Call-site regression: drives `handle_control` itself, not
@@ -4894,6 +6562,7 @@ mod tests {
                     tmux_name: "fh-fake".to_string(),
                     pane: "%0".to_string(),
                 }),
+                outcome: std::sync::Mutex::new(LastOutcome::Running),
             }),
         );
 
@@ -5013,6 +6682,7 @@ mod tests {
                             restart_offer: RestartOffer::default(),
                         },
                         terminal: None,
+                        outcome: std::sync::Mutex::new(LastOutcome::Running),
                     }),
                 );
             }
@@ -5101,6 +6771,7 @@ mod tests {
                     restart_offer: RestartOffer::default(),
                 },
                 terminal: None,
+                outcome: std::sync::Mutex::new(LastOutcome::Running),
             }),
         );
 

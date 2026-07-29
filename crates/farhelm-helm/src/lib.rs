@@ -1795,6 +1795,88 @@ mod tests {
         peer.await.unwrap();
     }
 
+    /// The helm is a passthrough for classification, and PLAN_M3.md item 2
+    /// is the first change that makes that claim testable with something
+    /// the helm could plausibly get wrong: `interrupted` is a status
+    /// variant no earlier milestone had, and the stop annotation is a
+    /// field nothing used to populate. Neither is invented, renamed, or
+    /// dropped here — the supervisor is authoritative (SPEC.md), and this
+    /// pins that the JSON the browser receives says exactly what the
+    /// supervisor said.
+    ///
+    /// Asserted on the raw JSON rather than a decoded `SessionInfo`,
+    /// because the UI decodes JSON, not proto types: a serialization
+    /// change that a round trip through the same Rust types would hide is
+    /// precisely what would break the badge in the browser.
+    #[tokio::test]
+    async fn list_sessions_passes_interrupted_status_and_stop_annotation_through() {
+        use farhelm_proto::ControlMsg;
+        use farhelm_proto::io::{FrameReader, FrameWriter, handshake, parse_control};
+
+        let (client_side, peer_side) = tokio::io::duplex(64 * 1024);
+        let peer = tokio::spawn(async move {
+            let (r, w) = tokio::io::split(peer_side);
+            let mut reader = FrameReader::new(r);
+            let mut writer = FrameWriter::new(w);
+            handshake(&mut reader, &mut writer, "supervisor")
+                .await
+                .unwrap();
+            let request = parse_control(&reader.read_frame().await.unwrap().unwrap()).unwrap();
+            let ControlMsg::ListSessions { req_id } = request else {
+                panic!("expected ListSessions, got {request:?}");
+            };
+            let session = |id: &str, status, annotation: Option<&str>| farhelm_proto::SessionInfo {
+                id: id.into(),
+                title: id.into(),
+                cwd: "/tmp".into(),
+                invocation: "agent".into(),
+                status,
+                annotation: annotation.map(str::to_string),
+                restart_offer: farhelm_proto::RestartOffer::default(),
+            };
+            writer
+                .write_control(&ControlMsg::SessionList {
+                    req_id,
+                    sessions: vec![
+                        session("lost", farhelm_proto::SessionStatus::Interrupted, None),
+                        session(
+                            "stopped",
+                            farhelm_proto::SessionStatus::Exited { exit_code: Some(0) },
+                            Some(farhelm_proto::STOP_ANNOTATION),
+                        ),
+                    ],
+                    total: 2,
+                    truncated: false,
+                })
+                .await
+                .unwrap();
+        });
+
+        let (r, w) = tokio::io::split(client_side);
+        let client = super::SupervisorClient::start(r, w).await.unwrap();
+        let app = build_router(client, None, 7433);
+
+        let request = axum::http::Request::builder()
+            .method("GET")
+            .uri("/api/sessions")
+            .header("host", "127.0.0.1:7433")
+            .body(axum::body::Body::empty())
+            .unwrap();
+
+        let response = tower::ServiceExt::oneshot(app, request).await.unwrap();
+        assert_eq!(response.status(), axum::http::StatusCode::OK);
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let value: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(value["sessions"][0]["status"]["state"], "interrupted");
+        assert_eq!(value["sessions"][0]["annotation"], serde_json::Value::Null);
+        assert_eq!(value["sessions"][1]["status"]["state"], "exited");
+        assert_eq!(value["sessions"][1]["annotation"], "stopped by user");
+
+        peer.await.unwrap();
+    }
+
     /// The DNS-rebinding origin guard is route-agnostic middleware, and the
     /// Playwright suite (`terminal.spec.ts`, "requests from a foreign
     /// origin are refused") already proves it holds through the real

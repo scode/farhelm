@@ -377,7 +377,10 @@ pub enum SessionStatus {
     /// `#{pane_dead_status}` when parseable — `None` covers a signal
     /// death tmux cannot reduce to a plain code, and the restart-gap and
     /// stale-lookup cases where there is no live pane to ask at all (see
-    /// the supervisor's `ListSessions` handler).
+    /// the supervisor's `ListSessions` handler). As of PLAN_M3.md item 2 a
+    /// code the supervisor witnessed EARLIER is retained once the pane
+    /// that held it is gone, so `None` now means nothing ever observed one
+    /// — not merely that nothing can observe one right now.
     Exited { exit_code: Option<i32> },
     /// The agent's process could not be started at all — the launch
     /// shim's exec-failure sentinel (PLAN_M3.md item 3), never inferred
@@ -424,8 +427,11 @@ pub struct SessionInfo {
     /// say (tmux itself did not survive the reboot, or never started at
     /// all) and are instead read back from the supervisor's own durable
     /// last-known-outcome record — so "never persisted" describes the
-    /// live-probed variants only, not this field as a whole. Either way,
-    /// this field is never trusted from an older sender.
+    /// live-probed variants only, not this field as a whole. `Exited` is
+    /// now BOTH: computed from a live dead pane where one still exists,
+    /// and otherwise retained from that same record — which is what lets
+    /// an exit code and a stop annotation outlive the pane that held them.
+    /// Either way, this field is never trusted from an older sender.
     /// `#[serde(default)]` is what makes this field additive within
     /// `PROTOCOL_VERSION` 3: an old peer's JSON has no `status` at all and
     /// decodes to `SessionStatus::Unknown` rather than failing, and this
@@ -440,10 +446,9 @@ pub struct SessionInfo {
     /// section). A bare optional string, not a coded enum, for the same
     /// reason `ControlMsg::Detached::reason` is one (see that field's
     /// docs): this is prose the UI renders verbatim, not a value it
-    /// branches on. Absent (`None`) is the only case anything produces as
-    /// of this PR — no writer exists yet, so every session decodes with no
-    /// annotation until PLAN_M3.md item 4 lands the durable stop-annotation
-    /// write path; an `Option<String>` field defaults to `None` on a
+    /// branches on. The supervisor's StopSession handler records it
+    /// durably (PLAN_M3.md item 4); sessions never stopped by the user
+    /// carry `None`; an `Option<String>` field defaults to `None` on a
     /// missing key without needing `#[serde(default)]` (serde's own
     /// built-in `Option` handling — the same mechanism
     /// `ControlMsg::CreateSession::title` already relies on elsewhere in
@@ -748,17 +753,27 @@ pub enum ControlMsg {
     /// agent already exited (or one whose terminal never existed, the
     /// restart-gap case) still replies `SessionStopped` rather than
     /// erring, because from the caller's point of view "make sure nothing
-    /// is running" already holds.
+    /// is running" already holds. Such a stop records a PLAIN exit, not
+    /// [`SessionInfo::annotation`]'s "stopped by user": the annotation
+    /// says who ended the run, and a run that had already ended was not
+    /// ended by this request (PLAN_M3.md item 4). A stop that does find a
+    /// live agent annotates it, and that annotation stays with the session
+    /// until a restart replaces the run it describes or a delete removes
+    /// the session — surviving supervisor restarts and reboots alike.
     ///
-    /// Two distinct failure modes, not one: an unknown `session_id` is the
-    /// only PRECONDITION failure, reported the same way `Attach` reports
-    /// it. But the kill sweep itself — enumerating and signaling the
+    /// Three distinct failure modes, not one: an unknown `session_id` is
+    /// the only PRECONDITION failure, reported the same way `Attach`
+    /// reports it. The kill sweep itself — enumerating and signaling the
     /// process tree, see `kill_process_tree` in the supervisor — can also
     /// fail (a `/proc` read erroring out, a signal coming back `EPERM`),
     /// and that is reported as an `Error` too rather than a false
     /// `SessionStopped`: a caller must be able to tell "nothing was
     /// running" from "the sweep could not confirm nothing is running"
-    /// apart.
+    /// apart. And the durable record of the stop can fail to write, which
+    /// is reported as well — with wording that distinguishes the two
+    /// sides of the kill, since a failure BEFORE it means nothing was
+    /// killed at all while one after it means the session did stop but may
+    /// list as an ordinary exit.
     StopSession {
         req_id: u64,
         session_id: String,
