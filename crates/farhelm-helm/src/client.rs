@@ -619,6 +619,7 @@ impl SupervisorClient {
                     | ControlMsg::SessionList { req_id, .. }
                     | ControlMsg::SessionStopped { req_id, .. }
                     | ControlMsg::SessionDeleted { req_id, .. }
+                    | ControlMsg::SessionRestarted { req_id, .. }
                     | ControlMsg::Attached { req_id, .. }
                     | ControlMsg::Error { req_id, .. }
                         if *req_id != 0 =>
@@ -744,6 +745,14 @@ impl SupervisorClient {
                     title,
                     cols,
                     rows,
+                    // This helper is the pre-M3 raw create path with no
+                    // idempotency or snapshot-override support of its own
+                    // yet (PLAN_M3.md items 6/7 land their own call-site
+                    // plumbing later); `None` here is exactly the
+                    // behavior-preserving default those fields document.
+                    intent_key: None,
+                    agent_kind: None,
+                    resume_template: None,
                 },
             )
             .await?
@@ -1077,6 +1086,8 @@ mod tests {
             cwd: format!("/{id}"),
             invocation: "agent".into(),
             status: farhelm_proto::SessionStatus::Alive,
+            annotation: None,
+            restart_offer: farhelm_proto::RestartOffer::default(),
         }
     }
 
@@ -1747,5 +1758,62 @@ mod tests {
                 .unwrap()
                 .is_none()
         );
+    }
+
+    /// `SessionRestarted` must resolve its `RestartSession` request through
+    /// the demux exactly like every other req_id-bearing reply
+    /// (`concurrent_requests_accept_replies_in_reverse_order` above pins the
+    /// same mechanism for `SessionList`). PLAN_M3 review batch item 5: this
+    /// message was added to `ControlMsg` alongside the reply-classification
+    /// match in `run_reader`'s demux, and without that addition a scripted
+    /// peer sending `SessionRestarted` would fall into the `other =>
+    /// warn!(...)` arm — the pending caller's oneshot would never resolve,
+    /// hanging forever, since unlike `Detached` this reply exists to answer
+    /// a specific waiting request. There is no public `restart_session`
+    /// client method yet (PLAN_M3.md item 9 adds one); this drives the
+    /// private `request()` plumbing directly, the same way this module's
+    /// other low-level demux tests do.
+    #[tokio::test]
+    async fn session_restarted_reply_resolves_the_pending_request() {
+        let (client_side, peer_side) = tokio::io::duplex(64 * 1024);
+        let peer = tokio::spawn(async move {
+            let (r, w) = tokio::io::split(peer_side);
+            let mut reader = FrameReader::new(r);
+            let mut writer = FrameWriter::new(w);
+            handshake(&mut reader, &mut writer, "supervisor")
+                .await
+                .unwrap();
+            let request = parse_control(&reader.read_frame().await.unwrap().unwrap()).unwrap();
+            let ControlMsg::RestartSession { req_id, .. } = request else {
+                panic!("expected RestartSession, got {request:?}");
+            };
+            writer
+                .write_control(&ControlMsg::SessionRestarted {
+                    req_id,
+                    session: session("restarted"),
+                })
+                .await
+                .unwrap();
+        });
+        let (r, w) = tokio::io::split(client_side);
+        let client = SupervisorClient::start(r, w).await.unwrap();
+
+        let reply = client
+            .request(
+                7,
+                ControlMsg::RestartSession {
+                    req_id: 7,
+                    session_id: "restarted".to_string(),
+                    mode: farhelm_proto::RestartMode::Resume,
+                    stop_if_running: false,
+                },
+            )
+            .await
+            .unwrap();
+        assert!(matches!(
+            reply,
+            ControlMsg::SessionRestarted { req_id: 7, session } if session.id == "restarted"
+        ));
+        peer.await.unwrap();
     }
 }

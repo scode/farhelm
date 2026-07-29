@@ -27,7 +27,7 @@ use farhelm_proto::io::{
     FrameReader, FrameWriter, ProgressWrite, handshake, parse_control, write_frame_before_stall,
 };
 use farhelm_proto::{
-    ControlMsg, DETACH_REASON_STALLED, ErrorKind, Frame, SessionInfo, SessionStatus,
+    ControlMsg, DETACH_REASON_STALLED, ErrorKind, Frame, RestartOffer, SessionInfo, SessionStatus,
 };
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
@@ -1874,6 +1874,12 @@ impl Supervisor {
                         // particular value — `Unknown` is simply the
                         // honest "not yet computed" default.
                         status: SessionStatus::default(),
+                        // Neither field has a writer yet (PLAN_M3.md items
+                        // 4 and 9 land them); `None`/`FreshOnly` are the
+                        // honest "nothing has ever populated this" values,
+                        // matching `status` just above.
+                        annotation: None,
+                        restart_offer: RestartOffer::default(),
                     },
                     terminal,
                 }),
@@ -2184,6 +2190,11 @@ impl Supervisor {
             // value is never persisted (see `StoredSession`'s docs)
             // either way.
             status: SessionStatus::Unknown,
+            // Vocabulary only as of this PR: nothing writes a stop
+            // annotation or computes a real restart offer at create time
+            // yet (PLAN_M3.md items 4 and 9).
+            annotation: None,
+            restart_offer: RestartOffer::default(),
         };
 
         // DB insert AFTER the tmux session already exists: a session that
@@ -2735,6 +2746,7 @@ fn reply_frame(msg: &ControlMsg) -> Frame {
         | ControlMsg::SessionList { req_id, .. }
         | ControlMsg::SessionStopped { req_id, .. }
         | ControlMsg::SessionDeleted { req_id, .. }
+        | ControlMsg::SessionRestarted { req_id, .. }
         | ControlMsg::Attached { req_id, .. }
         | ControlMsg::Error { req_id, .. } => req_id,
         ref other => {
@@ -3382,6 +3394,12 @@ async fn handle_control(
             title,
             cols,
             rows,
+            // PLAN_M3.md item 1's snapshot-override and idempotency-key
+            // fields are wire vocabulary only as of this PR: no handler
+            // reads them yet (item 6 wires `intent_key` dedup, item 7
+            // wires `agent_kind`/`resume_template`), so this arm ignores
+            // them via `..` rather than binding unused names.
+            ..
         } => {
             let field_len = cwd.len() + invocation.len() + title.as_deref().map_or(0, str::len);
             if field_len > CREATE_FIELD_CAP {
@@ -4159,6 +4177,27 @@ async fn handle_control(
             // A second hello is a protocol violation; ignore rather than
             // kill the connection over it.
         }
+        // TEMPORARY, until PLAN_M3.md item 9 lands the real handler:
+        // `RestartSession` carries a `req_id` a caller is genuinely
+        // blocked on (unlike the fire-and-forget `PauseOutput`/
+        // `ResumeOutput` vocabulary-only precedent), so falling through
+        // to the generic "unexpected control message" catch-all below
+        // would silently hang every v5 caller that sends one on this
+        // build forever. An explicit, honestly-labeled `Error` reply is
+        // the minimal truthful behavior a vocabulary-only PR can give it;
+        // item 9 replaces this arm with the real restart sequence and
+        // this comment (and the temporary message text) go with it.
+        ControlMsg::RestartSession { req_id, .. } => {
+            send_reply(
+                tx,
+                &ControlMsg::Error {
+                    req_id,
+                    message: "restart not implemented in this build".to_string(),
+                    kind: ErrorKind::Internal,
+                },
+            )
+            .await;
+        }
         // Response/event messages arriving at the supervisor are peer
         // bugs; log and continue.
         other => warn!(?other, "unexpected control message at supervisor"),
@@ -4274,6 +4313,8 @@ mod tests {
                     cwd: "/".to_string(),
                     invocation: "agent".to_string(),
                     status: SessionStatus::Unknown,
+                    annotation: None,
+                    restart_offer: RestartOffer::default(),
                 },
                 terminal: None,
             }),
@@ -4528,6 +4569,8 @@ mod tests {
                 cwd: "/tmp".to_string(),
                 invocation: "agent".to_string(),
                 status: SessionStatus::Alive,
+                annotation: None,
+                restart_offer: RestartOffer::default(),
             }],
             total: 1,
             truncated: false,
@@ -4581,9 +4624,78 @@ mod tests {
                 // Matches real `create_session` output: `Unknown`, not
                 // `Alive` (see that function's own doc comment).
                 status: SessionStatus::Unknown,
+                annotation: None,
+                restart_offer: RestartOffer::default(),
             },
         };
         assert_eq!(reply_frame(&msg), Frame::control(&msg));
+    }
+
+    /// `SessionRestarted` joined `reply_frame`'s req_id correlator alongside
+    /// the helm demux (PLAN_M3 review batch item 5): this is the
+    /// `unreachable!`-on-unknown-variant match, so proving it accepts the
+    /// new variant here — rather than only via the round-trip tests in
+    /// farhelm-proto — is what would catch a future refactor that forgets
+    /// this arm and reintroduces the panic for a message `handle_control`'s
+    /// temporary `RestartSession` arm actually sends today.
+    #[test]
+    fn reply_frame_accepts_session_restarted() {
+        let msg = ControlMsg::SessionRestarted {
+            req_id: 9,
+            session: SessionInfo {
+                id: "s1".to_string(),
+                title: "demo".to_string(),
+                cwd: "/tmp".to_string(),
+                invocation: "agent".to_string(),
+                status: SessionStatus::Alive,
+                annotation: None,
+                restart_offer: RestartOffer::Resume,
+            },
+        };
+        assert_eq!(reply_frame(&msg), Frame::control(&msg));
+    }
+
+    /// PLAN_M3 review batch item 4: `RestartSession` has a `req_id` a
+    /// caller genuinely blocks on, so this build must answer it with an
+    /// honest `Error` rather than silently falling into the generic
+    /// unknown-message catch-all (which would hang a v5 caller forever —
+    /// unlike `PauseOutput`/`ResumeOutput`'s fire-and-forget precedent, a
+    /// dropped reply here is a real bug, not a no-op). This is temporary
+    /// scaffolding removed once PLAN_M3.md item 9 lands the real handler.
+    #[tokio::test]
+    async fn restart_session_replies_with_a_temporary_not_implemented_error() {
+        let state = tempfile::tempdir().expect("state dir");
+        let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
+            .await
+            .expect("supervisor construction touches only tmux, not the launch shim");
+        let (tx, mut rx) = mpsc::channel(CONNECTION_WRITER_QUEUE);
+        let mut input_routes = HashMap::new();
+        let mut tasks = tokio::task::JoinSet::new();
+
+        handle_control(
+            &sup,
+            ControlMsg::RestartSession {
+                req_id: 5,
+                session_id: "does-not-matter".to_string(),
+                mode: farhelm_proto::RestartMode::Fresh,
+                stop_if_running: false,
+            },
+            &tx,
+            &mut input_routes,
+            &mut tasks,
+        )
+        .await;
+
+        let reply = rx.try_recv().expect("a reply must have been sent");
+        let decoded: ControlMsg = serde_json::from_slice(&reply.body).unwrap();
+        assert!(matches!(
+            decoded,
+            ControlMsg::Error {
+                req_id: 5,
+                kind: ErrorKind::Internal,
+                ..
+            }
+        ));
     }
 
     /// `reply_frame` panics on a message with no `req_id` to correlate an
@@ -4640,6 +4752,9 @@ mod tests {
                 title: None,
                 cols: 80,
                 rows: 24,
+                intent_key: None,
+                agent_kind: None,
+                resume_template: None,
             },
             &tx,
             &mut input_routes,
@@ -4710,6 +4825,9 @@ mod tests {
                 title: None,
                 cols: 80,
                 rows: 24,
+                intent_key: None,
+                agent_kind: None,
+                resume_template: None,
             },
             &tx,
             &mut input_routes,
@@ -4769,6 +4887,8 @@ mod tests {
                     cwd: "/tmp".to_string(),
                     invocation: "agent".to_string(),
                     status: SessionStatus::default(),
+                    annotation: None,
+                    restart_offer: RestartOffer::default(),
                 },
                 terminal: Some(Terminal {
                     tmux_name: "fh-fake".to_string(),
@@ -4889,6 +5009,8 @@ mod tests {
                             cwd: "/tmp".to_string(),
                             invocation: "agent".to_string(),
                             status: SessionStatus::default(),
+                            annotation: None,
+                            restart_offer: RestartOffer::default(),
                         },
                         terminal: None,
                     }),
@@ -4975,6 +5097,8 @@ mod tests {
                     cwd: "/tmp".to_string(),
                     invocation: "agent".to_string(),
                     status: SessionStatus::default(),
+                    annotation: None,
+                    restart_offer: RestartOffer::default(),
                 },
                 terminal: None,
             }),
@@ -5070,6 +5194,8 @@ mod tests {
             cwd: "/tmp".to_string(),
             invocation: "agent".to_string(),
             status: SessionStatus::Alive,
+            annotation: None,
+            restart_offer: RestartOffer::default(),
         }
     }
 

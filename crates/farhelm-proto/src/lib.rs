@@ -89,14 +89,40 @@ pub mod io;
 /// connection loops treat that error as fatal — an unknown variant tears
 /// down an already-established connection instead of being ignored. A new
 /// variant is exactly the "cannot be additive" case that earns its own
-/// bump, per version 3's own docs above; `protocol_version_is_pinned_at_4`
-/// and `unknown_control_message_tag_fails_decode` below (plus the
+/// bump, per version 3's own docs above; `protocol_version_is_pinned_at_5`
+/// (renamed from `_at_4` when version 5 landed) and
+/// `unknown_control_message_tag_fails_decode` below (plus the
 /// loop-level teardown test in the farhelm crate's e2e suite) pin both the
 /// number and the reasoning so the next milestone cannot re-assume
 /// tolerance that was never there. Within version 4, the same additive
 /// discipline applies: later M2.5 wire changes must be new optional fields
 /// with decode defaults, not new variants, or they earn their own bump too.
-pub const PROTOCOL_VERSION: u32 = 4;
+///
+/// Bumped to 5 for the complete M3 wire vocabulary (PLAN_M3.md item 1):
+/// `SessionStatus::Interrupted`/`Error`, `SessionInfo`'s stop annotation
+/// and restart-offer fields, `CreateSession`'s intent key and snapshot
+/// overrides (`agent_kind`, `resume_template`), `ErrorKind::Conflict` for
+/// an intent key reused with a different fingerprint, and
+/// `RestartSession`/`SessionRestarted`. All of it lands in ONE bump rather
+/// than several: each of the FIVE new tagged-enum variants above (two on
+/// `SessionStatus` — `Error` and `Interrupted`; one on `ErrorKind` —
+/// `Conflict`; two on `ControlMsg` — `RestartSession` and
+/// `SessionRestarted`) independently earns its own bump by version 4's own
+/// argument above — an unrecognized tag is connection-fatal, never a
+/// tolerated no-op — so spreading M3 across a version per variant would
+/// only multiply the number of protocol versions a mixed fleet has to
+/// reason about, for a milestone that ships all of them together anyway.
+/// (`AgentKind`'s three variants, including `Generic`, are not part of
+/// this count: `AgentKind` itself is new in version 5, so there is no
+/// prior decoder for it to break — the count above is specifically about
+/// variants added to enums that already existed at version 4.) Within
+/// version 5, new FIELDS on an existing message keep the same additive
+/// discipline version 4 established: default on absence, ignored when
+/// unrecognized. Only a genuinely new tagged variant, OR a field change
+/// that cannot be made additive — a new REQUIRED field being the version 2
+/// precedent documented above, where an old decoder has no default to
+/// fall back on — needs another bump; neither is anticipated before M4.
+pub const PROTOCOL_VERSION: u32 = 5;
 
 /// The build version compiled into this binary, carried in the hello for
 /// diagnostics.
@@ -120,14 +146,16 @@ pub struct Frame {
 }
 
 /// Coarse classification of `ControlMsg::Error`, deliberately minimal: the
-/// three kinds are exactly the statuses the M1 HTTP surface can honestly
-/// distinguish (404 / 400 / 500). M2's GUI error surfacing grows this
-/// taxonomy (PLAN.md) once there is a UI that can act on finer distinctions.
-/// Adding a variant here is still a wire-format change — an older peer's
-/// decoder has no fallback for a tag it does not recognize — so it takes
-/// the same `PROTOCOL_VERSION` bump as any other incompatible change; there
-/// is just no need to over-design the set now, before M2's requirements are
-/// known.
+/// original three kinds (M1) were exactly the statuses the HTTP surface
+/// could honestly distinguish at the time (404 / 400 / 500); PLAN_M3.md
+/// item 6 added the fourth, `Conflict` (409), for intent-key reuse with a
+/// mismatched fingerprint — a genuinely different situation from all
+/// three, not an HTTP-status-table nicety. Adding a variant here is
+/// always a wire-format change — an older peer's decoder has no fallback
+/// for a tag it does not recognize — so it takes the same
+/// `PROTOCOL_VERSION` bump as any other incompatible change; there is
+/// still no need to over-design this set beyond what a caller can
+/// currently act on.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ErrorKind {
@@ -139,6 +167,17 @@ pub enum ErrorKind {
     /// Anything else: a server-side fault the caller could not have
     /// prevented by sending a different request.
     Internal,
+    /// The request conflicts with an outcome already recorded under the
+    /// same identifier. As of `PROTOCOL_VERSION` 5 the one producer is
+    /// `CreateSession`'s intent key (PLAN_M3.md item 6) reused with a
+    /// different fingerprint: the caller has replayed a retry identifier
+    /// for what is, per the fingerprint, a genuinely different request —
+    /// a client bug (a stale or reused key), not something the server can
+    /// honestly merge or route around. Neither `NotFound` (nothing to
+    /// operate on) nor `InvalidRequest` (a self-contained flaw in this
+    /// request alone) fits: only `Conflict` names "this identifier already
+    /// has a meaning, and it is not the one you just sent."
+    Conflict,
 }
 
 /// Frames larger than this are rejected at decode time. Terminal output is
@@ -299,7 +338,19 @@ impl Frame {
 /// this enum, `SessionInfo::status`, and `SessionList::total`/`truncated`
 /// are the one wire change M2's list step gets, and it must stay
 /// tolerant on decode both ways — see `SessionInfo::status`'s docs.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+///
+/// `Error` and `Interrupted` are NOT additive the same way — they are new
+/// tagged-enum variants, exactly the case `PROTOCOL_VERSION`'s own docs
+/// say cannot be additive, which is why they ride the bump to 5 rather
+/// than landing as a same-version addition the way `total`/`truncated`
+/// did.
+///
+/// No longer `Copy` as of `Error { detail: String }`: an owned `String`
+/// cannot be duplicated bit-for-bit, so `Copy` and `String` are mutually
+/// exclusive on any type containing one, forcing every prior call site
+/// that copied a `SessionStatus` implicitly to `clone()` it instead
+/// (`cargo check --all-targets` finds every such site).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(tag = "state", rename_all = "snake_case")]
 pub enum SessionStatus {
     /// The default exists for wire tolerance first: a peer built before
@@ -328,6 +379,27 @@ pub enum SessionStatus {
     /// stale-lookup cases where there is no live pane to ask at all (see
     /// the supervisor's `ListSessions` handler).
     Exited { exit_code: Option<i32> },
+    /// The agent's process could not be started at all — the launch
+    /// shim's exec-failure sentinel (PLAN_M3.md item 3), never inferred
+    /// from an exit code: an invocation that execs successfully and then
+    /// exits 126 or 127 is `Exited`, not `Error`, because it DID run.
+    /// `detail` is the sentinel's own errno-derived explanation, carried
+    /// as a plain required `String` rather than `Option` (unlike
+    /// `Exited::exit_code`) because a sentinel is only ever read when it
+    /// exists — there is no "error, but no detail" case the way there is
+    /// a "exited, but tmux could not reduce it to a code" case.
+    Error { detail: String },
+    /// The host rebooted while this session's durable last-known outcome
+    /// was launching or running, and tmux — the only liveness truth this
+    /// system keeps — did not survive that reboot (PLAN_M3.md item 2,
+    /// SPEC.md's Durability section). Distinct from `Unknown`: `Unknown`
+    /// means "not yet asked"; `Interrupted` means "asked, via the one
+    /// reboot detector this system has (a changed stored boot id), and
+    /// the answer is structurally unknowable now, not merely unasked
+    /// yet." Persists until the user acts (restart, archive, delete);
+    /// nothing — including another supervisor restart on the same boot —
+    /// clears it on its own.
+    Interrupted,
 }
 
 /// A session as the supervisor reports it. The supervisor is authoritative
@@ -342,10 +414,18 @@ pub struct SessionInfo {
     /// rejected at the boundary before a `SessionInfo` could exist.
     pub cwd: String,
     pub invocation: String,
-    /// Computed fresh by the supervisor on every `ListSessions` reply —
-    /// never persisted (SQLite has no liveness truth to persist; tmux is
-    /// the only truth, and it does not survive a restart on its own
-    /// terms either) and never trusted from an older sender.
+    /// `Unknown`/`Alive`/`Exited` are computed fresh by the supervisor on
+    /// every `ListSessions` reply through LIVE tmux probing — that half of
+    /// this field is never persisted, because tmux's own pane state is the
+    /// only truth for a currently-reachable session, and it does not
+    /// survive a supervisor restart on its own terms either.
+    /// `Interrupted` and `Error` (PLAN_M3.md items 2 and 3) are the
+    /// opposite case: they exist BECAUSE live tmux probing has nothing to
+    /// say (tmux itself did not survive the reboot, or never started at
+    /// all) and are instead read back from the supervisor's own durable
+    /// last-known-outcome record — so "never persisted" describes the
+    /// live-probed variants only, not this field as a whole. Either way,
+    /// this field is never trusted from an older sender.
     /// `#[serde(default)]` is what makes this field additive within
     /// `PROTOCOL_VERSION` 3: an old peer's JSON has no `status` at all and
     /// decodes to `SessionStatus::Unknown` rather than failing, and this
@@ -355,6 +435,177 @@ pub struct SessionInfo {
     /// M2 wire addition, per `PROTOCOL_VERSION`'s own docs.
     #[serde(default)]
     pub status: SessionStatus,
+    /// User-legible qualifier shown alongside an `Exited` status — SPEC.md's
+    /// "a user-initiated stop yields exited with an annotation" (Status
+    /// section). A bare optional string, not a coded enum, for the same
+    /// reason `ControlMsg::Detached::reason` is one (see that field's
+    /// docs): this is prose the UI renders verbatim, not a value it
+    /// branches on. Absent (`None`) is the only case anything produces as
+    /// of this PR — no writer exists yet, so every session decodes with no
+    /// annotation until PLAN_M3.md item 4 lands the durable stop-annotation
+    /// write path; an `Option<String>` field defaults to `None` on a
+    /// missing key without needing `#[serde(default)]` (serde's own
+    /// built-in `Option` handling — the same mechanism
+    /// `ControlMsg::CreateSession::title` already relies on elsewhere in
+    /// this file; `SessionInfo`'s OWN `title` above is a required
+    /// `String`, not a comparable case).
+    pub annotation: Option<String>,
+    /// What restarting THIS session would currently do to the agent's
+    /// conversation — see [`RestartOffer`]'s own docs for what it means
+    /// and why it lives here rather than behind a dedicated query message
+    /// (PLAN_M3.md item 9's open design question, resolved in this PR).
+    /// `#[serde(default)]` keeps it additive: an old sender's JSON has no
+    /// `restart_offer` at all and decodes to the safe `FreshOnly` default
+    /// rather than an invented "captured" claim.
+    #[serde(default)]
+    pub restart_offer: RestartOffer,
+}
+
+/// What restarting a session would do to the agent's conversation, as the
+/// supervisor currently understands it from the session's snapshot
+/// (PLAN_M3.md item 7) and its captured conversation identity (item 8) —
+/// never re-derived by a client, which cannot see either.
+///
+/// ## Design decision: on `SessionInfo`, not a dedicated query message
+///
+/// PLAN_M3.md item 9 requires the UI to know, BEFORE it even asks the user
+/// to confirm a restart, what restarting would offer: resume the captured
+/// conversation, fall back to an explicit placeholder-free template, or
+/// offer only a fresh launch. Item 9 itself is silent on HOW that
+/// knowledge reaches the client; "without a second round trip" is this
+/// design's own chosen tradeoff (spelled out in the PR brief that shaped
+/// this vocabulary), not a requirement PLAN_M3.md states. The alternative
+/// shape considered was a dedicated `QueryRestartOffer`/`RestartOfferReply`
+/// request pair, and it was rejected: opening a session (or just having
+/// listed sessions at all) already means the client holds that session's
+/// `SessionInfo`, so a second round trip would exist ONLY to answer a
+/// question the supervisor could have answered for free while building
+/// the reply it was sending anyway. The cost of embedding is symmetric
+/// and small: every `SessionInfo` in every `ListSessions` reply now
+/// carries a few bytes of enum whether or not the viewer ever opens a
+/// restart dialog for that particular session, which is negligible
+/// next to the round trip it buys back universally.
+///
+/// The other half of item 9's "know before asking" requirement — whether
+/// to SHOW a confirm-stop dialog because the agent looks still running —
+/// needed no new field here either: it is exactly `status ==
+/// SessionStatus::Alive`, already on this struct. That is deliberately
+/// only ever a UI-flow HINT, never an authorization, precisely because
+/// this same `SessionInfo` can go stale between being cached and a
+/// `RestartSession` actually being sent: the AUTHORIZATION to stop a
+/// session that turns out to be live at handling time is a separate,
+/// explicit field on the request itself
+/// (`ControlMsg::RestartSession::stop_if_running`) that the supervisor
+/// checks against liveness it rechecks at that moment — see that field's
+/// docs for why deriving consent from a client-cached status would be a
+/// TOCTOU bug, not just a redundant one.
+///
+/// Every variant is a unit variant carrying no data, so — like
+/// `ErrorKind` and `AgentKind` above, and unlike `SessionStatus` (which
+/// needs an internal tag because some of ITS variants carry fields) —
+/// this serializes as a bare snake_case string, not a tagged object.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum RestartOffer {
+    /// No captured conversation identity, and no explicit placeholder-free
+    /// resume-template override either: restart can only offer a fresh
+    /// launch. `#[default]` is deliberate, not just convenient — it is the
+    /// safe reading for any session this field does not (yet) describe an
+    /// old sender's session, or one this exact build has not finished
+    /// classifying — because defaulting toward "captured" would risk
+    /// exactly the silently-wrong-conversation resume SPEC.md forbids.
+    #[default]
+    FreshOnly,
+    /// The session's own conversation was captured (item 8): restart fills
+    /// the snapshot's resume template with that identity and resumes it.
+    Resume,
+    /// No captured identity, but the session's snapshot carries an
+    /// explicit, placeholder-free resume-template override (item 7):
+    /// restart runs that template verbatim. Kept distinct from
+    /// `FreshOnly` because the user deliberately configured this
+    /// fallback; the UI must not describe it as a plain fresh launch.
+    FallbackTemplate,
+}
+
+/// An agent's integration kind (PLAN_M3.md item 7): the two SPEC.md
+/// requires conversation-identity capture for, plus `Generic` for
+/// everything else — SPEC.md's own phrase for a profile that names no
+/// kind ("profiles without a kind get generic treatment").
+///
+/// This is a genuine three-state override on `CreateSession::agent_kind`,
+/// not two states plus an absent field: `None` means "derive it from
+/// `invocation`'s basename (or fail to)"; `Some(Claude)`/`Some(Codex)`
+/// forces integration on for an invocation basename recognition would
+/// otherwise miss (`env claude`, a wrapper script); `Some(Generic)`
+/// forces integration OFF even when the basename WOULD have matched —
+/// the case absence cannot express, because a caller has no way to tell
+/// "let it derive" apart from "I checked, and it must not integrate"
+/// without a real third value. A user running a personal script also
+/// named `claude` that is not Anthropic's CLI is the motivating case:
+/// without `Generic`, there is no way to stop basename recognition from
+/// misclassifying it and running Claude-Code-specific status heuristics
+/// and identity capture against a process that was never going to
+/// produce Claude Code's on-disk records.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AgentKind {
+    Claude,
+    Codex,
+    /// Explicitly non-integrated: no status heuristics beyond the
+    /// generic ones, no conversation-identity capture, regardless of
+    /// what basename recognition would have concluded on its own.
+    Generic,
+}
+
+/// The one stop annotation this PR reserves. SPEC.md itself only promises
+/// THAT a user-initiated stop gets an annotation on an `Exited` session
+/// ("'stopped' is not a distinct status"), without pinning its exact
+/// text; `"stopped by user"` is the literal string PLAN_M3.md item 4
+/// chose for that annotation. Named here, like [`DETACH_REASON_STALLED`],
+/// so the (future) writer and the tests that check for it cannot drift
+/// independently.
+pub const STOP_ANNOTATION: &str = "stopped by user";
+
+/// The user's chosen resolution on a `ControlMsg::RestartSession` request.
+/// Shares its three shapes with [`RestartOffer`] but is the opposite
+/// direction: `RestartOffer` is the SERVER telling the client what is
+/// possible; `RestartMode` is the CLIENT telling the server what to do.
+/// Like [`RestartOffer`], every variant is a unit variant, so this is a
+/// bare snake_case string on the wire, not a tagged object.
+///
+/// ## Must match the CURRENT offer, not a cached one
+///
+/// A well-behaved client only ever sends `Resume` or `FallbackTemplate`
+/// when the session's own `RestartOffer` said that capability exists —
+/// but see `ControlMsg::RestartSession`'s "offer/mode staleness contract"
+/// doc for why the supervisor, not client good behavior, is what actually
+/// enforces this: the offer the client saw can be stale by request time,
+/// so the handler (PLAN_M3.md item 9, not this PR) validates `mode`
+/// against the CURRENT offer and rejects a mismatch with `Conflict`
+/// rather than trusting the request.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RestartMode {
+    /// Resume the captured conversation through the snapshot's resume
+    /// template. Only valid when the CURRENT offer is `Resume`.
+    Resume,
+    /// Launch a fresh, unrelated agent process in the same working
+    /// directory. Valid ONLY when the current offer is `FreshOnly` — NOT
+    /// a way to decline an available resume: SPEC.md's restart never
+    /// downgrades a resumable session to a clean conversation ("no
+    /// fresh-restart variant in v1... for a clean conversation, create a
+    /// new session in the same directory"), so a client cannot legally
+    /// choose `Fresh` over `Resume` when `Resume` was offered — there is
+    /// no "user chose not to resume" case, only "there was nothing to
+    /// resume." A `Fresh` sent against a `Resume`/`FallbackTemplate`
+    /// offer is exactly the staleness case above and gets `Conflict`.
+    Fresh,
+    /// Run the snapshot's explicit, placeholder-free resume-template
+    /// override verbatim. Only a valid choice when
+    /// `RestartOffer::FallbackTemplate` was offered; PLAN_M3.md item 9
+    /// reserves this for the case item 7 describes (an explicitly
+    /// overridden template on a non-integrated kind).
+    FallbackTemplate,
 }
 
 /// Control-channel messages. `req_id` correlates a response to its request
@@ -390,6 +641,57 @@ pub enum ControlMsg {
         title: Option<String>,
         cols: u16,
         rows: u16,
+        /// Client-supplied idempotency key (PLAN_M3.md item 6): a create
+        /// retried with the same key and an identical fingerprint of
+        /// every session-shaping field (this struct's fields below
+        /// included, but never `cols`/`rows` — those shape the
+        /// attachment, not the session) replays the original outcome
+        /// instead of launching a second process. `None` preserves
+        /// pre-M3 behavior exactly: every request is its own create, with
+        /// no deduplication — the safe default for raw API callers (curl,
+        /// an older UI build) that never learned this field exists, so
+        /// its mere addition does not newly expose them to anything.
+        /// Vocabulary only as of this PR: nothing stores or dedups on it
+        /// yet.
+        intent_key: Option<String>,
+        /// Explicit override of the integrated-agent kind PLAN_M3.md item
+        /// 7 would otherwise derive from `invocation`'s first token by
+        /// basename recognition. A genuine tri-state via [`AgentKind`]'s
+        /// three variants: `None` means "let the supervisor derive it
+        /// (or fail to)"; `Some(Claude)`/`Some(Codex)` forces integration
+        /// on for a basename recognition would miss (`env claude`, a
+        /// wrapper script); `Some(Generic)` forces it OFF even when the
+        /// basename would have matched — see `AgentKind::Generic`'s own
+        /// docs for why that direction needs an explicit value rather
+        /// than reusing absence. No UI surface sends this yet — the UI
+        /// sends `None` and lets derivation run; this field exists for
+        /// the API and for M5's future profile system to feed richer
+        /// values through the same slot.
+        agent_kind: Option<AgentKind>,
+        /// Explicit override of the resume invocation template PLAN_M3.md
+        /// item 7 would otherwise default from `invocation`'s first
+        /// token. Structured as an argv vector, not a shell string, so a
+        /// path containing spaces survives without quoting heroics, and
+        /// `{conversation}` substitutes into its own argv slot rather
+        /// than into a string that would need escaping.
+        ///
+        /// The placement rule is exact, not "somewhere in the template":
+        /// an argv ELEMENT must equal the literal string `{conversation}`
+        /// in full — `--resume={conversation}` or any other embedded
+        /// form does not count as a placeholder occurrence under this
+        /// rule, because substitution replaces a whole element, never
+        /// splices into part of one. A session with an integrated
+        /// `agent_kind` (derived or overridden) must have a template
+        /// containing an element meeting that exact-equality rule — a
+        /// template with no such element is only valid on a non-integrated
+        /// kind, where it is a verbatim fallback resume invocation
+        /// (SPEC.md's "falls back to the profile's resume invocation
+        /// verbatim"). This crate does not enforce that invariant itself
+        /// (it is vocabulary, not validation); the supervisor's create
+        /// handler is where it will be checked once item 7 lands, and this
+        /// exact-equality wording is what keeps that future validator from
+        /// having to guess which reading was intended.
+        resume_template: Option<Vec<String>>,
     },
     /// Success reply to `CreateSession`. The session and terminal exist,
     /// but this does not establish that the agent's later `exec`
@@ -494,6 +796,87 @@ pub enum ControlMsg {
     /// never happen silently).
     SessionDeleted {
         req_id: u64,
+    },
+    /// Relaunch a session's agent (PLAN_M3.md item 9) — the only relaunch
+    /// mechanism SPEC.md's lifecycle "restart" names; the resume offered
+    /// when opening an interrupted session sends this same message, not a
+    /// separate one. `mode` is the user's resolution among what
+    /// [`SessionInfo::restart_offer`] told the client was possible for
+    /// this session AT THE TIME IT WAS CACHED — see the staleness note
+    /// below, because that offer can go stale before this message is
+    /// sent.
+    ///
+    /// Deciding whether to SHOW a confirm-stop dialog is client-side UI
+    /// flow, derived from `status == SessionStatus::Alive` on whatever
+    /// `SessionInfo` the client last saw. But that derivation is only a
+    /// hint, not an authorization: it can be stale by the time this
+    /// message actually arrives (another client's action, or the agent
+    /// exiting or relaunching in the interim), so `stop_if_running`
+    /// carries the user's actual consent onto the wire, and the handler
+    /// rechecks REAL liveness before honoring it — see that field's own
+    /// docs for the full rationale. A client only sets it after the user
+    /// has confirmed; the field is what lets the supervisor tell "the
+    /// user agreed to stop a live agent" apart from "the client
+    /// forgot to ask."
+    ///
+    /// ## Offer/mode staleness contract
+    ///
+    /// `SessionInfo::restart_offer` is a snapshot the client cached from
+    /// its last `ListSessions` or `SessionCreated`/`SessionRestarted`
+    /// reply; conversation capture (PLAN_M3.md item 8) can upgrade a
+    /// session's real offer — `FreshOnly` to `Resume` — asynchronously,
+    /// after that snapshot was taken and before this request arrives.
+    /// The handler (item 9, not this PR) must therefore validate `mode`
+    /// against the supervisor's CURRENT offer at handling time, not trust
+    /// the client's stale copy: a mismatch is rejected with `Conflict`,
+    /// and the client is expected to refresh its `SessionInfo` (polling
+    /// already exists for this) and re-present the (possibly changed)
+    /// offer to the user rather than retry blindly. This contract is
+    /// written here, at the vocabulary level, specifically so the item 9
+    /// handler cannot be implemented against a softer reading — see
+    /// [`RestartMode::Fresh`]'s own docs for the one-directional
+    /// consequence this has for that variant.
+    ///
+    /// Vocabulary only as of this PR: no handler exists yet. Until
+    /// PLAN_M3.md item 9 lands terminal reuse, vanished-cwd handling, and
+    /// the confirm-stop-relaunch sequence, this build cannot honor a
+    /// restart at all; `handle_control` replies with a temporary
+    /// `Error { kind: Internal, .. }` naming that plainly rather than
+    /// silently dropping the request (see that function's own docs) —
+    /// falling through to the generic "unexpected control message"
+    /// fallback would leave a v5 caller's request waiting on a reply
+    /// that never comes, since unlike `PauseOutput`/`ResumeOutput` this
+    /// message carries a `req_id` a caller is actually blocked on.
+    RestartSession {
+        req_id: u64,
+        session_id: String,
+        mode: RestartMode,
+        /// Explicit consent to stop a still-running agent before
+        /// relaunching (`#[serde(default)]` false — the safe direction:
+        /// an old-shaped or naive request never kills a live process by
+        /// accident). SPEC.md requires restart on a running agent to
+        /// confirm before it stops it, and that confirmation has to be
+        /// something the SUPERVISOR checks, not something the client
+        /// merely promises: a client's `SessionInfo.status` is a
+        /// snapshot from its last list or its own cached copy, and the
+        /// agent can transition between "the user was shown a confirm
+        /// dialog" and "the request actually arrives" (another client's
+        /// action, the agent exiting or being launched in the interim).
+        /// The handler (PLAN_M3.md item 9, not this PR) atomically
+        /// rechecks REAL liveness at handling time and rejects with
+        /// `Conflict` if the session is live and this flag is false —
+        /// client-derived status is a UI hint that decides whether to
+        /// SHOW a confirm dialog, never the authorization to skip it.
+        #[serde(default)]
+        stop_if_running: bool,
+    },
+    /// Success reply to `RestartSession`, shaped like `SessionCreated`:
+    /// `session` carries the session's resulting state (including its
+    /// freshly recomputed `restart_offer`) so a caller does not have to
+    /// re-list to see it.
+    SessionRestarted {
+        req_id: u64,
+        session: SessionInfo,
     },
     /// Attach to a session's terminal. The requester picks the (connection
     /// -unique) data channel; the supervisor replays history onto it and
@@ -749,7 +1132,11 @@ mod tests {
     /// form deserves the same golden-JSON pinning as any other message: a
     /// serde attribute change here (dropping `rename_all`, renaming a
     /// variant) would compile and pass every round-trip test while quietly
-    /// producing bytes an unmodified peer cannot parse.
+    /// producing bytes an unmodified peer cannot parse. `Conflict`
+    /// (PLAN_M3.md item 6, the fourth variant this enum has ever grown) is
+    /// pinned here too, bare — as `ErrorKind` alone, not wrapped in a full
+    /// `ControlMsg::Error` — since its wire shape (a snake_case string) is
+    /// independent of which message happens to carry it.
     #[test]
     fn error_kind_json_shape_is_pinned() {
         let msg = ControlMsg::Error {
@@ -767,16 +1154,21 @@ mod tests {
                 "kind": "not_found",
             })
         );
+        assert_eq!(
+            serde_json::to_value(ErrorKind::Conflict).unwrap(),
+            serde_json::json!("conflict")
+        );
     }
 
     /// `PROTOCOL_VERSION` is a load-bearing constant (see the const's own
-    /// docs for the M2 bump to 3 and the M2.5 bump to 4): pinning its value
-    /// here makes an accidental re-bump (or a forgotten one, if a later
-    /// change needed it) a loud test failure rather than a silent drift
-    /// discovered only by two builds refusing to talk to each other.
+    /// docs for the M2 bump to 3, the M2.5 bump to 4, and the M3 bump to
+    /// 5): pinning its value here makes an accidental re-bump (or a
+    /// forgotten one, if a later change needed it) a loud test failure
+    /// rather than a silent drift discovered only by two builds refusing
+    /// to talk to each other.
     #[test]
-    fn protocol_version_is_pinned_at_4() {
-        assert_eq!(PROTOCOL_VERSION, 4);
+    fn protocol_version_is_pinned_at_5() {
+        assert_eq!(PROTOCOL_VERSION, 5);
     }
 
     /// Pins the decode half of the failure PLAN_M2_5.md's version bump
@@ -1022,16 +1414,17 @@ mod tests {
         );
     }
 
-    /// `SessionStatus`'s three variants and FOUR distinct JSON shapes
+    /// `SessionStatus`'s now FIVE variants and SIX distinct JSON shapes
     /// (`Exited` alone has two: `exit_code` present vs. `null`) are
-    /// PLAN_M2.md's "Proto growth" wire addition, pinned exactly like
-    /// `ErrorKind`'s variants above: an `#[serde(tag = ...)]` or
-    /// variant-naming change here would compile and round-trip cleanly
+    /// PLAN_M2.md's and PLAN_M3.md's "Proto growth" wire additions, pinned
+    /// exactly like `ErrorKind`'s variants above: an `#[serde(tag = ...)]`
+    /// or variant-naming change here would compile and round-trip cleanly
     /// while quietly producing bytes an unmodified peer cannot parse. All
-    /// four shapes matter individually because `Exited` has an
-    /// internally-tagged field (`exit_code`) that flattens into the same
-    /// object as the `state` tag — a detail `serde_json::to_value`
-    /// equality alone makes visible, unlike a bare round-trip.
+    /// shapes matter individually because `Exited` and `Error` both have
+    /// internally-tagged fields that flatten into the same object as the
+    /// `state` tag — a detail `serde_json::to_value` equality alone makes
+    /// visible, unlike a bare round-trip. `Error` and `Interrupted` are the
+    /// PLAN_M3.md item 3/2 additions that forced `PROTOCOL_VERSION` to 5.
     #[test]
     fn session_status_json_shapes_are_pinned() {
         assert_eq!(
@@ -1050,6 +1443,82 @@ mod tests {
             serde_json::to_value(SessionStatus::Unknown).unwrap(),
             serde_json::json!({ "state": "unknown" })
         );
+        assert_eq!(
+            serde_json::to_value(SessionStatus::Error {
+                detail: "exec: no such file or directory".to_string()
+            })
+            .unwrap(),
+            serde_json::json!({
+                "state": "error",
+                "detail": "exec: no such file or directory",
+            })
+        );
+        assert_eq!(
+            serde_json::to_value(SessionStatus::Interrupted).unwrap(),
+            serde_json::json!({ "state": "interrupted" })
+        );
+    }
+
+    /// PLAN_M3 review batch item 28: proves the FAILURE the whole
+    /// `PROTOCOL_VERSION` bump to 5 exists to cause. `Interrupted` and
+    /// `Error` are new tagged-enum variants (see `SessionStatus`'s own
+    /// docs on why they could not be additive), so a decoder shaped like a
+    /// genuine v4 peer — one that only ever knew `unknown`/`alive`/
+    /// `exited` — must FAIL to decode either of them, exactly as
+    /// `unknown_control_message_tag_fails_decode` pins the same failure
+    /// one level up for `ControlMsg` tags. Nothing before this test
+    /// actually checked that a v4 decoder rejects these; every other
+    /// `SessionStatus` test in this file decodes through the CURRENT (v5)
+    /// types, which trivially accept their own variants.
+    #[derive(Debug, Deserialize)]
+    #[serde(tag = "state", rename_all = "snake_case")]
+    enum LegacyV4SessionStatus {
+        Unknown,
+        Alive,
+        // Included for shape-completeness (a real v4 decoder has this
+        // variant too) even though this test only ever feeds it
+        // `interrupted`/`error` JSON, which is exactly the point: it
+        // exercises none of `Exited`'s own fields.
+        #[allow(dead_code)]
+        Exited {
+            exit_code: Option<i32>,
+        },
+    }
+
+    #[test]
+    fn interrupted_and_error_status_fail_under_a_legacy_v4_decoder() {
+        let interrupted = serde_json::to_value(SessionStatus::Interrupted).unwrap();
+        serde_json::from_value::<LegacyV4SessionStatus>(interrupted).expect_err(
+            "a v4 decoder must fail on `interrupted`, not silently ignore or default it",
+        );
+
+        let error = serde_json::to_value(SessionStatus::Error {
+            detail: "exec: no such file or directory".to_string(),
+        })
+        .unwrap();
+        serde_json::from_value::<LegacyV4SessionStatus>(error)
+            .expect_err("a v4 decoder must fail on `error`, not silently ignore or default it");
+    }
+
+    /// The `ErrorKind` sibling of the test above: a decoder shaped like a
+    /// genuine v4 peer — `not_found`/`invalid_request`/`internal` only —
+    /// must FAIL on `conflict`, the variant `PROTOCOL_VERSION` 5 added.
+    /// `ErrorKind` has no internal tag (every variant is a bare string;
+    /// see `AgentKind`'s doc comment for why), so the shadow enum below
+    /// needs no `#[serde(tag = ...)]` either.
+    #[derive(Debug, Deserialize)]
+    #[serde(rename_all = "snake_case")]
+    enum LegacyV4ErrorKind {
+        NotFound,
+        InvalidRequest,
+        Internal,
+    }
+
+    #[test]
+    fn conflict_error_kind_fails_under_a_legacy_v4_decoder() {
+        let conflict = serde_json::to_value(ErrorKind::Conflict).unwrap();
+        serde_json::from_value::<LegacyV4ErrorKind>(conflict)
+            .expect_err("a v4 decoder must fail on `conflict`, not silently ignore or default it");
     }
 
     /// `SessionList`'s `total`/`truncated` addition, pinned the same way:
@@ -1165,6 +1634,8 @@ mod tests {
                 cwd: "/tmp".to_string(),
                 invocation: "agent".to_string(),
                 status: SessionStatus::Exited { exit_code: Some(1) },
+                annotation: None,
+                restart_offer: RestartOffer::default(),
             }],
             total: 3,
             truncated: true,
@@ -1189,5 +1660,514 @@ mod tests {
         // some hand-crafted stand-in.
         let real_decoded: ControlMsg = serde_json::from_value(json).unwrap();
         assert_eq!(real_decoded, new_msg);
+    }
+
+    /// `SessionInfo::annotation` and `restart_offer` are PLAN_M3.md's stop-
+    /// annotation (item 4) and restart-offer (item 9) additions, both
+    /// defaulting on absence for the same additive-within-5 reason
+    /// `status` was — `restart_offer` via an explicit `#[serde(default)]`
+    /// (it is a plain enum with a `#[default]` variant), `annotation` via
+    /// serde's own built-in `Option` handling (see that field's doc
+    /// comment). Pinning both the present and absent shapes catches a
+    /// rename or a dropped default independently of the round-trip tests
+    /// elsewhere in this file.
+    #[test]
+    fn session_info_annotation_and_restart_offer_json_shapes_are_pinned() {
+        let bare = SessionInfo {
+            id: "s1".to_string(),
+            title: "demo".to_string(),
+            cwd: "/tmp".to_string(),
+            invocation: "agent".to_string(),
+            status: SessionStatus::default(),
+            annotation: None,
+            restart_offer: RestartOffer::default(),
+        };
+        assert_eq!(
+            serde_json::to_value(&bare).unwrap(),
+            serde_json::json!({
+                "id": "s1",
+                "title": "demo",
+                "cwd": "/tmp",
+                "invocation": "agent",
+                "status": { "state": "unknown" },
+                "annotation": null,
+                "restart_offer": "fresh_only",
+            })
+        );
+
+        let stopped = SessionInfo {
+            status: SessionStatus::Exited { exit_code: Some(0) },
+            annotation: Some(STOP_ANNOTATION.to_string()),
+            restart_offer: RestartOffer::Resume,
+            ..bare
+        };
+        assert_eq!(
+            serde_json::to_value(&stopped).unwrap()["annotation"],
+            serde_json::json!("stopped by user")
+        );
+        assert_eq!(
+            serde_json::to_value(&stopped).unwrap()["restart_offer"],
+            serde_json::json!("resume")
+        );
+
+        // JSON shaped as if these two fields had not been added YET —
+        // no `annotation`, no `restart_offer` at all — must still decode,
+        // defaulting both. This is intra-version-5 additive discipline,
+        // not real cross-build interop: an actual pre-M3 (v4) peer is
+        // refused outright at the handshake (see `PROTOCOL_VERSION`'s own
+        // docs) and never reaches this decode path at all. What this
+        // pins is the same guarantee `status` needed when THAT field was
+        // added within v3 (see
+        // `old_shape_session_list_json_decodes_with_defaulted_new_fields`
+        // above) — that a later field addition inside one version stays
+        // safe for any JSON that predates it, whatever the reason a given
+        // sender's JSON might lack it.
+        let old_shape = serde_json::json!({
+            "id": "s1",
+            "title": "demo",
+            "cwd": "/tmp",
+            "invocation": "agent",
+            "status": { "state": "alive" },
+        });
+        let decoded: SessionInfo = serde_json::from_value(old_shape).unwrap();
+        assert_eq!(decoded.annotation, None);
+        assert_eq!(decoded.restart_offer, RestartOffer::FreshOnly);
+    }
+
+    /// PLAN_M3 review batch item 23: a future field appearing INSIDE a
+    /// nested `SessionInfo` — not just at the top level of a `ControlMsg`,
+    /// which `pause_and_resume_with_future_extra_fields_decode_through_parse_control`
+    /// already covers — must still decode through the REAL `parse_control`
+    /// path (not a hand-rolled `serde_json::from_value::<SessionInfo>`,
+    /// which would say nothing about whether `deny_unknown_fields` had
+    /// crept in anywhere along the real decode chain from frame bytes to
+    /// `ControlMsg`). Additivity within version 5 is only real if it holds
+    /// at every nesting level a sender might grow, not just the outermost
+    /// one; a `#[serde(deny_unknown_fields)]` added to `SessionInfo` alone
+    /// (never touching `ControlMsg` itself) would break this specific case
+    /// while every other test in this file stayed green.
+    #[test]
+    fn session_list_with_unknown_field_inside_session_decodes_through_parse_control() {
+        let frame = Frame {
+            kind: FrameKind::Control,
+            channel: 0,
+            body: serde_json::json!({
+                "type": "session_list",
+                "req_id": 11,
+                "sessions": [
+                    {
+                        "id": "s1",
+                        "title": "demo",
+                        "cwd": "/tmp",
+                        "invocation": "agent",
+                        "status": { "state": "alive" },
+                        "future_field_inside_session": "value from tomorrow",
+                    }
+                ],
+                "total": 1,
+                "truncated": false,
+            })
+            .to_string()
+            .into_bytes(),
+        };
+        let msg = crate::io::parse_control(&frame)
+            .expect("an unknown field nested inside a SessionInfo object must decode, not error");
+        let ControlMsg::SessionList { sessions, .. } = msg else {
+            panic!("expected ControlMsg::SessionList, got {msg:?}");
+        };
+        assert_eq!(sessions.len(), 1);
+        assert_eq!(sessions[0].id, "s1");
+        assert_eq!(sessions[0].status, SessionStatus::Alive);
+    }
+
+    /// `AgentKind`, `RestartOffer`, and `RestartMode` are bare snake_case
+    /// strings (see their doc comments for why, unlike `SessionStatus`),
+    /// golden-pinned per variant below so a rename or `rename_all` change
+    /// fails loudly instead of passing a round-trip test while quietly
+    /// breaking an unmodified peer.
+    ///
+    /// The exhaustive matches at the top are the actual mechanism that
+    /// catches a future variant this test forgets: a golden assertion
+    /// alone would stay green if someone added a variant and simply never
+    /// came back here, since nothing about `assert_eq!` on the variants
+    /// THIS test already knows about would notice. Each `match` has no
+    /// wildcard arm, so a new variant on any of these three enums fails
+    /// THIS FILE to compile until it is added to both the match and a
+    /// golden assertion below — the earlier version of this doc comment
+    /// claimed the golden assertions alone gave this protection, which
+    /// was not true (a genuinely exhaustive check requires exactly this
+    /// kind of construct, not more `assert_eq!` calls).
+    #[test]
+    fn agent_kind_and_restart_vocabulary_json_shapes_are_pinned() {
+        match AgentKind::Claude {
+            AgentKind::Claude | AgentKind::Codex | AgentKind::Generic => {}
+        }
+        match RestartOffer::FreshOnly {
+            RestartOffer::FreshOnly | RestartOffer::Resume | RestartOffer::FallbackTemplate => {}
+        }
+        match RestartMode::Resume {
+            RestartMode::Resume | RestartMode::Fresh | RestartMode::FallbackTemplate => {}
+        }
+
+        assert_eq!(
+            serde_json::to_value(AgentKind::Claude).unwrap(),
+            serde_json::json!("claude")
+        );
+        assert_eq!(
+            serde_json::to_value(AgentKind::Codex).unwrap(),
+            serde_json::json!("codex")
+        );
+        assert_eq!(
+            serde_json::to_value(AgentKind::Generic).unwrap(),
+            serde_json::json!("generic")
+        );
+        assert_eq!(
+            serde_json::to_value(RestartOffer::FreshOnly).unwrap(),
+            serde_json::json!("fresh_only")
+        );
+        assert_eq!(
+            serde_json::to_value(RestartOffer::Resume).unwrap(),
+            serde_json::json!("resume")
+        );
+        assert_eq!(
+            serde_json::to_value(RestartOffer::FallbackTemplate).unwrap(),
+            serde_json::json!("fallback_template")
+        );
+        assert_eq!(
+            serde_json::to_value(RestartMode::Resume).unwrap(),
+            serde_json::json!("resume")
+        );
+        assert_eq!(
+            serde_json::to_value(RestartMode::Fresh).unwrap(),
+            serde_json::json!("fresh")
+        );
+        assert_eq!(
+            serde_json::to_value(RestartMode::FallbackTemplate).unwrap(),
+            serde_json::json!("fallback_template")
+        );
+    }
+
+    /// `CreateSession`'s three PLAN_M3.md additions (`intent_key`,
+    /// `agent_kind`, `resume_template`) golden-pinned with every one of
+    /// them present, matching the treatment every other message shape in
+    /// this file gets.
+    #[test]
+    fn create_session_snapshot_override_fields_json_shape_is_pinned() {
+        let msg = ControlMsg::CreateSession {
+            req_id: 1,
+            cwd: "/some/dir".to_string(),
+            invocation: "/opt/bin/claude".to_string(),
+            title: None,
+            cols: 80,
+            rows: 24,
+            intent_key: Some("intent-abc".to_string()),
+            agent_kind: Some(AgentKind::Claude),
+            resume_template: Some(vec![
+                "/opt/bin/claude".to_string(),
+                "--resume".to_string(),
+                "{conversation}".to_string(),
+            ]),
+        };
+        assert_eq!(
+            serde_json::to_value(&msg).unwrap(),
+            serde_json::json!({
+                "type": "create_session",
+                "req_id": 1,
+                "cwd": "/some/dir",
+                "invocation": "/opt/bin/claude",
+                "title": null,
+                "cols": 80,
+                "rows": 24,
+                "intent_key": "intent-abc",
+                "agent_kind": "claude",
+                "resume_template": ["/opt/bin/claude", "--resume", "{conversation}"],
+            })
+        );
+    }
+
+    /// One direction of `CreateSession`'s three new fields' additive-decode
+    /// contract, mirroring
+    /// `old_shape_session_list_json_decodes_with_defaulted_new_fields`:
+    /// JSON shaped as if these fields had not been added yet — no
+    /// `intent_key`, `agent_kind`, or `resume_template` at all — must
+    /// still decode, with every new field defaulting to `None`. As with
+    /// the `SessionInfo` sibling test above, this is intra-version-5
+    /// additive discipline, not a claim about interoperating with an
+    /// actual pre-M3 (v4) build — a real v4 peer is refused at the
+    /// handshake and never reaches this decode path. This is the
+    /// "preserving old behavior for raw API users" promise items 6
+    /// (`intent_key` idempotency) and 7 (`agent_kind`/`resume_template`
+    /// overrides) make: a caller that never learned these fields exist
+    /// must get exactly the old behavior (no idempotency, no overrides),
+    /// never a decode failure. The REVERSE direction — today's `CreateSession`
+    /// bytes decoding under a decoder that predates these fields — is
+    /// `new_create_session_json_decodes_under_a_legacy_pre_snapshot_decoder`
+    /// below.
+    #[test]
+    fn old_shape_create_session_json_decodes_with_defaulted_new_fields() {
+        let old_shape = serde_json::json!({
+            "type": "create_session",
+            "req_id": 2,
+            "cwd": "/some/dir",
+            "invocation": "some-agent",
+            "title": null,
+            "cols": 80,
+            "rows": 24,
+        });
+        let decoded: ControlMsg = serde_json::from_value(old_shape).unwrap();
+        let ControlMsg::CreateSession {
+            intent_key,
+            agent_kind,
+            resume_template,
+            ..
+        } = decoded
+        else {
+            panic!("expected ControlMsg::CreateSession, got {decoded:?}");
+        };
+        assert_eq!(intent_key, None, "an old sender never had this field");
+        assert_eq!(agent_kind, None, "an old sender never had this field");
+        assert_eq!(resume_template, None, "an old sender never had this field");
+    }
+
+    /// The REVERSE tolerance direction (PLAN_M3 review batch item 7),
+    /// mirroring `new_session_list_json_decodes_under_a_legacy_pre_status_decoder`:
+    /// a decoder shaped like a peer built BEFORE `intent_key`/`agent_kind`/
+    /// `resume_template` existed must still decode a NEW sender's
+    /// `CreateSession` JSON, silently dropping the three fields it does
+    /// not know about. Without this test, the "CreateSession's tolerance
+    /// is covered both ways" claim made elsewhere in this file would be
+    /// true in only one direction.
+    #[derive(Debug, Deserialize)]
+    #[serde(tag = "type", rename_all = "snake_case")]
+    enum LegacyPreSnapshotControlMsg {
+        CreateSession {
+            req_id: u64,
+            cwd: String,
+            invocation: String,
+            title: Option<String>,
+            cols: u16,
+            rows: u16,
+        },
+    }
+
+    #[test]
+    fn new_create_session_json_decodes_under_a_legacy_pre_snapshot_decoder() {
+        let new_msg = ControlMsg::CreateSession {
+            req_id: 6,
+            cwd: "/some/dir".to_string(),
+            invocation: "/opt/bin/claude".to_string(),
+            title: Some("demo".to_string()),
+            cols: 80,
+            rows: 24,
+            intent_key: Some("intent-xyz".to_string()),
+            agent_kind: Some(AgentKind::Claude),
+            resume_template: Some(vec![
+                "/opt/bin/claude".to_string(),
+                "--resume".to_string(),
+                "{conversation}".to_string(),
+            ]),
+        };
+        let json = serde_json::to_value(&new_msg).unwrap();
+
+        let LegacyPreSnapshotControlMsg::CreateSession {
+            req_id,
+            cwd,
+            invocation,
+            title,
+            cols,
+            rows,
+        } = serde_json::from_value(json.clone()).expect(
+            "a legacy decoder without intent_key/agent_kind/resume_template must still decode \
+             new-shape JSON",
+        );
+        assert_eq!(req_id, 6);
+        assert_eq!(cwd, "/some/dir");
+        assert_eq!(invocation, "/opt/bin/claude");
+        assert_eq!(title, Some("demo".to_string()));
+        assert_eq!((cols, rows), (80, 24));
+
+        // The REAL type round-trips the same JSON too, same as the
+        // `SessionList` sibling test does.
+        let real_decoded: ControlMsg = serde_json::from_value(json).unwrap();
+        assert_eq!(real_decoded, new_msg);
+    }
+
+    /// `RestartSession`/`SessionRestarted` round-tripped through the real
+    /// encode/decode path, matching `stop_and_delete_roundtrip_through_frames`'s
+    /// treatment of the M2 additions — this is what would catch a drift
+    /// between the codec's framing and serde's JSON shape for the restart
+    /// vocabulary PLAN_M3.md item 9 needs (the create/error vocabulary
+    /// above is exercised at the JSON layer only, like `Attach`'s golden
+    /// test, since those are simpler unnested shapes).
+    ///
+    /// One mode suffices here (PLAN_M3 review batch item 9): each mode's
+    /// own serialized string is already golden-pinned individually by
+    /// `agent_kind_and_restart_vocabulary_json_shapes_are_pinned`, so this
+    /// test's only remaining job is proving the codec/serde frame path
+    /// itself does not drift, which does not depend on which mode is used.
+    #[test]
+    fn restart_session_roundtrips_through_frames() {
+        let msg = ControlMsg::RestartSession {
+            req_id: 42,
+            session_id: "s1".to_string(),
+            mode: RestartMode::Resume,
+            stop_if_running: true,
+        };
+        let mut wire = Vec::new();
+        Frame::control(&msg).encode(&mut wire).unwrap();
+        let (frame, used) = Frame::decode(&wire).unwrap().unwrap();
+        assert_eq!(used, wire.len());
+        assert_eq!(
+            serde_json::from_slice::<ControlMsg>(&frame.body).unwrap(),
+            msg
+        );
+
+        let reply = ControlMsg::SessionRestarted {
+            req_id: 42,
+            session: SessionInfo {
+                id: "s1".to_string(),
+                title: "demo".to_string(),
+                cwd: "/tmp".to_string(),
+                invocation: "claude".to_string(),
+                status: SessionStatus::Alive,
+                annotation: None,
+                restart_offer: RestartOffer::Resume,
+            },
+        };
+        let mut wire = Vec::new();
+        Frame::control(&reply).encode(&mut wire).unwrap();
+        let (frame, used) = Frame::decode(&wire).unwrap().unwrap();
+        assert_eq!(used, wire.len());
+        assert_eq!(
+            serde_json::from_slice::<ControlMsg>(&frame.body).unwrap(),
+            reply
+        );
+    }
+
+    /// Golden JSON for `RestartSession`, pinned the same way as
+    /// `stop_and_delete_json_shapes_are_pinned`: a serde attribute change
+    /// here would compile and round-trip cleanly while quietly producing
+    /// bytes an unmodified peer cannot parse. `stop_if_running: true` is
+    /// used here specifically (its OTHER value, absence-defaults-false, is
+    /// its own separate pin below, since that direction is the safety
+    /// property that actually matters).
+    #[test]
+    fn restart_session_json_shape_is_pinned() {
+        let msg = ControlMsg::RestartSession {
+            req_id: 7,
+            session_id: "s1".to_string(),
+            mode: RestartMode::Resume,
+            stop_if_running: true,
+        };
+        assert_eq!(
+            serde_json::to_value(&msg).unwrap(),
+            serde_json::json!({
+                "type": "restart_session",
+                "req_id": 7,
+                "session_id": "s1",
+                "mode": "resume",
+                "stop_if_running": true,
+            })
+        );
+    }
+
+    /// The safety-critical direction of `stop_if_running`'s default
+    /// (PLAN_M3 review batch item 1): JSON with no `stop_if_running` key
+    /// at all — an old-shaped or hand-crafted request — must decode to
+    /// `false`, never `true`. Getting this backwards would mean an old or
+    /// naive client's restart request kills a live agent's process tree
+    /// with no consent ever expressed, which is exactly the authorization
+    /// bug this field exists to prevent.
+    #[test]
+    fn restart_session_stop_if_running_defaults_false_when_absent() {
+        let old_shape = serde_json::json!({
+            "type": "restart_session",
+            "req_id": 1,
+            "session_id": "s1",
+            "mode": "resume",
+        });
+        let decoded: ControlMsg = serde_json::from_value(old_shape).unwrap();
+        let ControlMsg::RestartSession {
+            stop_if_running, ..
+        } = decoded
+        else {
+            panic!("expected ControlMsg::RestartSession, got {decoded:?}");
+        };
+        assert!(
+            !stop_if_running,
+            "an absent consent flag must never be read as consent"
+        );
+    }
+
+    /// Golden JSON for `SessionRestarted`'s FULL outer shape, including its
+    /// nested `session` object (PLAN_M3 review batch item 6): a bare
+    /// round-trip test, like `restart_session_roundtrips_through_frames`
+    /// above, would still pass under a coordinated drift where BOTH the
+    /// encode and decode sides of a field rename happen to agree with each
+    /// other but not with an unmodified peer — the same reasoning
+    /// `control_json_shape_is_pinned` and `error_kind_json_shape_is_pinned`
+    /// document for why round-trips alone are not enough.
+    #[test]
+    fn session_restarted_json_shape_is_pinned() {
+        let msg = ControlMsg::SessionRestarted {
+            req_id: 8,
+            session: SessionInfo {
+                id: "s1".to_string(),
+                title: "demo".to_string(),
+                cwd: "/tmp".to_string(),
+                invocation: "claude".to_string(),
+                status: SessionStatus::Alive,
+                annotation: None,
+                restart_offer: RestartOffer::Resume,
+            },
+        };
+        assert_eq!(
+            serde_json::to_value(&msg).unwrap(),
+            serde_json::json!({
+                "type": "session_restarted",
+                "req_id": 8,
+                "session": {
+                    "id": "s1",
+                    "title": "demo",
+                    "cwd": "/tmp",
+                    "invocation": "claude",
+                    "status": { "state": "alive" },
+                    "annotation": null,
+                    "restart_offer": "resume",
+                },
+            })
+        );
+    }
+
+    /// Version 5's additive rule for FIELDS (see `PROTOCOL_VERSION`'s
+    /// docs): the future-extra-field tolerance direction, mirroring
+    /// `pause_and_resume_with_future_extra_fields_decode_through_parse_control`.
+    /// `RestartSession` is the representative message here because it is
+    /// the one new REQUEST-shaped variant this PR adds (`CreateSession`'s
+    /// tolerance is already covered above by its own pair of tests). The
+    /// reverse direction (today's bytes under a future decoder with
+    /// defaults) is NOT a separate test here (PLAN_M3 review batch item
+    /// 9): its only independent claim would be that a hand-rolled shadow
+    /// struct's own `#[serde(default)]` works, which is serde's own
+    /// well-tested behavior, not this crate's.
+    #[test]
+    fn restart_session_with_future_extra_field_decodes_through_parse_control() {
+        let frame = Frame {
+            kind: FrameKind::Control,
+            channel: 0,
+            body: br#"{"type":"restart_session","req_id":9,"session_id":"s1","mode":"fresh","stop_if_running":false,"priority":"high"}"#
+                .to_vec(),
+        };
+        let msg = crate::io::parse_control(&frame)
+            .expect("a known tag with an unknown extra field must decode, not error");
+        assert_eq!(
+            msg,
+            ControlMsg::RestartSession {
+                req_id: 9,
+                session_id: "s1".to_string(),
+                mode: RestartMode::Fresh,
+                stop_if_running: false,
+            }
+        );
     }
 }

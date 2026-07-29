@@ -513,9 +513,10 @@ async fn delete_session(
 /// Render an error as an HTTP response whose body is the error chain in
 /// full and whose status reflects what the supervisor actually classified.
 ///
-/// The status mapping is only as honest as the M1 supervisor's own
-/// classification: `NotFound` and `InvalidRequest` map to 404/400
-/// respectively when a `SupervisorClient` request surfaces a
+/// The status mapping is only as honest as the supervisor's own
+/// classification: `NotFound` maps to 404, `InvalidRequest` to 400, and
+/// `Conflict` (PLAN_M3.md item 6 — an intent key reused with a different
+/// fingerprint) to 409, each when a `SupervisorClient` request surfaces a
 /// [`SupervisorError`] with that kind anywhere in its chain (the walk
 /// mirrors the supervisor's own `error_kind` helper, for the same
 /// reason — a `SupervisorError` can sit under context layers this client
@@ -542,6 +543,11 @@ fn http_error(e: anyhow::Error) -> axum::response::Response {
         Some(ErrorKind::NotFound) => axum::http::StatusCode::NOT_FOUND,
         Some(ErrorKind::InvalidRequest) => axum::http::StatusCode::BAD_REQUEST,
         Some(ErrorKind::Internal) | None => axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+        // PLAN_M3.md item 6: an intent key reused with a different
+        // fingerprint. 409 is the standard HTTP reading of "this
+        // identifier already means something else"; this function's own
+        // docstring above is where the full status-mapping table lives.
+        Some(ErrorKind::Conflict) => axum::http::StatusCode::CONFLICT,
     };
     // The UI shows this body verbatim.
     (status, format!("{e:#}")).into_response()
@@ -1431,6 +1437,11 @@ mod tests {
                 title,
                 cols,
                 rows,
+                // Not under test here (the assertions below only check
+                // cwd/invocation/title/cols/rows); PLAN_M3.md's new
+                // fields are exercised by farhelm-proto's own golden and
+                // tolerance tests instead.
+                ..
             } = request
             else {
                 panic!("expected CreateSession, got {request:?}");
@@ -1456,6 +1467,8 @@ mod tests {
                         // not `Alive` (creation does not establish the
                         // agent's later exec succeeded).
                         status: farhelm_proto::SessionStatus::Unknown,
+                        annotation: None,
+                        restart_offer: farhelm_proto::RestartOffer::default(),
                     },
                 }))
                 .await
@@ -1748,6 +1761,8 @@ mod tests {
                         cwd: "/sess-1".into(),
                         invocation: "agent".into(),
                         status: farhelm_proto::SessionStatus::Alive,
+                        annotation: None,
+                        restart_offer: farhelm_proto::RestartOffer::default(),
                     }],
                     total: 42,
                     truncated: true,
@@ -1937,6 +1952,21 @@ mod tests {
             response.status(),
             axum::http::StatusCode::INTERNAL_SERVER_ERROR
         );
+    }
+
+    /// PLAN_M3.md item 6: an intent key reused with a different
+    /// fingerprint maps to 409, the standard HTTP reading of "this
+    /// identifier already means something else" (see `ErrorKind::Conflict`'s
+    /// own doc comment in farhelm-proto for the full rationale, and this
+    /// function's own docstring for the mapping table).
+    #[test]
+    fn http_error_maps_conflict_supervisor_error_to_409() {
+        let err = anyhow::Error::new(SupervisorError {
+            kind: farhelm_proto::ErrorKind::Conflict,
+            message: "intent key already used with a different request".to_string(),
+        });
+        let response = super::http_error(err);
+        assert_eq!(response.status(), axum::http::StatusCode::CONFLICT);
     }
 
     /// Spec: an error chain with no `SupervisorError` anywhere in it — a
