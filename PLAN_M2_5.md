@@ -22,11 +22,17 @@ RSS without bound — about 3.5 MB/s against a `yes` pane on tmux 3.4.
 ## User-visible outcome
 
 Almost nothing, which is the point. `cat` of a huge file in a session terminal renders progressively instead of freezing
-the tab or silently truncating; the agent keeps running at full speed regardless of how slowly any viewer parses. The
+the tab or silently truncating, and interactive agent output — which never approaches these rates — is unaffected. The
 one genuinely new surface: a viewer that stops consuming entirely — a wedged tab, a laptop asleep past its WebSocket
 timeout — is detached after a bounded stall with a visible reason, exactly like the existing another-client-took-over
-detach. The session itself is never slowed or harmed by a stuck viewer; reattaching replays per the existing rules and
-moves on.
+detach; reattaching replays per the existing rules and moves on.
+
+An earlier draft of this section promised the agent "keeps running at full speed regardless" and that a session is
+"never slowed" by a stuck viewer. PR 3's audit shows that is not achievable and not what the design does: one of the two
+flow-control behaviors tmux exhibits is to throttle the pane itself, which blocks the agent's `write` for as long as the
+pause is honored. The honest contract, now also in SPEC.md, is BOUNDED slowdown — an agent's output can be held back
+only while a viewer is paused, only up to the stall timeout, and never silently; past that the viewer is detached and
+the agent runs unimpeded. No viewer can stop a session's work outright, or affect a session it is not attached to.
 
 ## Scope
 
@@ -42,9 +48,9 @@ moves on.
 - **Supervisor flow control**: on pause, stop reading the attachment's control-client stream; on resume, continue. The
   overflow backstop is tmux's own client flow control (`pause-after`, audited below) so a stalled client never grows the
   tmux server's memory. Enabling `pause-after` changes the control-mode dialect: pane output arrives as
-  `%extended-output` (with an age argument) instead of `%output`, and `%pause`/`%continue` notifications appear —
-  today's parser recognizes none of these and would silently discard all terminal output, so the parser work is explicit
-  PR-3 scope with tests on every supported tmux generation, not an incidental detail.
+  `%extended-output` (with an age argument) instead of `%output`, and `%pause`/`%continue` notifications appear — the
+  pre-PR3 parser recognized none of these and would have silently discarded all terminal output, so the parser work is
+  explicit PR-3 scope with tests on every supported tmux generation, not an incidental detail.
 - **Catch-up after a tmux-side pause** is a reattach in all but the WebSocket: the existing snapshot/cutover replay
   machinery assumes an empty terminal, so the client's terminal is reset before the replay lands (normal screen,
   alternate screen, cursor modes, and scrollback all covered by tests). Never replay into a populated terminal; never
@@ -74,9 +80,13 @@ moves on.
 
 ### Out (deliberately)
 
-Everything in PLAN.md's later milestones, notably M3's durability/resume work. Also out: throttling the agent itself
-(the PTY and tmux history absorb bursts; the agent is never paused), any persistent-buffer scheme (tmux history is the
-buffer), and input-path flow control (keystrokes are tiny and latency-critical; pausing input is never correct).
+Everything in PLAN.md's later milestones, notably M3's durability/resume work. Also out: any Farhelm-side mechanism for
+throttling the agent — nothing in this milestone signals, stops, or paces the agent process, and the PTY plus tmux
+history absorb ordinary bursts. What is NOT claimed (see "User-visible outcome") is that the agent therefore never
+blocks: tmux may throttle a paused viewer's pane on its own, which back-pressures the agent's `write` for the duration
+of the pause. That is tmux's mechanism, bounded by the stall timeout, not a knob this milestone adds. Also out: any
+persistent-buffer scheme (tmux history is the buffer), and input-path flow control (keystrokes are tiny and
+latency-critical; pausing input is never correct).
 
 ## Design: how the pieces hold together
 
@@ -87,14 +97,32 @@ they hang off one multiplexed supervisor connection, a full per-terminal channel
 blocking the shared reader — head-of-line blocking across sessions is the one failure this hop must never have.
 Supervisor: a paused attachment's reader simply stops pulling from the control client's stdout; the per-attachment and
 per-connection channels are bounded so a slow unix-socket consumer propagates backpressure the same way. tmux: the
-control client is attached with `pause-after` set, so when the supervisor stops draining, tmux pauses that client's pane
-stream instead of buffering (audited 2026-07-29 on 3.4 and 3.7b: RSS flat under a `yes` producer with an undrained
-client; without the flag, unbounded growth at ~3.5 MB/s). History keeps accumulating per `history-limit` while paused.
-The audit does not yet cover tmux 3.3, the version floor SPEC_impl.md commits to — PR 3 extends the existing
-multi-version validation (the `scripts/check-tmux-cutover.py` precedent) to `pause-after` and the `%extended-output`
-dialect on a 3.3a build, or surfaces a floor raise as its own decision if 3.3a cannot be validated.
+control client is attached with `pause-after` set, so when the supervisor stops draining, the tmux server's RSS stays
+flat instead of growing without bound (audited 2026-07-29 on 3.3a, 3.4 and 3.7b; without the flag, unbounded growth at
+~3.5 MB/s).
 
-Catching up after tmux pauses is the part that must not be improvised. tmux marks the pane paused and the client must
+This paragraph originally said tmux answers an undrained client by pausing that client's pane stream. PR 3's own audit
+(2026-07-29, same three versions, both with a standalone control client and through the full supervisor stack) found
+that is only one of two answers tmux gives, and that the choice is not version-determined: tmux either throttles the
+pane itself — the agent's `write` blocks, nothing is queued, and delivery simply continues on resume — or reads ahead
+into history and pauses the client's stream once the output queued for it ages past `pause-after`. All three versions
+were observed taking both paths across repeated identical trials, so the deciding factor is how far tmux had read ahead
+when the client stalled, not which tmux is installed. Both satisfy the milestone's contract; the supervisor implements
+both, and SPEC_impl.md's backpressure paragraph records the mechanism split as the audited truth.
+
+That audit is also what closes this plan's owed 3.3 validation: `pause-after`, the `%extended-output` dialect, the
+`%pause`/`%continue` notifications, and flat-RSS behavior were all exercised directly against a locally built tmux 3.3a,
+and every terminal-path e2e test passes against it (the suite as a whole does not — see the pre-existing failure noted
+below). The version floor stands as SPEC_impl.md commits it, and no extension of `scripts/check-tmux-cutover.py` was
+needed to get there. One PRE-EXISTING e2e failure surfaced on 3.3a and is out of this milestone's scope:
+`capture-pane -N` does not preserve trailing styled padding there, so M2's stop-snapshot padding test fails. Decision
+(recorded here because the 3.3a run is what surfaced it): this is accepted degradation below tmux 3.4, like the pre-3.7
+bracketed-paste loss SPEC_impl.md already documents — the stop snapshot's trailing padding styling is cosmetic fidelity
+in an already-dead pane's frame, CI pins the behavior on 3.4+, and a snapshot-side workaround would complicate the
+capture path for every version to serve the floor's last dot release. SPEC_impl.md's tmux-version paragraph records it
+alongside the bracketed-paste caveat.
+
+Catching up when tmux does pause is the part that must not be improvised. tmux marks the pane paused and the client must
 explicitly continue it; the bytes tmux dropped from the live stream are exactly the bytes the reattach machinery already
 knows how to replay from history with a clean cutover. The resume path reuses that sequence rather than growing a second
 replay implementation — but as a reattach in full: the replay assumes an empty terminal, so the client's terminal is
@@ -148,7 +176,7 @@ Each step is a PR on the single stack; tests ride with their behavior.
 - The M1 review's unbounded-queue debt on the terminal path — supervisor and helm — closed rather than re-deferred.
 - The `term.write()` ~50MB silent-discard cliff, now unreachable by construction.
 - The untested assumption that tmux tolerates a lagging supervisor; now pinned to `pause-after` behavior audited on 3.4
-  and 3.7b (3.3 validation owed by PR 3), with the catch-up path shared with reattach instead of a second bespoke
-  replay.
+  and 3.7b — and, since PR 3's own audit, on 3.3a as well, so the 3.3 validation this plan owed is done — with the
+  catch-up path shared with reattach instead of a second bespoke replay.
 - The false belief that new control messages are additive within a protocol version — now pinned by a test as
   connection-fatal, so future wire growth starts from the truth.

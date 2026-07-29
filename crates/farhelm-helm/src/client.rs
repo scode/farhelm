@@ -8,11 +8,14 @@
 //! which is the SPEC_impl.md transport-blindness made structural.
 
 use anyhow::{Context, bail};
-use farhelm_proto::io::{FrameReader, FrameWriter, handshake, parse_control};
+use farhelm_proto::io::{
+    FrameReader, FrameWriter, ProgressWrite, handshake, parse_control, write_frame_before_stall,
+};
 use farhelm_proto::{ControlMsg, ErrorKind, Frame, FrameKind, SessionInfo};
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::time::Duration;
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::sync::{Mutex, mpsc, oneshot, watch};
 use tracing::warn;
@@ -20,6 +23,77 @@ use tracing::warn;
 /// Input chunk size. Well under `MAX_FRAME_LEN`, and matched to the
 /// supervisor's replay chunking so both directions behave alike.
 const INPUT_CHUNK: usize = 32 * 1024;
+
+/// Depth of one attached terminal's [`TermEvent`] queue.
+///
+/// The helm's half of PLAN_M2_5.md's bounded-queue work, and the hop with
+/// the unusual rule: a full queue here DETACHES that terminal instead of
+/// backpressuring, because every terminal on this connection shares one
+/// multiplexed reader (see [`SupervisorClient::dispatch`]).
+///
+/// Sized so a WORST-CASE ATTACH REPLAY can never trip the overflow
+/// detach, because a healthy attach must not look like a wedged viewer.
+/// The arithmetic, from the two constants that actually bound a replay:
+///
+/// - tmux retains at most `HISTORY_LIMIT` = 12,000 lines (the SPEC.md
+///   replay floor the supervisor configures).
+/// - A captured line is a terminal row plus its `capture-pane -e` escape
+///   sequences; 256 bytes is a generous ceiling for the 80–200 column
+///   rows real agents draw. 12,000 × 256 B ≈ 3 MiB.
+/// - The supervisor chunks that at its `REPLAY_CHUNK` (32 KiB), so a
+///   full replay is ≈ 96 frames.
+///
+/// 256 leaves ~2.5× headroom over that for unusually wide or heavily
+/// styled panes. Item ordering matters as much as the number: the
+/// supervisor now enqueues `Attached` BEFORE spawning the forwarder, so
+/// `attach()` returns and the consumer starts draining while the replay is
+/// still being written — without that, no queue depth is safe, because
+/// nothing is allowed to read until the reply lands.
+///
+/// Beyond a replay this is a pure backstop. Real flow control happens two
+/// hops away — the browser's watermark pause/resume and the supervisor's
+/// bounded writer — so a healthy terminal never approaches this in steady
+/// state; it only fills when the consumer has genuinely stopped.
+///
+/// Honest caveat: this bounds EVENTS, not bytes, and the two only line up
+/// when frames are large. Live pane output arrives as whatever tmux
+/// notification sizes the producer happens to generate — often a few
+/// hundred bytes, not `REPLAY_CHUNK` — so for small frames the real
+/// ceiling is closer to a hundred kilobytes than to the 8 MiB the count
+/// would suggest, and a consumer that stops draining trips the detach
+/// below quickly. That is the right bias for what this bound exists to
+/// catch (a genuinely wedged viewer), and it is why the number cannot be
+/// read as a memory budget. A byte-accounted bound would be the honest fix
+/// if this ever needs to double as one; `mpsc` offers no such thing, and a
+/// side counter is not worth it while the watermark upstream governs the
+/// steady state.
+const TERM_EVENT_QUEUE: usize = 256;
+
+/// Depth of the single outbound queue to the supervisor.
+///
+/// Deliberately small: this direction carries only terminal INPUT
+/// (keystrokes and pastes, already chunked at [`INPUT_CHUNK`]) and
+/// control messages (requests, resizes, pause/resume). There is no
+/// high-volume producer on this side — SPEC_impl.md keeps input off the
+/// flow-control path entirely, since keystrokes are tiny and
+/// latency-critical — so a deep queue would buy nothing but a longer
+/// window in which a dead supervisor still looks alive. Like every
+/// `mpsc` bound here this counts MESSAGES, not bytes; a single paste
+/// chunk is up to `INPUT_CHUNK`, so the ceiling is 64 of those and the
+/// typical occupancy is a keystroke or two.
+const SUPERVISOR_WRITER_QUEUE: usize = 64;
+
+/// How long the writer task may make NO byte progress before declaring
+/// the supervisor gone.
+///
+/// The helm's mirror of the supervisor's own writer bound, needed for the
+/// same reason: once the outbound queue is bounded, a supervisor that
+/// stops consuming parks this task and — through the queue — every request
+/// and every WebSocket handler behind it, with no error to report and no
+/// EOF to notice. Sixty seconds is generous by construction; the residual
+/// is only that a transport accepting not one byte for a full minute is
+/// called gone, which is indistinguishable from gone at this layer.
+const WRITER_STALL_TIMEOUT: Duration = Duration::from_secs(60);
 
 /// A supervisor-side request failure, carried through as a distinct type
 /// (rather than a bare string `anyhow` error) so callers above this client
@@ -76,6 +150,133 @@ pub enum TermEvent {
     Detached(String),
 }
 
+/// One attached terminal, as the client holds it: the bounded data queue
+/// plus an out-of-band detach signal.
+///
+/// The detach reason travels on its own `watch` rather than through the
+/// data queue, and that separation is what makes teardown always possible.
+/// The queue can be full at exactly the moment a terminal must be told it
+/// is finished — that is, definitionally, the stalled-terminal case — so a
+/// notice that needed queue capacity could not be delivered to the one
+/// consumer that most needs it, and the sender would sit pinned behind a
+/// browser that has stopped reading. A watch never blocks and never needs
+/// capacity.
+struct TerminalHandle {
+    events: mpsc::Sender<TermEvent>,
+    detach: watch::Sender<Option<String>>,
+}
+
+/// The receiving half of one attachment: bounded terminal events plus the
+/// out-of-band detach signal (see [`TerminalHandle`]).
+///
+/// Exposes `recv()` with the obvious semantics — events in order, then a
+/// final `Detached`, then `None` — while keeping the detach signal
+/// separately observable via [`Self::detach_signal`] so a consumer parked
+/// on something else (a WebSocket write to a browser that stopped reading)
+/// can be woken and torn down without that write ever completing.
+#[derive(Debug)]
+pub struct TermStream {
+    events: mpsc::Receiver<TermEvent>,
+    detach: watch::Receiver<Option<String>>,
+    ended: bool,
+}
+
+impl TermStream {
+    /// Next event, or `None` once the attachment has ended and its
+    /// backlog is drained.
+    ///
+    /// Buffered data is preferred over the detach signal, deliberately:
+    /// a takeover or a dead terminal must not truncate output the
+    /// supervisor already delivered, so the reason is reported only once
+    /// there is genuinely nothing left to hand over. The one case that
+    /// discards a backlog is the overflow detach, and there the backlog is
+    /// exactly the content the consumer already proved it was not reading.
+    pub async fn recv(&mut self) -> Option<TermEvent> {
+        if self.ended {
+            return None;
+        }
+        loop {
+            match self.events.try_recv() {
+                Ok(event) => return Some(event),
+                Err(mpsc::error::TryRecvError::Empty) => {}
+                // The queue closed. That happens at the same moment the
+                // handle is dropped, which is the same moment the reason
+                // was published — so the reason must be reported here
+                // rather than collapsing to a bare end-of-stream. Getting
+                // this wrong is exactly a silent disappearance: the client
+                // would see its terminal stop with no explanation.
+                Err(mpsc::error::TryRecvError::Disconnected) => return self.end_with_reason(),
+            }
+            if let Some(reason) = self.detach.borrow_and_update().clone() {
+                self.ended = true;
+                return Some(TermEvent::Detached(reason));
+            }
+            tokio::select! {
+                event = self.events.recv() => match event {
+                    Some(event) => return Some(event),
+                    None => return self.end_with_reason(),
+                },
+                changed = self.detach.changed() => {
+                    if changed.is_err() {
+                        return self.end_with_reason();
+                    }
+                }
+            }
+        }
+    }
+
+    /// End the stream, reporting a detach reason if one was published.
+    ///
+    /// The `None` answer means the attachment ended without anyone ever
+    /// saying why — which the client's own paths do not do, so it stands
+    /// for "the whole client was dropped mid-flight" rather than a normal
+    /// detach.
+    fn end_with_reason(&mut self) -> Option<TermEvent> {
+        self.ended = true;
+        self.detach
+            .borrow_and_update()
+            .clone()
+            .map(TermEvent::Detached)
+    }
+
+    /// Take an event only if one is already buffered.
+    ///
+    /// Deliberately narrower than `recv`: it never reports the detach
+    /// signal, because its callers use it to sweep up data still queued
+    /// behind a detach they have ALREADY observed. `Err` means nothing is
+    /// buffered right now, not that the stream has ended.
+    pub fn try_recv(&mut self) -> Result<TermEvent, mpsc::error::TryRecvError> {
+        self.events.try_recv()
+    }
+
+    /// A separate view of the detach signal, for consumers that must be
+    /// able to abandon an unrelated await when the attachment ends. Yields
+    /// the reason; never resolves while the attachment is live.
+    pub fn detach_signal(&self) -> TermDetachSignal {
+        TermDetachSignal(self.detach.clone())
+    }
+}
+
+/// Standalone view of one attachment's detach signal — see
+/// [`TermStream::detach_signal`].
+#[derive(Debug)]
+pub struct TermDetachSignal(watch::Receiver<Option<String>>);
+
+impl TermDetachSignal {
+    /// Resolve with the detach reason once the attachment ends, or with
+    /// `None` if the client itself disappeared first.
+    pub async fn detached(&mut self) -> Option<String> {
+        loop {
+            if let Some(reason) = self.0.borrow_and_update().clone() {
+                return Some(reason);
+            }
+            if self.0.changed().await.is_err() {
+                return None;
+            }
+        }
+    }
+}
+
 /// A live connection to one supervisor, shared by every request in flight.
 ///
 /// All methods take `&self` and the type is `Send + Sync`: axum handlers
@@ -88,9 +289,9 @@ pub enum TermEvent {
 /// fast rather than queueing onto a corpse. Reconnection with bounded
 /// retries (SPEC.md's Errors section) arrives with the host registry.
 pub struct SupervisorClient {
-    writer_tx: mpsc::UnboundedSender<Frame>,
+    writer_tx: mpsc::Sender<Frame>,
     pending: Mutex<Pending>,
-    terminals: Mutex<HashMap<u32, mpsc::UnboundedSender<TermEvent>>>,
+    terminals: Mutex<HashMap<u32, TerminalHandle>>,
     next_req: AtomicU64,
     /// Wider than the wire's u32 on purpose: ids are never recycled (see
     /// `allocate_channel`), so the counter must be able to walk past the
@@ -143,6 +344,31 @@ fn allocate_channel(next_channel: &AtomicU64) -> anyhow::Result<u32> {
         .map_err(|_| anyhow::anyhow!("terminal channel ids exhausted on this connection"))
 }
 
+/// Tell one terminal it is finished, without ever blocking and without
+/// ever needing queue capacity.
+///
+/// Publishing on the handle's out-of-band watch rather than pushing a
+/// `TermEvent` is what makes this always possible. Every caller is on the
+/// shared demux path — the multiplexed reader loop, or `fail_all` running
+/// from either connection half — where blocking on one terminal's bounded
+/// queue would stall every OTHER terminal, request, and control reply on
+/// the connection (see `dispatch`'s head-of-line note). Yet the notice
+/// must not be dropped either: a client that never learns it was detached
+/// shows a live-looking terminal that has silently stopped.
+///
+/// The first reason wins. A terminal is detached once, and a later cause
+/// (the connection dying after a takeover already landed) must not rewrite
+/// the specific reason the user is shown.
+fn signal_detached(handle: &TerminalHandle, reason: String) {
+    handle.detach.send_if_modified(|current| {
+        if current.is_some() {
+            return false;
+        }
+        *current = Some(reason);
+        true
+    });
+}
+
 impl SupervisorClient {
     /// Perform the hello handshake and start the demux loop. Fails fast
     /// on protocol-version mismatch — the SPEC.md skew rule fires here,
@@ -152,11 +378,29 @@ impl SupervisorClient {
         R: AsyncRead + Unpin + Send + 'static,
         W: AsyncWrite + Unpin + Send + 'static,
     {
+        Self::start_with_stall_timeout(r, w, WRITER_STALL_TIMEOUT).await
+    }
+
+    /// Like [`Self::start`], but with the writer's no-progress window
+    /// supplied explicitly — the seam tests use to observe a wedged-peer
+    /// teardown without waiting out a full production minute.
+    pub async fn start_with_stall_timeout<R, W>(
+        r: R,
+        w: W,
+        writer_stall: Duration,
+    ) -> anyhow::Result<Arc<SupervisorClient>>
+    where
+        R: AsyncRead + Unpin + Send + 'static,
+        W: AsyncWrite + Unpin + Send + 'static,
+    {
+        // Byte-level write progress, so the writer task below can tell a
+        // slow supervisor from one that has stopped consuming.
+        let (w, bytes_written) = ProgressWrite::new(w);
         let mut reader = FrameReader::new(r);
         let mut writer = FrameWriter::new(w);
         handshake(&mut reader, &mut writer, "helm").await?;
 
-        let (writer_tx, mut writer_rx) = mpsc::unbounded_channel::<Frame>();
+        let (writer_tx, mut writer_rx) = mpsc::channel::<Frame>(SUPERVISOR_WRITER_QUEUE);
         let (connection_done, _) = watch::channel(false);
 
         let client = Arc::new(SupervisorClient {
@@ -190,8 +434,17 @@ impl SupervisorClient {
                 };
                 // Logged, not swallowed: a write failure here (broken
                 // ssh pipe, dead socket) is the one diagnostic that
-                // explains why every later request starts failing.
-                if let Err(e) = writer.write_frame(&frame).await {
+                // explains why every later request starts failing. A
+                // supervisor that stops consuming entirely is treated the
+                // same way and for the same reason as the supervisor's own
+                // writer treats a stalled helm — see
+                // `write_frame_before_stall`: without a bound, bounding
+                // the outbound queue would let a wedged peer park this
+                // task and every producer behind it forever.
+                if let Err(e) =
+                    write_frame_before_stall(&mut writer, &bytes_written, &frame, writer_stall)
+                        .await
+                {
                     warn!(error = %e, "frame write to supervisor failed");
                     // The write half dying must fail waiters too: a
                     // half-broken pipe (remote stops reading, keeps
@@ -273,8 +526,8 @@ impl SupervisorClient {
     /// "connection closed" error instead of hanging an HTTP handler.
     async fn fail_all(&self, reason: &str) {
         let mut terms = self.terminals.lock().await;
-        for (_, tx) in terms.drain() {
-            let _ = tx.send(TermEvent::Detached(reason.to_string()));
+        for (_, handle) in terms.drain() {
+            signal_detached(&handle, reason.to_string());
         }
         drop(terms);
         // Flag and drain in one lock hold; see `Pending` for why.
@@ -298,12 +551,65 @@ impl SupervisorClient {
     /// request" rule (see `ControlMsg::Error`): request ids start at 1, so
     /// an `Error` carrying 0 is unsolicited and falls through to the log
     /// rather than completing somebody's request.
+    ///
+    /// # Why this hop detaches instead of backpressuring
+    ///
+    /// Every other bounded hop on the terminal path answers a full queue
+    /// by blocking, which propagates backpressure upstream until it
+    /// reaches tmux's own `pause-after`. This one must not, and the
+    /// asymmetry is deliberate (PLAN_M2_5.md calls it the one failure this
+    /// hop must never have): every terminal, every pending request, and
+    /// the control channel itself are multiplexed over the SINGLE reader
+    /// loop that calls this function. Awaiting capacity on one terminal's
+    /// channel would stall all of them — one wedged browser tab freezing
+    /// every other session's output and every control reply on the
+    /// connection.
+    ///
+    /// So a full per-terminal queue is treated as that terminal being
+    /// stalled: `try_send` never blocks, the upstream attachment is torn
+    /// down with a `Detach`, and the terminal gets a final
+    /// [`TermEvent::Detached`] carrying the same
+    /// `DETACH_REASON_STALLED` string the supervisor's own stall detach
+    /// uses (they must be identical — that is why the constant exists).
+    /// Losing the tail of a wedged terminal's output is the accepted cost;
+    /// it is bounded, visible to the user as a detach banner, and
+    /// recoverable by reattaching, whereas the alternative is an
+    /// unbounded, invisible stall of everything else.
     async fn dispatch(&self, frame: Frame) -> anyhow::Result<()> {
         match frame.kind {
             FrameKind::Data => {
-                let terms = self.terminals.lock().await;
-                if let Some(tx) = terms.get(&frame.channel) {
-                    let _ = tx.send(TermEvent::Data(frame.body));
+                let mut terms = self.terminals.lock().await;
+                // `entry` rather than get-then-remove so the overflow arm
+                // below removes the very entry it just observed, under the
+                // SAME lock hold: releasing first would let a concurrent
+                // `detach`/`attach` interleave and leave this tearing down
+                // a channel that is no longer the one that overflowed.
+                if let std::collections::hash_map::Entry::Occupied(entry) =
+                    terms.entry(frame.channel)
+                {
+                    match entry.get().events.try_send(TermEvent::Data(frame.body)) {
+                        Ok(()) => {}
+                        Err(mpsc::error::TrySendError::Full(_)) => {
+                            let handle = entry.remove();
+                            signal_detached(
+                                &handle,
+                                farhelm_proto::DETACH_REASON_STALLED.to_string(),
+                            );
+                            self.release_upstream(frame.channel);
+                        }
+                        Err(mpsc::error::TrySendError::Closed(_)) => {
+                            // The consumer dropped its receiver without
+                            // detaching (a task cancelled mid-flight, say).
+                            // Nobody is listening, so there is no local
+                            // notice to deliver — but the SUPERVISOR still
+                            // holds an attachment for this channel, and
+                            // leaving it there would pin a control client,
+                            // an input client, and a forwarder for the life
+                            // of the connection.
+                            entry.remove();
+                            self.release_upstream(frame.channel);
+                        }
+                    }
                 }
             }
             FrameKind::Control => {
@@ -322,8 +628,8 @@ impl SupervisorClient {
                         }
                     }
                     ControlMsg::Detached { channel, reason } => {
-                        if let Some(tx) = self.terminals.lock().await.remove(channel) {
-                            let _ = tx.send(TermEvent::Detached(reason.clone()));
+                        if let Some(handle) = self.terminals.lock().await.remove(channel) {
+                            signal_detached(&handle, reason.clone());
                         }
                     }
                     other => warn!(?other, "unexpected control message at helm"),
@@ -331,6 +637,29 @@ impl SupervisorClient {
             }
         }
         Ok(())
+    }
+
+    /// Enqueue a `Detach` for `channel` upstream WITHOUT awaiting.
+    ///
+    /// Called only from the demultiplexer, which is why it must not await:
+    /// `detach()` blocks on the bounded writer queue, and blocking there
+    /// on the shared reader loop is precisely the head-of-line failure the
+    /// per-terminal detach rule exists to avoid — one wedged tab would
+    /// stall every other terminal, every pending request, and the control
+    /// channel, via the very path meant to protect them from it. Spawning
+    /// keeps the loop free; the message is never dropped, because the task
+    /// owns a sender clone and outlives this call.
+    ///
+    /// The local terminal entry is always removed by the caller before
+    /// this runs, so nothing routes to the channel while the `Detach` is
+    /// still in flight.
+    fn release_upstream(&self, channel: u32) {
+        let writer_tx = self.writer_tx.clone();
+        tokio::spawn(async move {
+            let _ = writer_tx
+                .send(Frame::control(&ControlMsg::Detach { channel }))
+                .await;
+        });
     }
 
     /// Send a request and await its correlated reply.
@@ -347,6 +676,20 @@ impl SupervisorClient {
     /// unblocks a waiter, and inventing a deadline here would abandon
     /// slow-but-fine operations on a loaded host.
     async fn request(&self, req_id: u64, msg: ControlMsg) -> anyhow::Result<ControlMsg> {
+        // Writer capacity is reserved BEFORE the pending entry is
+        // registered, and that ordering is the whole point. The queue is
+        // bounded, so sending can park; if it parks with the entry already
+        // registered and this future is then cancelled — an axum handler
+        // whose client disconnected, a `select!` losing a race — the entry
+        // is orphaned in a map nothing ever cleans, for the life of the
+        // process. With the reservation first, the only await before
+        // registration cannot leave anything behind, and the send itself
+        // becomes infallible and instant.
+        let permit = self
+            .writer_tx
+            .reserve()
+            .await
+            .map_err(|e| anyhow::Error::new(e).context("supervisor connection closed"))?;
         let (tx, rx) = oneshot::channel();
         {
             // Check-and-insert under one lock hold; see `Pending` for
@@ -357,12 +700,7 @@ impl SupervisorClient {
             }
             pending.map.insert(req_id, tx);
         }
-        if let Err(e) = self.writer_tx.send(Frame::control(&msg)) {
-            // Do not leave a pending entry behind for a request that was
-            // never sent; it would accumulate for the process's life.
-            self.pending.lock().await.map.remove(&req_id);
-            return Err(anyhow::Error::new(e).context("supervisor connection closed"));
-        }
+        permit.send(Frame::control(&msg));
         let reply = rx.await.context("supervisor connection closed")?;
         // Matched by value, not `if let ... = &reply`: an owned `message`
         // moves straight into `SupervisorError` instead of a borrow forcing
@@ -520,14 +858,26 @@ impl SupervisorClient {
         session_id: &str,
         cols: u16,
         rows: u16,
-    ) -> anyhow::Result<(u32, mpsc::UnboundedReceiver<TermEvent>)> {
+    ) -> anyhow::Result<(u32, TermStream)> {
         let channel = allocate_channel(&self.next_channel)?;
-        let (tx, rx) = mpsc::unbounded_channel();
+        let (events_tx, events_rx) = mpsc::channel(TERM_EVENT_QUEUE);
+        let (detach_tx, detach_rx) = watch::channel(None);
+        let stream = TermStream {
+            events: events_rx,
+            detach: detach_rx,
+            ended: false,
+        };
         // Register before sending Attach: replay data frames may arrive
         // before the Attached reply is processed. The insert cannot clobber
         // anything — `allocate_channel` never hands out an id twice on this
         // connection.
-        self.terminals.lock().await.insert(channel, tx);
+        self.terminals.lock().await.insert(
+            channel,
+            TerminalHandle {
+                events: events_tx,
+                detach: detach_tx,
+            },
+        );
 
         let req_id = self.req_id();
         let result = self
@@ -550,7 +900,7 @@ impl SupervisorClient {
         // attachment, or the caller waits on a terminal nobody is
         // feeding.
         match result? {
-            ControlMsg::Attached { .. } => Ok((channel, rx)),
+            ControlMsg::Attached { .. } => Ok((channel, stream)),
             other => {
                 self.terminals.lock().await.remove(&channel);
                 bail!("unexpected reply to attach: {other:?}")
@@ -568,7 +918,8 @@ impl SupervisorClient {
         self.terminals.lock().await.remove(&channel);
         let _ = self
             .writer_tx
-            .send(Frame::control(&ControlMsg::Detach { channel }));
+            .send(Frame::control(&ControlMsg::Detach { channel }))
+            .await;
     }
 
     /// Forward terminal input, chunked below the protocol's frame cap.
@@ -578,11 +929,17 @@ impl SupervisorClient {
     /// `MAX_FRAME_LEN` is a fatal decode error on the supervisor side —
     /// one oversized paste would kill the shared connection and every
     /// session on it.
-    pub fn send_input(&self, channel: u32, bytes: Vec<u8>) {
+    ///
+    /// Async since the outbound queue became bounded
+    /// ([`SUPERVISOR_WRITER_QUEUE`]). Waiting here is the right answer for
+    /// input specifically: keystrokes must never be silently dropped, and
+    /// the only thing this can wait on is the socket itself draining.
+    pub async fn send_input(&self, channel: u32, bytes: Vec<u8>) {
         for chunk in bytes.chunks(INPUT_CHUNK) {
             if self
                 .writer_tx
                 .send(Frame::data(channel, chunk.to_vec()))
+                .await
                 .is_err()
             {
                 break;
@@ -596,13 +953,46 @@ impl SupervisorClient {
     /// the supervisor drops the resize unless that channel still holds
     /// the session's attachment, so a resize in flight from a client
     /// that just lost a takeover cannot reflow the winner's terminal.
-    pub fn resize(&self, session_id: &str, channel: u32, cols: u16, rows: u16) {
-        let _ = self.writer_tx.send(Frame::control(&ControlMsg::Resize {
-            session_id: session_id.to_string(),
-            channel,
-            cols,
-            rows,
-        }));
+    pub async fn resize(&self, session_id: &str, channel: u32, cols: u16, rows: u16) {
+        let _ = self
+            .writer_tx
+            .send(Frame::control(&ControlMsg::Resize {
+                session_id: session_id.to_string(),
+                channel,
+                cols,
+                rows,
+            }))
+            .await;
+    }
+
+    /// Ask the supervisor to stop sending this attachment's output until
+    /// a matching [`Self::resume_output`].
+    ///
+    /// The helm end of PLAN_M2_5.md's watermark flow control: the browser
+    /// decides (from its own unflushed `term.write()` backlog) and this
+    /// forwards that decision verbatim. Deliberately no state is kept
+    /// here — the helm does not model whether a terminal "is" paused,
+    /// because the supervisor already ignores a pause for a channel the
+    /// sender no longer owns, and a second source of truth could only
+    /// disagree with it.
+    ///
+    /// Fire-and-forget like `resize`, and for the same reason: there is
+    /// no reply to correlate and nothing useful a caller could do with a
+    /// failure that the connection dying will not already tell it.
+    pub async fn pause_output(&self, channel: u32) {
+        let _ = self
+            .writer_tx
+            .send(Frame::control(&ControlMsg::PauseOutput { channel }))
+            .await;
+    }
+
+    /// Tell the supervisor this attachment's client has drained below its
+    /// low-water mark and output may flow again. See [`Self::pause_output`].
+    pub async fn resume_output(&self, channel: u32) {
+        let _ = self
+            .writer_tx
+            .send(Frame::control(&ControlMsg::ResumeOutput { channel }))
+            .await;
     }
 }
 
@@ -613,9 +1003,8 @@ mod tests {
     use std::io;
     use std::pin::Pin;
     use std::sync::atomic::AtomicBool;
-    use std::task::{Context, Poll};
-    use tokio::io::AsyncWrite;
-    use tokio::time::{Duration, timeout};
+    use std::task::Poll;
+    use tokio::time::timeout;
 
     /// A write half whose next frame can fail while its read peer stays
     /// open, matching the asymmetric failure possible over ssh.
@@ -627,7 +1016,7 @@ mod tests {
     impl<W: AsyncWrite + Unpin> AsyncWrite for ToggleWriteFailure<W> {
         fn poll_write(
             mut self: Pin<&mut Self>,
-            cx: &mut Context<'_>,
+            cx: &mut std::task::Context<'_>,
             buf: &[u8],
         ) -> Poll<io::Result<usize>> {
             if self.fail_writes.load(Ordering::SeqCst) {
@@ -639,12 +1028,45 @@ mod tests {
             Pin::new(&mut self.inner).poll_write(cx, buf)
         }
 
-        fn poll_flush(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<io::Result<()>> {
+        fn poll_flush(
+            mut self: Pin<&mut Self>,
+            cx: &mut std::task::Context<'_>,
+        ) -> Poll<io::Result<()>> {
             Pin::new(&mut self.inner).poll_flush(cx)
         }
 
-        fn poll_shutdown(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<io::Result<()>> {
+        fn poll_shutdown(
+            mut self: Pin<&mut Self>,
+            cx: &mut std::task::Context<'_>,
+        ) -> Poll<io::Result<()>> {
             Pin::new(&mut self.inner).poll_shutdown(cx)
+        }
+    }
+
+    /// Register a terminal on `client` directly, returning the receiving
+    /// half a real `attach()` caller would have got.
+    ///
+    /// Bypasses `attach` on purpose: these tests drive scripted peers that
+    /// would otherwise have to play out a full attach exchange per
+    /// channel, which is irrelevant to what any of them is about.
+    async fn register_terminal(
+        client: &SupervisorClient,
+        channel: u32,
+        capacity: usize,
+    ) -> TermStream {
+        let (events_tx, events_rx) = mpsc::channel(capacity);
+        let (detach_tx, detach_rx) = watch::channel(None);
+        client.terminals.lock().await.insert(
+            channel,
+            TerminalHandle {
+                events: events_tx,
+                detach: detach_tx,
+            },
+        );
+        TermStream {
+            events: events_rx,
+            detach: detach_rx,
+            ended: false,
         }
     }
 
@@ -875,8 +1297,7 @@ mod tests {
         };
         let client = SupervisorClient::start(r, w).await.unwrap();
         let (mut peer_reader, _peer_writer) = peer.await.unwrap();
-        let (term_tx, mut term_rx) = mpsc::unbounded_channel();
-        client.terminals.lock().await.insert(7, term_tx);
+        let mut term_rx = register_terminal(&client, 7, TERM_EVENT_QUEUE).await;
 
         fail_writes.store(true, Ordering::SeqCst);
         let request = timeout(Duration::from_secs(2), client.list_sessions())
@@ -962,6 +1383,293 @@ mod tests {
         peer.await.unwrap();
     }
 
+    /// The single most important test of the helm's bounded-queue rule:
+    /// one terminal whose consumer has stopped draining must be detached,
+    /// and must NOT stall the other terminals sharing the connection.
+    ///
+    /// This is the head-of-line failure PLAN_M2_5.md says this hop must
+    /// never have. Every terminal, every request, and the control channel
+    /// itself are multiplexed over one reader task, so the obvious
+    /// implementation — await capacity on the per-terminal channel — turns
+    /// a single wedged browser tab into a supervisor-wide outage for that
+    /// helm. The assertion that catches it is the LAST one: a second,
+    /// healthy terminal still receiving data after the first has
+    /// overflowed. The first two assertions (a `Detach` reaches the
+    /// supervisor, and the stalled terminal is told why with the shared
+    /// [`farhelm_proto::DETACH_REASON_STALLED`] string) pin the rest of
+    /// the contract: the wedged attachment is genuinely released rather
+    /// than merely abandoned locally, and its user is told rather than
+    /// left staring at a terminal that silently stopped.
+    ///
+    /// Drives the real demux loop through a scripted peer rather than
+    /// calling `dispatch` directly, so the overflow is discovered exactly
+    /// where production discovers it — inside the shared reader — and a
+    /// refactor that moved the send off that path could not pass this
+    /// while reintroducing the block.
+    #[tokio::test]
+    async fn a_full_terminal_queue_detaches_that_terminal_without_blocking_the_others() {
+        let (client_side, peer_side) = tokio::io::duplex(64 * 1024);
+        let peer = tokio::spawn(async move {
+            let (r, w) = tokio::io::split(peer_side);
+            let mut reader = FrameReader::new(r);
+            let mut writer = FrameWriter::new(w);
+            handshake(&mut reader, &mut writer, "supervisor")
+                .await
+                .unwrap();
+            (reader, writer)
+        });
+        let (r, w) = tokio::io::split(client_side);
+        let client = SupervisorClient::start(r, w).await.unwrap();
+        let (mut peer_reader, mut peer_writer) = peer.await.unwrap();
+
+        // Registered directly rather than through `attach`, which would
+        // need the scripted peer to also play out an attach exchange for
+        // two channels — irrelevant to what this test is about. Registered
+        // BEFORE any frame is written, since the demux drops frames for
+        // channels it does not know.
+        let mut stalled_rx = register_terminal(&client, 1, TERM_EVENT_QUEUE).await;
+        let mut healthy_rx = register_terminal(&client, 2, TERM_EVENT_QUEUE).await;
+
+        // Flood the stalled channel well past its bound, then send a
+        // single frame on the healthy one. The healthy frame goes LAST on
+        // purpose: it can only arrive if the reader loop got past the
+        // overflow without waiting.
+        for _ in 0..(TERM_EVENT_QUEUE * 2) {
+            peer_writer
+                .write_frame(&Frame::data(1, b"flood".to_vec()))
+                .await
+                .unwrap();
+        }
+        peer_writer
+            .write_frame(&Frame::data(2, b"healthy".to_vec()))
+            .await
+            .unwrap();
+
+        // `stalled_rx` is deliberately never drained: it stands in for a
+        // browser that has stopped consuming entirely.
+        let detach = timeout(Duration::from_secs(5), peer_reader.read_frame())
+            .await
+            .expect("the overflowing terminal never sent a Detach upstream")
+            .unwrap()
+            .expect("connection closed before the Detach arrived");
+        assert!(
+            matches!(
+                parse_control(&detach).unwrap(),
+                ControlMsg::Detach { channel: 1 }
+            ),
+            "the stalled terminal's attachment must be released upstream, not merely dropped \
+             locally: {detach:?}"
+        );
+
+        assert!(
+            matches!(
+                timeout(Duration::from_secs(5), healthy_rx.recv()).await,
+                Ok(Some(TermEvent::Data(bytes))) if bytes == b"healthy"
+            ),
+            "a terminal sharing the connection stopped receiving because another one \
+             overflowed — this is the head-of-line block the detach-not-block rule exists to \
+             prevent"
+        );
+
+        // Drain the backlog the stalled terminal did accumulate; its
+        // final event must be the stall detach, which is delivered on its
+        // own task precisely so it survives the queue having been full.
+        let final_event = timeout(Duration::from_secs(5), async {
+            loop {
+                match stalled_rx.recv().await {
+                    Some(TermEvent::Data(_)) => {}
+                    other => return other,
+                }
+            }
+        })
+        .await
+        .expect("the stalled terminal never received its detach notice");
+        assert!(
+            matches!(final_event, Some(TermEvent::Detached(reason))
+                if reason == farhelm_proto::DETACH_REASON_STALLED),
+            "the stalled terminal must be told why it stopped, using the same reason string \
+             the supervisor's own stall detach emits"
+        );
+    }
+
+    /// Push fire-and-forget messages until one blocks, returning the
+    /// widths that were actually accepted.
+    ///
+    /// Counting rather than assuming a number: what fills first is the
+    /// bounded queue PLUS whatever the transport buffer happens to
+    /// absorb, and only the former is a constant. `resize` carries a
+    /// distinguishable payload and needs no reply, so the accepted
+    /// prefix is directly checkable against what the peer later reads.
+    ///
+    /// A cancelled `send` is not enqueued (tokio's `mpsc::Sender::send`
+    /// is cancel-safe that way), so the returned widths are exactly the
+    /// messages in flight — which is what makes the ordering assertion
+    /// below exact rather than approximate.
+    async fn saturate_outbound(client: &SupervisorClient) -> Vec<u16> {
+        let mut accepted = Vec::new();
+        for cols in 0..2000u16 {
+            if timeout(Duration::from_millis(50), client.resize("s", 1, cols, 24))
+                .await
+                .is_err()
+            {
+                return accepted;
+            }
+            accepted.push(cols);
+        }
+        panic!(
+            "2000 sends completed against a transport nobody is draining — the outbound queue \
+             is not bounded at all"
+        );
+    }
+
+    /// The outbound queue must behave as a BOUND: sends stop completing
+    /// once it is full against a transport that is not draining, and
+    /// everything accepted lands in order when capacity returns.
+    ///
+    /// Pins the bound itself rather than a symptom. Without this, swapping
+    /// the bounded channel back to an unbounded one — the exact debt this
+    /// milestone closed — passes every other test in this file, because
+    /// nothing else can observe the difference until memory runs out.
+    /// Order matters as much as the bound: a fix that dropped or reordered
+    /// under pressure would still "not block".
+    #[tokio::test]
+    async fn the_outbound_queue_blocks_at_capacity_and_drains_in_order() {
+        // A small transport so the writer task parks quickly instead of
+        // absorbing the whole burst into a socket buffer.
+        let (client_side, peer_side) = tokio::io::duplex(1024);
+        let peer = tokio::spawn(async move {
+            let (r, w) = tokio::io::split(peer_side);
+            let mut reader = FrameReader::new(r);
+            let mut writer = FrameWriter::new(w);
+            handshake(&mut reader, &mut writer, "supervisor")
+                .await
+                .unwrap();
+            reader
+        });
+        let (r, w) = tokio::io::split(client_side);
+        let client = SupervisorClient::start(r, w).await.unwrap();
+        let mut peer_reader = peer.await.unwrap();
+
+        let accepted = saturate_outbound(&client).await;
+        assert!(
+            accepted.len() >= SUPERVISOR_WRITER_QUEUE,
+            "sends stopped after only {} messages, fewer than the queue's own capacity — the \
+             bound is tighter than it claims",
+            accepted.len()
+        );
+
+        // Draining the peer releases the writer, and everything accepted
+        // arrives in the order it was sent.
+        let mut widths = Vec::new();
+        while widths.len() < accepted.len() {
+            let frame = timeout(Duration::from_secs(5), peer_reader.read_frame())
+                .await
+                .expect("peer read hung")
+                .unwrap()
+                .expect("connection closed mid-drain");
+            if let ControlMsg::Resize { cols, .. } = parse_control(&frame).unwrap() {
+                widths.push(cols);
+            }
+        }
+        assert_eq!(
+            widths, accepted,
+            "queued messages must drain in send order once capacity returns"
+        );
+    }
+
+    /// A request cancelled while parked on a full outbound queue must
+    /// leave no pending entry behind.
+    ///
+    /// `request` registers its `req_id` so a reply can be correlated, and
+    /// that entry is only ever removed by a reply arriving. Registering it
+    /// BEFORE awaiting queue capacity means a cancellation in that window
+    /// — an axum handler whose browser disconnected, a `select!` losing a
+    /// race — orphans it in a map nothing sweeps, for the life of the
+    /// process. Reserving capacity first is what closes that, and this is
+    /// the only test that can tell the two orderings apart.
+    #[tokio::test]
+    async fn a_request_cancelled_on_a_full_queue_leaks_no_pending_entry() {
+        let (client_side, peer_side) = tokio::io::duplex(1024);
+        let peer = tokio::spawn(async move {
+            let (r, w) = tokio::io::split(peer_side);
+            let mut reader = FrameReader::new(r);
+            let mut writer = FrameWriter::new(w);
+            handshake(&mut reader, &mut writer, "supervisor")
+                .await
+                .unwrap();
+            (reader, writer)
+        });
+        let (r, w) = tokio::io::split(client_side);
+        let client = SupervisorClient::start(r, w).await.unwrap();
+        let _peer = peer.await.unwrap();
+
+        saturate_outbound(&client).await;
+
+        let cancelled = timeout(Duration::from_millis(300), client.list_sessions()).await;
+        assert!(
+            cancelled.is_err(),
+            "test premise: the request must still be parked on the full queue when cancelled"
+        );
+        assert!(
+            client.pending.lock().await.map.is_empty(),
+            "a request cancelled while waiting for queue capacity left its pending entry \
+             behind; it would never be reaped"
+        );
+    }
+
+    /// A terminal whose receiver was dropped must be released UPSTREAM,
+    /// not merely forgotten locally.
+    ///
+    /// The consumer disappearing without detaching is ordinary — a task
+    /// cancelled mid-flight, a handler that returned early — and the
+    /// supervisor cannot see it. Left registered, the entry keeps routing
+    /// frames nowhere while the supervisor holds a control client, an
+    /// input client, and a forwarder open for the life of the connection.
+    /// Nothing else in this file covers the closed (as opposed to full)
+    /// case, and the two need different handling: there is no local notice
+    /// to deliver here, because nobody is listening.
+    #[tokio::test]
+    async fn a_terminal_whose_receiver_was_dropped_is_released_upstream() {
+        let (client_side, peer_side) = tokio::io::duplex(64 * 1024);
+        let peer = tokio::spawn(async move {
+            let (r, w) = tokio::io::split(peer_side);
+            let mut reader = FrameReader::new(r);
+            let mut writer = FrameWriter::new(w);
+            handshake(&mut reader, &mut writer, "supervisor")
+                .await
+                .unwrap();
+            (reader, writer)
+        });
+        let (r, w) = tokio::io::split(client_side);
+        let client = SupervisorClient::start(r, w).await.unwrap();
+        let (mut peer_reader, mut peer_writer) = peer.await.unwrap();
+
+        let stream = register_terminal(&client, 3, TERM_EVENT_QUEUE).await;
+        drop(stream);
+
+        peer_writer
+            .write_frame(&Frame::data(3, b"output for nobody".to_vec()))
+            .await
+            .unwrap();
+
+        let detach = timeout(Duration::from_secs(5), peer_reader.read_frame())
+            .await
+            .expect("no Detach reached the supervisor for a dropped terminal")
+            .unwrap()
+            .expect("connection closed before the Detach arrived");
+        assert!(
+            matches!(
+                parse_control(&detach).unwrap(),
+                ControlMsg::Detach { channel: 3 }
+            ),
+            "a dropped receiver must release its attachment upstream: {detach:?}"
+        );
+        assert!(
+            !client.terminals.lock().await.contains_key(&3),
+            "the dead terminal must also be unregistered locally"
+        );
+    }
+
     /// The common case: allocation is a plain monotonic counter starting at
     /// 1 (0 is the control channel). This pins the never-recycle contract's
     /// happy half — each call hands out a new id and advances.
@@ -995,6 +1703,12 @@ mod tests {
     /// so a refactor that stops routing allocation through
     /// `allocate_channel` cannot silently reintroduce id reuse while the
     /// unit tests above stay green.
+    ///
+    /// The three assertions are ordered from cheapest to prove to
+    /// strongest, and the last is the one with a prerequisite: proving
+    /// nothing was WRITTEN requires closing the connection first, because
+    /// only then does the peer's read resolve — to `None` if the attach
+    /// was truly silent, or to the stray frame if it was not.
     #[tokio::test]
     async fn attach_fails_cleanly_when_channel_ids_exhausted() {
         let (client_side, peer_side) = tokio::io::duplex(64 * 1024);

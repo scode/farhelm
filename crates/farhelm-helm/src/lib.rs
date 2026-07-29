@@ -29,7 +29,9 @@ use std::sync::Arc;
 use tracing::{error, info};
 
 mod client;
-pub use client::{SessionListing, SupervisorClient, SupervisorError, TermEvent};
+pub use client::{
+    SessionListing, SupervisorClient, SupervisorError, TermDetachSignal, TermEvent, TermStream,
+};
 
 /// CLI arguments for `farhelm helm run`. Lives here (not in the bin
 /// crate) so the helm's surface and its implementation evolve together.
@@ -566,8 +568,25 @@ struct TermQuery {
 
 /// Terminal WebSocket: binary frames are terminal bytes in both
 /// directions; text frames are small JSON control messages (client →
-/// resize; server → detached notice). This is the browser-facing twin of
-/// the proto data channel, kept equally dumb.
+/// resize/pause/resume; server → detached notice). This is the
+/// browser-facing twin of the proto data channel, kept equally dumb.
+///
+/// The client → server text messages, all `{"type": ...}`:
+/// - `{"type":"resize","cols":N,"rows":N}` — the pane's new geometry.
+/// - `{"type":"pause"}` — this terminal's unflushed `term.write()`
+///   backlog crossed its high-water mark; stop sending output.
+/// - `{"type":"resume"}` — the backlog drained below the low-water mark;
+///   output may flow again.
+///
+/// Pause and resume carry no payload because the channel is implicit:
+/// one socket is one attachment. They are the browser end of
+/// PLAN_M2_5.md's watermark flow control and travel straight through to
+/// the supervisor as `ControlMsg::PauseOutput`/`ResumeOutput` — the helm
+/// keeps no pause state of its own (see `SupervisorClient::pause_output`).
+/// The browser side that SENDS them lands with the UI work in
+/// PLAN_M2_5.md step 4; the server accepts them now.
+///
+/// Server → client stays one message: `{"type":"detached","reason":...}`.
 async fn term_ws(
     State(state): State<Arc<AppState>>,
     AxPath(id): AxPath<String>,
@@ -587,14 +606,35 @@ async fn term_ws(
         })
 }
 
+/// How long a terminal WebSocket's outbound drain gets to deliver its
+/// final detach notice once the handler is unwinding.
+///
+/// SPEC.md requires a takeover — and now a stall — to be visibly itself
+/// rather than a bare connection close, and that notice is one small text
+/// frame, so this only has to cover a socket that is working. A socket
+/// that is NOT working is the case this bound exists for: the browser
+/// that stopped reading is precisely the one whose detach is being
+/// delivered, and waiting on it indefinitely would reinstate the pin the
+/// detach just removed.
+const WS_TEARDOWN_GRACE: std::time::Duration = std::time::Duration::from_secs(5);
+
 /// Client-to-helm control messages on a terminal socket. Text frames only
 /// — binary is always terminal input — and an unparseable one is ignored
 /// rather than fatal, so adding a message type does not break older
-/// clients.
+/// clients. See `term_ws`'s docs for the wire shapes.
 #[derive(Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 enum WsClientMsg {
-    Resize { cols: u16, rows: u16 },
+    Resize {
+        cols: u16,
+        rows: u16,
+    },
+    /// Watermark flow control, PLAN_M2_5.md. No fields: one socket is one
+    /// attachment, so the channel these apply to is never ambiguous, and
+    /// letting the browser name a channel would only invite it to name
+    /// somebody else's.
+    Pause,
+    Resume,
 }
 
 /// Pump one attached terminal between the browser and the supervisor.
@@ -611,6 +651,22 @@ enum WsClientMsg {
 /// as a generic "connection closed" and SPEC.md requires a takeover to be
 /// visibly a takeover. `detach` runs on every exit path so the supervisor
 /// never keeps an attachment alive for a browser that is gone.
+///
+/// # Why two tasks
+///
+/// Inbound (browser → supervisor) and outbound (supervisor → browser) run
+/// as separate tasks rather than two arms of one `select!`. Since the
+/// helm's outbound queue became bounded, every inbound forward — input,
+/// resize, pause, resume — can park waiting for capacity, and in a single
+/// loop that parking also stops draining terminal events. That is the
+/// worst possible coupling: a big paste blocks output delivery, the
+/// per-terminal queue backs up, and a perfectly healthy viewer trips the
+/// stalled-terminal detach. Splitting them means a blocked inbound send
+/// cannot starve the outbound drain.
+///
+/// Inbound ORDER is preserved regardless: all four inbound message kinds
+/// originate from this one WebSocket read loop and are forwarded from it
+/// in arrival order. Only the outbound drain moved.
 async fn serve_term(
     state: Arc<AppState>,
     session_id: String,
@@ -634,52 +690,435 @@ async fn serve_term(
         }
     };
 
-    loop {
-        tokio::select! {
-            event = events.recv() => match event {
-                Some(TermEvent::Data(bytes)) => {
-                    if ws_tx.send(ws::Message::Binary(bytes.into())).await.is_err() {
+    // The detach signal, watched independently of the event queue. This is
+    // the priority path that makes teardown always possible: a browser
+    // that has stopped reading can block the `ws_tx.send` below
+    // indefinitely, and without a way to abandon that send, a stall detach
+    // would leave this handler, its queued frames, and the attachment
+    // itself pinned for as long as the wedge lasted — the very leak the
+    // stall detach exists to prevent.
+    let mut detach_signal = events.detach_signal();
+    let mut outbound = tokio::spawn(async move {
+        loop {
+            let Some(event) = events.recv().await else {
+                break;
+            };
+            let message = match event {
+                TermEvent::Data(bytes) => ws::Message::Binary(bytes.into()),
+                TermEvent::Detached(reason) => {
+                    let notice = serde_json::json!({"type": "detached", "reason": reason});
+                    // Best-effort and last: the socket closes right after,
+                    // and a browser that cannot even take this notice is
+                    // one the reason would not have reached anyway.
+                    let _ = ws_tx
+                        .send(ws::Message::Text(notice.to_string().into()))
+                        .await;
+                    break;
+                }
+            };
+            tokio::select! {
+                sent = ws_tx.send(message) => {
+                    if sent.is_err() {
                         break;
                     }
                 }
-                Some(TermEvent::Detached(reason)) => {
+                reason = detach_signal.detached() => {
+                    // Abandon the in-flight send along with everything
+                    // still queued behind it: this viewer is gone, and the
+                    // backlog is exactly the data it already proved it was
+                    // not reading.
+                    let reason = reason.unwrap_or_else(|| "detached".to_string());
                     let notice = serde_json::json!({"type": "detached", "reason": reason});
-                    let _ = ws_tx.send(ws::Message::Text(notice.to_string().into())).await;
+                    let _ = ws_tx
+                        .send(ws::Message::Text(notice.to_string().into()))
+                        .await;
                     break;
                 }
-                None => break,
-            },
-            msg = ws_rx.next() => match msg {
-                Some(Ok(ws::Message::Binary(bytes))) => {
-                    state.client.send_input(channel, bytes.to_vec());
+            }
+        }
+    });
+
+    let inbound = async {
+        while let Some(msg) = ws_rx.next().await {
+            match msg {
+                Ok(ws::Message::Binary(bytes)) => {
+                    state.client.send_input(channel, bytes.to_vec()).await;
                 }
-                Some(Ok(ws::Message::Text(text))) => {
-                    if let Ok(WsClientMsg::Resize { cols, rows }) =
-                        serde_json::from_str::<WsClientMsg>(&text)
-                    {
-                        state.client.resize(&session_id, channel, cols, rows);
+                Ok(ws::Message::Text(text)) => match serde_json::from_str::<WsClientMsg>(&text) {
+                    Ok(WsClientMsg::Resize { cols, rows }) => {
+                        state.client.resize(&session_id, channel, cols, rows).await;
                     }
-                }
-                Some(Ok(ws::Message::Close(_))) | None => break,
-                Some(Ok(_)) => {} // ping/pong handled by axum
+                    Ok(WsClientMsg::Pause) => state.client.pause_output(channel).await,
+                    Ok(WsClientMsg::Resume) => state.client.resume_output(channel).await,
+                    // Unparseable or unknown: ignored on purpose, so a
+                    // newer browser bundle talking to an older helm
+                    // degrades rather than dropping the terminal.
+                    Err(_) => {}
+                },
+                Ok(ws::Message::Close(_)) => break,
+                Ok(_) => {} // ping/pong handled by axum
                 // Surfaced, not swallowed: an oversized message or a
                 // protocol error here is otherwise invisible to both the
                 // user (generic "connection closed") and the log.
-                Some(Err(e)) => {
-                    state.client.detach(channel).await;
+                Err(e) => {
                     return Err(anyhow::Error::new(e).context("terminal websocket receive failed"));
                 }
-            },
+            }
         }
-    }
+        anyhow::Ok(())
+    };
+    tokio::pin!(inbound);
+
+    // Either half ending must end the whole handler, and the outbound arm
+    // is the one that matters for teardown. A browser that stops reading
+    // never closes its socket and never sends anything, so the inbound
+    // loop alone would wait forever — pinning this handler, its socket,
+    // and every frame queued for it for exactly as long as the wedge
+    // lasts. That is the leak the stall detach exists to end, so the
+    // detach has to be able to end this handler by itself.
+    let result = tokio::select! {
+        result = &mut inbound => result,
+        _ = &mut outbound => Ok(()),
+    };
+
+    // Detaching is what ends the outbound task in the ORDINARY case (the
+    // browser closed its socket): the supervisor drops the attachment,
+    // the client signals detached, and the drain unwinds after sending
+    // its notice. The grace period covers exactly that notice; past it
+    // the task is abandoned, because by then it can only be blocked on
+    // the same unreadable socket the detach was about.
     state.client.detach(channel).await;
-    Ok(())
+    if tokio::time::timeout(WS_TEARDOWN_GRACE, &mut outbound)
+        .await
+        .is_err()
+    {
+        outbound.abort();
+    }
+    let _ = outbound.await;
+    result
 }
 
 #[cfg(test)]
 mod tests {
     use super::{HelmArgs, SupervisorError, build_router, origin_is_allowed};
     use axum::http::HeaderMap;
+    use farhelm_proto::io::{FrameReader, FrameWriter, handshake};
+    use farhelm_proto::{ControlMsg, Frame};
+    use std::sync::Arc;
+    use std::time::Duration;
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+    /// Serve the helm's real router on a loopback port, returning its
+    /// address.
+    ///
+    /// The WebSocket tests cannot use `oneshot` like the HTTP ones do: an
+    /// upgrade needs a real connection with a real byte stream on both
+    /// sides, which is also exactly what makes a "browser that stops
+    /// reading" expressible at all.
+    async fn serve_helm(client: Arc<super::SupervisorClient>) -> std::net::SocketAddr {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind loopback");
+        let addr = listener.local_addr().expect("local addr");
+        let app = build_router(client, None, addr.port());
+        tokio::spawn(async move {
+            let _ = axum::serve(listener, app).await;
+        });
+        addr
+    }
+
+    /// A deliberately minimal WebSocket client: enough to complete the
+    /// upgrade, send text/binary frames, and — crucially — to STOP
+    /// READING whenever a test wants to model a wedged browser.
+    ///
+    /// Hand-rolled rather than pulled from a crate because no WebSocket
+    /// client is a dependency of this workspace, and the two behaviors
+    /// these tests need are precisely the ones a real client library goes
+    /// out of its way to hide: never draining the socket, and observing
+    /// the server's close. Only the subset actually used is implemented —
+    /// client frames are always masked and always short, which is all a
+    /// pause/resume message or a keystroke ever is.
+    struct WsTestClient {
+        stream: tokio::net::TcpStream,
+        /// Bytes read from the socket but not yet parsed into a frame.
+        buffered: Vec<u8>,
+    }
+
+    impl WsTestClient {
+        async fn connect(addr: std::net::SocketAddr, path: &str) -> WsTestClient {
+            let mut stream = tokio::net::TcpStream::connect(addr).await.expect("connect");
+            // A fixed key is fine: nothing here verifies the accept hash,
+            // which exists to defend against caching proxies, not tests.
+            let request = format!(
+                "GET {path} HTTP/1.1\r\nHost: 127.0.0.1:{}\r\nConnection: Upgrade\r\n\
+                 Upgrade: websocket\r\nSec-WebSocket-Version: 13\r\n\
+                 Sec-WebSocket-Key: AAAAAAAAAAAAAAAAAAAAAA==\r\n\r\n",
+                addr.port()
+            );
+            stream
+                .write_all(request.as_bytes())
+                .await
+                .expect("send upgrade");
+            // Read exactly up to the end of the response headers, leaving
+            // any frame bytes that followed them in the buffer.
+            let mut buffered = Vec::new();
+            let mut byte = [0u8; 1];
+            while !buffered.ends_with(b"\r\n\r\n") {
+                let n = stream.read(&mut byte).await.expect("read upgrade response");
+                assert!(n > 0, "connection closed during the WebSocket upgrade");
+                buffered.push(byte[0]);
+            }
+            let response = String::from_utf8_lossy(&buffered).into_owned();
+            assert!(
+                response.starts_with("HTTP/1.1 101"),
+                "WebSocket upgrade refused: {response}"
+            );
+            WsTestClient {
+                stream,
+                buffered: Vec::new(),
+            }
+        }
+
+        /// Send one masked client frame. `opcode` is 1 for text, 2 for
+        /// binary — the only two this suite sends.
+        async fn send(&mut self, opcode: u8, payload: &[u8]) {
+            assert!(
+                payload.len() < 126,
+                "test frames stay in the short-length form"
+            );
+            let mask = [0x37u8, 0xfa, 0x21, 0x3d];
+            let mut frame = vec![0x80 | opcode, 0x80 | payload.len() as u8];
+            frame.extend_from_slice(&mask);
+            frame.extend(
+                payload
+                    .iter()
+                    .enumerate()
+                    .map(|(i, byte)| byte ^ mask[i % 4]),
+            );
+            self.stream.write_all(&frame).await.expect("send ws frame");
+        }
+
+        async fn send_text(&mut self, text: &str) {
+            self.send(1, text.as_bytes()).await;
+        }
+
+        /// Read one server frame's (opcode, payload), or `None` once the
+        /// server closes. Server frames are never masked.
+        async fn recv(&mut self) -> Option<(u8, Vec<u8>)> {
+            loop {
+                if let Some(frame) = self.take_buffered_frame() {
+                    return Some(frame);
+                }
+                let mut chunk = [0u8; 8192];
+                let n = self.stream.read(&mut chunk).await.ok()?;
+                if n == 0 {
+                    return None;
+                }
+                self.buffered.extend_from_slice(&chunk[..n]);
+            }
+        }
+
+        /// Decode one complete frame out of `buffered`, if there is one.
+        /// Handles the two length forms axum actually emits for the sizes
+        /// these tests produce.
+        fn take_buffered_frame(&mut self) -> Option<(u8, Vec<u8>)> {
+            if self.buffered.len() < 2 {
+                return None;
+            }
+            let opcode = self.buffered[0] & 0x0f;
+            let short = (self.buffered[1] & 0x7f) as usize;
+            let (len, header) = match short {
+                126 => {
+                    if self.buffered.len() < 4 {
+                        return None;
+                    }
+                    (
+                        u16::from_be_bytes([self.buffered[2], self.buffered[3]]) as usize,
+                        4,
+                    )
+                }
+                127 => {
+                    if self.buffered.len() < 10 {
+                        return None;
+                    }
+                    let mut bytes = [0u8; 8];
+                    bytes.copy_from_slice(&self.buffered[2..10]);
+                    (u64::from_be_bytes(bytes) as usize, 10)
+                }
+                other => (other, 2),
+            };
+            if self.buffered.len() < header + len {
+                return None;
+            }
+            let payload = self.buffered[header..header + len].to_vec();
+            self.buffered.drain(..header + len);
+            Some((opcode, payload))
+        }
+    }
+
+    /// Browser pause/resume must reach the SUPERVISOR as
+    /// `PauseOutput`/`ResumeOutput` for this terminal's channel.
+    ///
+    /// The WS half of PLAN_M2_5.md's watermark flow control had no
+    /// coverage at all: only `SupervisorClient`'s methods were tested, so
+    /// nothing pinned the JSON message shapes, the routing from a text
+    /// frame to the right channel, or that the helm forwards rather than
+    /// interpreting. Any of those silently breaking would leave the
+    /// browser's watermark wired to nothing — a failure whose only symptom
+    /// is memory growth under load.
+    #[tokio::test]
+    async fn browser_pause_and_resume_reach_the_supervisor_for_this_channel() {
+        let (client_side, peer_side) = tokio::io::duplex(64 * 1024);
+        let peer = tokio::spawn(scripted_supervisor_attach(peer_side));
+        let (r, w) = tokio::io::split(client_side);
+        let client = super::SupervisorClient::start(r, w).await.unwrap();
+        let addr = serve_helm(client).await;
+        // Concurrently, and this ordering is not incidental: the scripted
+        // peer only ever sees an `Attach` because a browser connected, so
+        // awaiting it first would be waiting on something this test has
+        // not caused yet.
+        let (mut ws, peer) = tokio::join!(
+            WsTestClient::connect(addr, "/api/sessions/sess-1/term"),
+            peer
+        );
+        let (mut reader, _writer, channel) = peer.unwrap();
+
+        ws.send_text(r#"{"type":"pause"}"#).await;
+        ws.send_text(r#"{"type":"resume"}"#).await;
+
+        for expected in [
+            ControlMsg::PauseOutput { channel },
+            ControlMsg::ResumeOutput { channel },
+        ] {
+            let frame = tokio::time::timeout(Duration::from_secs(5), reader.read_frame())
+                .await
+                .expect("the supervisor never saw the browser's flow-control message")
+                .unwrap()
+                .expect("connection closed");
+            let got = farhelm_proto::io::parse_control(&frame).unwrap();
+            assert_eq!(
+                format!("{got:?}"),
+                format!("{expected:?}"),
+                "the browser's message must reach the supervisor unchanged, for its own channel"
+            );
+        }
+    }
+
+    /// A browser that stops reading must not pin the WebSocket handler:
+    /// the stall detach has to terminate it even while a send to that
+    /// browser is blocked.
+    ///
+    /// This is the teardown half of the detach-not-block design, and
+    /// until now it was only argued. The failure it guards is specific
+    /// and quiet: `serve_term` parked in `ws_tx.send()` to a browser that
+    /// stopped reading cannot observe a detach that arrives through the
+    /// terminal's data queue, because that queue is full — which is
+    /// precisely why the terminal was detached. Handler, socket, queued
+    /// frames, and the notification task would then stay alive for as
+    /// long as the wedge lasted, which is exactly the unbounded pin the
+    /// stall detach exists to end.
+    ///
+    /// The assertion is the strongest one available from outside: the
+    /// server CLOSES the connection. That can only happen after
+    /// `serve_term` returned, which can only happen after the blocked send
+    /// was abandoned — so a regression that restores the in-band-only
+    /// detach hangs here instead of passing.
+    #[tokio::test]
+    async fn a_wedged_browser_is_torn_down_by_the_stall_detach() {
+        let (client_side, peer_side) = tokio::io::duplex(1024 * 1024);
+        let peer = tokio::spawn(scripted_supervisor_attach(peer_side));
+        let (r, w) = tokio::io::split(client_side);
+        let client = super::SupervisorClient::start(r, w).await.unwrap();
+        let addr = serve_helm(client).await;
+        // Concurrently, for the same reason as the test above.
+        let (mut ws, peer) = tokio::join!(
+            WsTestClient::connect(addr, "/api/sessions/sess-1/term"),
+            peer
+        );
+        let (_reader, mut writer, channel) = peer.unwrap();
+
+        // Read exactly one frame, proving the socket works, and then stop
+        // reading forever — the wedged browser.
+        writer
+            .write_frame(&Frame::data(channel, b"first".to_vec()))
+            .await
+            .unwrap();
+        let (opcode, payload) = tokio::time::timeout(Duration::from_secs(5), ws.recv())
+            .await
+            .expect("no first frame")
+            .expect("socket closed early");
+        assert_eq!((opcode, payload.as_slice()), (2, &b"first"[..]));
+
+        // Flood until the kernel buffers, the WS sink, and the helm's
+        // per-terminal queue are all full, so `serve_term` is genuinely
+        // parked mid-send rather than idle.
+        for _ in 0..2_000 {
+            if writer
+                .write_frame(&Frame::data(channel, vec![b'x'; 4096]))
+                .await
+                .is_err()
+            {
+                break;
+            }
+        }
+
+        // The supervisor detaches it as stalled. This must tear the
+        // handler down even though the send above cannot complete.
+        writer
+            .write_control(&ControlMsg::Detached {
+                channel,
+                reason: farhelm_proto::DETACH_REASON_STALLED.to_string(),
+            })
+            .await
+            .unwrap();
+
+        // Drain to EOF: the server must close. Whatever backlog is still
+        // in flight is fine to receive — the contract is that the
+        // connection ENDS, not that the backlog is discarded byte for
+        // byte.
+        let closed = tokio::time::timeout(Duration::from_secs(20), async {
+            while ws.recv().await.is_some() {}
+        })
+        .await;
+        assert!(
+            closed.is_ok(),
+            "the terminal WebSocket never closed after a stall detach — `serve_term` is still \
+             pinned on a send to a browser that stopped reading"
+        );
+    }
+
+    /// Drive a scripted supervisor peer through an attach, returning the
+    /// reader/writer halves positioned right after the `Attached` reply.
+    ///
+    /// Every WebSocket test below needs the same preamble — handshake,
+    /// answer one `Attach` — and none of them is about that preamble.
+    async fn scripted_supervisor_attach(
+        peer_side: tokio::io::DuplexStream,
+    ) -> (
+        FrameReader<tokio::io::ReadHalf<tokio::io::DuplexStream>>,
+        FrameWriter<tokio::io::WriteHalf<tokio::io::DuplexStream>>,
+        u32,
+    ) {
+        let (r, w) = tokio::io::split(peer_side);
+        let mut reader = FrameReader::new(r);
+        let mut writer = FrameWriter::new(w);
+        handshake(&mut reader, &mut writer, "supervisor")
+            .await
+            .unwrap();
+        let request =
+            farhelm_proto::io::parse_control(&reader.read_frame().await.unwrap().unwrap()).unwrap();
+        let ControlMsg::Attach {
+            req_id, channel, ..
+        } = request
+        else {
+            panic!("expected an Attach, got {request:?}");
+        };
+        writer
+            .write_control(&ControlMsg::Attached { req_id, channel })
+            .await
+            .unwrap();
+        (reader, writer, channel)
+    }
 
     const PORT: u16 = 7433;
 

@@ -82,13 +82,36 @@ therefore carries end-to-end backpressure — write-completion callbacks drive w
 WebSocket, and the supervisor throttles its pane reads accordingly. Interactive agent output never approaches these
 rates; `cat` of a huge file must degrade to slow, never to silent data loss. Precisely (sharpened while planning M2.5,
 when the original sentence met tmux's actual flow-control mechanics): no code Farhelm owns may ever drop a terminal byte
-— every Farhelm-side bound is backpressure or a visible detach, never discard. The one producer-side bound is tmux's
-retained pane history: tmux cannot be told to stop reading a pane's PTY, so a client stalled long enough that the gap
-exceeds retained history catches up by replay from that history, exactly like a reattach. The xterm.js scrollback
-capacity is therefore sized to at most the tmux history floor (both currently 12,000 lines) — an invariant tests must
-pin — which makes the catch-up end state observably equivalent to lossless slow delivery: every byte still within the
-terminal's own retention is present, and bytes beyond it would have been evicted from scrollback even had they been
-delivered one at a time.
+— every Farhelm-side bound is backpressure or a visible detach, never discard.
+
+What "degrade to slow" is allowed to slow includes, on one of the two tmux behaviors below, the AGENT's own writes for
+the duration of a viewer's pause. SPEC.md's stall bullet now states that bounded-slowdown contract directly, and this
+document's job is only to record the mechanism: nothing here throttles the agent deliberately, and the block is bounded
+by the flow-control window and ultimately by the stall detach.
+
+The producer-side bound is tmux's, and tmux implements it in one of two ways. With `pause-after` set on the supervisor's
+control client, a client that stops reading gets EITHER of these (audited 2026-07-29 on 3.3a, 3.4, and 3.7b, both with a
+standalone control client and through the full supervisor stack):
+
+- **tmux throttles the pane.** It stops reading the PTY, the agent's own `write` blocks, and nothing is queued or
+  dropped. On resume, delivery continues from exactly where it stopped — a genuine end-to-end degrade-to-slow, with no
+  recovery needed.
+- **tmux reads ahead into history and pauses the client's stream.** The agent free-runs into scrollback (tmux server RSS
+  stays flat), the bytes queued for the stalled client age past `pause-after`, and tmux then cuts that client's stream
+  with `%pause` and discards what it had queued for it. Recovery is replay from retained history, exactly like a
+  reattach.
+
+Which one happens is NOT a property of the tmux version — an earlier draft of this paragraph claimed it was, and the
+audit does not support that. All three versions were observed taking both paths across repeated identical trials; the
+deciding factor is how far tmux happens to have read ahead of the client at the moment it stalls, which in turn depends
+on how fast that client was consuming beforehand. Both paths satisfy the contract, so nothing above this layer may
+depend on which one occurs, and the supervisor implements both (it honors `%pause` whenever it arrives and simply keeps
+reading when it does not).
+
+The xterm.js scrollback capacity is therefore sized to at most the tmux history floor (both currently 12,000 lines) — an
+invariant tests must pin — which makes the replay-based catch-up's end state observably equivalent to lossless slow
+delivery: every byte still within the terminal's own retention is present, and bytes beyond it would have been evicted
+from scrollback even had they been delivered one at a time.
 
 ## Terminal substrate: private tmux server
 
@@ -100,10 +123,13 @@ and config are untouched.
 Farhelm requires tmux ≥ 3.3 (dependable control mode) to operate at all. One capability sits higher: restoring bracketed
 paste on reattach reads the `bracket_paste_flag` format, which tmux only gained in 3.7 — below that the supervisor warns
 once at first attach (a startup probe cannot tell "old tmux" from "no pane to inspect yet") and loses that one mode,
-everything else working normally. This matters in practice because Ubuntu 24.04 ships tmux 3.4. Releases bundle a
-private tmux build per platform, used whenever the host's tmux is missing or below the floor — the Mac app bundles one
-too, since macOS ships no tmux at all. A host tmux at or above the floor is acceptable; version is checked, not just
-presence.
+everything else working normally. A second, smaller accepted degradation below 3.4 (found during M2.5's 3.3a validation,
+2026-07-29): `capture-pane -N` on 3.3a does not preserve trailing styled padding, so a stop snapshot's dead-pane frame
+can lose the styling of trailing padding cells — cosmetic fidelity only, accepted rather than complicating the capture
+path for the floor's last dot release; CI pins the full behavior on 3.4+. This matters in practice because Ubuntu 24.04
+ships tmux 3.4. Releases bundle a private tmux build per platform, used whenever the host's tmux is missing or below the
+floor — the Mac app bundles one too, since macOS ships no tmux at all. A host tmux at or above the floor is acceptable;
+version is checked, not just presence.
 
 tmux is a headless PTY holder and history store. The supervisor's only client is a non-rendering control-mode client
 (`tmux -C`, the interface iTerm2's tmux integration is built on; `pipe-pane` is the fallback shape). Sizing (audited on
@@ -126,18 +152,29 @@ being world-readable via `/proc/<pid>/cmdline`, which matters because input incl
 and that risk never applied to bytes written to a pipe. Each `send-keys` command is chunked at 256 bytes because tmux
 rejects a command carrying on the order of ~1000 arguments as "command too long" and each input byte becomes one hex
 argument; every command's `%begin`/`%end` reply rides back on the same stdout the client's other notifications use,
-which is safe to ignore because the output-streaming loop already discards every non-`%output` notification by design
-(see below). Passthrough sequences (audited): the control-mode `%output` stream carries `\ePtmux;...\e\\`-wrapped
-payloads still wrapped, regardless of the `allow-passthrough` option — that option only gates forwarding to rendering
-clients, which Farhelm has none of — so the supervisor unwraps passthrough payloads itself before they reach xterm.js.
-Reconnect replay prefills xterm.js from `capture-pane -e` history, then continues with live bytes from the same control
-client — that is how the 10,000-line floor is met without a gap between the two. The handoff ordering is load-bearing:
-the incumbent control client is killed and awaited, the window is resized, and the replacement attaches with
-`no-output`. Pane modes, a history snapshot, a visible-screen snapshot, and `refresh-client -f !no-output` are submitted
-as one semicolon-separated command group through that replacement. The matching `%end` for the final refresh block is
-the cutover: earlier pane bytes are represented by the snapshot, later ones arrive as `%output`, and `no-output`
-advances rather than queueing a second copy for delivery. Normal-screen replay selects the history snapshot;
+which is safe to ignore because the output-streaming loop already discards every notification it has no use for (see
+below). Passthrough sequences (audited): the control-mode pane-output stream carries `\ePtmux;...\e\\`-wrapped payloads
+still wrapped, regardless of the `allow-passthrough` option — that option only gates forwarding to rendering clients,
+which Farhelm has none of — so the supervisor unwraps passthrough payloads itself before they reach xterm.js. Reconnect
+replay prefills xterm.js from `capture-pane -e` history, then continues with live bytes from the same control client —
+that is how the 10,000-line floor is met without a gap between the two. The handoff ordering is load-bearing: the
+incumbent control client is killed and awaited, the window is resized, and the replacement attaches with `no-output`.
+Pane modes, a history snapshot, a visible-screen snapshot, and a final `refresh-client -f
+!no-output,pause-after=N` are
+submitted as one semicolon-separated command group through that replacement. The matching `%end` for the final refresh
+block is the cutover: earlier pane bytes are represented by the snapshot, later ones arrive as live output, and
+`no-output` advances rather than queueing a second copy for delivery. Normal-screen replay selects the history snapshot;
 alternate-screen replay selects the visible snapshot so normal history is not mixed into a full-screen app.
+
+Setting `pause-after` on that same cutover (M2.5) changes the dialect the client then reads, which the parser must
+handle rather than discard: pane bytes arrive as `%extended-output <pane-id> <age> ... : <data>` instead of `%output`,
+and `%pause`/`%continue` notifications appear. Both output dialects are accepted unconditionally and decoded
+identically, including across a switch mid-stream, because the passthrough decoder carries state between notifications.
+`%pause` is acted on — it means tmux cut this client's stream, and the dropped bytes are recoverable only by replaying
+history — while `%continue` is discarded like any other chatter, since it arrives inside the reply block of the command
+that requested it and nothing waits on it. The extensible-argument rule matters too: everything between the age and a
+lone `:` field is reserved for future tmux versions and is skipped by scanning for that separator field rather than by
+counting fields, so a future argument cannot silently shift the payload.
 
 This boundary was checked against tmux 3.3a, 3.4, and 3.7b with `scripts/check-tmux-cutover.py` under a continuously
 busy pane. The corresponding tmux source has the same ordering in all three versions: one input line appends the
@@ -153,8 +190,9 @@ that, a reattached full-screen agent silently loses paste bracketing and mouse r
 tmux's retained history. One deeper tmux limitation also remains: `capture-pane` serializes rendered cells, not an
 in-progress terminal escape parser. If reconnect lands after tmux has consumed only a prefix of one escape sequence, the
 snapshot cannot serialize that hidden parser state for xterm.js; a later application repaint repairs the display.
-Farhelm does preserve split printable output and keeps its own passthrough decoder across live `%output` notification
-boundaries. The supervisor enforces SPEC.md's one-attachment rule itself.
+Farhelm does preserve split printable output and keeps its own passthrough decoder across live pane-output notification
+boundaries (resetting it only when a `%pause` catch-up abandons the stream it belonged to). The supervisor enforces
+SPEC.md's one-attachment rule itself.
 
 Exited-session semantics: `remain-on-exit on` keeps dead panes viewable per SPEC.md, and exit codes come from the dead
 pane's status. Exec failure versus ran-and-died cannot be told apart by exit code alone (a missing command yields 127

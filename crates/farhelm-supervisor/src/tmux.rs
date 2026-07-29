@@ -23,7 +23,45 @@ use tokio::process::{Child, ChildStdin, Command};
 /// History (and therefore replay) floor. SPEC.md promises at least the
 /// screen plus 10,000 lines; the margin covers lines scrolled during the
 /// capture itself.
+///
+/// Doubles as the ceiling on the browser's own scrollback (PLAN_M2_5.md:
+/// xterm.js scrollback capacity at most this floor, so a post-stall
+/// catch-up's end state is observably equivalent to lossless slow
+/// delivery). That cross-language invariant is pinned by an e2e test that
+/// reads `crates/farhelm-ui/assets/terminal.js` directly, because nothing
+/// else forces the two numbers to move together.
 pub const HISTORY_LIMIT: u32 = 12_000;
+
+/// How far behind a control client's pane stream may fall, in seconds,
+/// before tmux applies its own flow control to it (`pause-after` — see
+/// [`attach_cutover_command`]).
+///
+/// This is the overflow backstop under Farhelm's own flow control, not
+/// the primary mechanism: PLAN_M2_5.md's browser-driven pause/resume
+/// keeps the steady state far from here, and a real pause lasts seconds
+/// at most (the drainable backlog is bounded by the UI's high-water mark
+/// plus the bounded queues below it).
+///
+/// What tmux actually does once this trips is NOT one behavior, which is
+/// worth knowing before reading the rest of this module (audited
+/// 2026-07-29 on 3.3a, 3.4 and 3.7b, all three observed doing both across
+/// repeated identical trials — it is not a version split; see
+/// SPEC_impl.md's backpressure paragraph): tmux either throttles the pane
+/// itself, blocking the agent's own `write` so nothing is queued and
+/// delivery just continues on resume, or reads ahead into history and
+/// cuts this client's stream with `%pause`, discarding what it had queued
+/// for it. Only the second needs recovery, and
+/// [`OutputStream::resume_paused_with_replay`] is it. Nothing here may
+/// assume which one will happen.
+///
+/// Five seconds is long enough that an ordinary watermark pause rarely
+/// trips this — tripping is not an error, but on the second path it costs
+/// a full reset-and-replay catch-up — and short enough that a genuinely
+/// wedged client cannot make the tmux server grow its own memory for
+/// long. Without the flag at all, an undrained control client grows the
+/// tmux server's RSS without bound (audited 2026-07-29: ~3.5 MB/s against
+/// a `yes` pane on 3.4), which is the failure this exists to close.
+pub const TMUX_PAUSE_AFTER_SECS: u64 = 5;
 
 /// One tmux control-mode notification may expand each terminal byte into
 /// a four-byte octal escape. Bound the line above the protocol frame cap
@@ -42,7 +80,7 @@ const CONTROL_EXCHANGE_TIMEOUT: std::time::Duration = std::time::Duration::from_
 /// `pane_process` call from the `Attach` handler — `pane_process` is a
 /// plain (non-control-mode) tmux invocation of its own, and this format is
 /// already fetched as part of the control-mode replay cutover command
-/// group in [`OutputStream::snapshot_then_enable`], so folding the dead
+/// group in [`OutputStream::snapshot_then_cutover`], so folding the dead
 /// flag in here avoids that extra round trip entirely rather than merely
 /// avoiding a second CONTROL-mode one. The dead flag is what the `Attach`
 /// handler (service.rs) uses to decide whether to append the alt-screen
@@ -51,6 +89,61 @@ const PANE_MODE_FORMAT: &str = "#{alternate_on},#{bracket_paste_flag},#{mouse_an
                                 #{mouse_button_flag},#{mouse_standard_flag},#{mouse_sgr_flag},\
                                 #{cursor_flag},#{keypad_cursor_flag},#{cursor_x},#{cursor_y},\
                                 #{pane_dead}";
+
+/// The command that ends the attach-time replay command group and hands
+/// the client over to live output.
+///
+/// Two client flags in one comma-separated `-f` list, and both halves are
+/// load-bearing. `!no-output` (the leading `!` is tmux's own
+/// clear-this-flag form) is the cutover itself: the client attached with
+/// `no-output` set, so this is the instant pane bytes start flowing.
+/// `pause-after=N` is what makes those bytes safe to fall behind on — see
+/// [`TMUX_PAUSE_AFTER_SECS`]. Setting `pause-after` here rather than on
+/// the original `attach` is deliberate: it belongs to the same atomic
+/// hand-over as the cutover, so there is no window in which output flows
+/// without the backstop.
+///
+/// Enabling `pause-after` also switches this client's output dialect —
+/// pane bytes arrive as `%extended-output` instead of `%output`, and
+/// `%pause`/`%continue` notifications appear (see [`OutputEvent`]).
+/// Verified against tmux 3.7b that the combined flag list is accepted and
+/// does exactly this.
+fn attach_cutover_command() -> String {
+    format!("refresh-client -f !no-output,pause-after={TMUX_PAUSE_AFTER_SECS}")
+}
+
+/// The command that lifts a tmux-side pause on `pane` — `refresh-client
+/// -A <pane-id>:continue`, tmux's documented pane-state form.
+///
+/// Used as the FINAL command of the catch-up replay group (see
+/// [`OutputStream::resume_paused_with_replay`]), which is why it is a
+/// command rather than a flag: it is the resume path's cutover, exactly
+/// as [`attach_cutover_command`] is the attach path's. tmux acknowledges
+/// it with a `%continue <pane-id>` notification and resumes the stream
+/// immediately after the command group's own `%end` (verified against
+/// tmux 3.7b). The argument is quoted because it contains a `:`; the
+/// pane id's leading `%` is required by tmux.
+fn continue_pane_command(pane: &str) -> String {
+    format!("refresh-client -A \"{pane}:continue\"")
+}
+
+/// The replay command group both the attach and the catch-up paths
+/// submit through their control client, differing only in `cutover` —
+/// the final command whose `%end` is the replay/live boundary.
+///
+/// Shared rather than duplicated because the four commands and their
+/// ORDER are the contract [`OutputStream::snapshot_then_cutover`] reads
+/// replies against: modes, history snapshot, visible snapshot, cutover.
+/// A second copy of this string for the resume path would be a second
+/// place for that block-count contract to drift.
+fn replay_command_group(pane: &str, cutover: &str) -> String {
+    format!(
+        "display-message -p -t {pane} '{PANE_MODE_FORMAT}' ; \
+         capture-pane -p -e -N -t {pane} -S -{HISTORY_LIMIT} ; \
+         capture-pane -p -e -N -t {pane} ; \
+         {cutover}\n"
+    )
+}
 
 /// Handle to the private tmux server. All tmux invocations go through
 /// this so the `-S <socket> -f <config>` isolation is impossible to
@@ -816,8 +909,9 @@ impl TmuxDriver {
     /// Avoids adding another lossy UTF-8 conversion to `capture-pane`
     /// output. Tmux may already canonicalize invalid source bytes while
     /// storing its terminal grid, but valid multibyte and non-ASCII
-    /// content should reach replay unchanged. The live `%output` path is
-    /// byte-clean and bypasses the grid (see `OutputStream::next_output`).
+    /// content should reach replay unchanged. The live output path
+    /// (`%output`/`%extended-output`) is byte-clean and bypasses the grid
+    /// (see `OutputStream::next_output`).
     async fn run_bytes(&self, args: &[&str]) -> anyhow::Result<Vec<u8>> {
         // `stdin` is null so tmux can never inherit the supervisor's own
         // stdin — under `farhelm internal stdio` that stdin is the
@@ -1511,12 +1605,13 @@ impl TmuxDriver {
     /// output without leaving a gap between the two.
     ///
     /// The client attaches with tmux's `no-output` flag. Mode query, two
-    /// snapshots, and `refresh-client -f !no-output` are then submitted
-    /// as one command group through that same client. tmux runs a command
-    /// group synchronously before returning to pane reads, so the final
+    /// snapshots, and [`attach_cutover_command`] are then submitted as one
+    /// command group through that same client. tmux runs a command group
+    /// synchronously before returning to pane reads, so the final
     /// command's `%end` is the cutover: pane bytes before it are already
     /// represented by the selected snapshot, while bytes after it arrive
-    /// as `%output` on this stream.
+    /// as `%extended-output` on this stream (the cutover also sets
+    /// `pause-after`, which switches the dialect — see [`OutputEvent`]).
     ///
     /// Both history and visible-only snapshots are taken because modes
     /// decide which one is valid. Normal-screen replay includes
@@ -1566,7 +1661,9 @@ impl TmuxDriver {
             "control-mode attach",
         )
         .await?;
-        let (modes, prefill) = stream.snapshot_then_enable(pane, deadline).await?;
+        let (modes, prefill) = stream
+            .snapshot_then_cutover(pane, deadline, &attach_cutover_command())
+            .await?;
         Ok((modes, prefill, stream))
     }
 
@@ -1574,7 +1671,7 @@ impl TmuxDriver {
     ///
     /// Attaches with `-f no-output` PERMANENTLY, unlike the replay
     /// client's transient use of the same flag: this client must never
-    /// see a `%output` notification, because [`InputClient::send`] reads
+    /// see a pane-output notification, because [`InputClient::send`] reads
     /// exactly one command-reply block per chunk it writes, and an
     /// interleaved pane-output line would desynchronize that read from
     /// the write that produced it. See [`InputClient`] for why input gets
@@ -1635,30 +1732,57 @@ pub struct OutputStream {
     reader: BufReader<tokio::process::ChildStdout>,
     line: Vec<u8>,
     /// Stateful because tmux may split one passthrough wrapper across
-    /// several `%output` notifications.
+    /// several output notifications.
     passthrough: PassthroughDecoder,
 }
 
-impl OutputStream {
-    /// Capture modes and content, then enable live output at the final
-    /// command block boundary.
+/// One thing read off a control client's stream that the forwarder cares
+/// about. Everything else tmux says (command replies, layout changes,
+/// window renames) is consumed and discarded inside
+/// [`OutputStream::next_output`].
+///
+/// The two non-byte variants exist because `pause-after` (see
+/// [`TMUX_PAUSE_AFTER_SECS`]) makes tmux's flow-control state visible on
+/// this stream, and the supervisor must act on it rather than treat it as
+/// chatter: a `Paused` means tmux CUT this client's pane stream and the
+/// bytes it dropped are gone from the live path for good, recoverable
+/// only by replaying history (PLAN_M2_5.md's reset-then-replay catch-up).
+/// Swallowing it would leave the client silently missing a chunk of its
+/// terminal with nothing anywhere noticing.
+#[derive(Debug, PartialEq, Eq)]
+pub enum OutputEvent {
+    /// Decoded pane bytes, ready for the wire. Never empty.
+    Bytes(Vec<u8>),
+    /// `%pause`: tmux stopped sending this pane's output to this client
+    /// because it fell further behind than `pause-after` allows, and
+    /// discarded what it had queued. The stream stays quiet until
+    /// [`OutputStream::resume_paused_with_replay`].
     ///
-    /// The four expected blocks are deliberately explicit. Treating the
-    /// group as one opaque reply makes it too easy to enable output after
-    /// only the first `%end`, which reintroduces the replay/live overlap
-    /// this method exists to remove.
-    async fn snapshot_then_enable(
+    /// Its ABSENCE is not evidence of anything: tmux answers a lagging
+    /// client either this way or by throttling the pane instead, and
+    /// which one is timing-dependent rather than version-dependent (see
+    /// [`TMUX_PAUSE_AFTER_SECS`]). Code may act on this event but must
+    /// never wait for one.
+    Paused,
+}
+
+impl OutputStream {
+    /// Capture modes and content, then hand the client over to live
+    /// output at the final command block boundary.
+    ///
+    /// `cutover` is that final command — [`attach_cutover_command`] on the
+    /// attach path, [`continue_pane_command`] on the catch-up path. The
+    /// four expected blocks are deliberately explicit. Treating the group
+    /// as one opaque reply makes it too easy to enable output after only
+    /// the first `%end`, which reintroduces the replay/live overlap this
+    /// method exists to remove.
+    async fn snapshot_then_cutover(
         &mut self,
         pane: &str,
         deadline: tokio::time::Instant,
+        cutover: &str,
     ) -> anyhow::Result<(PaneModes, Vec<u8>)> {
-        let history = format!("-{HISTORY_LIMIT}");
-        let command = format!(
-            "display-message -p -t {pane} '{PANE_MODE_FORMAT}' ; \
-             capture-pane -p -e -N -t {pane} -S {history} ; \
-             capture-pane -p -e -N -t {pane} ; \
-             refresh-client -f !no-output\n"
-        );
+        let command = replay_command_group(pane, cutover);
         let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
         tokio::time::timeout(remaining, async {
             self.stdin
@@ -1710,35 +1834,159 @@ impl OutputStream {
         Ok((modes, normalize_capture(snapshot)))
     }
 
-    /// Next chunk of pane output bytes, or None when the client exits
-    /// (session killed, server gone). Non-%output notifications are
-    /// consumed and ignored — command replies, layout changes, and
-    /// `%exit` chatter are not terminal content.
+    /// Next event of interest, or `None` when the client exits (session
+    /// killed, server gone). Notifications this stream has no use for —
+    /// command replies, layout changes, window renames — are consumed and
+    /// ignored; they are not terminal content and not flow control.
+    ///
+    /// BOTH output dialects are accepted unconditionally, in every call,
+    /// rather than switching on whether `pause-after` was set: `%output`
+    /// is what tmux emits without the flag (and what an older or
+    /// differently-configured client would still send), `%extended-output`
+    /// is what it emits with it. The two carry identical payloads and go
+    /// through identical decoding — see [`decode_output_payload`] — so a
+    /// stream that changes dialect mid-life, or interleaves the two, loses
+    /// nothing.
     ///
     /// Reads BYTES, never lines-as-`String`: tmux's control-mode escaping
     /// only octal-escapes bytes below 0x20 (and backslash), so anything
     /// ≥ 0x80 crosses this stream raw. Decoding as UTF-8 would fail on
     /// any pane emitting binary or non-UTF-8 output — `cat` of a binary
     /// file — and one such byte would kill the terminal for good.
-    pub async fn next_output(&mut self) -> anyhow::Result<Option<Vec<u8>>> {
+    ///
+    /// NOT cancel-safe: a cancelled call can leave a partially-read line
+    /// behind, which the next call discards. Callers may only abandon this
+    /// future on a path that tears the whole stream down (the stall detach
+    /// does exactly that), never to resume reading afterwards.
+    pub async fn next_output(&mut self) -> anyhow::Result<Option<OutputEvent>> {
+        // Fields are destructured up front so the borrow checker can see
+        // that the scratch line buffer, the reader, and the passthrough
+        // decoder are disjoint — which is what lets a classified borrow OF
+        // the line coexist with the mutable borrow of the decoder, without
+        // moving the buffer out and back on every call.
+        let OutputStream {
+            reader,
+            line,
+            passthrough,
+            ..
+        } = self;
         loop {
-            self.line.clear();
-            let n = read_control_line(&mut self.reader, &mut self.line).await?;
+            line.clear();
+            let n = read_control_line(reader, line).await?;
             if n == 0 {
                 return Ok(None);
             }
-            let line = strip_line_ending(&self.line);
-            if let Some(rest) = line.strip_prefix(b"%output ") {
-                // Format: "%<pane-id> <escaped-data>"
-                if let Some(sep) = rest.iter().position(|&b| b == b' ') {
-                    let bytes = unescape_control_output(&rest[sep + 1..]);
-                    let bytes = self.passthrough.push(&bytes);
+            match classify_control_line(strip_line_ending(line)) {
+                Some(ControlLine::Payload(escaped)) => {
+                    let bytes = decode_output_payload(passthrough, escaped);
                     if !bytes.is_empty() {
-                        return Ok(Some(bytes));
+                        return Ok(Some(OutputEvent::Bytes(bytes)));
                     }
                 }
-            } else if line.starts_with(b"%exit") {
-                return Ok(None);
+                Some(ControlLine::Paused) => return Ok(Some(OutputEvent::Paused)),
+                Some(ControlLine::Exit) => return Ok(None),
+                None => {}
+            }
+        }
+    }
+
+    /// Lift a tmux-side pause and re-establish this client's stream as a
+    /// reattach: snapshot the pane's modes and history, then continue it.
+    ///
+    /// The catch-up contract (PLAN_M2_5.md): the bytes tmux dropped while
+    /// paused are exactly the bytes history can replay, so the resume path
+    /// reuses the attach path's snapshot machinery rather than growing a
+    /// second replay implementation — same command group, same block
+    /// accounting, only the cutover command differs.
+    ///
+    /// Ordering is load-bearing and empirically verified (tmux 3.7b): the
+    /// snapshot is taken while the pane is STILL paused, so no live output
+    /// can interleave with the command group's reply blocks, and the
+    /// continue is the group's LAST command, so the first live byte after
+    /// its `%end` is the first byte past the snapshot. Continuing first and
+    /// snapshotting after would race resumed output into
+    /// [`read_command_block`], which would silently fold it into the
+    /// captured history.
+    ///
+    /// The caller must reset the client's terminal before writing the
+    /// returned prefill: the replay assumes an empty terminal, and this
+    /// one lands in a terminal already showing the pre-pause bytes.
+    pub async fn resume_paused_with_replay(
+        &mut self,
+        pane: &str,
+    ) -> anyhow::Result<(PaneModes, Vec<u8>)> {
+        // Discard any half-decoded passthrough wrapper left over from the
+        // stream tmux just cut. `%pause` can land in the middle of a
+        // wrapper split across notifications, and that partial state
+        // belongs to bytes the client will never receive — carrying it
+        // into the post-reset stream would make the decoder treat the
+        // first fresh bytes as a wrapper continuation and swallow or
+        // mangle them. The replay itself is capture-pane output, which
+        // never contains a wrapper, so nothing is lost by clearing here.
+        self.passthrough = PassthroughDecoder::default();
+        let deadline = tokio::time::Instant::now() + CONTROL_EXCHANGE_TIMEOUT;
+        self.snapshot_then_cutover(pane, deadline, &continue_pane_command(pane))
+            .await
+    }
+
+    /// Submit a raw command line on this client's stdin, for tests only.
+    ///
+    /// Exists so a test can force tmux into a state that is otherwise
+    /// reachable only by timing — specifically `refresh-client -A
+    /// <pane>:pause`, tmux's on-demand form of the same pane pause
+    /// `pause-after` produces after a delay. Provoking that delay-driven
+    /// pause deterministically is not possible from a test (it depends on
+    /// how far tmux happens to have read ahead of a client that then
+    /// stalls), so the on-demand form is what makes the catch-up path
+    /// testable at all.
+    ///
+    /// Deliberately does NOT read the reply: the caller is expected to go
+    /// on consuming the stream through [`Self::next_output`], which
+    /// discards command-reply blocks like any other chatter. Production
+    /// code must not use this — every real command this client sends is
+    /// part of a command GROUP whose replies are read back in lockstep by
+    /// [`Self::snapshot_then_cutover`].
+    #[cfg(test)]
+    async fn send_raw_command(&mut self, command: &str) -> anyhow::Result<()> {
+        self.stdin.write_all(command.as_bytes()).await?;
+        self.stdin.write_all(b"\n").await?;
+        self.stdin.flush().await?;
+        Ok(())
+    }
+
+    /// Read and discard control lines until this client's in-flight
+    /// command reply closes with `%end`/`%error`. Tests only.
+    ///
+    /// The complement to [`Self::send_raw_command`]: tmux nests the
+    /// `%pause`/`%continue` notification INSIDE the reply block of the
+    /// command that caused it, so a test that stops reading the moment it
+    /// sees the notification leaves the block's closing marker unread —
+    /// and the replay group that follows reads reply blocks positionally,
+    /// so one stray marker desynchronizes it. Waiting for the marker
+    /// explicitly is what makes that deterministic; the obvious
+    /// alternative (a short timeout on [`Self::next_output`], hoping it
+    /// consumes the line) both races and cancels a read this type
+    /// documents as not cancel-safe.
+    #[cfg(test)]
+    async fn drain_command_reply(&mut self) -> anyhow::Result<()> {
+        let deadline = tokio::time::Instant::now() + CONTROL_EXCHANGE_TIMEOUT;
+        loop {
+            self.line.clear();
+            let read = read_control_line_before(
+                &mut self.reader,
+                &mut self.line,
+                deadline,
+                "test command reply",
+            )
+            .await?;
+            if read == 0 {
+                bail!("control client exited before its command reply closed");
+            }
+            if matches!(
+                parse_control_marker(strip_line_ending(&self.line)),
+                Some(ControlMarker::End(_) | ControlMarker::Error(_))
+            ) {
+                return Ok(());
             }
         }
     }
@@ -1753,7 +2001,7 @@ impl OutputStream {
     /// be dead before another attaches: overlapping control clients
     /// reproducibly froze the newcomer's stream after the replay. The
     /// mechanism was never pinned down (in isolation two attached control
-    /// clients DO both receive `%output` — audited), so treat the
+    /// clients DO both receive pane output — audited), so treat the
     /// ordering, not any particular explanation, as the invariant; the
     /// attach handler's open-stream comment tells the same story.
     pub async fn shutdown(mut self) {
@@ -1778,8 +2026,8 @@ impl OutputStream {
 /// OS pipe accepted the bytes, which is not the same as tmux having
 /// executed them. Two failure modes hid behind that gap — an `%error`
 /// reply had nowhere to go, because `OutputStream::next_output` discards
-/// every non-`%output` notification by design (command replies,
-/// layout-change chatter, `%exit`), so a rejected `send-keys` vanished
+/// every notification it has no use for (command replies, layout-change
+/// chatter, `%exit`), so a rejected `send-keys` vanished
 /// silently instead of surfacing as dropped input; and a takeover could
 /// kill the shared client after `send` returned `Ok` but before tmux
 /// processed the buffered command, losing input that had already been
@@ -2086,7 +2334,15 @@ async fn read_command_block<R: AsyncRead + Unpin>(
             Some(ControlMarker::End(_) | ControlMarker::Error(_)) => {
                 bail!("tmux control protocol ended a block before beginning the {purpose} reply");
             }
-            None if stripped.starts_with(b"%output ") => {
+            // Both dialects, for the same reason: live output arriving
+            // BETWEEN reply blocks means the cutover ordering broke, and
+            // silently folding those bytes into the next block's captured
+            // output would manufacture terminal history. Which dialect it
+            // arrives in depends only on whether `pause-after` is set on
+            // this client, which is not this function's business to know.
+            None if stripped.starts_with(b"%output ")
+                || stripped.starts_with(b"%extended-output ") =>
+            {
                 bail!("tmux emitted live output before the replay cutover completed");
             }
             None if stripped.starts_with(b"%exit") => {
@@ -2240,8 +2496,8 @@ fn normalize_capture(out: &[u8]) -> Vec<u8> {
 /// Incrementally remove tmux passthrough wrappers before bytes reach the
 /// real terminal.
 ///
-/// tmux may split `ESC P tmux; ... ESC \` across `%output`
-/// notifications, including inside the opener or on either side of an
+/// tmux may split `ESC P tmux; ... ESC \` across output
+/// notifications (either dialect), including inside the opener or on either side of an
 /// escaped `ESC`. Keeping only the parser's few bytes of boundary state
 /// avoids both split-wrapper corruption and an unbounded whole-wrapper
 /// buffer for large inline images.
@@ -2318,7 +2574,7 @@ fn unwrap_passthrough(bytes: &[u8]) -> Vec<u8> {
 /// its ending, because the bounded line reader leaves it attached and
 /// tmux is not consistent about whether a `\r` precedes it. Applies only to
 /// tmux's own notification lines — pane output is escaped payload inside
-/// `%output` and must never be touched.
+/// `%output`/`%extended-output` and must never be touched.
 fn strip_line_ending(line: &[u8]) -> &[u8] {
     let line = line.strip_suffix(b"\n").unwrap_or(line);
     line.strip_suffix(b"\r").unwrap_or(line)
@@ -2331,8 +2587,114 @@ fn strip_line_ending(line: &[u8]) -> &[u8] {
 /// newlines. One belongs to control mode and is removed here; the other
 /// belongs to capture-pane and is removed during terminal normalization.
 fn strip_command_output_terminator(output: &[u8]) -> &[u8] {
-    let output = output.strip_suffix(b"\n").unwrap_or(output);
-    output.strip_suffix(b"\r").unwrap_or(output)
+    // Same trailing-CRLF-or-LF shape as a notification's own terminator,
+    // so it shares that implementation rather than repeating it; the two
+    // stay distinct FUNCTIONS because they answer different questions
+    // (see this one's docs on the two newlines a command block carries).
+    strip_line_ending(output)
+}
+
+/// What one control-mode notification line means to
+/// [`OutputStream::next_output`], before any decoding happens.
+///
+/// Split out from the read loop as a pure function over one line
+/// specifically so the notification GRAMMAR is unit-testable without a
+/// tmux server or a live process behind it — the same reasoning
+/// [`parse_pane_states`] and [`PaneModes::parse`] were split out for.
+/// Shapes worth testing here are otherwise awkward or impossible to
+/// provoke on demand from a real server: a `%pause` requires stalling a
+/// client for seconds, and a future tmux's extra `%extended-output`
+/// argument does not exist yet at all.
+///
+/// `None` is "nothing this stream cares about" — command replies,
+/// `%layout-change`, `%window-renamed`, and anything a newer tmux invents.
+enum ControlLine<'a> {
+    /// Escaped pane bytes from either output dialect, still to be
+    /// unescaped and passthrough-decoded.
+    Payload(&'a [u8]),
+    /// `%pause <pane-id>`.
+    Paused,
+    /// `%exit`: this control client is going away.
+    Exit,
+}
+
+/// Classify one already-terminator-stripped notification line. See
+/// [`ControlLine`] for why this is a free function.
+fn classify_control_line(line: &[u8]) -> Option<ControlLine<'_>> {
+    if let Some(rest) = line.strip_prefix(b"%output ") {
+        // Format: "%<pane-id> <escaped-data>".
+        split_output_payload(rest).map(ControlLine::Payload)
+    } else if let Some(rest) = line.strip_prefix(b"%extended-output ") {
+        // Format: "%<pane-id> <age> ... : <escaped-data>".
+        split_extended_output_payload(rest).map(ControlLine::Payload)
+    } else if line.starts_with(b"%pause ") {
+        Some(ControlLine::Paused)
+    } else if line.starts_with(b"%exit") {
+        Some(ControlLine::Exit)
+    } else {
+        None
+    }
+}
+
+/// Turn one notification's escaped payload into pane bytes: undo
+/// control-mode octal escaping, then feed the result through the
+/// stateful passthrough decoder.
+///
+/// One function for BOTH dialects, deliberately. That matters more than
+/// it looks: [`PassthroughDecoder`] carries state ACROSS notifications (a
+/// `ESC P tmux;` wrapper may be split over any number of them), so a
+/// second decode path — or one dialect bypassing the decoder — would
+/// corrupt any wrapper that happens to straddle a dialect boundary. An
+/// empty result is normal and means the chunk ended mid-wrapper; the
+/// caller keeps reading.
+fn decode_output_payload(decoder: &mut PassthroughDecoder, escaped: &[u8]) -> Vec<u8> {
+    decoder.push(&unescape_control_output(escaped))
+}
+
+/// Split a `%output` notification's tail (everything past `"%output "`)
+/// into just its escaped payload, dropping the pane id.
+///
+/// `None` for a malformed line with no separator at all — treated as
+/// chatter rather than as empty output, so a truncated notification can
+/// never be mistaken for the pane genuinely emitting nothing.
+fn split_output_payload(rest: &[u8]) -> Option<&[u8]> {
+    let separator = rest.iter().position(|&byte| byte == b' ')?;
+    Some(&rest[separator + 1..])
+}
+
+/// Split an `%extended-output` notification's tail (everything past
+/// `"%extended-output "`) into just its escaped payload.
+///
+/// The documented shape is `pane-id age ... : value`, where tmux
+/// explicitly reserves the space between the age and the `:` for future
+/// arguments a client "should ignore". So this deliberately does NOT
+/// count fields: it scans space-separated fields for the first one that
+/// is EXACTLY `":"` and takes everything after it, which is what makes a
+/// future tmux adding a field a no-op here instead of a payload shifted
+/// by one token. Anchoring on a lone `:` field (not the first `:` byte)
+/// matters because the payload itself routinely contains colons — pane
+/// output is arbitrary bytes.
+///
+/// `None` when no such separator field exists, for the same reason
+/// [`split_output_payload`] returns `None`: a line this function cannot
+/// locate a payload in is chatter, not empty output.
+fn split_extended_output_payload(rest: &[u8]) -> Option<&[u8]> {
+    let mut offset = 0;
+    while offset < rest.len() {
+        let end = rest[offset..]
+            .iter()
+            .position(|&byte| byte == b' ')
+            .map_or(rest.len(), |index| offset + index);
+        if &rest[offset..end] == b":" {
+            // `end + 1` is in range whenever a space followed the marker;
+            // an `%extended-output` whose payload is genuinely empty ends
+            // right at the marker, which `get` turns into an empty slice
+            // rather than a panic.
+            return Some(rest.get(end + 1..).unwrap_or(&[]));
+        }
+        offset = end + 1;
+    }
+    None
 }
 
 /// Undo control-mode escaping.
@@ -2583,6 +2945,44 @@ mod tests {
         .await
         .expect("complete block");
         assert_eq!(output, b"ordinary\n%end 10 999 1\n%error not-a-marker\n");
+    }
+
+    /// Live pane output arriving BETWEEN reply blocks must fail the
+    /// attach, in EITHER dialect.
+    ///
+    /// That guard is what stops the replay cutover silently
+    /// manufacturing history: output landing before the cutover means the
+    /// ordering broke, and folding those bytes into the next block would
+    /// store them as captured content. `%extended-output` is the dialect
+    /// every post-M2.5 attachment actually uses, so a guard that only knew
+    /// `%output` would be the one that never fires in production. Both are
+    /// asserted to produce the SAME error, since which dialect a client
+    /// speaks depends only on whether `pause-after` is set and is not
+    /// this function's business.
+    #[tokio::test]
+    async fn live_output_before_the_cutover_fails_the_attach_in_either_dialect() {
+        for live in [
+            &b"%output %0 live\n"[..],
+            &b"%extended-output %0 0 : live\n"[..],
+        ] {
+            let mut input = live.to_vec();
+            input.extend_from_slice(b"%begin 10 20 1\nmodes\n%end 10 20 1\n");
+            let mut reader = BufReader::new(&input[..]);
+            let mut line = Vec::new();
+            let error = read_command_block(
+                &mut reader,
+                &mut line,
+                tokio::time::Instant::now() + CONTROL_EXCHANGE_TIMEOUT,
+                "pane modes",
+            )
+            .await
+            .expect_err("live output before the cutover must fail the attach");
+            assert!(
+                format!("{error:#}").contains("live output before the replay cutover"),
+                "dialect {:?} produced an unexpected error: {error:#}",
+                String::from_utf8_lossy(live)
+            );
+        }
     }
 
     /// `%error` closes the matching command block and must retain tmux's
@@ -3189,6 +3589,337 @@ mod tests {
             states.is_empty(),
             "every row here is malformed and must be skipped: {states:?}"
         );
+    }
+
+    /// Run a scripted control-mode transcript through the exact
+    /// classification and decoding `OutputStream::read_next_event` uses,
+    /// collecting the events a forwarder would have observed.
+    ///
+    /// Line-per-line rather than through a reader on purpose: framing is
+    /// already pinned by this module's `read_control_line` tests, and
+    /// keeping this helper free of any I/O is what lets the notification
+    /// GRAMMAR be tested without a tmux server. One shared
+    /// [`PassthroughDecoder`] across the whole transcript is load-bearing,
+    /// not incidental — it is what makes a wrapper split across
+    /// notifications (or across dialects) observable here at all.
+    fn events_from_transcript(transcript: &[&[u8]]) -> Vec<OutputEvent> {
+        let mut decoder = PassthroughDecoder::default();
+        let mut events = Vec::new();
+        for line in transcript {
+            match classify_control_line(line) {
+                Some(ControlLine::Payload(escaped)) => {
+                    let bytes = decode_output_payload(&mut decoder, escaped);
+                    if !bytes.is_empty() {
+                        events.push(OutputEvent::Bytes(bytes));
+                    }
+                }
+                Some(ControlLine::Paused) => events.push(OutputEvent::Paused),
+                Some(ControlLine::Exit) => break,
+                None => {}
+            }
+        }
+        events
+    }
+
+    /// `%extended-output` — the dialect `pause-after` switches tmux into,
+    /// and therefore the ONLY dialect a production attachment sees after
+    /// this milestone. Pins the documented shape (`pane-id age ... :
+    /// value`), the extensibility rule (unknown fields between the age
+    /// and the `:` are ignored rather than counted, so a future tmux
+    /// argument cannot shift the payload), and that a payload containing
+    /// colons and spaces of its own is not mistaken for the separator.
+    #[test]
+    fn extended_output_is_decoded_with_and_without_extra_fields() {
+        let events = events_from_transcript(&[
+            br"%extended-output %0 0 : plain\015\012",
+            b"%extended-output %0 12 future args here : with:colons and spaces",
+            b"%extended-output %0 0 :",
+        ]);
+        assert_eq!(
+            events,
+            vec![
+                OutputEvent::Bytes(b"plain\r\n".to_vec()),
+                OutputEvent::Bytes(b"with:colons and spaces".to_vec()),
+            ],
+            "an empty payload yields no event at all, and neither extra fields nor colons in \
+             the payload may shift the split"
+        );
+    }
+
+    /// Plain `%output` must keep working unchanged: it is what tmux emits
+    /// with no `pause-after` set, and the parser accepts both dialects
+    /// unconditionally rather than switching on client state. Interleaving
+    /// the two in one transcript is deliberate — passthrough-wrapper state
+    /// is carried ACROSS notifications, so a dialect boundary landing
+    /// inside a wrapper must decode exactly as if it never happened.
+    #[test]
+    fn both_output_dialects_share_one_decoder() {
+        let events = events_from_transcript(&[
+            br"%output %0 before\033Ptmux;\033\033]52;c;",
+            br"%extended-output %0 0 : aGk=\007\033\134after",
+        ]);
+        assert_eq!(
+            events,
+            vec![
+                // The wrapper opens in the `%output` notification and its
+                // payload so far (an un-doubled ESC, then the OSC opener)
+                // comes out with it; the rest, including the `ESC \` that
+                // CLOSES the wrapper, arrives in the `%extended-output`
+                // one and must decode as a continuation rather than as a
+                // fresh, unwrapped chunk.
+                OutputEvent::Bytes(b"before\x1b]52;c;".to_vec()),
+                OutputEvent::Bytes(b"aGk=\x07after".to_vec()),
+            ],
+            "a passthrough wrapper opened in one dialect must close correctly in the other"
+        );
+    }
+
+    /// `%pause` must surface as an event; `%continue` must NOT, and must
+    /// not disturb the output around it.
+    ///
+    /// The asymmetry is the point. A swallowed `%pause` is the worst
+    /// outcome in this file — tmux has cut the stream, the bytes it drops
+    /// are gone from the live path forever, and nothing downstream would
+    /// know to replay them, so the terminal would just silently miss a
+    /// chunk. `%continue`, by contrast, is pure acknowledgement: it
+    /// arrives inside the reply block of the very command that requested
+    /// it, so nothing ever waits on it, and surfacing it would only give
+    /// callers a variant they must remember to ignore. This pins that it
+    /// is discarded like any other chatter AND that discarding it does not
+    /// swallow or reorder the adjacent pane output.
+    #[test]
+    fn pause_surfaces_as_an_event_while_continue_is_discarded_intact() {
+        let events = events_from_transcript(&[
+            b"%extended-output %0 0 : a",
+            b"%pause %0",
+            b"%window-renamed @0 sh",
+            b"%continue %0",
+            b"%extended-output %0 0 : b",
+        ]);
+        assert_eq!(
+            events,
+            vec![
+                OutputEvent::Bytes(b"a".to_vec()),
+                OutputEvent::Paused,
+                OutputEvent::Bytes(b"b".to_vec()),
+            ],
+            "`%continue` and unrelated notifications alike must be discarded without \
+             disturbing the pane bytes on either side of them"
+        );
+    }
+
+    /// The exact attach-cutover text, pinned like every other generated
+    /// tmux command in this module. Both flags ride one comma-separated
+    /// `-f` list, and the `!` prefix is what CLEARS `no-output` rather
+    /// than setting a flag by that name — get either detail wrong and the
+    /// client silently either never receives output or never gets the
+    /// `pause-after` backstop, neither of which fails loudly.
+    #[test]
+    fn attach_cutover_sets_pause_after_while_clearing_no_output() {
+        assert_eq!(
+            attach_cutover_command(),
+            format!("refresh-client -f !no-output,pause-after={TMUX_PAUSE_AFTER_SECS}")
+        );
+    }
+
+    /// The exact continue text. `-A <pane>:continue` is tmux's pane-state
+    /// form; the pane id keeps its leading `%` and the argument is quoted
+    /// because of the `:`. A wrong spelling here would surface only as a
+    /// pane that never resumes after a stall.
+    #[test]
+    fn continue_command_uses_the_pane_state_form() {
+        assert_eq!(
+            continue_pane_command("%7"),
+            "refresh-client -A \"%7:continue\""
+        );
+    }
+
+    /// The replay group's command list and ORDER are the contract
+    /// `snapshot_then_cutover` reads reply blocks against, and both the
+    /// attach and catch-up paths depend on it being identical apart from
+    /// the final cutover. Pinned against the complete string so a
+    /// reordering — which would silently pair the modes reply with the
+    /// history capture — cannot pass.
+    #[test]
+    fn replay_command_group_differs_only_in_its_cutover() {
+        let attach = replay_command_group("%1", &attach_cutover_command());
+        let resume = replay_command_group("%1", &continue_pane_command("%1"));
+        assert_eq!(
+            attach,
+            format!(
+                "display-message -p -t %1 '{PANE_MODE_FORMAT}' ; \
+                 capture-pane -p -e -N -t %1 -S -{HISTORY_LIMIT} ; \
+                 capture-pane -p -e -N -t %1 ; \
+                 refresh-client -f !no-output,pause-after={TMUX_PAUSE_AFTER_SECS}\n"
+            )
+        );
+        let common = attach
+            .strip_suffix(&format!("{}\n", attach_cutover_command()))
+            .expect("attach group ends with its cutover");
+        assert_eq!(
+            resume,
+            format!("{common}{}\n", continue_pane_command("%1")),
+            "the two groups must share every snapshot command verbatim"
+        );
+    }
+
+    /// A tmux server on a throwaway socket, killed on drop.
+    ///
+    /// The tests below are the only ones in this module that need a real
+    /// tmux — everything else here is deliberately pure. Drop-based
+    /// teardown for the same reason the e2e harness uses it: a test that
+    /// fails an assertion never reaches an explicit cleanup call, and
+    /// leaked tmux servers accumulate across runs.
+    struct ScratchServer {
+        driver: TmuxDriver,
+        _dir: tempfile::TempDir,
+    }
+
+    impl Drop for ScratchServer {
+        fn drop(&mut self) {
+            let _ = std::process::Command::new("tmux")
+                .arg("-S")
+                .arg(&self.driver.socket)
+                .arg("kill-server")
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .status();
+        }
+    }
+
+    impl ScratchServer {
+        async fn start() -> ScratchServer {
+            let dir = tempfile::tempdir().expect("tempdir");
+            let driver = TmuxDriver::new(dir.path());
+            driver.ensure_server().await.expect("tmux server");
+            ScratchServer { driver, _dir: dir }
+        }
+    }
+
+    /// Pull events until one satisfies `want`, failing rather than
+    /// hanging if the stream goes quiet. Returns everything decoded along
+    /// the way so callers can assert on the bytes that preceded the event.
+    async fn pump_until(
+        stream: &mut OutputStream,
+        secs: u64,
+        want: impl Fn(&OutputEvent) -> bool,
+    ) -> Vec<u8> {
+        let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(secs);
+        let mut bytes = Vec::new();
+        loop {
+            let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
+            let event = tokio::time::timeout(remaining, stream.next_output())
+                .await
+                .unwrap_or_else(|_| panic!("stream went quiet after {} bytes", bytes.len()))
+                .expect("control stream failed")
+                .expect("control client exited");
+            if want(&event) {
+                return bytes;
+            }
+            if let OutputEvent::Bytes(chunk) = event {
+                bytes.extend_from_slice(&chunk);
+            }
+        }
+    }
+
+    /// The catch-up path against a REAL tmux: a paused pane must surface
+    /// as [`OutputEvent::Paused`], and
+    /// [`OutputStream::resume_paused_with_replay`] must both hand back a
+    /// usable replay and get the live stream flowing again.
+    ///
+    /// This is the one place the whole tmux-facing half of PLAN_M2_5.md's
+    /// deep-stall recovery is exercised end to end, and it earns a real
+    /// tmux because every interesting part is tmux's behavior, not ours:
+    /// that a paused pane goes quiet, that a snapshot command group can
+    /// still run cleanly on that same client while it is paused (the
+    /// ordering the resume path depends on — continuing first would race
+    /// resumed output into the snapshot), and that the continue command's
+    /// `%end` is where live output picks back up.
+    ///
+    /// The pause is forced with tmux's on-demand `refresh-client -A
+    /// <pane>:pause` rather than by starving the client until
+    /// `pause-after` fires. That is not a shortcut, it is the only
+    /// DETERMINISTIC option: whether the delay-driven pause triggers
+    /// depends on how far tmux happens to have read ahead of a client that
+    /// then stalls, and a client that was caught up when it stopped
+    /// reading leaves tmux nothing buffered to age — tmux then throttles
+    /// the pane instead and never pauses at all. Both outcomes were
+    /// observed on every supported tmux generation (3.3a, 3.4, 3.7b) in
+    /// repeated identical trials, so starving the client would make this a
+    /// coin flip. The pane state reached is identical either way, which is
+    /// what this test is about; the e2e suite covers the delay-driven path
+    /// end to end, tolerating both outcomes.
+    #[tokio::test]
+    async fn a_paused_pane_surfaces_and_recovers_through_the_replay_path() {
+        let server = ScratchServer::start().await;
+        let pane = server
+            .driver
+            .create_session(
+                "fh-pause-test",
+                "/",
+                80,
+                24,
+                // A producer fast enough that "the stream went quiet"
+                // genuinely means paused, and slow enough not to bury the
+                // test in output.
+                &[
+                    "sh".to_string(),
+                    "-c".to_string(),
+                    "i=0; while :; do echo PAUSETEST-$i; i=$((i+1)); done".to_string(),
+                ],
+            )
+            .await
+            .expect("session");
+        let (_modes, _prefill, mut stream) = server
+            .driver
+            .open_replay_stream("fh-pause-test", &pane)
+            .await
+            .expect("replay stream");
+
+        // Prove output is flowing before pausing, so the quiet below is
+        // attributable to the pause rather than to a pane that never
+        // started.
+        pump_until(&mut stream, 10, |event| {
+            matches!(event, OutputEvent::Bytes(bytes) if bytes.windows(10).any(|w| w == b"PAUSETEST-"))
+        })
+        .await;
+
+        stream
+            .send_raw_command(&format!("refresh-client -A \"{pane}:pause\""))
+            .await
+            .expect("pause command");
+        pump_until(&mut stream, 10, |event| *event == OutputEvent::Paused).await;
+        // Consume the pause command's own closing marker before running
+        // the replay group, which reads reply blocks positionally — see
+        // `drain_command_reply` for why the notification arrives inside
+        // that block, and why this is awaited explicitly rather than
+        // approximated with a timeout on a read that is not cancel-safe.
+        stream
+            .drain_command_reply()
+            .await
+            .expect("pause command reply");
+
+        let (modes, content) = stream
+            .resume_paused_with_replay(&pane)
+            .await
+            .expect("catch-up replay");
+        assert!(
+            content.windows(10).any(|window| window == b"PAUSETEST-"),
+            "the catch-up replay must carry the pane's history, not an empty capture"
+        );
+        assert!(
+            !modes.pane_dead,
+            "test premise: the producer must still be alive after the catch-up"
+        );
+
+        // Live output resuming is the other half of the contract: a
+        // continue that returned a snapshot but left the pane paused
+        // would look identical up to here and leave the terminal dead.
+        pump_until(&mut stream, 10, |event| {
+            matches!(event, OutputEvent::Bytes(bytes) if bytes.windows(10).any(|w| w == b"PAUSETEST-"))
+        })
+        .await;
+        stream.shutdown().await;
     }
 
     /// Parser-level robustness only: an empty string must parse as an
