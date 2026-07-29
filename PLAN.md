@@ -1,7 +1,7 @@
 # Farhelm plan
 
 NOTE: This is the overall build plan: the motivation for how the work is ordered, and the coarse milestone ladder. Only
-the current milestone is ever planned in detail — see PLAN_M2.md (PLAN_M0.md and PLAN_M1.md are history). Later
+the current milestone is ever planned in detail — see PLAN_M3.md (PLAN_M0.md through PLAN_M2_5.md are history). Later
 milestones get their own PLAN_M*.md when their turn comes; pre-emptive detail would just be fiction that dogfooding
 invalidates.
 
@@ -47,11 +47,15 @@ Consequences of that stance:
   server-enforced create idempotency: SPEC.md's "one intended create yields one session, never two silently" is only
   half-met by M2's client-side double-submit guard — a retry after an ambiguous transport failure can still duplicate,
   and closing that needs a client-supplied intent key deduplicated in the supervisor's store, which is this milestone's
-  durability territory.
+  durability territory. Also SPEC.md's durable stop annotations — no ladder entry ever claimed them (found while
+  planning M3 in detail), and durable session metadata is exactly this milestone's ground.
 - **M4 — attachments and terminal tabs.** Paste/drop to path-at-cursor; tabs in the session cwd.
 - **M5 — status and profiles.** Running/waiting/idle heuristics with per-agent sharpening, list filtering, profile CRUD
   and starter profiles. Also live push of session-list changes to connected clients, replacing M2's polling — placed
-  here because status transitions are what make polling genuinely painful, and the push channel serves both.
+  here because status transitions are what make polling genuinely painful, and the push channel serves both. Also
+  session rename: PLAN_M2.md deferred it as "M3+" and no entry ever claimed it (a ladder gap found while planning M3);
+  it lands here because it is a metadata-CRUD-plus-list-UX change of exactly this milestone's shape, not durability
+  work.
 - **M6 — multi-host.** Registry and host management, local-host supervisor, stale-cache semantics — including the
   helm-side persistent last-known session cache (helm.db) that SPEC.md's stale-list behavior needs, deferred out of M2
   where a single always-connected supervisor made it dead weight. Version-skew refusal. Real cursor pagination of the

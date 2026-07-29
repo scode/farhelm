@@ -224,8 +224,9 @@ Each session shows one of: **running** (agent actively working), **waiting** (a 
 directed at the user), **idle** (agent alive and at rest, no pending ask), **exited** (process ended), **interrupted**
 (the host rebooted while the session was last known live — an explicit lost-track state; see Durability), **error** (the
 agent process could not be started at all). Exited sessions show their exit code when known; an exit that happened while
-the supervisor was down shows an explicit unknown, never a guess. A user-initiated stop yields exited with an annotation
-— "stopped" is not a distinct status. Host unreachability is per-host connection state, not a session status.
+the supervisor was down shows the code only when the surviving terminal genuinely retains it, and an explicit unknown
+otherwise — never a guess (see Durability). A user-initiated stop yields exited with an annotation — "stopped" is not a
+distinct status. Host unreachability is per-host connection state, not a session status.
 
 An interrupted session stays interrupted until the user acts: opening it and declining resume leaves it interrupted;
 restart, archive, or delete are the ways out.
@@ -312,11 +313,13 @@ returns when the app or binary is next started, and interruption is classified a
 comes back. After a boot, sessions last known running show as **interrupted** — explicitly a lost-track state, not a
 claim about what happened in between: the agent may have exited on its own moments before the reboot, the supervisor
 cannot know, and interrupted says exactly that. Sessions already known exited (including user-stopped ones) keep their
-status; an exit during supervisor downtime with no reboot involved shows as exited with unknown code. Interrupted
-sessions' terminal contents are gone — there is no history store (see Terminal experience) — but the conversation itself
-is recoverable. Opening an interrupted session offers restart-with-resume. Nothing respawns unattended — an agent
-(especially one launched with permissive flags) only restarts when the user opens the session and confirms. The system
-must not presume the original OS process survived the reboot.
+status; an exit during supervisor downtime with no reboot involved shows as exited — with the true exit code when the
+surviving terminal still holds it, unknown code otherwise (reporting a code the terminal genuinely retains is not
+guessing; inventing one where nothing retains it would be). Interrupted sessions' terminal contents are gone — there is
+no history store (see Terminal experience) — but the conversation itself is recoverable. Opening an interrupted session
+offers restart-with-resume. Nothing respawns unattended — an agent (especially one launched with permissive flags) only
+restarts when the user opens the session and confirms. The system must not presume the original OS process survived the
+reboot.
 
 The resume promise is per-session: for agents with conversation-identity integration, the supervisor captures which
 agent conversation belongs to each session, and restart resumes exactly that conversation (e.g.
