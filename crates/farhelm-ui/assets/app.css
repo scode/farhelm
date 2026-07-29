@@ -252,6 +252,20 @@ body,
   padding: 2px 8px;
   border-radius: 3px;
   white-space: nowrap;
+  /* Every OTHER badge word is short and fixed ("alive", "exited (code
+     N)", ...), but `error`'s text embeds the shim's own detail — argv-
+     derived, and therefore user/attacker-influenced length (review-swarm
+     fix batch item 21). Without a cap, a long detail can widen this flex
+     item past its siblings' shrink budget and force the whole row wider
+     than the viewport, pushing the stop/delete buttons out of reach
+     rather than merely looking untidy. `min-width: 0` is load-bearing,
+     not decorative: a flex item's default minimum size is its CONTENT's
+     min-content width, which for `nowrap` text equals the full string —
+     `overflow`/`text-overflow` alone do nothing to shrink it without this. */
+  max-width: 32ch;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .status-badge.alive {
@@ -274,6 +288,14 @@ body,
    red — nothing failed, and this is not an error. */
 .status-badge.interrupted {
   color: #d8b45f;
+}
+
+/* Error (PLAN_M3.md item 3) IS the red-family case `interrupted`'s comment
+   above says nothing failed: the shim's exec-failure sentinel means the
+   agent never started at all, a genuine failure distinct from `exited`'s
+   "it ran and finished" or `interrupted`'s "the host took it away". */
+.status-badge.error {
+  color: #e0685f;
 }
 
 /* Create dialog (PLAN_M2.md step 8): an inline form toggled from the
