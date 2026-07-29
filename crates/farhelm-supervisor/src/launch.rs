@@ -378,16 +378,61 @@ pub fn window_command(shell: &str, farhelm_exe: &Path, spec_path: &Path) -> Vec<
     ]
 }
 
+/// Deterministically derive a launch's SENTINEL path from its SPEC path —
+/// pure, requiring no JSON parsing — so the shim can still report a
+/// launch failure when the spec itself cannot be read, or turns out to
+/// be malformed, unreadable, or empty. Without this, those failure modes
+/// have no known status-file path to write to at all (the path only
+/// lives INSIDE the parsed JSON), and silently degrade to a plain
+/// "exited" classification later — exactly the conversion PLAN_M3.md item
+/// 5 forbids. `service.rs`'s `create_session` derives this SAME path the
+/// same way when it first writes the spec, so the two sides always agree
+/// without the spec's own payload needing to restate it.
+pub fn status_path_for_spec(spec_path: &Path) -> PathBuf {
+    spec_path.with_extension("status")
+}
+
 /// The shim body: exec the spec's argv, recording failure to the status
 /// file first. Lives here (not in the bin crate) so it is unit-testable;
 /// `farhelm internal launch` is a thin caller. On success this function
-/// never returns.
+/// never returns. Delegates to [`exec_launch_spec_with_seam`] with the
+/// real filesystem; see that function for the actual logic.
 pub fn exec_launch_spec(spec_path: &Path) -> anyhow::Error {
+    exec_launch_spec_with_seam(spec_path, &crate::files::RealFs)
+}
+
+/// [`exec_launch_spec`]'s real body, parameterized over the write-
+/// atomicity seam so a test can inject a failure into the sentinel write
+/// itself while driving the ACTUAL production shim logic — not a
+/// synthetic call directly into `crate::files` that merely resembles it
+/// (PLAN_M3.md item 5's seam requirement: every tier-owed window driven
+/// through each real call site).
+///
+/// EVERY early-return path here writes a sentinel via
+/// [`status_path_for_spec`]'s derived path, not just the exec-failure one
+/// at the bottom: a spec that cannot even be read, or that parses into
+/// garbage, or whose argv is empty, must classify as error exactly as
+/// surely as a real exec failure does. Before this, those paths returned
+/// bare, unrecorded errors — invisible to any classifier that only ever
+/// looks for a sentinel file.
+pub fn exec_launch_spec_with_seam(
+    spec_path: &Path,
+    seam: &dyn crate::files::FaultSeam,
+) -> anyhow::Error {
     use std::os::unix::process::CommandExt;
+
+    let status_path = status_path_for_spec(spec_path);
 
     let bytes = match std::fs::read(spec_path) {
         Ok(bytes) => bytes,
-        Err(e) => return anyhow::Error::from(e).context("reading launch spec"),
+        Err(e) => {
+            let report = record_launch_failure(
+                &status_path,
+                format!("launch spec unreadable at {}: {e}", spec_path.display()),
+                seam,
+            );
+            return anyhow::Error::from(e).context(report);
+        }
     };
     // Unlink the moment the bytes are in hand — before parsing, not just
     // before exec: the spec holds the agent's full command line, which
@@ -395,16 +440,35 @@ pub fn exec_launch_spec(spec_path: &Path) -> anyhow::Error {
     // spec must not leave it on disk. Nothing else removes it during
     // this supervisor's lifetime; only the next restart's sweep would.
     if let Err(e) = std::fs::remove_file(spec_path) {
-        return anyhow::Error::from(e)
-            .context(format!("removing launch spec {}", spec_path.display()));
+        let report = record_launch_failure(
+            &status_path,
+            format!("removing launch spec {}: {e}", spec_path.display()),
+            seam,
+        );
+        return anyhow::Error::from(e).context(report);
     }
     let spec: LaunchSpec = match serde_json::from_slice(&bytes) {
         Ok(spec) => spec,
-        Err(e) => return anyhow::Error::from(e).context("parsing launch spec"),
+        Err(e) => {
+            let report = record_launch_failure(
+                &status_path,
+                format!("launch spec at {} is malformed: {e}", spec_path.display()),
+                seam,
+            );
+            return anyhow::Error::from(e).context(report);
+        }
     };
     if spec.argv.is_empty() {
-        return anyhow::anyhow!("launch spec has empty argv");
+        let report =
+            record_launch_failure(&status_path, "launch spec has empty argv".to_string(), seam);
+        return anyhow::anyhow!(report);
     }
+    debug_assert_eq!(
+        spec.status_file, status_path,
+        "a spec's own status_file field must always match what status_path_for_spec derives \
+         from its own path — service.rs's create_session and this derivation must never \
+         disagree, or the exec-failure path below would write to the wrong place"
+    );
     // exec only returns on failure. `Command::env` adds to (never clears)
     // the shim's own inherited environment, so this joins the rc-file
     // variables the login shell already sourced rather than replacing
@@ -418,19 +482,227 @@ pub fn exec_launch_spec(spec_path: &Path) -> anyhow::Error {
         spec.argv[0],
         err.raw_os_error().unwrap_or(-1)
     );
-    let report = match std::fs::write(&spec.status_file, &report) {
+    let report = record_launch_failure(&status_path, report, seam);
+    anyhow::Error::from(err).context(report)
+}
+
+/// Write `report` as this launch's durable sentinel (`crate::files`
+/// module docs: the exec-failure sentinel is the durability-bearing
+/// tier), returning either the bare report or one augmented with the
+/// write's own failure detail. Shared by every early-return path in
+/// [`exec_launch_spec_with_seam`], not just the exec-failure one at the
+/// bottom, so every launch-failure class gets identical durable evidence.
+fn record_launch_failure(
+    status_path: &Path,
+    report: String,
+    seam: &dyn crate::files::FaultSeam,
+) -> String {
+    match crate::files::write_durable_sync(status_path, report.as_bytes(), seam) {
         Ok(()) => report,
         Err(write_error) => format!(
-            "{report}; could not record exec failure at {}: {write_error}",
-            spec.status_file.display()
+            "{report}; could not record launch failure at {}: {write_error}",
+            status_path.display()
         ),
-    };
-    anyhow::Error::from(err).context(report)
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::os::unix::fs::PermissionsExt;
+
+    /// The shim's own end-to-end path from a spec on disk to a durable
+    /// sentinel: an argv0 GUARANTEED not to exist (a name inside this
+    /// test's own fresh tempdir, never created — item 23: the old version
+    /// of this test used a hardcoded `/nonexistent/...` path that the
+    /// real filesystem is never actually guaranteed to lack) makes the
+    /// real `exec` fail with `ENOENT`, and this pins that the sentinel
+    /// [`exec_launch_spec`] leaves behind is exactly what a later
+    /// classifier will read — 0600, containing the errno, at the path the
+    /// spec named — via the same code path production uses, not a
+    /// synthetic call into `crate::files` directly.
+    #[test]
+    fn exec_launch_spec_writes_a_durable_sentinel_on_exec_failure() {
+        let tmp = tempfile::tempdir().unwrap();
+        let spec_path = tmp.path().join("spec.json");
+        let missing_binary = tmp.path().join("no-such-farhelm-test-binary");
+        let spec = LaunchSpec {
+            argv: vec![missing_binary.to_string_lossy().into_owned()],
+            status_file: status_path_for_spec(&spec_path),
+            session_id: "test-session".to_string(),
+        };
+        std::fs::write(&spec_path, serde_json::to_vec(&spec).unwrap()).unwrap();
+
+        let err = exec_launch_spec(&spec_path);
+        assert!(
+            format!("{err:#}").contains("exec_failed"),
+            "error chain should surface the exec-failure report: {err:#}"
+        );
+
+        let status_path = status_path_for_spec(&spec_path);
+        let content = std::fs::read_to_string(&status_path).unwrap();
+        assert!(
+            content.contains("exec_failed")
+                && content.contains(&missing_binary.to_string_lossy()[..]),
+            "sentinel content must name the exec failure and the argv0 that failed: {content:?}"
+        );
+        let mode = std::fs::metadata(&status_path)
+            .unwrap()
+            .permissions()
+            .mode()
+            & 0o777;
+        assert_eq!(mode, 0o600, "sentinel must be 0600, got {mode:o}");
+
+        // The spec itself must always be gone by this point, success or
+        // failure — it carries the agent's full command line.
+        assert!(
+            !spec_path.exists(),
+            "launch spec must be unlinked once read"
+        );
+    }
+
+    /// The EACCES half of "exec fails" (item 23), distinct from the
+    /// ENOENT case above: a real, existing file with no execute bit set
+    /// at all makes `exec` fail for a completely different reason
+    /// (permissions, not absence), and both must classify identically —
+    /// a durable sentinel naming the failure, never a silent "exited".
+    #[test]
+    fn exec_launch_spec_writes_a_durable_sentinel_on_a_non_executable_file() {
+        let tmp = tempfile::tempdir().unwrap();
+        let spec_path = tmp.path().join("spec.json");
+        let non_executable = tmp.path().join("not-executable");
+        std::fs::write(&non_executable, b"not a real binary").unwrap();
+        std::fs::set_permissions(&non_executable, std::fs::Permissions::from_mode(0o600)).unwrap();
+        let spec = LaunchSpec {
+            argv: vec![non_executable.to_string_lossy().into_owned()],
+            status_file: status_path_for_spec(&spec_path),
+            session_id: "test-session".to_string(),
+        };
+        std::fs::write(&spec_path, serde_json::to_vec(&spec).unwrap()).unwrap();
+
+        let err = exec_launch_spec(&spec_path);
+        assert!(format!("{err:#}").contains("exec_failed"));
+
+        let content = std::fs::read_to_string(status_path_for_spec(&spec_path)).unwrap();
+        assert!(
+            content.contains("exec_failed"),
+            "a non-executable target must still classify as a recorded exec failure: {content:?}"
+        );
+    }
+
+    /// Item 21's core regression: a MISSING spec (the login shell reached
+    /// the shim, but the spec file it names is simply not there — a
+    /// supervisor-side bug, a race, or a sweep gone wrong) must still
+    /// leave a durable sentinel behind at the path derived from the spec
+    /// path alone. Before this fix, `exec_launch_spec` returned bare on a
+    /// read failure with NOTHING written anywhere — invisible to any
+    /// later classifier, silently converting what should be "error" into
+    /// "exited" (there being no evidence of a launch attempt at all).
+    #[test]
+    fn exec_launch_spec_records_a_sentinel_for_a_missing_spec() {
+        let tmp = tempfile::tempdir().unwrap();
+        let spec_path = tmp.path().join("spec.json");
+        // Never created: this is the whole point of the test.
+
+        let err = exec_launch_spec(&spec_path);
+        assert!(format!("{err:#}").contains("unreadable"));
+
+        let status_path = status_path_for_spec(&spec_path);
+        let content = std::fs::read_to_string(&status_path).unwrap();
+        assert!(
+            content.contains("unreadable"),
+            "a missing spec must still leave a durable failure sentinel: {content:?}"
+        );
+    }
+
+    /// Item 21's other core regression: a spec that EXISTS but is not
+    /// valid JSON (truncated, corrupted, or simply garbage) must ALSO
+    /// leave a durable sentinel — the failure is discovered only after
+    /// parsing, but the destination path is derived from `spec_path`
+    /// alone (never from the unparseable content), so it is known
+    /// regardless of how badly the JSON is broken.
+    #[test]
+    fn exec_launch_spec_records_a_sentinel_for_a_malformed_spec() {
+        let tmp = tempfile::tempdir().unwrap();
+        let spec_path = tmp.path().join("spec.json");
+        std::fs::write(&spec_path, b"this is not json").unwrap();
+
+        let err = exec_launch_spec(&spec_path);
+        assert!(format!("{err:#}").contains("malformed"));
+
+        let content = std::fs::read_to_string(status_path_for_spec(&spec_path)).unwrap();
+        assert!(content.contains("malformed"));
+        // Malformed-but-present specs are still unlinked before parsing
+        // is attempted — see the function's own docs on why.
+        assert!(!spec_path.exists());
+    }
+
+    /// The empty-argv case, the one launch-failure class that was ALREADY
+    /// reachable from valid JSON before item 21: it must get the same
+    /// durable-sentinel treatment as every other failure branch, not the
+    /// bare unrecorded error the pre-fix code returned.
+    #[test]
+    fn exec_launch_spec_records_a_sentinel_for_empty_argv() {
+        let tmp = tempfile::tempdir().unwrap();
+        let spec_path = tmp.path().join("spec.json");
+        let spec = LaunchSpec {
+            argv: vec![],
+            status_file: status_path_for_spec(&spec_path),
+            session_id: "test-session".to_string(),
+        };
+        std::fs::write(&spec_path, serde_json::to_vec(&spec).unwrap()).unwrap();
+
+        let err = exec_launch_spec(&spec_path);
+        assert!(format!("{err:#}").contains("empty argv"));
+
+        let content = std::fs::read_to_string(status_path_for_spec(&spec_path)).unwrap();
+        assert!(content.contains("empty argv"));
+    }
+
+    /// The seam-injectable real call site (items 7/8): a failure injected
+    /// into the sentinel write ITSELF, driven through
+    /// [`exec_launch_spec_with_seam`] — the actual production shim
+    /// logic, not a standalone call into `crate::files` — must still
+    /// leave the shim's own error naming the exec failure (the root cause
+    /// the caller most needs), with the write failure folded in as
+    /// additional context, and must never leave a torn sentinel: absent
+    /// before the write's publish step, complete at or after it. This
+    /// supersedes the earlier, generic-duplicate version of this test
+    /// that bypassed the shim entirely.
+    #[test]
+    fn exec_launch_spec_with_seam_reports_both_failures_without_a_torn_sentinel() {
+        struct FailAtWrite;
+        impl crate::files::FaultSeam for FailAtWrite {
+            fn write(&self, _file: &mut std::fs::File, _bytes: &[u8]) -> std::io::Result<()> {
+                Err(std::io::Error::other("injected sentinel-write failure"))
+            }
+        }
+
+        let tmp = tempfile::tempdir().unwrap();
+        let spec_path = tmp.path().join("spec.json");
+        let missing_binary = tmp.path().join("no-such-farhelm-test-binary");
+        let spec = LaunchSpec {
+            argv: vec![missing_binary.to_string_lossy().into_owned()],
+            status_file: status_path_for_spec(&spec_path),
+            session_id: "test-session".to_string(),
+        };
+        std::fs::write(&spec_path, serde_json::to_vec(&spec).unwrap()).unwrap();
+
+        let err = exec_launch_spec_with_seam(&spec_path, &FailAtWrite);
+        let rendered = format!("{err:#}");
+        assert!(
+            rendered.contains("exec_failed"),
+            "the exec failure remains the reported root cause: {rendered}"
+        );
+        assert!(
+            rendered.contains("could not record launch failure"),
+            "the sentinel write's own failure must be surfaced too: {rendered}"
+        );
+        assert!(
+            !status_path_for_spec(&spec_path).exists(),
+            "a failure injected at the write step must never publish a torn sentinel"
+        );
+    }
 
     /// The window command shape is a contract with SPEC_impl.md's
     /// environment section: login + interactive + exec-shim, exactly.

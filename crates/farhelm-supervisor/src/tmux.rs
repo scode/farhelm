@@ -963,6 +963,25 @@ impl TmuxDriver {
     /// `set-option` call below for why a config-file line cannot do this
     /// job alone, and for what the option actually buys us.
     pub async fn ensure_server(&self) -> anyhow::Result<()> {
+        self.ensure_server_with_seam(crate::files::RealFs).await
+    }
+
+    /// [`Self::ensure_server`]'s real body, parameterized over the write-
+    /// atomicity seam (items 7/8: production call sites must be
+    /// injectable through their REAL path, not just through a synthetic
+    /// call into `crate::files`). Production always calls
+    /// [`Self::ensure_server`], which supplies [`crate::files::RealFs`].
+    ///
+    /// `seam` is a VALUE, `Copy + Send + 'static`, rather than a `&dyn`
+    /// reference: it must cross into a `spawn_blocking` closure (the
+    /// config write is blocking I/O that must not run on an async worker
+    /// thread — `tokio::task::block_in_place` was considered instead, but
+    /// it panics under this crate's current-thread test runtimes, which
+    /// construct a `TmuxDriver` in nearly every integration-style test).
+    pub async fn ensure_server_with_seam<S>(&self, seam: S) -> anyhow::Result<()>
+    where
+        S: crate::files::FaultSeam + Copy + Send + 'static,
+    {
         let version = Command::new("tmux")
             .arg("-V")
             .output()
@@ -979,7 +998,21 @@ impl TmuxDriver {
         if let Some(dir) = self.socket.parent() {
             tokio::fs::create_dir_all(dir).await?;
         }
-        tokio::fs::write(&self.config, Self::config_body()).await?;
+        // Best-effort-atomic tier (`crate::files` module docs): this
+        // config is rebuilt from `config_body()` on every call and
+        // carries no state of its own, so a LOST update is harmless — the
+        // next `ensure_server` regenerates it regardless — but a TORN one
+        // could still wedge THIS very call (tmux reading a truncated `-f`
+        // file on the fresh-start path), which is exactly the failure
+        // mode this tier's rename-based publish (plus, since item 19, a
+        // file fsync before that rename) rules out.
+        let path = self.config.clone();
+        let body = Self::config_body();
+        tokio::task::spawn_blocking(move || {
+            crate::files::overwrite_private_file_sync(&path, body.as_bytes(), &seam)
+        })
+        .await
+        .map_err(|join_err| anyhow::anyhow!("tmux config write task panicked: {join_err}"))??;
         self.run(&["start-server"]).await?;
 
         // `focus-events` is deliberately NOT part of `config_body`: tmux
@@ -3097,6 +3130,39 @@ mod tests {
                  set -g history-limit {HISTORY_LIMIT}\n\
                  setw -g remain-on-exit on\n"
             )
+        );
+    }
+
+    /// Item 8: the generated-config write must be injectable through its
+    /// REAL production call site (`ensure_server`), not only via a
+    /// synthetic call directly into `crate::files`. A seam that fails the
+    /// write step must surface through `ensure_server_with_seam`'s
+    /// returned error, and — since the failure happens before `rename` —
+    /// must never leave a config file behind at all.
+    #[tokio::test]
+    async fn ensure_server_with_seam_surfaces_an_injected_config_write_failure() {
+        #[derive(Clone, Copy)]
+        struct FailWrite;
+        impl crate::files::FaultSeam for FailWrite {
+            fn write(&self, _file: &mut std::fs::File, _bytes: &[u8]) -> std::io::Result<()> {
+                Err(std::io::Error::other("injected config write failure"))
+            }
+        }
+
+        let dir = tempfile::tempdir().expect("tempdir");
+        let driver = TmuxDriver::new(dir.path());
+
+        let err = driver
+            .ensure_server_with_seam(FailWrite)
+            .await
+            .expect_err("an injected write failure must propagate");
+        assert!(
+            format!("{err:#}").contains("injected config write failure"),
+            "the injected failure must be visible in the error: {err:#}"
+        );
+        assert!(
+            !driver.config.exists(),
+            "a failed config write must never publish a partial file"
         );
     }
 
