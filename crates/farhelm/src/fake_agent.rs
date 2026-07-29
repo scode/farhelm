@@ -76,6 +76,11 @@ pub enum Script {
     /// `pause-after` rather than being absorbed by a buffer somewhere.
     /// See `flood`'s own docs for the record shape tests key on.
     Flood,
+    /// Like `Flood`, but blocks after `FAKE-AGENT READY` until it has read
+    /// exactly one input byte before emitting anything. See `flood_gated`'s
+    /// own docs for why this is a SEPARATE script rather than a flag on
+    /// `Flood` itself.
+    FloodGated,
     /// Continuous numbered records for replay/live cutover tests.
     Counter,
     /// Raw-mode hex echo of every input byte, for input-fidelity tests.
@@ -133,6 +138,7 @@ pub fn run(script: Script) -> anyhow::Result<()> {
         Script::AltscreenStubbornChildStaysAlt => altscreen_stubborn_child_stays_alt(),
         Script::Binary => binary(),
         Script::Flood => flood(),
+        Script::FloodGated => flood_gated(),
         Script::Counter => counter(),
         Script::Hexecho => hexecho(),
         Script::Spawner => spawn_and_echo("sleep 3600", "spawner"),
@@ -528,12 +534,61 @@ fn flood() -> anyhow::Result<()> {
     let mut out = std::io::stdout().lock();
     writeln!(out, "FAKE-AGENT READY\r")?;
     out.flush()?;
+    emit_flood_records(&mut out)
+}
+
+/// Identical to [`flood`], except it blocks after `FAKE-AGENT READY` until
+/// exactly one input byte has arrived, and only then emits a single record.
+///
+/// Why a gate at all: `flood`'s whole point (see its own docs) is emitting
+/// fast enough to outrun every consumer on the path, which on a fast host
+/// can mean the ENTIRE burst is already sitting in tmux's pane history
+/// before a test even finishes attaching — the browser-driven watermark
+/// tests (PLAN_M2_5.md, e2e/tests/terminal.spec.ts) need the opposite: a
+/// LIVE producer racing a client that is already attached, instrumented,
+/// and watching, not a sub-watermark replay of a burst that already
+/// finished. Gating on real terminal input — sent only once a test's own
+/// WebSocket is open and its instrumentation installed — removes that race
+/// entirely: nothing streams until the test says so.
+///
+/// Why a SEPARATE script rather than a flag on `Flood` itself: `Flood` is
+/// also the Rust integration suite's own fixture (`crates/farhelm/tests/e2e.rs`'s
+/// `flood_session`), and several of those tests attach and expect output
+/// flowing immediately, with no input round trip at all (their own comments
+/// say so — e.g. "the flood fixture builds a full history quickly"). Gating
+/// `Flood` itself would silently hang every one of them; a distinct script
+/// leaves that fixture's existing contract untouched.
+fn flood_gated() -> anyhow::Result<()> {
+    let mut out = std::io::stdout().lock();
+    // Raw mode BEFORE the ready marker, same reasoning as `hexecho`'s own
+    // docs: terminal mode bits live in the pty's line discipline, not the
+    // pane, so a test that sends its gate byte the instant it sees READY
+    // must always find raw mode already established. Without this, the
+    // pty's default canonical mode would hold the gate byte in its own
+    // line buffer until a newline arrived, since one arbitrary byte is not
+    // itself a complete line — turning a single-byte gate into a
+    // newline-shaped one and defeating the point of sending exactly one
+    // byte.
+    set_raw_mode()?;
+    writeln!(out, "FAKE-AGENT READY\r")?;
+    out.flush()?;
+
+    let mut gate = [0u8; 1];
+    std::io::stdin().lock().read_exact(&mut gate)?;
+
+    emit_flood_records(&mut out)
+}
+
+/// Emit [`FLOOD_RECORDS`] numbered records at full speed, then say so and
+/// wait to be killed. Shared by [`flood`] and [`flood_gated`], which differ
+/// only in what happens before the first byte goes out.
+fn emit_flood_records(out: &mut impl Write) -> anyhow::Result<()> {
     // One buffered writer, flushed once at the end, deliberately: this
     // fixture wants throughput, not per-record write boundaries. Records
     // split across PTY writes are fine — every consumer on this path is
     // byte-oriented, and the tests scan for records in the byte stream
     // rather than assuming any framing.
-    let mut buffered = std::io::BufWriter::with_capacity(64 * 1024, &mut out);
+    let mut buffered = std::io::BufWriter::with_capacity(64 * 1024, &mut *out);
     for sequence in 0..FLOOD_RECORDS {
         writeln!(buffered, "FLOOD-{sequence:08}\r")?;
     }

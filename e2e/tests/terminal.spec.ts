@@ -36,6 +36,41 @@ import path from "node:path";
 const FAKE_AGENT_INVOCATION = `"${path.resolve(__dirname, "../../target/debug/farhelm")}" internal fake-agent --script basic`;
 
 /**
+ * A producer fast and heavy enough to actually trip PLAN_M2_5.md's
+ * watermark flow control, not merely a session that exists: ~12 MiB of
+ * consecutively-numbered `FLOOD-NNNNNNNN` records (`FLOOD_RECORDS` below),
+ * unpaced and buffered for throughput (see `fake_agent.rs`'s `flood` for
+ * the full sizing argument — it exceeds every Farhelm-side bound on the
+ * terminal path combined). Ends with a `FLOOD-DONE` marker and then waits
+ * to be killed, so the pane stays alive (and therefore its scrollback
+ * intact) for a test to inspect after the burst lands.
+ *
+ * The GATED variant (`flood_gated`, fake_agent.rs's own docs), not plain
+ * `flood`: on a fast host the whole unpaced burst can already be sitting in
+ * tmux's pane history before a test even finishes attaching, leaving a
+ * sub-watermark replay instead of the LIVE producer these tests need to
+ * race a client against — a nondeterministic failure mode found directly
+ * while writing these tests. `flood_gated` blocks after printing its ready
+ * marker until it has read exactly one input byte, so every test below
+ * controls precisely when the producer starts (`sendFloodGateByte`) rather
+ * than racing it.
+ */
+const FLOOD_GATED_AGENT_INVOCATION = `"${path.resolve(__dirname, "../../target/debug/farhelm")}" internal fake-agent --script flood-gated`;
+
+/**
+ * How many records the `flood`/`flood_gated` fake-agent scripts emit.
+ * Duplicated from `fake_agent::FLOOD_RECORDS` (crates/farhelm/src/fake_agent.rs)
+ * because that module is private to the bin crate and there is no shared
+ * build step between it and this TypeScript suite — the same duplication
+ * the Rust e2e suite accepts for the same reason (see its own
+ * `FLOOD_RECORDS`). Used in an EQUALITY check against the last record this
+ * suite observes, so drift here would cause a false test FAILURE, not a
+ * silently weakened assertion — the two constants have no way to notice
+ * they disagree short of a test actually running.
+ */
+const FLOOD_RECORDS = 800_000;
+
+/**
  * Open the list view's inline create form (PLAN_M2.md step 8: "not a
  * modal library" — a plain toggled `<div>`, not a dialog element), fill
  * in the three fields, and optionally submit.
@@ -157,6 +192,379 @@ async function openTerminal(page: Page) {
   await waitForTermText(page, "FAKE-AGENT READY");
 }
 
+/**
+ * Hold `term.write()` completion callbacks in an array instead of ever
+ * invoking them, until `window.__farhelmTest.paused` — terminal.js's OWN
+ * record of having crossed HIGH_WATER and sent a real pause — flips true,
+ * at which point THIS SAME in-page callback restores real writing and
+ * fires every held callback at once, all synchronously in one JS turn.
+ * Patches the shared `Terminal.prototype.write`, since the test has no
+ * handle to the instance `mount()` is about to construct — so this must
+ * run before that call, not after — but this is NOT a patch that stays
+ * installed indefinitely: it un-patches itself the first time a crossing
+ * is observed, typically within the same attachment's very first burst of
+ * writes. A caller that wants a SECOND attachment (a reconnect, say) held
+ * the same way must call this again for it.
+ *
+ * Three things went wrong on the way to this shape, each a real failure
+ * mode found while writing this test, not a hypothetical one:
+ *
+ * - A FIXED DELAY per completion (simulating "a renderer slower than the
+ *   producer"), tuned against this suite's observed delivery rate for
+ *   `flood` over loopback. That rate is not stable across runs, which
+ *   left that version flaky under full-suite CPU contention (sometimes
+ *   zero pauses observed in 30s) — a delay is only "slow enough" relative
+ *   to some ASSUMED rate.
+ * - Holding every callback until a caller-chosen BYTE CAP had
+ *   accumulated, comfortably above HIGH_WATER. That reliably crosses
+ *   HIGH_WATER, but "comfortably above" is exactly the bug: terminal.js
+ *   sends its real pause the instant ITS OWN counter crosses HIGH_WATER,
+ *   which stops the server from sending any more bytes at all — so if
+ *   this function's cap sits above that point, its own `heldBytes` can
+ *   never reach it (nothing arrives to grow it further) and it hangs
+ *   forever, having proven the crossing but never releasing anything.
+ *   Confirmed directly: `heldBytes` parked below a 5 MiB cap indefinitely
+ *   once terminal.js's own 4 MiB HIGH_WATER had already silenced the
+ *   stream.
+ * - Once fixed to release on `paused` correctly, doing so from a
+ *   SEPARATE `page.evaluate` the test called after polling `paused` from
+ *   Node still flaked under full-suite load: a Node-side poll-then-
+ *   release round-trips through Chromium's remote-debugging protocol, and
+ *   under enough CPU contention that round trip can itself take longer
+ *   than `TMUX_PAUSE_AFTER_SECS` (tmux.rs) — long enough for tmux's OWN
+ *   pause-after to trip on a pane this test only meant to leave paused for
+ *   an instant. Once THAT happens, recovering needs the supervisor's
+ *   reset-then-replay catch-up (PLAN_M2_5.md) — a full history re-capture,
+ *   not a resumed live stream — which is measured in tens of seconds for
+ *   this fixture's volume, not the sub-second cost recovering from this
+ *   test's OWN brief pause should have.
+ *
+ * Checking terminal.js's OWN flag from inside the SAME synchronous
+ * callback sidesteps all three: it releases at the earliest possible
+ * moment consistent with a real crossing (no arbitrary margin to
+ * overshoot), and the release itself never leaves the page's own JS
+ * turn, so it is as fast as this host's JS engine regardless of how
+ * loaded the rest of the suite has left it.
+ *
+ * One more failure mode this closes, found in review: writes already
+ * in-flight through this wrapper when it releases (dispatched before the
+ * prototype swap, so still routed through this closure when THEIR
+ * completion fires) would, without the `released` flag below, re-check
+ * `__farhelmTest.paused` on arrival — which may already be `false` again
+ * by then, since the FIRST release already sent a resume. Such a callback
+ * would sit in `held` forever, never invoked, quietly inflating
+ * terminal.js's own `pendingWrite` by however much it represents (up to
+ * LOW_WATER's worth) for the rest of the attachment's life. `released`
+ * makes every write dispatched through this wrapper, no matter when its
+ * completion actually arrives, pass straight through once the real
+ * release has happened.
+ */
+async function holdTermWrites(page: Page) {
+  // Guards a real race: `window.Terminal` is set by a plain `<script>` tag
+  // that a fresh navigation's 'load' event does not strictly guarantee has
+  // already run by the time the FIRST `page.evaluate` after `goto` reaches
+  // the browser — observed directly as an intermittent "Cannot read
+  // properties of undefined (reading 'prototype')" without this wait.
+  await page.waitForFunction(() => !!(window as any).Terminal);
+  await page.evaluate(() => {
+    const real = (window as any).Terminal.prototype.write;
+    let held: Array<() => void> = [];
+    let released = false;
+    (window as any).Terminal.prototype.write = function (
+      data: unknown,
+      cb?: () => void,
+    ) {
+      return real.call(this, data, () => {
+        if (!cb) return;
+        if (released) {
+          // A write dispatched through this wrapper before the release
+          // below, whose completion only arrives afterward — see this
+          // function's own docs for why it must pass straight through
+          // instead of re-checking `paused`.
+          cb();
+          return;
+        }
+        held.push(cb);
+        if ((window as any).__farhelmTest?.paused) {
+          // Same synchronous turn as observing the crossing — see this
+          // function's own docs for why that timing is load-bearing.
+          released = true;
+          (window as any).Terminal.prototype.write = real;
+          const toRelease = held;
+          held = [];
+          for (const c of toRelease) c();
+        }
+      });
+    };
+  });
+}
+
+/**
+ * Send exactly one byte of terminal input over the raw WebSocket — the
+ * gate byte `flood_gated` (fake_agent.rs) blocks on before emitting
+ * anything, so that every test using it controls precisely when the
+ * producer starts rather than racing its own attach against an unpaced
+ * fixture that can otherwise outrun a fast host's attach sequence (see
+ * `FLOOD_GATED_AGENT_INVOCATION`'s own docs).
+ *
+ * Sent directly over `window.__farhelmWs`, not via `page.keyboard`,
+ * deliberately: this needs to fire the instant the socket is OPEN and
+ * every patch a test installed beforehand is already active, with no DOM
+ * click/focus round trip adding timing slack of its own. Polls for
+ * `readyState` first because `mount()` publishes `__farhelmWs` (and sets
+ * `__farhelmTermReady`) before the socket has necessarily finished its
+ * handshake — `WebSocket.send()` throws on a socket that is not yet OPEN.
+ */
+async function sendFloodGateByte(page: Page) {
+  await expect
+    .poll(() => page.evaluate(() => (window as any).__farhelmWs?.readyState))
+    .toBe(1); // WebSocket.OPEN
+  await page.evaluate(() => {
+    // The value is arbitrary — `flood_gated` only counts bytes, in raw
+    // mode, so nothing downstream interprets or echoes it.
+    (window as any).__farhelmWs.send(new Uint8Array([0x67]));
+  });
+}
+
+/**
+ * Create a session running the `flood_gated` fake-agent script (see
+ * `FLOOD_GATED_AGENT_INVOCATION`'s docs) via the API, without opening its
+ * terminal. Split out from `openFloodSession` because the same-realm
+ * reconnect test below needs to `goto("/")` and install a page-wide patch
+ * BEFORE any session exists, rather than after — see that test's own docs.
+ */
+async function createFloodGatedSession(
+  request: APIRequestContext,
+  title: string,
+): Promise<string> {
+  const created = await request.post("/api/sessions", {
+    data: { cwd: "/tmp", invocation: FLOOD_GATED_AGENT_INVOCATION, title },
+  });
+  expect(created.status()).toBe(200);
+  return (await created.json()).id;
+}
+
+/**
+ * Create a session running `flood_gated` and open its terminal in `page`,
+ * returning its id for the caller's own cleanup. Sends the gate byte
+ * (`sendFloodGateByte`) as the last step, once the terminal is mounted and
+ * every patch a caller installed is already active — the producer starts
+ * only once this function returns.
+ *
+ * Every PLAN_M2_5.md watermark test below needs its OWN session running
+ * this producer, distinct from the shared "e2e-session" the rest of the
+ * file depends on: flooding that shared session would blow past its
+ * scrollback (as the multi-megabyte-message test near the end of this
+ * file already does deliberately, and only because it is placed last for
+ * exactly that reason) and pollute every test that runs after it.
+ *
+ * `holdWrites` applies `holdTermWrites` before the terminal mounts, for
+ * callers that need to OBSERVE a pause/resume cycle rather than just
+ * survive one — see that function's docs for why this is necessary at all
+ * on typical test hardware. `verifyStream` applies
+ * `installFloodStreamVerifier` first (order matters — see that function's
+ * docs), for callers that need to verify the ENTIRE stream rather than
+ * just the scrollback-capped tail `termText` can still see once it lands.
+ *
+ * A step after creation failing (the goto, the click, either wait) must
+ * not strand the session this function already created: none of this
+ * function's callers have an id to clean up with yet if they never got one
+ * back, so a leaked `flood_gated` session — a long-running fake-agent
+ * process — would sit contaminating every test that runs after it in this
+ * serially-run suite. The `catch` below is this function's own cleanup of
+ * its own partial work, not a substitute for the caller's `finally`.
+ */
+async function openFloodSession(
+  page: Page,
+  request: APIRequestContext,
+  title: string,
+  { holdWrites = false, verifyStream = false }: { holdWrites?: boolean; verifyStream?: boolean } = {},
+): Promise<string> {
+  const id = await createFloodGatedSession(request, title);
+  try {
+    await page.goto("/");
+    if (verifyStream) await installFloodStreamVerifier(page);
+    if (holdWrites) await holdTermWrites(page);
+    const row = page.locator(`[data-session-id="${id}"]`);
+    await expect(row).toBeVisible();
+    await row.click();
+    // NOT `waitForTermText(page, "FAKE-AGENT READY")`: a `holdWrites`
+    // caller (or the stall-detach test, which patches `term.write()` to a
+    // no-op outright) may never render that banner text at all.
+    // `termReady` alone (mount succeeded, socket opening) is the one
+    // readiness signal every caller of this helper can rely on.
+    await page.waitForFunction(() => (window as any).__farhelmTermReady === true);
+    await sendFloodGateByte(page);
+    return id;
+  } catch (err) {
+    await cleanupSession(request, id);
+    throw err;
+  }
+}
+
+/**
+ * Stop then delete a session, tolerating ONLY "already gone" (404 — the
+ * expected case when a test's own happy path already cleaned up). Every
+ * OTHER failure is surfaced rather than swallowed: a silently leaked flood
+ * session — a long-running fake-agent process — would otherwise
+ * contaminate every test that runs after it in this serially-run suite,
+ * and a `.catch(() => {})` here would hide exactly that.
+ */
+async function cleanupSession(request: APIRequestContext, id: string) {
+  const stopped = await request.post(`/api/sessions/${id}/stop`);
+  if (!stopped.ok() && stopped.status() !== 404) {
+    throw new Error(
+      `cleanup: stopping session ${id} failed (${stopped.status()}): ${await stopped.text()}`,
+    );
+  }
+  const deleted = await request.delete(`/api/sessions/${id}`);
+  if (!deleted.ok() && deleted.status() !== 404) {
+    throw new Error(
+      `cleanup: deleting session ${id} failed (${deleted.status()}): ${await deleted.text()}`,
+    );
+  }
+}
+
+/**
+ * Extract every `FLOOD-NNNNNNNN` record number from `text`, in the order
+ * they appear. The tests below use this to check the visible TAIL is
+ * consecutive (no gap = no loss, no repeat/step-back = no duplicated
+ * replay) — mirroring the Rust e2e suite's own `flood_records` helper for
+ * the identical fixture. This only ever sees whatever xterm.js's scrollback
+ * cap still retains, NOT the whole stream — see `installFloodStreamVerifier`
+ * for the assertion that covers every record, not just the retained tail.
+ */
+function parseFloodRecords(text: string): number[] {
+  return [...text.matchAll(/FLOOD-(\d{8})/g)].map((m) => Number(m[1]));
+}
+
+/**
+ * Install a constant-memory, in-page verifier over the ENTIRE flood stream
+ * — every record from 0 to `FLOOD_RECORDS - 1`, in order, exactly once,
+ * ending with `FLOOD-DONE` — patching `term.write()` the same way
+ * `holdTermWrites` does (must run before `mount()` constructs a `Terminal`,
+ * for the same reason: the test has no handle to the instance it is about
+ * to construct).
+ *
+ * Why this exists, and why the retained-tail check (`parseFloodRecords`
+ * over `termText`) is not enough on its own: xterm.js's scrollback is
+ * capped (terminal.js's own `scrollback: 12000`), so by the time this
+ * fixture's 800,000 records have all landed, only the last ~12,000 are
+ * still readable from the buffer. A test that asserted ONLY on that tail
+ * could not tell "every record arrived, in order" from "everything before
+ * the last 12,000 silently vanished" — exactly the class of bug
+ * PLAN_M2_5.md's "never a silent gap" requirement exists to rule out. This
+ * verifier inspects every byte as it arrives, before xterm.js's own
+ * scrollback eviction ever gets a chance to make it unobservable, and
+ * holds only a small carry-over buffer across chunk boundaries rather than
+ * the whole transcript — hence "constant memory".
+ *
+ * Composes with `holdTermWrites` when both are installed (this function
+ * MUST run first): each patches whatever it finds as `Terminal.prototype.write`
+ * and calls that as its own "real" implementation, so installing this
+ * verifier first and `holdTermWrites` second means the verifier keeps
+ * observing every byte even after `holdTermWrites` releases itself and
+ * hands writes straight through.
+ */
+async function installFloodStreamVerifier(page: Page) {
+  // Same race `holdTermWrites` guards against — see its own docs.
+  await page.waitForFunction(() => !!(window as any).Terminal);
+  await page.evaluate(() => {
+    const real = (window as any).Terminal.prototype.write;
+    const decoder = new TextDecoder();
+    const state = {
+      // Bytes seen since the last complete record/marker, carried across
+      // chunk boundaries — never the whole stream, which is the whole
+      // point of verifying as data arrives rather than after the fact.
+      leftover: "",
+      // `flood_gated` prints "FAKE-AGENT READY" (padded to the pane's row
+      // width by tmux) BEFORE ever reading the gate byte, so the very
+      // first bytes this verifier sees are never a record — `started`
+      // marks having found the first one, after which anything
+      // unrecognized is a genuine violation rather than expected preamble.
+      started: false,
+      nextExpected: 0,
+      recordsSeen: 0,
+      sawDone: false,
+      // The FIRST violation only: once something is wrong, later bytes
+      // are not interesting, and holding just one message keeps this
+      // genuinely constant-memory even in a pathological failure.
+      error: null as string | null,
+    };
+    (window as any).__farhelmFloodVerify = state;
+
+    // Fixed-width by construction (fake_agent.rs's `flood`): "FLOOD-" (6)
+    // + 8 digits + "\r\n" (2) = 16 bytes. "FLOOD-DONE\r\n" is 12 — the
+    // SHORTER of the two, so it is NOT the right length to gate "have we
+    // ruled out both patterns yet" on: a record chunk can legitimately
+    // split anywhere, including mid-CRLF (e.g. "FLOOD-00000311\r" with no
+    // "\n" yet, 15 bytes — longer than the DONE marker but still an
+    // incomplete record, not corruption). Gating on the LONGER pattern's
+    // length is what avoids misjudging that case; see below.
+    const RECORD_RE = /^FLOOD-(\d{8})\r\n/;
+    const DONE_RE = /^FLOOD-DONE\r\n/;
+    const RECORD_LEN = "FLOOD-00000000\r\n".length;
+
+    (window as any).Terminal.prototype.write = function (
+      data: unknown,
+      cb?: () => void,
+    ) {
+      if (data instanceof Uint8Array && !state.error && !state.sawDone) {
+        let text = state.leftover + decoder.decode(data, { stream: false });
+        if (!state.started) {
+          // Discard the READY banner (and tmux's own row-padding around
+          // it) rather than judging it: it is short and bounded (one
+          // line), so accumulating it across a chunk boundary or two
+          // cannot grow this verifier's memory in any meaningful way.
+          const recordsBegin = text.indexOf("FLOOD-");
+          if (recordsBegin === -1) {
+            state.leftover = text;
+            return real.call(this, data, cb);
+          }
+          text = text.slice(recordsBegin);
+          state.started = true;
+        }
+        let i = 0;
+        while (i < text.length) {
+          const rest = text.slice(i);
+          const recordMatch = RECORD_RE.exec(rest);
+          if (recordMatch) {
+            const n = Number(recordMatch[1]);
+            if (n !== state.nextExpected) {
+              state.error = `record ${n} arrived out of order after ${state.recordsSeen} \
+verified records (expected ${state.nextExpected}) — a gap is lost output, a repeat or a step \
+back is duplicated replay`;
+              break;
+            }
+            state.nextExpected = n + 1;
+            state.recordsSeen++;
+            i += recordMatch[0].length;
+            continue;
+          }
+          if (DONE_RE.test(rest)) {
+            state.sawDone = true;
+            i += "FLOOD-DONE\r\n".length;
+            break;
+          }
+          if (rest.length < RECORD_LEN) {
+            // Too short to have ruled out a record straddling a chunk
+            // boundary (see `RECORD_LEN`'s own docs for why this is the
+            // longer, correct threshold rather than the DONE marker's
+            // shorter one) — carry it into the next chunk rather than
+            // judging it yet.
+            break;
+          }
+          state.error = `unrecognized bytes in the flood stream after ${state.recordsSeen} \
+verified records: ${JSON.stringify(rest.slice(0, 24))}`;
+          break;
+        }
+        state.leftover = state.error ? "" : text.slice(i);
+      }
+      return real.call(this, data, cb);
+    };
+  });
+}
+
 // First pixels: the whole stack standing up and putting an agent's output
 // on screen. Everything below assumes this works, so when the suite goes
 // red this is the test that says whether the problem is the stack or the
@@ -245,26 +653,33 @@ test("back tears down the mounted terminal; reopening the same session mounts a 
 
   await page.evaluate(() => {
     (window as any).__farhelmTerm.__testMarker = "before-back";
-    // Stashed under a different name so it survives terminal.js's own
-    // `delete window.__farhelmWs` on unmount — this is the actual
-    // WebSocket object the mount owned, kept around purely so the
-    // assertion below can check that unmount() really closed it.
+    // Stashed under different names so they survive terminal.js's own
+    // deletes on unmount — the actual WebSocket object and test hook the
+    // mount owned, kept around purely so the assertions below can check
+    // unmount() really tore them down (and, for the hook, that reopening
+    // installs a genuinely NEW one rather than reusing this one).
     (window as any).__testWsBeforeBack = (window as any).__farhelmWs;
+    (window as any).__testHookBeforeBack = (window as any).__farhelmTest;
   });
 
   await page.locator(".back-button").click();
 
   // The teardown itself must be observable, not just its later effects:
-  // every global terminal.js publishes on mount must be gone...
+  // every global terminal.js publishes on mount must be gone, __farhelmTest
+  // included (PLAN_M2_5.md step 4's per-mount hook — unmount() only
+  // deletes it if it still references THIS mount's own object, terminal.js's
+  // own docs, so seeing it gone here is also indirect coverage that guard
+  // took the branch it was supposed to)...
   await expect
     .poll(() =>
       page.evaluate(() => ({
         ready: (window as any).__farhelmTermReady,
         term: (window as any).__farhelmTerm,
         ws: (window as any).__farhelmWs,
+        test: (window as any).__farhelmTest,
       })),
     )
-    .toEqual({ ready: undefined, term: undefined, ws: undefined });
+    .toEqual({ ready: undefined, term: undefined, ws: undefined, test: undefined });
   // ...and the socket it owned must be genuinely closed (readyState 3 —
   // CLOSED; there is no browser `WebSocket` global in this Node-side
   // test context to reference `WebSocket.CLOSED` by name), not merely
@@ -305,6 +720,19 @@ test("back tears down the mounted terminal; reopening the same session mounts a 
     () => (window as any).__farhelmTerm.__testMarker !== "before-back",
   );
   expect(isFreshInstance).toBe(true);
+
+  // The reopened attachment's test hook must be a genuinely NEW object
+  // (not the old one somehow surviving unmount, and not a stale reference
+  // reused) with a freshly-zeroed watermark state — the same "fresh, not
+  // reused" property `isFreshInstance` above pins for the xterm instance,
+  // extended to the hook PLAN_M2_5.md step 4 added.
+  const hookState = await page.evaluate(() => {
+    const hook = (window as any).__farhelmTest;
+    const before = (window as any).__testHookBeforeBack;
+    return { isDifferentObject: hook !== before, hook };
+  });
+  expect(hookState.isDifferentObject).toBe(true);
+  expect(hookState.hook).toEqual({ paused: false, pauseCount: 0, resumeCount: 0 });
 
   // Replay must bring back output produced before THIS attachment
   // existed, exactly like the reload test below — the only difference
@@ -2507,6 +2935,328 @@ test("responses carry the anti-framing headers", async ({ request }) => {
   expect(resp.headers()["content-security-policy"]).toBe(
     "frame-ancestors 'none'",
   );
+});
+
+// PLAN_M2_5.md step 4: terminal.js's watermark pause/resume is the thing
+// that keeps a producer faster than the browser can parse from either
+// freezing the tab (xterm.js's own ~50MB write-buffer cliff) or losing
+// data. This is the SPEC "never a silent gap" pin for the terminal path,
+// so it asserts the strongest thing available at each layer: the WHOLE
+// 800,000-record stream, not just the scrollback-capped tail, arrived
+// exactly once and in order (`installFloodStreamVerifier` — an
+// implementation that silently dropped or duplicated records outside the
+// retained tail would still pass a tail-only check, which is exactly the
+// gap that finding this milestone closes), the visible tail is ALSO
+// consecutive (the cheaper, still-worth-keeping check a real user's
+// screen would show), and flow control demonstrably engaged (at least one
+// pause, matched by a resume) while all of that happened — an
+// implementation that buffered the whole 12 MiB unboundedly (exactly the
+// bug this milestone closes) would pass the content checks just as easily
+// as a correct one, so the pause/resume assertion is what actually pins
+// that flow control did the work.
+//
+// `holdWrites: true` (see `holdTermWrites`'s docs): a real headless
+// Chromium on typical hardware parses this fixture's ~12 MiB fast enough
+// over loopback that HIGH_WATER is never actually crossed, so provoking a
+// genuine pause deterministically means holding write completions back
+// rather than merely delaying them, releasing again the instant
+// terminal.js's own `paused` flag confirms the crossing — see that
+// function's docs for the failure modes that ruled out a fixed delay, an
+// arbitrary byte cap, and a Node-side release in turn. By the time this
+// test can observe anything, the hold-then-release has already happened
+// entirely inside the page, in one ordinary, brief pause/resume cycle.
+// `verifyStream: true` installs the whole-stream verifier FIRST (order is
+// load-bearing — see its own docs), so it keeps observing every byte even
+// after `holdTermWrites` later hands writes straight through.
+test("the whole flood stream arrives exactly once and in order, with at least one pause/resume cycle observed", async ({
+  page,
+  request,
+}) => {
+  test.setTimeout(60_000);
+  const title = `flood-complete-${Date.now()}`;
+  let id: string | undefined;
+  try {
+    id = await openFloodSession(page, request, title, {
+      holdWrites: true,
+      verifyStream: true,
+    });
+
+    await waitForTermText(page, "FLOOD-DONE", 45_000);
+
+    // The write-completion callbacks that drive resume are asynchronous
+    // relative to xterm.js appending to its buffer, so `FLOOD-DONE`
+    // showing up in the buffer does not itself guarantee the LAST
+    // callback (and therefore a resume, if the tail landed mid-pause) has
+    // fired yet. Poll rather than reading the hook once.
+    await expect
+      .poll(() => page.evaluate(() => (window as any).__farhelmTest.paused), {
+        message: "the attachment must end unpaused once output is exhausted",
+      })
+      .toBe(false);
+
+    const hooks = await page.evaluate(() => (window as any).__farhelmTest);
+    expect(hooks.pauseCount).toBeGreaterThanOrEqual(1);
+    // Exactly-once semantics (terminal.js's own docs): every pause this
+    // attachment sent must eventually have been answered by a resume,
+    // since nothing here ever leaves output permanently withheld.
+    expect(hooks.resumeCount).toBe(hooks.pauseCount);
+
+    // The whole-stream check: every record observed exactly once, in
+    // order, with the terminal marker right behind the last one. This is
+    // the assertion the retained-tail check below cannot make on its own
+    // — see `installFloodStreamVerifier`'s docs for why.
+    const verify = await page.evaluate(() => (window as any).__farhelmFloodVerify);
+    expect(verify.error).toBeNull();
+    expect(verify.recordsSeen).toBe(FLOOD_RECORDS);
+    expect(verify.nextExpected).toBe(FLOOD_RECORDS);
+    expect(verify.sawDone).toBe(true);
+
+    // Retained-tail check: the buffer's visible tail (scrollback-capped,
+    // so this necessarily starts partway through the 800,000 records)
+    // must ALSO be strictly consecutive up to the last record, with
+    // `FLOOD-DONE` right behind it — this is what a real user's screen
+    // would actually show, kept alongside the whole-stream check above
+    // rather than instead of it.
+    const records = parseFloodRecords(await termText(page));
+    expect(records.length).toBeGreaterThan(0);
+    for (let i = 1; i < records.length; i++) {
+      expect(records[i]).toBe(records[i - 1] + 1);
+    }
+    expect(records[records.length - 1]).toBe(FLOOD_RECORDS - 1);
+  } finally {
+    if (id) await cleanupSession(request, id);
+  }
+});
+
+// PLAN_M2_5.md's stall-detach contract from the browser's side: a viewer
+// that stops draining entirely (a wedged tab, a laptop asleep past its
+// WebSocket timeout) must not pin the supervisor's buffers forever — past
+// STALL_DETACH_TIMEOUT (farhelm-supervisor/src/service.rs, 60s) the
+// attachment is detached with a visible reason, exactly like the existing
+// takeover detach, and reattaching afterward must work normally.
+//
+// This waits out the REAL 60-second timeout rather than a shortened one.
+// That is not a shortcut left on the table: the timeout is deliberately
+// not environment-configurable (farhelm-supervisor's own docs — "this
+// repo's tests never mutate the process environment"), and the one
+// injection seam that DOES exist — a short-timeout constructor argument
+// the Rust integration suite uses directly (`SupervisorTimeouts`, via
+// `harness_with_timeouts`) — is reached only through `farhelm supervisor
+// run`'s CLI and `farhelm_supervisor::service::run`, and the production
+// binary exposes no flag for it. A browser-level test has no way to dial
+// this down without adding that flag to the production binary itself, so
+// waiting out the real timeout is the honest option, not a workaround.
+//
+// The timing assertion below exists because "eventually" is not precise
+// enough here: the SAME detach reason string can also come from the
+// helm's own per-terminal channel-full backstop (crates/farhelm-helm/src/client.rs)
+// — a completely different, byte-volume-driven mechanism that has nothing
+// to do with pause DURATION and could plausibly fire much sooner. A test
+// that only waited for the banner to appear, with no floor on how soon,
+// could pass by catching that mechanism instead of the one this test is
+// actually named for.
+test("a client that stops draining is detached with the stall reason after the full stall interval; reattaching afterward replays", async ({
+  page,
+  request,
+}) => {
+  // The nested waits below sum to a bit over STALL_DETACH_TIMEOUT (60s):
+  // confirming the pause, the banner's own margin past 60s, and the
+  // reattach/replay at the end. Set comfortably above that sum, plus room
+  // for setup and cleanup, so a slow-but-legitimate run does not trip
+  // Playwright's OWN timeout ahead of the assertions this test relies on
+  // to fail correctly.
+  test.setTimeout(150_000);
+  const title = `flood-stall-${Date.now()}`;
+  let id: string | undefined;
+  try {
+    id = await createFloodGatedSession(request, title);
+
+    await page.goto("/");
+    // Same readiness wait `holdTermWrites` documents and relies on — the
+    // patch below needs `window.Terminal` to already exist.
+    await page.waitForFunction(() => !!(window as any).Terminal);
+    const row = page.locator(`[data-session-id="${id}"]`);
+    await expect(row).toBeVisible();
+
+    // Patch EVERY future xterm.js instance's write() to swallow its
+    // completion callback, BEFORE mount() constructs one — patching the
+    // instance afterward would race the flood's first bytes, which can
+    // land (and drain normally) before a post-mount patch runs. With no
+    // callback ever firing, terminal.js's `pendingWrite` never drains
+    // below LOW_WATER, so the pause this test provokes is never answered
+    // by a resume: exactly the "viewer stopped consuming" wedge
+    // `STALL_DETACH_TIMEOUT` exists for.
+    await page.evaluate(() => {
+      (window as any).__testRealWrite = (window as any).Terminal.prototype.write;
+      (window as any).Terminal.prototype.write = function () {
+        // Deliberately no callback invocation.
+      };
+    });
+
+    await row.click();
+    await page.waitForFunction(() => (window as any).__farhelmTermReady === true);
+    await sendFloodGateByte(page);
+
+    // The pause must actually happen, and promptly — this is the moment
+    // the 60s stall-detach clock (STALL_DETACH_TIMEOUT) starts counting.
+    // Asserting it HERE, not just eventually, is what lets the timing
+    // assertion below measure from the right instant rather than from
+    // whenever this test happened to start.
+    await expect
+      .poll(() => page.evaluate(() => (window as any).__farhelmTest.pauseCount), {
+        timeout: 30_000,
+        message: "the attachment must cross HIGH_WATER and pause before the stall clock can start",
+      })
+      .toBeGreaterThanOrEqual(1);
+    const pausedAt = Date.now();
+
+    // The banner is this test's synchronization point for the DETACH
+    // itself — it can only appear once the supervisor's stall timeout
+    // actually elapses, so this genuinely waits the real ~60s (see this
+    // test's own file-level docs for why no shorter seam exists to inject
+    // here).
+    await expect(page.locator("#term-banner")).toContainText(
+      "Detached: terminal stopped consuming output (stalled)",
+      { timeout: 75_000 },
+    );
+    const detachedAt = Date.now();
+
+    // Attribution, not just occurrence (see this test's own file-level
+    // docs): a detach arriving materially before a full stall interval
+    // had elapsed SINCE THE PAUSE would mean this test caught the helm's
+    // channel-full backstop instead of the supervisor's stall-detach
+    // timeout — margin below the nominal 60s, not an exact threshold,
+    // because wall-clock measurement across a real network and process
+    // boundary is inherently a little loose.
+    const pausedForMs = detachedAt - pausedAt;
+    expect(pausedForMs).toBeGreaterThan(55_000);
+
+    // Restore real rendering before reattaching, or the replay below
+    // would be exactly as invisible as the stall that produced it.
+    await page.evaluate(() => {
+      (window as any).Terminal.prototype.write = (window as any).__testRealWrite;
+      delete (window as any).__testRealWrite;
+    });
+
+    // Reattach the same way the navigation-lifecycle test above
+    // ("back tears down the mounted terminal; reopening the same session
+    // mounts a fresh one") does: back to the list, then the same row. The
+    // session survived the detach (SPEC.md: no viewer can affect a
+    // session it stalls out of), so replay brings back its own tail —
+    // already complete in tmux history well before the stall elapsed, so
+    // no second gate byte is needed.
+    await page.locator(".back-button").click();
+    await row.click();
+    await page.waitForFunction(() => (window as any).__farhelmTermReady === true);
+    await waitForTermText(page, "FLOOD-DONE", 15_000);
+  } finally {
+    if (id) await cleanupSession(request, id);
+  }
+});
+
+// PLAN_M2_5.md step 4's reconnect invariant: a fresh WebSocket must start
+// from a clean slate regardless of what the OLD one last sent. A
+// regression that leaked `paused`/pending-write state across attachments
+// (e.g. module-scoped instead of per-mount counters) would show up here as
+// a resume sent on the new socket before it ever paused on its own — this
+// pins that it does not.
+//
+// SAME-REALM back-navigation, not `page.reload()`: an earlier version of
+// this test reloaded the page between attachments, which tears down the
+// WHOLE JS realm — and therefore cannot catch a regression that leaked
+// state via a module-scoped variable instead of a per-mount closure,
+// since a reload resets those too, for reasons that have nothing to do
+// with terminal.js's own lifecycle discipline. Only a same-realm
+// back-then-reopen (the app's own navigation, `unmount()` then a fresh
+// `mount()`) actually exercises whatever terminal.js does at THAT
+// boundary. To make that meaningful, attachment one is kept STILL PAUSED
+// at the moment of navigating away — proven via the hook, not merely
+// assumed — using a permanent swallow patch (like the stall test's own),
+// not `holdTermWrites` (which self-releases the instant it observes a
+// pause, which would let attachment one recover before this test ever got
+// to navigate away from it).
+test("reconnecting within the same page resets flow-control state; the new attachment neither inherits a pause nor sends a bare resume", async ({
+  page,
+  request,
+}) => {
+  const title = `flood-reconnect-${Date.now()}`;
+  let id: string | undefined;
+  try {
+    await page.goto("/");
+    await page.waitForFunction(() => !!(window as any).Terminal);
+    await page.evaluate(() => {
+      (window as any).__testRealWrite = (window as any).Terminal.prototype.write;
+      (window as any).Terminal.prototype.write = function () {
+        // Deliberately no callback invocation: keeps attachment one
+        // paused indefinitely, so it is still, provably, paused at the
+        // moment this test navigates away from it below.
+      };
+    });
+
+    id = await createFloodGatedSession(request, title);
+    const row = page.locator(`[data-session-id="${id}"]`);
+    await expect(row).toBeVisible();
+    await row.click();
+    await page.waitForFunction(() => (window as any).__farhelmTermReady === true);
+    await sendFloodGateByte(page);
+
+    await expect
+      .poll(() => page.evaluate(() => (window as any).__farhelmTest.pauseCount), {
+        timeout: 30_000,
+        message: "the first attachment must actually cross HIGH_WATER and pause",
+      })
+      .toBeGreaterThanOrEqual(1);
+    // Not just "paused once" — still paused right now, which is the
+    // premise the "starts unpaused" assertion on the reopened attachment
+    // needs to actually mean something.
+    expect(await page.evaluate(() => (window as any).__farhelmTest.paused)).toBe(true);
+
+    // Restore real writing before navigating to the fresh attachment: the
+    // patch above is a shared PROTOTYPE hook, so leaving it swallowing
+    // would silently break the reconnected instance's own rendering too.
+    // This does NOT "unpause" attachment one — its closure-scoped
+    // `paused`/`pendingWrite` have nothing to do with the prototype patch
+    // surviving; its own already-dispatched writes' callbacks were baked
+    // in at call time and will now simply never fire, which is exactly
+    // the point.
+    await page.evaluate(() => {
+      (window as any).Terminal.prototype.write = (window as any).__testRealWrite;
+      delete (window as any).__testRealWrite;
+    });
+
+    await page.locator(".back-button").click();
+    // The old attachment's hook must be gone entirely — the same
+    // assertion the navigation-lifecycle test above pins for
+    // `__farhelmTerm`/`__farhelmWs`, extended here to `__farhelmTest`:
+    // `unmount()` only deletes the global if it still references THIS
+    // mount's own object (terminal.js's own docs), so seeing it gone is
+    // also indirect coverage that the delete actually took that branch.
+    await expect
+      .poll(() => page.evaluate(() => (window as any).__farhelmTest))
+      .toBeUndefined();
+
+    await row.click();
+    await page.waitForFunction(() => (window as any).__farhelmTermReady === true);
+    await sendFloodGateByte(page);
+    await waitForTermText(page, "FLOOD-DONE", 15_000);
+
+    // The reattach's replay is bounded by the tmux history floor (~12,000
+    // lines — terminal.js's `scrollback` setting and tmux.rs's
+    // `HISTORY_LIMIT`), a few hundred KiB at most, far below HIGH_WATER —
+    // so a healthy fresh attachment neither pauses nor resumes delivering
+    // it. A resume observed here would mean the new socket inherited the
+    // OLD one's paused state instead of starting clean; a pause observed
+    // here would mean the replay itself grew past HIGH_WATER, which would
+    // invalidate this test's premise (that ordinary replay volume cannot
+    // trip the same mark the first attachment's live flood did) rather
+    // than exercising the invariant this test is actually for.
+    const hooks = await page.evaluate(() => (window as any).__farhelmTest);
+    expect(hooks.pauseCount).toBe(0);
+    expect(hooks.resumeCount).toBe(0);
+    expect(hooks.paused).toBe(false);
+  } finally {
+    if (id) await cleanupSession(request, id);
+  }
 });
 
 // An attach failure must arrive as a detach notice on the socket, not a
