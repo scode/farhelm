@@ -42,6 +42,19 @@
 //! the session as a tombstone — so a replay for a deleted session can say
 //! so instead of duplicating it.
 //!
+//! M3's third addition is the per-session integration snapshot and the
+//! conversation identity captured against it (PLAN_M3.md items 7 and 8).
+//! The snapshot columns — [`StoredSession::agent_kind`] and
+//! [`StoredSession::resume_template`] — are IMMUTABLE: they are written by
+//! the insert that creates the row and there is deliberately no update path
+//! for them, because re-deriving a kind later would consult a PATH and a
+//! filesystem that may since have changed (`crate::agent_kind`'s own docs).
+//! The two columns beside them are the mutable half and each has exactly
+//! one narrow writer: [`SessionStore::record_first_input`] and
+//! [`SessionStore::record_captured_conversation`], both write-once and both
+//! conditioned on the column still being NULL, so neither can ever move
+//! backwards or overwrite what a concurrent observer already established.
+//!
 //! Journal mode and synchronous pragmas are left at SQLite's defaults.
 //! M3 is where PLAN.md places the explicit crash-safety/atomicity policy
 //! for the state store; this module does not invent one ahead of that.
@@ -70,7 +83,7 @@ const BUSY_TIMEOUT: Duration = Duration::from_secs(5);
 /// step in `apply_schema`: version 2 (PLAN_M3.md item 2 — the durable
 /// last-known outcome and the boot id) is the first real migration this
 /// database has ever had, and the template every later one follows.
-const SCHEMA_VERSION: i64 = 3;
+const SCHEMA_VERSION: i64 = 4;
 
 /// The sole row id of [`supervisor_meta`](apply_schema) — the table is
 /// single-row by construction (a `CHECK` on this value), so every read and
@@ -734,6 +747,69 @@ fn error_kind_from_column(text: &str) -> anyhow::Result<farhelm_proto::ErrorKind
     })
 }
 
+/// The on-disk spelling of an [`AgentKind`](farhelm_proto::AgentKind).
+///
+/// A STABLE vocabulary owned here, spelled out rather than derived from the
+/// Rust variant names, for the same reason [`LastOutcome::columns`] is: a
+/// variant rename must not invalidate every database in the field.
+///
+/// It is also the vocabulary `service::create_fingerprint` persists into
+/// reservation rows, and it is shared rather than duplicated because as of
+/// PLAN_M3.md item 7 the same kind is written to two durable places at
+/// once: two independent spellings that drifted would make an unchanged
+/// retry of a create look like a key reuse for every session created
+/// before the drift, with nothing at runtime able to notice.
+pub(crate) fn agent_kind_column(kind: farhelm_proto::AgentKind) -> &'static str {
+    use farhelm_proto::AgentKind as K;
+    match kind {
+        K::Claude => "claude",
+        K::Codex => "codex",
+        K::Generic => "generic",
+    }
+}
+
+/// The inverse of [`agent_kind_column`].
+///
+/// An unrecognized value is refused rather than defaulted to `Generic`,
+/// matching every other decoder in this module: the schema version already
+/// gates which shapes this build understands, so a value outside the
+/// vocabulary means the row is corrupt — and silently downgrading such a
+/// session to "no integration" would discard a captured conversation
+/// identity that may be sitting in the very next column.
+fn agent_kind_from_column(text: &str) -> anyhow::Result<farhelm_proto::AgentKind> {
+    use farhelm_proto::AgentKind as K;
+    Ok(match text {
+        "claude" => K::Claude,
+        "codex" => K::Codex,
+        "generic" => K::Generic,
+        other => anyhow::bail!("session row has unrecognized agent kind {other:?}"),
+    })
+}
+
+/// Encode a resume template for its column: a JSON array, or NULL for a
+/// session with no resume invocation.
+///
+/// JSON rather than a delimiter-joined string because the whole point of
+/// storing argv structurally is that an element may contain anything —
+/// spaces, quotes, a delimiter — and still come back as one element.
+fn resume_template_column(template: Option<&[String]>) -> Option<String> {
+    template.map(|template| {
+        serde_json::to_string(template).expect("a vector of strings always serializes")
+    })
+}
+
+/// The inverse of [`resume_template_column`]; a value that is present but
+/// not a JSON string array is refused rather than dropped, since a session
+/// silently losing its resume template would turn a `Resume` offer into a
+/// `FreshOnly` one with no explanation anywhere.
+fn resume_template_from_column(text: Option<String>) -> anyhow::Result<Option<Vec<String>>> {
+    text.map(|text| {
+        serde_json::from_str::<Vec<String>>(&text)
+            .context("decoding a session's stored resume template")
+    })
+    .transpose()
+}
+
 /// A failure injected INSIDE [`SessionStore::record_boot`]'s transaction,
 /// between the sentinel overrides and the blanket interrupted conversion —
 /// only ever called when `interrupt_live` is true, since that is the only
@@ -798,6 +874,64 @@ pub struct StoredSession {
     pub pane: String,
     /// The last transition the supervisor witnessed for this session.
     pub outcome: LastOutcome,
+    /// The session's integration snapshot (PLAN_M3.md item 7), resolved
+    /// once at create and IMMUTABLE thereafter — no method on this type
+    /// updates either field. See the module docs for why.
+    pub agent_kind: farhelm_proto::AgentKind,
+    /// The resume invocation as an argv vector, JSON-encoded in one
+    /// column. Structural rather than a command string so a path with
+    /// spaces survives without quoting (`crate::agent_kind`); `None` is a
+    /// session with no resume invocation at all, which only a `Generic`
+    /// kind can be.
+    pub resume_template: Option<Vec<String>>,
+    /// The session's working directory with every symlink, `.`, `..`, and
+    /// trailing slash resolved away, as it was at create.
+    ///
+    /// Correlation uses THIS, never [`StoredSession::cwd`], for both the
+    /// munged directory name and the recorded-cwd comparison: the agent
+    /// reports its own `getcwd()`, which the kernel has already resolved,
+    /// so a session created through a symlinked path would otherwise never
+    /// match its own records. `cwd` stays exactly as the user spelled it,
+    /// because that is what the UI shows and what a create replays.
+    /// `None` only for a row that predates this column, which can have no
+    /// integration and therefore no correlation either.
+    pub canonical_cwd: Option<String>,
+    /// The agent conversation this session was found to be running
+    /// (PLAN_M3.md item 8), or `None` while nothing has been claimed.
+    /// Written once by [`SessionStore::record_captured_conversation`], and
+    /// only ever from a COMPLETE post-horizon scan — see `service`'s
+    /// `capture_pass` for why a provisional match is never stored.
+    pub captured_conversation: Option<String>,
+    /// Where the claimed conversation's record was when it was claimed.
+    ///
+    /// A locator hint, not an identity: it exists so a supervisor restart
+    /// can re-verify a captured session's record with one `stat` instead
+    /// of re-scanning its whole directory, which would otherwise make
+    /// startup cost multiplicative in captured sessions. A stale path
+    /// simply fails re-verification, which retains the identity (see
+    /// `service`'s `reverify_capture`).
+    pub captured_record: Option<String>,
+    /// Whether correlation for this session was found AMBIGUOUS and no
+    /// identity will ever be claimed for this launch (PLAN_M3.md item 8).
+    ///
+    /// Durable, and that is the point: the collision that produced it —
+    /// a rival session sharing the working directory, a second record in
+    /// the window — does not become less ambiguous across a restart, and a
+    /// fresh supervisor that happened to see only one of the two
+    /// candidates (because the rival's evidence has since been cleaned up)
+    /// would otherwise claim an identity on strictly worse evidence than
+    /// the pass that bailed. Only a new LAUNCH clears it; nothing in this
+    /// PR relaunches, so PLAN_M3.md item 9's restart is where the clear
+    /// belongs, alongside clearing the captured identity itself.
+    pub capture_ambiguous: bool,
+    /// When this supervisor first confirmed delivery of input to the
+    /// session, in seconds since the Unix epoch — the correlator capture
+    /// keys on, because the agents' records appear at first PROMPT
+    /// submission rather than at launch. Durable so that a supervisor
+    /// restart landing in the (unbounded) launch-to-first-input gap does
+    /// not cost the session its only chance at capture. Written once by
+    /// [`SessionStore::record_first_input`].
+    pub first_input_at: Option<i64>,
 }
 
 /// The supervisor's session database.
@@ -848,6 +982,13 @@ pub struct SessionStore {
 ///   can exist with no session row at all, and because it outlives the
 ///   session it created as a tombstone. Its lifetime is the INTENT's, not
 ///   the session's.
+/// - 4: PLAN_M3.md items 7 and 8 — the per-session integration snapshot
+///   (`agent_kind`, `resume_template`), the conversation identity captured
+///   against it, and the first-input timestamp that capture correlates on.
+///   Columns on `sessions` rather than a side table because all four have
+///   exactly the session's lifetime and are read on the same paths that
+///   already load the row; a join would buy nothing and would let a
+///   snapshot outlive (or predate) the session it describes.
 ///
 /// `may_migrate` is the caller's assertion that it holds this state
 /// directory's exclusivity (see `service::StateDirOwnership`). Upgrading a
@@ -888,7 +1029,14 @@ fn apply_schema(conn: &Connection, may_migrate: bool) -> anyhow::Result<()> {
                  outcome_state TEXT NOT NULL DEFAULT 'launching',
                  exit_code     INTEGER,
                  annotation    TEXT,
-                 error_detail  TEXT
+                 error_detail  TEXT,
+                 agent_kind    TEXT NOT NULL DEFAULT 'generic',
+                 resume_template       TEXT,
+                 canonical_cwd         TEXT,
+                 captured_conversation TEXT,
+                 captured_record       TEXT,
+                 capture_ambiguous     INTEGER NOT NULL DEFAULT 0,
+                 first_input_at        INTEGER
              ) STRICT;
              CREATE TABLE supervisor_meta (
                  id      INTEGER PRIMARY KEY CHECK (id = 0),
@@ -906,7 +1054,7 @@ fn apply_schema(conn: &Connection, may_migrate: bool) -> anyhow::Result<()> {
              ) STRICT;
              CREATE INDEX create_reservations_pending
                  ON create_reservations (session_id) WHERE state = 'pending';
-             PRAGMA user_version = 3;
+             PRAGMA user_version = 4;
              COMMIT;",
         )
         .context("creating schema")?;
@@ -977,6 +1125,33 @@ fn apply_schema(conn: &Connection, may_migrate: bool) -> anyhow::Result<()> {
         .context("migrating schema from version 2 to 3")?;
         version = 3;
     }
+    if version == 3 {
+        // Purely additive, and the DEFAULTS are the whole design decision.
+        // A pre-item-7 row has no recorded kind, and there is no honest way
+        // to invent one: deriving it now from the stored invocation would
+        // be exactly the "re-guess it later" that item 7 forbids — the
+        // basename that would be recognized today is not necessarily what
+        // the session was launched against, and a session that silently
+        // acquired an integration would then be offered a resume it can
+        // never fill (no first-input time was ever recorded for it either,
+        // so capture could not run for it in any case). `generic` with no
+        // template is the honest reading: this session predates the
+        // snapshot, so restart can only ever offer it a fresh launch.
+        conn.execute_batch(
+            "BEGIN;
+             ALTER TABLE sessions ADD COLUMN agent_kind TEXT NOT NULL DEFAULT 'generic';
+             ALTER TABLE sessions ADD COLUMN resume_template       TEXT;
+             ALTER TABLE sessions ADD COLUMN canonical_cwd         TEXT;
+             ALTER TABLE sessions ADD COLUMN captured_conversation TEXT;
+             ALTER TABLE sessions ADD COLUMN captured_record       TEXT;
+             ALTER TABLE sessions ADD COLUMN capture_ambiguous     INTEGER NOT NULL DEFAULT 0;
+             ALTER TABLE sessions ADD COLUMN first_input_at        INTEGER;
+             PRAGMA user_version = 4;
+             COMMIT;",
+        )
+        .context("migrating schema from version 3 to 4")?;
+        version = 4;
+    }
     if version == SCHEMA_VERSION {
         return Ok(());
     }
@@ -1029,6 +1204,133 @@ fn settle_within(conn: &Connection, settlement: &Settlement) -> anyhow::Result<(
     )
     .context("settling a create reservation")?;
     Ok(())
+}
+
+/// Insert one session row through whatever transaction the caller owns.
+///
+/// Shared by the first-time insert and the relaunch takeover, which write
+/// the SAME row shape under the same identities — keeping one statement
+/// is what stops a column added for one path from being silently absent on
+/// the other (a relaunch that dropped the integration snapshot would leave
+/// a session that could never resume, with nothing to point at).
+fn insert_session_row(conn: &Connection, row: &StoredSession) -> anyhow::Result<()> {
+    let (state, exit_code, annotation, error_detail) = row.outcome.columns();
+    conn.execute(
+        "INSERT INTO sessions \
+         (id, title, cwd, invocation, tmux_name, pane, created_at, \
+          outcome_state, exit_code, annotation, error_detail, \
+          agent_kind, resume_template, canonical_cwd, captured_conversation, \
+          captured_record, capture_ambiguous, first_input_at) \
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18)",
+        rusqlite::params![
+            row.id,
+            row.title,
+            row.cwd,
+            row.invocation,
+            row.tmux_name,
+            row.pane,
+            now_unix(),
+            state,
+            exit_code,
+            annotation,
+            error_detail,
+            agent_kind_column(row.agent_kind),
+            resume_template_column(row.resume_template.as_deref()),
+            row.canonical_cwd,
+            row.captured_conversation,
+            row.captured_record,
+            i64::from(row.capture_ambiguous),
+            row.first_input_at,
+        ],
+    )
+    .context("inserting session row")?;
+    Ok(())
+}
+
+/// The column list every session read shares, in the order
+/// [`decode_session_row`] expects. Named so the two readers cannot drift
+/// apart by one column and start decoding each other's fields.
+const SESSION_COLUMNS: &str = "id, title, cwd, invocation, tmux_name, pane, \
+                               outcome_state, exit_code, annotation, error_detail, \
+                               agent_kind, resume_template, canonical_cwd, \
+                               captured_conversation, captured_record, capture_ambiguous, \
+                               first_input_at";
+
+/// The raw columns of one session row, before the fallible decoding that
+/// cannot happen inside a rusqlite row mapper (whose error type is
+/// rusqlite's own — see `load_all`'s two-stage comment).
+///
+/// The trailing two members are the raw agent-kind text and the raw
+/// resume-template JSON; every other column is already in place on the
+/// partially-built `StoredSession`, because only these two (with the
+/// outcome) can be REFUSED.
+type SessionColumns = (StoredSession, OutcomeColumns, String, Option<String>);
+
+/// Read one row's columns positionally, matching [`SESSION_COLUMNS`].
+///
+/// The `StoredSession` this produces carries PLACEHOLDER values for every
+/// field that needs fallible decoding; [`decode_session_row`] is what
+/// replaces them. Splitting the two is what keeps a corrupt outcome or a
+/// malformed template refusable with its own message instead of being
+/// flattened into a generic rusqlite decode failure.
+fn read_session_columns(r: &rusqlite::Row<'_>) -> rusqlite::Result<SessionColumns> {
+    Ok((
+        StoredSession {
+            id: r.get(0)?,
+            title: r.get(1)?,
+            cwd: r.get(2)?,
+            invocation: r.get(3)?,
+            tmux_name: r.get(4)?,
+            pane: r.get(5)?,
+            outcome: LastOutcome::Launching,
+            agent_kind: farhelm_proto::AgentKind::Generic,
+            resume_template: None,
+            canonical_cwd: r.get(12)?,
+            captured_conversation: r.get(13)?,
+            captured_record: r.get(14)?,
+            capture_ambiguous: r.get::<_, i64>(15)? != 0,
+            first_input_at: r.get(16)?,
+        },
+        (r.get(6)?, r.get(7)?, r.get(8)?, r.get(9)?),
+        r.get(10)?,
+        r.get(11)?,
+    ))
+}
+
+/// Finish decoding a row read by [`read_session_columns`], refusing rather
+/// than guessing on anything outside this build's vocabulary.
+///
+/// Two SEMANTIC checks run here, not only syntactic ones, and they are
+/// deliberately the same invariants `create` enforces (`agent_kind`'s
+/// `IntegrationSnapshot::resolve`). The database is a trust boundary like
+/// any other input: a row is whatever the last process to write it left
+/// behind, plus whatever a crash, a downgrade, or a hand-edit did to it.
+/// A row claiming an integrated kind with no `{conversation}` placeholder
+/// in its template describes a session that could capture an identity and
+/// then be unable to resume with it — SPEC.md's exact-conversation promise
+/// silently false — so it is refused at load rather than allowed to reach
+/// the restart path and be discovered there.
+fn decode_session_row(columns: SessionColumns) -> anyhow::Result<StoredSession> {
+    let (mut row, (state, exit_code, annotation, error_detail), kind, template) = columns;
+    row.outcome = LastOutcome::from_columns(&state, exit_code, annotation, error_detail)
+        .with_context(|| format!("session {}", row.id))?;
+    row.agent_kind =
+        agent_kind_from_column(&kind).with_context(|| format!("session {}", row.id))?;
+    row.resume_template =
+        resume_template_from_column(template).with_context(|| format!("session {}", row.id))?;
+    if crate::agent_kind::integration_for(row.agent_kind).is_some()
+        && !crate::agent_kind::template_has_placeholder(row.resume_template.as_deref())
+    {
+        anyhow::bail!(
+            "session {} is recorded with the integrated agent kind {} but a resume template \
+             carrying no {} element; that combination is refused at create and cannot be \
+             honored at restart either",
+            row.id,
+            agent_kind_column(row.agent_kind),
+            crate::agent_kind::CONVERSATION_PLACEHOLDER
+        );
+    }
+    Ok(row)
 }
 
 fn read_reservation(conn: &Connection, intent_key: &str) -> anyhow::Result<Option<Reservation>> {
@@ -1203,27 +1505,7 @@ impl SessionStore {
                     return Ok(Claimed::TakenBy(Box::new(winner)));
                 }
             }
-            let (state, exit_code, annotation, error_detail) = row.outcome.columns();
-            tx.execute(
-                "INSERT INTO sessions \
-                 (id, title, cwd, invocation, tmux_name, pane, created_at, \
-                  outcome_state, exit_code, annotation, error_detail) \
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
-                rusqlite::params![
-                    row.id,
-                    row.title,
-                    row.cwd,
-                    row.invocation,
-                    row.tmux_name,
-                    row.pane,
-                    now_unix(),
-                    state,
-                    exit_code,
-                    annotation,
-                    error_detail,
-                ],
-            )
-            .context("inserting session row")?;
+            insert_session_row(&tx, &row)?;
             tx.commit().context("committing the session insert")?;
             Ok(Claimed::Ours)
         })
@@ -1350,27 +1632,8 @@ impl SessionStore {
                 rusqlite::params![row.id],
             )
             .context("clearing the interrupted attempt's launching row")?;
-            let (state, exit_code, annotation, error_detail) = row.outcome.columns();
-            tx.execute(
-                "INSERT INTO sessions \
-                 (id, title, cwd, invocation, tmux_name, pane, created_at, \
-                  outcome_state, exit_code, annotation, error_detail) \
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
-                rusqlite::params![
-                    row.id,
-                    row.title,
-                    row.cwd,
-                    row.invocation,
-                    row.tmux_name,
-                    row.pane,
-                    now_unix(),
-                    state,
-                    exit_code,
-                    annotation,
-                    error_detail,
-                ],
-            )
-            .context("re-inserting the launching row for a relaunch")?;
+            insert_session_row(&tx, &row)
+                .context("re-inserting the launching row for a relaunch")?;
             tx.commit().context("committing the relaunch takeover")?;
             Ok(RetryClaim::Acquired)
         })
@@ -1393,35 +1656,15 @@ impl SessionStore {
             // Two stages for the same reason `load_all` uses them: a
             // corrupt outcome must be refused with its own message rather
             // than flattened into a rusqlite decode failure.
-            let raw: Option<(StoredSession, OutcomeColumns)> = conn
+            let raw = conn
                 .query_row(
-                    "SELECT id, title, cwd, invocation, tmux_name, pane, \
-                     outcome_state, exit_code, annotation, error_detail \
-                     FROM sessions WHERE id = ?1",
+                    &format!("SELECT {SESSION_COLUMNS} FROM sessions WHERE id = ?1"),
                     rusqlite::params![id],
-                    |r| {
-                        Ok((
-                            StoredSession {
-                                id: r.get(0)?,
-                                title: r.get(1)?,
-                                cwd: r.get(2)?,
-                                invocation: r.get(3)?,
-                                tmux_name: r.get(4)?,
-                                pane: r.get(5)?,
-                                outcome: LastOutcome::Launching,
-                            },
-                            (r.get(6)?, r.get(7)?, r.get(8)?, r.get(9)?),
-                        ))
-                    },
+                    read_session_columns,
                 )
                 .optional()
                 .context("reading a session row")?;
-            let Some((mut row, (state, exit_code, annotation, error_detail))) = raw else {
-                return Ok(None);
-            };
-            row.outcome = LastOutcome::from_columns(&state, exit_code, annotation, error_detail)
-                .with_context(|| format!("session {}", row.id))?;
-            Ok(Some(row))
+            raw.map(decode_session_row).transpose()
         })
         .await
         .context("session read task panicked")?
@@ -1678,6 +1921,138 @@ impl SessionStore {
         .context("outcome transition task panicked")?
     }
 
+    /// Record when this session first had input forwarded to it
+    /// (PLAN_M3.md item 8's correlator), if nothing has recorded it yet.
+    ///
+    /// Write-once by SQL predicate rather than by caller discipline, and
+    /// the direction matters: the FIRST input is what the agents' records
+    /// appear after, so a later observation must never move the timestamp
+    /// forward — that would slide the capture window past the very record
+    /// it exists to match. The in-memory mirror on the session entry
+    /// enforces the same thing for the common case; this predicate is what
+    /// makes it true across a restart, where the mirror is gone and the
+    /// stored value is all there is.
+    ///
+    /// Deliberately NOT part of `Transition`: this is not something
+    /// witnessed about the agent's lifecycle, it is a fact about what this
+    /// supervisor did, and folding it into the outcome state machine would
+    /// mean every transition had to reason about a field none of them can
+    /// change.
+    pub async fn record_first_input(&self, id: &str, at_unix: i64) -> anyhow::Result<()> {
+        let conn = Arc::clone(&self.conn);
+        let id = id.to_string();
+        tokio::task::spawn_blocking(move || -> anyhow::Result<()> {
+            let conn = conn.lock().expect("session db mutex poisoned");
+            conn.execute(
+                "UPDATE sessions SET first_input_at = ?2 \
+                 WHERE id = ?1 AND first_input_at IS NULL",
+                rusqlite::params![id, at_unix],
+            )
+            .context("recording a session's first-input time")?;
+            Ok(())
+        })
+        .await
+        .context("first-input record task panicked")?
+    }
+
+    /// Claim a conversation identity for a session (PLAN_M3.md item 8), if
+    /// none is claimed yet and nothing has declared the correlation
+    /// ambiguous.
+    ///
+    /// Write-once for the reason SPEC.md's resume promise is per-session
+    /// and exact: once an identity is claimed, the only thing a later scan
+    /// could honestly do is confirm it. A fork writes a NEW id to a NEW
+    /// record, and letting that overwrite this column would silently move
+    /// a session onto a conversation it never ran — precisely the
+    /// silently-wrong-conversation resume the capture design exists to
+    /// exclude. Re-verification after an append therefore compares; it
+    /// never rewrites.
+    ///
+    /// The `capture_ambiguous = 0` condition is the durable half of
+    /// ambiguity dominance: a claim computed before something (this
+    /// process, or a previous one) found the correlation ambiguous must
+    /// LOSE, and the only place that can be arbitrated without a race is
+    /// inside this transaction.
+    ///
+    /// Returns the identity now committed, whoever wrote it, so an
+    /// in-memory mirror follows what the database actually says rather
+    /// than what this caller intended (the same rule `transition`
+    /// follows). That read-back is also what makes it safe to advertise
+    /// `RestartOffer::Resume`: the offer means "there is a stored identity
+    /// this restart can fill in", and only a value read back out of the
+    /// committed row establishes that. `Ok(None)` means either the row is
+    /// gone (a concurrent delete) or the claim lost to an ambiguity —
+    /// neither is an error, and the caller distinguishes them by looking
+    /// at nothing at all: in both cases it must not advertise Resume.
+    pub async fn record_captured_conversation(
+        &self,
+        id: &str,
+        conversation: &str,
+        record: &Path,
+    ) -> anyhow::Result<Option<String>> {
+        let conn = Arc::clone(&self.conn);
+        let id = id.to_string();
+        let conversation = conversation.to_string();
+        let record = record.to_string_lossy().into_owned();
+        tokio::task::spawn_blocking(move || -> anyhow::Result<Option<String>> {
+            let mut conn = conn.lock().expect("session db mutex poisoned");
+            let tx = conn
+                .transaction()
+                .context("beginning the capture transaction")?;
+            tx.execute(
+                "UPDATE sessions SET captured_conversation = ?2, captured_record = ?3 \
+                 WHERE id = ?1 AND captured_conversation IS NULL AND capture_ambiguous = 0",
+                rusqlite::params![id, conversation, record],
+            )
+            .context("recording a captured conversation identity")?;
+            let committed: Option<Option<String>> = tx
+                .query_row(
+                    "SELECT captured_conversation FROM sessions WHERE id = ?1",
+                    rusqlite::params![id],
+                    |r| r.get(0),
+                )
+                .optional()
+                .context("reading back the captured conversation identity")?;
+            tx.commit().context("committing the capture")?;
+            Ok(committed.flatten())
+        })
+        .await
+        .context("capture record task panicked")?
+    }
+
+    /// Record durably that this session's correlation was AMBIGUOUS, so no
+    /// identity will ever be claimed for this launch (PLAN_M3.md item 8).
+    ///
+    /// Ambiguity DOMINATES, which is why this write has no precondition
+    /// beyond the row existing: it can never be wrong to refuse, and the
+    /// only monotonic direction is toward refusing. Its durability is what
+    /// keeps a restart from re-deciding on worse evidence — see
+    /// [`StoredSession::capture_ambiguous`].
+    ///
+    /// It also clears any identity a racing writer had just claimed. That
+    /// looks like a violation of the write-once rule above and is in fact
+    /// the same rule: `captured_conversation` is write-once against
+    /// *later, poorer* evidence, and an ambiguity is never poorer — it is
+    /// the discovery that the claim should not have been made. In
+    /// practice the two cannot race (passes are serialized), so this is
+    /// the belt to that suspenders.
+    pub async fn record_capture_ambiguous(&self, id: &str) -> anyhow::Result<()> {
+        let conn = Arc::clone(&self.conn);
+        let id = id.to_string();
+        tokio::task::spawn_blocking(move || -> anyhow::Result<()> {
+            let conn = conn.lock().expect("session db mutex poisoned");
+            conn.execute(
+                "UPDATE sessions SET capture_ambiguous = 1, captured_conversation = NULL, \
+                 captured_record = NULL WHERE id = ?1",
+                rusqlite::params![id],
+            )
+            .context("recording an ambiguous conversation correlation")?;
+            Ok(())
+        })
+        .await
+        .context("capture ambiguity task panicked")?
+    }
+
     /// The boot id stored by the last supervisor that ran against this
     /// database, or `None` for a database written before PLAN_M3.md item 2
     /// existed (or by a build whose host offers no boot id at all).
@@ -1858,47 +2233,21 @@ impl SessionStore {
         tokio::task::spawn_blocking(move || -> anyhow::Result<Vec<StoredSession>> {
             let conn = conn.lock().expect("session db mutex poisoned");
             let mut stmt = conn
-                .prepare(
-                    "SELECT id, title, cwd, invocation, tmux_name, pane, \
-                     outcome_state, exit_code, annotation, error_detail FROM sessions",
-                )
+                .prepare(&format!("SELECT {SESSION_COLUMNS} FROM sessions"))
                 .context("preparing session load query")?;
-            // Two stages, not one: the outcome columns are reassembled by
-            // `LastOutcome::from_columns`, which returns `anyhow::Error`
-            // for a corrupt row and so cannot live inside a rusqlite row
-            // mapper (whose error type is rusqlite's own). Collecting the
-            // raw tuples first keeps the refusal-to-guess behavior and its
-            // message intact instead of flattening it into a generic
-            // decode failure.
+            // Two stages, not one: the outcome, kind, and template columns
+            // are reassembled by functions that return `anyhow::Error` for
+            // a corrupt row and so cannot live inside a rusqlite row mapper
+            // (whose error type is rusqlite's own). Collecting the raw
+            // tuples first keeps the refusal-to-guess behavior and its
+            // message intact instead of flattening it into a generic decode
+            // failure.
             let raw = stmt
-                .query_map([], |r| {
-                    Ok((
-                        StoredSession {
-                            id: r.get(0)?,
-                            title: r.get(1)?,
-                            cwd: r.get(2)?,
-                            invocation: r.get(3)?,
-                            tmux_name: r.get(4)?,
-                            pane: r.get(5)?,
-                            outcome: LastOutcome::Launching,
-                        },
-                        r.get::<_, String>(6)?,
-                        r.get::<_, Option<i32>>(7)?,
-                        r.get::<_, Option<String>>(8)?,
-                        r.get::<_, Option<String>>(9)?,
-                    ))
-                })
+                .query_map([], read_session_columns)
                 .context("querying sessions")?
                 .collect::<Result<Vec<_>, rusqlite::Error>>()
                 .context("decoding session rows")?;
-            raw.into_iter()
-                .map(|(mut row, state, exit_code, annotation, error_detail)| {
-                    row.outcome =
-                        LastOutcome::from_columns(&state, exit_code, annotation, error_detail)
-                            .with_context(|| format!("session {}", row.id))?;
-                    Ok(row)
-                })
-                .collect()
+            raw.into_iter().map(decode_session_row).collect()
         })
         .await
         .context("session load task panicked")?
@@ -1980,6 +2329,13 @@ mod tests {
                     tmux_name: format!("fh-{id}"),
                     pane: "%0".to_string(),
                     outcome: LastOutcome::Running,
+                    agent_kind: farhelm_proto::AgentKind::Generic,
+                    resume_template: None,
+                    canonical_cwd: None,
+                    captured_conversation: None,
+                    captured_record: None,
+                    capture_ambiguous: false,
+                    first_input_at: None,
                 },
                 None,
             )
@@ -2692,6 +3048,13 @@ mod tests {
                     tmux_name: "fh-1".to_string(),
                     pane: String::new(),
                     outcome: LastOutcome::Launching,
+                    agent_kind: farhelm_proto::AgentKind::Generic,
+                    resume_template: None,
+                    canonical_cwd: None,
+                    captured_conversation: None,
+                    captured_record: None,
+                    capture_ambiguous: false,
+                    first_input_at: None,
                 },
                 None,
             )
@@ -2727,6 +3090,13 @@ mod tests {
                     tmux_name: "fh-1".to_string(),
                     pane: String::new(),
                     outcome: LastOutcome::Launching,
+                    agent_kind: farhelm_proto::AgentKind::Generic,
+                    resume_template: None,
+                    canonical_cwd: None,
+                    captured_conversation: None,
+                    captured_record: None,
+                    capture_ambiguous: false,
+                    first_input_at: None,
                 },
                 None,
             )
@@ -3312,6 +3682,13 @@ mod tests {
                     tmux_name: "fh-abc".to_string(),
                     pane: "%3".to_string(),
                     outcome: LastOutcome::Running,
+                    agent_kind: farhelm_proto::AgentKind::Generic,
+                    resume_template: None,
+                    canonical_cwd: None,
+                    captured_conversation: None,
+                    captured_record: None,
+                    capture_ambiguous: false,
+                    first_input_at: None,
                 },
                 None,
             )
@@ -3474,6 +3851,9 @@ mod tests {
     /// A launching row in the shape `create_session` commits one.
     fn launching_row(id: &str) -> StoredSession {
         StoredSession {
+            canonical_cwd: None,
+            captured_record: None,
+            capture_ambiguous: false,
             id: id.to_string(),
             title: id.to_string(),
             cwd: "/tmp/work".to_string(),
@@ -3481,6 +3861,10 @@ mod tests {
             tmux_name: format!("fh-{id}"),
             pane: String::new(),
             outcome: LastOutcome::Launching,
+            agent_kind: farhelm_proto::AgentKind::Generic,
+            resume_template: None,
+            captured_conversation: None,
+            first_input_at: None,
         }
     }
 
@@ -4087,5 +4471,246 @@ mod tests {
                 "the refusal must name the problem and the row: {rendered}"
             );
         }
+    }
+
+    /// The integration snapshot has to make the round trip through SQLite
+    /// intact, and the interesting half is the template: it is an argv
+    /// VECTOR stored in one column precisely so a path with spaces (or a
+    /// quote, or a JSON metacharacter) comes back as ONE element. A
+    /// delimiter-joined encoding would pass a naive test and silently
+    /// fragment exactly the invocation PLAN_M3.md item 7 calls out.
+    #[tokio::test]
+    async fn an_integration_snapshot_survives_the_round_trip_element_by_element() {
+        let (_dir, store) = fresh_store().await;
+        let template = vec![
+            "/opt/my agents/claude".to_string(),
+            "--resume".to_string(),
+            "{conversation}".to_string(),
+            r#"weird "quoted", value"#.to_string(),
+        ];
+        store
+            .insert_session(
+                StoredSession {
+                    id: "s1".to_string(),
+                    title: "t".to_string(),
+                    cwd: "/tmp/work".to_string(),
+                    invocation: "agent".to_string(),
+                    tmux_name: "fh-s1".to_string(),
+                    pane: String::new(),
+                    outcome: LastOutcome::Launching,
+                    agent_kind: farhelm_proto::AgentKind::Claude,
+                    resume_template: Some(template.clone()),
+                    canonical_cwd: Some("/tmp/work".to_string()),
+                    captured_conversation: None,
+                    captured_record: None,
+                    capture_ambiguous: false,
+                    first_input_at: None,
+                },
+                None,
+            )
+            .await
+            .expect("insert");
+        let row = store.session("s1").await.expect("read").expect("present");
+        assert_eq!(row.agent_kind, farhelm_proto::AgentKind::Claude);
+        assert_eq!(row.resume_template.as_deref(), Some(template.as_slice()));
+        // And through the bulk loader, which uses the same decoder but a
+        // different statement — the one a supervisor restart runs.
+        let loaded = store.load_all().await.expect("load");
+        assert_eq!(
+            loaded[0].resume_template.as_deref(),
+            Some(template.as_slice())
+        );
+    }
+
+    /// Both mutable capture columns are WRITE-ONCE, and each protects a
+    /// different failure.
+    ///
+    /// Moving `first_input_at` forward would slide the capture window past
+    /// the very record it exists to match, so a later observation must
+    /// lose to the first. Overwriting `captured_conversation` would let an
+    /// explicit fork — which writes a NEW id — silently move a session onto
+    /// a conversation it never ran, which is the wrong-conversation resume
+    /// SPEC.md forbids. Both are enforced by SQL predicate rather than by
+    /// caller discipline, so this asserts the predicate.
+    #[tokio::test]
+    async fn the_capture_columns_are_write_once_and_report_what_is_committed() {
+        let (_dir, store) = fresh_store().await;
+        insert_running(&store, "s1").await;
+
+        store.record_first_input("s1", 1_000).await.expect("first");
+        store.record_first_input("s1", 2_000).await.expect("second");
+        assert_eq!(
+            store
+                .session("s1")
+                .await
+                .expect("read")
+                .unwrap()
+                .first_input_at,
+            Some(1_000),
+            "the FIRST input is the correlator; a later one must not move it"
+        );
+
+        assert_eq!(
+            store
+                .record_captured_conversation("s1", "conv-a", Path::new("/records/a.jsonl"))
+                .await
+                .expect("capture"),
+            Some("conv-a".to_string())
+        );
+        assert_eq!(
+            store
+                .record_captured_conversation("s1", "conv-b", Path::new("/records/b.jsonl"))
+                .await
+                .expect("second capture"),
+            Some("conv-a".to_string()),
+            "the committed value is reported, not the one this caller intended"
+        );
+        assert_eq!(
+            store
+                .session("s1")
+                .await
+                .expect("read")
+                .unwrap()
+                .captured_conversation,
+            Some("conv-a".to_string())
+        );
+
+        // A deleted session is not an error for either writer: a capture
+        // pass racing a delete is ordinary, and there is nothing to repair.
+        store.delete_session("s1", None).await.expect("delete");
+        assert_eq!(
+            store
+                .record_captured_conversation("s1", "conv-c", Path::new("/records/c.jsonl"))
+                .await
+                .expect("a vanished row is not a failure"),
+            None
+        );
+        store
+            .record_first_input("s1", 3_000)
+            .await
+            .expect("a vanished row is not a failure");
+    }
+
+    /// A database written before item 7 has no snapshot at all, and the
+    /// migration must NOT invent one: re-deriving a kind from the stored
+    /// invocation is exactly the later re-guessing item 7 forbids, and a
+    /// pre-M3 session additionally has no first-input time, so capture
+    /// could never run for it even if it looked integrated. `generic` with
+    /// no template is the honest reading — restart can only offer it a
+    /// fresh launch.
+    #[tokio::test]
+    async fn migrating_a_pre_snapshot_database_claims_no_integration() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("supervisor.db");
+        {
+            let conn = Connection::open(&path).expect("create raw");
+            conn.execute_batch(V1_SCHEMA).expect("v1 schema");
+            conn.execute(
+                "INSERT INTO sessions (id, title, cwd, invocation, tmux_name, pane, created_at) \
+                 VALUES ('old', 't', '/tmp', 'claude --resume-me', 'fh-old', '%0', 0)",
+                [],
+            )
+            .expect("seed a pre-M3 row");
+            conn.pragma_update(None, "user_version", 1).expect("stamp");
+        }
+        let store = SessionStore::open(&path, true).await.expect("migrate");
+        let row = store.session("old").await.expect("read").expect("present");
+        assert_eq!(
+            row.agent_kind,
+            farhelm_proto::AgentKind::Generic,
+            "a session that predates the snapshot must not acquire an integration"
+        );
+        assert_eq!(row.resume_template, None);
+        assert_eq!(row.captured_conversation, None);
+        assert_eq!(row.first_input_at, None);
+    }
+
+    /// The database is a trust boundary: a row is whatever the last writer
+    /// left plus whatever a crash, a downgrade, or a hand-edit did to it.
+    /// Every shape that would produce a session this build cannot honor is
+    /// refused at LOAD rather than discovered later — most sharply the
+    /// integrated-kind-without-placeholder row, which describes a session
+    /// that could capture an identity and then be unable to resume with
+    /// it: SPEC.md's exact-conversation promise silently false, discovered
+    /// only at the restart that needed it.
+    ///
+    /// A matrix rather than one case, because these are independent
+    /// decoders and a fix to one says nothing about the others.
+    #[tokio::test]
+    async fn a_semantically_impossible_session_row_is_refused_at_load() {
+        let cases = [
+            (
+                "UPDATE sessions SET agent_kind = 'claude', resume_template = \
+                 '[\"claude\",\"--continue\"]'",
+                "{conversation}",
+            ),
+            (
+                "UPDATE sessions SET agent_kind = 'claude', resume_template = NULL",
+                "{conversation}",
+            ),
+            (
+                "UPDATE sessions SET resume_template = 'not json at all'",
+                "resume template",
+            ),
+            (
+                "UPDATE sessions SET resume_template = '{\"not\":\"an array\"}'",
+                "resume template",
+            ),
+            (
+                "UPDATE sessions SET resume_template = '[1,2,3]'",
+                "resume template",
+            ),
+        ];
+        for (corruption, expected) in cases {
+            let (dir, store) = fresh_store().await;
+            insert_running(&store, "s1").await;
+            {
+                let conn = Connection::open(dir.path().join("supervisor.db")).expect("open raw");
+                conn.execute(corruption, []).expect("plant corruption");
+            }
+            let rendered = format!(
+                "{:#}",
+                store
+                    .session("s1")
+                    .await
+                    .expect_err("an unusable row must not be handed out")
+            );
+            assert!(
+                rendered.contains(expected) && rendered.contains("s1"),
+                "the refusal must name the problem and the row: {rendered}"
+            );
+            // The bulk loader shares the decoder, but through a different
+            // statement — the one a supervisor restart runs, where a
+            // silently-dropped refusal would be worst.
+            assert!(store.load_all().await.is_err());
+        }
+    }
+
+    /// An agent-kind column outside this build's vocabulary is refused
+    /// rather than downgraded to `generic`, for the same no-guessing
+    /// reason every other decoder here refuses: quietly dropping the
+    /// integration would ALSO orphan whatever conversation identity sits
+    /// in the very next column, turning a resumable session into an
+    /// unresumable one with no error anywhere.
+    #[tokio::test]
+    async fn a_corrupt_agent_kind_is_refused_rather_than_defaulted() {
+        let (dir, store) = fresh_store().await;
+        insert_running(&store, "s1").await;
+        {
+            let conn = Connection::open(dir.path().join("supervisor.db")).expect("open raw");
+            conn.execute("UPDATE sessions SET agent_kind = 'gemini'", [])
+                .expect("plant corruption");
+        }
+        let rendered = format!(
+            "{:#}",
+            store
+                .session("s1")
+                .await
+                .expect_err("an unrecognized kind must not be guessed at")
+        );
+        assert!(
+            rendered.contains("gemini") && rendered.contains("s1"),
+            "the refusal must name the problem and the row: {rendered}"
+        );
     }
 }

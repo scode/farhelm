@@ -124,12 +124,28 @@ pub enum Script {
     /// A test-side drop guard is the primary cleanup; this is the
     /// backstop under it.
     SpawnerForkStorm,
+    /// Writes a Claude-Code-shaped conversation record on first input, then
+    /// echoes like `Basic`. See [`record_agent`] for the whole contract —
+    /// including the `append` and `fork` commands that stand in for a
+    /// resume and an explicit fork.
+    ClaudeRecord,
+    /// Writes a Codex-shaped rollout record on first input; otherwise
+    /// identical to [`Script::ClaudeRecord`].
+    CodexRecord,
 }
 
 /// Act out one script and exit. Runs synchronously on blocking stdio on
 /// purpose: this stands in for a real agent's terminal behavior, and
 /// nothing about it should depend on an async runtime being present.
-pub fn run(script: Script) -> anyhow::Result<()> {
+///
+/// `record_home` is the root the record-writing scripts hang their
+/// `.claude`/`.codex` trees off — the fixture side of the supervisor's own
+/// injectable agent home (`SupervisorSeams::agent_home`). A flag rather
+/// than `$HOME` because this repo's tests never mutate the test process's
+/// environment, and because several harnesses run concurrently and would
+/// otherwise share one tree. `None` is every other script, which writes no
+/// records at all.
+pub fn run(script: Script, record_home: Option<std::path::PathBuf>) -> anyhow::Result<()> {
     match script {
         Script::Basic => basic(),
         Script::Altscreen => altscreen(),
@@ -163,7 +179,214 @@ pub fn run(script: Script) -> anyhow::Result<()> {
              i=$((i + 1)); done",
             "spawner-fork-storm",
         ),
+        Script::ClaudeRecord => record_agent(RecordShape::Claude, record_home),
+        Script::CodexRecord => record_agent(RecordShape::Codex, record_home),
     }
+}
+
+/// Which agent's on-disk record layout [`record_agent`] imitates.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum RecordShape {
+    Claude,
+    Codex,
+}
+
+/// Prompt-and-echo like `basic`, but writing a conversation record the way
+/// the real agents do — the deterministic fixture PLAN_M3.md item 8's
+/// capture tests are built on.
+///
+/// Every property here exists to make one audited constraint reproducible
+/// in CI rather than only reasoned about:
+///
+/// - **The record appears on FIRST INPUT, not at launch.** This is the
+///   constraint that forces correlation onto first-input time and forbids
+///   any timeout measured from creation, so the fixture must not write
+///   anything until a line arrives. A test can therefore create a session,
+///   wait as long as it likes, and only then provoke the record.
+/// - **The correlators are per-line JSON**, including the working
+///   directory as a FIELD — which is what lets the munged-cwd-collision
+///   test put two records for two different directories in one project
+///   directory and still expect them told apart.
+/// - **`append` appends under the SAME id**, standing in for a plain
+///   resume, so re-verification has something to confirm.
+/// - **`fork` writes a NEW id** in the same place, standing in for an
+///   explicit fork, so the "a fork must not displace the captured
+///   identity" test has a real second record to be ignored.
+///
+/// Markers (`RECORD-WRITTEN:`, `RECORD-APPENDED:`, `RECORD-FORKED:`) are
+/// printed so tests key on the record genuinely existing rather than on a
+/// sleep — the same discipline `FAKE-AGENT READY` established.
+fn record_agent(shape: RecordShape, home: Option<std::path::PathBuf>) -> anyhow::Result<()> {
+    let home = home.context(
+        "the record-writing fake-agent scripts need --record-home; without it there is no \
+         tree to write into and a test would silently observe no capture",
+    )?;
+    let cwd = std::env::current_dir().context("reading the fixture's working directory")?;
+    let cwd = cwd.to_string_lossy().into_owned();
+
+    let mut out = std::io::stdout().lock();
+    write!(out, "\x1b[?2004h")?;
+    writeln!(
+        out,
+        "\x1b[1;32mfake-agent\x1b[0m starting (script=record)\r"
+    )?;
+    writeln!(out, "FAKE-AGENT READY\r")?;
+    write!(out, "> ")?;
+    out.flush()?;
+
+    // The record this fixture owns, created lazily on the first line: its
+    // absence before then IS the behavior under test.
+    let mut current: Option<(String, std::path::PathBuf)> = None;
+
+    let stdin = std::io::stdin();
+    for line in stdin.lock().lines() {
+        let line = line?;
+        let line = line.replace("\x1b[200~", "").replace("\x1b[201~", "");
+        let trimmed = line.trim();
+        match (trimmed, &current) {
+            ("quit", _) => {
+                writeln!(out, "bye\r")?;
+                out.flush()?;
+                return Ok(());
+            }
+            // A resume: the real agents append to the existing record
+            // under the same id rather than starting a new one.
+            ("append", Some((id, path))) => {
+                let mut file = std::fs::OpenOptions::new()
+                    .append(true)
+                    .open(path)
+                    .context("reopening the record to append")?;
+                writeln!(file, "{}", record_line(shape, id, &cwd))?;
+                file.flush()?;
+                writeln!(out, "RECORD-APPENDED:{id}\r")?;
+            }
+            // An explicit fork: a genuinely new conversation id, in a new
+            // file, exactly as `--fork-session` produces.
+            // The forked record's path is deliberately dropped rather
+            // than adopted as `current`: a fork is a different
+            // conversation, so the fixture keeps writing to the ORIGINAL
+            // and a later `append` still exercises the captured record.
+            ("fork", Some(_)) => {
+                let (id, _forked_path) = write_record(shape, &home, &cwd)?;
+                writeln!(out, "RECORD-FORKED:{id}\r")?;
+            }
+            _ => {
+                if current.is_none() {
+                    let (id, path) = write_record(shape, &home, &cwd)?;
+                    writeln!(out, "RECORD-WRITTEN:{id}\r")?;
+                    current = Some((id, path));
+                }
+                writeln!(out, "echo:\x1b[36m{trimmed}\x1b[0m\r")?;
+            }
+        }
+        write!(out, "> ")?;
+        out.flush()?;
+    }
+    Ok(())
+}
+
+/// Create one new record file with a fresh conversation id, returning the
+/// id and where it landed.
+fn write_record(
+    shape: RecordShape,
+    home: &std::path::Path,
+    cwd: &str,
+) -> anyhow::Result<(String, std::path::PathBuf)> {
+    let id = fresh_conversation_id();
+    let path = record_path(shape, home, cwd, &id);
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent).context("creating the fixture's record directory")?;
+    }
+    std::fs::write(&path, format!("{}\n", record_line(shape, &id, cwd)))
+        .context("writing the fixture's conversation record")?;
+    Ok((id, path))
+}
+
+/// Where each agent puts a record for `cwd`.
+///
+/// Claude's project directory is the MUNGED working directory — reused
+/// from the supervisor's own implementation rather than reimplemented,
+/// because a fixture that munged differently would make the collision test
+/// pass for the wrong reason (or fail for one).
+fn record_path(
+    shape: RecordShape,
+    home: &std::path::Path,
+    cwd: &str,
+    id: &str,
+) -> std::path::PathBuf {
+    match shape {
+        RecordShape::Claude => home
+            .join(".claude")
+            .join("projects")
+            .join(farhelm_supervisor::agent_kind::munge_cwd(cwd))
+            .join(format!("{id}.jsonl")),
+        RecordShape::Codex => {
+            // `YYYY-MM-DDT...` — the date components the real rollout tree
+            // nests by, taken from the same formatter the supervisor parses
+            // so the two can never disagree about the calendar.
+            let stamp = farhelm_supervisor::agent_kind::format_rfc3339(
+                farhelm_supervisor::agent_kind::now_unix(),
+            );
+            home.join(".codex")
+                .join("sessions")
+                .join(&stamp[0..4])
+                .join(&stamp[5..7])
+                .join(&stamp[8..10])
+                .join(format!("rollout-{id}.jsonl"))
+        }
+    }
+}
+
+/// One record line in the shape the corresponding real agent writes.
+///
+/// Serialized by `serde_json` rather than assembled by `format!`. The
+/// fixture's whole job is to be the thing the supervisor's parser is
+/// trusted against, and a working directory is arbitrary bytes chosen by
+/// the test: a path containing a quote, a backslash, a newline, or a tab
+/// is exactly the input a hand-rolled escaper gets wrong, and the failure
+/// would surface as a parser bug rather than a fixture bug. Paying one
+/// dependency to make that class of confusion impossible is the right
+/// trade.
+fn record_line(shape: RecordShape, id: &str, cwd: &str) -> String {
+    let timestamp =
+        farhelm_supervisor::agent_kind::format_rfc3339(farhelm_supervisor::agent_kind::now_unix());
+    let value = match shape {
+        RecordShape::Claude => serde_json::json!({
+            "type": "user",
+            "sessionId": id,
+            "cwd": cwd,
+            "timestamp": timestamp,
+        }),
+        RecordShape::Codex => serde_json::json!({
+            "timestamp": timestamp,
+            "type": "session_meta",
+            "payload": {
+                "id": id,
+                "cwd": cwd,
+                "timestamp": timestamp,
+            },
+        }),
+    };
+    // `to_string` is the compact form, which is also the only form that is
+    // legal here: JSONL requires the whole record on one line, and
+    // `serde_json`'s default writer never emits a bare newline inside a
+    // string.
+    value.to_string()
+}
+
+/// A conversation id unique across every fixture process on this host.
+///
+/// pid plus nanoseconds rather than a UUID: this binary has no `uuid`
+/// dependency, the value is opaque to everything that reads it, and the
+/// pair is already unique enough that two concurrently-running harnesses
+/// cannot collide — which is the only property the tests need, since a
+/// collision would silently merge two conversations.
+fn fresh_conversation_id() -> String {
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or(0);
+    format!("fake-{}-{nanos}", std::process::id())
 }
 
 /// Prompt-and-echo with color, bracketed paste, and test control commands.
@@ -838,4 +1061,35 @@ fn set_raw_mode() -> anyhow::Result<()> {
         anyhow::bail!("tcsetattr failed: {}", std::io::Error::last_os_error());
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A fixture that produces invalid JSONL would make every capture test
+    /// fail as if the supervisor's parser were broken, so the escaping
+    /// contract is pinned here rather than left implicit in whatever
+    /// working directories the e2e suite happens to create. Newlines and
+    /// tabs are the load-bearing cases: both are legal in a POSIX path,
+    /// both are illegal raw inside a JSON string, and a raw newline would
+    /// additionally split one record across two JSONL lines.
+    #[test]
+    fn a_hostile_working_directory_still_produces_one_valid_jsonl_line() {
+        let cwd = "/tmp/we\"ird\\path\nwith\tcontrol/chars";
+        for shape in [RecordShape::Claude, RecordShape::Codex] {
+            let line = record_line(shape, "fake-1-2", cwd);
+            assert!(
+                !line.contains('\n'),
+                "{shape:?} record spans more than one JSONL line: {line}"
+            );
+            let parsed: serde_json::Value =
+                serde_json::from_str(&line).expect("record line must be valid JSON");
+            let recorded = match shape {
+                RecordShape::Claude => &parsed["cwd"],
+                RecordShape::Codex => &parsed["payload"]["cwd"],
+            };
+            assert_eq!(recorded.as_str(), Some(cwd), "{shape:?} lost the cwd");
+        }
+    }
 }

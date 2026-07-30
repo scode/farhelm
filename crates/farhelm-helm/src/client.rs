@@ -11,7 +11,7 @@ use anyhow::{Context, bail};
 use farhelm_proto::io::{
     FrameReader, FrameWriter, ProgressWrite, handshake, parse_control, write_frame_before_stall,
 };
-use farhelm_proto::{ControlMsg, ErrorKind, Frame, FrameKind, SessionInfo};
+use farhelm_proto::{AgentKind, ControlMsg, ErrorKind, Frame, FrameKind, SessionInfo};
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -275,6 +275,28 @@ impl TermDetachSignal {
             }
         }
     }
+}
+
+/// The optional fields a `CreateSession` may carry beyond the four that
+/// describe the session itself.
+///
+/// Grouped rather than added as three more parameters because they share
+/// a property that is easy to lose sight of: all three are OPTIONAL and
+/// all three participate in the create's idempotency fingerprint, so a
+/// retry that changes any of them is a different request and is refused
+/// as a key reuse rather than merged (PLAN_M3.md item 6). `Default` is
+/// the pre-M3 create in every respect.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct CreateExtras {
+    /// See [`SupervisorClient::create_session_with_key`].
+    pub intent_key: Option<String>,
+    /// Force (or forbid) an agent integration the invocation's basename
+    /// would not produce on its own; `None` lets the supervisor derive it.
+    pub agent_kind: Option<AgentKind>,
+    /// Override the resume invocation, as an argv vector. An integrated
+    /// kind's template must contain a `{conversation}` element; the
+    /// supervisor refuses the create otherwise.
+    pub resume_template: Option<Vec<String>>,
 }
 
 /// A live connection to one supervisor, shared by every request in flight.
@@ -775,6 +797,38 @@ impl SupervisorClient {
         rows: u16,
         intent_key: Option<String>,
     ) -> anyhow::Result<SessionInfo> {
+        self.create_session_with_extras(
+            cwd,
+            invocation,
+            title,
+            cols,
+            rows,
+            CreateExtras {
+                intent_key,
+                ..CreateExtras::default()
+            },
+        )
+        .await
+    }
+
+    /// [`SupervisorClient::create_session`] carrying PLAN_M3.md item 7's
+    /// snapshot overrides as well as item 6's idempotency key.
+    ///
+    /// The overrides have no UI caller and are not expected to gain one
+    /// before M5's profiles: the UI sends nothing and lets the supervisor
+    /// derive the kind from the invocation's basename. This entry point
+    /// exists because the API and the tests ARE the consumers in the
+    /// meantime — a wrapper script or `env claude` classifies as generic
+    /// by design, and there has to be a way to say otherwise.
+    pub async fn create_session_with_extras(
+        &self,
+        cwd: &str,
+        invocation: &str,
+        title: Option<String>,
+        cols: u16,
+        rows: u16,
+        extras: CreateExtras,
+    ) -> anyhow::Result<SessionInfo> {
         let req_id = self.req_id();
         match self
             .request(
@@ -786,14 +840,9 @@ impl SupervisorClient {
                     title,
                     cols,
                     rows,
-                    intent_key,
-                    // PLAN_M3.md item 7's snapshot overrides have no
-                    // caller yet; `None` is the behavior-preserving
-                    // default those fields document (the supervisor still
-                    // FINGERPRINTS them, so a future sender of these gets
-                    // key-reuse detection for free).
-                    agent_kind: None,
-                    resume_template: None,
+                    intent_key: extras.intent_key,
+                    agent_kind: extras.agent_kind,
+                    resume_template: extras.resume_template,
                 },
             )
             .await?

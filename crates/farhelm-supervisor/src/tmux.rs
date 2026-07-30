@@ -1741,6 +1741,7 @@ impl TmuxDriver {
             reader,
             line,
             pane: pane.to_string(),
+            delivered_any_bytes: false,
         })
     }
 }
@@ -2104,6 +2105,21 @@ pub struct InputClient {
     line: Vec<u8>,
     /// The pane this client addresses every `send-keys -t <pane>` at.
     pane: String,
+    /// Whether tmux has ever CONFIRMED executing a `send-keys` carrying at
+    /// least one byte through this client.
+    ///
+    /// Exists for PLAN_M3.md item 8's correlator: conversation capture
+    /// anchors on the moment input actually reached the pane, because that
+    /// is the last moment before the agent's record can exist. Confirmed
+    /// delivery — a chunk whose `%end` came back — is the only reading that
+    /// supports that, which is why this is set here rather than inferred
+    /// from `send` returning `Ok`: a send that failed part-way still
+    /// delivered the chunks it had confirmed, and one of those may have
+    /// carried the prompt's newline.
+    ///
+    /// Deliberately never reset. It answers "has anything ever landed",
+    /// and the correlator it feeds is itself write-once.
+    delivered_any_bytes: bool,
 }
 
 impl InputClient {
@@ -2145,6 +2161,9 @@ impl InputClient {
     /// batch's replies (~30 bytes each) stay far below the pipe capacity.
     pub async fn send(&mut self, bytes: &[u8]) -> anyhow::Result<()> {
         if bytes.is_empty() {
+            // Nothing reaches the pane, so nothing is delivered — see
+            // `delivered_any_bytes`, whose whole point is that an empty
+            // frame must not start conversation capture's clock.
             return Ok(());
         }
         let mut line = String::with_capacity(32 + Self::MAX_CHUNK * 3);
@@ -2181,9 +2200,21 @@ impl InputClient {
                     "send-keys input",
                 )
                 .await?;
+                // Marked per CONFIRMED chunk, not once at the end: a send
+                // that fails on a later chunk has still delivered this
+                // one, and the correlator cares about the earliest byte
+                // that landed rather than about the call succeeding.
+                self.delivered_any_bytes = true;
             }
         }
         Ok(())
+    }
+
+    /// Whether this attachment has ever had input confirmed into its pane.
+    /// See [`InputClient::delivered_any_bytes`] for why conversation
+    /// capture keys on this rather than on a successful `send`.
+    pub fn delivered_any_bytes(&self) -> bool {
+        self.delivered_any_bytes
     }
 }
 

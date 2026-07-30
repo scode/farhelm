@@ -82,6 +82,14 @@ enum InternalCmd {
         /// Behavior script.
         #[arg(long, value_enum, default_value_t = fake_agent::Script::Basic)]
         script: fake_agent::Script,
+        /// Root the record-writing scripts hang their `.claude`/`.codex`
+        /// trees off, mirroring the supervisor's own injectable agent home
+        /// (PLAN_M3.md item 8). A flag rather than `$HOME` because the
+        /// tests that use it must not mutate the test process's
+        /// environment, and because concurrent harnesses each need their
+        /// own tree. Ignored by every other script.
+        #[arg(long)]
+        record_home: Option<PathBuf>,
     },
 }
 
@@ -123,7 +131,10 @@ fn main() -> anyhow::Result<()> {
                 // On success exec never returns; reaching here is failure.
                 Err(farhelm_supervisor::launch::exec_launch_spec(&spec))
             }
-            InternalCmd::FakeAgent { script } => fake_agent::run(script),
+            InternalCmd::FakeAgent {
+                script,
+                record_home,
+            } => fake_agent::run(script, record_home),
         },
     }
 }

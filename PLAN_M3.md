@@ -134,6 +134,19 @@ nothing captures which conversation a session's agent was running.
    two near-simultaneous launches in one cwd stay uncaptured and take the fallback rather than a guess; plain resume
    appends under the same id (new ids only on explicit forks), so the watcher treats appends as the resume signal and
    re-verifies identity after each restart.
+
+   **Known limitation, accepted in M3: a session whose own INVOCATION resumes a conversation is never captured.** Create
+   a session with `claude --resume <id>` typed by hand and the agent appends to that conversation's existing record,
+   whose header timestamp predates the session's capture window by however long ago the conversation started — so no
+   candidate matches and the session correctly reports `FreshOnly`. It is a missed capture, never a wrong one, and it is
+   deliberately not fixed here. The available fix is to treat an in-window APPEND to an out-of-window record as a match,
+   and that trades directly against the guarantee this whole mechanism exists for: an append is evidenced only by a
+   filesystem mtime, so any background write to an old record — the user resuming the same conversation in their own
+   terminal, a vendor tool touching history — would become a capture, and a single such write is not something the
+   ambiguity rule can see. The two clean fixes both belong later: item 9's restart already knows the identity it is
+   resuming and carries it forward without re-discovery (so the common path to a resumed session is covered from M3
+   onward), and M5's profiles can let an invocation DECLARE its conversation, which is authoritative rather than
+   inferred. A fixture test pins the current behavior so the limitation cannot be lost.
 9. **Restart with resume — the full SPEC contract.** Reuse the session's terminal when it still exists (prior run stays
    in scrollback); create a fresh one when it does not; reap leftover descendants of the prior run before relaunching,
    never alongside — including daemons left behind by an agent that exited on its own; restart on a still-running agent
