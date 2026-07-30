@@ -28,9 +28,12 @@ use std::path::{Path, PathBuf};
 /// the kernel, so setting this once here reaches every process the agent
 /// ever spawns, transitively, with no further plumbing — UNLESS a
 /// descendant deliberately scrubs or replaces its own environment before
-/// spawning further children, which escapes the marker scan; that
-/// residual is accepted until M3's cgroups hardening (see
-/// `kill_process_tree`'s docs in service.rs).
+/// spawning further children, which escapes the marker scan. That
+/// residual is what the per-launch cgroup scope closes where a systemd
+/// user manager exists (`crate::scope`, `service.rs`'s
+/// `reap_process_tree`), and remains open where none does — the marker is
+/// still the only mechanism there, which is why it is set here rather
+/// than left to the cgroup.
 pub const SESSION_ID_ENV_VAR: &str = "FARHELM_SESSION_ID";
 
 /// What the shim needs to launch the agent: written as JSON by the
@@ -386,15 +389,43 @@ fn lookup_with_growing_buffer(
 /// Build the tmux window command argv: the interactive login shell running
 /// the launch shim. `farhelm_exe` is this supervisor's own binary — the
 /// shim ships inside it, which is why one artifact per host suffices.
-pub fn window_command(shell: &str, farhelm_exe: &Path, spec_path: &Path) -> Vec<String> {
+///
+/// `scope_prefix` is the cgroup hardening (`crate::scope`), empty on every
+/// host without a systemd user manager. It is spliced between the shell's
+/// `exec` and the shim rather than anywhere else in the chain for two
+/// reasons that pull in the same direction: the login shell must still be
+/// the outermost thing tmux starts (SPEC.md's environment contract is what
+/// `-l -i` delivers, and a scope around the SHELL would put the rc files'
+/// own subprocesses in the cgroup too), while everything the shim
+/// promises — its `exec` of the agent, its sentinel, its session-id marker
+/// — must stay inside it. `systemd-run --scope` `exec`s in place
+/// (`crate::scope`'s module docs record the empirical check), so the
+/// resulting process tree is byte-for-byte the shape it was without the
+/// prefix; nothing downstream of here can tell the difference.
+pub fn window_command(
+    shell: &str,
+    farhelm_exe: &Path,
+    spec_path: &Path,
+    scope_prefix: Vec<String>,
+) -> Vec<String> {
     // Quoting matters because both paths derive from $HOME or user flags
     // and can contain spaces or quotes; shell_words::quote is the same
-    // POSIX single-quote encoding the invocation parser expects.
-    let inner = format!(
-        "exec {} internal launch {}",
-        shell_words::quote(&farhelm_exe.to_string_lossy()),
-        shell_words::quote(&spec_path.to_string_lossy()),
-    );
+    // POSIX single-quote encoding the invocation parser expects. The scope
+    // prefix goes through the same quoting even though its words are all
+    // literals this crate wrote: one encoder for the whole command line is
+    // one fewer place for a future flag with a shell metacharacter in it
+    // to break the launch.
+    let mut words: Vec<String> = vec!["exec".to_string()];
+    words.extend(scope_prefix);
+    words.push(farhelm_exe.to_string_lossy().into_owned());
+    words.push("internal".to_string());
+    words.push("launch".to_string());
+    words.push(spec_path.to_string_lossy().into_owned());
+    let inner = words
+        .iter()
+        .map(|w| shell_words::quote(w).into_owned())
+        .collect::<Vec<_>>()
+        .join(" ");
     vec![
         shell.to_string(),
         "-l".to_string(),
@@ -983,11 +1014,61 @@ mod tests {
             "/bin/bash",
             Path::new("/opt/farhelm"),
             Path::new("/state/launch/abc.json"),
+            Vec::new(),
         );
         assert_eq!(cmd[0..4], ["/bin/bash", "-l", "-i", "-c"]);
         assert_eq!(
             cmd[4],
             "exec /opt/farhelm internal launch /state/launch/abc.json"
+        );
+    }
+
+    /// The cgroup wrapper (PLAN_M3.md item 10) must land BETWEEN the
+    /// shell's `exec` and the shim, leaving both ends of the chain exactly
+    /// as they were: the login shell still outermost (the environment
+    /// contract), the shim still `exec`ing the agent (the sentinel
+    /// contract). A prefix that wrapped the shell instead, or that
+    /// displaced the `exec`, would break one of the two silently.
+    #[test]
+    fn a_scope_prefix_wraps_only_the_shim_invocation() {
+        // A hand-written prefix, not one from `ScopeManager`: what is under
+        // test here is the COMPOSITION (where the prefix lands in the chain),
+        // and the manager's own flag list has its own test — against the real
+        // probed binary, which is the only place that list means anything.
+        let prefix: Vec<String> = ["systemd-run", "--user", "--scope", "--collect", "--quiet"]
+            .iter()
+            .map(|s| s.to_string())
+            .chain(["--unit=farhelm-abc-0.scope".to_string(), "--".to_string()])
+            .collect();
+        let cmd = window_command(
+            "/bin/bash",
+            Path::new("/opt/farhelm"),
+            Path::new("/state/launch/abc.0.json"),
+            prefix,
+        );
+        assert_eq!(cmd[0..4], ["/bin/bash", "-l", "-i", "-c"]);
+        // Asserted through the SHELL's own parser rather than on the raw
+        // string: `shell_words` quotes `--unit=...` (its safe-character
+        // set excludes `=`), which is harmless — the shell strips the
+        // quotes — but would make a literal comparison a test of the
+        // quoting library rather than of this function's composition.
+        let parsed = shell_words::split(&cmd[4]).expect("shell-parseable");
+        assert_eq!(
+            parsed,
+            vec![
+                "exec",
+                "systemd-run",
+                "--user",
+                "--scope",
+                "--collect",
+                "--quiet",
+                "--unit=farhelm-abc-0.scope",
+                "--",
+                "/opt/farhelm",
+                "internal",
+                "launch",
+                "/state/launch/abc.0.json",
+            ]
         );
     }
 
@@ -1000,6 +1081,7 @@ mod tests {
             "/bin/zsh",
             Path::new("/opt/far helm"),
             Path::new("/state/it's/abc.json"),
+            Vec::new(),
         );
         let parsed = shell_words::split(&cmd[4]).expect("shell-parseable");
         assert_eq!(

@@ -194,6 +194,33 @@ between launches, never by mutating the test process's environment. The cgroup p
 the development host — and is explicitly SKIPPED, loudly, where one does not (CI pins the fallback); the milestone is
 not done until a documented run of the cgroup tests on a manager-equipped host is recorded.
 
+### The recorded runs (acceptance 8 and 10)
+
+Performed 2026-07-31 on the Linux development host (systemd 255, tmux 3.7b, Ubuntu-family):
+
+- **Claude Code v2.1.220, real, passed.** Launched through the real supervisor into a fresh scratch directory, accepted
+  the vendor's folder-trust dialog, submitted one prompt; the supervisor captured the conversation identity from the
+  vendor's own record and filled it into the resume template. Two stale assumptions died in this run and are now pinned
+  by the test: the readiness marker had to become `Claude Code v` (the banner's versioned form), because a fresh
+  directory shows the trust dialog INSTEAD of the banner and the dialog's own body contains the bare phrase "Claude
+  Code"; and readiness must be matched against the rendered pane, since a TUI's first paint reaches the raw stream as
+  cursor-positioned fragments.
+- **Codex 0.146.0, real, passed** — against a test-owned synthetic `CODEX_HOME` (credentials copied, working directory
+  pre-trusted in its config, a `codex`-named shim carrying the variable into the launch). This is dependency injection
+  at the test boundary through the existing `agent_home` seam; the user's real `~/.codex` is never written to and
+  nothing in the product changed.
+- **Cgroup scope tests, real, passed** on the same host: four e2e and nine unit tests, none announcing a skip, so every
+  one exercised the real transient-scope path rather than the fallback.
+
+**Recorded limitation, upstream, user-facing.** Codex 0.146.0's folder-trust modal is input-dead under tmux: verified
+with strace, the pane's carriage return arrives as a completed `read(0, "\r", 1024) = 1` inside codex and is discarded,
+and the modal advances for no input tried (CR, the numbered option, arrows, kitty-protocol encodings, with and without a
+rendering client attached). Codex's main TUI accepts input normally in the same pane, so this is codex's onboarding
+path, not farhelm's input plumbing — but the consequence for users is real: **launching codex in an untrusted directory
+from inside farhelm wedges on that dialog**, and because a human at the terminal is equally stuck, the workaround is to
+trust the directory once by running codex outside farhelm. This also means the "documented interactive run" escape hatch
+above was factually unavailable, which is why the synthetic-home mechanism was built instead of invoked.
+
 ## Order of work
 
 Each step leaves something runnable; later steps only add. Tests ride with their step.

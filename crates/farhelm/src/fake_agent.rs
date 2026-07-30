@@ -100,6 +100,11 @@ pub enum Script {
     /// The acceptance fixture for the marker-scan half of
     /// `kill_process_tree`.
     SpawnerReparent,
+    /// A daemon that is invisible to BOTH halves of `kill_process_tree` —
+    /// see `spawner_cloaked`'s docs. The acceptance fixture for the cgroup
+    /// hardening (PLAN_M3.md item 10), and the ONE process shape whose
+    /// death proves a scope kill happened rather than a sweep.
+    SpawnerCloaked,
     /// A child that ignores both SIGTERM and SIGHUP (so it keeps running,
     /// and keeps forking, straight through `kill_process_tree`'s grace
     /// period rather than dying to the very first signal OR to the
@@ -195,6 +200,7 @@ pub fn run(script: Script, record_home: Option<std::path::PathBuf>) -> anyhow::R
             "spawner-stubborn",
         ),
         Script::SpawnerReparent => spawner_reparent(),
+        Script::SpawnerCloaked => spawner_cloaked(),
         Script::SpawnerForkStorm => spawn_and_echo(
             // Self-expiring: the outer loop runs at most 2400 iterations
             // (~120s at the 0.05s step) rather than forever, and each
@@ -1085,6 +1091,94 @@ fn spawner_reparent() -> anyhow::Result<()> {
         .context("spawning the reparenting daemon's launcher")?
         .wait()
         .context("waiting for the launcher to finish backgrounding the daemon")?;
+
+    writeln!(out, "SELF-PID:{self_pid}\r")?;
+    writeln!(out, "FAKE-AGENT READY\r")?;
+    write!(out, "> ")?;
+    out.flush()?;
+
+    let stdin = std::io::stdin();
+    for line in stdin.lock().lines() {
+        let line = line?;
+        let line = line.replace("\x1b[200~", "").replace("\x1b[201~", "");
+        let trimmed = line.trim();
+        if trimmed == "quit" {
+            writeln!(out, "bye\r")?;
+            out.flush()?;
+            return Ok(());
+        }
+        writeln!(out, "echo:\x1b[36m{trimmed}\x1b[0m\r")?;
+        write!(out, "> ")?;
+        out.flush()?;
+    }
+    Ok(())
+}
+
+/// Spawn a daemon that neither half of `kill_process_tree` can find, and
+/// print a ready marker; its pid goes to `cloaked.pid` in the working
+/// directory, since nothing left alive is related to it closely enough to
+/// report it. The recorded pid is the daemon ITSELF, not a shell wrapping
+/// it — see the `exec` below for why that distinction decides whether this
+/// fixture proves anything at all.
+///
+/// This is the acceptance fixture for the cgroup hardening (PLAN_M3.md
+/// item 10), and it is deliberately the exact residual
+/// lore/2026-07-27-m2-process-tree-stop.md records as the sweep's one
+/// accepted blind spot — BOTH cloaking steps are load-bearing and neither
+/// alone would do:
+///
+/// - `(setsid ... &)` double-forks, so the daemon has reparented to init
+///   before anything could walk down to it: the PPID closure never reaches
+///   it. `spawner-reparent` already covers this half on its own.
+/// - `env -u FARHELM_SESSION_ID` strips the marker BEFORE the daemon
+///   starts, so the `/proc/*/environ` scan cannot see it either — and,
+///   unlike `spawner-reparent`'s unmarked grandchild, this process has no
+///   marked ancestor left to be found through, because its parent shell
+///   exits immediately.
+///
+/// The consequence is what makes it useful: on a host with no systemd user
+/// manager this daemon SURVIVES a stop (which is why no test asserts
+/// otherwise there), and on a host with one it dies — so its death is
+/// positive evidence that the scope kill ran and reached what only a
+/// cgroup can reach, not merely that something killed something.
+///
+/// Self-expiring at 120s for the same reason every other spawner fixture
+/// is (`SpawnerForkStorm`): a test that fails before calling stop must not
+/// leak an immortal process, least of all one designed to be unfindable.
+fn spawner_cloaked() -> anyhow::Result<()> {
+    let mut out = std::io::stdout().lock();
+    write!(out, "\x1b[?2004h")?;
+    writeln!(
+        out,
+        "\x1b[1;32mfake-agent\x1b[0m starting (script=spawner-cloaked)\r"
+    )?;
+
+    let self_pid = std::process::id();
+    // Waited on for the same reason `spawner_reparent` waits: this
+    // launcher subshell exits as soon as it has backgrounded the daemon,
+    // so its exit is a real synchronization point proving the daemon was
+    // at least started, without depending on the daemon itself.
+    // `exec sleep` after the write, not a plain `sleep`, and this is the
+    // difference between a fixture that works and one that quietly lies:
+    // `$$` is the SHELL's pid, so without the `exec` the recorded pid would
+    // name a shell whose `sleep` child is a separate process — a test
+    // killing the recorded pid would leave the real survivor running, and a
+    // test asserting the recorded pid died would pass while the thing that
+    // actually had to die lived on. `exec` collapses the two into one
+    // process, so the pid in the file IS the process under test.
+    std::process::Command::new("sh")
+        .arg("-c")
+        .arg(
+            "(setsid env -u FARHELM_SESSION_ID sh -c \
+             'echo $$ > cloaked.pid; exec sleep 120' &)",
+        )
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+        .context("spawning the cloaked daemon's launcher")?
+        .wait()
+        .context("waiting for the launcher to finish backgrounding the cloaked daemon")?;
 
     writeln!(out, "SELF-PID:{self_pid}\r")?;
     writeln!(out, "FAKE-AGENT READY\r")?;

@@ -73,7 +73,12 @@ jobs:
       # fail here rather than exercising the substrate they exist to pin.
       - name: Install tmux
         run: sudo apt-get update && sudo apt-get install -y tmux
-      - run: cargo test
+      # `--show-output` is load-bearing, not verbosity: the tests that can
+      # only run where a systemd user manager exists announce their own skip
+      # on this runner (which has none), and libtest swallows a passing
+      # test's output without it — so the cgroup coverage would silently
+      # read as "ran and passed" instead of "skipped, here is why".
+      - run: cargo test -- --show-output
 
   # The desktop renderer is compiled by no other job: clippy/test build
   # with no renderer feature and e2e builds only the web one, so without

@@ -888,9 +888,9 @@ async fn serve_term(
     // and every frame queued for it for exactly as long as the wedge
     // lasts. That is the leak the stall detach exists to end, so the
     // detach has to be able to end this handler by itself.
-    let result = tokio::select! {
-        result = &mut inbound => result,
-        _ = &mut outbound => Ok(()),
+    let (result, outbound_finished) = tokio::select! {
+        result = &mut inbound => (result, false),
+        _ = &mut outbound => (Ok(()), true),
     };
 
     // Detaching is what ends the outbound task in the ORDINARY case (the
@@ -900,14 +900,43 @@ async fn serve_term(
     // the task is abandoned, because by then it can only be blocked on
     // the same unreadable socket the detach was about.
     state.client.detach(channel).await;
-    if tokio::time::timeout(WS_TEARDOWN_GRACE, &mut outbound)
-        .await
-        .is_err()
-    {
-        outbound.abort();
-    }
-    let _ = outbound.await;
+    settle_outbound(outbound, outbound_finished, WS_TEARDOWN_GRACE).await;
     result
+}
+
+/// Let a terminal socket's outbound drain finish, aborting it past
+/// `grace` — and never polling its `JoinHandle` more than once past
+/// completion.
+///
+/// That last clause is the entire reason this is a function rather than
+/// three lines at the call site. `tokio::JoinHandle`'s documented contract
+/// is that polling it after it has already returned `Ready` panics — it is
+/// not a fused future — and the teardown it belongs to had two independent
+/// ways to do exactly that: the `select!` above can be what drives the
+/// handle to completion (the supervisor ended the attachment first), and so
+/// can the timeout below (the ordinary case — the browser navigated away,
+/// the drain sent its detach notice and stopped). Either one left the old
+/// `timeout(...); handle.await` pair polling a spent handle, so a plain page
+/// navigation printed "JoinHandle polled after completion" into the helm's
+/// log on the way out.
+///
+/// `already_finished` is the caller's report of the first case; the second
+/// is handled by only awaiting after an `abort`, which is the one path where
+/// the handle is known to still be outstanding.
+async fn settle_outbound(
+    mut outbound: tokio::task::JoinHandle<()>,
+    already_finished: bool,
+    grace: std::time::Duration,
+) {
+    if already_finished {
+        return;
+    }
+    if tokio::time::timeout(grace, &mut outbound).await.is_err() {
+        outbound.abort();
+        // Safe to await: the timeout expired, so nothing has taken this
+        // handle's output yet, and the abort only makes it resolve sooner.
+        let _ = outbound.await;
+    }
 }
 
 #[cfg(test)]
@@ -919,6 +948,51 @@ mod tests {
     use std::sync::Arc;
     use std::time::Duration;
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+    /// Every exit shape of a terminal socket's teardown must leave its
+    /// outbound drain settled WITHOUT ever polling a spent `JoinHandle`.
+    ///
+    /// This is a regression test for a live bug, not a test of tokio: the
+    /// old teardown polled the handle in the `select!` and then again in
+    /// the timeout and again in a trailing `await`, so an ordinary page
+    /// navigation — the drain finishing inside the grace period — panicked
+    /// the connection task with "JoinHandle polled after completion". A
+    /// panic there is invisible from the browser side (the socket is
+    /// already closing either way), which is exactly why it survived until
+    /// someone read the webserver log, and why the property is pinned here
+    /// at the seam instead of end to end.
+    ///
+    /// All three shapes run, because each reaches the handle differently:
+    /// already-driven-to-completion by the caller, completing inside the
+    /// grace, and never completing at all (the wedged browser the grace
+    /// exists for).
+    #[tokio::test]
+    async fn outbound_teardown_never_polls_a_finished_join_handle() {
+        // Driven to completion by the caller, exactly as the `select!`
+        // arm does before reporting `already_finished`.
+        let mut handle = tokio::spawn(async {});
+        (&mut handle).await.expect("the task cannot panic");
+        super::settle_outbound(handle, true, Duration::from_secs(5)).await;
+
+        // Finishes on its own inside the grace: the ordinary navigation
+        // case, and the one the old code panicked on.
+        let handle = tokio::spawn(async {
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        });
+        super::settle_outbound(handle, false, Duration::from_secs(5)).await;
+
+        // Never finishes: aborted past the grace, which must also not
+        // leave this call hanging.
+        let handle = tokio::spawn(async {
+            std::future::pending::<()>().await;
+        });
+        let start = tokio::time::Instant::now();
+        super::settle_outbound(handle, false, Duration::from_millis(50)).await;
+        assert!(
+            start.elapsed() < Duration::from_secs(2),
+            "a wedged drain must be abandoned at the grace, not waited on"
+        );
+    }
 
     /// Serve the helm's real router on a loopback port, returning its
     /// address.

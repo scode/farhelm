@@ -20,7 +20,10 @@
 //! snapshot and conversation-identity capture behind the `AgentKind` seam
 //! (`agent_kind` module, PLAN_M3.md items 7 and 8): which agent a session
 //! runs, how a resume would be invoked, and — read purely by observing the
-//! agents' own on-disk records — which conversation it belongs to.
+//! agents' own on-disk records — which conversation it belongs to. The
+//! `scope` module adds M3's last piece: where a systemd user manager
+//! exists, each launch also gets its own cgroup, which stop kills BEFORE
+//! (never instead of) the portable sweep.
 //!
 //! Unix-only, unconditionally: the doorway is a unix socket and the
 //! substrate is tmux, so unix APIs are used without cfg gates — a
@@ -29,6 +32,7 @@
 pub mod agent_kind;
 pub mod files;
 pub mod launch;
+pub mod scope;
 pub mod service;
 pub mod store;
 pub mod tmux;

@@ -264,6 +264,15 @@ static SLOTS: tokio::sync::Semaphore = tokio::sync::Semaphore::const_new(4);
 /// server — via `harness()` or by hand — must hold one of these, ordered
 /// BEFORE the state `TempDir` in its struct so the server dies before
 /// the directory holding its socket disappears.
+///
+/// That ordering rule extends to DESTRUCTURING a [`Harness`]: the fields
+/// become plain locals dropped in reverse pattern order, so a pattern
+/// naming the guard before `state` silently inverts the rule and leaks the
+/// server (measured: three per full run, all from that one shape). The
+/// guard is deliberately NOT folded into the tempdir type that would make
+/// this unconstructible — one test drops the guard mid-run, on purpose, to
+/// simulate the tmux server dying across a reboot while keeping the state
+/// directory intact.
 struct TmuxServerGuard(std::path::PathBuf);
 
 impl Drop for TmuxServerGuard {
@@ -4815,6 +4824,497 @@ async fn stop_kills_an_unmarked_child_of_a_reparented_daemon_via_closure_seeding
     wait_until_pid_gone(unmarked_child_pid, 15).await;
 }
 
+/// Whether the cgroup path can be exercised here — and, when it cannot,
+/// say so LOUDLY before the caller returns.
+///
+/// One helper rather than a predicate plus a separate announce call,
+/// because the two must never come apart: a test that checked availability
+/// and forgot to announce would look like a pass while proving nothing,
+/// which is the exact failure the loud skip exists to prevent.
+///
+/// Asked through the production probe rather than a hand-rolled
+/// `which systemd-run`, so this answers the same question the supervisor
+/// answers, by the same experiment. It is a SEPARATE probe, not a shared
+/// verdict: a manager that dies between this call and the supervisor's own
+/// could still leave the two disagreeing. That residual is the same one the
+/// product has (`scope::ScopeManager`'s cached verdict), and its worst case
+/// here is a test that runs the fallback while announcing the scope path —
+/// which shows up as the test's own assertions failing, not as a false pass.
+///
+/// `#[ignore]` would be the obvious alternative and is the wrong one
+/// (PLAN_M3.md item 10 says so explicitly): an ignored test is ignored
+/// everywhere, including on the development hosts where the scope path is
+/// the whole point. The message reaches CI's transcript because the test
+/// step runs with `--show-output` (see `.github/workflows/ci.yml`).
+async fn cgroup_path_available(test: &str) -> bool {
+    if farhelm_supervisor::scope::ScopeManager::systemd()
+        .available()
+        .await
+    {
+        return true;
+    }
+    eprintln!(
+        "SKIPPED {test}: this host has no usable systemd user manager, so the cgroup path \
+         (PLAN_M3.md item 10) cannot be exercised here; the fallback path is what runs and \
+         is proved by the rest of this suite"
+    );
+    false
+}
+
+/// SIGKILLs a pid on drop — failure-safe cleanup for the one fixture
+/// `MarkerCleanupGuard` cannot reach.
+///
+/// The cloaked daemon (`Script::SpawnerCloaked`) carries no marker by
+/// construction, so the marker sweep this file's other guard performs
+/// would never find it; and on a host without a user manager it is
+/// expected to SURVIVE the stop under test. Its own 120s self-expiry is
+/// the backstop under this, not a substitute for it.
+struct PidKillGuard {
+    pid: u32,
+    /// The pid's `/proc` start time when this guard was armed.
+    ///
+    /// Validated again before signaling, exactly as the production sweep
+    /// does (`signal_validated` in service.rs). Not paranoia here: this
+    /// guard's whole purpose is to clean up a pid the test EXPECTS to be
+    /// killed by the code under test, so by the time `Drop` runs the number
+    /// is usually free — and a test host busy enough to run this suite is
+    /// exactly a host recycling pids. SIGKILLing an unrelated process
+    /// because its number came up is not an acceptable cost of tidiness.
+    starttime: Option<u64>,
+}
+
+impl PidKillGuard {
+    fn arm(pid: u32) -> PidKillGuard {
+        PidKillGuard {
+            pid,
+            starttime: proc_starttime(pid),
+        }
+    }
+}
+
+impl Drop for PidKillGuard {
+    fn drop(&mut self) {
+        if self.starttime.is_none() || proc_starttime(self.pid) != self.starttime {
+            return;
+        }
+        // SAFETY: `libc::kill` validates the pid itself; one that is already
+        // gone yields an ignorable errno.
+        unsafe {
+            libc::kill(self.pid as libc::pid_t, libc::SIGKILL);
+        }
+    }
+}
+
+/// A pid's `/proc` start time (field 22 of `stat`), or `None` if it cannot
+/// be read.
+///
+/// The identity half of a `(pid, starttime)` pair: pids repeat, this does
+/// not. Parsed from after the LAST `)` because `comm` can contain both
+/// spaces and parentheses — the same rule the supervisor's own `parse_stat`
+/// follows, restated here rather than shared because a test reaching into
+/// private production internals to check production would prove less.
+fn proc_starttime(pid: u32) -> Option<u64> {
+    let raw = std::fs::read_to_string(format!("/proc/{pid}/stat")).ok()?;
+    let tail = &raw[raw.rfind(')')? + 1..];
+    tail.split_whitespace().nth(19)?.parse().ok()
+}
+
+/// A marked process spawned OUTSIDE the session's cgroup, killed and
+/// reaped on drop.
+///
+/// The instrument that makes "the backstop sweep still ran" observable at
+/// all. Both of stop's mechanisms leave the same end state — nothing
+/// running — so the only way to tell them apart is a process exactly one
+/// of them can reach: this one is findable ONLY by the marker scan (it is
+/// in no scope, and is a child of the test process rather than of the
+/// pane), while the cloaked daemon is killable ONLY by the cgroup. A stop
+/// that ends both provably ran both.
+///
+/// Owns the `Child` rather than handing back a bare pid so the zombie is
+/// reaped: this IS a child of the test process, and the sweep under test
+/// only kills it — somebody still has to `wait()`.
+struct MarkedDecoy(std::process::Child);
+
+impl MarkedDecoy {
+    /// `Command::env` sets the CHILD's environment, never this process's,
+    /// which is the repo rule this file lives under. `sleep 120` bounds the
+    /// leak if the test dies before its own cleanup runs.
+    fn spawn(session_id: &str) -> MarkedDecoy {
+        MarkedDecoy(
+            std::process::Command::new("sh")
+                .arg("-c")
+                .arg("sleep 120")
+                .env("FARHELM_SESSION_ID", session_id)
+                .stdin(std::process::Stdio::null())
+                .stdout(std::process::Stdio::null())
+                .stderr(std::process::Stdio::null())
+                .spawn()
+                .expect("spawning the marked decoy"),
+        )
+    }
+
+    fn pid(&self) -> u32 {
+        self.0.id()
+    }
+}
+
+impl Drop for MarkedDecoy {
+    fn drop(&mut self) {
+        let _ = self.0.kill();
+        let _ = self.0.wait();
+    }
+}
+
+/// The headline cgroup acceptance test (PLAN_M3.md item 10, acceptance
+/// 10): on a host with a systemd user manager, stop must kill through the
+/// launch's own scope AND still run the backstop sweep afterwards.
+///
+/// Both halves are asserted through processes only ONE mechanism can
+/// reach, because the end state is otherwise identical:
+///
+/// - the cloaked daemon (double-forked to init, marker stripped) is
+///   invisible to both halves of `kill_process_tree`, so its death can
+///   only have come from the cgroup — this is the residual
+///   lore/2026-07-27-m2-process-tree-stop.md accepted and this milestone
+///   closes;
+/// - the marked decoy is outside the scope entirely, so its death can only
+///   have come from the marker sweep — which is SPEC_impl.md's
+///   belt-and-suspenders rule made observable.
+///
+/// The recorded selection is checked too: a run where the manager was
+/// present but the launch fell back would kill the decoy and leave the
+/// daemon, and reading the column is what turns that into a clear failure
+/// rather than a puzzling one.
+#[tokio::test]
+async fn a_scope_launched_stop_kills_through_the_cgroup_and_still_runs_the_sweep() {
+    if !cgroup_path_available(
+        "a_scope_launched_stop_kills_through_the_cgroup_and_still_runs_the_sweep",
+    )
+    .await
+    {
+        return;
+    }
+    let h = harness().await;
+    let work = tempfile::tempdir().unwrap();
+    let session = h
+        .client
+        .create_session(
+            &work.path().to_string_lossy(),
+            &agent_cmd("internal fake-agent --script spawner-cloaked"),
+            None,
+            80,
+            24,
+        )
+        .await
+        .expect("create");
+    let _cleanup = MarkerCleanupGuard::new(session.id.clone());
+
+    let (_chan, mut rx) = h.client.attach(&session.id, 80, 24).await.expect("attach");
+    let mut seen = Vec::new();
+    wait_for(&mut rx, &mut seen, "FAKE-AGENT READY", 20).await;
+    let self_pid = extract_pid(&seen, "SELF-PID:");
+    let cloaked_pid = wait_for_pid_file(&work.path().join("cloaked.pid"), 10).await;
+    let _cloaked_cleanup = PidKillGuard::arm(cloaked_pid);
+    assert!(
+        !marked_pids(&session.id).contains(&cloaked_pid),
+        "test setup: the cloaked daemon must NOT carry the marker — the whole point is that \
+         only a cgroup can find it"
+    );
+
+    // The tree-shape audit, asserted rather than merely reasoned about:
+    // `systemd-run --user --scope` must `exec` in place, so the pane's
+    // process IS the agent, exactly as it is without the wrapper. Anything
+    // that forked instead would leave the pane pointing at an intermediary
+    // — and `pane_process` liveness, `pane_dead_status` exit codes, and the
+    // sweep's PPID closure all read that pid.
+    let pane_pid_out = tmux_query(
+        &h.state.path().join("tmux.sock"),
+        &[
+            "display-message",
+            "-p",
+            "-t",
+            &format!("fh-{}", session.id),
+            "#{pane_pid}",
+        ],
+    )
+    .await;
+    assert_eq!(
+        String::from_utf8_lossy(&pane_pid_out.stdout).trim(),
+        self_pid.to_string(),
+        "the scope wrapper must exec in place: the pane's process must still be the agent \
+         itself, with nothing spliced in between"
+    );
+
+    let decoy = MarkedDecoy::spawn(&session.id);
+    let decoy_pid = decoy.pid();
+
+    assert_eq!(
+        launch_scope_of(&h, &session.id).await,
+        Some(format!("farhelm-{}-0.scope", session.id)),
+        "a launch on a manager-equipped host must record its generation-scoped unit"
+    );
+
+    h.client.stop_session(&session.id).await.expect("stop");
+
+    wait_until_pid_gone(self_pid, 15).await;
+    wait_until_pid_gone(cloaked_pid, 15).await;
+    wait_until_pid_gone(decoy_pid, 15).await;
+}
+
+/// The recorded selection must survive a supervisor restart, and the
+/// RESTARTED supervisor must still be able to kill through the scope
+/// (PLAN_M3.md item 10's reload interplay, acceptance 10).
+///
+/// This is the case the durable column exists for: the restarted process
+/// never ran the launch, never saw the probe that chose the scope, and
+/// re-derives the unit name from the row's id and generation. If the
+/// column were dropped — or the name derived from anything the restart
+/// changes — the cloaked daemon would survive, since nothing else in the
+/// system can reach it.
+#[tokio::test]
+async fn a_recorded_scope_survives_a_supervisor_restart_and_still_kills() {
+    if !cgroup_path_available("a_recorded_scope_survives_a_supervisor_restart_and_still_kills")
+        .await
+    {
+        return;
+    }
+    let h = harness().await;
+    let work = tempfile::tempdir().unwrap();
+    let session = h
+        .client
+        .create_session(
+            &work.path().to_string_lossy(),
+            &agent_cmd("internal fake-agent --script spawner-cloaked"),
+            None,
+            80,
+            24,
+        )
+        .await
+        .expect("create");
+    let _cleanup = MarkerCleanupGuard::new(session.id.clone());
+
+    let (_chan, mut rx) = h.client.attach(&session.id, 80, 24).await.expect("attach");
+    let mut seen = Vec::new();
+    wait_for(&mut rx, &mut seen, "FAKE-AGENT READY", 20).await;
+    let cloaked_pid = wait_for_pid_file(&work.path().join("cloaked.pid"), 10).await;
+    let _cloaked_cleanup = PidKillGuard::arm(cloaked_pid);
+    let scope_before = launch_scope_of(&h, &session.id).await;
+    assert!(
+        scope_before.is_some(),
+        "test setup: this launch must be scoped"
+    );
+
+    // The predecessor is RELEASED before its replacement is built, and the
+    // replacement's ownership is asserted rather than assumed. An
+    // overlapping successor starts read-only (`Supervisor::owns_state_dir`)
+    // and reconciles nothing, so a test that skipped this would exercise a
+    // path production never takes — and, worse here, would prove nothing
+    // about the restart at all: a read-only supervisor's stop is not the
+    // stop under test. `_tmux` is bound AFTER `state` on purpose; see
+    // `TmuxServerGuard`'s docs.
+    let Harness {
+        client,
+        sup,
+        state,
+        _tmux,
+        _slot,
+    } = h;
+    drop(client);
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
+    while Arc::strong_count(&sup) > 1 {
+        assert!(tokio::time::Instant::now() < deadline, "connection drain");
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    drop(sup);
+
+    let restarted = Supervisor::new_with_exe(state.path(), farhelm_bin().into())
+        .await
+        .expect("second supervisor construction on the same state dir");
+    assert!(
+        restarted.owns_state_dir(),
+        "the predecessor must be gone, or this proves nothing about a restart"
+    );
+    let client2 = connect_client(&restarted).await;
+    assert_eq!(
+        stored_launch_scope(state.path(), &session.id).await,
+        scope_before,
+        "the recorded selection must be unchanged by a supervisor restart"
+    );
+
+    client2
+        .stop_session(&session.id)
+        .await
+        .expect("stop through the restarted supervisor");
+    wait_until_pid_gone(cloaked_pid, 15).await;
+}
+
+/// A launch whose cgroup WRAPPER failed must classify as error, not as a
+/// plain exit — PLAN_M3.md item 10's one new failure mode, and the one gap
+/// the wrapper opened in item 3's sentinel contract.
+///
+/// The gap: every other launch failure is reported by farhelm's own exec
+/// shim, which writes a sentinel before dying. `systemd-run` runs BEFORE the
+/// shim, so a wrapper that fails (the user manager died since the probe, the
+/// unit was refused) exits the pane with no sentinel at all — leaving a
+/// session that reports "your agent ran and finished" about an agent that
+/// never started, and a launch spec holding its full command line on disk
+/// with nothing left to consume it.
+///
+/// The shape is PLANTED rather than provoked, exactly as
+/// `a_planted_malformed_spec_sentinel_classifies_error_with_its_detail`
+/// plants its sentinel: making a real `systemd-run` fail from inside a test
+/// would mean sabotaging the host's user manager. What is planted is only
+/// the evidence — an unconsumed spec on a dead pane — while the scope
+/// selection under it is the real one this host's real probe made.
+#[tokio::test]
+async fn a_failed_scope_wrapper_classifies_as_error_rather_than_a_plain_exit() {
+    if !cgroup_path_available("a_failed_scope_wrapper_classifies_as_error_rather_than_a_plain_exit")
+        .await
+    {
+        return;
+    }
+    let h = harness().await;
+    let (session, _work) = basic_session(&h).await;
+    assert!(
+        launch_scope_of(&h, &session.id).await.is_some(),
+        "test setup: this launch must have selected a scope"
+    );
+
+    // Kill the agent outright so the pane is dead with no sentinel — the
+    // state a failed wrapper leaves, reached the only way a test can.
+    let sock = h.state.path().join("tmux.sock");
+    let pid_out = tmux_query(
+        &sock,
+        &[
+            "display-message",
+            "-p",
+            "-t",
+            &format!("fh-{}", session.id),
+            "#{pane_pid}",
+        ],
+    )
+    .await;
+    let pane_pid: u32 = String::from_utf8_lossy(&pid_out.stdout)
+        .trim()
+        .parse()
+        .expect("a live pane must report a pid");
+    // SAFETY: a real, currently-live pid this test just read from tmux.
+    unsafe {
+        libc::kill(pane_pid as libc::pid_t, libc::SIGKILL);
+    }
+    wait_until_pid_gone(pane_pid, 10).await;
+
+    // The shim consumed and unlinked its own spec on the way past; putting
+    // one back is what stands in for a wrapper that died before the shim
+    // ever ran.
+    let spec = spec_path_for_launch(h.state.path(), &session.id, 0);
+    std::fs::write(&spec, b"{}").expect("plant an unconsumed launch spec");
+
+    let found = wait_for_non_alive_status(&h.client, &session.id, 15).await;
+    let SessionStatus::Error { detail } = &found.status else {
+        panic!("a launch that never reached the shim must classify as error, got {found:?}");
+    };
+    assert!(
+        detail.contains("never reached farhelm's exec shim"),
+        "the error must say the agent never started, got {detail:?}"
+    );
+    assert!(
+        !spec.exists(),
+        "classifying the failure must also clean up the credential-bearing spec the wrapper \
+         left behind"
+    );
+}
+
+/// The fallback proof, run on EVERY host including the ones that have a
+/// manager: a supervisor with no usable user manager records no scope and
+/// stops exactly as M2 did (PLAN_M3.md item 10, acceptance 10's second
+/// half).
+///
+/// CI proves this incidentally by having no manager at all; this test
+/// makes it provable on a developer machine too, through the injected
+/// `ScopeManager::disabled()`. Without it, the fallback would be exercised
+/// only where nobody is looking — and the assertion that matters most
+/// (`launch_scope` is NULL, so stop is sweep-only) would never run beside
+/// the scope path it must stay distinguishable from.
+///
+/// The cloaked daemon is deliberately NOT part of this test: with no
+/// cgroup, nothing can reach it, and asserting its survival would pin a
+/// known gap as if it were a feature.
+#[tokio::test]
+async fn without_a_user_manager_a_launch_records_the_fallback_and_stops_like_m2() {
+    let h = harness_with_seams(
+        SupervisorTimeouts::default(),
+        SupervisorSeams {
+            scopes: Arc::new(farhelm_supervisor::scope::ScopeManager::disabled()),
+            ..SupervisorSeams::default()
+        },
+    )
+    .await;
+    let work = tempfile::tempdir().unwrap();
+    let session = h
+        .client
+        .create_session(
+            &work.path().to_string_lossy(),
+            &agent_cmd("internal fake-agent --script spawner-reparent"),
+            None,
+            80,
+            24,
+        )
+        .await
+        .expect("create");
+    let _cleanup = MarkerCleanupGuard::new(session.id.clone());
+
+    let (_chan, mut rx) = h.client.attach(&session.id, 80, 24).await.expect("attach");
+    let mut seen = Vec::new();
+    wait_for(&mut rx, &mut seen, "FAKE-AGENT READY", 20).await;
+    let self_pid = extract_pid(&seen, "SELF-PID:");
+    let daemon_pid = wait_for_pid_file(&work.path().join("reparented.pid"), 10).await;
+
+    assert_eq!(
+        launch_scope_of(&h, &session.id).await,
+        None,
+        "a launch with no usable user manager must durably record the fallback"
+    );
+
+    h.client.stop_session(&session.id).await.expect("stop");
+
+    // Exactly M2's guarantee, unchanged: the pane's own process and the
+    // reparented marked daemon both die to the sweep alone.
+    wait_until_pid_gone(self_pid, 15).await;
+    wait_until_pid_gone(daemon_pid, 15).await;
+}
+
+/// Read one session's recorded cgroup SELECTION straight out of SQLite,
+/// together with the unit name that selection derives.
+///
+/// Through the store rather than through any wire reply on purpose: the
+/// selection is deliberately NOT wire vocabulary (PLAN_M3.md item 1 froze
+/// M3's protocol before item 10 landed), so the durable column is the only
+/// place it exists — and the durability is the property the tests are
+/// actually about. The NAME is derived here exactly as the supervisor
+/// derives it, never read back, because the database deliberately does not
+/// store one (`store::StoredSession::launch_scoped`).
+async fn launch_scope_of(h: &Harness, session_id: &str) -> Option<String> {
+    stored_launch_scope(h.state.path(), session_id).await
+}
+
+/// [`launch_scope_of`] against a state directory rather than a live
+/// harness, for the tests that dismantle their harness to release the
+/// state dir before asking.
+async fn stored_launch_scope(state_dir: &std::path::Path, session_id: &str) -> Option<String> {
+    let store = SessionStore::open(&state_dir.join("supervisor.db"), false)
+        .await
+        .expect("opening the supervisor database read-only");
+    let row = store
+        .session(session_id)
+        .await
+        .expect("reading the session row")
+        .expect("the session must still have a row");
+    row.launch_scoped
+        .then(|| farhelm_supervisor::scope::unit_name(session_id, row.generation))
+        .flatten()
+}
+
 /// Delete must remove a session's launch artifacts, not just the row and
 /// the terminal — `launch/<id>.json` can hold the agent's full command
 /// line (credentials included, per launch.rs's own docs), and the shim
@@ -8421,6 +8921,7 @@ async fn capture_harness_with_fault(
             agent_home: Some(home.path().to_path_buf()),
             capture_window: test_capture_bounds(),
             capture_store_fault: fault,
+            scopes: Arc::new(farhelm_supervisor::scope::ScopeManager::disabled()),
             ..SupervisorSeams::default()
         },
     )
@@ -9101,11 +9602,17 @@ async fn a_capture_missed_while_the_supervisor_was_down_lands_on_reload() {
     // overlapping successor starts read-only and reconciles nothing, so a
     // test that skipped this would exercise a path production never takes
     // (see `Supervisor::owns_state_dir`).
+    // `_tmux` LAST, and that is not cosmetic: destructuring rebinds these
+    // fields as ordinary locals, which drop in reverse declaration order —
+    // so listing the guard before `state` would delete the state tempdir
+    // (and with it the socket the guard kills through) before the guard
+    // ever ran, leaking the tmux server. That leak was real and measured;
+    // see `TmuxServerGuard`'s docs.
     let Harness {
         client,
         sup,
-        _tmux,
         state,
+        _tmux,
         _slot,
     } = h;
     drop(client);
@@ -9169,11 +9676,17 @@ async fn an_ambiguity_survives_a_restart_even_when_its_evidence_does_not() {
     settle_past_horizon(&h).await;
     assert!(snapshot_of(&h, &first.id).await.capture_ambiguous);
 
+    // `_tmux` LAST, and that is not cosmetic: destructuring rebinds these
+    // fields as ordinary locals, which drop in reverse declaration order —
+    // so listing the guard before `state` would delete the state tempdir
+    // (and with it the socket the guard kills through) before the guard
+    // ever ran, leaking the tmux server. That leak was real and measured;
+    // see `TmuxServerGuard`'s docs.
     let Harness {
         client,
         sup,
-        _tmux,
         state,
+        _tmux,
         _slot,
     } = h;
     drop(client);
@@ -9335,11 +9848,17 @@ async fn capture_considers_sessions_beyond_the_list_reply_cap() {
     let (_chan, _rx, _seen, _id) = provoke_record(&h, &session).await;
     let at = wait_for_first_input(&h, &session.id, 20).await;
 
+    // `_tmux` LAST, and that is not cosmetic: destructuring rebinds these
+    // fields as ordinary locals, which drop in reverse declaration order —
+    // so listing the guard before `state` would delete the state tempdir
+    // (and with it the socket the guard kills through) before the guard
+    // ever ran, leaking the tmux server. That leak was real and measured;
+    // see `TmuxServerGuard`'s docs.
     let Harness {
         client,
         sup,
-        _tmux,
         state,
+        _tmux,
         _slot,
     } = h;
     drop(client);
@@ -9388,6 +9907,7 @@ async fn capture_considers_sessions_beyond_the_list_reply_cap() {
                     capture_ambiguous: false,
                     first_input_at: rival.then_some(at),
                     generation: 0,
+                    launch_scoped: false,
                 },
                 None,
             )
@@ -9697,17 +10217,31 @@ async fn a_session_resuming_an_old_conversation_is_not_captured() {
 /// The prompt is chosen to be answerable without tools and cheap to serve;
 /// nothing asserts anything about the ANSWER, only that submitting one
 /// caused a record this build can correlate.
-async fn real_agent_captures_its_conversation(agent: &str, ready_marker: &str) {
-    let home = std::env::var_os("HOME").expect("a real-agent run needs a real HOME");
+///
+/// Both agents were run for real on 2026-07-31 and both passed; the run
+/// records, and codex's upstream trust-dialog limitation, are in
+/// PLAN_M3.md's testing-decisions section.
+async fn real_agent_captures_its_conversation(
+    ready_marker: &str,
+    trust_dialog_markers: &[&str],
+    // Given the scratch working directory, produce the home the supervisor
+    // should observe, the agent command to launch, and any tempdir that must
+    // outlive the run. Claude observes the user's real home directly; codex
+    // needs a synthesized one (see its test for why), and this seam is what
+    // lets one helper serve both without either knowing the other's needs.
+    prepare: impl FnOnce(&std::path::Path) -> (std::path::PathBuf, String, Option<tempfile::TempDir>),
+) {
     let slot = SLOTS.acquire().await.expect("semaphore is never closed");
     let state = tempfile::tempdir().expect("tempdir");
     let work = tempfile::tempdir().expect("workdir");
+    let (agent_home, agent, _agent_home_guard) = prepare(work.path());
+    let agent = agent.as_str();
     let sup = Supervisor::new_with_seams(
         state.path(),
         farhelm_bin().into(),
         SupervisorTimeouts::default(),
         SupervisorSeams {
-            agent_home: Some(std::path::PathBuf::from(home)),
+            agent_home: Some(agent_home),
             ..SupervisorSeams::default()
         },
     )
@@ -9723,13 +10257,85 @@ async fn real_agent_captures_its_conversation(agent: &str, ready_marker: &str) {
 
     let (chan, mut rx) = client.attach(&session.id, 100, 30).await.expect("attach");
     let mut seen = Vec::new();
-    // Generous: a real agent's first paint includes auth, model selection,
-    // and whatever banner the vendor ships.
-    wait_for(&mut rx, &mut seen, ready_marker, 120).await;
+    // A fresh scratch directory is an UNTRUSTED workspace, and a modern
+    // agent blocks on its own folder-trust dialog before it will accept a
+    // prompt. Accepting it here is not a workaround: farhelm passes the
+    // vendor's terminal through untouched and never configures an agent
+    // (SPEC.md), so a real user meets this same dialog and presses enter.
+    // The test simulates only that human half.
+    //
+    // Two orderings are load-bearing, both learned by running this for
+    // real against Claude Code v2.1.220:
+    //
+    // 1. Dialog markers are checked BEFORE the ready marker, and a ready
+    //    marker must never be a substring of any dialog text. The first
+    //    real run matched "Claude Code" against the dialog's own body
+    //    ("Claude Code'll be able to read, edit, and execute files here"),
+    //    broke the wait, and typed the prompt into an unaccepted modal —
+    //    no conversation was ever started and capture correctly found
+    //    nothing. Hence "Claude Code v", which only the banner carries.
+    // 2. Nothing slow may sit between accepting the dialog and submitting
+    //    the prompt: that enter IS the session's first input byte, so it
+    //    anchors the capture window. The slack for a human composing
+    //    afterwards is exactly what `CAPTURE_WINDOW_AFTER` is sized for
+    //    (see its docs, which name this dialog).
+    //
+    // Matching is against the RENDERED pane, not the raw stream: a TUI's
+    // first paint arrives as cursor-positioned fragments that the raw
+    // transcript shows as bare line endings.
+    //
+    // Accepted side effect: accepting trust writes the (soon-deleted)
+    // scratch path into the user's real agent config. That is the vendor's
+    // own write, and the same class of consequence this test already
+    // embraces by observing the real HOME.
+    let sock = state.path().join("tmux.sock");
+    let tmux_name = format!("fh-{}", session.id);
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(120);
+    loop {
+        let pane = tmux_query(&sock, &["capture-pane", "-p", "-t", &tmux_name]).await;
+        let text = String::from_utf8_lossy(&pane.stdout).to_string();
+        // The deadline is checked FIRST, before either branch: a dialog
+        // that never advances no matter how often it is answered is a real
+        // failure mode (codex's does exactly that under tmux), and a
+        // dialog branch that looped straight back to the top would press
+        // enter at it forever instead of failing with the pane printed.
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "timed out waiting for {ready_marker:?}; rendered pane:\n{text}"
+        );
+        if trust_dialog_markers.iter().any(|m| text.contains(m)) {
+            client.send_input(chan, b"\r".to_vec()).await;
+            tokio::time::sleep(Duration::from_secs(2)).await;
+            continue;
+        }
+        if text.contains(ready_marker) {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(500)).await;
+    }
+    // Drain whatever the attach streamed so far; nothing below asserts on it.
+    while let Ok(TermEvent::Data(bytes)) = rx.try_recv() {
+        seen.extend_from_slice(&bytes);
+    }
+    let _ = &seen;
 
     client
-        .send_input(chan, b"Reply with the single word ok.\r".to_vec())
+        // Deliberately digit-free: a numbered modal (the trust dialogs
+        // above offer "1."/"2.") treats a stray digit as an option
+        // selection, so a prompt containing one could pick an answer
+        // rather than be typed if a dialog ever races this send.
+        .send_input(chan, b"Reply with the single word ok.".to_vec())
         .await;
+    // The submitting Enter is a SEPARATE keystroke, as a human's is. Sent
+    // in the same burst as the text, codex intermittently reads the whole
+    // thing as a paste and inserts the carriage return into the composer
+    // instead of submitting — observed live as the prompt sitting unsent
+    // on the "›" line until the poll deadline, on roughly half of runs,
+    // while claude submitted the same burst every time. Splitting it costs
+    // nothing (the capture window is anchored on the first input byte and
+    // is a minute wide) and removes the whole class of flake.
+    tokio::time::sleep(Duration::from_secs(1)).await;
+    client.send_input(chan, b"\r".to_vec()).await;
 
     // The record appears at first prompt SUBMISSION, so this poll is
     // waiting on the agent's own bookkeeping — and then on the production
@@ -9781,20 +10387,124 @@ async fn real_agent_captures_its_conversation(agent: &str, ready_marker: &str) {
 #[tokio::test]
 #[ignore = "needs real Claude Code credentials and network; run deliberately"]
 async fn real_claude_session_captures_its_conversation_identity() {
-    // No flags: the plain invocation is the one users type, and the one
-    // whose basename derivation must recognize.
-    real_agent_captures_its_conversation("claude", "Welcome").await;
+    // No flags and the user's real home: the plain invocation is the one
+    // users type, and the one basename derivation must recognize. The
+    // marker is "Claude Code v" (only the banner carries the version), not
+    // "Claude Code" — the trust dialog's own body says "Claude Code'll be
+    // able to read...", and matching that broke this test's first real run.
+    real_agent_captures_its_conversation(
+        "Claude Code v",
+        &["Accessing workspace", "Do you trust"],
+        |_work| {
+            let home = std::env::var_os("HOME").expect("a real-agent run needs a real HOME");
+            (std::path::PathBuf::from(home), "claude".to_string(), None)
+        },
+    )
+    .await;
 }
 
-/// Codex for real. Requires a working, authenticated `codex` on PATH.
-/// SPEC.md requires BOTH integrations in v1, so an unexercised codex path
-/// is a milestone blocker rather than a recordable gap — if this cannot be
-/// run headlessly on a given host, PLAN_M3.md's testing decisions allow a
-/// documented interactive run in its place, but not skipping it.
+/// Codex for real. Requires an authenticated `codex` on PATH (its
+/// `auth.json` is copied into the synthetic home below).
+///
+/// Unlike the claude test, this one runs codex against a SYNTHESIZED
+/// `CODEX_HOME` rather than the user's real one, and that is not a
+/// convenience — it is the only path that works. Codex v0.146.0's
+/// folder-trust modal is input-dead under tmux: verified with strace, the
+/// pane's `\r` reaches codex as a completed `read(0, "\r", 1024) = 1` and
+/// is discarded, and the dialog never advances for ANY input tried (CR,
+/// numeric option, arrows, kitty-protocol encodings, with and without a
+/// rendering client attached). Codex's main TUI accepts input normally in
+/// the same pane, so this is an upstream onboarding bug, not a farhelm
+/// input-path problem — and it means a human sitting at the terminal is
+/// equally stuck, so "have a person accept it" is not a fallback either.
+///
+/// The synthetic home sidesteps the modal the way codex itself intends:
+/// trust is a recorded fact in its config, so a config that already trusts
+/// the working directory means the modal never appears. Nothing here
+/// configures the AGENT on the user's behalf in production terms — the
+/// seam is `SupervisorSeams::agent_home`, which exists for exactly this,
+/// and the user's real `~/.codex` is never written to. A `codex`-named
+/// shim carries `CODEX_HOME` into the launch, which also keeps basename
+/// derivation honest and makes the filled resume argv genuinely runnable.
+///
+/// No dialog markers are passed: with trust seeded the modal must not
+/// appear, and pressing enter at a modal that ignores enter would only
+/// burn the deadline two seconds at a time. If it ever does appear, the
+/// wait fails with the rendered pane printed, which diagnoses itself.
 #[tokio::test]
 #[ignore = "needs real Codex credentials and network; run deliberately"]
 async fn real_codex_session_captures_its_conversation_identity() {
-    real_agent_captures_its_conversation("codex", "codex").await;
+    real_agent_captures_its_conversation("OpenAI Codex (v", &[], |work| {
+        let real_home = std::env::var_os("HOME").expect("a real-agent run needs a real HOME");
+        let real_auth = std::path::Path::new(&real_home).join(".codex/auth.json");
+        let auth = std::fs::read(&real_auth).unwrap_or_else(|e| {
+            panic!(
+                "this test needs an authenticated codex ({}): {e}",
+                real_auth.display()
+            )
+        });
+
+        let synth = tempfile::tempdir().expect("synthetic codex home");
+        let codex_home = synth.path().join(".codex");
+        std::fs::create_dir_all(&codex_home).expect("codex home");
+        let auth_path = codex_home.join("auth.json");
+        std::fs::write(&auth_path, auth).expect("auth.json");
+        std::fs::set_permissions(
+            &auth_path,
+            std::os::unix::fs::PermissionsExt::from_mode(0o600),
+        )
+        .expect("auth.json mode");
+        // The trust key is the exact path the session is created with.
+        std::fs::write(
+            codex_home.join("config.toml"),
+            format!(
+                "[projects.\"{}\"]\ntrust_level = \"trusted\"\n",
+                work.display()
+            ),
+        )
+        .expect("config.toml");
+
+        let real_codex = which_binary("codex").expect("codex on PATH");
+        let bin = synth.path().join("bin");
+        std::fs::create_dir_all(&bin).expect("shim dir");
+        let shim = bin.join("codex");
+        std::fs::write(
+            &shim,
+            format!(
+                "#!/bin/sh\nexec env CODEX_HOME={} {} \"$@\"\n",
+                shell_quote(&codex_home.to_string_lossy()),
+                shell_quote(&real_codex.to_string_lossy()),
+            ),
+        )
+        .expect("shim");
+        std::fs::set_permissions(
+            &shim,
+            <std::fs::Permissions as std::os::unix::fs::PermissionsExt>::from_mode(0o755),
+        )
+        .expect("shim mode");
+
+        let agent = shim.to_string_lossy().into_owned();
+        (synth.path().to_path_buf(), agent, Some(synth))
+    })
+    .await;
+}
+
+/// First `name` on `PATH` that is an executable regular file.
+fn which_binary(name: &str) -> Option<std::path::PathBuf> {
+    let path = std::env::var_os("PATH")?;
+    std::env::split_paths(&path)
+        .map(|dir| dir.join(name))
+        .find(|candidate| {
+            std::fs::metadata(candidate).is_ok_and(|m| {
+                use std::os::unix::fs::PermissionsExt;
+                m.is_file() && m.permissions().mode() & 0o111 != 0
+            })
+        })
+}
+
+/// Single-quote `s` for `/bin/sh`, closing and reopening around any quote.
+fn shell_quote(s: &str) -> String {
+    format!("'{}'", s.replace('\'', "'\\''"))
 }
 
 // ---------------------------------------------------------------------

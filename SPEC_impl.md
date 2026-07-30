@@ -276,10 +276,31 @@ by eye; raw binary data channels keep PTY throughput off the JSON path.
   descendants by walking /proc PPIDs, unioned with a scan for processes whose environment carries the session's
   `FARHELM_SESSION_ID` marker (which catches daemons that already reparented to init), then SIGTERM, a short grace,
   SIGSTOP-quiesce, re-enumerate, SIGKILL — with process start-time validation so a recycled pid is never signaled.
-  `systemd-run --user --scope` cgroup scopes remain the intended Linux hardening on top (they additionally catch a
-  descendant that scrubbed its environment via exec) and are deferred to M3 (PLAN.md); the macOS variant of the sweep
-  (no /proc there) arrives with the Mac supervisor work. See lore/2026-07-27-m2-process-tree-stop.md for the
-  alternatives as they looked when this was decided.
+  `systemd-run --user --scope` cgroup scopes layer on top as the Linux hardening (M3): where a functional systemd user
+  manager exists — probed once by actually running a trivial transient scope and then showing, killing, and confirming
+  the collection of it, not by `which`, and through absolute binary paths so a login shell's `$PATH` cannot substitute
+  what the probe approved — each launch is wrapped in its own generation-named scope (audited on systemd 255: the
+  wrapper execs in place, so the pane's process tree, exit codes, and liveness checks see exactly the unwrapped shape),
+  the per-launch SELECTION is recorded durably as a boolean while the unit name is re-derived from session id plus
+  generation at every use (a stored name would let a tampered row aim a kill at another session's unit), and stop kills
+  through the scope first — SIGTERM, the same grace the sweep gives, SIGKILL, then confirming the unit was actually
+  collected, because `systemctl kill` returning only proves delivery. The sweep ALWAYS runs afterwards as the backstop,
+  and is the whole mechanism where no user manager exists — a missing manager never degrades stop below the sweep's
+  guarantees, and neither does a broken one: the sweep's verdict is the answer, and the scope's troubles are diagnostic.
+  A wrapper that fails runs before the shim can write its exec-failure sentinel, so the supervisor classifies that shape
+  (a launch spec nothing ever consumed, on a dead pane, for a scoped launch) as **error** rather than letting it
+  masquerade as a plain exit.
+
+  **What the cgroup does and does not promise.** It targets ACCIDENTAL daemonization — the dev server, MCP server, or
+  build watcher that double-forks and execs away its environment marker, which is exactly the shape the sweep provably
+  cannot find. It does NOT contain a deliberately adversarial descendant: one that runs `systemd-run --user --scope` on
+  itself migrates into a sibling unit under the same user manager, and with its marker scrubbed is then invisible to
+  both mechanisms (reproduced, not theorized). Containing that needs a delegation boundary — a parent slice the
+  supervisor owns, with the manager refusing migrations out of it — which v1 does not build and SPEC.md does not
+  promise. Agent descendants run with the user's own privileges by design, so a descendant determined to outlive its
+  session can always arrange to; the honest claim is that stop reaps what a normal program leaves behind. The macOS
+  variant of the sweep (no /proc there) arrives with the Mac supervisor work. See
+  lore/2026-07-27-m2-process-tree-stop.md for the alternatives as they looked when this was decided.
 - Attachments land in `~/.local/state/farhelm/attachments/<session-id>/`, deleted with the session.
 - The rest of the state directory: `supervisor.sock` (the unix socket that is the supervisor's only doorway — mode 0600,
   inside a 0700 directory, because reaching it means running commands as the user), `tmux.sock` and `tmux.conf` for the
