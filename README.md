@@ -7,12 +7,13 @@ and PLAN.md for where the build currently stands.
 NOTE: This is milestone-2 software: several sessions at once, one host, argv-driven setup. Sessions survive a supervisor
 restart (persisted metadata, and a still-viewable terminal whenever the private tmux server survived too), a host reboot
 classifies previously-running sessions as interrupted rather than guessing, and a user-stopped session keeps its
-"stopped by user" qualifier durably; resuming an interrupted agent conversation is M3's remaining addition on top of
-that, not a prerequisite for restarts to work at all today. Usable for real work, minimal in everything else. Two
-caveats worth knowing before that real work: the helm's loopback API carries no authentication yet (the web token is a
-later milestone), so any local account on the helm's machine can drive your sessions — treat multi-user hosts
-accordingly; and every agent invocation (the startup one below, or one entered through the GUI's create dialog) is
-ordinary argv, visible to every local user via `ps`, so credentials do not belong in it.
+"stopped by user" qualifier durably. Restart is live too: an interrupted (or exited, or errored) session relaunches its
+agent — resuming its own Claude Code or Codex conversation where that conversation was captured, and saying plainly that
+it is launching fresh where it was not. Usable for real work, minimal in everything else. Two caveats worth knowing
+before that real work: the helm's loopback API carries no authentication yet (the web token is a later milestone), so
+any local account on the helm's machine can drive your sessions — treat multi-user hosts accordingly; and every agent
+invocation (the startup one below, or one entered through the GUI's create dialog) is ordinary argv, visible to every
+local user via `ps`, so credentials do not belong in it.
 
 ## Trying it (M2)
 
@@ -59,6 +60,13 @@ Ubuntu 24.04 ships 3.4.
 - Each row also has stop and delete. Stop kills the agent and its whole process tree; the session stays listed, its
   terminal still viewable. Delete removes the session and its stored state — with an inline confirmation first whenever
   the agent might still be alive.
+- Opening a session leads with what restarting it would do to the conversation, and the control says which: "resume
+  conversation" when this session's own agent conversation was captured, "restart (fresh launch)" when it was not. A
+  restart reuses the session's terminal when it still exists — the previous run stays above the new one in scrollback —
+  and builds a fresh one when the host rebooted out from under it. Restarting a session whose agent is still running
+  confirms first, then stops the whole process tree before relaunching; leftover daemons from a previous run are reaped
+  the same way. A working directory that has vanished (or that now resolves somewhere else) fails the restart by name
+  and leaves the session, its stop annotation included, exactly as it was.
 - Sustained heavy output (piping a huge file through the pane, say) is flow-controlled end to end rather than freezing
   the tab or silently dropping bytes. A viewer that stops consuming entirely — a wedged tab, a laptop asleep past its
   connection timeout — is detached, with a visible reason, after a bounded stall; the session keeps running unaffected,

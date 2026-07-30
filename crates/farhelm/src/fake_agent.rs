@@ -132,7 +132,39 @@ pub enum Script {
     /// Writes a Codex-shaped rollout record on first input; otherwise
     /// identical to [`Script::ClaudeRecord`].
     CodexRecord,
+    /// Echoes one rc-file-sourced environment variable
+    /// ([`RC_MARKER_VAR`]) at startup, then behaves like [`Script::Basic`].
+    ///
+    /// The fixture for SPEC.md's "the environment is evaluated at each
+    /// launch: edit your rc files and the next launch or restart sees the
+    /// change" (PLAN_M3.md acceptance 9). A test points the launch at a
+    /// private `HOME` whose rc files export that variable, rewrites them
+    /// between launches, and reads the two different values back off this
+    /// script's own output — no test-process environment is touched at any
+    /// point (see `SupervisorSeams::launch_env`).
+    EnvEcho,
 }
+
+/// The variable [`Script::EnvEcho`] reports, exported by the rc files a
+/// test writes into its private `HOME`. Named here so the fixture and its
+/// tests cannot drift apart, the same discipline the record markers below
+/// follow.
+pub const RC_MARKER_VAR: &str = "FARHELM_RC_MARKER";
+
+/// The variable that tells a record-writing script which conversation it
+/// is RESUMING, standing in for the `--resume <id>` a real agent takes on
+/// its command line.
+///
+/// It is an environment variable rather than a flag for a mundane reason
+/// with a real consequence: this binary's argument parser lives in
+/// `main.rs`, and the restart tests must be able to substitute a
+/// conversation id into an argv slot WITHOUT changing that parser. A test's
+/// resume template therefore ends in a tiny `sh -c` wrapper that moves the
+/// substituted argv element into this variable before exec'ing the fixture
+/// — which still exercises exactly what matters (item 7's `{conversation}`
+/// element is substituted as its own slot, never spliced into a string,
+/// and the value reaches the relaunched process).
+pub const RESUME_ENV_VAR: &str = "FARHELM_FAKE_AGENT_RESUME";
 
 /// Act out one script and exit. Runs synchronously on blocking stdio on
 /// purpose: this stands in for a real agent's terminal behavior, and
@@ -181,7 +213,26 @@ pub fn run(script: Script, record_home: Option<std::path::PathBuf>) -> anyhow::R
         ),
         Script::ClaudeRecord => record_agent(RecordShape::Claude, record_home),
         Script::CodexRecord => record_agent(RecordShape::Codex, record_home),
+        Script::EnvEcho => env_echo(),
     }
+}
+
+/// Report [`RC_MARKER_VAR`] as the launch's shell resolved it, then run
+/// [`basic`]'s loop.
+///
+/// The value is printed BEFORE the ready marker so a test that waits for
+/// readiness has the line in hand by then, and an absent variable prints
+/// as an explicit empty value rather than nothing at all — "the rc file
+/// was not sourced" and "the fixture never got that far" must not look
+/// alike to a test.
+fn env_echo() -> anyhow::Result<()> {
+    let value = std::env::var(RC_MARKER_VAR).unwrap_or_default();
+    {
+        let mut out = std::io::stdout().lock();
+        writeln!(out, "ENV:{RC_MARKER_VAR}={value}\r")?;
+        out.flush()?;
+    }
+    basic()
 }
 
 /// Which agent's on-disk record layout [`record_agent`] imitates.
@@ -230,13 +281,40 @@ fn record_agent(shape: RecordShape, home: Option<std::path::PathBuf>) -> anyhow:
         out,
         "\x1b[1;32mfake-agent\x1b[0m starting (script=record)\r"
     )?;
+    // The launch's own argv, echoed so a restart test can assert what was
+    // actually RUN rather than inferring it from a side effect. Joined with
+    // single spaces: no test needs to recover the original word boundaries,
+    // and every value these tests look for (a conversation id) contains no
+    // whitespace.
+    writeln!(
+        out,
+        "FAKE-AGENT ARGV:{}\r",
+        std::env::args().collect::<Vec<_>>().join(" ")
+    )?;
+
+    // The record this fixture owns. Created lazily on the first line — its
+    // absence before then IS the behavior under test — unless this launch
+    // is RESUMING one, in which case the record already exists and is
+    // adopted here, exactly as a real agent's `--resume` picks up an
+    // existing conversation rather than starting a new one.
+    let mut current: Option<(String, std::path::PathBuf)> = None;
+    if let Ok(resumed) = std::env::var(RESUME_ENV_VAR)
+        && !resumed.is_empty()
+    {
+        let path = record_path(shape, &home, &cwd, &resumed);
+        if path.exists() {
+            writeln!(out, "RECORD-RESUMED:{resumed}\r")?;
+            current = Some((resumed, path));
+        } else {
+            // Never silently start a fresh conversation instead: a test
+            // asserting a resume must fail loudly if the id it substituted
+            // named nothing, not quietly pass against a new record.
+            writeln!(out, "RECORD-RESUME-MISSING:{resumed}\r")?;
+        }
+    }
     writeln!(out, "FAKE-AGENT READY\r")?;
     write!(out, "> ")?;
     out.flush()?;
-
-    // The record this fixture owns, created lazily on the first line: its
-    // absence before then IS the behavior under test.
-    let mut current: Option<(String, std::path::PathBuf)> = None;
 
     let stdin = std::io::stdin();
     for line in stdin.lock().lines() {

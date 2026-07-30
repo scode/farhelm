@@ -53,8 +53,8 @@ use farhelm_proto::io::{
     FrameReader, FrameWriter, ProgressWrite, handshake, parse_control, write_frame_before_stall,
 };
 use farhelm_proto::{
-    AgentKind, ControlMsg, DETACH_REASON_STALLED, ErrorKind, Frame, RestartOffer, SessionInfo,
-    SessionStatus,
+    AgentKind, ControlMsg, DETACH_REASON_STALLED, ErrorKind, Frame, RestartMode, RestartOffer,
+    SessionInfo, SessionStatus,
 };
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
@@ -339,6 +339,28 @@ pub struct SupervisorSeams {
     pub capture_window: CaptureWindowBounds,
     /// See [`CaptureStoreFault`]. `None` in production.
     pub capture_store_fault: Option<CaptureStoreFault>,
+    /// Extra environment entries every launch of every session in this
+    /// supervisor starts with, injected into tmux (`-e`) so they reach the
+    /// login shell before it sources anything.
+    ///
+    /// Empty in production, and deliberately not a user-facing feature:
+    /// SPEC.md's environment contract says a session behaves as if the user
+    /// had SSHed in and typed the command, which is what the launch chain's
+    /// `-l -i` shell already delivers from the supervisor's own
+    /// environment. This exists because that contract's other half — "the
+    /// environment is evaluated at each launch: edit your rc files and the
+    /// next launch or restart sees the change" — is otherwise untestable in
+    /// this repo: proving it needs an rc file the test controls, which
+    /// means a `HOME` the test controls, and mutating the test process's
+    /// environment is forbidden here (and would be shared by every
+    /// concurrently-running harness besides). Dependency injection is the
+    /// sanctioned alternative, and this is it — the same reasoning as
+    /// [`SupervisorSeams::agent_home`], one layer lower.
+    ///
+    /// Applied identically to a create and to a restart's relaunch, since
+    /// a difference between the two would be exactly the divergence the
+    /// contract forbids.
+    pub launch_env: Vec<(String, String)>,
 }
 
 impl Default for SupervisorSeams {
@@ -349,6 +371,7 @@ impl Default for SupervisorSeams {
             agent_home: None,
             capture_window: CaptureWindowBounds::default(),
             capture_store_fault: None,
+            launch_env: Vec::new(),
         }
     }
 }
@@ -775,20 +798,20 @@ fn create_fingerprint(
 /// Entries are pruned when the last holder leaves, so the map is bounded
 /// by in-flight creates rather than by every key ever seen.
 #[derive(Debug, Default)]
-struct IntentLocks {
-    /// `Weak` so an entry dies with its last guard; see [`IntentGuard`]'s
+struct KeyedLocks {
+    /// `Weak` so an entry dies with its last guard; see [`KeyedGuard`]'s
     /// `Drop`. A std mutex, not a tokio one: it is held only for the map
     /// lookup itself, never across the `await` that acquires the per-key
     /// lock.
     locks: std::sync::Mutex<HashMap<String, std::sync::Weak<tokio::sync::Mutex<()>>>>,
 }
 
-impl IntentLocks {
+impl KeyedLocks {
     /// Hold this key's lock until the returned guard is dropped, waiting
-    /// out any create already running under the same key.
-    async fn claim(self: &Arc<Self>, key: &str) -> IntentGuard {
+    /// out any holder already running under the same key.
+    async fn claim(self: &Arc<Self>, key: &str) -> KeyedGuard {
         let lock = {
-            let mut locks = self.locks.lock().expect("intent lock map poisoned");
+            let mut locks = self.locks.lock().expect("keyed lock map poisoned");
             match locks.get(key).and_then(std::sync::Weak::upgrade) {
                 Some(existing) => existing,
                 None => {
@@ -798,7 +821,7 @@ impl IntentLocks {
                 }
             }
         };
-        IntentGuard {
+        KeyedGuard {
             registry: Arc::clone(self),
             key: key.to_string(),
             _held: lock.lock_owned().await,
@@ -806,16 +829,16 @@ impl IntentLocks {
     }
 }
 
-/// One create's exclusive hold on its intent key; see [`IntentLocks`].
-struct IntentGuard {
-    registry: Arc<IntentLocks>,
+/// One holder's exclusive claim on a key; see [`KeyedLocks`].
+struct KeyedGuard {
+    registry: Arc<KeyedLocks>,
     key: String,
     /// Owned rather than borrowed so the guard is `'static` and can be
     /// held across every await in a create.
     _held: tokio::sync::OwnedMutexGuard<()>,
 }
 
-impl Drop for IntentGuard {
+impl Drop for KeyedGuard {
     fn drop(&mut self) {
         let Ok(mut locks) = self.registry.locks.lock() else {
             return;
@@ -1065,6 +1088,286 @@ impl Reserved {
     }
 }
 
+/// Why a relaunch failed, and — the part the caller acts on — whether it
+/// is DEFINITIVE that nothing outside this process changed.
+///
+/// The distinction decides whether the previous run's outcome may be put
+/// back (`SessionStore::abort_relaunch`). Restoring "exited, stopped by
+/// user" over a session that may have a live agent under its new
+/// generation would be a worse lie than the honest `Launching` that reload
+/// knows how to reconcile — so only failures that PROVED nothing spawned
+/// are marked definitive, and every ambiguity (including every failure to
+/// probe one) stays on the safe side.
+struct RelaunchFailure {
+    error: anyhow::Error,
+    definitive: bool,
+}
+
+impl RelaunchFailure {
+    /// Nothing outside this process changed: the previous outcome is still
+    /// the truth about this session and may be restored.
+    fn definitive(error: anyhow::Error) -> RelaunchFailure {
+        RelaunchFailure {
+            error,
+            definitive: true,
+        }
+    }
+
+    /// An agent may be running under the new generation; the durable
+    /// `Launching` record stays.
+    fn ambiguous(error: anyhow::Error) -> RelaunchFailure {
+        RelaunchFailure {
+            error,
+            definitive: false,
+        }
+    }
+}
+
+/// Build the entry that describes a session's NEW launch generation,
+/// carrying over exactly what describes the CONVERSATION rather than the
+/// run.
+///
+/// A fresh `Arc` rather than a mutation, which is what makes
+/// [`SessionEntry::generation`] a real fence: anything still holding the
+/// previous entry keeps describing the previous run, and its durable
+/// writes are rejected rather than silently landing on this one.
+///
+/// `reset_capture` mirrors the durable decision
+/// [`SessionStore::begin_relaunch`] made: a relaunch that opened a fresh
+/// capture window must not carry the previous run's first-input anchor or
+/// verdict in memory either, or the very next capture pass would correlate
+/// the new run against a window that closed long ago.
+fn relaunched_entry(
+    entry: &SessionEntry,
+    info: SessionInfo,
+    terminal: Option<Terminal>,
+    generation: i64,
+    outcome: LastOutcome,
+    reset_capture: bool,
+) -> Arc<SessionEntry> {
+    let (first_input, capture) = if reset_capture {
+        (
+            FirstInput {
+                at: None,
+                durable: true,
+            },
+            CaptureState::Unclaimed,
+        )
+    } else {
+        (
+            *entry
+                .first_input
+                .lock()
+                .expect("first-input mutex poisoned"),
+            entry
+                .capture
+                .lock()
+                .expect("capture mutex poisoned")
+                .clone(),
+        )
+    };
+    Arc::new(SessionEntry {
+        info,
+        terminal,
+        outcome: std::sync::Mutex::new(outcome),
+        snapshot: entry.snapshot.clone(),
+        canonical_cwd: entry.canonical_cwd.clone(),
+        first_input: std::sync::Mutex::new(first_input),
+        capture: std::sync::Mutex::new(capture),
+        generation,
+    })
+}
+
+/// Refuse a relaunch whose working directory no longer resolves to the
+/// path this session was created against (fix-batch item 21).
+///
+/// `ensure_cwd_usable` answers "is there a usable directory here"; this
+/// answers "is it the SAME one". They are different questions the moment a
+/// symlink is involved: a path that pointed at one worktree at create time
+/// can point at another by restart time, and relaunching an agent — often
+/// one launched with permissive flags — into a directory somebody else
+/// chose is not a refusal a user could reasonably be expected to make for
+/// themselves. The stored canonical path is the identity to compare
+/// against precisely because it was resolved once, at create, and is
+/// immutable after (`store::StoredSession::canonical_cwd`).
+///
+/// Sessions with no stored canonical path (rows predating the column) skip
+/// the check rather than fail it: there is nothing to compare, and
+/// inventing a mismatch would refuse every such session's restart forever.
+/// A path that cannot be canonicalized NOW is likewise not treated as a
+/// mismatch — `ensure_cwd_usable` has already established the directory is
+/// there, so this is a race or an exotic filesystem, and the honest cost
+/// is skipping a defence rather than blocking a legitimate restart.
+async fn ensure_cwd_identity(cwd: &str, canonical: Option<&str>) -> anyhow::Result<()> {
+    let Some(canonical) = canonical else {
+        return Ok(());
+    };
+    let resolved = match tokio::fs::canonicalize(cwd).await {
+        Ok(resolved) => resolved.to_string_lossy().into_owned(),
+        Err(e) => {
+            warn!(
+                cwd = %cwd, error = %e,
+                "could not resolve this working directory before a relaunch; proceeding \
+                 without confirming it still names the directory the session was created in"
+            );
+            return Ok(());
+        }
+    };
+    if resolved == canonical {
+        return Ok(());
+    }
+    Err(RequestError::new(
+        ErrorKind::InvalidRequest,
+        format!(
+            "working directory {cwd} now resolves to {resolved}, not to {canonical} where this \
+             session was created; refusing to relaunch its agent somewhere else"
+        ),
+    )
+    .into())
+}
+
+/// The geometry a relaunch's FRESH terminal starts at, for the same reason
+/// the helm's create API has defaults: a restart request carries no
+/// terminal size — it can come from a session view whose pane is not laid
+/// out, from the API, or from a client that never had a terminal at all.
+/// These decide how the agent's first output wraps until something resizes
+/// the window, which for the ordinary flow is the next attach
+/// (`Attach` resizes to its own client's size) — a client that never
+/// attaches leaves the window at exactly this size. A REUSED terminal
+/// keeps whatever geometry it already had and never consults these.
+const RELAUNCH_COLS: u16 = 80;
+const RELAUNCH_ROWS: u16 = 24;
+
+/// The command a restart runs, and the validation of `mode` against the
+/// session's CURRENT offer that decides whether there is one at all
+/// (PLAN_M3.md item 9; `ControlMsg::RestartSession`'s staleness contract).
+///
+/// One function for both halves deliberately: the offer and the argv are
+/// two statements of the same fact, and computing them apart is how a
+/// build ends up validating against one answer and running the other. A
+/// pure function of the durable snapshot plus the launch invocation, so the
+/// whole mode/offer matrix is unit-testable without a supervisor.
+///
+/// The mode/offer pairing is exact in both directions — there is no
+/// "mode the user is allowed to downgrade to". `Fresh` against a `Resume`
+/// offer is refused for the reason SPEC.md gives ("no fresh-restart variant
+/// in v1 — for a clean conversation, create a new session in the same
+/// directory"), and `Resume` against a `FreshOnly` offer is refused because
+/// there is nothing to fill the template with — the case that would
+/// otherwise run a `{conversation}` placeholder unfilled, which SPEC.md
+/// forbids outright.
+///
+/// The `Conflict` names the CURRENT offer, because the client's next move
+/// is to re-present that offer to the user rather than to retry.
+fn relaunch_argv(
+    mode: RestartMode,
+    snapshot: &SessionSnapshot,
+    invocation: &str,
+) -> anyhow::Result<Vec<String>> {
+    let expected = match snapshot.restart_offer {
+        RestartOffer::FreshOnly => RestartMode::Fresh,
+        RestartOffer::Resume => RestartMode::Resume,
+        RestartOffer::FallbackTemplate => RestartMode::FallbackTemplate,
+    };
+    if mode != expected {
+        return Err(RequestError::new(
+            ErrorKind::Conflict,
+            format!(
+                "this session's restart offer is {}, not {}; refresh the session and \
+                 re-present the offer rather than retrying",
+                offer_wording(snapshot.restart_offer),
+                mode_wording(mode)
+            ),
+        )
+        .into());
+    }
+    match mode {
+        // Already substituted, slot by slot, from the DURABLE identity
+        // (`IntegrationSnapshot::filled_resume_argv`) — never spliced into
+        // a command string, so an id cannot become a different command.
+        RestartMode::Resume => snapshot.resume_argv.clone().ok_or_else(|| {
+            anyhow::Error::new(RequestError::new(
+                ErrorKind::Internal,
+                "this session offers a resume but has no filled resume command; refusing to \
+                 relaunch rather than guessing one",
+            ))
+        }),
+        RestartMode::FallbackTemplate => snapshot.resume_template.clone().ok_or_else(|| {
+            anyhow::Error::new(RequestError::new(
+                ErrorKind::Internal,
+                "this session offers a fallback resume command but has no template; refusing \
+                 to relaunch rather than guessing one",
+            ))
+        }),
+        // The session's own launch invocation, parsed exactly as the
+        // create parsed it. A parse failure here means the stored
+        // invocation is not a command line any more, which is the caller's
+        // to fix (by creating a new session), not this build's to guess at.
+        RestartMode::Fresh => shell_words::split(invocation).map_err(|e| {
+            anyhow::Error::new(RequestError::new(
+                ErrorKind::InvalidRequest,
+                format!("this session's launch invocation no longer parses: {e}"),
+            ))
+        }),
+    }
+}
+
+/// How an offer reads in a refusal aimed at a user. Deliberately prose
+/// rather than the wire spelling: this text lands in an HTTP body and a UI
+/// line, not in anything a client branches on (`ErrorKind` carries that).
+fn offer_wording(offer: RestartOffer) -> &'static str {
+    match offer {
+        RestartOffer::FreshOnly => "a fresh launch (no conversation was captured for it)",
+        RestartOffer::Resume => "resuming its captured conversation",
+        RestartOffer::FallbackTemplate => "its configured fallback resume command",
+    }
+}
+
+/// The requested mode's half of the same sentence; see [`offer_wording`].
+fn mode_wording(mode: RestartMode) -> &'static str {
+    match mode {
+        RestartMode::Fresh => "a fresh launch",
+        RestartMode::Resume => "resuming its captured conversation",
+        RestartMode::FallbackTemplate => "its configured fallback resume command",
+    }
+}
+
+/// What a successful [`Supervisor::spawn_agent`] produced: the pane the
+/// agent is starting in, plus the two per-launch paths it published to —
+/// which a caller that later fails to confirm the launch has to clean up,
+/// and which the shim itself normally consumes on its way to `exec`.
+///
+/// The paths are RETURNED rather than recomputed by callers so nothing
+/// downstream can derive a path the spawn did not actually use — the
+/// spec's own `status_file` field is what the shim writes to, and a caller
+/// cleaning up a differently-derived path would leave the real sentinel in
+/// place for the next launch to misread.
+struct Spawned {
+    pane: String,
+    spec_path: PathBuf,
+    status_path: PathBuf,
+}
+
+/// Why a launch's side effects did not complete, split by what the caller
+/// may conclude from it — see [`Supervisor::spawn_agent`] for why the two
+/// cannot be unwound the same way.
+enum SpawnFailure {
+    /// The spec never landed, so nothing external happened at all. Carries
+    /// no path to clean up on purpose: the write helper's own contract is
+    /// that a failed staged write leaves neither a temp file nor a
+    /// published one (`files::write_staged`), so there is nothing here for
+    /// a caller to remove.
+    Spec(anyhow::Error),
+    /// tmux refused, or answered ambiguously. The agent may or may not be
+    /// running; only a probe can say. The spec DID land, and the shim may
+    /// never run to consume it, so the caller is handed the path: it holds
+    /// the agent's full command line, credentials included.
+    Tmux {
+        spec_path: PathBuf,
+        error: anyhow::Error,
+    },
+}
+
 /// Async wrapper around [`crate::launch::read_launch_sentinel`] for the
 /// handlers in this module: `ListSessions` calls it on every poll for
 /// every eligible session, which makes it the genuinely hot one;
@@ -1079,12 +1382,18 @@ impl Reserved {
 /// forwarding sharing that thread for however long the underlying I/O
 /// takes — worth paying on `ListSessions`'s polling path even though any
 /// one call is ordinarily fast.
-async fn read_launch_sentinel(state_dir: &Path, id: &str) -> anyhow::Result<Option<String>> {
+async fn read_launch_sentinel(
+    state_dir: &Path,
+    id: &str,
+    generation: i64,
+) -> anyhow::Result<Option<String>> {
     let state_dir = state_dir.to_path_buf();
     let id = id.to_string();
-    tokio::task::spawn_blocking(move || crate::launch::read_launch_sentinel(&state_dir, &id))
-        .await
-        .context("launch sentinel read task panicked")?
+    tokio::task::spawn_blocking(move || {
+        crate::launch::read_launch_sentinel(&state_dir, &id, generation)
+    })
+    .await
+    .context("launch sentinel read task panicked")?
 }
 
 /// Whether a launch sentinel discovered NOW could still change `outcome` —
@@ -1127,11 +1436,148 @@ fn sentinel_could_still_apply(outcome: &LastOutcome) -> bool {
 /// (`best_effort_remove`): a failure here is logged, never fatal, and
 /// never blocks a reply — both files are cosmetic once the DURABLE
 /// outcome already says what happened.
-async fn cleanup_launch_artifacts(state_dir: &Path, id: &str) {
-    let spec_path = crate::launch::spec_path_for_session(state_dir, id);
+async fn cleanup_launch_artifacts(state_dir: &Path, id: &str, generation: i64) {
+    let spec_path = crate::launch::spec_path_for_launch(state_dir, id, generation);
     let status_path = crate::launch::status_path_for_spec(&spec_path);
     best_effort_remove(&status_path, "consumed launch sentinel").await;
     best_effort_remove(&spec_path, "leftover launch spec").await;
+}
+
+/// Clear the launch artifacts sitting at ONE launch's spec and sentinel
+/// paths, FAIL-CLOSED, before something writes its own there.
+///
+/// Reached from exactly one caller now that per-launch paths are
+/// generation-scoped: a create RETAKING an interrupted attempt's
+/// identities (PLAN_M3.md item 6), which reuses the reservation's session
+/// id and therefore its generation-0 paths. A sentinel that survived into
+/// that relaunch would be read as evidence about a launch that has not
+/// happened yet, painting a perfectly good agent as `error`; a stale spec
+/// is a credential-bearing file with no owner. So a cleanup that cannot be
+/// CONFIRMED aborts the relaunch rather than proceeding: destroying
+/// evidence is bad, but launching on top of evidence this process could
+/// not remove is worse.
+///
+/// A RESTART needs none of this — its new generation names files nothing
+/// has ever written (`launch::spec_path_for_launch`), which is the whole
+/// reason those paths carry the generation.
+///
+/// The sentinel goes first: it is the one whose survival changes a
+/// classification, so if only one of the two removals gets to run, that is
+/// the one worth having run.
+async fn clear_launch_artifacts_fail_closed(
+    state_dir: &Path,
+    id: &str,
+    generation: i64,
+) -> Result<(), String> {
+    let spec_path = crate::launch::spec_path_for_launch(state_dir, id, generation);
+    let status_path = crate::launch::status_path_for_spec(&spec_path);
+    remove_fail_closed(&status_path, "the previous launch's sentinel").await?;
+    remove_fail_closed(&spec_path, "the previous launch's spec").await
+}
+
+/// Remove every launch spec and sentinel belonging to `session_id`, across
+/// all of its generations, fail-closed.
+///
+/// Delete's cleanup, and the one place that has to enumerate rather than
+/// derive: a session that was restarted owns one file pair per launch
+/// (`launch::spec_path_for_launch`), and the row that would say how many is
+/// about to be removed. Every failure — including a directory that cannot
+/// be read at all — is returned rather than logged, because these files
+/// hold agent command lines users put credentials into and delete is the
+/// last moment anything will ever come back for them.
+async fn remove_launch_artifacts_for_session(
+    state_dir: &Path,
+    session_id: &str,
+) -> Result<(), String> {
+    let launch_dir = state_dir.join("launch");
+    let mut entries = match tokio::fs::read_dir(&launch_dir).await {
+        Ok(entries) => entries,
+        // A launch directory that was never created is nothing to clean up
+        // — the honest empty case, unlike a directory this process cannot
+        // read, which is reported.
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(e) => {
+            return Err(format!(
+                "reading {} to remove this session's launch files: {e}",
+                launch_dir.display()
+            ));
+        }
+    };
+    loop {
+        let entry = match entries.next_entry().await {
+            Ok(None) => return Ok(()),
+            Ok(Some(entry)) => entry,
+            Err(e) => {
+                return Err(format!(
+                    "listing {} to remove this session's launch files: {e}",
+                    launch_dir.display()
+                ));
+            }
+        };
+        let name = entry.file_name();
+        let name = name.to_string_lossy();
+        if crate::launch::parse_launch_file_name(&name).is_some_and(|(id, _)| id == session_id) {
+            remove_fail_closed(&entry.path(), "launch file").await?;
+        }
+    }
+}
+
+/// Whether `cwd` is usable as a session's working directory, as the one
+/// precondition both a create and a restart check (SPEC.md: "Operations
+/// that need the working directory — restart, opening a terminal tab —
+/// fail with a clear error naming the directory if it has vanished since
+/// creation").
+///
+/// Shared rather than duplicated specifically so restart's refusal is the
+/// SAME refusal create's is, down to the wording and the `ErrorKind`: a
+/// directory that has since been removed is the ordinary way this fails
+/// for a restart, and a user who has seen the create-time message should
+/// not have to recognize a second phrasing of it.
+///
+/// Every classification below preserves the distinction between a bad
+/// caller precondition and a host I/O failure. Calling both "does not
+/// exist" sends users looking for a typo when the real problem is
+/// permission, a symlink loop, or a failing filesystem.
+async fn ensure_cwd_usable(cwd: &str) -> anyhow::Result<()> {
+    match tokio::fs::metadata(cwd).await {
+        Ok(metadata) if metadata.is_dir() => Ok(()),
+        Ok(_) => Err(RequestError::new(
+            ErrorKind::InvalidRequest,
+            format!("working directory is not a directory: {cwd}"),
+        )
+        .into()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Err(RequestError::new(
+            ErrorKind::InvalidRequest,
+            format!("working directory does not exist: {cwd}"),
+        )
+        .into()),
+        // `NotADirectory` is a path like `/tmp/some-file/child`, where a
+        // non-final component is a regular file — a distinct precondition
+        // from the top-level "cwd itself is a file" case above, but the
+        // same caller mistake. `InvalidInput` is the OS rejecting the
+        // path text itself (a NUL byte, say) before it ever reaches the
+        // filesystem. Both are things the caller could have avoided by
+        // sending a different `cwd`, unlike the fallback below.
+        Err(error)
+            if matches!(
+                error.kind(),
+                std::io::ErrorKind::NotADirectory | std::io::ErrorKind::InvalidInput
+            ) =>
+        {
+            Err(RequestError::new(
+                ErrorKind::InvalidRequest,
+                format!("working directory is not usable: {cwd} ({error})"),
+            )
+            .into())
+        }
+        // Not classified: this is an I/O failure the caller could not have
+        // avoided by sending a different request (a permission problem, a
+        // symlink loop, a failing filesystem), so it defaults to
+        // `ErrorKind::Internal`.
+        Err(error) => {
+            Err(error).with_context(|| format!("reading working directory metadata for {cwd}"))
+        }
+    }
 }
 
 /// Best-effort credential-hygiene cleanup: remove `path`, treating its
@@ -1873,12 +2319,102 @@ fn summarize_errors(errors: &[String]) -> String {
     }
 }
 
+/// Why a stop of a LIVE agent did not complete cleanly, split by what the
+/// caller may still conclude about the agent — see [`stop_live_agent`].
+///
+/// The three are genuinely different answers, not shades of one failure:
+/// after `Unrecorded` nothing was killed at all, after `Sweep` the agent
+/// may still be running, and after `UnrecordedOutcome` it is provably
+/// stopped and only the bookkeeping is behind. A restart may proceed past
+/// none of the first two and (with a warning) past the third.
+enum StopFailure {
+    /// The durable stop intent could not be written, so the sweep never
+    /// ran. This is the window the intent exists to close (a crash mid-kill
+    /// silently converting "the user stopped this" into "the agent finished
+    /// on its own"), which is why it refuses rather than killing anyway.
+    Unrecorded(anyhow::Error),
+    /// The kill sweep itself could not be confirmed complete — not "nothing
+    /// was found to kill". A caller must be able to tell those apart
+    /// (`ControlMsg::StopSession`'s docs).
+    Sweep(anyhow::Error),
+    /// The tree IS stopped; recording that outcome failed, so the session
+    /// may list as a plain exit rather than an annotated one.
+    UnrecordedOutcome(anyhow::Error),
+}
+
+impl StopFailure {
+    /// The user-facing wording for this failure, worded so the reader can
+    /// tell what actually happened to their agent. Kept here rather than at
+    /// the call sites so `StopSession` and restart report the same failure
+    /// the same way.
+    fn message(&self) -> String {
+        match self {
+            StopFailure::Unrecorded(e) => {
+                format!("recording the stop failed, so nothing was killed: {e:#}")
+            }
+            StopFailure::Sweep(e) => format!("{e:#}"),
+            StopFailure::UnrecordedOutcome(e) => format!(
+                "the session was stopped, but recording that outcome failed, so it may list \
+                 as a plain exit: {e:#}"
+            ),
+        }
+    }
+}
+
+/// Stop an agent this caller has just observed ALIVE: the durable intent,
+/// the process-tree sweep, and the outcome — PLAN_M3.md item 4's stop
+/// lifecycle, shared by `StopSession` and by item 9's restart.
+///
+/// The ORDER is the contract, and it is why this is one function rather
+/// than three calls each caller makes for itself:
+///
+/// - The intent commits BEFORE a single signal is sent. `kill_process_tree`
+///   runs for seconds — SIGTERM, a grace period, re-enumeration, SIGKILL —
+///   and a crash anywhere in there used to leave a session the next startup
+///   read as a plain exit, silently converting "the user stopped this" into
+///   "the agent finished on its own". With the intent recorded first,
+///   reload reconciles it: a dead pane means the stop landed (annotated
+///   exit), a live one means it never did (intent cleared), and a reboot
+///   straddling it interrupts like any other live session.
+/// - The outcome commits BEFORE the caller does anything else with its
+///   success — the kill has already happened, so any crash from here on
+///   must find a record that says so.
+///
+/// The exit code is re-queried rather than assumed. A killed process
+/// usually leaves tmux nothing to reduce to a plain code, but where it
+/// does, that code is worth keeping — and `pane_states`, not
+/// `pane_process`, is what carries `#{pane_dead_status}` at all. A failed
+/// query costs the code, not the annotation, and a later list can still
+/// enrich the record (the store's transitions are monotonic).
+///
+/// `root_pid` is the pid the caller's own liveness check found, passed in
+/// rather than re-derived here so the pid signaled is the one the aliveness
+/// decision was actually made about.
+async fn stop_live_agent(
+    sup: &Supervisor,
+    session_id: &str,
+    entry: &SessionEntry,
+    root_pid: Option<u32>,
+) -> Result<(), StopFailure> {
+    sup.record(session_id, entry, Transition::StopRequested)
+        .await
+        .map_err(StopFailure::Unrecorded)?;
+    kill_process_tree(root_pid, session_id)
+        .await
+        .map_err(StopFailure::Sweep)?;
+    let exit_code = dead_pane_exit_code(sup, entry.terminal.as_ref(), session_id).await;
+    sup.record(session_id, entry, Transition::StopCompleted { exit_code })
+        .await
+        .map_err(StopFailure::UnrecordedOutcome)
+}
+
 /// The two tmux handles that address one session's terminal.
 ///
 /// Both are needed and neither substitutes for the other: session name is
 /// the target for anything window-scoped (`resize-window`, the
 /// control-mode attach), pane id (`%N`) for anything pane-scoped
 /// (`send-keys`, `capture-pane`, format queries).
+#[derive(Clone)]
 struct Terminal {
     tmux_name: String,
     pane: String,
@@ -1947,7 +2483,8 @@ fn snapshot_path(state_dir: &Path, session_id: &str) -> PathBuf {
 /// relaunch, or explicit delete) belongs entirely to that future
 /// consumer, never to this best-effort hygiene pass.
 ///
-/// A spec's session id (its file stem) is checked against `sessions` —
+/// A spec's session id (the first component of its `<id>.<generation>`
+/// stem — `launch::parse_launch_file_name`) is checked against `sessions` —
 /// rather than removing every entry unconditionally, which is what this
 /// sweep used to do — because a supervisor restart does NOT kill tmux: a
 /// session created just before the restart can have its login shell
@@ -1988,12 +2525,21 @@ async fn sweep_launch_dir(launch_dir: &Path, sessions: &std::collections::HashSe
 
         let should_remove = if crate::files::is_staged_temp_name(&name) {
             true
-        } else if let Some(id) = name.strip_suffix(".json") {
-            !sessions.contains(id)
+        } else if let Some((id, _generation)) = crate::launch::parse_launch_file_name(&name) {
+            // Names are `<id>.<generation>.json|status` now that launch
+            // files are per-LAUNCH rather than per-session
+            // (`launch::spec_path_for_launch`), and the sweep's question is
+            // still the same one: does the SESSION still exist? A file
+            // belonging to a live session's older generation is not swept
+            // here — the restart that superseded it removes its own
+            // predecessor, and sweeping by generation would mean deciding,
+            // from a directory listing, which launch is current.
+            //
+            // Only specs are ever removed; `.status` sentinels are never
+            // this sweep's to remove (see the function's own docs), which
+            // the extension check preserves.
+            !sessions.contains(id) && name.ends_with(".json")
         } else {
-            // `.status` sentinels, and anything else this sweep does not
-            // recognize, are never its to remove — see the function's
-            // own docs.
             false
         };
 
@@ -2454,6 +3000,20 @@ struct SessionEntry {
     /// Where this session stands on conversation-identity capture. See
     /// [`CaptureState`].
     capture: std::sync::Mutex<CaptureState>,
+    /// Which LAUNCH of this session this entry describes
+    /// (`store::StoredSession::generation`).
+    ///
+    /// Immutable per entry, which is the point: a restart PUBLISHES A NEW
+    /// ENTRY rather than mutating this one, so anything still holding the
+    /// old `Arc` — a `ListSessions` pass that already cloned it, a capture
+    /// pass mid-scan, an `Attach` that resolved before the restart — is
+    /// holding, and can be recognized as holding, a description of the
+    /// previous run. Every durable write those paths perform carries this
+    /// value and is rejected by the store when it is no longer current
+    /// (`SessionStore::transition_many` and the capture writers), and
+    /// `Attach` compares it before installing an attachment on what may be
+    /// a respawned pane.
+    generation: i64,
 }
 
 /// The first-input correlator and its durability.
@@ -2803,9 +3363,28 @@ pub struct Supervisor {
     /// handlers are already running.
     may_record: std::sync::atomic::AtomicBool,
     /// Collapses concurrent creates that share an intent key into one
-    /// launch; see [`IntentLocks`] for why an in-process lock is the whole
+    /// launch; see [`KeyedLocks`] for why an in-process lock is the whole
     /// mechanism and what it is (and is not) responsible for.
-    intent_locks: Arc<IntentLocks>,
+    intent_locks: Arc<KeyedLocks>,
+    /// One claim per SESSION, held for the whole of any operation that
+    /// changes what is running under it: restart, stop, and delete.
+    ///
+    /// The map-wide `sessions` mutex cannot do this job — it is released
+    /// the moment an entry is cloned out of it, and every one of these
+    /// operations then spends seconds in tmux and `/proc` with nothing
+    /// holding the session still. What that permits is not merely untidy:
+    /// two concurrent restarts each recheck liveness before either has
+    /// stopped anything, both conclude "nothing is running", and the
+    /// second's marker-keyed kill sweep then reaps the agent the first one
+    /// just launched — a kill nobody consented to, arrived at entirely
+    /// through legal steps. Stop-vs-restart is the same shape with the
+    /// sweep on the other side, and delete-vs-restart resolves to a
+    /// half-torn-down session rather than one honest winner.
+    ///
+    /// LOCK ORDER: lifecycle first, then `attachments`, then `sessions`
+    /// (see this struct's lock-discipline docs). Nothing acquires a
+    /// lifecycle claim while holding either of the other two.
+    lifecycle_locks: Arc<KeyedLocks>,
     /// The home directory the agents' own record trees hang off
     /// (PLAN_M3.md item 8), resolved once at construction from
     /// `SupervisorSeams::agent_home` or `$HOME`.
@@ -2972,7 +3551,8 @@ impl Supervisor {
             seams,
             ownership,
             may_record: std::sync::atomic::AtomicBool::new(may_record),
-            intent_locks: Arc::new(IntentLocks::default()),
+            intent_locks: Arc::new(KeyedLocks::default()),
+            lifecycle_locks: Arc::new(KeyedLocks::default()),
             agent_home,
             capture_window,
             capture_lock: Mutex::new(()),
@@ -3004,15 +3584,44 @@ impl Supervisor {
     /// a bail into a wrong capture, the one outcome this design exists to
     /// exclude.
     async fn capture_now(&self) {
+        self.capture_sweep(false).await;
+    }
+
+    /// [`Supervisor::capture_now`], with the choice of WAITING for a pass
+    /// already in flight instead of skipping it.
+    ///
+    /// The list path skips (`wait: false`): a capture arriving one poll
+    /// interval later costs nothing, while a list reply queued behind
+    /// somebody else's filesystem scan costs the UI. A RESTART cannot skip
+    /// (`wait: true`): it is about to validate the requested mode against
+    /// the session's offer, and a pass running right now may be one commit
+    /// away from changing that offer — validating against the pre-commit
+    /// answer is exactly the staleness the restart contract exists to
+    /// exclude. Restarts are rare and user-initiated, so waiting out one
+    /// scan is free.
+    async fn capture_sweep(&self, wait: bool) {
         if self.agent_home.is_none() {
             return;
         }
-        let Ok(_single_flight) = self.capture_lock.try_lock() else {
-            return;
+        let _pass = if wait {
+            Some(self.capture_lock.lock().await)
+        } else {
+            match self.capture_lock.try_lock() {
+                Ok(guard) => Some(guard),
+                Err(_) => return,
+            }
         };
         let entries: Vec<Arc<SessionEntry>> =
             self.sessions.lock().await.values().cloned().collect();
-        capture_pass(self, &entries, self.may_record()).await;
+        // Boxed, not awaited inline: `capture_pass` is by far the largest
+        // future in this crate (per-record buffers, nested per-root scans),
+        // and every async fn that awaits it inlines that size into its OWN
+        // future. Two callers already compose it with a lot of other work
+        // — `ListSessions` and the restart handler — and one of them ran a
+        // test thread out of stack merely by CONSTRUCTING the combined
+        // future. One heap allocation per pass is nothing next to the
+        // filesystem scan it wraps.
+        Box::pin(capture_pass(self, &entries, self.may_record())).await;
     }
 
     /// Rebuild the in-memory session map from SQLite plus one bulk tmux
@@ -3147,7 +3756,7 @@ impl Supervisor {
                         row.outcome,
                         LastOutcome::Launching | LastOutcome::Running | LastOutcome::StopRequested
                     ) {
-                        match read_launch_sentinel(state_dir, &row.id).await {
+                        match read_launch_sentinel(state_dir, &row.id, row.generation).await {
                             Ok(Some(detail)) => {
                                 sentinel_overrides.insert(row.id.clone(), detail);
                             }
@@ -3211,8 +3820,13 @@ impl Supervisor {
                 // the shared cleanup further down, which only ever sees
                 // what THIS pass's `transitions` vec itself proposed
                 // (item 4 of the review-swarm fix batch).
-                for id in sentinel_overrides.keys() {
-                    cleanup_launch_artifacts(state_dir, id).await;
+                for (id, generation) in rows
+                    .iter()
+                    .filter(|row| sentinel_overrides.contains_key(&row.id))
+                    .map(|row| (row.id.clone(), row.generation))
+                    .collect::<Vec<_>>()
+                {
+                    cleanup_launch_artifacts(state_dir, &id, generation).await;
                 }
             }
         }
@@ -3241,7 +3855,7 @@ impl Supervisor {
             // so this runs unconditionally rather than trying to prove it
             // is necessary first.
             if matches!(row.outcome, LastOutcome::Error { .. }) {
-                cleanup_launch_artifacts(state_dir, &row.id).await;
+                cleanup_launch_artifacts(state_dir, &row.id, row.generation).await;
                 continue;
             }
 
@@ -3277,10 +3891,11 @@ impl Supervisor {
             // (not `is_terminal()`) is what lets this reach those two
             // states rather than wrongly skipping them.
             if sentinel_could_still_apply(&row.outcome) {
-                match read_launch_sentinel(state_dir, &row.id).await {
+                match read_launch_sentinel(state_dir, &row.id, row.generation).await {
                     Ok(Some(detail)) => {
                         transitions.push((
                             row.id.clone(),
+                            row.generation,
                             Transition::SentinelError {
                                 detail: detail.clone(),
                                 pane: found.as_ref().map(|(pane, _)| pane.clone()),
@@ -3343,40 +3958,65 @@ impl Supervisor {
                     row.outcome,
                     LastOutcome::Running | LastOutcome::StopRequested
                 ) {
-                    transitions
-                        .push((row.id.clone(), Transition::ObservedExit { exit_code: None }));
+                    transitions.push((
+                        row.id.clone(),
+                        row.generation,
+                        Transition::ObservedExit { exit_code: None },
+                    ));
                 }
                 continue;
             };
             if !row.outcome.is_terminal() {
                 if state.dead {
-                    // The pane outlived its process (remain-on-exit) and
-                    // still holds the code — "exited with the code the
-                    // surviving dead pane retains". A rediscovered pane
-                    // rides the same commit as the outcome it evidences,
-                    // so no crash window can leave the pane recorded under
-                    // a still-`Running` row.
-                    transitions.push((
-                        row.id.clone(),
-                        if row.pane.is_empty() {
-                            Transition::RediscoveredExit {
-                                pane: pane.clone(),
-                                exit_code: state.exit_code,
-                            }
-                        } else {
-                            Transition::ObservedExit {
-                                exit_code: state.exit_code,
-                            }
-                        },
-                    ));
+                    // A dead pane found BY NAME (the row has none of its
+                    // own) is only this launch's evidence when this launch
+                    // is the session's FIRST: generation 0 means the pane
+                    // can only have come from the create that crashed
+                    // before confirming it. On a later generation the same
+                    // shape means a restart crashed between opening its
+                    // generation and respawning, so the pane still there is
+                    // the PREVIOUS run's — recording its exit against this
+                    // generation would attribute a death to a launch that
+                    // never happened. That row stays `Launching` (listing
+                    // as `Unknown`) for a retried restart to resolve, which
+                    // is the same "no side effects found is not evidence
+                    // the agent ran" rule the no-pane branch above applies.
+                    let stale_pane = row.pane.is_empty() && row.generation > 0;
+                    if !stale_pane {
+                        // The pane outlived its process (remain-on-exit)
+                        // and still holds the code — "exited with the code
+                        // the surviving dead pane retains". A rediscovered
+                        // pane rides the same commit as the outcome it
+                        // evidences, so no crash window can leave the pane
+                        // recorded under a still-`Running` row.
+                        transitions.push((
+                            row.id.clone(),
+                            row.generation,
+                            if row.pane.is_empty() {
+                                Transition::RediscoveredExit {
+                                    pane: pane.clone(),
+                                    exit_code: state.exit_code,
+                                }
+                            } else {
+                                Transition::ObservedExit {
+                                    exit_code: state.exit_code,
+                                }
+                            },
+                        ));
+                    }
                 } else if row.outcome != LastOutcome::Running || row.pane != pane {
                     // Live, and either not yet confirmed, confirmed
                     // against a different pane, or carrying a stop intent
                     // whose kill sweep evidently never landed — the last
                     // being the reconciliation that keeps a crashed stop
-                    // from annotating a session that is still running.
+                    // from annotating a session that is still running. A
+                    // LIVE pane found by name after a crashed relaunch is
+                    // this generation's after all (the respawn landed
+                    // before the crash), which is why the staleness rule
+                    // above covers only the dead case.
                     transitions.push((
                         row.id.clone(),
+                        row.generation,
                         Transition::ConfirmRunning { pane: pane.clone() },
                     ));
                 }
@@ -3394,11 +4034,10 @@ impl Supervisor {
         // the truth — nothing ever reads either file again to answer "is
         // this session an error" (`session_status` consults the store,
         // never the filesystem) — and leaving them around serves no
-        // reader while risking a future collision: PR8's relaunch reuses
-        // this exact session id's spec/sentinel path
-        // (`spec_path_for_session`), and stale files from THIS launch
-        // sitting at that path could otherwise be misread as evidence
-        // about a launch that hasn't happened yet. Folded into this same
+        // reader while leaving credential-bearing debris behind. (A
+        // relaunch can no longer collide with them: launch files are named
+        // per GENERATION — `launch::spec_path_for_launch` — so a later
+        // launch's paths are simply different ones.) Folded into this same
         // successful arm (item 7) rather than a separate loop afterward:
         // a failed write means nothing durable exists yet, so the files
         // must survive for the next pass to retry against — cleaning them
@@ -3407,9 +4046,14 @@ impl Supervisor {
         let committed = if may_write && !transitions.is_empty() {
             match store.transition_many(transitions).await {
                 Ok(committed) => {
-                    for id in sentinel_hits.keys() {
-                        if matches!(committed.get(id), Some(LastOutcome::Error { .. })) {
-                            cleanup_launch_artifacts(state_dir, id).await;
+                    for (id, generation) in rows
+                        .iter()
+                        .filter(|row| sentinel_hits.contains_key(&row.id))
+                        .map(|row| (row.id.clone(), row.generation))
+                        .collect::<Vec<_>>()
+                    {
+                        if matches!(committed.get(&id), Some(LastOutcome::Error { .. })) {
+                            cleanup_launch_artifacts(state_dir, &id, generation).await;
                         }
                     }
                     committed
@@ -3515,6 +4159,7 @@ impl Supervisor {
                         durable: row.first_input_at.is_some(),
                     }),
                     capture: std::sync::Mutex::new(capture),
+                    generation: row.generation,
                 }),
             );
         }
@@ -3744,7 +4389,7 @@ impl Supervisor {
     /// it are ONE intended create. Without it nothing below changes at all:
     /// every call is its own create, exactly as before M3. With it, this
     /// function is a state machine over a durable reservation, run as a
-    /// whole under that key's lock ([`IntentLocks`]) so concurrent retries
+    /// whole under that key's lock ([`KeyedLocks`]) so concurrent retries
     /// collapse instead of racing:
     ///
     /// - **A settled reservation, same fingerprint** — replay: the session
@@ -3881,54 +4526,7 @@ impl Supervisor {
             resume_template,
         } = inputs;
         let cwd_path = PathBuf::from(cwd);
-        // Preserve the distinction between a bad caller precondition and
-        // a host I/O failure. Calling both "does not exist" sends users
-        // looking for a typo when the real problem is permission, a
-        // symlink loop, or a failing filesystem.
-        match tokio::fs::metadata(&cwd_path).await {
-            Ok(metadata) if metadata.is_dir() => {}
-            Ok(_) => {
-                return Err(RequestError::new(
-                    ErrorKind::InvalidRequest,
-                    format!("working directory is not a directory: {cwd}"),
-                )
-                .into());
-            }
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-                return Err(RequestError::new(
-                    ErrorKind::InvalidRequest,
-                    format!("working directory does not exist: {cwd}"),
-                )
-                .into());
-            }
-            // `NotADirectory` is a path like `/tmp/some-file/child`, where a
-            // non-final component is a regular file — a distinct precondition
-            // from the top-level "cwd itself is a file" case above, but the
-            // same caller mistake. `InvalidInput` is the OS rejecting the
-            // path text itself (a NUL byte, say) before it ever reaches the
-            // filesystem. Both are things the caller could have avoided by
-            // sending a different `cwd`, unlike the fallback below.
-            Err(error)
-                if matches!(
-                    error.kind(),
-                    std::io::ErrorKind::NotADirectory | std::io::ErrorKind::InvalidInput
-                ) =>
-            {
-                return Err(RequestError::new(
-                    ErrorKind::InvalidRequest,
-                    format!("working directory is not usable: {cwd} ({error})"),
-                )
-                .into());
-            }
-            Err(error) => {
-                // Not classified: this is an I/O failure the caller could
-                // not have avoided by sending a different request (a
-                // permission problem, a symlink loop, a failing
-                // filesystem), so it defaults to `ErrorKind::Internal`.
-                return Err(error)
-                    .with_context(|| format!("reading working directory metadata for {cwd}"));
-            }
-        }
+        ensure_cwd_usable(cwd).await?;
         // The invocation itself stays out of the error: it may carry
         // credentials (`--api-key ...`), and this message travels into
         // the HTTP error body and the helm's stderr/journal. shell-words'
@@ -4110,7 +4708,10 @@ impl Supervisor {
                 return LaunchEvidence::Unresolved(e.context("reading the reserved session row"));
             }
         }
-        match read_launch_sentinel(&self.state_dir, &reservation.session_id).await {
+        // Generation 0: a reservation's session is one this create is
+        // still trying to launch for the FIRST time, so its evidence can
+        // only ever be its original launch's (`spec_path_for_launch`).
+        match read_launch_sentinel(&self.state_dir, &reservation.session_id, 0).await {
             Ok(Some(_)) => return LaunchEvidence::Present,
             Ok(None) => {}
             Err(e) => {
@@ -4379,28 +4980,15 @@ impl Supervisor {
         let tmux_name = reserved.tmux_name().to_string();
         if let Reserved::Retry(reservation) = reserved {
             // Clear the interrupted attempt's leftovers before reusing its
-            // identities, FAIL-CLOSED: this id's spec and sentinel paths
-            // are derived from the id alone (`spec_path_for_session`), so
-            // anything left at them would sit exactly where this launch's
-            // own files go — and a sentinel that survived would be read as
-            // evidence about a launch that has not happened yet. A cleanup
-            // that cannot be confirmed therefore ABORTS the relaunch
-            // rather than proceeding: destroying evidence is bad, but
-            // launching on top of evidence this process could not remove
-            // is worse.
-            let spec_path = crate::launch::spec_path_for_session(&self.state_dir, &id);
-            let status_path = crate::launch::status_path_for_spec(&spec_path);
-            for (path, what) in [
-                (&status_path, "the interrupted attempt's launch sentinel"),
-                (&spec_path, "the interrupted attempt's launch spec"),
-            ] {
-                if let Err(e) = remove_fail_closed(path, what).await {
-                    return Err(anyhow::anyhow!(
-                        "not relaunching intent key {}: {e}; the intent stays pending, so a \
-                         retry can resolve it once the cause is cleared",
-                        truncate_for_error(&reservation.intent_key)
-                    ));
-                }
+            // identities; `clear_launch_artifacts_fail_closed` carries the
+            // full argument for why this is fail-closed, and item 9's
+            // restart takes the same step for the same reason.
+            if let Err(e) = clear_launch_artifacts_fail_closed(&self.state_dir, &id, 0).await {
+                return Err(anyhow::anyhow!(
+                    "not relaunching intent key {}: {e}; the intent stays pending, so a \
+                     retry can resolve it once the cause is cleared",
+                    truncate_for_error(&reservation.intent_key)
+                ));
             }
             // The atomic re-check of the decision that got us here: the
             // evidence was gathered a moment ago, and a delete or a
@@ -4426,6 +5014,7 @@ impl Supervisor {
                 captured_record: None,
                 capture_ambiguous: false,
                 first_input_at: None,
+                generation: 0,
             };
             match self
                 .store
@@ -4448,26 +5037,6 @@ impl Supervisor {
             self.sessions.lock().await.remove(&id);
         }
 
-        // Named after the SESSION id, not a separate per-launch id — a
-        // deliberate, minimal choice made while settling PLAN_M3.md item 5's
-        // write-atomicity policy, recorded here for whoever builds item 3's
-        // stale-sentinel supersession or item 9's restart: today a session
-        // launches exactly once for its entire life (no restart exists yet),
-        // so the session id already IS the one and only launch's identity —
-        // introducing a distinct launch id now, with nothing yet tracking
-        // durably which launch is "current" for a session (that generation-
-        // tracking is item 2/3's territory), would just be a second id with
-        // no consumer. What keeping this name buys for free: because
-        // `write_durable_sync` always publishes via `rename` (never
-        // truncate-in-place), a FUTURE relaunch reusing this exact path
-        // inherits atomic supersession of a stale sentinel at no extra
-        // design cost — no new file-naming scheme to migrate to later.
-        // What it does NOT buy: PROACTIVELY clearing a leftover sentinel
-        // from a previously failed launch before a relaunch's process even
-        // starts (so a successful relaunch doesn't leave a stale error
-        // sentinel behind for nothing to overwrite) is still open work,
-        // deliberately left to whichever milestone item adds relaunching at
-        // all.
         // The durable launching record, committed BEFORE any external side
         // effect exists (PLAN_M3.md item 2). The ordering is the whole
         // point and it is the INVERSE of M2's, which inserted the row only
@@ -4522,6 +5091,7 @@ impl Supervisor {
                         captured_record: None,
                         capture_ambiguous: false,
                         first_input_at: None,
+                        generation: 0,
                     },
                     claim,
                 )
@@ -4545,67 +5115,25 @@ impl Supervisor {
         // as a real one would, with nothing tidied up after it.
         self.simulate_crash(CreateStage::AfterRecord)?;
 
-        let spec_path = crate::launch::spec_path_for_session(&self.state_dir, &id);
-        // Derived the SAME way the shim derives it from its own copy of
-        // `spec_path` (`launch::status_path_for_spec`) — never computed
-        // independently here — so the two sides can never disagree about
-        // where a launch failure gets recorded, including for the failure
-        // classes (missing/malformed spec) where the shim never gets to
-        // read this struct's own `status_file` field at all.
-        let status_file_path = crate::launch::status_path_for_spec(&spec_path);
-        let spec = LaunchSpec {
-            argv,
-            status_file: status_file_path.clone(),
-            // The kill machinery's environment-marker sweep (see
-            // `kill_process_tree`) is keyed on this exact value reaching
-            // the agent's process and everything it forks.
-            session_id: id.clone(),
-        };
-        // 0600 from the first byte: the spec holds the full agent command
-        // line, which users do put credentials into (`--api-key ...`).
-        // Mode is set at open, not chmod-after-write — a write-then-chmod
-        // leaves a window where the default umask exposes the contents.
-        // A failed write cleans up too: a partial spec (disk full after
-        // create) would otherwise strand a credential prefix on disk
-        // until the next supervisor restart's sweep.
-        // Serialized before the write so the (practically impossible)
-        // encoding failure shares the write's rollback path rather than
-        // returning past it via `?` and stranding the launching row.
-        let spec_bytes = match serde_json::to_vec(&spec) {
-            Ok(bytes) => bytes,
-            Err(e) => {
-                return Err(self
-                    .abandon_launching_record(
-                        reserved,
-                        anyhow::Error::new(e).context("encoding launch spec"),
-                    )
-                    .await);
+        let spawned = self
+            .spawn_agent(&id, 0, &tmux_name, argv, cwd, cols, rows, None, None)
+            .await;
+        let (pane, spec_path, status_file_path) = match spawned {
+            Ok(Spawned {
+                pane,
+                spec_path,
+                status_path,
+            }) => (pane, spec_path, status_path),
+            Err(SpawnFailure::Spec(error)) => {
+                // Nothing external happened yet — the spec is the FIRST
+                // side effect and it did not land — so the launching row
+                // is provably describing nothing and is rolled back. A
+                // crash here would leave it instead, which is the case
+                // reload reconciles; this path can do better because the
+                // process is still alive to know.
+                return Err(self.abandon_launching_record(reserved, error).await);
             }
-        };
-        if let Err(e) = crate::write_private_file(&spec_path, &spec_bytes).await {
-            // Nothing external happened yet — the spec is the FIRST side
-            // effect and it did not land — so the launching row is
-            // provably describing nothing and is rolled back. A crash
-            // here would leave it instead, which is the case reload
-            // reconciles; this path can do better because the process is
-            // still alive to know.
-            return Err(self
-                .abandon_launching_record(
-                    reserved,
-                    anyhow::Error::new(e).context("writing launch spec"),
-                )
-                .await);
-        }
-
-        let shell = resolve_shell().await;
-        let cmd = window_command(&shell, &self.farhelm_exe, &spec_path);
-        let pane = match self
-            .tmux
-            .create_session(&tmux_name, cwd, cols, rows, &cmd)
-            .await
-        {
-            Ok(pane) => pane,
-            Err(e) => {
+            Err(SpawnFailure::Tmux { spec_path, error }) => {
                 // A tmux failure is AMBIGUOUS in a way the spec write is
                 // not: `new-session` can fail after the session already
                 // exists (a lost reply, a timeout mid-command), so
@@ -4615,7 +5143,7 @@ impl Supervisor {
                 // roll back on a CONFIRMED absence; an ambiguous or failed
                 // probe keeps the row, which is the only record anything
                 // will ever have of that launch.
-                let mut error = e.context("creating the session's tmux session");
+                let mut error = error;
                 match self.tmux.has_session(&tmux_name).await {
                     Ok(false) => {
                         // The shim unlinks the spec once it has read it,
@@ -4708,7 +5236,7 @@ impl Supervisor {
         // and unlisted with no way for the caller to learn its id.
         let confirmed = self
             .store
-            .transition(&id, Transition::ConfirmRunning { pane: pane.clone() })
+            .transition(&id, 0, Transition::ConfirmRunning { pane: pane.clone() })
             .await;
         if let Ok(None) = confirmed {
             // The row is GONE: a `DeleteSession` for this id resolved its
@@ -4810,9 +5338,978 @@ impl Supervisor {
                     durable: true,
                 }),
                 capture: std::sync::Mutex::new(CaptureState::Unclaimed),
+                // A create is a session's FIRST launch by definition
+                // (`store::StoredSession::generation`); only a restart ever
+                // moves this off zero.
+                generation: 0,
             }),
         );
         Ok(info)
+    }
+
+    /// Relaunch a session's agent in place — SPEC.md's restart, PLAN_M3.md
+    /// item 9. The only relaunch mechanism there is: the resume offered
+    /// when opening an interrupted session lands here too.
+    ///
+    /// ## Serialization
+    ///
+    /// The whole operation runs under this session's LIFECYCLE CLAIM
+    /// ([`Supervisor::lifecycle_locks`]), which stop and delete take too.
+    /// Without it, two restarts of one session interleave into a genuinely
+    /// dangerous shape rather than a merely untidy one: both recheck
+    /// liveness before either has stopped anything, both conclude "not
+    /// running", and the second one's kill sweep — which is keyed on the
+    /// session's environment marker, not on a pid — reaps the agent the
+    /// FIRST one just launched, with no consent asked for killing it. The
+    /// claim makes that sequence unconstructible, and makes restart-vs-stop
+    /// and restart-vs-delete resolve to exactly one winner with the loser
+    /// getting an honest answer instead of a half-torn-down session.
+    ///
+    /// ## What it refuses, and when
+    ///
+    /// Every refusal below runs before ANY of this operation's side effects
+    /// — before the stop, before the sweep, before the generation — so a
+    /// restart refused for one of these reasons leaves the session exactly
+    /// as it was, stop annotation included. That is deliberately not the
+    /// same claim as "nothing can fail after a change": a restart that gets
+    /// past these and then fails has stopped an agent, and item 4's
+    /// annotation promise is kept there by restoring the previous outcome
+    /// (`SessionStore::abort_relaunch`), not by nothing having happened.
+    ///
+    /// - **`mode` against the CURRENT offer**, recomputed here rather than
+    ///   trusted from the client's cached `SessionInfo`: capture can
+    ///   upgrade a session from `FreshOnly` to `Resume` asynchronously
+    ///   (item 8), so the offer the user was shown may already be stale.
+    ///   A mismatch is a `Conflict` naming what the offer is NOW, which is
+    ///   what lets a client refresh and re-present rather than retry blindly
+    ///   (`ControlMsg::RestartSession`'s staleness contract). The check is
+    ///   made ATOMIC with the relaunch by the capture pass being awaited
+    ///   (not skipped, as the list path's single-flight allows) and by the
+    ///   generation claim being conditional on the same two fields the
+    ///   validation read (`SessionStore::begin_relaunch`).
+    /// - **A vanished or repointed working directory**, named in the error.
+    ///   Existence uses the same check and wording a create uses
+    ///   (`ensure_cwd_usable`); identity additionally requires the path to
+    ///   still resolve to what it resolved to at create
+    ///   (`ensure_cwd_identity`), so a symlink repointed between launches
+    ///   cannot silently relaunch a permissive agent somewhere else.
+    /// - **A still-running agent without explicit consent.** Liveness is
+    ///   RE-probed through the pane here; the client's `status` is only ever
+    ///   a hint about whether to show a confirm dialog, never the
+    ///   authorization to skip it (see `stop_if_running`'s wire docs). A
+    ///   status of `Unknown` — no terminal, or a launch never confirmed —
+    ///   is treated as possibly-alive for exactly this reason: the pane, not
+    ///   the reported status, is what answers.
+    ///
+    /// ## What it does, in order
+    ///
+    /// 1. Stops the agent through the SHARED stop lifecycle
+    ///    ([`stop_live_agent`]) when it is alive and the user consented, or
+    ///    otherwise runs the marker sweep on its own — either way the prior
+    ///    run's descendants (including daemons an already-exited agent left
+    ///    behind) die BEFORE the new launch, never alongside it (SPEC.md:
+    ///    "Restart reaps any leftover descendants of the prior run before
+    ///    relaunching").
+    /// 2. Hands off to [`Supervisor::relaunch`] for everything destructive,
+    ///    on a supervisor-owned task: from the generation claim through
+    ///    republication, the span must not be cancellable by the connection
+    ///    that asked for it (see that method's docs).
+    ///
+    /// The captured conversation identity is RETAINED across a `Resume`
+    /// relaunch and cleared for the others, along with the rest of the
+    /// per-launch capture state; [`SessionStore::begin_relaunch`] carries
+    /// the argument for that split.
+    async fn restart_session(
+        self: &Arc<Self>,
+        session_id: &str,
+        mode: RestartMode,
+        stop_if_running: bool,
+    ) -> anyhow::Result<SessionInfo> {
+        // Taken FIRST, and released only when the whole restart is done —
+        // including the republication. Lock order is lifecycle →
+        // attachments → sessions (see the `Supervisor` struct's docs).
+        let lifecycle = self.lifecycle_locks.claim(session_id).await;
+        if !self.may_record() {
+            // A supervisor with no standing to write cannot open a launch
+            // generation, and launching without one is precisely the state
+            // item 2's ordering rule exists to make impossible.
+            return Err(RequestError::new(
+                ErrorKind::Internal,
+                "this supervisor is not recording session state (it does not hold the state \
+                 directory's claim, or it could not read this host's boot id), so it will not \
+                 relaunch a session it cannot durably account for",
+            )
+            .into());
+        }
+        // AWAITED, not single-flight-skipped like the list path's
+        // `capture_now`: a pass that is running right now may be about to
+        // commit an identity, and validating the mode against the offer as
+        // it stands BEFORE that commit is exactly the staleness this whole
+        // contract exists to exclude. A restart is a rare, user-initiated
+        // operation; waiting out one filesystem scan is free.
+        self.capture_sweep(true).await;
+        let entry = self.sessions.lock().await.get(session_id).cloned();
+        let Some(entry) = entry else {
+            return Err(RequestError::new(
+                ErrorKind::NotFound,
+                format!("no such session: {}", truncate_for_error(session_id)),
+            )
+            .into());
+        };
+        // Read from the STORE rather than the in-memory mirror: a restart
+        // resumes what SURVIVED (`session_snapshot`'s own docs), and the
+        // filled resume argv is built there from the durable identity.
+        let snapshot = self
+            .session_snapshot(session_id)
+            .await
+            .context("reading this session's durable snapshot for a restart")?;
+        let Some(snapshot) = snapshot else {
+            return Err(RequestError::new(
+                ErrorKind::NotFound,
+                format!("no such session: {}", truncate_for_error(session_id)),
+            )
+            .into());
+        };
+        let argv = relaunch_argv(mode, &snapshot, &entry.info.invocation)?;
+        ensure_cwd_usable(&entry.info.cwd).await?;
+        ensure_cwd_identity(&entry.info.cwd, snapshot.canonical_cwd.as_deref()).await?;
+
+        // Liveness as it is NOW, from the pane rather than from anything a
+        // client cached. A pane query that FAILS is not read as "not
+        // running": that would be the one direction that can kill nothing
+        // and relaunch beside a live agent.
+        let pane_state = match entry.terminal.as_ref() {
+            Some(terminal) => self
+                .tmux
+                .pane_process(&terminal.tmux_name, &terminal.pane)
+                .await
+                .context("rechecking whether this session's agent is still running")?,
+            None => None,
+        };
+        let alive_pane = pane_state.filter(|pane| !pane.dead);
+        // Captured BEFORE the kill, exactly as `StopSession` captures its
+        // own snapshot and for the same reason: an alternate-screen app's
+        // frame is gone the moment its process is, so the only chance to
+        // carry it into the relaunched terminal is now. Skipped entirely
+        // when nothing is alive to be on the alternate screen — the
+        // dead-pane case is handled by the relaunch plan itself, which can
+        // still read a retained alt grid off the dead pane.
+        let live_frame = match (entry.terminal.as_ref(), alive_pane) {
+            (Some(terminal), Some(_)) => {
+                capture_alt_screen_before_stop(self, session_id, terminal).await
+            }
+            _ => None,
+        };
+        if let Some(pane) = alive_pane {
+            if !stop_if_running {
+                return Err(RequestError::new(
+                    ErrorKind::Conflict,
+                    "this session's agent is still running; restarting it stops the agent and \
+                     its whole process tree first, so confirm stopping it and send the restart \
+                     again with that consent",
+                )
+                .into());
+            }
+            if let Err(failure) = stop_live_agent(self, session_id, &entry, Some(pane.pid)).await {
+                match failure {
+                    // The tree IS stopped and only the bookkeeping is
+                    // behind — and the outcome it failed to write is one
+                    // this restart is about to replace with a new
+                    // generation anyway. Proceeding is strictly better
+                    // than refusing a restart whose only casualty is a
+                    // record about to be overwritten.
+                    StopFailure::UnrecordedOutcome(e) => warn!(
+                        session = %session_id, error = %format!("{e:#}"),
+                        "could not record the stop that preceded this restart; the relaunch's \
+                         own generation replaces that record regardless"
+                    ),
+                    // Nothing was killed, or the sweep could not confirm
+                    // it: relaunching now would risk exactly the
+                    // "alongside, not after" the SPEC forbids.
+                    failure => {
+                        return Err(RequestError::new(
+                            ErrorKind::Internal,
+                            format!("not relaunching: {}", failure.message()),
+                        )
+                        .into());
+                    }
+                }
+            }
+        } else {
+            // SPEC.md: an agent exiting on its own does not trigger a hunt
+            // for daemonized survivors — the session's next restart does.
+            // This is that hunt, and it runs before the new launch rather
+            // than beside it.
+            kill_process_tree(None, session_id)
+                .await
+                .context("reaping the prior run's leftover descendants before relaunching")?;
+        }
+
+        // Everything from here on is destructive, and runs on a task this
+        // SUPERVISOR owns rather than the connection's. See
+        // `Supervisor::relaunch` for why cancellation must not reach it;
+        // awaiting the handle is itself cancellable, so a client that
+        // disconnects mid-restart loses only its reply.
+        let sup = Arc::clone(self);
+        let entry_for_task = Arc::clone(&entry);
+        let terminal_survives = pane_state.is_some();
+        let relaunch = tokio::spawn(async move {
+            // The claim MOVES into the task with the work it protects.
+            // Holding it in the caller instead would release it the moment
+            // a disconnecting client cancelled the await below — while
+            // this task ran on — and the next restart, stop, or delete
+            // would walk straight into the span this claim exists to keep
+            // them out of.
+            let _lifecycle = lifecycle;
+            sup.relaunch(
+                &entry_for_task,
+                &snapshot,
+                mode,
+                argv,
+                terminal_survives,
+                live_frame,
+            )
+            .await
+        });
+        match relaunch.await {
+            Ok(result) => result,
+            Err(join) => Err(anyhow::anyhow!(
+                "the relaunch task for session {} did not complete: {join}",
+                truncate_for_error(session_id)
+            )),
+        }
+    }
+
+    /// The destructive half of [`Supervisor::restart_session`]: open the
+    /// new launch generation, take the session off the map, relaunch, and
+    /// republish — or put everything back.
+    ///
+    /// ## Why this runs on a supervisor-owned task
+    ///
+    /// From the generation claim to the republication, this span leaves the
+    /// session in states nothing else can resolve: a durable `Launching`
+    /// row, no in-memory entry (so stop and delete answer `NotFound`), and
+    /// possibly a freshly spawned agent. The connection's request handlers
+    /// are tracked in a `JoinSet` that `handle_connection` ABORTS at
+    /// shutdown (`HANDLER_SHUTDOWN_TIMEOUT`), so a client that disconnects
+    /// at the wrong moment could otherwise cancel this mid-span and strand
+    /// exactly that state — an agent running under a session no longer in
+    /// the map, with the entry never restored. Spawning here means
+    /// cancellation can only ever reach the AWAIT in the caller, never the
+    /// work: the task holds its own `Arc<Supervisor>` and runs to
+    /// completion regardless of who is still listening.
+    ///
+    /// ## Restoring on failure
+    ///
+    /// A failure that is DEFINITIVE about having changed nothing outside
+    /// this process puts the previous run's outcome back
+    /// ([`SessionStore::abort_relaunch`]) — that is what makes item 4's
+    /// "only a successful restart clears the annotation" true rather than
+    /// merely intended. A failure that is AMBIGUOUS about a spawned agent
+    /// leaves the `Launching` row alone for reload to reconcile: restoring
+    /// "exited, stopped by user" over a session that may be running would
+    /// be a worse lie than an honest "unknown".
+    async fn relaunch(
+        self: &Arc<Self>,
+        entry: &Arc<SessionEntry>,
+        snapshot: &SessionSnapshot,
+        mode: RestartMode,
+        argv: Vec<String>,
+        terminal_survives: bool,
+        live_frame: Option<Vec<u8>>,
+    ) -> anyhow::Result<SessionInfo> {
+        let id = entry.info.id.clone();
+        // A relaunch that is not resuming a captured identity opens a FRESH
+        // capture window: `first_input_at` and the correlation verdict
+        // belong to one run, not to the session (see
+        // `SessionStore::begin_relaunch`). `Resume` keeps them, because
+        // reverifying the identity it is resuming is exactly what the
+        // capture pass must go on doing.
+        let reset_capture = mode != RestartMode::Resume;
+        let claim = self
+            .store
+            .begin_relaunch(
+                &id,
+                crate::store::OfferBasis {
+                    captured_conversation: snapshot.captured_conversation.clone(),
+                    capture_ambiguous: snapshot.capture_ambiguous,
+                },
+                reset_capture,
+            )
+            .await
+            .context("opening a new launch generation for this restart")?;
+        let claim = match claim {
+            crate::store::RelaunchDecision::Claimed(claim) => claim,
+            crate::store::RelaunchDecision::OfferChanged => {
+                return Err(RequestError::new(
+                    ErrorKind::Conflict,
+                    "this session's restart offer changed while the restart was being \
+                     prepared (its conversation identity was just captured, or its \
+                     correlation was just found ambiguous); nothing was relaunched — refresh \
+                     the session and re-present the offer",
+                )
+                .into());
+            }
+            crate::store::RelaunchDecision::Gone => {
+                return Err(RequestError::new(
+                    ErrorKind::Conflict,
+                    format!(
+                        "session {} was deleted while its restart was being prepared, so \
+                         nothing was relaunched",
+                        truncate_for_error(&id)
+                    ),
+                )
+                .into());
+            }
+        };
+        // Off the map for the duration. The LIFECYCLE CLAIM the caller
+        // holds is what actually keeps stop and delete out of this window
+        // — they queue behind it rather than seeing a missing entry — and
+        // this removal is the belt to that suspenders: nothing can install
+        // an attachment on, or tear down, a session whose terminal is
+        // being replaced. The visible cost is that a `ListSessions`
+        // landing inside this window omits the session entirely: accepted,
+        // because the window is a couple of tmux round trips long, and
+        // publishing an entry whose pane is mid-respawn would be worse
+        // than briefly publishing none.
+        self.sessions.lock().await.remove(&id);
+        // Whatever is attached is attached to the PREVIOUS run: the pane is
+        // about to be respawned under it (or replaced outright), so the
+        // client is told to reattach rather than left watching a stream
+        // whose meaning changed underneath it.
+        self.detach_for_restart(&id).await;
+        let relaunched = self
+            .relaunch_into_terminal(
+                entry,
+                claim.generation,
+                argv,
+                terminal_survives,
+                live_frame,
+                reset_capture,
+            )
+            .await;
+        match relaunched {
+            Ok(info) => Ok(info),
+            Err(failure) => {
+                if failure.definitive {
+                    // Nothing outside this process changed, so the previous
+                    // run's outcome is still the truth about this session —
+                    // annotation, exit code and all.
+                    match self
+                        .store
+                        .abort_relaunch(&id, claim.generation, &claim.prior)
+                        .await
+                    {
+                        Ok(_) => {
+                            *entry.outcome.lock().expect("outcome mutex poisoned") =
+                                claim.prior.outcome.clone();
+                        }
+                        Err(e) => warn!(
+                            session = %id, error = %format!("{e:#}"),
+                            "could not restore the outcome this failed restart replaced; the \
+                             session lists as unknown until it is restarted again"
+                        ),
+                    }
+                } else {
+                    // An agent may be running under the new generation.
+                    // `Launching` is the honest record for that, and reload
+                    // reconciles it against what it can actually find.
+                    *entry.outcome.lock().expect("outcome mutex poisoned") = LastOutcome::Launching;
+                }
+                // The entry goes back — with the generation it now has, so
+                // nothing published under it can write against a
+                // generation the store has moved past — UNLESS the session
+                // is gone, which is one of the ways a relaunch fails
+                // (a delete committed while this was in flight). Putting an
+                // entry back for a deleted row would resurrect the session
+                // in the list with nothing durable behind it, and every
+                // later operation on it would fail in a more confusing
+                // place than this one.
+                let still_exists = match self.store.session(&id).await {
+                    Ok(row) => row.is_some(),
+                    // Unknown is treated as "still there": losing a live
+                    // session from the map costs its terminal, its stop and
+                    // its delete, while keeping a doomed entry costs one
+                    // confusing row until the next reload.
+                    Err(e) => {
+                        warn!(
+                            session = %id, error = %format!("{e:#}"),
+                            "could not confirm whether this session still exists after a \
+                             failed restart; keeping its entry"
+                        );
+                        true
+                    }
+                };
+                if still_exists {
+                    self.sessions.lock().await.insert(
+                        id.clone(),
+                        relaunched_entry(
+                            entry,
+                            entry.info.clone(),
+                            entry.terminal.clone(),
+                            claim.generation,
+                            entry
+                                .outcome
+                                .lock()
+                                .expect("outcome mutex poisoned")
+                                .clone(),
+                            reset_capture,
+                        ),
+                    );
+                }
+                Err(failure.error)
+            }
+        }
+    }
+
+    /// The launch itself, once the generation is claimed and the session is
+    /// off the map: publish this launch's spec, hand it to tmux (into the
+    /// surviving pane, or a fresh session), confirm it durably, and
+    /// republish the entry.
+    ///
+    /// `terminal_survives` is the caller's own pane probe: `true` means the
+    /// pane still exists (alive or dead-but-retained) and the relaunch
+    /// respawns into it, keeping the prior run above in scrollback
+    /// (SPEC.md); `false` means the terminal is gone — an interrupted
+    /// session, or one whose tmux server died — and a fresh one is built.
+    ///
+    /// Every failure says whether it is DEFINITIVE (nothing outside this
+    /// process changed) so the caller knows whether the previous outcome
+    /// can be restored; see [`RelaunchFailure`].
+    #[allow(clippy::too_many_arguments)]
+    async fn relaunch_into_terminal(
+        &self,
+        entry: &SessionEntry,
+        generation: i64,
+        argv: Vec<String>,
+        terminal_survives: bool,
+        live_frame: Option<Vec<u8>>,
+        reset_capture: bool,
+    ) -> Result<SessionInfo, RelaunchFailure> {
+        let id = entry.info.id.clone();
+        let terminal = entry.terminal.as_ref();
+        let tmux_name = match terminal {
+            Some(terminal) => terminal.tmux_name.clone(),
+            // A session whose terminal did not survive keeps the tmux name
+            // its row was created with — read back rather than re-derived,
+            // because the name is part of the session's durable identity
+            // (create reservations reconcile against exactly this string)
+            // and a relaunch is the same session, not a new one.
+            None => match self.store.session(&id).await {
+                Ok(Some(row)) => row.tmux_name,
+                Ok(None) => {
+                    return Err(RelaunchFailure::definitive(anyhow::anyhow!(
+                        "session {} vanished between opening its launch generation and \
+                         relaunching it",
+                        truncate_for_error(&id)
+                    )));
+                }
+                Err(e) => {
+                    return Err(RelaunchFailure::definitive(
+                        e.context("reading this session's tmux name for a relaunch"),
+                    ));
+                }
+            },
+        };
+        // A snapshot stored for the PREVIOUS run must not survive into this
+        // one: `Attach`'s dead-pane replay would otherwise show the old
+        // run's last screen as if it were the new run's, the moment the new
+        // agent exits. Fail-closed for the same reason the launch artifacts
+        // are — a file this process could not remove is one a later replay
+        // will happily read.
+        if let Err(e) = remove_fail_closed(
+            &snapshot_path(&self.state_dir, &id),
+            "the previous run's alt-screen snapshot",
+        )
+        .await
+        {
+            return Err(RelaunchFailure::definitive(anyhow::anyhow!(
+                "not relaunching session {}: {e}",
+                truncate_for_error(&id)
+            )));
+        }
+        let reuse = terminal.filter(|_| terminal_survives);
+        if reuse.is_none() {
+            // The pane this session knew is gone, but a tmux session under
+            // its name can still exist (a pane killed on its own, a server
+            // this supervisor lost track of). `new-session` would refuse
+            // the duplicate name, so the husk is torn down first — this is
+            // the same "the terminal is gone" case delete would clean up,
+            // reached from the other direction.
+            if let Err(e) = self.tmux.kill_session(&tmux_name).await {
+                return Err(RelaunchFailure::definitive(e.context(
+                    "clearing this session's leftover tmux session before relaunching",
+                )));
+            }
+        }
+        // The prior run's last screen, for the cases tmux's own respawn
+        // cannot carry across (see `TmuxDriver::plan_pane_relaunch`). A
+        // frame captured before the kill wins over one read off the dead
+        // pane now: it is the same content, but taken while the app was
+        // still there to have it.
+        let plan = match reuse {
+            Some(terminal) => {
+                self.tmux
+                    .plan_pane_relaunch(
+                        &terminal.tmux_name,
+                        &terminal.pane,
+                        MAX_ALT_SCREEN_SNAPSHOT_BYTES,
+                    )
+                    .await
+            }
+            None => crate::tmux::PaneRelaunchPlan {
+                restore: None,
+                carry_over: None,
+            },
+        };
+        let preamble = live_frame.or(plan.carry_over);
+        let spawned = self
+            .spawn_agent(
+                &id,
+                generation,
+                &tmux_name,
+                argv,
+                &entry.info.cwd,
+                RELAUNCH_COLS,
+                RELAUNCH_ROWS,
+                reuse,
+                preamble,
+            )
+            .await;
+        // Restored whatever the spawn did: this window was shrunk by the
+        // plan above, and leaving it one row tall because the launch failed
+        // would be a second, unrelated injury.
+        if let Some((cols, rows)) = plan.restore
+            && let Err(e) = self.tmux.resize_window(&tmux_name, cols, rows).await
+        {
+            warn!(
+                session = %id, error = %format!("{e:#}"),
+                "could not restore this window's size after a relaunch; the next attach's \
+                 own resize will correct it"
+            );
+        }
+        let Spawned {
+            pane, spec_path, ..
+        } = match spawned {
+            Ok(spawned) => spawned,
+            Err(SpawnFailure::Spec(error)) => {
+                return Err(RelaunchFailure::definitive(
+                    error.context("publishing this restart's launch spec"),
+                ));
+            }
+            Err(SpawnFailure::Tmux { spec_path, error }) => {
+                return Err(self
+                    .unwind_failed_relaunch(&id, &tmux_name, reuse, &spec_path, error)
+                    .await);
+            }
+        };
+        // Launch confirmed: the pane exists, so the durable record moves
+        // from launching to running and gains the pane it could not know
+        // before — the same transition a create commits, for the same
+        // reason, and fenced on this launch's own generation so a racing
+        // observer cannot have moved it first.
+        let confirmed = self
+            .store
+            .transition(
+                &id,
+                generation,
+                Transition::ConfirmRunning { pane: pane.clone() },
+            )
+            .await;
+        let confirmed = match confirmed {
+            Ok(confirmed) => confirmed,
+            Err(e) => {
+                // The agent IS running and this process could not record
+                // it. Publishing the new terminal as `Launching` keeps the
+                // session reachable — attachable, stoppable, deletable —
+                // which is strictly better than reporting a failure that
+                // leaves an untracked agent behind; the next list or reload
+                // confirms what this write could not.
+                warn!(
+                    session = %id, error = %format!("{e:#}"),
+                    "could not confirm this relaunch durably; publishing it as launching so \
+                     the agent stays reachable"
+                );
+                self.publish_relaunched(
+                    entry,
+                    generation,
+                    Terminal {
+                        tmux_name: tmux_name.clone(),
+                        pane: pane.clone(),
+                    },
+                    LastOutcome::Launching,
+                    reset_capture,
+                )
+                .await;
+                return Err(RelaunchFailure::ambiguous(e.context(
+                    "confirming the relaunch in the database; the agent is running and the \
+                     session lists as unknown until the next observation",
+                )));
+            }
+        };
+        match confirmed {
+            Some(LastOutcome::Running) => {}
+            // The row is GONE: a delete resolved this session's entry
+            // before the removal above and committed while the relaunch was
+            // mid-flight. The delete wins — it was a deliberate action
+            // against a session that existed when it was issued — so this
+            // relaunch tears its own work back down rather than leaving an
+            // agent running with no row that knows about it.
+            None => {
+                let mut teardown = Vec::new();
+                if let Err(e) = kill_process_tree(None, &id).await {
+                    teardown.push(format!("the new agent's process tree ({e:#})"));
+                }
+                if let Err(e) = self.tmux.kill_session(&tmux_name).await {
+                    teardown.push(format!("its tmux session {tmux_name} ({e:#})"));
+                }
+                for (path, what) in [
+                    (&spec_path, "launch spec"),
+                    (
+                        &crate::launch::status_path_for_spec(&spec_path),
+                        "launch sentinel",
+                    ),
+                ] {
+                    if let Err(e) = remove_fail_closed(path, what).await {
+                        teardown.push(e);
+                    }
+                }
+                let message = if teardown.is_empty() {
+                    format!(
+                        "session {} was deleted while it was being relaunched, so the new \
+                         agent was torn back down",
+                        truncate_for_error(&id)
+                    )
+                } else {
+                    // Never "was torn back down" over a failure: a caller
+                    // reading that would believe nothing survives, and
+                    // something does.
+                    format!(
+                        "session {} was deleted while it was being relaunched, and the new \
+                         agent could NOT be fully torn back down: {}",
+                        truncate_for_error(&id),
+                        teardown.join("; ")
+                    )
+                };
+                return Err(RelaunchFailure::ambiguous(
+                    RequestError::new(ErrorKind::Conflict, message).into(),
+                ));
+            }
+            // Anything else means another writer moved this generation's
+            // outcome between the spawn and this line — a lost race rather
+            // than a success. Published as what actually committed, never
+            // as a fabricated `Running`.
+            Some(other) => {
+                warn!(
+                    session = %id, outcome = ?other,
+                    "this relaunch's confirmation lost a race; publishing what committed"
+                );
+                return Ok(self
+                    .publish_relaunched(
+                        entry,
+                        generation,
+                        Terminal {
+                            tmux_name: tmux_name.clone(),
+                            pane: pane.clone(),
+                        },
+                        other,
+                        reset_capture,
+                    )
+                    .await);
+            }
+        }
+
+        info!(session = %id, tmux = %tmux_name, %pane, reused = reuse.is_some(), "session restarted");
+        Ok(self
+            .publish_relaunched(
+                entry,
+                generation,
+                Terminal { tmux_name, pane },
+                LastOutcome::Running,
+                reset_capture,
+            )
+            .await)
+    }
+
+    /// Unwind a relaunch whose tmux command failed — but only once it is
+    /// established that the launch did NOT take.
+    ///
+    /// tmux failures are ambiguous in a way the spec write is not: a
+    /// respawn (or a `new-session`) can fail after tmux has already applied
+    /// it, so removing this launch's spec on the strength of the error
+    /// alone would leave a REAL agent running with the shim's own spec
+    /// deleted underneath it — which the shim then reports as a launch
+    /// failure, converting a live session into a fabricated exec error.
+    /// This probes first, exactly as the create path does, and only cleans
+    /// up on confirmed absence.
+    async fn unwind_failed_relaunch(
+        &self,
+        id: &str,
+        tmux_name: &str,
+        reuse: Option<&Terminal>,
+        spec_path: &Path,
+        error: anyhow::Error,
+    ) -> RelaunchFailure {
+        let error = error.context(format!(
+            "relaunching session {} in tmux",
+            truncate_for_error(id)
+        ));
+        // For a reused pane the question is "is a process running in it
+        // now"; for a fresh terminal it is "does the session exist". Either
+        // answer being unavailable is itself ambiguity.
+        let applied = match reuse {
+            Some(terminal) => self
+                .tmux
+                .pane_process(&terminal.tmux_name, &terminal.pane)
+                .await
+                .map(|pane| pane.is_some_and(|pane| !pane.dead)),
+            None => self.tmux.has_session(tmux_name).await,
+        };
+        match applied {
+            Ok(false) => {}
+            Ok(true) => {
+                return RelaunchFailure::ambiguous(error.context(
+                    "tmux reports a live process for this session despite the failure, so the \
+                     launch may have taken; it is kept as a launching record rather than \
+                     unwound",
+                ));
+            }
+            Err(probe) => {
+                return RelaunchFailure::ambiguous(error.context(format!(
+                    "could not determine whether the relaunch took ({probe:#}), so it is kept \
+                     as a launching record rather than unwound"
+                )));
+            }
+        }
+        // Confirmed absent: nothing is running under this launch, so its
+        // spec — which holds the agent's full command line, credentials
+        // included — must not be left for nothing to consume. A removal
+        // that itself fails is reported rather than swallowed; the file is
+        // this launch's only leftover, and silence about it is what turns
+        // hygiene into a leak.
+        let mut error = error;
+        if let Err(cleanup) = remove_fail_closed(spec_path, "the failed relaunch's spec").await {
+            error = error.context(cleanup);
+        }
+        // The marker sweep, not just tmux: a launch that got far enough to
+        // start the login shell can have left descendants even though tmux
+        // now reports nothing running.
+        if let Err(sweep) = kill_process_tree(None, id).await {
+            return RelaunchFailure::ambiguous(error.context(format!(
+                "and the failed launch's process tree could not be swept ({sweep:#})"
+            )));
+        }
+        RelaunchFailure::definitive(error)
+    }
+
+    /// Put a relaunched session back on the map under its NEW generation,
+    /// and build the reply that describes it.
+    ///
+    /// A new `SessionEntry` rather than a mutated one, which is the whole
+    /// mechanism behind [`SessionEntry::generation`]: anything still
+    /// holding the previous `Arc` is holding a description of the previous
+    /// run, and every durable write it attempts is fenced out by the
+    /// generation it carries.
+    async fn publish_relaunched(
+        &self,
+        entry: &SessionEntry,
+        generation: i64,
+        terminal: Terminal,
+        outcome: LastOutcome,
+        reset_capture: bool,
+    ) -> SessionInfo {
+        let restart_offer = if reset_capture {
+            // The new window has captured nothing yet, so the only offer
+            // this session can honestly make is what its snapshot alone
+            // supports — which is also how a stale ambiguity stops being
+            // reported the moment the relaunch clears it.
+            entry.snapshot.restart_offer(None)
+        } else {
+            entry.snapshot.restart_offer(
+                entry
+                    .capture
+                    .lock()
+                    .expect("capture mutex poisoned")
+                    .committed_conversation(),
+            )
+        };
+        let info = SessionInfo {
+            id: entry.info.id.clone(),
+            title: entry.info.title.clone(),
+            cwd: entry.info.cwd.clone(),
+            invocation: entry.info.invocation.clone(),
+            // Deliberately not a fabricated `Alive`: the pane exists, but
+            // whether the agent's own `exec` inside it succeeds is a
+            // separate question this reply cannot answer. `ListSessions`
+            // computes the real status, and the UI refreshes after a
+            // restart for exactly that reason.
+            status: SessionStatus::Unknown,
+            // Cleared with the new generation: the annotation described how
+            // the PREVIOUS run ended (item 4).
+            annotation: None,
+            restart_offer,
+        };
+        let published = relaunched_entry(
+            entry,
+            info.clone(),
+            Some(terminal),
+            generation,
+            outcome,
+            reset_capture,
+        );
+        self.sessions
+            .lock()
+            .await
+            .insert(entry.info.id.clone(), published);
+        info
+    }
+
+    /// Tear down whatever is attached to a session being relaunched,
+    /// telling the client why.
+    ///
+    /// A restart replaces the process behind the pane and can replace the
+    /// pane itself, so an attachment that survived it would either be
+    /// streaming a terminal whose meaning silently changed or, in the
+    /// fresh-terminal case, one that no longer exists at all. Detaching
+    /// both cases identically keeps the client's rule simple: after a
+    /// restart, reattach. The replay a reattach performs is also what puts
+    /// the reused pane's scrollback — the prior run's output — back on the
+    /// client's screen.
+    async fn detach_for_restart(&self, session_id: &str) {
+        let attachment = self.attachments.lock().await.remove(session_id);
+        let Some(ActiveAttach {
+            channel,
+            notify,
+            forwarder,
+            input: _input,
+            pause: _pause,
+        }) = attachment
+        else {
+            return;
+        };
+        // Aborted before the notice, exactly as the delete handler does, so
+        // the forwarder cannot race its own "terminal ended" detach against
+        // this truthful one.
+        forwarder.abort();
+        let _ = forwarder.await;
+        notify_detached(&notify, channel, "session restarted".to_string());
+    }
+
+    /// Publish one launch's spec and start its window command in tmux —
+    /// the side-effecting half of a launch, shared by create (PLAN_M3.md
+    /// items 2/6) and restart (item 9).
+    ///
+    /// Shared deliberately, and this is the seam that keeps a relaunch from
+    /// becoming a second, subtly different launch implementation: the spec
+    /// contents, its 0600 publication, the shim path, the login-shell
+    /// window command, and the tmux invocation are all decided in exactly
+    /// one place. A relaunch that built its own would be free to drift on
+    /// any of them — a missing session-id marker (silently breaking the
+    /// kill sweep), a different shell resolution (breaking SPEC.md's
+    /// environment contract), a spec written world-readable.
+    ///
+    /// `reuse` is the ONLY difference between the two callers: `None`
+    /// creates a fresh tmux session (create, and a restart whose terminal
+    /// is gone), `Some(pane)` respawns into an existing pane so the prior
+    /// run stays in scrollback (see [`TmuxDriver::relaunch_in_pane`]).
+    ///
+    /// Failures are classified rather than flattened, because the two
+    /// classes cannot be unwound the same way: a spec that never landed
+    /// proves nothing external happened, while a tmux failure is AMBIGUOUS
+    /// (the session can exist despite the error) and the caller must probe
+    /// before deciding anything. Both carry the spec path so a caller
+    /// unwinding can remove the credential-bearing file it left behind.
+    #[allow(clippy::too_many_arguments)]
+    async fn spawn_agent(
+        &self,
+        id: &str,
+        generation: i64,
+        tmux_name: &str,
+        argv: Vec<String>,
+        cwd: &str,
+        cols: u16,
+        rows: u16,
+        reuse: Option<&Terminal>,
+        preamble: Option<Vec<u8>>,
+    ) -> Result<Spawned, SpawnFailure> {
+        let spec_path = crate::launch::spec_path_for_launch(&self.state_dir, id, generation);
+        // Derived the SAME way the shim derives it from its own copy of
+        // `spec_path` (`launch::status_path_for_spec`) — never computed
+        // independently here — so the two sides can never disagree about
+        // where a launch failure gets recorded, including for the failure
+        // classes (missing/malformed spec) where the shim never gets to
+        // read this struct's own `status_file` field at all.
+        let status_path = crate::launch::status_path_for_spec(&spec_path);
+        let spec = LaunchSpec {
+            argv,
+            status_file: status_path.clone(),
+            // The kill machinery's environment-marker sweep (see
+            // `kill_process_tree`) is keyed on this exact value reaching
+            // the agent's process and everything it forks.
+            session_id: id.to_string(),
+            // Only ever set by a restart reusing a terminal whose visible
+            // frame tmux cannot carry across the respawn itself; see
+            // `LaunchSpec::preamble`.
+            preamble: preamble.unwrap_or_default(),
+        };
+        // Serialized before the write so the (practically impossible)
+        // encoding failure shares the write's rollback path rather than
+        // returning past it and stranding the launching row.
+        let spec_bytes = match serde_json::to_vec(&spec) {
+            Ok(bytes) => bytes,
+            Err(e) => {
+                return Err(SpawnFailure::Spec(
+                    anyhow::Error::new(e).context("encoding launch spec"),
+                ));
+            }
+        };
+        // 0600 from the first byte: the spec holds the full agent command
+        // line, which users do put credentials into (`--api-key ...`).
+        // Mode is set at open, not chmod-after-write — a write-then-chmod
+        // leaves a window where the default umask exposes the contents.
+        // A failed write cleans up too: a partial spec (disk full after
+        // create) would otherwise strand a credential prefix on disk
+        // until the next supervisor restart's sweep. The write PUBLISHES BY
+        // HARD LINK and therefore refuses to replace an existing file
+        // (`files::write_private_file_sync`) — which is exactly the check
+        // that makes generation-scoped naming load-bearing rather than
+        // cosmetic: every launch writes a path no launch has used before,
+        // so this can only fail on a genuine collision, never on a
+        // predecessor's leftovers.
+        if let Err(e) = crate::write_private_file(&spec_path, &spec_bytes).await {
+            return Err(SpawnFailure::Spec(
+                anyhow::Error::new(e).context("writing launch spec"),
+            ));
+        }
+
+        let shell = resolve_shell().await;
+        let cmd = window_command(&shell, &self.farhelm_exe, &spec_path);
+        let started = match reuse {
+            Some(terminal) => self
+                .tmux
+                .relaunch_in_pane(
+                    &terminal.tmux_name,
+                    &terminal.pane,
+                    cwd,
+                    &self.seams.launch_env,
+                    &cmd,
+                )
+                .await
+                .map(|()| terminal.pane.clone()),
+            None => self
+                .tmux
+                .create_session(tmux_name, cwd, cols, rows, &self.seams.launch_env, &cmd)
+                .await
+                .map_err(|e| e.context("creating the session's tmux session")),
+        };
+        match started {
+            Ok(pane) => Ok(Spawned {
+                pane,
+                spec_path,
+                status_path,
+            }),
+            Err(error) => Err(SpawnFailure::Tmux { spec_path, error }),
+        }
     }
 
     /// Drop the durable launching record for a create this process is
@@ -4938,7 +6435,15 @@ impl Supervisor {
         if !self.may_record() {
             return Ok(());
         }
-        if let Some(committed) = self.store.transition(session, transition).await? {
+        // Fenced on the entry's own generation: an observation made against
+        // a run a restart has since replaced describes something that is no
+        // longer true, and the store drops it rather than letting it land
+        // on the new run (see `SessionEntry::generation`).
+        if let Some(committed) = self
+            .store
+            .transition(session, entry.generation, transition)
+            .await?
+        {
             *entry.outcome.lock().expect("outcome mutex poisoned") = committed;
         }
         Ok(())
@@ -5469,7 +6974,11 @@ async fn persist_first_input(sup: &Supervisor, entry: &SessionEntry, at: i64) {
         );
         return;
     }
-    match sup.store.record_first_input(&entry.info.id, at).await {
+    match sup
+        .store
+        .record_first_input(&entry.info.id, entry.generation, at)
+        .await
+    {
         Ok(()) => {
             entry
                 .first_input
@@ -5855,7 +7364,7 @@ async fn commit_capture(
     }
     let committed = match sup
         .store
-        .record_captured_conversation(&entry.info.id, &conversation, &record)
+        .record_captured_conversation(&entry.info.id, entry.generation, &conversation, &record)
         .await
     {
         Ok(Some(committed)) => committed,
@@ -5934,7 +7443,11 @@ async fn persist_ambiguity(sup: &Supervisor, entry: &Arc<SessionEntry>) {
         );
         return;
     }
-    match sup.store.record_capture_ambiguous(&entry.info.id).await {
+    match sup
+        .store
+        .record_capture_ambiguous(&entry.info.id, entry.generation)
+        .await
+    {
         Ok(()) => {
             entry
                 .capture
@@ -7141,7 +8654,7 @@ async fn handle_control(
                 // ALREADY recorded as an inferred `Interrupted` or
                 // unannotated `Exited` — both are themselves only
                 // inferences a sentinel is defined to beat.
-                let mut observations: Vec<(String, Transition)> = Vec::new();
+                let mut observations: Vec<(String, i64, Transition)> = Vec::new();
                 // This pass's sentinel finds, id to detail — used both to
                 // gate post-commit file cleanup on the transition actually
                 // landing, and (`reply_status`, below) to surface the
@@ -7173,12 +8686,15 @@ async fn handle_control(
                     // cleanup that should have followed it. Harmless no-op
                     // once both files are gone.
                     if matches!(recorded, LastOutcome::Error { .. }) {
-                        cleanup_launch_artifacts(&sup.state_dir, &entry.info.id).await;
+                        cleanup_launch_artifacts(&sup.state_dir, &entry.info.id, entry.generation)
+                            .await;
                         continue;
                     }
 
                     if sentinel_could_still_apply(&recorded) && dead_or_absent {
-                        match read_launch_sentinel(&sup.state_dir, &entry.info.id).await {
+                        match read_launch_sentinel(&sup.state_dir, &entry.info.id, entry.generation)
+                            .await
+                        {
                             Ok(Some(detail)) => {
                                 sentinel_hits.insert(entry.info.id.clone(), detail.clone());
                                 // No pane to rediscover here (unlike
@@ -7191,6 +8707,7 @@ async fn handle_control(
                                 if sup.may_record() {
                                     observations.push((
                                         entry.info.id.clone(),
+                                        entry.generation,
                                         Transition::SentinelError { detail, pane: None },
                                     ));
                                 }
@@ -7234,7 +8751,11 @@ async fn handle_control(
                                 .filter(|state| state.session_name == terminal.tmux_name)
                         });
                         if let Some(transition) = observation(&recorded, live) {
-                            observations.push((entry.info.id.clone(), transition));
+                            observations.push((
+                                entry.info.id.clone(),
+                                entry.generation,
+                                transition,
+                            ));
                         }
                     }
                 }
@@ -7256,9 +8777,19 @@ async fn handle_control(
                             // leave them for the next pass to retry
                             // against, hence gating on `committed` here
                             // rather than on `sentinel_hits` alone).
-                            for id in sentinel_hits.keys() {
-                                if matches!(committed.get(id), Some(LastOutcome::Error { .. })) {
-                                    cleanup_launch_artifacts(&sup.state_dir, id).await;
+                            for entry in &entries {
+                                if sentinel_hits.contains_key(&entry.info.id)
+                                    && matches!(
+                                        committed.get(&entry.info.id),
+                                        Some(LastOutcome::Error { .. })
+                                    )
+                                {
+                                    cleanup_launch_artifacts(
+                                        &sup.state_dir,
+                                        &entry.info.id,
+                                        entry.generation,
+                                    )
+                                    .await;
                                 }
                             }
                         }
@@ -7326,6 +8857,13 @@ async fn handle_control(
             let tx = tx.clone();
             spawn_admitted(&sup.admission, tasks, async move {
                 let sup = sup2;
+                // This session's lifecycle claim, held for the whole stop —
+                // the intent, the sweep, and the outcome. Without it a
+                // restart running concurrently would have this sweep reap
+                // the agent IT just launched: the sweep is keyed on the
+                // session's environment marker, which the new run carries
+                // too. See `Supervisor::lifecycle_locks`.
+                let _lifecycle = sup.lifecycle_locks.claim(&session_id).await;
                 let entry = sup.sessions.lock().await.get(&session_id).cloned();
                 let Some(entry) = entry else {
                     send_reply(
@@ -7373,29 +8911,19 @@ async fn handle_control(
                     },
                     None => None,
                 };
-                // One "alive" check feeding BOTH the pid a tree-kill walks
-                // from and the decision to even attempt an alt-screen
-                // capture below, rather than two independent `!pane.dead`
+                // One "alive" check deciding BOTH which lifecycle this stop
+                // runs and whether an alt-screen capture is worth
+                // attempting, rather than two independent `!pane.dead`
                 // checks scattered across this handler. The stale pid a
-                // dead pane still reports is deliberately never read via
-                // either use of `alive_pane`; it may already be recycled.
+                // dead pane still reports is deliberately never read; it
+                // may already be recycled.
                 let alive_pane = pane_state.filter(|pane| !pane.dead);
-                let root_pid = alive_pane.map(|pane| pane.pid);
 
-                // The durable stop INTENT, before a single signal is sent
-                // (PLAN_M3.md item 4). `kill_process_tree` below runs for
-                // seconds — SIGTERM, a grace period, re-enumeration,
-                // SIGKILL — and a crash anywhere in there used to leave a
-                // session the next startup read as a plain exit, silently
-                // converting "the user stopped this" into "the agent
-                // finished on its own". With the intent recorded first,
-                // reload reconciles it: a dead pane means the stop landed
-                // (annotated exit), a live one means it never did (intent
-                // cleared), and a reboot straddling it interrupts like any
-                // other live session.
+                // What this stop records, and why the two branches differ.
                 //
-                // Only for a pane observed ALIVE: an agent that had
-                // already exited on its own is not something the user
+                // Only a pane observed ALIVE gets the stop lifecycle and
+                // its annotation: an agent that had already exited on its
+                // own is not something the user
                 // stopped, and claiming otherwise would credit them with
                 // an ending they had nothing to do with. That case records
                 // the plain exit instead — with whatever code the dead
@@ -7413,8 +8941,82 @@ async fn handle_control(
                 // classification the file already had evidence for.
                 // Checking here, before the write, is what keeps a stop
                 // from being the race that loses.
-                let stop_intent = if alive_pane.is_some() {
-                    Transition::StopRequested
+                //
+                // The alive path below is the stop lifecycle proper —
+                // durable intent, sweep, outcome — and it is shared
+                // verbatim with PLAN_M3.md item 9's restart, which stops a
+                // still-running agent before relaunching it
+                // (`stop_live_agent`). The dead-or-absent path is this
+                // handler's alone: it records a CLASSIFICATION rather than
+                // an intent, and has no annotation to write.
+                let stop_error = if let Some(pane) = alive_pane {
+                    // Capture the alt-screen snapshot (if any) BEFORE the
+                    // kill destroys it, but do NOT write it to disk yet —
+                    // see `publish_alt_screen_snapshot`'s docs for why
+                    // publishing waits until the kill's own outcome is
+                    // known. `capture_alt_screen_before_stop` itself
+                    // decides (atomically, in tmux) whether that pane is
+                    // really on the alternate screen.
+                    //
+                    // Deliberately taken before the durable intent too,
+                    // which is a change from when this handler owned the
+                    // whole lifecycle inline: the capture is a READ (one
+                    // tmux `capture-pane`) that signals nothing, so it
+                    // cannot violate the "nothing dies before the intent is
+                    // recorded" rule the intent exists to enforce — and
+                    // moving it out of the middle is what lets intent,
+                    // sweep, and outcome stay one shared unit.
+                    let pending_snapshot = match entry.terminal.as_ref() {
+                        Some(terminal) => {
+                            capture_alt_screen_before_stop(&sup, &session_id, terminal).await
+                        }
+                        None => None,
+                    };
+                    // Published into `Supervisor::pending_snapshots` (see
+                    // that field's own docs) BEFORE the kill runs:
+                    // `kill_process_tree` can take up to a couple of
+                    // seconds against an uncooperative tree, and tmux can
+                    // mark the pane dead well before that returns. Making
+                    // the capture visible to a concurrent `Attach` for this
+                    // whole window — not only after
+                    // `publish_alt_screen_snapshot` finally writes it to
+                    // disk — is what closes the "attach lands mid-stop,
+                    // sees a dead pane with nothing to show" gap. Cloned
+                    // rather than moved: this handler still needs its own
+                    // copy below regardless of what `Attach` does with the
+                    // map's copy concurrently.
+                    if let Some(bytes) = pending_snapshot.clone() {
+                        sup.pending_snapshots
+                            .lock()
+                            .await
+                            .insert(session_id.clone(), bytes);
+                    }
+                    let stopped = stop_live_agent(&sup, &session_id, &entry, Some(pane.pid)).await;
+                    // Published only for the two outcomes that leave the
+                    // agent provably dead. A stop whose intent never
+                    // recorded (nothing was killed) or whose sweep could
+                    // not be confirmed must never plant a snapshot file
+                    // that a later, unrelated exit's own dead-pane replay
+                    // could be mistaken for.
+                    if matches!(stopped, Ok(()) | Err(StopFailure::UnrecordedOutcome(_)))
+                        && let Some(bytes) = pending_snapshot
+                    {
+                        publish_alt_screen_snapshot(
+                            &sup,
+                            &session_id,
+                            &bytes,
+                            crate::files::RealFs,
+                        )
+                        .await;
+                    }
+                    // Removed only now, AFTER publish has run (or been
+                    // skipped because there was never anything to publish):
+                    // a concurrent `Attach` must be able to see this entry
+                    // for the entire capture-to-published-file window, not
+                    // just up to this point — see
+                    // `Supervisor::pending_snapshots`'s docs.
+                    sup.pending_snapshots.lock().await.remove(&session_id);
+                    stopped.err().map(|failure| failure.message())
                 } else {
                     let current = entry
                         .outcome
@@ -7422,11 +9024,11 @@ async fn handle_control(
                         .expect("outcome mutex poisoned")
                         .clone();
                     let sentinel = if sentinel_could_still_apply(&current) {
-                        read_launch_sentinel(&sup.state_dir, &session_id).await
+                        read_launch_sentinel(&sup.state_dir, &session_id, entry.generation).await
                     } else {
                         Ok(None)
                     };
-                    match sentinel {
+                    let classification = match sentinel {
                         Ok(Some(detail)) => Transition::SentinelError {
                             detail,
                             pane: entry.terminal.as_ref().map(|t| t.pane.clone()),
@@ -7463,142 +9065,64 @@ async fn handle_control(
                             .await;
                             return;
                         }
-                    }
-                };
-                if let Err(e) = sup.record(&session_id, &entry, stop_intent).await {
-                    // Recording the intent is part of the stop's contract,
-                    // not bookkeeping around it: proceeding to kill a tree
-                    // whose intent could not be stored is exactly the
-                    // crash window this write exists to close, and SPEC.md
-                    // requires the failure to surface rather than be
-                    // logged past.
-                    send_reply(
-                        &tx,
-                        &ControlMsg::Error {
-                            req_id,
-                            message: format!(
-                                "recording the stop failed, so nothing was killed: {e:#}"
-                            ),
-                            kind: ErrorKind::Internal,
-                        },
-                    )
-                    .await;
-                    return;
-                }
-                // Sentinel lifecycle: if the intent just recorded WAS a
-                // `SentinelError` and it committed, this stop is the
-                // moment that classification became durable — clean up
-                // both files right away rather than waiting for a later
-                // list or reload to notice (item 4/25 of the review-swarm
-                // fix batch; see `cleanup_launch_artifacts`'s own docs).
-                if matches!(
-                    &*entry.outcome.lock().expect("outcome mutex poisoned"),
-                    LastOutcome::Error { .. }
-                ) {
-                    cleanup_launch_artifacts(&sup.state_dir, &session_id).await;
-                }
-
-                // Capture the alt-screen snapshot (if any) BEFORE the kill
-                // destroys it, but do NOT write it to disk yet — see
-                // `publish_alt_screen_snapshot`'s docs for why publishing
-                // waits until the kill's own outcome is known. `alive_pane`
-                // being `Some` is what gates this to a pane actually worth
-                // querying at all; `capture_alt_screen_before_stop` itself
-                // decides (atomically, in tmux) whether that pane is really
-                // on the alternate screen.
-                let pending_snapshot = match (entry.terminal.as_ref(), alive_pane) {
-                    (Some(terminal), Some(_)) => {
-                        capture_alt_screen_before_stop(&sup, &session_id, terminal).await
-                    }
-                    _ => None,
-                };
-                // Published into `Supervisor::pending_snapshots` (see that
-                // field's own docs) BEFORE the kill runs: `kill_process_tree`
-                // can take up to a couple of seconds against an uncooperative
-                // tree, and tmux can mark the pane dead well before that
-                // returns. Making the capture visible to a concurrent
-                // `Attach` for this whole window — not only after
-                // `publish_alt_screen_snapshot` finally writes it to disk —
-                // is what closes the "attach lands mid-stop, sees a dead pane
-                // with nothing to show" gap. Cloned rather than moved: this
-                // handler still needs its own copy below regardless of what
-                // `Attach` does with the map's copy concurrently.
-                if let Some(bytes) = pending_snapshot.clone() {
-                    sup.pending_snapshots
-                        .lock()
-                        .await
-                        .insert(session_id.clone(), bytes);
-                }
-
-                let kill_result = kill_process_tree(root_pid, &session_id).await;
-                if let Err(e) = kill_result {
-                    // The sweep itself failed (not just "nothing was found
-                    // to kill") — this is not a false success. See
-                    // ControlMsg::StopSession's docs: an unknown id is the
-                    // only PRECONDITION failure; a sweep that could not
-                    // complete is reported the same honest way. Any captured
-                    // (but not yet written) snapshot bytes are simply dropped
-                    // here on the way out — including the pending-map entry
-                    // just inserted above, removed without ever being
-                    // published: a failed stop must never plant a snapshot
-                    // file a later, unrelated exit's own dead-pane replay
-                    // could be mistaken for.
-                    sup.pending_snapshots.lock().await.remove(&session_id);
-                    send_reply(
-                        &tx,
-                        &ControlMsg::Error {
-                            req_id,
-                            message: format!("{e:#}"),
-                            kind: ErrorKind::Internal,
-                        },
-                    )
-                    .await;
-                    return;
-                }
-                // The stop's OUTCOME, committed before the snapshot is
-                // published and before the reply is sent: the kill has
-                // already happened, so any crash from here on must find a
-                // record that says so. Publishing a snapshot first would
-                // put a cosmetic write ahead of the durability the stop
-                // promised.
-                //
-                // The exit code is re-queried rather than assumed. A
-                // killed process usually leaves tmux nothing to reduce to
-                // a plain code, but where it does, that code is worth
-                // keeping — and `pane_states`, not `pane_process`, is what
-                // carries `#{pane_dead_status}` at all. A failed query is
-                // logged rather than swallowed: it costs the code, not the
-                // annotation, and a later list can still enrich the record
-                // (the store's transitions are monotonic).
-                let mut stop_error = None;
-                if alive_pane.is_some() {
-                    let exit_code =
-                        dead_pane_exit_code(&sup, entry.terminal.as_ref(), &session_id).await;
-                    if let Err(e) = sup
-                        .record(&session_id, &entry, Transition::StopCompleted { exit_code })
-                        .await
-                    {
-                        // The process tree IS stopped; what failed is
-                        // recording it. Reported rather than logged
-                        // (SPEC.md surfaces every failure), and worded so
-                        // the caller knows the kill itself succeeded.
-                        stop_error = Some(format!(
-                            "the session was stopped, but recording that outcome failed, so it \
-                             may list as a plain exit: {e:#}"
-                        ));
-                    }
-                }
-
-                if let Some(bytes) = pending_snapshot {
-                    publish_alt_screen_snapshot(&sup, &session_id, &bytes, crate::files::RealFs)
+                    };
+                    if let Err(e) = sup.record(&session_id, &entry, classification).await {
+                        // Recording what this stop witnessed is part of its
+                        // contract, not bookkeeping around it, and SPEC.md
+                        // requires the failure to surface rather than be
+                        // logged past. Nothing has been killed at this
+                        // point either way.
+                        send_reply(
+                            &tx,
+                            &ControlMsg::Error {
+                                req_id,
+                                message: format!(
+                                    "recording the stop failed, so nothing was killed: {e:#}"
+                                ),
+                                kind: ErrorKind::Internal,
+                            },
+                        )
                         .await;
-                }
-                // Removed only now, AFTER publish has run (or been skipped
-                // because there was never anything to publish): a concurrent
-                // `Attach` must be able to see this entry for the entire
-                // capture-to-published-file window, not just up to this
-                // point — see `Supervisor::pending_snapshots`'s docs.
-                sup.pending_snapshots.lock().await.remove(&session_id);
+                        return;
+                    }
+                    // Sentinel lifecycle: if the classification just
+                    // recorded WAS a `SentinelError` and it committed, this
+                    // stop is the moment that classification became durable
+                    // — clean up both files right away rather than waiting
+                    // for a later list or reload to notice (item 4/25 of
+                    // the review-swarm fix batch; see
+                    // `cleanup_launch_artifacts`'s own docs).
+                    if matches!(
+                        &*entry.outcome.lock().expect("outcome mutex poisoned"),
+                        LastOutcome::Error { .. }
+                    ) {
+                        cleanup_launch_artifacts(&sup.state_dir, &session_id, entry.generation)
+                            .await;
+                    }
+                    // The marker sweep still runs with no live pid to walk
+                    // from: SPEC.md assigns reaping a PAST run's leftover
+                    // descendants to the session's next stop or delete, and
+                    // once there is no live pane the environment-marker
+                    // scan is the only mechanism that can still find one.
+                    if let Err(e) = kill_process_tree(None, &session_id).await {
+                        // The sweep itself failed (not just "nothing was
+                        // found to kill") — this is not a false success.
+                        // See `ControlMsg::StopSession`'s docs: a caller
+                        // must be able to tell "nothing was running" from
+                        // "the sweep could not confirm nothing is running".
+                        send_reply(
+                            &tx,
+                            &ControlMsg::Error {
+                                req_id,
+                                message: format!("{e:#}"),
+                                kind: ErrorKind::Internal,
+                            },
+                        )
+                        .await;
+                        return;
+                    }
+                    None
+                };
 
                 // Deliberately untouched: the DB row, the sessions map, and
                 // any live attachment. The pane survives (remain-on-exit),
@@ -7639,6 +9163,13 @@ async fn handle_control(
             let tx = tx.clone();
             spawn_admitted(&sup.admission, tasks, async move {
                 let sup = sup2;
+                // Same claim the stop and restart paths take, and the
+                // reason delete-vs-restart resolves to one winner: without
+                // it, a delete can tear down the tmux session a restart is
+                // mid-way through respawning into, leaving the loser to
+                // report a half-finished teardown rather than an honest
+                // "it was deleted". See `Supervisor::lifecycle_locks`.
+                let _lifecycle = sup.lifecycle_locks.claim(&session_id).await;
                 let entry = sup.sessions.lock().await.get(&session_id).cloned();
                 let Some(entry) = entry else {
                     send_reply(
@@ -7766,17 +9297,18 @@ async fn handle_control(
                             .await
                             .map_err(|e| format!("killing tmux session: {e:#}"))?;
                     }
-                    let launch_dir = sup.state_dir.join("launch");
-                    remove_fail_closed(
-                        &launch_dir.join(format!("{session_id}.json")),
-                        "launch spec",
-                    )
-                    .await?;
-                    remove_fail_closed(
-                        &launch_dir.join(format!("{session_id}.status")),
-                        "launch status file",
-                    )
-                    .await?;
+                    // EVERY generation's launch files, not just the current
+                    // one: they are named per launch now
+                    // (`launch::spec_path_for_launch`), and a session that
+                    // was restarted has one pair per launch it ever had.
+                    // Delete is the last moment anything comes back for
+                    // them, and a spec holds the agent's full command line
+                    // — credentials included — so a missed generation is a
+                    // credential leak, not untidiness. Fail-closed for that
+                    // reason (`remove_fail_closed`), including the failure
+                    // to LIST them: an unreadable directory is not evidence
+                    // there was nothing in it.
+                    remove_launch_artifacts_for_session(&sup.state_dir, &session_id).await?;
                     // Same fail-closed treatment as the launch artifacts
                     // above and for the same reason: the snapshot can hold
                     // secrets an agent echoed to an alt-screen app, and
@@ -7912,6 +9444,30 @@ async fn handle_control(
             // winner the *last* attach rather than whichever client's
             // tmux calls happened to finish last.
             let mut attachments = sup.attachments.lock().await;
+
+            // Revalidate the entry this attach resolved BEFORE installing
+            // anything on it (fix-batch item 6). The lookup above released
+            // the `sessions` lock, and a restart landing in that window
+            // replaces the entry (and respawns, or replaces, its pane) —
+            // so an attachment installed from the stale entry would be
+            // wired to the NEW run's terminal while nothing in this arm
+            // ever checked that the user may drive it. Comparing the entry
+            // POINTER (not just the generation) also covers the case where
+            // the session was deleted and something else took its id.
+            let current = sup.sessions.lock().await.get(&session_id).cloned();
+            if !current.is_some_and(|current| Arc::ptr_eq(&current, &entry)) {
+                drop(attachments);
+                permit.send(reply_frame(&ControlMsg::Error {
+                    req_id,
+                    message: format!(
+                        "session {} changed while this attach was being set up (it was \
+                         restarted or deleted); attach again",
+                        truncate_for_error(&session_id)
+                    ),
+                    kind: ErrorKind::Conflict,
+                }));
+                return;
+            }
 
             if let Some(old) = attachments.remove(&session_id) {
                 old.forwarder.abort();
@@ -8124,25 +9680,46 @@ async fn handle_control(
             // A second hello is a protocol violation; ignore rather than
             // kill the connection over it.
         }
-        // TEMPORARY, until PLAN_M3.md item 9 lands the real handler:
-        // `RestartSession` carries a `req_id` a caller is genuinely
-        // blocked on (unlike the fire-and-forget `PauseOutput`/
-        // `ResumeOutput` vocabulary-only precedent), so falling through
-        // to the generic "unexpected control message" catch-all below
-        // would silently hang every v5 caller that sends one on this
-        // build forever. An explicit, honestly-labeled `Error` reply is
-        // the minimal truthful behavior a vocabulary-only PR can give it;
-        // item 9 replaces this arm with the real restart sequence and
-        // this comment (and the temporary message text) go with it.
-        ControlMsg::RestartSession { req_id, .. } => {
-            send_reply(
-                tx,
-                &ControlMsg::Error {
-                    req_id,
-                    message: "restart not implemented in this build".to_string(),
-                    kind: ErrorKind::Internal,
-                },
-            )
+        ControlMsg::RestartSession {
+            req_id,
+            session_id,
+            mode,
+            stop_if_running,
+        } => {
+            // Spawned for the same reason `StopSession` is: a restart that
+            // has to stop a live agent first runs that handler's whole kill
+            // sweep — a grace period plus repeated `/proc` walks, real
+            // wall-clock seconds — and awaiting it inline would stall every
+            // other session's attach, input, and list behind this one
+            // request. Safe for the same reasons too: this arm resolves the
+            // session through the same lock-guarded map clone, and it never
+            // touches `input_routes` (connection-local state a spawned task
+            // must not see). Tracked and admitted exactly like the other
+            // slow handlers — see `HANDLER_ADMISSION_PERMITS`.
+            let sup2 = Arc::clone(sup);
+            let tx = tx.clone();
+            spawn_admitted(&sup.admission, tasks, async move {
+                let sup = sup2;
+                match sup
+                    .restart_session(&session_id, mode, stop_if_running)
+                    .await
+                {
+                    Ok(session) => {
+                        send_reply(&tx, &ControlMsg::SessionRestarted { req_id, session }).await;
+                    }
+                    Err(e) => {
+                        send_reply(
+                            &tx,
+                            &ControlMsg::Error {
+                                req_id,
+                                message: format!("{e:#}"),
+                                kind: error_kind(&e),
+                            },
+                        )
+                        .await;
+                    }
+                }
+            })
             .await;
         }
         // Response/event messages arriving at the supervisor are peer
@@ -8173,6 +9750,164 @@ pub async fn connect(state_dir: &Path) -> anyhow::Result<UnixStream> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A snapshot shaped exactly as `session_snapshot` would build one for
+    /// a session with `offer` — used by the mode/offer matrix below, which
+    /// is about the PAIRING rules rather than about how an offer is
+    /// derived (`IntegrationSnapshot::restart_offer` owns that, and its own
+    /// tests cover it).
+    fn snapshot_offering(offer: RestartOffer) -> SessionSnapshot {
+        let (kind, resume_template, captured_conversation, resume_argv) = match offer {
+            RestartOffer::FreshOnly => (AgentKind::Generic, None, None, None),
+            RestartOffer::Resume => (
+                AgentKind::Claude,
+                Some(vec![
+                    "claude".to_string(),
+                    "--resume".to_string(),
+                    "{conversation}".to_string(),
+                ]),
+                Some("conv-1".to_string()),
+                Some(vec![
+                    "claude".to_string(),
+                    "--resume".to_string(),
+                    "conv-1".to_string(),
+                ]),
+            ),
+            RestartOffer::FallbackTemplate => (
+                AgentKind::Generic,
+                Some(vec!["agent".to_string(), "--continue".to_string()]),
+                None,
+                None,
+            ),
+        };
+        SessionSnapshot {
+            kind,
+            resume_template,
+            captured_conversation,
+            restart_offer: offer,
+            resume_argv,
+            first_input_at: None,
+            capture_ambiguous: false,
+            canonical_cwd: None,
+        }
+    }
+
+    /// The whole mode/offer matrix, in one place: exactly one mode is legal
+    /// per offer, and every other pairing is a `Conflict` rather than a
+    /// best-effort substitution.
+    ///
+    /// The diagonal matters as much as the off-diagonal. `Fresh` against a
+    /// `Resume` offer is the one a well-meaning client is most likely to
+    /// send ("the user just wants a restart"), and SPEC.md is explicit that
+    /// v1 has no such downgrade — for a clean conversation you create a new
+    /// session. `Resume` against `FreshOnly` is the mirror image and the
+    /// more dangerous one: honoring it could only mean running a
+    /// `{conversation}` template with nothing to fill it.
+    #[test]
+    fn each_restart_offer_accepts_exactly_one_mode() {
+        for offer in [
+            RestartOffer::FreshOnly,
+            RestartOffer::Resume,
+            RestartOffer::FallbackTemplate,
+        ] {
+            let snapshot = snapshot_offering(offer);
+            for mode in [
+                RestartMode::Fresh,
+                RestartMode::Resume,
+                RestartMode::FallbackTemplate,
+            ] {
+                let result = relaunch_argv(mode, &snapshot, "agent --flag");
+                let legal = matches!(
+                    (offer, mode),
+                    (RestartOffer::FreshOnly, RestartMode::Fresh)
+                        | (RestartOffer::Resume, RestartMode::Resume)
+                        | (
+                            RestartOffer::FallbackTemplate,
+                            RestartMode::FallbackTemplate
+                        )
+                );
+                match result {
+                    Ok(argv) => assert!(
+                        legal,
+                        "mode {mode:?} must not be accepted for offer {offer:?}, got {argv:?}"
+                    ),
+                    Err(e) => {
+                        assert!(
+                            !legal,
+                            "mode {mode:?} must be accepted for offer {offer:?}: {e:#}"
+                        );
+                        assert_eq!(
+                            error_kind(&e),
+                            ErrorKind::Conflict,
+                            "a mismatched mode is a staleness conflict, not a bad request"
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    /// The refusal has to NAME the current offer, because the client's
+    /// prescribed response is to refresh and re-present it (the wire
+    /// vocabulary's staleness contract) — an unqualified "conflict" would
+    /// leave it with nothing to show the user.
+    #[test]
+    fn a_mismatched_mode_names_the_current_offer() {
+        let err = relaunch_argv(
+            RestartMode::Fresh,
+            &snapshot_offering(RestartOffer::Resume),
+            "agent",
+        )
+        .expect_err("fresh is not legal against a resume offer");
+        let message = format!("{err:#}");
+        assert!(
+            message.contains("resum"),
+            "the refusal must name the current offer: {message}"
+        );
+    }
+
+    /// Command construction per mode, including the property the whole
+    /// resume promise rests on: the conversation id arrives in its OWN argv
+    /// element, substituted rather than spliced, and no placeholder ever
+    /// survives into something that gets executed.
+    #[test]
+    fn each_mode_builds_its_own_command() {
+        let resumed = relaunch_argv(
+            RestartMode::Resume,
+            &snapshot_offering(RestartOffer::Resume),
+            "claude --dangerously-skip-permissions",
+        )
+        .expect("resume is legal against a resume offer");
+        assert_eq!(resumed, vec!["claude", "--resume", "conv-1"]);
+        assert!(
+            !resumed.iter().any(|e| e.contains("{conversation}")),
+            "a placeholder must never reach a command line: {resumed:?}"
+        );
+
+        let fallback = relaunch_argv(
+            RestartMode::FallbackTemplate,
+            &snapshot_offering(RestartOffer::FallbackTemplate),
+            "agent --launch-only",
+        )
+        .expect("the fallback template is legal against its own offer");
+        assert_eq!(
+            fallback,
+            vec!["agent", "--continue"],
+            "the configured template runs verbatim, never the launch invocation"
+        );
+
+        let fresh = relaunch_argv(
+            RestartMode::Fresh,
+            &snapshot_offering(RestartOffer::FreshOnly),
+            "agent 'one arg' --flag",
+        )
+        .expect("fresh is legal against a fresh-only offer");
+        assert_eq!(
+            fresh,
+            vec!["agent", "one arg", "--flag"],
+            "a fresh relaunch re-parses the session's own invocation, quoting included"
+        );
+    }
 
     /// The common case: an id well under the cap is echoed verbatim, with
     /// no allocation (`Cow::Borrowed`) and no trailing ellipsis.
@@ -8275,6 +10010,7 @@ mod tests {
                     durable: true,
                 }),
                 capture: std::sync::Mutex::new(CaptureState::Unclaimed),
+                generation: 0,
             }),
         );
 
@@ -8301,27 +10037,68 @@ mod tests {
         let launch_dir = tmp.path().join("launch");
         std::fs::create_dir(&launch_dir).unwrap();
         std::fs::write(
-            launch_dir.join("abc.status"),
+            launch_dir.join("abc.0.status"),
             b"exec_failed argv0=x errno=2",
         )
         .unwrap();
-        std::fs::write(launch_dir.join("orphan.json"), b"{}").unwrap();
-        std::fs::write(launch_dir.join(".orphan.json.tmp-deadbeef"), b"partial").unwrap();
+        std::fs::write(launch_dir.join("orphan.0.json"), b"{}").unwrap();
+        // A LATER generation of a session that still exists: this sweep
+        // asks about session ownership, never about which launch is
+        // current, so a live session's files survive whatever their
+        // generation (the restart that supersedes them cleans up its own
+        // predecessor).
+        std::fs::write(launch_dir.join("live.3.json"), b"{}").unwrap();
+        std::fs::write(launch_dir.join(".orphan.0.json.tmp-deadbeef"), b"partial").unwrap();
+        // Unrecognized names are never this sweep's to remove.
+        std::fs::write(launch_dir.join("not-ours"), b"?").unwrap();
 
-        sweep_launch_dir(&launch_dir, &std::collections::HashSet::new()).await;
+        let live: std::collections::HashSet<String> = ["live".to_string()].into_iter().collect();
+        sweep_launch_dir(&launch_dir, &live).await;
 
         assert!(
-            launch_dir.join("abc.status").exists(),
+            launch_dir.join("abc.0.status").exists(),
             "a sentinel must never be removed by this sweep, regardless of session ownership"
         );
         assert!(
-            !launch_dir.join("orphan.json").exists(),
+            !launch_dir.join("orphan.0.json").exists(),
             "a spec whose session id owns nothing in `sessions` must be removed"
         );
         assert!(
-            !launch_dir.join(".orphan.json.tmp-deadbeef").exists(),
+            launch_dir.join("live.3.json").exists(),
+            "a live session's spec survives, whichever generation named it"
+        );
+        assert!(
+            !launch_dir.join(".orphan.0.json.tmp-deadbeef").exists(),
             "a staged temp file must always be removed"
         );
+        assert!(
+            launch_dir.join("not-ours").exists(),
+            "an unrecognized file is not this sweep's to delete"
+        );
+    }
+
+    /// The name parser the sweep depends on, pinned directly: session ids
+    /// are UUIDs (no dots), so splitting the last two dot-separated
+    /// components apart is unambiguous — and anything that does not parse
+    /// must come back `None` rather than being guessed at, since the sweep
+    /// deletes what it recognizes.
+    #[test]
+    fn launch_file_names_round_trip_through_the_parser() {
+        let state = std::path::Path::new("/state");
+        let spec = crate::launch::spec_path_for_launch(state, "sess-1", 7);
+        let status = crate::launch::status_path_for_spec(&spec);
+        for path in [&spec, &status] {
+            let name = path.file_name().unwrap().to_string_lossy();
+            assert_eq!(
+                crate::launch::parse_launch_file_name(&name),
+                Some(("sess-1", 7)),
+                "{name} must parse back into the launch that produced it"
+            );
+        }
+        assert_eq!(crate::launch::parse_launch_file_name("sess-1.json"), None);
+        assert_eq!(crate::launch::parse_launch_file_name("sess-1.x.json"), None);
+        assert_eq!(crate::launch::parse_launch_file_name("tmux.conf"), None);
+        assert_eq!(crate::launch::parse_launch_file_name(".0.json"), None);
     }
 
     /// Item 22's restart race: a spec whose session id IS still present
@@ -8594,8 +10371,8 @@ mod tests {
     /// `unreachable!`-on-unknown-variant match, so proving it accepts the
     /// new variant here — rather than only via the round-trip tests in
     /// farhelm-proto — is what would catch a future refactor that forgets
-    /// this arm and reintroduces the panic for a message `handle_control`'s
-    /// temporary `RestartSession` arm actually sends today.
+    /// this arm and reintroduces the panic for a message the
+    /// `RestartSession` handler sends on every successful restart.
     #[test]
     fn reply_frame_accepts_session_restarted() {
         let msg = ControlMsg::SessionRestarted {
@@ -8613,15 +10390,19 @@ mod tests {
         assert_eq!(reply_frame(&msg), Frame::control(&msg));
     }
 
-    /// PLAN_M3 review batch item 4: `RestartSession` has a `req_id` a
-    /// caller genuinely blocks on, so this build must answer it with an
-    /// honest `Error` rather than silently falling into the generic
-    /// unknown-message catch-all (which would hang a v5 caller forever —
-    /// unlike `PauseOutput`/`ResumeOutput`'s fire-and-forget precedent, a
-    /// dropped reply here is a real bug, not a no-op). This is temporary
-    /// scaffolding removed once PLAN_M3.md item 9 lands the real handler.
+    /// `RestartSession` carries a `req_id` a caller genuinely blocks on
+    /// (unlike `PauseOutput`/`ResumeOutput`'s fire-and-forget precedent),
+    /// so every request must produce a correlated reply — including the
+    /// ones that fail. An unknown session is the cheapest such failure to
+    /// drive end to end, and the one whose classification a client acts on
+    /// differently (a 404 rather than a retryable error).
+    ///
+    /// The reply is awaited via the handler's own `JoinSet` rather than
+    /// read immediately: this arm is spawned (a restart can run a
+    /// multi-second kill sweep), so a `try_recv` straight after the call
+    /// would race the task rather than test it.
     #[tokio::test]
-    async fn restart_session_replies_with_a_temporary_not_implemented_error() {
+    async fn restart_of_an_unknown_session_replies_not_found() {
         let state = tempfile::tempdir().expect("state dir");
         let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
             .await
@@ -8634,7 +10415,7 @@ mod tests {
             &sup,
             ControlMsg::RestartSession {
                 req_id: 5,
-                session_id: "does-not-matter".to_string(),
+                session_id: "no-such-session".to_string(),
                 mode: farhelm_proto::RestartMode::Fresh,
                 stop_if_running: false,
             },
@@ -8643,17 +10424,24 @@ mod tests {
             &mut tasks,
         )
         .await;
+        while tasks.join_next().await.is_some() {}
 
         let reply = rx.try_recv().expect("a reply must have been sent");
         let decoded: ControlMsg = serde_json::from_slice(&reply.body).unwrap();
-        assert!(matches!(
-            decoded,
-            ControlMsg::Error {
-                req_id: 5,
-                kind: ErrorKind::Internal,
-                ..
-            }
-        ));
+        let ControlMsg::Error {
+            req_id,
+            kind,
+            message,
+        } = decoded
+        else {
+            panic!("expected an Error reply, got {decoded:?}");
+        };
+        assert_eq!(req_id, 5);
+        assert_eq!(kind, ErrorKind::NotFound);
+        assert!(
+            message.contains("no-such-session"),
+            "the refusal names what was not found: {message}"
+        );
     }
 
     /// `reply_frame` panics on a message with no `req_id` to correlate an
@@ -8708,6 +10496,7 @@ mod tests {
                 durable: true,
             }),
             capture: std::sync::Mutex::new(CaptureState::Unclaimed),
+            generation: 0,
         }
     }
 
@@ -8932,7 +10721,7 @@ mod tests {
         for (name, command) in [("fh-live", "sleep 300"), ("fh-dead", "exit 7")] {
             let argv = ["sh".to_string(), "-c".to_string(), command.to_string()];
             sup.tmux
-                .create_session(name, "/tmp", 80, 24, &argv)
+                .create_session(name, "/tmp", 80, 24, &[], &argv)
                 .await
                 .expect("create a tmux session directly");
         }
@@ -8954,6 +10743,7 @@ mod tests {
                         captured_record: None,
                         capture_ambiguous: false,
                         first_input_at: None,
+                        generation: 0,
                     },
                     None,
                 )
@@ -9048,7 +10838,7 @@ mod tests {
             let argv = ["sh".to_string(), "-c".to_string(), command.to_string()];
             let pane = sup
                 .tmux
-                .create_session(&tmux_name, "/tmp", 80, 24, &argv)
+                .create_session(&tmux_name, "/tmp", 80, 24, &[], &argv)
                 .await
                 .expect("create a tmux session directly");
             sup.store
@@ -9068,6 +10858,7 @@ mod tests {
                         captured_record: None,
                         capture_ambiguous: false,
                         first_input_at: None,
+                        generation: 0,
                     },
                     None,
                 )
@@ -9077,7 +10868,7 @@ mod tests {
             // real interrupted stop leaves behind rather than a hand-made
             // approximation of it.
             sup.store
-                .transition(id, Transition::StopRequested)
+                .transition(id, 0, Transition::StopRequested)
                 .await
                 .expect("record the intent");
             panes.insert(id, pane);
@@ -9165,6 +10956,7 @@ mod tests {
                     captured_record: None,
                     capture_ambiguous: false,
                     first_input_at: None,
+                    generation: 0,
                 },
                 None,
             )
@@ -9243,6 +11035,7 @@ mod tests {
                     captured_record: None,
                     capture_ambiguous: false,
                     first_input_at: None,
+                    generation: 0,
                 },
                 None,
             )
@@ -9313,6 +11106,7 @@ mod tests {
                     captured_record: None,
                     capture_ambiguous: false,
                     first_input_at: None,
+                    generation: 0,
                 },
                 None,
             )
@@ -9858,14 +11652,14 @@ mod tests {
     ///
     /// All three are load-bearing and none is visible from the outside: a
     /// lock that did not exclude would let two creates gather evidence
-    /// about each other's in-flight launch (see [`IntentLocks`] for why
+    /// about each other's in-flight launch (see [`KeyedLocks`] for why
     /// that specific ambiguity is what it exists to remove), one that
     /// pruned too eagerly would hand a waiter a DIFFERENT mutex for the
     /// same key, and one that never pruned would grow a map entry per key
     /// this process has ever seen.
     #[tokio::test]
     async fn intent_locks_exclude_hand_off_and_prune() {
-        let locks = Arc::new(IntentLocks::default());
+        let locks = Arc::new(KeyedLocks::default());
         let first = locks.claim("key").await;
         assert_eq!(locks.locks.lock().unwrap().len(), 1);
 
@@ -10162,6 +11956,7 @@ mod tests {
                     captured_record: None,
                     capture_ambiguous: false,
                     first_input_at: None,
+                    generation: 0,
                 },
                 Some(IntentClaim {
                     intent_key: "key".to_string(),
@@ -10236,6 +12031,7 @@ mod tests {
                     captured_record: None,
                     capture_ambiguous: false,
                     first_input_at: None,
+                    generation: 0,
                 },
                 Some(IntentClaim {
                     intent_key: "key".to_string(),
@@ -10245,7 +12041,7 @@ mod tests {
             .await
             .expect("seed a pending reservation");
         sup.store
-            .transition("ended", Transition::ObservedExit { exit_code: Some(1) })
+            .transition("ended", 0, Transition::ObservedExit { exit_code: Some(1) })
             .await
             .expect("the session ran and finished");
 
@@ -10581,6 +12377,7 @@ mod tests {
                     captured_record: None,
                     capture_ambiguous: false,
                     first_input_at: None,
+                    generation: 0,
                 },
                 Some(IntentClaim {
                     intent_key: "key".to_string(),
@@ -10589,7 +12386,7 @@ mod tests {
             )
             .await
             .expect("seed a pending reservation");
-        let spec = crate::launch::spec_path_for_session(state.path(), "stranded");
+        let spec = crate::launch::spec_path_for_launch(state.path(), "stranded", 0);
         std::fs::create_dir(crate::launch::status_path_for_spec(&spec))
             .expect("plant an unreadable sentinel");
 
@@ -10662,6 +12459,7 @@ mod tests {
                     captured_record: None,
                     capture_ambiguous: false,
                     first_input_at: None,
+                    generation: 0,
                 },
                 Some(IntentClaim {
                     intent_key: "key".to_string(),
@@ -10673,7 +12471,7 @@ mod tests {
         // A leftover spec (but no sentinel — a sentinel would itself be
         // evidence the launch happened) in a directory that refuses
         // unlinking.
-        let spec = crate::launch::spec_path_for_session(state.path(), "stranded");
+        let spec = crate::launch::spec_path_for_launch(state.path(), "stranded", 0);
         std::fs::write(&spec, b"{}").expect("plant a leftover spec");
         {
             use std::os::unix::fs::PermissionsExt;
@@ -10858,6 +12656,7 @@ mod tests {
                     durable: true,
                 }),
                 capture: std::sync::Mutex::new(CaptureState::Unclaimed),
+                generation: 0,
             }),
         );
 
@@ -10988,6 +12787,7 @@ mod tests {
                             durable: true,
                         }),
                         capture: std::sync::Mutex::new(CaptureState::Unclaimed),
+                        generation: 0,
                     }),
                 );
             }
@@ -11087,6 +12887,7 @@ mod tests {
                     durable: true,
                 }),
                 capture: std::sync::Mutex::new(CaptureState::Unclaimed),
+                generation: 0,
             }),
         );
 

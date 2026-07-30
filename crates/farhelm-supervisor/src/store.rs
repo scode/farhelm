@@ -83,7 +83,7 @@ const BUSY_TIMEOUT: Duration = Duration::from_secs(5);
 /// step in `apply_schema`: version 2 (PLAN_M3.md item 2 — the durable
 /// last-known outcome and the boot id) is the first real migration this
 /// database has ever had, and the template every later one follows.
-const SCHEMA_VERSION: i64 = 4;
+const SCHEMA_VERSION: i64 = 5;
 
 /// The sole row id of [`supervisor_meta`](apply_schema) — the table is
 /// single-row by construction (a `CHECK` on this value), so every read and
@@ -642,6 +642,57 @@ pub enum RetryClaim {
     Launched,
 }
 
+/// The mutable inputs to a session's restart offer, as the caller read
+/// them when it validated the requested mode — the condition
+/// [`SessionStore::begin_relaunch`] claims under.
+///
+/// Only these two, and that is a claim worth stating: kind and resume
+/// template are immutable from create (PLAN_M3.md item 7), so a session's
+/// offer can only ever change because capture claimed an identity or
+/// declared the correlation ambiguous. Conditioning on exactly the fields
+/// that can move is what keeps the check tight enough to be meaningful and
+/// loose enough not to reject a relaunch over an unrelated write.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OfferBasis {
+    pub captured_conversation: Option<String>,
+    pub capture_ambiguous: bool,
+}
+
+/// What a session's row said about its PREVIOUS run, handed back by
+/// [`SessionStore::begin_relaunch`] so a failed relaunch can put it back
+/// ([`SessionStore::abort_relaunch`]).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PriorRun {
+    pub outcome: LastOutcome,
+    /// The pane the previous run confirmed, or empty for a launch that
+    /// never confirmed one. Restored alongside the outcome so an aborted
+    /// restart leaves the row describing the same terminal it did before.
+    pub pane: String,
+}
+
+/// The new launch generation a restart claimed, and what it replaced.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RelaunchClaim {
+    pub generation: i64,
+    pub prior: PriorRun,
+}
+
+/// What [`SessionStore::begin_relaunch`] found when it tried to open a new
+/// launch generation.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum RelaunchDecision {
+    /// The generation is open and this caller owns the relaunch.
+    Claimed(RelaunchClaim),
+    /// The session's captured identity or ambiguity verdict changed since
+    /// the caller validated the requested mode against them, so the mode
+    /// may no longer be the one the session's offer authorizes. Nothing was
+    /// written.
+    OfferChanged,
+    /// The row is gone — a delete committed while the restart was being
+    /// prepared. Nothing was written, and nothing may be recreated.
+    Gone,
+}
+
 /// Where a [`Reservation`] stands: claimed, or resolved one way or the
 /// other.
 ///
@@ -920,18 +971,43 @@ pub struct StoredSession {
     /// fresh supervisor that happened to see only one of the two
     /// candidates (because the rival's evidence has since been cleaned up)
     /// would otherwise claim an identity on strictly worse evidence than
-    /// the pass that bailed. Only a new LAUNCH clears it; nothing in this
-    /// PR relaunches, so PLAN_M3.md item 9's restart is where the clear
-    /// belongs, alongside clearing the captured identity itself.
+    /// the pass that bailed. Only a new LAUNCH clears it — a verdict is
+    /// about one run's correlation, not about the session forever — which
+    /// is what [`SessionStore::begin_relaunch`] does for a relaunch that
+    /// is not resuming a captured identity.
     pub capture_ambiguous: bool,
     /// When this supervisor first confirmed delivery of input to the
-    /// session, in seconds since the Unix epoch — the correlator capture
-    /// keys on, because the agents' records appear at first PROMPT
+    /// CURRENT launch, in seconds since the Unix epoch — the correlator
+    /// capture keys on, because the agents' records appear at first PROMPT
     /// submission rather than at launch. Durable so that a supervisor
     /// restart landing in the (unbounded) launch-to-first-input gap does
-    /// not cost the session its only chance at capture. Written once by
-    /// [`SessionStore::record_first_input`].
+    /// not cost the session its only chance at capture. Written once per
+    /// launch by [`SessionStore::record_first_input`], and cleared by a
+    /// relaunch that opens a fresh capture window
+    /// ([`SessionStore::begin_relaunch`]): this is PER-LAUNCH state, not
+    /// conversation metadata — a new run's first prompt is what its record
+    /// appears after, and reusing the previous run's anchor would search a
+    /// window that closed long ago.
     pub first_input_at: Option<i64>,
+    /// Which LAUNCH of this session the row currently describes: 0 for the
+    /// session's original launch, incremented once by every relaunch
+    /// ([`SessionStore::begin_relaunch`]).
+    ///
+    /// The fence every durable write about the current run carries. Two
+    /// failures it exists to exclude, both real races rather than
+    /// theoretical ones: a `ListSessions` pass holding an entry from before
+    /// a restart must not record the OLD pane's death as the new run's
+    /// outcome, and a capture pass that started against the previous launch
+    /// must not commit that launch's identity onto the new one. Every
+    /// generation-conditioned write ([`SessionStore::transition_many`],
+    /// the capture writers) simply does nothing when the generation it
+    /// carries is no longer current.
+    ///
+    /// Monotonic and never reused, which is also what makes it safe to name
+    /// files after (`launch::spec_path_for_launch`): a stale sentinel from
+    /// generation N can never be mistaken for generation N+1's, because the
+    /// two are different paths rather than the same path written twice.
+    pub generation: i64,
 }
 
 /// The supervisor's session database.
@@ -1036,7 +1112,8 @@ fn apply_schema(conn: &Connection, may_migrate: bool) -> anyhow::Result<()> {
                  captured_conversation TEXT,
                  captured_record       TEXT,
                  capture_ambiguous     INTEGER NOT NULL DEFAULT 0,
-                 first_input_at        INTEGER
+                 first_input_at        INTEGER,
+                 generation            INTEGER NOT NULL DEFAULT 0
              ) STRICT;
              CREATE TABLE supervisor_meta (
                  id      INTEGER PRIMARY KEY CHECK (id = 0),
@@ -1054,7 +1131,7 @@ fn apply_schema(conn: &Connection, may_migrate: bool) -> anyhow::Result<()> {
              ) STRICT;
              CREATE INDEX create_reservations_pending
                  ON create_reservations (session_id) WHERE state = 'pending';
-             PRAGMA user_version = 4;
+             PRAGMA user_version = 5;
              COMMIT;",
         )
         .context("creating schema")?;
@@ -1152,6 +1229,28 @@ fn apply_schema(conn: &Connection, may_migrate: bool) -> anyhow::Result<()> {
         .context("migrating schema from version 3 to 4")?;
         version = 4;
     }
+    if version == 4 {
+        // The launch generation (PLAN_M3.md item 9's restart): a monotonic
+        // counter, bumped once per relaunch, that every durable write about
+        // a session's CURRENT run is conditioned on.
+        //
+        // `DEFAULT 0` backfills every existing row with the generation its
+        // one and only launch has always implicitly had — a session that
+        // has never been restarted is on its first launch by definition, so
+        // this migration invents nothing. The counter is also what makes
+        // the per-launch spec and sentinel paths distinguishable
+        // (`launch::spec_path_for_launch`), which is why a pre-generation
+        // row's files, named for generation 0, are exactly where this
+        // build looks for them.
+        conn.execute_batch(
+            "BEGIN;
+             ALTER TABLE sessions ADD COLUMN generation INTEGER NOT NULL DEFAULT 0;
+             PRAGMA user_version = 5;
+             COMMIT;",
+        )
+        .context("migrating schema from version 4 to 5")?;
+        version = 5;
+    }
     if version == SCHEMA_VERSION {
         return Ok(());
     }
@@ -1220,8 +1319,9 @@ fn insert_session_row(conn: &Connection, row: &StoredSession) -> anyhow::Result<
          (id, title, cwd, invocation, tmux_name, pane, created_at, \
           outcome_state, exit_code, annotation, error_detail, \
           agent_kind, resume_template, canonical_cwd, captured_conversation, \
-          captured_record, capture_ambiguous, first_input_at) \
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18)",
+          captured_record, capture_ambiguous, first_input_at, generation) \
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, \
+                 ?18, ?19)",
         rusqlite::params![
             row.id,
             row.title,
@@ -1241,6 +1341,7 @@ fn insert_session_row(conn: &Connection, row: &StoredSession) -> anyhow::Result<
             row.captured_record,
             i64::from(row.capture_ambiguous),
             row.first_input_at,
+            row.generation,
         ],
     )
     .context("inserting session row")?;
@@ -1254,7 +1355,7 @@ const SESSION_COLUMNS: &str = "id, title, cwd, invocation, tmux_name, pane, \
                                outcome_state, exit_code, annotation, error_detail, \
                                agent_kind, resume_template, canonical_cwd, \
                                captured_conversation, captured_record, capture_ambiguous, \
-                               first_input_at";
+                               first_input_at, generation";
 
 /// The raw columns of one session row, before the fallible decoding that
 /// cannot happen inside a rusqlite row mapper (whose error type is
@@ -1290,6 +1391,7 @@ fn read_session_columns(r: &rusqlite::Row<'_>) -> rusqlite::Result<SessionColumn
             captured_record: r.get(14)?,
             capture_ambiguous: r.get::<_, i64>(15)? != 0,
             first_input_at: r.get(16)?,
+            generation: r.get(17)?,
         },
         (r.get(6)?, r.get(7)?, r.get(8)?, r.get(9)?),
         r.get(10)?,
@@ -1641,6 +1743,209 @@ impl SessionStore {
         .context("relaunch takeover task panicked")?
     }
 
+    /// Open a NEW launch generation on an existing session (PLAN_M3.md item
+    /// 9's restart), committed BEFORE the relaunch touches anything
+    /// external — and only if the session still looks the way the caller
+    /// validated it.
+    ///
+    /// This is the one write in this module that deliberately moves a
+    /// TERMINAL outcome backwards, which is why it is a method of its own
+    /// rather than a [`Transition`]: `Transition::apply` arbitrates
+    /// OBSERVATIONS, and no observation may ever reopen an `Exited`,
+    /// `Interrupted`, or `Error` row (see its docs). A restart is not an
+    /// observation — it is a user-authorized new run of the same session,
+    /// and the previous run's outcome stops describing anything the moment
+    /// it begins.
+    ///
+    /// ## The offer condition
+    ///
+    /// `basis` is what the caller's mode validation was decided against:
+    /// the captured identity and the ambiguity verdict, the only two
+    /// mutable inputs to a session's restart offer (kind and template are
+    /// immutable from create). The claim is CONDITIONAL on both still
+    /// holding, which is what makes "validate the offer, then relaunch"
+    /// atomic rather than merely sequential: a capture pass that commits
+    /// `Resume` in between turns this into [`RelaunchDecision::OfferChanged`]
+    /// and the caller refuses with a conflict, instead of launching the
+    /// fresh agent the user chose against a session that has meanwhile
+    /// become resumable.
+    ///
+    /// ## What the new generation clears, and why each
+    ///
+    /// - `generation` itself increments, monotonically. Every durable write
+    ///   about the current run carries it (see [`StoredSession::generation`]),
+    ///   so this single increment is what invalidates every in-flight
+    ///   observation of the run being replaced.
+    /// - the outcome becomes `Launching`, the same pre-side-effect
+    ///   generation a create commits, so a crash straddling the relaunch
+    ///   can never leave the PREVIOUS run's outcome standing over a session
+    ///   that has since been relaunched (item 2's ordering rule);
+    /// - the stop annotation goes with it, because it describes how the
+    ///   previous run ended (item 4). The prior outcome is RETURNED rather
+    ///   than merely dropped, so a relaunch that fails before touching
+    ///   anything external can put it back verbatim
+    ///   ([`SessionStore::abort_relaunch`]) — item 4's "only a SUCCESSFUL
+    ///   restart clears it" is enforced by that pair, not by this call
+    ///   alone;
+    /// - the exit code and the error detail go for the same reason;
+    /// - the pane is emptied, because the relaunch has not confirmed one
+    ///   yet.
+    /// - `reset_capture` additionally clears `first_input_at`, the captured
+    ///   identity, its record locator, and the ambiguity verdict. Those are
+    ///   PER-LAUNCH correlation state: a fresh (or fallback-template) run
+    ///   starts a conversation of its own, and keeping the previous run's
+    ///   first-input anchor would point the correlator at a window that
+    ///   closed long ago — while keeping a stale ambiguity would deny the
+    ///   new run any capture at all. A `Resume` relaunch passes `false`,
+    ///   because reverifying the identity it is resuming is exactly what
+    ///   the capture pass must go on doing.
+    ///
+    /// The immutable create-time snapshot (kind, template, invocation, cwd)
+    /// is untouched in every case.
+    pub async fn begin_relaunch(
+        &self,
+        id: &str,
+        basis: OfferBasis,
+        reset_capture: bool,
+    ) -> anyhow::Result<RelaunchDecision> {
+        let conn = Arc::clone(&self.conn);
+        let id = id.to_string();
+        tokio::task::spawn_blocking(move || -> anyhow::Result<RelaunchDecision> {
+            let mut conn = conn.lock().expect("session db mutex poisoned");
+            let tx = conn
+                .transaction()
+                .context("beginning the relaunch generation transaction")?;
+            let current: Option<(OutcomeColumns, String, i64, Option<String>, i64)> = tx
+                .query_row(
+                    "SELECT outcome_state, exit_code, annotation, error_detail, pane, \
+                     generation, captured_conversation, capture_ambiguous \
+                     FROM sessions WHERE id = ?1",
+                    rusqlite::params![id],
+                    |r| {
+                        Ok((
+                            (r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?),
+                            r.get(4)?,
+                            r.get(5)?,
+                            r.get(6)?,
+                            r.get(7)?,
+                        ))
+                    },
+                )
+                .optional()
+                .context("reading the session a restart is about to relaunch")?;
+            let Some((
+                (state, exit_code, annotation, error_detail),
+                pane,
+                generation,
+                captured_conversation,
+                capture_ambiguous,
+            )) = current
+            else {
+                return Ok(RelaunchDecision::Gone);
+            };
+            if captured_conversation != basis.captured_conversation
+                || (capture_ambiguous != 0) != basis.capture_ambiguous
+            {
+                return Ok(RelaunchDecision::OfferChanged);
+            }
+            let prior = PriorRun {
+                outcome: LastOutcome::from_columns(&state, exit_code, annotation, error_detail)
+                    .with_context(|| format!("session {id}"))?,
+                pane,
+            };
+            let generation = generation + 1;
+            let (state, exit_code, annotation, error_detail) = LastOutcome::Launching.columns();
+            if reset_capture {
+                tx.execute(
+                    "UPDATE sessions SET outcome_state = ?2, exit_code = ?3, annotation = ?4, \
+                     error_detail = ?5, pane = '', generation = ?6, first_input_at = NULL, \
+                     captured_conversation = NULL, captured_record = NULL, \
+                     capture_ambiguous = 0 WHERE id = ?1",
+                    rusqlite::params![id, state, exit_code, annotation, error_detail, generation],
+                )
+            } else {
+                tx.execute(
+                    "UPDATE sessions SET outcome_state = ?2, exit_code = ?3, annotation = ?4, \
+                     error_detail = ?5, pane = '', generation = ?6 WHERE id = ?1",
+                    rusqlite::params![id, state, exit_code, annotation, error_detail, generation],
+                )
+            }
+            .context("opening a new launch generation for a restart")?;
+            tx.commit().context("committing the launch generation")?;
+            Ok(RelaunchDecision::Claimed(RelaunchClaim {
+                generation,
+                prior,
+            }))
+        })
+        .await
+        .context("relaunch generation task panicked")?
+    }
+
+    /// Put back the outcome a [`SessionStore::begin_relaunch`] replaced,
+    /// for a relaunch that failed BEFORE it could change anything outside
+    /// this database.
+    ///
+    /// This is the other half of item 4's contract: a restart clears the
+    /// previous run's annotation (and exit code, and error detail) only if
+    /// it SUCCEEDS, and the generation has to be opened before any side
+    /// effect for the ordering rule — so the only way to have both is to
+    /// restore on the failures that are provably harmless to restore on.
+    /// The caller decides which those are: a launch artifact that could not
+    /// be cleared, a spec that never landed, a tmux refusal with the
+    /// session CONFIRMED absent. An ambiguous failure — anything that may
+    /// have left an agent running — must NOT restore, because the row would
+    /// then describe a run that is not the one actually alive; those stay
+    /// `Launching` for reload to reconcile.
+    ///
+    /// Conditional on `generation` still being current, so a restore can
+    /// never step on a LATER restart that has since claimed the session:
+    /// by the time this loses that race, the newer generation's own outcome
+    /// is the truth and this one's prior run is ancient history. The
+    /// generation itself is deliberately NOT rolled back — it is monotonic,
+    /// and a reused number is exactly what would let a stale sentinel or a
+    /// stale observation land on a future launch.
+    ///
+    /// `Ok(false)` means the restore did not apply (the row is gone, or a
+    /// newer generation owns it); the caller reports its original failure
+    /// either way.
+    pub async fn abort_relaunch(
+        &self,
+        id: &str,
+        generation: i64,
+        prior: &PriorRun,
+    ) -> anyhow::Result<bool> {
+        let conn = Arc::clone(&self.conn);
+        let id = id.to_string();
+        let (state, exit_code, annotation, error_detail) = prior.outcome.columns();
+        let (state, annotation, error_detail) = (
+            state.to_string(),
+            annotation.map(str::to_string),
+            error_detail.map(str::to_string),
+        );
+        let pane = prior.pane.clone();
+        tokio::task::spawn_blocking(move || -> anyhow::Result<bool> {
+            let conn = conn.lock().expect("session db mutex poisoned");
+            let restored = conn
+                .execute(
+                    "UPDATE sessions SET outcome_state = ?2, exit_code = ?3, annotation = ?4, \
+                     error_detail = ?5, pane = ?6 WHERE id = ?1 AND generation = ?7",
+                    rusqlite::params![
+                        id,
+                        state,
+                        exit_code,
+                        annotation,
+                        error_detail,
+                        pane,
+                        generation
+                    ],
+                )
+                .context("restoring the outcome a failed restart replaced")?;
+            Ok(restored > 0)
+        })
+        .await
+        .context("relaunch abort task panicked")?
+    }
+
     /// One session's stored row, if it still exists.
     ///
     /// The DURABLE answer to "does this session exist", which every replay
@@ -1823,16 +2128,26 @@ impl SessionStore {
     /// to write, which is what keeps the mirror equal to the database even
     /// when a concurrent writer won.
     ///
+    /// `generation` is the launch this observation is ABOUT — the value the
+    /// caller read from the row or the session entry it observed. A
+    /// transition whose generation is no longer the row's current one is
+    /// silently dropped (the committed outcome is still returned), because
+    /// it describes a run this session has already moved past: the classic
+    /// case is a `ListSessions` pass that cloned an entry, went to tmux,
+    /// and came back with the OLD pane's death after a restart replaced it
+    /// (see [`StoredSession::generation`]).
+    ///
     /// `Ok(None)` means the row no longer exists (a concurrent delete);
     /// that is not an error, exactly as `delete_session` tolerates a
     /// missing row.
     pub async fn transition(
         &self,
         id: &str,
+        generation: i64,
         transition: Transition,
     ) -> anyhow::Result<Option<LastOutcome>> {
         let committed = self
-            .transition_many(vec![(id.to_string(), transition)])
+            .transition_many(vec![(id.to_string(), generation, transition)])
             .await?;
         Ok(committed.into_values().next())
     }
@@ -1848,7 +2163,7 @@ impl SessionStore {
     /// ids deleted concurrently are simply absent.
     pub async fn transition_many(
         &self,
-        transitions: Vec<(String, Transition)>,
+        transitions: Vec<(String, i64, Transition)>,
     ) -> anyhow::Result<HashMap<String, LastOutcome>> {
         if transitions.is_empty() {
             return Ok(HashMap::new());
@@ -1860,22 +2175,33 @@ impl SessionStore {
                 .transaction()
                 .context("beginning outcome transition transaction")?;
             let mut committed = HashMap::new();
-            for (id, transition) in transitions {
-                let current: Option<OutcomeColumns> = tx
+            for (id, generation, transition) in transitions {
+                let current: Option<(OutcomeColumns, i64)> = tx
                     .query_row(
-                        "SELECT outcome_state, exit_code, annotation, error_detail \
+                        "SELECT outcome_state, exit_code, annotation, error_detail, generation \
                              FROM sessions WHERE id = ?1",
                         rusqlite::params![id],
-                        |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
+                        |r| Ok(((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?), r.get(4)?)),
                     )
                     .optional()
                     .context("reading the current outcome")?;
-                let Some((state, exit_code, annotation, error_detail)) = current else {
+                let Some(((state, exit_code, annotation, error_detail), current_generation)) =
+                    current
+                else {
                     continue;
                 };
                 let current =
                     LastOutcome::from_columns(&state, exit_code, annotation, error_detail)
                         .with_context(|| format!("session {id}"))?;
+                // The generation fence (see `StoredSession::generation`).
+                // Reported as the CURRENT outcome rather than as an error
+                // or an absence: the caller's observation was simply about
+                // a run this session has moved past, and what it should
+                // mirror is what is true now.
+                if generation != current_generation {
+                    committed.insert(id, current);
+                    continue;
+                }
                 let next = transition.apply(&current);
                 // The pane rides the same statement as the outcome it
                 // belongs to (see `Transition::pane`), and is written
@@ -1938,15 +2264,25 @@ impl SessionStore {
     /// supervisor did, and folding it into the outcome state machine would
     /// mean every transition had to reason about a field none of them can
     /// change.
-    pub async fn record_first_input(&self, id: &str, at_unix: i64) -> anyhow::Result<()> {
+    /// `generation` fences the write to the launch the caller observed: a
+    /// relaunch clears this anchor for its own new window (see
+    /// [`SessionStore::begin_relaunch`]), and an input frame that was
+    /// in flight across that boundary must not write the previous run's
+    /// anchor back onto it.
+    pub async fn record_first_input(
+        &self,
+        id: &str,
+        generation: i64,
+        at_unix: i64,
+    ) -> anyhow::Result<()> {
         let conn = Arc::clone(&self.conn);
         let id = id.to_string();
         tokio::task::spawn_blocking(move || -> anyhow::Result<()> {
             let conn = conn.lock().expect("session db mutex poisoned");
             conn.execute(
                 "UPDATE sessions SET first_input_at = ?2 \
-                 WHERE id = ?1 AND first_input_at IS NULL",
-                rusqlite::params![id, at_unix],
+                 WHERE id = ?1 AND first_input_at IS NULL AND generation = ?3",
+                rusqlite::params![id, at_unix, generation],
             )
             .context("recording a session's first-input time")?;
             Ok(())
@@ -1984,9 +2320,17 @@ impl SessionStore {
     /// gone (a concurrent delete) or the claim lost to an ambiguity —
     /// neither is an error, and the caller distinguishes them by looking
     /// at nothing at all: in both cases it must not advertise Resume.
+    /// `generation` fences the claim to the launch the correlating pass
+    /// actually observed: a pass that started before a restart must not
+    /// commit the previous run's identity onto the new one, which for a
+    /// Fresh relaunch would be exactly the silently-wrong-conversation
+    /// resume SPEC.md forbids. A fenced-out claim reads back whatever the
+    /// current generation holds, so the caller's mirror still follows the
+    /// database.
     pub async fn record_captured_conversation(
         &self,
         id: &str,
+        generation: i64,
         conversation: &str,
         record: &Path,
     ) -> anyhow::Result<Option<String>> {
@@ -2001,8 +2345,9 @@ impl SessionStore {
                 .context("beginning the capture transaction")?;
             tx.execute(
                 "UPDATE sessions SET captured_conversation = ?2, captured_record = ?3 \
-                 WHERE id = ?1 AND captured_conversation IS NULL AND capture_ambiguous = 0",
-                rusqlite::params![id, conversation, record],
+                 WHERE id = ?1 AND captured_conversation IS NULL AND capture_ambiguous = 0 \
+                 AND generation = ?4",
+                rusqlite::params![id, conversation, record, generation],
             )
             .context("recording a captured conversation identity")?;
             let committed: Option<Option<String>> = tx
@@ -2036,15 +2381,18 @@ impl SessionStore {
     /// the discovery that the claim should not have been made. In
     /// practice the two cannot race (passes are serialized), so this is
     /// the belt to that suspenders.
-    pub async fn record_capture_ambiguous(&self, id: &str) -> anyhow::Result<()> {
+    /// `generation` fences it like every other capture write: an ambiguity
+    /// established about one run says nothing about the next one, and a
+    /// relaunch that opened a fresh capture window has already cleared it.
+    pub async fn record_capture_ambiguous(&self, id: &str, generation: i64) -> anyhow::Result<()> {
         let conn = Arc::clone(&self.conn);
         let id = id.to_string();
         tokio::task::spawn_blocking(move || -> anyhow::Result<()> {
             let conn = conn.lock().expect("session db mutex poisoned");
             conn.execute(
                 "UPDATE sessions SET capture_ambiguous = 1, captured_conversation = NULL, \
-                 captured_record = NULL WHERE id = ?1",
-                rusqlite::params![id],
+                 captured_record = NULL WHERE id = ?1 AND generation = ?2",
+                rusqlite::params![id, generation],
             )
             .context("recording an ambiguous conversation correlation")?;
             Ok(())
@@ -2336,6 +2684,7 @@ mod tests {
                     captured_record: None,
                     capture_ambiguous: false,
                     first_input_at: None,
+                    generation: 0,
                 },
                 None,
             )
@@ -3013,7 +3362,7 @@ mod tests {
         force_outcome(&store, "s1", &LastOutcome::Interrupted);
 
         let committed = store
-            .transition("s1", Transition::ObservedExit { exit_code: Some(1) })
+            .transition("s1", 0, Transition::ObservedExit { exit_code: Some(1) })
             .await
             .expect("transition");
         assert_eq!(committed, Some(LastOutcome::Interrupted));
@@ -3024,7 +3373,7 @@ mod tests {
         store.delete_session("s1", None).await.expect("delete");
         assert_eq!(
             store
-                .transition("s1", Transition::ObservedExit { exit_code: None })
+                .transition("s1", 0, Transition::ObservedExit { exit_code: None })
                 .await
                 .expect("transition"),
             None
@@ -3055,6 +3404,7 @@ mod tests {
                     captured_record: None,
                     capture_ambiguous: false,
                     first_input_at: None,
+                    generation: 0,
                 },
                 None,
             )
@@ -3062,7 +3412,7 @@ mod tests {
             .expect("insert");
 
         store
-            .transition("s1", Transition::ConfirmRunning { pane: "%4".into() })
+            .transition("s1", 0, Transition::ConfirmRunning { pane: "%4".into() })
             .await
             .expect("confirm");
         let rows = store.load_all().await.expect("load");
@@ -3097,6 +3447,7 @@ mod tests {
                     captured_record: None,
                     capture_ambiguous: false,
                     first_input_at: None,
+                    generation: 0,
                 },
                 None,
             )
@@ -3106,6 +3457,7 @@ mod tests {
         store
             .transition(
                 "s1",
+                0,
                 Transition::RediscoveredExit {
                     pane: "%9".into(),
                     exit_code: Some(2),
@@ -3143,11 +3495,11 @@ mod tests {
         // the pane die and knows nothing about the stop.
         insert_running(&store, "a").await;
         store
-            .transition("a", Transition::StopRequested)
+            .transition("a", 0, Transition::StopRequested)
             .await
             .expect("intent");
         store
-            .transition("a", Transition::ObservedExit { exit_code: Some(0) })
+            .transition("a", 0, Transition::ObservedExit { exit_code: Some(0) })
             .await
             .expect("list observation");
         assert_eq!(
@@ -3163,11 +3515,11 @@ mod tests {
         // code the list had already captured.
         insert_running(&store, "b").await;
         store
-            .transition("b", Transition::ObservedExit { exit_code: Some(0) })
+            .transition("b", 0, Transition::ObservedExit { exit_code: Some(0) })
             .await
             .expect("list observation");
         store
-            .transition("b", Transition::StopCompleted { exit_code: None })
+            .transition("b", 0, Transition::StopCompleted { exit_code: None })
             .await
             .expect("stop completion");
         assert_eq!(
@@ -3208,7 +3560,7 @@ mod tests {
             insert_running(&store, id).await;
             force_outcome(&store, id, &seeded);
             store
-                .transition(id, Transition::StopCompleted { exit_code: None })
+                .transition(id, 0, Transition::StopCompleted { exit_code: None })
                 .await
                 .expect("stop");
         }
@@ -3440,6 +3792,7 @@ mod tests {
         store
             .transition(
                 "row",
+                0,
                 Transition::SentinelError {
                     detail: "exec_failed errno=2".to_string(),
                     pane: Some("%9".to_string()),
@@ -3494,6 +3847,7 @@ mod tests {
             store
                 .transition(
                     id,
+                    0,
                     Transition::SentinelError {
                         detail: "exec_failed errno=2".to_string(),
                         pane: None,
@@ -3530,6 +3884,7 @@ mod tests {
         let committed = store
             .transition(
                 "stopped",
+                0,
                 Transition::SentinelError {
                     detail: "exec_failed errno=2".to_string(),
                     pane: None,
@@ -3689,6 +4044,7 @@ mod tests {
                     captured_record: None,
                     capture_ambiguous: false,
                     first_input_at: None,
+                    generation: 0,
                 },
                 None,
             )
@@ -3865,6 +4221,7 @@ mod tests {
             resume_template: None,
             captured_conversation: None,
             first_input_at: None,
+            generation: 0,
         }
     }
 
@@ -4372,6 +4729,7 @@ mod tests {
         store
             .transition(
                 "s3",
+                0,
                 Transition::ConfirmRunning {
                     pane: "%1".to_string(),
                 },
@@ -4505,6 +4863,7 @@ mod tests {
                     captured_record: None,
                     capture_ambiguous: false,
                     first_input_at: None,
+                    generation: 0,
                 },
                 None,
             )
@@ -4537,8 +4896,14 @@ mod tests {
         let (_dir, store) = fresh_store().await;
         insert_running(&store, "s1").await;
 
-        store.record_first_input("s1", 1_000).await.expect("first");
-        store.record_first_input("s1", 2_000).await.expect("second");
+        store
+            .record_first_input("s1", 0, 1_000)
+            .await
+            .expect("first");
+        store
+            .record_first_input("s1", 0, 2_000)
+            .await
+            .expect("second");
         assert_eq!(
             store
                 .session("s1")
@@ -4552,14 +4917,14 @@ mod tests {
 
         assert_eq!(
             store
-                .record_captured_conversation("s1", "conv-a", Path::new("/records/a.jsonl"))
+                .record_captured_conversation("s1", 0, "conv-a", Path::new("/records/a.jsonl"))
                 .await
                 .expect("capture"),
             Some("conv-a".to_string())
         );
         assert_eq!(
             store
-                .record_captured_conversation("s1", "conv-b", Path::new("/records/b.jsonl"))
+                .record_captured_conversation("s1", 0, "conv-b", Path::new("/records/b.jsonl"))
                 .await
                 .expect("second capture"),
             Some("conv-a".to_string()),
@@ -4580,13 +4945,13 @@ mod tests {
         store.delete_session("s1", None).await.expect("delete");
         assert_eq!(
             store
-                .record_captured_conversation("s1", "conv-c", Path::new("/records/c.jsonl"))
+                .record_captured_conversation("s1", 0, "conv-c", Path::new("/records/c.jsonl"))
                 .await
                 .expect("a vanished row is not a failure"),
             None
         );
         store
-            .record_first_input("s1", 3_000)
+            .record_first_input("s1", 0, 3_000)
             .await
             .expect("a vanished row is not a failure");
     }
@@ -4712,5 +5077,412 @@ mod tests {
             rendered.contains("gemini") && rendered.contains("s1"),
             "the refusal must name the problem and the row: {rendered}"
         );
+    }
+
+    /// A basis that matches a session with nothing captured — what
+    /// `begin_relaunch`'s offer condition is checked against for the
+    /// ordinary fresh relaunch.
+    fn uncaptured_basis() -> OfferBasis {
+        OfferBasis {
+            captured_conversation: None,
+            capture_ambiguous: false,
+        }
+    }
+
+    fn claimed(decision: RelaunchDecision) -> RelaunchClaim {
+        match decision {
+            RelaunchDecision::Claimed(claim) => claim,
+            other => panic!("expected a claimed generation, got {other:?}"),
+        }
+    }
+
+    /// PLAN_M3.md items 4 and 9: a restart's new generation reopens a
+    /// terminal outcome — the one write in this module allowed to — and
+    /// takes the previous run's whole description with it, while handing
+    /// that description back so a failed relaunch can put it right back.
+    ///
+    /// The stop annotation is the clause that matters most: SPEC.md makes
+    /// it durable session metadata, and item 4 says a SUCCESSFUL restart is
+    /// what clears it. Clearing it here and RETURNING it is what makes
+    /// "only a successful one" enforceable rather than merely intended (see
+    /// `abort_relaunch`'s own test below).
+    ///
+    /// The pane is emptied for a reason a later reload depends on: a crash
+    /// between this commit and the launch's confirmation must leave the
+    /// exact shape reload already reconciles (a `launching` row with no
+    /// pane), not one claiming a pane the new run may never get.
+    #[tokio::test]
+    async fn a_relaunch_generation_reopens_a_stopped_session_and_clears_its_annotation() {
+        let (_dir, store) = fresh_store().await;
+        insert_running(&store, "s1").await;
+        store
+            .transition("s1", 0, Transition::StopRequested)
+            .await
+            .expect("stop intent");
+        store
+            .transition("s1", 0, Transition::StopCompleted { exit_code: Some(0) })
+            .await
+            .expect("stop outcome");
+        let stopped = store.session("s1").await.expect("read").expect("present");
+        let annotated = LastOutcome::Exited {
+            exit_code: Some(0),
+            annotation: Some(farhelm_proto::STOP_ANNOTATION.to_string()),
+        };
+        assert_eq!(stopped.outcome, annotated);
+
+        let claim = claimed(
+            store
+                .begin_relaunch("s1", uncaptured_basis(), true)
+                .await
+                .expect("begin relaunch"),
+        );
+        assert_eq!(claim.generation, 1, "generations count launches from zero");
+        assert_eq!(
+            claim.prior.outcome, annotated,
+            "the prior run is handed back verbatim, which is what makes it restorable"
+        );
+        assert_eq!(claim.prior.pane, stopped.pane);
+
+        let relaunching = store.session("s1").await.expect("read").expect("present");
+        assert_eq!(relaunching.outcome, LastOutcome::Launching);
+        assert_eq!(relaunching.pane, "");
+        assert_eq!(relaunching.generation, 1);
+        // Everything describing the SESSION rather than the run is
+        // untouched — a relaunched session is still the same session.
+        assert_eq!(relaunching.tmux_name, stopped.tmux_name);
+        assert_eq!(relaunching.invocation, stopped.invocation);
+        assert_eq!(relaunching.agent_kind, stopped.agent_kind);
+    }
+
+    /// Item 4's other half, and the contract this PR itself documented: a
+    /// relaunch that fails before touching anything external puts the
+    /// previous run's outcome back, annotation included. Without the
+    /// restore, opening the generation up front — which the crash-ordering
+    /// rule requires — would silently destroy the very metadata SPEC.md
+    /// calls durable.
+    #[tokio::test]
+    async fn aborting_a_relaunch_restores_the_outcome_it_replaced() {
+        let (_dir, store) = fresh_store().await;
+        insert_running(&store, "s1").await;
+        store
+            .transition("s1", 0, Transition::StopRequested)
+            .await
+            .expect("stop intent");
+        store
+            .transition("s1", 0, Transition::StopCompleted { exit_code: Some(3) })
+            .await
+            .expect("stop outcome");
+
+        let claim = claimed(
+            store
+                .begin_relaunch("s1", uncaptured_basis(), true)
+                .await
+                .expect("begin relaunch"),
+        );
+        assert!(
+            store
+                .abort_relaunch("s1", claim.generation, &claim.prior)
+                .await
+                .expect("abort"),
+        );
+        let restored = store.session("s1").await.expect("read").expect("present");
+        assert_eq!(restored.outcome, claim.prior.outcome);
+        assert_eq!(restored.pane, claim.prior.pane);
+        assert_eq!(
+            restored.generation, claim.generation,
+            "the generation is monotonic and never rolled back: a reused number is exactly \
+             what would let stale evidence land on a future launch"
+        );
+    }
+
+    /// An abort must never step on a LATER restart that has already claimed
+    /// the session: by then the newer generation's outcome is the truth,
+    /// and this one's prior run is ancient history.
+    #[tokio::test]
+    async fn aborting_a_superseded_relaunch_changes_nothing() {
+        let (_dir, store) = fresh_store().await;
+        insert_running(&store, "s1").await;
+        let first = claimed(
+            store
+                .begin_relaunch("s1", uncaptured_basis(), true)
+                .await
+                .expect("first"),
+        );
+        let second = claimed(
+            store
+                .begin_relaunch("s1", uncaptured_basis(), true)
+                .await
+                .expect("second"),
+        );
+        assert_eq!(second.generation, first.generation + 1);
+
+        assert!(
+            !store
+                .abort_relaunch("s1", first.generation, &first.prior)
+                .await
+                .expect("abort"),
+            "the older restart no longer owns this session"
+        );
+        let row = store.session("s1").await.expect("read").expect("present");
+        assert_eq!(row.outcome, LastOutcome::Launching);
+        assert_eq!(row.generation, second.generation);
+    }
+
+    /// The generation fence, from the side that matters most: an observer
+    /// holding a pre-restart view of a session must not be able to record
+    /// the OLD run's exit against the new one. That is not hypothetical —
+    /// it is precisely what a `ListSessions` pass does when it clones an
+    /// entry, goes to tmux, and comes back after a restart replaced the
+    /// pane it was asking about.
+    #[tokio::test]
+    async fn a_stale_generations_observation_is_dropped() {
+        let (_dir, store) = fresh_store().await;
+        insert_running(&store, "s1").await;
+        let claim = claimed(
+            store
+                .begin_relaunch("s1", uncaptured_basis(), true)
+                .await
+                .expect("begin relaunch"),
+        );
+        store
+            .transition(
+                "s1",
+                claim.generation,
+                Transition::ConfirmRunning {
+                    pane: "%7".to_string(),
+                },
+            )
+            .await
+            .expect("confirm the new launch");
+
+        let committed = store
+            .transition("s1", 0, Transition::ObservedExit { exit_code: Some(9) })
+            .await
+            .expect("stale observation")
+            .expect("the row exists");
+        assert_eq!(
+            committed,
+            LastOutcome::Running,
+            "the stale observation is dropped, and the caller is told what is actually true"
+        );
+        let row = store.session("s1").await.expect("read").expect("present");
+        assert_eq!(row.outcome, LastOutcome::Running);
+        assert_eq!(row.pane, "%7");
+    }
+
+    /// Capture writes carry the same fence, for the sharper version of the
+    /// same risk: an in-flight correlation pass committing the PREVIOUS
+    /// run's conversation identity onto a fresh relaunch is how a session
+    /// would come to offer a resume for a conversation the new run never
+    /// had — the silently-wrong-conversation resume SPEC.md forbids.
+    #[tokio::test]
+    async fn a_stale_generations_capture_is_dropped() {
+        let (_dir, store) = fresh_store().await;
+        insert_running(&store, "s1").await;
+        let claim = claimed(
+            store
+                .begin_relaunch("s1", uncaptured_basis(), true)
+                .await
+                .expect("begin relaunch"),
+        );
+
+        assert_eq!(
+            store
+                .record_captured_conversation("s1", 0, "conv-old", Path::new("/records/old"))
+                .await
+                .expect("stale capture"),
+            None,
+            "nothing was claimed, and the read-back says so"
+        );
+        store
+            .record_first_input("s1", 0, 1_000)
+            .await
+            .expect("stale first input");
+        store
+            .record_capture_ambiguous("s1", 0)
+            .await
+            .expect("stale ambiguity");
+        let row = store.session("s1").await.expect("read").expect("present");
+        assert_eq!(row.captured_conversation, None);
+        assert_eq!(row.first_input_at, None);
+        assert!(!row.capture_ambiguous);
+
+        // The CURRENT generation's own capture still works.
+        assert_eq!(
+            store
+                .record_captured_conversation(
+                    "s1",
+                    claim.generation,
+                    "conv-new",
+                    Path::new("/records/new")
+                )
+                .await
+                .expect("current capture")
+                .as_deref(),
+            Some("conv-new")
+        );
+    }
+
+    /// A relaunch that is not resuming a captured identity opens a FRESH
+    /// capture window: the first-input anchor and the correlation verdict
+    /// are per-LAUNCH state, and carrying them forward would either point
+    /// the correlator at a window that closed long ago or deny the new run
+    /// any capture at all.
+    #[tokio::test]
+    async fn a_fresh_relaunch_clears_the_previous_runs_capture_state() {
+        let (_dir, store) = fresh_store().await;
+        insert_running(&store, "s1").await;
+        store
+            .record_first_input("s1", 0, 1_000)
+            .await
+            .expect("first input");
+        store
+            .record_capture_ambiguous("s1", 0)
+            .await
+            .expect("ambiguity");
+
+        let claim = claimed(
+            store
+                .begin_relaunch(
+                    "s1",
+                    OfferBasis {
+                        captured_conversation: None,
+                        capture_ambiguous: true,
+                    },
+                    true,
+                )
+                .await
+                .expect("begin relaunch"),
+        );
+        let row = store.session("s1").await.expect("read").expect("present");
+        assert_eq!(row.first_input_at, None);
+        assert!(!row.capture_ambiguous);
+        assert_eq!(row.captured_conversation, None);
+
+        // And the new window can be captured into, which an inherited
+        // ambiguity would have denied forever.
+        assert_eq!(
+            store
+                .record_captured_conversation(
+                    "s1",
+                    claim.generation,
+                    "conv-1",
+                    Path::new("/records/1")
+                )
+                .await
+                .expect("capture")
+                .as_deref(),
+            Some("conv-1")
+        );
+    }
+
+    /// A `Resume` relaunch keeps every scrap of capture state, because the
+    /// identity it is resuming is exactly what the capture pass must go on
+    /// reverifying across the restart.
+    #[tokio::test]
+    async fn a_resuming_relaunch_keeps_the_captured_identity() {
+        let (_dir, store) = fresh_store().await;
+        insert_running(&store, "s1").await;
+        store
+            .record_first_input("s1", 0, 1_000)
+            .await
+            .expect("first input");
+        store
+            .record_captured_conversation("s1", 0, "conv-1", Path::new("/records/1"))
+            .await
+            .expect("capture");
+
+        claimed(
+            store
+                .begin_relaunch(
+                    "s1",
+                    OfferBasis {
+                        captured_conversation: Some("conv-1".to_string()),
+                        capture_ambiguous: false,
+                    },
+                    false,
+                )
+                .await
+                .expect("begin relaunch"),
+        );
+        let row = store.session("s1").await.expect("read").expect("present");
+        assert_eq!(row.captured_conversation.as_deref(), Some("conv-1"));
+        assert_eq!(row.first_input_at, Some(1_000));
+    }
+
+    /// The offer condition, which is what makes "validate the mode, then
+    /// relaunch" atomic rather than merely sequential: a capture that
+    /// commits between the two turns the claim into a refusal instead of
+    /// launching the fresh agent the user chose against a session that has
+    /// meanwhile become resumable.
+    #[tokio::test]
+    async fn a_capture_landing_mid_restart_refuses_the_generation() {
+        let (_dir, store) = fresh_store().await;
+        insert_running(&store, "s1").await;
+        // What the restart handler validated against.
+        let basis = uncaptured_basis();
+        // ...and what capture committed in between.
+        store
+            .record_captured_conversation("s1", 0, "conv-1", Path::new("/records/1"))
+            .await
+            .expect("capture");
+
+        assert_eq!(
+            store
+                .begin_relaunch("s1", basis, true)
+                .await
+                .expect("begin relaunch"),
+            RelaunchDecision::OfferChanged
+        );
+        let row = store.session("s1").await.expect("read").expect("present");
+        assert_eq!(
+            row.generation, 0,
+            "a refused claim writes nothing at all, generation included"
+        );
+        assert_eq!(row.outcome, LastOutcome::Running);
+    }
+
+    /// An `Error` row — a launch that never execed — reopens too, and its
+    /// detail goes with the generation that replaced it. Without this, a
+    /// session whose first launch was a typo would keep reporting that
+    /// typo's errno forever, even after a restart fixed it (M3 acceptance
+    /// 4: "after a successful restart the error is gone").
+    #[tokio::test]
+    async fn a_relaunch_generation_clears_a_previous_launch_error() {
+        let (_dir, store) = fresh_store().await;
+        insert_running(&store, "s1").await;
+        force_outcome(
+            &store,
+            "s1",
+            &LastOutcome::Error {
+                detail: "exec_failed argv0=/nope errno=2".to_string(),
+            },
+        );
+
+        claimed(
+            store
+                .begin_relaunch("s1", uncaptured_basis(), true)
+                .await
+                .expect("begin relaunch"),
+        );
+        let row = store.session("s1").await.expect("read").expect("present");
+        assert_eq!(row.outcome, LastOutcome::Launching);
+    }
+
+    /// A restart racing a delete must not resurrect the session: with no
+    /// row left, the generation cannot be opened at all, and the caller is
+    /// expected to abandon the relaunch rather than recreate what the user
+    /// threw away.
+    #[tokio::test]
+    async fn a_relaunch_generation_refuses_a_deleted_session() {
+        let (_dir, store) = fresh_store().await;
+        assert_eq!(
+            store
+                .begin_relaunch("gone", uncaptured_basis(), true)
+                .await
+                .expect("begin relaunch"),
+            RelaunchDecision::Gone
+        );
+        assert!(store.session("gone").await.expect("read").is_none());
     }
 }

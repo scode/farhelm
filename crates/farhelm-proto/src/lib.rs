@@ -656,8 +656,6 @@ pub enum ControlMsg {
         /// no deduplication — the safe default for raw API callers (curl,
         /// an older UI build) that never learned this field exists, so
         /// its mere addition does not newly expose them to anything.
-        /// Vocabulary only as of this PR: nothing stores or dedups on it
-        /// yet.
         intent_key: Option<String>,
         /// Explicit override of the integrated-agent kind PLAN_M3.md item
         /// 7 would otherwise derive from `invocation`'s first token by
@@ -852,16 +850,12 @@ pub enum ControlMsg {
     /// [`RestartMode::Fresh`]'s own docs for the one-directional
     /// consequence this has for that variant.
     ///
-    /// Vocabulary only as of this PR: no handler exists yet. Until
-    /// PLAN_M3.md item 9 lands terminal reuse, vanished-cwd handling, and
-    /// the confirm-stop-relaunch sequence, this build cannot honor a
-    /// restart at all; `handle_control` replies with a temporary
-    /// `Error { kind: Internal, .. }` naming that plainly rather than
-    /// silently dropping the request (see that function's own docs) —
-    /// falling through to the generic "unexpected control message"
-    /// fallback would leave a v5 caller's request waiting on a reply
-    /// that never comes, since unlike `PauseOutput`/`ResumeOutput` this
-    /// message carries a `req_id` a caller is actually blocked on.
+    /// The handler (PLAN_M3.md item 9) is live: it stops a still-running
+    /// agent when this request carries consent, reaps the prior run's
+    /// descendants, relaunches into the session's own terminal when it
+    /// survived, and replies `SessionRestarted`. Every refusal it can
+    /// make — a stale mode, a live agent without consent, a vanished or
+    /// repointed working directory — leaves the session untouched.
     RestartSession {
         req_id: u64,
         session_id: String,
@@ -957,8 +951,6 @@ pub enum ControlMsg {
     /// still in flight from a client that just lost this attachment's
     /// takeover.
     ///
-    /// Wire vocabulary only as of this PR — the supervisor gains no
-    /// handler for it until PLAN_M2_5.md step 3.
     PauseOutput {
         channel: u32,
     },
@@ -967,8 +959,6 @@ pub enum ControlMsg {
     /// for carrying `channel` (see `Resize`'s doc comment) and its
     /// fire-and-forget shape.
     ///
-    /// Wire vocabulary only as of this PR — the supervisor gains no
-    /// handler for it until PLAN_M2_5.md step 3.
     ResumeOutput {
         channel: u32,
     },

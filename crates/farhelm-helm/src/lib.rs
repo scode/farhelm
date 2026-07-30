@@ -112,7 +112,14 @@ fn build_router(
     let mut app = Router::new()
         .route("/api/sessions", get(list_sessions).post(create_session))
         .route("/api/sessions/{id}/stop", axum::routing::post(stop_session))
-        .route("/api/sessions/{id}", axum::routing::delete(delete_session))
+        .route(
+            "/api/sessions/{id}/restart",
+            axum::routing::post(restart_session),
+        )
+        .route(
+            "/api/sessions/{id}",
+            get(get_session).delete(delete_session),
+        )
         .route("/api/sessions/{id}/term", get(term_ws))
         .with_state(Arc::new(AppState { client }));
 
@@ -509,6 +516,84 @@ async fn stop_session(
 ) -> impl IntoResponse {
     match state.client.stop_session(&id).await {
         Ok(()) => axum::Json(serde_json::json!({})).into_response(),
+        Err(e) => http_error(e),
+    }
+}
+
+/// `GET /api/sessions/{id}` — one session's current `SessionInfo`.
+///
+/// Exists for the recovery paths rather than for browsing: after a restart
+/// (or after a restart whose reply was lost) a client needs THIS session's
+/// current status and offer, and asking through the full listing makes
+/// that lookup depend on a reply the supervisor caps at
+/// `LIST_SESSION_CAP` sessions — so on a busy host the one session a
+/// client is acting on can simply be absent from the answer.
+///
+/// Honest limitation, stated because it is not fixed here: the supervisor's
+/// protocol has no per-session query, so this handler still filters a
+/// listing and therefore still inherits that cap. What it buys today is
+/// ONE place for every client's recovery lookup to live, so the fix — a
+/// `GetSession` message — lands behind this route rather than in each
+/// caller. An id the listing does not contain is a 404, which is also the
+/// honest answer for a session that was genuinely deleted.
+async fn get_session(
+    State(state): State<Arc<AppState>>,
+    AxPath(id): AxPath<String>,
+) -> impl IntoResponse {
+    match state.client.list_sessions().await {
+        Ok(listing) => match listing.sessions.into_iter().find(|s| s.id == id) {
+            Some(session) => axum::Json(session).into_response(),
+            None => (
+                axum::http::StatusCode::NOT_FOUND,
+                format!("no such session: {id}\n"),
+            )
+                .into_response(),
+        },
+        Err(e) => http_error(e),
+    }
+}
+
+/// The body of `POST /api/sessions/{id}/restart`.
+///
+/// `mode` is required, and deliberately has no default: a restart that
+/// guessed a mode could resume a conversation the caller never asked to
+/// resume, or launch a fresh agent where the caller expected a resume.
+/// The supervisor validates it against the session's CURRENT offer anyway
+/// (PLAN_M3.md item 9), so a wrong value is refused rather than obeyed —
+/// but an ABSENT one should not be silently turned into a choice at all.
+///
+/// `stop_if_running` defaults to false, the safe direction: an old-shaped
+/// or hand-written body never kills a live agent by omission.
+#[derive(Deserialize)]
+struct RestartReq {
+    mode: farhelm_proto::RestartMode,
+    #[serde(default)]
+    stop_if_running: bool,
+}
+
+/// `POST /api/sessions/{id}/restart` — relaunch the session's agent
+/// (SPEC.md's restart; the resume offered when opening an interrupted
+/// session is this same operation, not a separate one).
+///
+/// Pure passthrough, including of the refusals that carry this endpoint's
+/// real contract: a `mode` that no longer matches the session's offer and
+/// a live agent without `stop_if_running` both come back as 409s through
+/// `http_error`, and a vanished working directory as a 400 naming the
+/// directory. The success body is the session's freshly recomputed
+/// `SessionInfo` — the same shape `POST /api/sessions` answers with — so a
+/// caller can re-render the row (its new offer included) without listing
+/// again.
+async fn restart_session(
+    State(state): State<Arc<AppState>>,
+    AxPath(id): AxPath<String>,
+    axum::Json(req): axum::Json<RestartReq>,
+) -> impl IntoResponse {
+    match state
+        .client
+        .restart_session(&id, req.mode, req.stop_if_running)
+        .await
+    {
+        Ok(session) => axum::Json(session).into_response(),
         Err(e) => http_error(e),
     }
 }
@@ -2159,5 +2244,150 @@ mod tests {
             response.status(),
             axum::http::StatusCode::INTERNAL_SERVER_ERROR
         );
+    }
+
+    /// `POST /api/sessions/{id}/restart` end to end (PLAN_M3.md item 9):
+    /// the body's `mode` and `stop_if_running` reach the supervisor
+    /// unaltered, and the success body is the session's own recomputed
+    /// `SessionInfo` — including the freshly computed `restart_offer` a
+    /// caller re-renders its row from without listing again.
+    ///
+    /// Both body fields are asserted at the WIRE, not merely accepted by
+    /// the handler: `stop_if_running` is the user's consent to kill a
+    /// running agent and `mode` is the choice the supervisor validates
+    /// against the current offer, so a route that dropped or defaulted
+    /// either would be a silent safety regression rather than a visible
+    /// failure.
+    #[tokio::test]
+    async fn restart_session_passes_mode_and_consent_through_and_returns_the_session() {
+        use farhelm_proto::ControlMsg;
+        use farhelm_proto::io::{FrameReader, FrameWriter, handshake, parse_control};
+        use tower::ServiceExt;
+
+        let (client_side, peer_side) = tokio::io::duplex(64 * 1024);
+        let peer = tokio::spawn(async move {
+            let (r, w) = tokio::io::split(peer_side);
+            let mut reader = FrameReader::new(r);
+            let mut writer = FrameWriter::new(w);
+            handshake(&mut reader, &mut writer, "supervisor")
+                .await
+                .unwrap();
+            let request = parse_control(&reader.read_frame().await.unwrap().unwrap()).unwrap();
+            let ControlMsg::RestartSession {
+                req_id,
+                session_id,
+                mode,
+                stop_if_running,
+            } = request
+            else {
+                panic!("expected RestartSession, got {request:?}");
+            };
+            assert_eq!(session_id, "sess-1");
+            assert_eq!(mode, farhelm_proto::RestartMode::Resume);
+            assert!(
+                stop_if_running,
+                "the user's consent to stop a live agent must reach the supervisor"
+            );
+            writer
+                .write_control(&ControlMsg::SessionRestarted {
+                    req_id,
+                    session: farhelm_proto::SessionInfo {
+                        id: "sess-1".into(),
+                        title: "t".into(),
+                        cwd: "/some/dir".into(),
+                        invocation: "some-agent".into(),
+                        status: farhelm_proto::SessionStatus::Unknown,
+                        annotation: None,
+                        restart_offer: farhelm_proto::RestartOffer::Resume,
+                    },
+                })
+                .await
+                .unwrap();
+        });
+
+        let (r, w) = tokio::io::split(client_side);
+        let client = super::SupervisorClient::start(r, w).await.unwrap();
+        let app = build_router(client, None, 7433);
+        let request = axum::http::Request::builder()
+            .method("POST")
+            .uri("/api/sessions/sess-1/restart")
+            .header("host", "127.0.0.1:7433")
+            .header("content-type", "application/json")
+            .body(axum::body::Body::from(
+                serde_json::json!({ "mode": "resume", "stop_if_running": true }).to_string(),
+            ))
+            .unwrap();
+
+        let response = app.oneshot(request).await.unwrap();
+        assert_eq!(response.status(), axum::http::StatusCode::OK);
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let value: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(value["id"], "sess-1");
+        assert_eq!(
+            value["restart_offer"], "resume",
+            "the reply carries the offer the session has NOW, which is what a client re-renders"
+        );
+
+        peer.await.unwrap();
+    }
+
+    /// A stale-offer refusal must reach the browser as a 409 carrying the
+    /// supervisor's own prose — that message names the CURRENT offer, and
+    /// re-presenting it is the client's prescribed response (the wire
+    /// vocabulary's staleness contract). A route that flattened it to a
+    /// generic 500 would leave the UI with nothing to say.
+    #[tokio::test]
+    async fn restart_session_conflict_reaches_the_caller_as_409_with_its_message() {
+        use farhelm_proto::io::{FrameReader, FrameWriter, handshake, parse_control};
+        use farhelm_proto::{ControlMsg, ErrorKind};
+        use tower::ServiceExt;
+
+        const SENTINEL: &str = "SENTINEL-restart-4b1e: the offer is now resume";
+
+        let (client_side, peer_side) = tokio::io::duplex(64 * 1024);
+        let peer = tokio::spawn(async move {
+            let (r, w) = tokio::io::split(peer_side);
+            let mut reader = FrameReader::new(r);
+            let mut writer = FrameWriter::new(w);
+            handshake(&mut reader, &mut writer, "supervisor")
+                .await
+                .unwrap();
+            let request = parse_control(&reader.read_frame().await.unwrap().unwrap()).unwrap();
+            let ControlMsg::RestartSession { req_id, .. } = request else {
+                panic!("expected RestartSession, got {request:?}");
+            };
+            writer
+                .write_control(&ControlMsg::Error {
+                    req_id,
+                    message: SENTINEL.to_string(),
+                    kind: ErrorKind::Conflict,
+                })
+                .await
+                .unwrap();
+        });
+
+        let (r, w) = tokio::io::split(client_side);
+        let client = super::SupervisorClient::start(r, w).await.unwrap();
+        let app = build_router(client, None, 7433);
+        let request = axum::http::Request::builder()
+            .method("POST")
+            .uri("/api/sessions/sess-1/restart")
+            .header("host", "127.0.0.1:7433")
+            .header("content-type", "application/json")
+            .body(axum::body::Body::from(
+                serde_json::json!({ "mode": "fresh" }).to_string(),
+            ))
+            .unwrap();
+
+        let response = app.oneshot(request).await.unwrap();
+        assert_eq!(response.status(), axum::http::StatusCode::CONFLICT);
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        assert_eq!(String::from_utf8_lossy(&body).trim(), SENTINEL);
+
+        peer.await.unwrap();
     }
 }

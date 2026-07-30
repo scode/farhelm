@@ -19,7 +19,7 @@ use farhelm_helm::{SupervisorClient, SupervisorError, TermEvent, TermStream};
 use farhelm_proto::io::parse_control;
 use farhelm_proto::{ControlMsg, ErrorKind, Frame, FrameKind, SessionInfo, SessionStatus};
 use farhelm_supervisor::agent_kind::{CaptureWindow, CaptureWindowBounds};
-use farhelm_supervisor::launch::{spec_path_for_session, status_path_for_spec};
+use farhelm_supervisor::launch::{spec_path_for_launch, status_path_for_spec};
 use farhelm_supervisor::service::{
     CaptureStoreFault, CreateCrashSeam, CreateStage, LIST_SESSION_CAP, SessionSnapshot, Supervisor,
     SupervisorSeams, SupervisorTimeouts, handle_connection,
@@ -2039,7 +2039,10 @@ async fn stdio_proxy_carries_a_real_session() {
     // An orphaned launch spec from a "previous run": serve() must sweep
     // it once — and only once — it owns the socket. It holds an agent
     // command line, which is why nothing may leave it behind.
-    let orphan = state.path().join("launch").join("orphan.json");
+    // Named the way a real launch names its files — per session AND
+    // generation (`launch::spec_path_for_launch`) — because the sweep
+    // recognizes its own naming and leaves anything else alone.
+    let orphan = spec_path_for_launch(state.path(), "orphan", 0);
     std::fs::write(&orphan, b"{}").expect("plant orphan spec");
 
     let serving = Arc::clone(&sup);
@@ -2234,6 +2237,7 @@ async fn control_mode_attach_to_missing_session_reports_tmux_reason() {
             state.path().to_str().expect("tempdir path is UTF-8"),
             80,
             24,
+            &[],
             &["sleep".to_string(), "60".to_string()],
         )
         .await
@@ -4823,9 +4827,11 @@ async fn delete_removes_launch_artifacts() {
     let h = harness().await;
     let (session, _work) = basic_session(&h).await;
 
-    let launch_dir = h.state.path().join("launch");
-    let spec_path = launch_dir.join(format!("{}.json", session.id));
-    let status_path = launch_dir.join(format!("{}.status", session.id));
+    // Named per LAUNCH, not per session (`launch::spec_path_for_launch`):
+    // this session has only ever launched once, so generation 0 is where
+    // its files live.
+    let spec_path = spec_path_for_launch(h.state.path(), &session.id, 0);
+    let status_path = status_path_for_spec(&spec_path);
     wait_for_shim_to_consume_spec(&spec_path).await;
     std::fs::write(&spec_path, b"{}").expect("plant a launch spec");
     std::fs::write(&status_path, b"exec_failed").expect("plant a launch status file");
@@ -7370,7 +7376,7 @@ async fn a_planted_malformed_spec_sentinel_classifies_error_with_its_detail() {
         "launch spec at /state/launch/{}.json is malformed: EOF while parsing a value",
         session.id
     );
-    let status_path = status_path_for_spec(&spec_path_for_session(h.state.path(), &session.id));
+    let status_path = status_path_for_spec(&spec_path_for_launch(h.state.path(), &session.id, 0));
     std::fs::write(&status_path, &detail).expect("plant the sentinel");
 
     let sup2 = Supervisor::new_with_exe(h.state.path(), farhelm_bin().into())
@@ -7486,7 +7492,7 @@ async fn a_sentinel_survives_an_unreadable_boot_id_undurably_then_commits_once_r
         .expect("create a session whose invocation cannot exec");
     wait_for_dead_pane(&sock, &format!("fh-{}", session.id)).await;
 
-    let status_path = status_path_for_spec(&spec_path_for_session(h.state.path(), &session.id));
+    let status_path = status_path_for_spec(&spec_path_for_launch(h.state.path(), &session.id, 0));
     assert!(
         status_path.exists(),
         "the shim must have left its sentinel behind by now"
@@ -7600,7 +7606,7 @@ async fn a_corrupt_sentinel_fails_the_whole_list_request_and_survives() {
     .await;
     assert!(out.status.success(), "test setup: killing the tmux session");
 
-    let status_path = status_path_for_spec(&spec_path_for_session(h.state.path(), &session.id));
+    let status_path = status_path_for_spec(&spec_path_for_launch(h.state.path(), &session.id, 0));
     std::fs::create_dir_all(status_path.parent().unwrap()).unwrap();
     std::fs::write(&status_path, [0xff, 0xfe, 0xfd]).expect("plant a corrupt sentinel");
 
@@ -7646,7 +7652,7 @@ async fn the_dead_or_absent_gate_ignores_a_sentinel_behind_a_live_pane_until_the
     );
 
     let detail = "exec_failed argv0=/nope errno=2".to_string();
-    let status_path = status_path_for_spec(&spec_path_for_session(h.state.path(), &session.id));
+    let status_path = status_path_for_spec(&spec_path_for_launch(h.state.path(), &session.id, 0));
     std::fs::write(&status_path, &detail).expect("plant a sentinel behind a live pane");
 
     assert_eq!(
@@ -8469,6 +8475,22 @@ fn marker_value(transcript: &[u8], marker: &str) -> String {
     let text = String::from_utf8_lossy(transcript);
     let start = text
         .find(marker)
+        .unwrap_or_else(|| panic!("no {marker} in transcript:\n{text}"))
+        + marker.len();
+    text[start..]
+        .chars()
+        .take_while(|c| !c.is_whitespace())
+        .collect()
+}
+
+/// The value after the LAST occurrence of `marker`, for transcripts that
+/// span a restart: a reattached client's replay carries the previous run's
+/// markers too, so "the first one" is the wrong run's answer whenever a
+/// terminal was reused.
+fn last_marker_value(transcript: &[u8], marker: &str) -> String {
+    let text = String::from_utf8_lossy(transcript);
+    let start = text
+        .rfind(marker)
         .unwrap_or_else(|| panic!("no {marker} in transcript:\n{text}"))
         + marker.len();
     text[start..]
@@ -9365,6 +9387,7 @@ async fn capture_considers_sessions_beyond_the_list_reply_cap() {
                     captured_record: None,
                     capture_ambiguous: false,
                     first_input_at: rival.then_some(at),
+                    generation: 0,
                 },
                 None,
             )
@@ -9772,4 +9795,1465 @@ async fn real_claude_session_captures_its_conversation_identity() {
 #[ignore = "needs real Codex credentials and network; run deliberately"]
 async fn real_codex_session_captures_its_conversation_identity() {
     real_agent_captures_its_conversation("codex", "codex").await;
+}
+
+// ---------------------------------------------------------------------
+// Restart with resume (PLAN_M3.md item 9; M3 acceptance 9, plus the
+// restart clauses of acceptance 4 and 5)
+//
+// Every test below drives the real `RestartSession` handler through the
+// real client, against a real tmux — the terminal-reuse behavior these
+// pin (a respawned pane keeping the prior run above it) is tmux's, not
+// this crate's, so a faked driver would prove nothing about it.
+// ---------------------------------------------------------------------
+
+/// Poll `list_sessions` until `session_id` reports `Alive`.
+///
+/// The mirror image of [`wait_for_non_alive_status`], and needed for the
+/// same reason: a restart's reply says the pane exists, not that the agent
+/// inside it has execed yet, so "the relaunch is running" is only
+/// observable by asking tmux — which `ListSessions` does, freshly, on every
+/// call.
+async fn wait_for_alive_status(
+    client: &SupervisorClient,
+    session_id: &str,
+    secs: u64,
+) -> SessionInfo {
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(secs);
+    loop {
+        let listed = client.list_sessions().await.expect("list while polling");
+        if let Some(found) = listed.sessions.iter().find(|s| s.id == session_id)
+            && found.status == SessionStatus::Alive
+        {
+            return found.clone();
+        }
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "session {session_id} never became Alive within {secs}s"
+        );
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+}
+
+/// The whole visible content of a session's pane, scrollback included —
+/// asked of tmux directly rather than through an attachment.
+///
+/// The scrollback assertions below are about what the TERMINAL holds after
+/// a respawn, which is precisely the thing an attachment's replay is
+/// derived from; reading tmux itself keeps those assertions from passing
+/// (or failing) for a reason that lives in the replay path instead.
+async fn pane_capture(sock: &std::path::Path, tmux_name: &str) -> String {
+    let out = tmux_query(sock, &["capture-pane", "-p", "-S", "-", "-t", tmux_name]).await;
+    assert!(
+        out.status.success(),
+        "capture-pane for {tmux_name} must succeed, got: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    String::from_utf8_lossy(&out.stdout).into_owned()
+}
+
+/// M3 acceptance 9, first clause: a restart on a LIVE session confirms
+/// (`stop_if_running`), stops the whole process tree, and relaunches into
+/// the SAME terminal.
+///
+/// The proof that the stop lifecycle really ran is the tree's death, not
+/// the annotation: a successful restart deliberately CLEARS the annotation
+/// with its new generation (PLAN_M3.md item 4), so a stopped-then-restarted
+/// session must come back carrying none — which this asserts too, since a
+/// stale "stopped by user" on a session that is running again is exactly
+/// the bug that clearing exists to prevent.
+///
+/// The `spawner` fixture is used rather than `basic` because a
+/// single-process agent cannot distinguish a tree kill from a plain one,
+/// and "reaps the prior run before relaunching, never alongside" is the
+/// clause under test.
+#[tokio::test]
+async fn restarting_a_live_session_stops_its_tree_and_reuses_the_terminal() {
+    let h = harness().await;
+    let sock = h.state.path().join("tmux.sock");
+    let work = tempfile::tempdir().unwrap();
+    let session = h
+        .client
+        .create_session(
+            &work.path().to_string_lossy(),
+            &agent_cmd("internal fake-agent --script spawner"),
+            None,
+            80,
+            24,
+        )
+        .await
+        .expect("create");
+    let _cleanup = MarkerCleanupGuard::new(session.id.clone());
+    let tmux_name = format!("fh-{}", session.id);
+
+    let (chan, mut rx) = h.client.attach(&session.id, 80, 24).await.expect("attach");
+    let mut seen = Vec::new();
+    wait_for(&mut rx, &mut seen, "FAKE-AGENT READY", 20).await;
+    let self_pid = extract_pid(&seen, "SELF-PID:");
+    let child_pid = extract_pid(&seen, "CHILD-PID:");
+    let grandchild_pid = wait_for_child(child_pid, 10).await;
+    let pane_before = pane_id_of(&sock, &tmux_name).await;
+
+    // Stopping first is what the user consented to; without that consent
+    // the request is refused outright (see the next test).
+    let restarted = h
+        .client
+        .restart_session(&session.id, farhelm_proto::RestartMode::Fresh, true)
+        .await
+        .expect("restart with consent to stop the running agent");
+    assert_eq!(restarted.id, session.id);
+    assert_eq!(
+        restarted.annotation, None,
+        "the new generation clears the previous run's stop annotation"
+    );
+
+    // The whole PRIOR tree is gone — including the grandchild, which only
+    // a tree sweep ever reaches. What this observes is the END STATE (no
+    // survivors, a live new run), not the interleaving: proving "before,
+    // never alongside" from the outside would need launch-time
+    // instrumentation this harness does not have. The supervisor's own
+    // ordering is asserted where it is decided instead — the sweep runs to
+    // completion before `begin_relaunch` is called at all.
+    wait_until_pid_gone(self_pid, 15).await;
+    wait_until_pid_gone(child_pid, 15).await;
+    wait_until_pid_gone(grandchild_pid, 15).await;
+
+    let alive = wait_for_alive_status(&h.client, &session.id, 30).await;
+    assert_eq!(
+        alive.annotation, None,
+        "a running session must never carry the previous run's annotation"
+    );
+    assert_eq!(
+        pane_id_of(&sock, &tmux_name).await,
+        pane_before,
+        "SPEC.md: restart reuses the session's terminal when it still exists — same pane, \
+         not a replacement one"
+    );
+
+    h.client.detach(chan).await;
+}
+
+/// The other half of the confirm contract: without `stop_if_running`, a
+/// restart against an agent the supervisor finds ALIVE is refused with
+/// `Conflict` and kills nothing at all.
+///
+/// This is the TOCTOU guard, not a redundancy: a client's cached status can
+/// say "exited" while the agent is running (another client relaunched it,
+/// or the status was simply stale), and the flag is what tells the
+/// supervisor "the user was actually asked". So the assertion that matters
+/// is the process still being alive afterwards, not just the error.
+#[tokio::test]
+async fn restarting_a_live_session_without_consent_is_refused_and_kills_nothing() {
+    let h = harness().await;
+    let work = tempfile::tempdir().unwrap();
+    let session = h
+        .client
+        .create_session(
+            &work.path().to_string_lossy(),
+            &agent_cmd("internal fake-agent --script spawner"),
+            None,
+            80,
+            24,
+        )
+        .await
+        .expect("create");
+    let _cleanup = MarkerCleanupGuard::new(session.id.clone());
+
+    let (_chan, mut rx) = h.client.attach(&session.id, 80, 24).await.expect("attach");
+    let mut seen = Vec::new();
+    wait_for(&mut rx, &mut seen, "FAKE-AGENT READY", 20).await;
+    let self_pid = extract_pid(&seen, "SELF-PID:");
+    let child_pid = extract_pid(&seen, "CHILD-PID:");
+
+    let err = h
+        .client
+        .restart_session(&session.id, farhelm_proto::RestartMode::Fresh, false)
+        .await
+        .expect_err("a live agent may not be restarted without consent to stop it");
+    let err = err
+        .downcast_ref::<SupervisorError>()
+        .expect("a refusal carries the supervisor's own classification");
+    assert_eq!(err.kind, ErrorKind::Conflict);
+    assert!(
+        err.message.contains("still running"),
+        "the refusal must say why, so a client can ask the user: {}",
+        err.message
+    );
+
+    assert!(
+        !process_is_gone(self_pid) && !process_is_gone(child_pid),
+        "a refused restart must not have killed anything"
+    );
+    assert_eq!(
+        listed(&h.client, &session.id).await.status,
+        SessionStatus::Alive,
+        "and must leave the session exactly as it was"
+    );
+}
+
+/// M3 acceptance 9: relaunching into a RETAINED terminal keeps the prior
+/// run in scrollback — "the previous run's output stays in scrollback"
+/// (SPEC.md), with the new run's output below it.
+///
+/// The marker is produced by TYPING into the first run rather than by its
+/// startup banner, because both runs print the same banner: an assertion
+/// on text only the first run could have produced is what makes this about
+/// retention rather than about the relaunch having printed something.
+#[tokio::test]
+async fn a_reused_terminal_keeps_the_prior_run_above_the_new_one() {
+    let h = harness().await;
+    let sock = h.state.path().join("tmux.sock");
+    let (session, _work) = basic_session(&h).await;
+    let tmux_name = format!("fh-{}", session.id);
+
+    let (chan, mut rx) = h.client.attach(&session.id, 80, 24).await.expect("attach");
+    let mut seen = Vec::new();
+    wait_for(&mut rx, &mut seen, "FAKE-AGENT READY", 20).await;
+    h.client
+        .send_input(chan, b"PRIOR-RUN-MARKER\r".to_vec())
+        .await;
+    wait_for(&mut rx, &mut seen, "echo:", 10).await;
+    wait_for(&mut rx, &mut seen, "PRIOR-RUN-MARKER", 10).await;
+
+    h.client
+        .restart_session(&session.id, farhelm_proto::RestartMode::Fresh, true)
+        .await
+        .expect("restart");
+    wait_for_alive_status(&h.client, &session.id, 30).await;
+
+    // Read from tmux itself, and wait for the new run's own banner to
+    // appear in the capture: the relaunched agent starts asynchronously,
+    // so a single read can land before it has printed anything.
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(20);
+    let capture = loop {
+        let capture = pane_capture(&sock, &tmux_name).await;
+        if let Some(marker) = capture.find("PRIOR-RUN-MARKER")
+            && capture[marker..].contains("FAKE-AGENT READY")
+        {
+            break capture;
+        }
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "the new run never appeared below the prior run's output; capture:\n{capture}"
+        );
+        tokio::time::sleep(Duration::from_millis(200)).await;
+    };
+    assert!(
+        capture.contains("PRIOR-RUN-MARKER"),
+        "the prior run's output must survive the respawn: {capture}"
+    );
+
+    // And a client attaching after the restart sees the same thing, since
+    // its replay is that scrollback.
+    h.client.detach(chan).await;
+    let (_chan2, mut rx2) = h
+        .client
+        .attach(&session.id, 80, 24)
+        .await
+        .expect("attach after restart");
+    let mut replay = Vec::new();
+    wait_for_after(
+        &mut rx2,
+        &mut replay,
+        "PRIOR-RUN-MARKER",
+        "FAKE-AGENT READY",
+        20,
+    )
+    .await;
+}
+
+/// M3 acceptance 9: leftover descendants of a prior run are reaped BEFORE
+/// the relaunch, never left running alongside it — including a daemon left
+/// behind by an agent that exited on its own, which SPEC.md says only the
+/// session's next restart (or teardown) goes hunting for.
+///
+/// The agent is killed directly rather than stopped, for the same reason
+/// `stop_kills_a_reparented_daemon_with_no_live_pane_to_walk_from` does it:
+/// a stop would already have reaped the daemon through the live-pane path,
+/// proving nothing about the restart's own sweep. The daemon has fully
+/// reparented to init by then, so only the environment-marker scan can
+/// find it at all.
+#[tokio::test]
+async fn a_restart_reaps_a_daemon_left_by_a_self_exited_agent() {
+    let h = harness().await;
+    let work = tempfile::tempdir().unwrap();
+    let session = h
+        .client
+        .create_session(
+            &work.path().to_string_lossy(),
+            &agent_cmd("internal fake-agent --script spawner-reparent"),
+            None,
+            80,
+            24,
+        )
+        .await
+        .expect("create");
+    let _cleanup = MarkerCleanupGuard::new(session.id.clone());
+
+    let (_chan, mut rx) = h.client.attach(&session.id, 80, 24).await.expect("attach");
+    let mut seen = Vec::new();
+    wait_for(&mut rx, &mut seen, "FAKE-AGENT READY", 20).await;
+    let self_pid = extract_pid(&seen, "SELF-PID:");
+    let daemon_pid = wait_for_pid_file(&work.path().join("reparented.pid"), 10).await;
+
+    // SAFETY: `self_pid` is a real, currently-live pid this test just read
+    // out of the fake agent's own output.
+    unsafe {
+        libc::kill(self_pid as libc::pid_t, libc::SIGKILL);
+    }
+    wait_until_pid_gone(self_pid, 10).await;
+    wait_for_non_alive_status(&h.client, &session.id, 20).await;
+    assert!(
+        !process_is_gone(daemon_pid),
+        "the daemon must outlive its parent, or this test proves nothing"
+    );
+
+    h.client
+        .restart_session(&session.id, farhelm_proto::RestartMode::Fresh, false)
+        .await
+        .expect("an agent that already exited needs no stop consent");
+
+    // Again the end state rather than the interleaving: the daemon is gone
+    // and a new run is up. The "before, not alongside" ordering is a
+    // property of the handler (the sweep completes before the generation is
+    // opened), not something this vantage point can witness.
+    wait_until_pid_gone(daemon_pid, 15).await;
+    wait_for_alive_status(&h.client, &session.id, 30).await;
+}
+
+/// M3 acceptance 9: a vanished working directory fails the restart with an
+/// error NAMING the directory, and the session survives untouched — its
+/// stop annotation included, which is PLAN_M3.md item 4's "only a
+/// SUCCESSFUL restart clears it".
+///
+/// The annotation is what makes this more than an error-message test: the
+/// clear commits with the new launch generation, so a restart that never
+/// gets a generation must leave the stopped outcome exactly as it was.
+#[tokio::test]
+async fn a_vanished_working_directory_refuses_the_restart_and_keeps_the_annotation() {
+    let h = harness().await;
+    let work = tempfile::tempdir().unwrap();
+    let cwd = work.path().to_string_lossy().into_owned();
+    let session = h
+        .client
+        .create_session(
+            &cwd,
+            &agent_cmd("internal fake-agent --script basic"),
+            None,
+            80,
+            24,
+        )
+        .await
+        .expect("create");
+
+    h.client.stop_session(&session.id).await.expect("stop");
+    assert_eq!(
+        listed(&h.client, &session.id).await.annotation.as_deref(),
+        Some("stopped by user")
+    );
+
+    // The directory goes away under the session, exactly as a user
+    // deleting a worktree would leave it.
+    work.close().expect("remove the working directory");
+
+    let err = h
+        .client
+        .restart_session(&session.id, farhelm_proto::RestartMode::Fresh, false)
+        .await
+        .expect_err("a session whose working directory is gone cannot be relaunched");
+    let err = err
+        .downcast_ref::<SupervisorError>()
+        .expect("a precondition failure carries its classification");
+    assert_eq!(err.kind, ErrorKind::InvalidRequest);
+    assert!(
+        err.message.contains(&cwd),
+        "the error must name the directory (SPEC.md): {}",
+        err.message
+    );
+
+    let after = listed(&h.client, &session.id).await;
+    assert!(
+        matches!(after.status, SessionStatus::Exited { .. }),
+        "the session itself survives a refused restart: {after:?}"
+    );
+    assert_eq!(
+        after.annotation.as_deref(),
+        Some("stopped by user"),
+        "a restart that never opened a launch generation cannot have cleared the annotation"
+    );
+}
+
+/// The staleness contract in the direction that actually happens
+/// (`ControlMsg::RestartSession`'s docs): conversation capture upgrades a
+/// session's offer from fresh-only to resumable AFTER a client read its
+/// `SessionInfo`, so the mode that client picked is no longer the one the
+/// supervisor will accept — and the refusal has to NAME the current offer,
+/// because the client's next move is to re-present it rather than retry.
+///
+/// Driven through the ordinary client rather than a raw frame writer: the
+/// staleness this exercises is a property of the SUPERVISOR's revalidation,
+/// and reproducing it only needs the request to be sent with a mode that
+/// was correct a moment earlier.
+#[tokio::test]
+async fn a_capture_that_lands_after_the_clients_read_makes_a_fresh_restart_conflict() {
+    let (h, fixtures) = capture_harness().await;
+    let work = tempfile::tempdir().expect("workdir");
+    let session = record_session(&h, &fixtures, work.path(), "claude").await;
+    // What a client that listed BEFORE the first prompt would have cached.
+    assert_eq!(
+        session.restart_offer,
+        farhelm_proto::RestartOffer::FreshOnly
+    );
+
+    let (_chan, _rx, _seen, conversation) = provoke_record(&h, &session).await;
+    settle_past_horizon(&h).await;
+    assert_eq!(
+        snapshot_of(&h, &session.id)
+            .await
+            .captured_conversation
+            .as_deref(),
+        Some(conversation.as_str()),
+        "the capture must have landed, or there is no staleness to test"
+    );
+
+    let err = h
+        .client
+        .restart_session(&session.id, farhelm_proto::RestartMode::Fresh, true)
+        .await
+        .expect_err("a fresh restart is not a legal answer to a resumable session");
+    let err = err
+        .downcast_ref::<SupervisorError>()
+        .expect("a stale-offer refusal carries its classification");
+    assert_eq!(err.kind, ErrorKind::Conflict);
+    assert!(
+        err.message.contains("resum"),
+        "the refusal must name the CURRENT offer so the client can re-present it: {}",
+        err.message
+    );
+    assert_eq!(
+        listed(&h.client, &session.id).await.restart_offer,
+        farhelm_proto::RestartOffer::Resume,
+        "and the offer the client should re-present is the one it can now read"
+    );
+}
+
+/// The environment variable the record-writing fixture reads a resumed
+/// conversation id from (`fake_agent::RESUME_ENV_VAR`).
+///
+/// Duplicated rather than imported because this crate has no library
+/// target — an integration test cannot reach `fake_agent`'s items at all
+/// (the same duplication `FLOOD_RECORDS` accepts, for the same reason).
+/// Drift is loud rather than silent: the fixture would report no resume at
+/// all and the test below would fail waiting for its marker.
+const FAKE_AGENT_RESUME_ENV: &str = "FARHELM_FAKE_AGENT_RESUME";
+
+/// A resume template that runs the record-writing fixture and hands it the
+/// substituted conversation id.
+///
+/// The `sh -c` wrapper exists for one mundane reason with a real payoff:
+/// this binary's argument parser lives in `main.rs`, so the fixture cannot
+/// grow a `--resume` flag from the test side — the wrapper moves the
+/// substituted argv element into the environment variable the fixture reads
+/// instead (`fake_agent::RESUME_ENV_VAR`). What it does NOT change is the
+/// property under test: `{conversation}` is still its OWN argv element,
+/// substituted slot-for-slot by the supervisor rather than spliced into any
+/// string, which is exactly what keeps an id from ever becoming part of a
+/// different command.
+///
+/// `argv0` must stay the kind-named symlink so the session still derives
+/// its integration from its own invocation, as a real one would.
+fn fixture_resume_template(
+    argv0: &std::path::Path,
+    kind: &str,
+    record_home: &std::path::Path,
+) -> Vec<String> {
+    vec![
+        "sh".to_string(),
+        "-c".to_string(),
+        format!(
+            "{}=\"$2\" exec \"$0\" internal fake-agent --script {kind}-record --record-home \"$1\"",
+            FAKE_AGENT_RESUME_ENV
+        ),
+        argv0.to_string_lossy().into_owned(),
+        record_home.to_string_lossy().into_owned(),
+        farhelm_supervisor::agent_kind::CONVERSATION_PLACEHOLDER.to_string(),
+    ]
+}
+
+/// M3 acceptance 9 and 8 together: a session INTERRUPTED by a (simulated)
+/// reboot restarts into a FRESH terminal — there is none left to reuse —
+/// and `Resume` mode fills the snapshot's template with the identity that
+/// was captured before the reboot, so the relaunched agent picks up the
+/// same conversation.
+///
+/// Both halves are asserted from the fixture's own output rather than
+/// inferred: it echoes the argv it was launched with (so the substituted id
+/// is visible as a fact about what RAN), and it reports adopting the
+/// existing record rather than starting a new one — which is what "resumes
+/// exactly that conversation" means on disk.
+#[tokio::test]
+async fn an_interrupted_session_resumes_its_conversation_in_a_fresh_terminal() {
+    let home = tempfile::tempdir().expect("agent home");
+    let bin = tempfile::tempdir().expect("agent bin");
+    std::os::unix::fs::symlink(farhelm_bin(), bin.path().join("claude"))
+        .expect("symlink the farhelm binary under the agent's own name");
+    let state = tempfile::tempdir().expect("state dir");
+    let slot = SLOTS.acquire().await.expect("semaphore is never closed");
+    let _tmux = TmuxServerGuard(state.path().join("tmux.sock"));
+
+    let seams = |boot: &str| SupervisorSeams {
+        boot_id: {
+            let boot = boot.to_string();
+            Arc::new(move || Ok(Some(boot.clone())))
+        },
+        agent_home: Some(home.path().to_path_buf()),
+        capture_window: test_capture_bounds(),
+        ..SupervisorSeams::default()
+    };
+
+    let work = tempfile::tempdir().expect("workdir");
+    let conversation = {
+        let sup = Supervisor::new_with_seams(
+            state.path(),
+            farhelm_bin().into(),
+            SupervisorTimeouts::default(),
+            seams("boot-a"),
+        )
+        .await
+        .expect("first supervisor");
+        let client = connect_client(&sup).await;
+        let session = client
+            .create_session_with_extras(
+                &work.path().to_string_lossy(),
+                &format!(
+                    "{} internal fake-agent --script claude-record --record-home {}",
+                    shell_words::quote(&bin.path().join("claude").to_string_lossy()),
+                    shell_words::quote(&home.path().to_string_lossy())
+                ),
+                None,
+                80,
+                24,
+                farhelm_helm::CreateExtras {
+                    resume_template: Some(fixture_resume_template(
+                        &bin.path().join("claude"),
+                        "claude",
+                        home.path(),
+                    )),
+                    ..farhelm_helm::CreateExtras::default()
+                },
+            )
+            .await
+            .expect("create the record-writing session");
+
+        let (chan, mut rx) = client.attach(&session.id, 80, 24).await.expect("attach");
+        let mut seen = Vec::new();
+        wait_for(&mut rx, &mut seen, "FAKE-AGENT READY", 20).await;
+        client.send_input(chan, b"first prompt\r".to_vec()).await;
+        wait_for(&mut rx, &mut seen, "RECORD-WRITTEN:", 20).await;
+        let conversation = marker_value(&seen, "RECORD-WRITTEN:");
+
+        // Let the claim become durable before the reboot: an identity that
+        // only ever existed in memory would prove nothing about a session
+        // whose supervisor is about to be replaced.
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(30);
+        loop {
+            client.list_sessions().await.expect("list drives capture");
+            let snapshot = sup
+                .session_snapshot(&session.id)
+                .await
+                .expect("snapshot")
+                .expect("present");
+            if snapshot.captured_conversation.is_some() {
+                break;
+            }
+            assert!(
+                tokio::time::Instant::now() < deadline,
+                "the fixture's identity was never captured"
+            );
+            tokio::time::sleep(Duration::from_millis(200)).await;
+        }
+        drop(client);
+        let drain = tokio::time::Instant::now() + Duration::from_secs(10);
+        while Arc::strong_count(&sup) > 1 {
+            assert!(tokio::time::Instant::now() < drain, "connection drain");
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+        drop(sup);
+        (conversation, session)
+    };
+    let (conversation, session) = conversation;
+
+    // The reboot: tmux dies with the host, and the next supervisor reads a
+    // different boot id.
+    kill_tmux_server_and_wait(&state.path().join("tmux.sock")).await;
+    let sup = Supervisor::new_with_seams(
+        state.path(),
+        farhelm_bin().into(),
+        SupervisorTimeouts::default(),
+        seams("boot-b"),
+    )
+    .await
+    .expect("post-reboot supervisor");
+    assert!(sup.owns_state_dir(), "the predecessor must be gone");
+    let client = connect_client(&sup).await;
+    let interrupted = listed(&client, &session.id).await;
+    assert_eq!(interrupted.status, SessionStatus::Interrupted);
+    assert_eq!(
+        interrupted.restart_offer,
+        farhelm_proto::RestartOffer::Resume,
+        "the captured identity survived the reboot, so opening this session offers a resume"
+    );
+
+    let restarted = client
+        .restart_session(&session.id, farhelm_proto::RestartMode::Resume, false)
+        .await
+        .expect("an interrupted session has nothing running to consent about");
+    assert_eq!(
+        restarted.restart_offer,
+        farhelm_proto::RestartOffer::Resume,
+        "the identity is the conversation's, not the run's — it survives the relaunch too"
+    );
+
+    let (chan, mut rx) = client
+        .attach(&session.id, 80, 24)
+        .await
+        .expect("the relaunch built a fresh terminal to attach to");
+    let mut seen = Vec::new();
+    wait_for(
+        &mut rx,
+        &mut seen,
+        &format!("RECORD-RESUMED:{conversation}"),
+        30,
+    )
+    .await;
+    let argv_line = String::from_utf8_lossy(&seen);
+    let argv_line = argv_line
+        .split("FAKE-AGENT ARGV:")
+        .nth(1)
+        .expect("the fixture echoes its own argv")
+        .lines()
+        .next()
+        .expect("a line");
+    assert!(
+        argv_line.contains("--record-home"),
+        "the resume ran the TEMPLATE, not the launch invocation: {argv_line}"
+    );
+    // The substituted id itself is not visible in this argv, and that is a
+    // property of the FIXTURE, not of the product: the template's
+    // `{conversation}` element is consumed by the `sh -c` wrapper that
+    // moves it into the environment variable the fixture reads (see
+    // `fixture_resume_template`). What proves the id reached the relaunched
+    // process is the `RECORD-RESUMED:<id>` marker waited on above, which
+    // the fixture only prints for the exact id it was handed.
+
+    // The resumed conversation genuinely continues: the fixture's
+    // `append` command is its stand-in for a real agent writing more of
+    // the SAME conversation (see `record_agent`'s docs), and it can only
+    // do that because the relaunch handed it the id it was resuming.
+    client.send_input(chan, b"append\r".to_vec()).await;
+    wait_for(
+        &mut rx,
+        &mut seen,
+        &format!("RECORD-APPENDED:{conversation}"),
+        20,
+    )
+    .await;
+    let record = String::from_utf8(
+        std::fs::read(
+            std::fs::read_dir(
+                home.path().join(".claude").join("projects").join(
+                    farhelm_supervisor::agent_kind::munge_cwd(
+                        &std::fs::canonicalize(work.path())
+                            .expect("canonicalize")
+                            .to_string_lossy(),
+                    ),
+                ),
+            )
+            .expect("project dir")
+            .map(|entry| entry.expect("dir entry").path())
+            .find(|path| path.to_string_lossy().contains(&conversation))
+            .expect("the captured record still exists"),
+        )
+        .expect("read the record"),
+    )
+    .expect("the fixture writes UTF-8");
+    assert!(
+        record.lines().count() >= 2,
+        "the resumed run must append to the captured conversation, not replace it: {record}"
+    );
+    drop(slot);
+}
+
+/// SPEC.md's verbatim fallback resume, which only an explicitly configured
+/// placeholder-free template can produce (PLAN_M3.md item 7): the session
+/// offers `FallbackTemplate`, and restarting it runs that template rather
+/// than the launch invocation.
+///
+/// The two commands are deliberately distinguishable in the terminal — the
+/// launch prints one marker and the fallback another — because "ran the
+/// right command" is the whole claim, and a template that silently fell
+/// back to the launch invocation would otherwise look identical.
+#[tokio::test]
+async fn a_configured_fallback_template_is_what_a_restart_runs() {
+    let h = harness().await;
+    let work = tempfile::tempdir().expect("workdir");
+    let session = h
+        .client
+        .create_session_with_extras(
+            &work.path().to_string_lossy(),
+            "sh -c 'echo LAUNCH-INVOCATION; sleep 300'",
+            None,
+            80,
+            24,
+            farhelm_helm::CreateExtras {
+                // Placeholder-free, on a session whose basename derives no
+                // integration: SPEC.md's "the profile's resume invocation
+                // verbatim".
+                resume_template: Some(vec![
+                    "sh".to_string(),
+                    "-c".to_string(),
+                    "echo FALLBACK-RESUME; sleep 300".to_string(),
+                ]),
+                ..farhelm_helm::CreateExtras::default()
+            },
+        )
+        .await
+        .expect("create with a configured fallback resume command");
+    assert_eq!(
+        session.restart_offer,
+        farhelm_proto::RestartOffer::FallbackTemplate,
+        "a configured placeholder-free template is an offer in its own right, not a fresh launch"
+    );
+
+    let (chan, mut rx) = h.client.attach(&session.id, 80, 24).await.expect("attach");
+    let mut seen = Vec::new();
+    wait_for(&mut rx, &mut seen, "LAUNCH-INVOCATION", 20).await;
+
+    // The mode has to match the offer exactly — a `Fresh` restart of a
+    // session with a configured fallback is refused, not silently honored.
+    let refused = h
+        .client
+        .restart_session(&session.id, farhelm_proto::RestartMode::Fresh, true)
+        .await
+        .expect_err("fresh is not a legal mode for a fallback-template offer");
+    assert_eq!(
+        refused
+            .downcast_ref::<SupervisorError>()
+            .expect("classified")
+            .kind,
+        ErrorKind::Conflict
+    );
+
+    h.client
+        .restart_session(
+            &session.id,
+            farhelm_proto::RestartMode::FallbackTemplate,
+            true,
+        )
+        .await
+        .expect("restart through the configured fallback");
+    wait_for_alive_status(&h.client, &session.id, 30).await;
+
+    h.client.detach(chan).await;
+    let (_chan2, mut rx2) = h
+        .client
+        .attach(&session.id, 80, 24)
+        .await
+        .expect("attach after restart");
+    let mut replay = Vec::new();
+    wait_for_after(
+        &mut rx2,
+        &mut replay,
+        "LAUNCH-INVOCATION",
+        "FALLBACK-RESUME",
+        20,
+    )
+    .await;
+}
+
+/// The variable the `env-echo` fixture reports (`fake_agent::RC_MARKER_VAR`),
+/// duplicated for the same reason [`FAKE_AGENT_RESUME_ENV`] is: this crate
+/// has no library target for a test to import from. Drift fails the test
+/// rather than weakening it — the fixture would report an empty value and
+/// the assertions below would not find the one they wait for.
+const RC_MARKER_VAR: &str = "FARHELM_RC_MARKER";
+
+/// Write rc files exporting [`RC_MARKER_VAR`] as `value` into a private
+/// HOME, covering every shell family this launch chain might resolve to.
+///
+/// The launch shell is whatever the supervisor's own `$SHELL`/passwd entry
+/// says (`launch::resolve_shell`), which no test may change — so instead of
+/// guessing one, this writes the file each family reads for an INTERACTIVE
+/// LOGIN shell (`-l -i`, the shape `window_command` uses): bash reads
+/// `.bash_profile` (and `.bashrc` when a profile sources it, as this one
+/// does), zsh reads `.zshenv`/`.zprofile`/`.zshrc` under `ZDOTDIR`, and a
+/// POSIX `sh` reads `$ENV`. Whichever one the host uses, the value arrives
+/// by the route a user's own rc file would take.
+fn write_rc_files(home: &std::path::Path, value: &str) {
+    let export = format!("export {RC_MARKER_VAR}={value}\n");
+    std::fs::write(home.join(".bashrc"), &export).expect("write .bashrc");
+    std::fs::write(
+        home.join(".bash_profile"),
+        format!(". \"$HOME/.bashrc\"\n{export}"),
+    )
+    .expect("write .bash_profile");
+    for name in [".zshenv", ".zprofile", ".zshrc", ".profile", ".shinit"] {
+        std::fs::write(home.join(name), &export).unwrap_or_else(|e| panic!("write {name}: {e}"));
+    }
+}
+
+/// M3 acceptance 9's last clause, and SPEC.md's environment contract: "the
+/// environment is evaluated at each launch: edit your rc files and the next
+/// launch or restart sees the change".
+///
+/// The rc files live in a private HOME injected through
+/// `SupervisorSeams::launch_env` — never by mutating this process's
+/// environment, which this repo forbids and which every concurrently
+/// running harness would share anyway.
+///
+/// If the host's login shell reads none of the files this test can write,
+/// it says so loudly and stops rather than asserting something it cannot
+/// observe: a silent pass would be worse than an honest skip, and a
+/// failure would blame the product for the harness's blind spot.
+#[tokio::test]
+async fn an_rc_file_change_between_launches_reaches_the_relaunched_agent() {
+    let home = tempfile::tempdir().expect("fixture home");
+    write_rc_files(home.path(), "first");
+    let h = harness_with_seams(
+        SupervisorTimeouts::default(),
+        SupervisorSeams {
+            launch_env: vec![
+                (
+                    "HOME".to_string(),
+                    home.path().to_string_lossy().into_owned(),
+                ),
+                (
+                    "ZDOTDIR".to_string(),
+                    home.path().to_string_lossy().into_owned(),
+                ),
+                (
+                    "ENV".to_string(),
+                    home.path().join(".shinit").to_string_lossy().into_owned(),
+                ),
+            ],
+            ..SupervisorSeams::default()
+        },
+    )
+    .await;
+    let work = tempfile::tempdir().expect("workdir");
+    let session = h
+        .client
+        .create_session(
+            &work.path().to_string_lossy(),
+            &agent_cmd("internal fake-agent --script env-echo"),
+            None,
+            80,
+            24,
+        )
+        .await
+        .expect("create");
+
+    let (chan, mut rx) = h.client.attach(&session.id, 80, 24).await.expect("attach");
+    let mut seen = Vec::new();
+    wait_for(&mut rx, &mut seen, &format!("ENV:{RC_MARKER_VAR}="), 20).await;
+    let observed = marker_value(&seen, &format!("ENV:{RC_MARKER_VAR}="));
+    if observed != "first" {
+        // Deterministic, not a shrug: the rc files this test writes cover
+        // the shell families this launch chain can resolve to (see
+        // `write_rc_files`), so for any of them the value MUST have
+        // arrived. Anything else is a host whose login shell this harness
+        // genuinely cannot reach, which is a skip — and one that names the
+        // shell, so the gap is diagnosable rather than mysterious.
+        let shell = farhelm_supervisor::launch::resolve_shell().await;
+        let family = std::path::Path::new(&shell)
+            .file_name()
+            .map(|name| name.to_string_lossy().into_owned())
+            .unwrap_or_else(|| shell.clone());
+        assert!(
+            !["bash", "zsh", "sh", "dash", "ksh"].contains(&family.as_str()),
+            "the launch shell is {shell}, which sources one of the rc files this test writes, \
+             so the relaunched agent should have seen the value; it reported {observed:?} \
+             instead"
+        );
+        eprintln!(
+            "SKIPPED an_rc_file_change_between_launches_reaches_the_relaunched_agent: this \
+             host launches sessions through {shell}, which sources none of the rc files this \
+             test knows how to write"
+        );
+        return;
+    }
+
+    // The edit a user would make between launches.
+    write_rc_files(home.path(), "second");
+    h.client
+        .restart_session(&session.id, farhelm_proto::RestartMode::Fresh, true)
+        .await
+        .expect("restart");
+    wait_for_alive_status(&h.client, &session.id, 30).await;
+
+    // A restart detaches whatever was attached to the previous run (the
+    // supervisor's `detach_for_restart`), so the client reattaches — which
+    // is also how it gets the reused terminal's scrollback replayed,
+    // first run's line included.
+    h.client.detach(chan).await;
+    let (_chan2, mut rx2) = h
+        .client
+        .attach(&session.id, 80, 24)
+        .await
+        .expect("attach after restart");
+    // Anchored AFTER the first run's own line, which is still in the
+    // reused terminal's scrollback: an unanchored wait would match the
+    // pre-restart value and pass without the relaunch having sourced
+    // anything.
+    let mut replay = Vec::new();
+    wait_for_after(
+        &mut rx2,
+        &mut replay,
+        &format!("ENV:{RC_MARKER_VAR}=first"),
+        &format!("ENV:{RC_MARKER_VAR}=second"),
+        30,
+    )
+    .await;
+}
+
+/// M3 acceptance 4's restart clause: after a successful restart, the
+/// previous launch's `error` is gone — status, detail, and the sentinel
+/// file that produced it.
+///
+/// The session is created with an invocation that cannot exec plus a
+/// configured resume command that can, which is the only way (before M5's
+/// profiles) to give one session both a failing launch and a working
+/// relaunch. What that combination really exercises is the per-launch
+/// sentinel lifecycle: the failed launch's sentinel sits at the very path
+/// this relaunch's own would use, and a build that left it there would
+/// classify a perfectly good agent as `error` forever.
+#[tokio::test]
+async fn a_restart_clears_a_previous_launch_error() {
+    let h = harness().await;
+    let sock = h.state.path().join("tmux.sock");
+    let work = tempfile::tempdir().expect("workdir");
+    let missing_binary = work.path().join("no-such-farhelm-agent");
+    let session = h
+        .client
+        .create_session_with_extras(
+            &work.path().to_string_lossy(),
+            &missing_binary.to_string_lossy(),
+            None,
+            80,
+            24,
+            farhelm_helm::CreateExtras {
+                resume_template: Some(vec![
+                    "sh".to_string(),
+                    "-c".to_string(),
+                    "echo RELAUNCHED-OK; sleep 300".to_string(),
+                ]),
+                ..farhelm_helm::CreateExtras::default()
+            },
+        )
+        .await
+        .expect("create a session whose invocation cannot exec");
+
+    wait_for_dead_pane(&sock, &format!("fh-{}", session.id)).await;
+    let errored = wait_for_non_alive_status(&h.client, &session.id, 30).await;
+    assert!(
+        matches!(errored.status, SessionStatus::Error { .. }),
+        "a launch that never execed is an error, not an exit: {errored:?}"
+    );
+
+    h.client
+        .restart_session(
+            &session.id,
+            farhelm_proto::RestartMode::FallbackTemplate,
+            false,
+        )
+        .await
+        .expect("restart through the configured resume command");
+
+    let alive = wait_for_alive_status(&h.client, &session.id, 30).await;
+    assert!(
+        !matches!(alive.status, SessionStatus::Error { .. }),
+        "the previous launch's error describes a run this session no longer has"
+    );
+    // The sentinel path is per-session, so the relaunch's own launch wrote
+    // where the failed one's file sat: had it survived, the next list would
+    // read it and paint this running agent as an error again.
+    let sentinel = status_path_for_spec(&spec_path_for_launch(h.state.path(), &session.id, 0));
+    assert!(
+        !sentinel.exists(),
+        "the failed launch's sentinel must not outlive the launch it described: {}",
+        sentinel.display()
+    );
+}
+
+// ---------------------------------------------------------------------
+// Restart under concurrency, and the failure paths that must not lose
+// durable metadata (PR8 review-swarm fix batch, items 1 and 4).
+// ---------------------------------------------------------------------
+
+/// The security case behind the per-session lifecycle claim: two restarts
+/// of one session must never interleave into a kill nobody consented to.
+///
+/// Without serialization the sequence is entirely legal-looking and
+/// entirely wrong: the first restart records its stop intent and starts a
+/// kill sweep that takes seconds; the second restart, arriving mid-sweep,
+/// probes the pane, finds it dead, concludes no consent is needed — and
+/// then runs ITS marker sweep, which reaps the agent the first restart has
+/// meanwhile launched. The user asked for a restart and got a stopped
+/// session, with a live agent killed on the way.
+///
+/// The claim turns that into an ordinary serial pair, and this test pins
+/// exactly that: the second restart runs AFTER the first has finished, so
+/// it finds a LIVE agent and refuses without consent — and the session is
+/// still running when both have returned.
+///
+/// `spawner-stubborn`'s SIGTERM-ignoring child is what makes the window
+/// wide enough to aim at: it forces the first restart's sweep through the
+/// full grace/quiesce/SIGKILL escalation rather than finishing instantly.
+#[tokio::test]
+async fn a_second_restart_cannot_reap_the_agent_the_first_one_just_launched() {
+    let h = harness().await;
+    let work = tempfile::tempdir().unwrap();
+    let session = h
+        .client
+        .create_session(
+            &work.path().to_string_lossy(),
+            &agent_cmd("internal fake-agent --script spawner-stubborn"),
+            None,
+            80,
+            24,
+        )
+        .await
+        .expect("create");
+    let _cleanup = MarkerCleanupGuard::new(session.id.clone());
+
+    let (_chan, mut rx) = h.client.attach(&session.id, 80, 24).await.expect("attach");
+    let mut seen = Vec::new();
+    wait_for(&mut rx, &mut seen, "FAKE-AGENT READY", 20).await;
+    wait_for_file(&work.path().join("stubborn-ready"), 10).await;
+
+    // The first restart, with consent: it will spend seconds in the sweep.
+    let first_client = Arc::clone(&h.client);
+    let first_id = session.id.clone();
+    let first = tokio::spawn(async move {
+        first_client
+            .restart_session(&first_id, farhelm_proto::RestartMode::Fresh, true)
+            .await
+    });
+    // Long enough to be inside that sweep, short enough to be well before
+    // it ends (`kill_process_tree`'s grace period alone is ~1s).
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    let second = h
+        .client
+        .restart_session(&session.id, farhelm_proto::RestartMode::Fresh, false)
+        .await;
+
+    first
+        .await
+        .expect("the first restart task")
+        .expect("the first restart succeeds");
+    let refusal = second.expect_err(
+        "the second restart must see the FIRST one's relaunched agent, alive, and refuse \
+         without consent — never sweep it away",
+    );
+    assert_eq!(
+        refusal
+            .downcast_ref::<SupervisorError>()
+            .expect("classified")
+            .kind,
+        ErrorKind::Conflict
+    );
+    // The whole point: something is still running when the dust settles.
+    wait_for_alive_status(&h.client, &session.id, 30).await;
+}
+
+/// Delete racing a restart resolves to exactly one winner, with the loser
+/// getting an honest error — never a session torn half-down.
+///
+/// The delete is issued while the restart is inside its kill sweep, which
+/// is precisely where an unserialized delete would kill the tmux session
+/// the relaunch is about to respawn into. Whichever order the claim
+/// imposes, the invariants below hold: the session is gone afterwards, and
+/// nothing carrying its marker is still running.
+#[tokio::test]
+async fn a_delete_racing_a_restart_leaves_no_session_and_no_survivors() {
+    let h = harness().await;
+    let work = tempfile::tempdir().unwrap();
+    let session = h
+        .client
+        .create_session(
+            &work.path().to_string_lossy(),
+            &agent_cmd("internal fake-agent --script spawner-stubborn"),
+            None,
+            80,
+            24,
+        )
+        .await
+        .expect("create");
+    let _cleanup = MarkerCleanupGuard::new(session.id.clone());
+
+    let (_chan, mut rx) = h.client.attach(&session.id, 80, 24).await.expect("attach");
+    let mut seen = Vec::new();
+    wait_for(&mut rx, &mut seen, "FAKE-AGENT READY", 20).await;
+    wait_for_file(&work.path().join("stubborn-ready"), 10).await;
+
+    let restart_client = Arc::clone(&h.client);
+    let restart_id = session.id.clone();
+    let restart = tokio::spawn(async move {
+        restart_client
+            .restart_session(&restart_id, farhelm_proto::RestartMode::Fresh, true)
+            .await
+    });
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    h.client
+        .delete_session(&session.id)
+        .await
+        .expect("the delete completes rather than colliding with the relaunch");
+    // The restart either finished first (and its agent was then deleted)
+    // or lost to the delete and said so; both are legitimate, and neither
+    // may leave anything behind.
+    let _ = restart.await.expect("the restart task");
+
+    assert!(
+        h.client
+            .list_sessions()
+            .await
+            .expect("list")
+            .sessions
+            .iter()
+            .all(|s| s.id != session.id),
+        "the delete must win the session's existence outright"
+    );
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(15);
+    loop {
+        if marked_pids(&session.id).is_empty() {
+            break;
+        }
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "no process carrying this session's marker may outlive the delete"
+        );
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+}
+
+/// PLAN_M3.md item 4's binding contract, and the one this PR could most
+/// easily have broken: a restart that FAILS leaves the stop annotation
+/// exactly where it was.
+///
+/// The generation has to be opened before any side effect (item 2's
+/// ordering rule), and opening it is what clears the annotation — so the
+/// only way both promises hold is for a definitively-failed relaunch to put
+/// the previous outcome back. This drives a real failure rather than a
+/// simulated one: with the launch directory read-only, the spec write fails
+/// and nothing external has happened, which is exactly the class of failure
+/// the restore is defined for.
+#[tokio::test]
+async fn a_failed_restart_restores_the_stop_annotation_it_had_cleared() {
+    let h = harness().await;
+    let (session, _work) = basic_session(&h).await;
+
+    h.client.stop_session(&session.id).await.expect("stop");
+    let stopped = listed(&h.client, &session.id).await;
+    assert_eq!(stopped.annotation.as_deref(), Some("stopped by user"));
+
+    // The launch directory becomes unwritable, so this restart's spec —
+    // its first side effect — cannot land.
+    let launch_dir = h.state.path().join("launch");
+    let original = std::fs::metadata(&launch_dir)
+        .expect("launch dir")
+        .permissions();
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&launch_dir, std::fs::Permissions::from_mode(0o500))
+            .expect("make the launch dir read-only");
+    }
+    let refused = h
+        .client
+        .restart_session(&session.id, farhelm_proto::RestartMode::Fresh, false)
+        .await;
+    std::fs::set_permissions(&launch_dir, original).expect("restore the launch dir");
+    refused.expect_err("a launch spec that cannot be written fails the restart");
+
+    let after = listed(&h.client, &session.id).await;
+    assert!(
+        matches!(after.status, SessionStatus::Exited { .. }),
+        "the previous run's outcome is restored, not left as an unknown launching row: \
+         {after:?}"
+    );
+    assert_eq!(
+        after.annotation.as_deref(),
+        Some("stopped by user"),
+        "only a SUCCESSFUL restart clears the annotation (PLAN_M3.md item 4)"
+    );
+
+    // ...and the session is still restartable afterwards, which is what
+    // makes the restore a recovery rather than a tidier failure.
+    h.client
+        .restart_session(&session.id, farhelm_proto::RestartMode::Fresh, false)
+        .await
+        .expect("restart once the directory is writable again");
+    wait_for_alive_status(&h.client, &session.id, 30).await;
+}
+
+/// A relaunch into a directory that no longer resolves where it did at
+/// create time is refused, naming both paths (fix-batch item 21).
+///
+/// The threat is specific: a session's cwd is a path, and a path can be a
+/// symlink somebody repoints between launches. Relaunching a permissive
+/// agent into a directory an attacker chose is not a decision the user
+/// made, and `ensure_cwd_usable`'s existence check cannot see it — the
+/// directory is perfectly usable, it is simply a different one.
+#[tokio::test]
+async fn a_repointed_working_directory_refuses_the_restart() {
+    let h = harness().await;
+    let real = tempfile::tempdir().expect("real cwd");
+    let decoy = tempfile::tempdir().expect("decoy cwd");
+    let link = tempfile::tempdir().expect("link parent");
+    let link = link.path().join("cwd");
+    std::os::unix::fs::symlink(real.path(), &link).expect("symlink");
+
+    let session = h
+        .client
+        .create_session(
+            &link.to_string_lossy(),
+            &agent_cmd("internal fake-agent --script basic"),
+            None,
+            80,
+            24,
+        )
+        .await
+        .expect("create through the symlink");
+    h.client.stop_session(&session.id).await.expect("stop");
+
+    // The repoint.
+    std::fs::remove_file(&link).expect("drop the old link");
+    std::os::unix::fs::symlink(decoy.path(), &link).expect("repoint");
+
+    let err = h
+        .client
+        .restart_session(&session.id, farhelm_proto::RestartMode::Fresh, false)
+        .await
+        .expect_err("the session's directory is no longer the one it was created in");
+    let err = err
+        .downcast_ref::<SupervisorError>()
+        .expect("a precondition failure carries its classification");
+    assert_eq!(err.kind, ErrorKind::InvalidRequest);
+    let canonical_decoy = std::fs::canonicalize(decoy.path()).expect("canonicalize");
+    assert!(
+        err.message
+            .contains(&canonical_decoy.to_string_lossy().into_owned()),
+        "the refusal must name where the path leads NOW: {}",
+        err.message
+    );
+    assert_eq!(
+        listed(&h.client, &session.id).await.annotation.as_deref(),
+        Some("stopped by user"),
+        "a refusal this early cannot have touched the session's durable state"
+    );
+}
+
+/// A relaunch that is not resuming a captured identity opens a FRESH
+/// capture window (fix-batch items 5 and 15): the previous run's ambiguity
+/// verdict and first-input anchor are per-LAUNCH state, and carrying them
+/// forward would deny the new run any capture at all.
+///
+/// Two fixture sessions in one directory make the first run's correlation
+/// ambiguous — the durable refusal SPEC.md's no-wrong-conversation rule
+/// depends on. Restarting one of them fresh must then let it capture its
+/// OWN conversation on the new run, which is only possible if the verdict
+/// and the anchor were both cleared.
+#[tokio::test]
+async fn a_fresh_relaunch_opens_a_new_capture_window_after_an_ambiguity() {
+    let (h, fixtures) = capture_harness().await;
+    let work = tempfile::tempdir().expect("workdir");
+    let first = record_session(&h, &fixtures, work.path(), "claude").await;
+    let second = record_session(&h, &fixtures, work.path(), "claude").await;
+    let (_c1, _r1, _s1, _id1) = provoke_record(&h, &first).await;
+    let (_c2, _r2, _s2, _id2) = provoke_record(&h, &second).await;
+    settle_past_horizon(&h).await;
+    let ambiguous = snapshot_of(&h, &first.id).await;
+    assert!(ambiguous.capture_ambiguous, "the setup must be ambiguous");
+    assert_eq!(
+        ambiguous.restart_offer,
+        farhelm_proto::RestartOffer::FreshOnly
+    );
+
+    // The rival is stopped first, so the new run's window has the
+    // directory to itself — otherwise the ambiguity rule would (correctly)
+    // refuse again and this test could not tell a cleared verdict from an
+    // inherited one.
+    h.client.stop_session(&second.id).await.expect("stop rival");
+    h.client
+        .restart_session(&first.id, farhelm_proto::RestartMode::Fresh, true)
+        .await
+        .expect("fresh restart");
+    wait_for_alive_status(&h.client, &first.id, 30).await;
+
+    let after = snapshot_of(&h, &first.id).await;
+    assert!(
+        !after.capture_ambiguous,
+        "the previous run's verdict describes a run this session no longer has"
+    );
+    assert_eq!(
+        after.first_input_at, None,
+        "and its first-input anchor points at a window that closed long ago"
+    );
+
+    // The new run captures its own conversation, which an inherited
+    // ambiguity would have made impossible forever.
+    let (chan, mut rx) = h.client.attach(&first.id, 80, 24).await.expect("attach");
+    let mut seen = Vec::new();
+    wait_for(&mut rx, &mut seen, "FAKE-AGENT READY", 20).await;
+    // Waited for by the ECHO of a prompt only this run has seen, and read
+    // as the LAST marker: this attachment replays the reused terminal's
+    // scrollback, which still holds the pre-restart run's own
+    // `RECORD-WRITTEN:` line — waiting on the marker itself would return
+    // on the OLD one, before the new run had written anything at all.
+    h.client
+        .send_input(chan, b"prompt-after-restart\r".to_vec())
+        .await;
+    // Anchored on the typed line's own echo, and read as the LAST marker:
+    // this attachment replays the reused terminal's scrollback, so both an
+    // earlier `RECORD-WRITTEN:` and an earlier `echo:` are already in the
+    // transcript before the new run has produced anything at all.
+    wait_for_after(
+        &mut rx,
+        &mut seen,
+        "prompt-after-restart",
+        "RECORD-WRITTEN:",
+        20,
+    )
+    .await;
+    let conversation = last_marker_value(&seen, "RECORD-WRITTEN:");
+    settle_past_horizon(&h).await;
+    let captured = snapshot_of(&h, &first.id).await;
+    assert_eq!(
+        captured.captured_conversation.as_deref(),
+        Some(conversation.as_str()),
+        "the fresh window captured the new run's own conversation"
+    );
+    assert_eq!(captured.restart_offer, farhelm_proto::RestartOffer::Resume);
+}
+
+/// Terminal reuse has to survive the case tmux's own respawn cannot carry
+/// (fix-batch items 10 and 17): a TUI that dies on the ALTERNATE screen.
+///
+/// The shrink trick that preserves a primary-screen grid is powerless
+/// here — an alternate-screen grid has no history to scroll into, which is
+/// what the alternate screen IS — so the frame is captured before the kill
+/// and re-emitted by the relaunched process itself
+/// (`launch::LaunchSpec::preamble`). Without that, restarting an
+/// agent-shaped TUI would silently discard everything the user was looking
+/// at, which is exactly what SPEC.md's "the previous run's output stays in
+/// scrollback" promises it will not.
+///
+/// The same restart also rotates the stored alt-screen snapshot: that file
+/// describes the run being replaced, and leaving it behind would let the
+/// NEXT natural death replay the OLD run's last screen as if it were the
+/// new run's.
+#[tokio::test]
+async fn restarting_an_alt_screen_agent_carries_its_last_frame_into_the_new_run() {
+    let h = harness().await;
+    let work = tempfile::tempdir().unwrap();
+    let session = h
+        .client
+        .create_session(
+            &work.path().to_string_lossy(),
+            &agent_cmd("internal fake-agent --script altscreen-ignores-term"),
+            None,
+            80,
+            24,
+        )
+        .await
+        .expect("create");
+    let snapshot_path = h.state.path().join("snapshots").join(&session.id);
+
+    let (chan, mut rx) = h.client.attach(&session.id, 80, 24).await.expect("attach");
+    let mut seen = Vec::new();
+    wait_for(&mut rx, &mut seen, "ALT-SCREEN APP", 20).await;
+    wait_for(&mut rx, &mut seen, "FAKE-AGENT READY", 20).await;
+
+    h.client
+        .restart_session(&session.id, farhelm_proto::RestartMode::Fresh, true)
+        .await
+        .expect("restart a live alt-screen agent");
+    wait_for_alive_status(&h.client, &session.id, 30).await;
+
+    assert!(
+        !snapshot_path.exists(),
+        "the previous run's alt-screen snapshot must not outlive the run it describes, or a \
+         later natural death would replay it as the NEW run's last screen"
+    );
+
+    // A fresh attachment sees the prior frame above the new run — the
+    // whole promise, from the side a user actually experiences.
+    h.client.detach(chan).await;
+    let (_chan2, mut rx2) = h
+        .client
+        .attach(&session.id, 80, 24)
+        .await
+        .expect("attach after restart");
+    let mut replay = Vec::new();
+    wait_for_after(
+        &mut rx2,
+        &mut replay,
+        "ALT-SCREEN APP",
+        "FAKE-AGENT READY",
+        30,
+    )
+    .await;
+}
+
+/// Pane ids are assigned by a server-wide counter that restarts at `%0`
+/// with the tmux server, so a remembered `%N` can name a pane belonging to
+/// a completely different session — and `respawn-pane` REPLACES the
+/// process in whatever it names. Binding the target to the session as well
+/// (`=<session>:.<pane>`) is what makes that unconstructible.
+///
+/// This drives the reuse path itself rather than the pairing in isolation:
+/// two sessions whose pane ids come from the same counter, one restarted,
+/// and the other's agent must be entirely undisturbed.
+#[tokio::test]
+async fn a_restart_respawns_only_its_own_pane() {
+    let h = harness().await;
+    let sock = h.state.path().join("tmux.sock");
+    let (restarted, _work_a) = basic_session(&h).await;
+    let (bystander, _work_b) = basic_session(&h).await;
+
+    let (chan, mut rx) = h
+        .client
+        .attach(&bystander.id, 80, 24)
+        .await
+        .expect("attach");
+    let mut seen = Vec::new();
+    wait_for(&mut rx, &mut seen, "FAKE-AGENT READY", 20).await;
+    h.client
+        .send_input(chan, b"BYSTANDER-MARKER\r".to_vec())
+        .await;
+    wait_for(&mut rx, &mut seen, "BYSTANDER-MARKER", 10).await;
+    let bystander_pane = pane_id_of(&sock, &format!("fh-{}", bystander.id)).await;
+
+    h.client
+        .restart_session(&restarted.id, farhelm_proto::RestartMode::Fresh, true)
+        .await
+        .expect("restart");
+    wait_for_alive_status(&h.client, &restarted.id, 30).await;
+
+    assert_eq!(
+        listed(&h.client, &bystander.id).await.status,
+        SessionStatus::Alive,
+        "the bystander's agent must be untouched by another session's respawn"
+    );
+    assert_eq!(
+        pane_id_of(&sock, &format!("fh-{}", bystander.id)).await,
+        bystander_pane,
+        "and it must still be the same pane"
+    );
+    // Its terminal content is intact too — a respawn would have cleared
+    // the visible grid even where it left the pane in place.
+    let content = pane_capture(&sock, &format!("fh-{}", bystander.id)).await;
+    assert!(
+        content.contains("BYSTANDER-MARKER"),
+        "the bystander's own output must survive: {content}"
+    );
 }
