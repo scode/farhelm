@@ -50,6 +50,31 @@ pub struct LaunchSpec {
     /// This session's id, injected into the agent's environment as
     /// [`SESSION_ID_ENV_VAR`] — see that constant's docs for why.
     pub session_id: String,
+    /// Bytes the shim writes to the terminal before `exec`, or empty for
+    /// the ordinary launch.
+    ///
+    /// Exists for one job (PLAN_M3.md item 9's terminal reuse): carrying a
+    /// dying run's last visible frame into the NEW run's scrollback when
+    /// tmux itself cannot. `respawn-pane` keeps a pane's history but
+    /// reinitializes its visible grid, and the supervisor's shrink trick
+    /// (`TmuxDriver::relaunch_in_pane`) recovers that grid only for a pane
+    /// on the PRIMARY screen with room to scroll — an alternate-screen TUI
+    /// (whose grid has no history at all) and a one-row window both fall
+    /// outside it. For those, the supervisor captures the frame before
+    /// respawning and hands it here, so what the user saw last is still
+    /// above the new run rather than silently discarded.
+    ///
+    /// Written by the SHIM rather than by the supervisor because there is
+    /// no other moment it can be written at: the pane's process is
+    /// replaced by the respawn, and nothing can write to a pane's output
+    /// stream except the process inside it. Emitted before `exec` and
+    /// never on any failure path, so a launch that could not start leaves
+    /// its own sentinel rather than a resurrected frame.
+    ///
+    /// `#[serde(default)]` keeps a spec written by an older build (or by a
+    /// launch that needs no preamble) decoding cleanly.
+    #[serde(default)]
+    pub preamble: Vec<u8>,
 }
 
 /// Resolve the shell to launch sessions through: `$SHELL`, then the
@@ -379,28 +404,59 @@ pub fn window_command(shell: &str, farhelm_exe: &Path, spec_path: &Path) -> Vec<
     ]
 }
 
-/// Where a session's per-launch spec file lives:
-/// `<state_dir>/launch/<id>.json`.
+/// Where one LAUNCH's spec file lives:
+/// `<state_dir>/launch/<id>.<generation>.json`.
 ///
-/// Named by SESSION id, not by a per-launch id: today a session gets
-/// exactly one spec-file path for its whole lifetime, so a relaunch
-/// (PR8's territory) writes a fresh spec to this SAME path, silently
-/// superseding whatever an earlier failed launch left behind. That is
-/// also why a stale sentinel from launch N cannot survive to be
-/// misattributed to launch N+1 without deliberate handling — today's half
-/// of that handling is that a CONSUMED sentinel is deleted once its
-/// `Error` outcome commits durably (`service.rs`'s `reload_sessions` and
-/// `ListSessions` handler both document the lifecycle and the rationale);
-/// PR8's own seam note there covers the other half, an UNCONSUMED
-/// sentinel superseded by a fresh launch before anything ever read it.
-/// `service.rs`'s `create_session` and the sentinel reader both call this
-/// SAME function so the two sides can never compute diverging paths for
-/// the same session.
-pub fn spec_path_for_session(state_dir: &Path, id: &str) -> PathBuf {
-    state_dir.join("launch").join(format!("{id}.json"))
+/// Keyed by session id AND launch generation (`store::StoredSession::
+/// generation`), which is the naming PLAN_M3.md item 3 asked for and item
+/// 9's restart is what finally needs: a session can now launch many times,
+/// and the two files a launch owns — this spec and the sentinel derived
+/// from it — are evidence ABOUT ONE LAUNCH. Sharing one path across
+/// launches made a stale sentinel and a fresh one indistinguishable except
+/// by careful deletion, so a cleanup that failed (or a crash before it
+/// ran) could paint a perfectly good relaunch as `error`. Different
+/// generations are different paths, so that misattribution is not a race
+/// to win but a state that cannot be constructed.
+///
+/// Generation 0 is a session's original launch, which is also what every
+/// row predating the generation column carries after the schema migration
+/// — so a session created by an older build finds its files exactly where
+/// this build looks for them.
+///
+/// `service.rs`'s launch path and the sentinel reader both call this SAME
+/// function, so the two sides can never compute diverging paths for the
+/// same launch.
+pub fn spec_path_for_launch(state_dir: &Path, id: &str, generation: i64) -> PathBuf {
+    state_dir
+        .join("launch")
+        .join(format!("{id}.{generation}.json"))
 }
 
-/// Read a session's CURRENT-launch exec-failure sentinel, if one exists.
+/// Split a launch-directory spec file NAME back into the session id and
+/// generation that produced it, or `None` when it is not one of ours.
+///
+/// The inverse of [`spec_path_for_launch`], and it exists for exactly one
+/// caller: the startup sweep, which must decide whether a leftover file
+/// belongs to a session that still exists. A session id is a UUID and
+/// contains no `.`, so splitting on the LAST two dot-separated components
+/// is unambiguous; anything that does not parse is left alone rather than
+/// guessed at, since an unrecognized file in this directory is not this
+/// code's to delete.
+pub fn parse_launch_file_name(name: &str) -> Option<(&str, i64)> {
+    let (rest, extension) = name.rsplit_once('.')?;
+    if extension != "json" && extension != "status" {
+        return None;
+    }
+    let (id, generation) = rest.rsplit_once('.')?;
+    let generation = generation.parse().ok()?;
+    (!id.is_empty()).then_some((id, generation))
+}
+
+/// Read one LAUNCH's exec-failure sentinel, if one exists.
+///
+/// `generation` names the launch (see [`spec_path_for_launch`]): a caller
+/// passes the generation of the run it is classifying, so a sentinel left
+/// by an earlier launch is not merely ignored but unreachable.
 ///
 /// `Ok(None)` is the ordinary case: no launch failure is known for this
 /// session, which covers both "never failed" and "the shim has not run
@@ -427,8 +483,12 @@ pub fn spec_path_for_session(state_dir: &Path, id: &str) -> PathBuf {
 /// treating any of these as "no sentinel" would let a launch that truly
 /// failed read back as a plain, wrong `Exited` — precisely the conversion
 /// PLAN_M3.md item 5 forbids.
-pub fn read_launch_sentinel(state_dir: &Path, id: &str) -> anyhow::Result<Option<String>> {
-    let status_path = status_path_for_spec(&spec_path_for_session(state_dir, id));
+pub fn read_launch_sentinel(
+    state_dir: &Path,
+    id: &str,
+    generation: i64,
+) -> anyhow::Result<Option<String>> {
+    let status_path = status_path_for_spec(&spec_path_for_launch(state_dir, id, generation));
     match std::fs::read(&status_path) {
         Ok(bytes) => {
             let content = String::from_utf8(bytes).with_context(|| {
@@ -548,6 +608,19 @@ pub fn exec_launch_spec_with_seam(
          from its own path — service.rs's create_session and this derivation must never \
          disagree, or the exec-failure path below would write to the wrong place"
     );
+    // The retained-terminal preamble (see `LaunchSpec::preamble`), written
+    // immediately before `exec` so it lands above the new run's own first
+    // byte. Best-effort by design: a write that fails costs scrollback
+    // fidelity, and refusing to start the agent over it would cost the
+    // user their session — so the failure is reported into the shim's own
+    // error path only if `exec` ALSO fails, and otherwise passes silently
+    // into a terminal that simply lacks the prior frame.
+    if !spec.preamble.is_empty() {
+        use std::io::Write as _;
+        let mut out = std::io::stdout().lock();
+        let _ = out.write_all(&spec.preamble);
+        let _ = out.flush();
+    }
     // exec only returns on failure. `Command::env` adds to (never clears)
     // the shim's own inherited environment, so this joins the rc-file
     // variables the login shell already sourced rather than replacing
@@ -596,7 +669,7 @@ mod tests {
     #[test]
     fn read_launch_sentinel_is_none_when_nothing_was_ever_written() {
         let tmp = tempfile::tempdir().unwrap();
-        let result = read_launch_sentinel(tmp.path(), "never-launched").unwrap();
+        let result = read_launch_sentinel(tmp.path(), "never-launched", 0).unwrap();
         assert_eq!(result, None);
     }
 
@@ -610,13 +683,14 @@ mod tests {
     fn read_launch_sentinel_reads_back_what_the_shim_wrote() {
         let tmp = tempfile::tempdir().unwrap();
         let id = "session-1";
-        let spec_path = spec_path_for_session(tmp.path(), id);
+        let spec_path = spec_path_for_launch(tmp.path(), id, 0);
         std::fs::create_dir_all(spec_path.parent().unwrap()).unwrap();
         let missing_binary = tmp.path().join("no-such-farhelm-test-binary");
         let spec = LaunchSpec {
             argv: vec![missing_binary.to_string_lossy().into_owned()],
             status_file: status_path_for_spec(&spec_path),
             session_id: id.to_string(),
+            preamble: Vec::new(),
         };
         std::fs::write(&spec_path, serde_json::to_vec(&spec).unwrap()).unwrap();
         exec_launch_spec(&spec_path);
@@ -628,7 +702,7 @@ mod tests {
         // through.
         let status_path = status_path_for_spec(&spec_path);
         let on_disk = std::fs::read_to_string(&status_path).expect("sentinel must exist on disk");
-        let sentinel = read_launch_sentinel(tmp.path(), id)
+        let sentinel = read_launch_sentinel(tmp.path(), id, 0)
             .expect("read must succeed")
             .expect("a sentinel must exist after the exec failure above");
         assert_eq!(
@@ -649,10 +723,10 @@ mod tests {
     fn read_launch_sentinel_reports_a_directory_at_the_status_path_loudly() {
         let tmp = tempfile::tempdir().unwrap();
         let id = "session-dir";
-        let status_path = status_path_for_spec(&spec_path_for_session(tmp.path(), id));
+        let status_path = status_path_for_spec(&spec_path_for_launch(tmp.path(), id, 0));
         std::fs::create_dir_all(&status_path).unwrap();
 
-        let err = read_launch_sentinel(tmp.path(), id)
+        let err = read_launch_sentinel(tmp.path(), id, 0)
             .expect_err("a directory at the sentinel path must be a hard error, not absence");
         assert!(
             format!("{err:#}").contains("reading launch sentinel"),
@@ -670,11 +744,11 @@ mod tests {
     fn read_launch_sentinel_rejects_empty_and_whitespace_only_content() {
         let tmp = tempfile::tempdir().unwrap();
         for (id, content) in [("empty", ""), ("blank", "   \n\t  ")] {
-            let status_path = status_path_for_spec(&spec_path_for_session(tmp.path(), id));
+            let status_path = status_path_for_spec(&spec_path_for_launch(tmp.path(), id, 0));
             std::fs::create_dir_all(status_path.parent().unwrap()).unwrap();
             std::fs::write(&status_path, content).unwrap();
 
-            let err = read_launch_sentinel(tmp.path(), id)
+            let err = read_launch_sentinel(tmp.path(), id, 0)
                 .expect_err("an empty or whitespace-only sentinel must be a hard error");
             assert!(
                 format!("{err:#}").contains("empty or pure whitespace"),
@@ -693,11 +767,11 @@ mod tests {
     fn read_launch_sentinel_refuses_to_treat_invalid_utf8_as_absent() {
         let tmp = tempfile::tempdir().unwrap();
         let id = "session-2";
-        let status_path = status_path_for_spec(&spec_path_for_session(tmp.path(), id));
+        let status_path = status_path_for_spec(&spec_path_for_launch(tmp.path(), id, 0));
         std::fs::create_dir_all(status_path.parent().unwrap()).unwrap();
         std::fs::write(&status_path, [0xff, 0xfe, 0xfd]).unwrap();
 
-        let err = read_launch_sentinel(tmp.path(), id)
+        let err = read_launch_sentinel(tmp.path(), id, 0)
             .expect_err("invalid UTF-8 must be a hard error, not a silent absence");
         assert!(format!("{err:#}").contains("not valid UTF-8"));
     }
@@ -721,6 +795,7 @@ mod tests {
             argv: vec![missing_binary.to_string_lossy().into_owned()],
             status_file: status_path_for_spec(&spec_path),
             session_id: "test-session".to_string(),
+            preamble: Vec::new(),
         };
         std::fs::write(&spec_path, serde_json::to_vec(&spec).unwrap()).unwrap();
 
@@ -768,6 +843,7 @@ mod tests {
             argv: vec![non_executable.to_string_lossy().into_owned()],
             status_file: status_path_for_spec(&spec_path),
             session_id: "test-session".to_string(),
+            preamble: Vec::new(),
         };
         std::fs::write(&spec_path, serde_json::to_vec(&spec).unwrap()).unwrap();
 
@@ -840,6 +916,7 @@ mod tests {
             argv: vec![],
             status_file: status_path_for_spec(&spec_path),
             session_id: "test-session".to_string(),
+            preamble: Vec::new(),
         };
         std::fs::write(&spec_path, serde_json::to_vec(&spec).unwrap()).unwrap();
 
@@ -876,6 +953,7 @@ mod tests {
             argv: vec![missing_binary.to_string_lossy().into_owned()],
             status_file: status_path_for_spec(&spec_path),
             session_id: "test-session".to_string(),
+            preamble: Vec::new(),
         };
         std::fs::write(&spec_path, serde_json::to_vec(&spec).unwrap()).unwrap();
 

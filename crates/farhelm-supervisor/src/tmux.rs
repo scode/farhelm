@@ -19,6 +19,7 @@ use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use tokio::io::{AsyncBufReadExt, AsyncRead, AsyncReadExt, AsyncWriteExt, BufReader};
 use tokio::process::{Child, ChildStdin, Command};
+use tracing::warn;
 
 /// History (and therefore replay) floor. SPEC.md promises at least the
 /// screen plus 10,000 lines; the margin covers lines scrolled during the
@@ -819,6 +820,89 @@ impl std::fmt::Display for TmuxCommandFailure {
 
 impl std::error::Error for TmuxCommandFailure {}
 
+/// Render environment entries as the `NAME=value` strings tmux's `-e`
+/// flag takes, one per entry.
+///
+/// A free function so `new-session` and `respawn-pane` build them
+/// identically: the two paths launch the same session's agent, and an
+/// environment that differed between a first launch and a relaunch would
+/// be exactly the kind of divergence SPEC.md's environment contract
+/// forbids. Returns owned strings because the caller borrows them into an
+/// argv that outlives this call.
+/// The tmux target that names `pane` WITHIN `session` — `=<session>:.<pane>`.
+///
+/// The leading `=` is tmux's exact-match prefix (no fnmatch, no prefix
+/// matching), and pairing the two is what makes a pane reference safe to
+/// carry across time: pane ids come from a server-wide counter that
+/// restarts at `%0` with the server, so a remembered `%N` can, after a
+/// tmux restart, name a live pane belonging to a completely different
+/// session. Commands that REPLACE or KILL what they name must not be able
+/// to act on that stranger, and tmux refuses a mismatched pairing itself
+/// ("can't find pane") — an atomic check rather than a probe that could go
+/// stale between asking and acting.
+fn pane_in_session(session: &str, pane: &str) -> String {
+    format!("={session}:.{pane}")
+}
+
+fn env_assignments(env: &[(String, String)]) -> Vec<String> {
+    env.iter()
+        .map(|(name, value)| format!("{name}={value}"))
+        .collect()
+}
+
+/// What [`TmuxDriver::plan_pane_relaunch`] arranged before a respawn,
+/// and what the caller still owes because of it.
+///
+/// Split from the respawn itself because the two halves have to
+/// straddle a step that belongs to neither: the preamble has to be in
+/// the launch spec BEFORE the new process starts, and the geometry has
+/// to be restored AFTER it. Returning a plan rather than doing it all
+/// inline is what lets the caller sequence spec-write → respawn →
+/// restore without this module knowing about launch specs.
+///
+/// ## Why either half exists
+///
+/// `respawn-pane` retains a pane's scrollback HISTORY but
+/// reinitializes its visible grid (measured on every version audited
+/// below), so what the user last saw is precisely what a naive respawn
+/// throws away. Two mechanisms recover it, and which one applies is
+/// decided here:
+///
+/// - **The shrink** (`restore`): shrinking a window scrolls the lines
+///   it no longer has room for into history, and growing it back pulls
+///   them out. Shrinking to one row therefore moves the ENTIRE visible
+///   screen into history before the respawn can clear it. Applies to a
+///   pane on the primary screen with more than one row.
+/// - **The carried-over frame** (`carry_over`): an ALTERNATE-screen
+///   grid has no history to scroll into (that is what the alternate
+///   screen is), so shrinking preserves nothing; a one-row window has
+///   nothing to shrink. In both cases the frame is captured instead and
+///   handed back for the new run to re-emit through its launch spec
+///   (`launch::LaunchSpec::preamble`) — the same content the stop
+///   snapshot already captures for a dead alt-screen pane, put to the
+///   one use that survives a respawn.
+///
+/// Version floor: `respawn-pane -k`, `-e` environment injection,
+/// history retention, the shrink-scrolls-into-history rule, and the
+/// grow-pulls-back rule were all audited empirically against tmux 3.3a
+/// (this crate's documented floor — see `require_supported_tmux`), 3.4
+/// (Ubuntu 24.04's package, so CI's), and 3.7b (the development host).
+/// All three behave identically; nothing here needs a version gate.
+///
+/// Every step is BEST EFFORT and never fails the relaunch: a resize or
+/// capture that does not land costs scrollback fidelity, while refusing
+/// to relaunch over it would cost the user their agent. A shrink whose
+/// restore never runs (a crash mid-restart) is not permanent either —
+/// every attach resizes the window to its own client size.
+pub struct PaneRelaunchPlan {
+    /// The geometry to restore after the respawn, when this plan
+    /// shrank the window to push its visible screen into history.
+    pub restore: Option<(u16, u16)>,
+    /// The prior run's last visible frame, for the cases the shrink
+    /// cannot cover; the caller emits it through the new launch.
+    pub carry_over: Option<Vec<u8>>,
+}
+
 impl TmuxDriver {
     /// `state_dir` owns the socket and generated config. The config file
     /// is rewritten whenever the driver starts, while a server already
@@ -1102,10 +1186,11 @@ impl TmuxDriver {
 
     /// Kill a tmux session by name, tolerating its absence.
     ///
-    /// Used to unwind a session whose tmux window was created but whose
-    /// SQLite insert then failed (`create_session`'s failure-ordering
-    /// contract): best-effort, because the caller returns the DB error
-    /// either way. The already-gone case this tolerates is NOT the agent
+    /// Three callers, all of them tearing something down: a create
+    /// unwinding a window whose SQLite insert failed (`create_session`'s
+    /// failure-ordering contract), `DeleteSession`'s teardown, and a
+    /// RESTART clearing the husk of a tmux session whose pane it can no
+    /// longer find before building a fresh terminal under the same name. The already-gone case this tolerates is NOT the agent
     /// exiting on its own — `remain-on-exit on` keeps a pane (and so its
     /// session) around after the process inside it dies, so that never
     /// races this call — but something outside the supervisor's own
@@ -1156,16 +1241,25 @@ impl TmuxDriver {
     /// `new-session -x 0` is a hard tmux error ("width too small"), and a
     /// caller that has no real terminal yet (a browser mid-layout, a
     /// script) must get a session, not a confusing tmux refusal.
+    ///
+    /// `env` is injected into the new session's environment with `-e`, one
+    /// flag per entry; production passes none (see
+    /// `service::SupervisorSeams::launch_env` for the one caller that does
+    /// not, and why the launch environment needs an injection point at
+    /// all). Values are passed as literal argv elements to tmux, never
+    /// through a shell, so no quoting applies.
     pub async fn create_session(
         &self,
         name: &str,
         cwd: &str,
         cols: u16,
         rows: u16,
+        env: &[(String, String)],
         window_cmd: &[String],
     ) -> anyhow::Result<String> {
         let cols_s = cols.clamp(1, 10_000).to_string();
         let rows_s = rows.clamp(1, 10_000).to_string();
+        let env_args = env_assignments(env);
         // `-P -F` prints the pane id from the same invocation that
         // creates the session. One call, not new-session followed by a
         // display-message query: if the follow-up query failed, the
@@ -1187,9 +1281,167 @@ impl TmuxDriver {
             "-c",
             cwd,
         ];
+        for assignment in &env_args {
+            args.push("-e");
+            args.push(assignment);
+        }
+        // `--` before the command: without it, an argv whose first element
+        // began with a dash would be parsed as more flags. Nothing today
+        // launches such a command (the window command always starts with a
+        // shell path), and that is exactly the kind of thing a caller
+        // should not have to keep true.
+        args.push("--");
         args.extend(window_cmd.iter().map(String::as_str));
         let pane = self.run(&args).await?;
         Ok(pane.trim().to_string())
+    }
+
+    /// Prepare `pane` to be respawned so the prior run's last screen
+    /// survives it; see [`PaneRelaunchPlan`] for what the two halves do and
+    /// why the work is split around the caller's own launch publication.
+    ///
+    /// `max_carry_over` bounds the captured frame exactly like the stop
+    /// snapshot bounds its own (see
+    /// [`TmuxDriver::capture_alt_screen_if_active`]): the bytes travel
+    /// through a launch spec and then through the pane, and an unbounded
+    /// capture of a 10,000-row pane is not something either should have to
+    /// carry.
+    pub async fn plan_pane_relaunch(
+        &self,
+        session: &str,
+        pane: &str,
+        max_carry_over: usize,
+    ) -> PaneRelaunchPlan {
+        let geometry = match self
+            .run(&[
+                "display-message",
+                "-p",
+                "-t",
+                &pane_in_session(session, pane),
+                "#{window_width} #{window_height} #{alternate_on}",
+            ])
+            .await
+        {
+            Ok(out) => out,
+            Err(e) => {
+                warn!(
+                    session, error = %e,
+                    "could not inspect this window before a relaunch; relaunching without \
+                     carrying the prior run's visible screen over"
+                );
+                return PaneRelaunchPlan {
+                    restore: None,
+                    carry_over: None,
+                };
+            }
+        };
+        let mut fields = geometry.split_whitespace();
+        let parsed = fields
+            .next()
+            .and_then(|w| w.parse::<u16>().ok())
+            .zip(fields.next().and_then(|h| h.parse::<u16>().ok()));
+        let alternate = fields.next() == Some("1");
+        let Some((cols, rows)) = parsed else {
+            warn!(
+                session,
+                geometry = %geometry.trim(),
+                "tmux reported an unparseable window size before a relaunch; relaunching \
+                 without carrying the prior run's visible screen over"
+            );
+            return PaneRelaunchPlan {
+                restore: None,
+                carry_over: None,
+            };
+        };
+        // The two cases the shrink cannot serve (see `PaneRelaunchPlan`):
+        // an alternate-screen grid, which has no history to scroll into,
+        // and a window with nothing to scroll.
+        if alternate || rows <= 1 {
+            let carry_over = match self
+                .capture_alt_screen_if_active(session, pane, max_carry_over)
+                .await
+            {
+                Ok(AltScreenCapture::Captured(bytes)) => Some(bytes),
+                // A one-row PRIMARY screen lands here (nothing to capture
+                // that is worth a second capture path), as does an
+                // oversized or mismatched capture. Losing the frame costs
+                // the same as the respawn's own grid reset would.
+                Ok(_) => None,
+                Err(e) => {
+                    warn!(
+                        session, error = %e,
+                        "could not capture this pane's last frame before a relaunch; the new \
+                         run starts without it above"
+                    );
+                    None
+                }
+            };
+            return PaneRelaunchPlan {
+                restore: None,
+                carry_over,
+            };
+        }
+        if let Err(e) = self.resize_window(session, cols, 1).await {
+            warn!(
+                session, error = %e,
+                "could not shrink this window before a relaunch; the prior run's visible \
+                 screen may be cleared by the respawn"
+            );
+            return PaneRelaunchPlan {
+                restore: None,
+                carry_over: None,
+            };
+        }
+        PaneRelaunchPlan {
+            restore: Some((cols, rows)),
+            carry_over: None,
+        }
+    }
+
+    /// Run `window_cmd` in an EXISTING pane (PLAN_M3.md item 9's terminal
+    /// reuse), replacing whatever was there.
+    ///
+    /// `respawn-pane -k` is the only tmux mechanism that runs a new process
+    /// in the SAME pane: the pane id — the handle every attachment, replay,
+    /// and status probe in this crate holds — survives, and `remain-on-exit`
+    /// keeps applying (verified: a respawned process that exits leaves the
+    /// pane dead with a readable `#{pane_dead_status}`). The alternatives
+    /// were rejected for the same reason as each other: a `new-window` or
+    /// `split-window` puts the new run in a DIFFERENT pane, so the prior
+    /// run's output ends up somewhere the session's terminal view never
+    /// shows — which is not "in scrollback" in any sense a user would
+    /// recognize.
+    ///
+    /// The target binds the SESSION and the pane together
+    /// (`pane_in_session`), which is not belt-and-braces: pane ids are
+    /// assigned by a server-wide counter that restarts at `%0` whenever the
+    /// tmux server does, so a bare `%N` carried across a server restart can
+    /// name a pane belonging to an entirely different session — and this
+    /// command REPLACES the process in whatever it names. tmux refuses the
+    /// mismatched pairing itself ("can't find pane"), which makes the check
+    /// atomic with the act rather than a probe that could go stale between
+    /// the two (audited on 3.3a, 3.4 and 3.7b).
+    pub async fn relaunch_in_pane(
+        &self,
+        session: &str,
+        pane: &str,
+        cwd: &str,
+        env: &[(String, String)],
+        window_cmd: &[String],
+    ) -> anyhow::Result<()> {
+        let target = pane_in_session(session, pane);
+        let env_args = env_assignments(env);
+        let mut args: Vec<&str> = vec!["respawn-pane", "-k", "-t", &target, "-c", cwd];
+        for assignment in &env_args {
+            args.push("-e");
+            args.push(assignment);
+        }
+        args.push("--");
+        args.extend(window_cmd.iter().map(String::as_str));
+        self.run(&args)
+            .await
+            .map(|_| ())
+            .context("respawning the session's pane for a relaunch")
     }
 
     /// Resize a session's window. `cols`/`rows` are clamped to tmux's
@@ -3956,6 +4208,7 @@ mod tests {
                 "/",
                 80,
                 24,
+                &[],
                 // A producer fast enough that "the stream went quiet"
                 // genuinely means paused, and slow enough not to bury the
                 // test in output.

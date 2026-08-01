@@ -356,6 +356,42 @@ body,
   color: #e08080;
 }
 
+/* The session view's restart affordance (PLAN_M3.md item 9). A plain
+   flex row under the titlebar rather than anything modal: SPEC.md says
+   opening an interrupted session OFFERS restart-with-resume, and
+   declining is simply not clicking — so it has to be visible without
+   covering the terminal, and dismissible by ignoring it.
+
+   `flex-wrap` is what keeps the offer text and the buttons on one line
+   when there is room and stacks them when there is not; the text is the
+   only item allowed to shrink (`min-width: 0`), so the controls never get
+   pushed off the edge by a long explanation. */
+.restart-offer {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 8px;
+  padding: 6px 10px;
+  background: #232833;
+  font-size: 12px;
+}
+
+.restart-offer-text {
+  flex: 1 1 auto;
+  min-width: 0;
+  color: #b8c0cc;
+}
+
+/* Full-width beneath the controls (`flex-basis: 100%`) rather than
+   squeezed in beside them: a restart refusal is the supervisor's own
+   prose — a stale-offer conflict names what the offer is now — and
+   truncating it would hide the one sentence that says what to do next. */
+.restart-error {
+  flex: 1 1 100%;
+  font-size: 12px;
+  color: #e08080;
+}
+
 /* Two classes, not one: `.banner`'s own `display: none` (below) must
    lose to this regardless of stylesheet order, since the rendered
    element always carries both classes together ("banner

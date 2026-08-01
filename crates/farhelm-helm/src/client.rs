@@ -11,7 +11,7 @@ use anyhow::{Context, bail};
 use farhelm_proto::io::{
     FrameReader, FrameWriter, ProgressWrite, handshake, parse_control, write_frame_before_stall,
 };
-use farhelm_proto::{AgentKind, ControlMsg, ErrorKind, Frame, FrameKind, SessionInfo};
+use farhelm_proto::{AgentKind, ControlMsg, ErrorKind, Frame, FrameKind, RestartMode, SessionInfo};
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -653,6 +653,19 @@ impl SupervisorClient {
                     ControlMsg::Detached { channel, reason } => {
                         if let Some(handle) = self.terminals.lock().await.remove(channel) {
                             signal_detached(&handle, reason.clone());
+                            // Acknowledge upstream, so the SUPERVISOR can
+                            // retire the connection-local routing this
+                            // channel still has (its `input_routes` entry,
+                            // which pins the `SessionEntry` it resolved).
+                            // A server-initiated detach — a delete, a
+                            // restart, a stall — otherwise leaves that
+                            // mapping for the life of the connection: a
+                            // leak per event, and a stale one, since the
+                            // entry it pins describes a session (or a run)
+                            // that is gone. The supervisor tolerates a
+                            // `Detach` for an attachment it has already
+                            // dropped, which is exactly what this is.
+                            self.release_upstream(*channel);
                         }
                     }
                     other => warn!(?other, "unexpected control message at helm"),
@@ -914,6 +927,46 @@ impl SupervisorClient {
         {
             ControlMsg::SessionStopped { .. } => Ok(()),
             other => bail!("unexpected reply to stop_session: {other:?}"),
+        }
+    }
+
+    /// Relaunch a session's agent (SPEC.md's restart, PLAN_M3.md item 9),
+    /// returning the session's freshly recomputed state.
+    ///
+    /// `mode` must match the session's CURRENT `restart_offer`, which the
+    /// supervisor recomputes at handling time rather than trusting the
+    /// caller's cached copy: a mismatch comes back as a
+    /// [`SupervisorError`] with `ErrorKind::Conflict` naming what the offer
+    /// is now, and the caller's correct response is to refresh the session
+    /// and re-present that offer — never to retry the same request (see
+    /// `ControlMsg::RestartSession`'s staleness contract).
+    ///
+    /// `stop_if_running` carries the user's explicit consent to stop a
+    /// still-running agent first. Without it, a restart against an agent
+    /// the supervisor finds alive is refused with the same `Conflict`
+    /// shape, which is what keeps a stale client-side "it looked exited"
+    /// from silently killing a live process.
+    pub async fn restart_session(
+        &self,
+        id: &str,
+        mode: RestartMode,
+        stop_if_running: bool,
+    ) -> anyhow::Result<SessionInfo> {
+        let req_id = self.req_id();
+        match self
+            .request(
+                req_id,
+                ControlMsg::RestartSession {
+                    req_id,
+                    session_id: id.to_string(),
+                    mode,
+                    stop_if_running,
+                },
+            )
+            .await?
+        {
+            ControlMsg::SessionRestarted { session, .. } => Ok(session),
+            other => bail!("unexpected reply to restart_session: {other:?}"),
         }
     }
 
@@ -1859,10 +1912,10 @@ mod tests {
     /// peer sending `SessionRestarted` would fall into the `other =>
     /// warn!(...)` arm — the pending caller's oneshot would never resolve,
     /// hanging forever, since unlike `Detached` this reply exists to answer
-    /// a specific waiting request. There is no public `restart_session`
-    /// client method yet (PLAN_M3.md item 9 adds one); this drives the
-    /// private `request()` plumbing directly, the same way this module's
-    /// other low-level demux tests do.
+    /// a specific waiting request. Deliberately kept at the demux level
+    /// even now that [`SupervisorClient::restart_session`] exists: what it
+    /// pins is the reply CLASSIFICATION, which a refactor could break for
+    /// this message alone while the public method's own tests stay green.
     #[tokio::test]
     async fn session_restarted_reply_resolves_the_pending_request() {
         let (client_side, peer_side) = tokio::io::duplex(64 * 1024);

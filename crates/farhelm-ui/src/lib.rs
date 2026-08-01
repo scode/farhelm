@@ -78,6 +78,52 @@ pub enum SessionStatus {
     Error { detail: String },
 }
 
+/// Mirror of the helm's restart-offer JSON (farhelm-proto `RestartOffer`):
+/// what restarting THIS session would do to its conversation, as the
+/// supervisor currently understands it (PLAN_M3.md items 7-9).
+///
+/// The UI never derives this — it cannot see a session's integration
+/// snapshot or its captured conversation identity — so the only honest
+/// thing it can do with a reply that carries no `restart_offer` at all is
+/// take the same safe default the wire type takes: `FreshOnly`. Defaulting
+/// toward "captured" would let the UI offer a resume the supervisor would
+/// then refuse.
+#[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum RestartOffer {
+    /// Nothing captured and no configured fallback: restart can only
+    /// launch a fresh agent.
+    #[default]
+    FreshOnly,
+    /// This session's own conversation was captured; restart resumes
+    /// exactly it.
+    Resume,
+    /// No captured identity, but the session carries an explicit
+    /// placeholder-free resume command that restart runs verbatim. Kept
+    /// distinct from `FreshOnly` because the user configured it — SPEC.md
+    /// requires it be labeled honestly rather than as a plain fresh launch.
+    FallbackTemplate,
+}
+
+/// The wire spelling of the restart mode this offer authorizes, and the
+/// ONLY mode the supervisor will accept for it.
+///
+/// The pairing is exact in both directions, which is why this is a function
+/// of the offer rather than a user choice: SPEC.md has no fresh-restart
+/// variant in v1 ("for a clean conversation, create a new session in the
+/// same directory"), so a session that CAN resume has no legal "restart
+/// fresh instead" — and a session that cannot has nothing to resume. The
+/// supervisor rejects any other pairing with a conflict naming the current
+/// offer, which is exactly the staleness case this UI handles by
+/// refreshing (see `SessionView`).
+fn restart_mode_for(offer: RestartOffer) -> &'static str {
+    match offer {
+        RestartOffer::FreshOnly => "fresh",
+        RestartOffer::Resume => "resume",
+        RestartOffer::FallbackTemplate => "fallback_template",
+    }
+}
+
 /// Mirror of the helm's session JSON (farhelm-proto `SessionInfo`). Kept
 /// as a local type so the UI depends on the HTTP contract, not on proto
 /// internals — the browser speaks JSON, not frames.
@@ -98,6 +144,13 @@ pub struct Session {
     /// missing key on an `Option` as `None`, so the same old-peer
     /// tolerance holds without the attribute.
     pub annotation: Option<String>,
+    /// What restarting this session would do to its conversation — the
+    /// supervisor recomputes it on every reply, so a session whose identity
+    /// was captured a moment ago starts offering a resume without anything
+    /// here having to ask. `#[serde(default)]` for the same old-peer
+    /// tolerance as `status`, defaulting to the safe `FreshOnly`.
+    #[serde(default)]
+    pub restart_offer: RestartOffer,
 }
 
 const VENDOR_XTERM_CSS: Asset = asset!("/assets/vendor/xterm.css");
@@ -320,6 +373,85 @@ async fn stop_session(base: &str, id: &str) -> Result<(), String> {
         });
     }
     Ok(())
+}
+
+/// Fetch ONE session's current state (`GET /api/sessions/{id}`).
+///
+/// Used by the session view's recovery paths rather than the full listing,
+/// which the supervisor caps: on a host with more sessions than that cap,
+/// the one session this view is about can simply be missing from a listing
+/// reply, and a view that concluded "it is gone" from that would be wrong
+/// in the worst direction (a restart that DID happen, reported as failed).
+/// `Ok(None)` is a genuine 404 — the session really is gone — while a
+/// transport failure stays an `Err`, because those two must not be
+/// confused.
+async fn fetch_session(base: &str, id: &str) -> Result<Option<Session>, String> {
+    let url = format!("{base}/api/sessions/{id}");
+    let resp = reqwest::get(&url).await.map_err(|e| e.to_string())?;
+    if resp.status() == reqwest::StatusCode::NOT_FOUND {
+        return Ok(None);
+    }
+    if !resp.status().is_success() {
+        let status = resp.status();
+        let detail = resp
+            .text()
+            .await
+            .map_err(|error| format!("GET {url}: {status}: reading error response: {error}"))?;
+        let detail = detail.trim();
+        return Err(if detail.is_empty() {
+            format!("GET {url}: {status}")
+        } else {
+            format!("GET {url}: {status}: {detail}")
+        });
+    }
+    resp.json::<Session>()
+        .await
+        .map(Some)
+        .map_err(|e| e.to_string())
+}
+
+/// POST the restart endpoint for one session, returning the session's
+/// freshly recomputed state (SPEC.md's restart; PLAN_M3.md item 9).
+///
+/// `mode` is not this caller's choice to make freely — it is whatever the
+/// session's CURRENT offer authorizes (`restart_mode_for`). The supervisor
+/// re-derives that offer at handling time and refuses a mismatch with a
+/// 409, which is the staleness case the caller handles by refreshing the
+/// session rather than retrying (see `SessionView`).
+///
+/// `stop_if_running` carries the user's explicit consent to stop a live
+/// agent first; the caller only sets it after the inline confirmation, and
+/// the supervisor rechecks real liveness before honoring it. Same
+/// error-surfacing shape as `stop_session` above, including the
+/// body-read-failure context.
+async fn restart_session(
+    base: &str,
+    id: &str,
+    mode: &str,
+    stop_if_running: bool,
+) -> Result<Session, String> {
+    let url = format!("{base}/api/sessions/{id}/restart");
+    let body = serde_json::json!({ "mode": mode, "stop_if_running": stop_if_running });
+    let resp = reqwest::Client::new()
+        .post(&url)
+        .json(&body)
+        .send()
+        .await
+        .map_err(|e| e.to_string())?;
+    if !resp.status().is_success() {
+        let status = resp.status();
+        let detail = resp
+            .text()
+            .await
+            .map_err(|error| format!("POST {url}: {status}: reading error response: {error}"))?;
+        let detail = detail.trim();
+        return Err(if detail.is_empty() {
+            format!("POST {url}: {status}")
+        } else {
+            detail.to_string()
+        });
+    }
+    resp.json::<Session>().await.map_err(|e| e.to_string())
 }
 
 /// DELETE a session. See `stop_session`'s docs — same error-surfacing
@@ -1307,7 +1439,7 @@ fn status_badge(status: &SessionStatus, annotation: Option<&str>) -> (&'static s
 /// exists to avoid. What deleting actually costs is the session itself —
 /// worth saying, because an interrupted session is the one case where the
 /// record outlives everything it described and is all that is left to
-/// lose (and, once PLAN_M3.md item 9 lands, the only route back into that
+/// lose (and, since restart landed, the only route back into that
 /// conversation).
 fn confirm_consequence(status: &SessionStatus) -> &'static str {
     match status {
@@ -1363,8 +1495,134 @@ fn confirm_consequence(status: &SessionStatus) -> &'static str {
 fn SessionView(session: Session, on_back: EventHandler<()>) -> Element {
     let base = use_context::<ApiBase>().0;
     let session_id = session.id.clone();
+    // The session as this view currently understands it. Seeded from the
+    // prop and then owned here, because a restart changes it: the reply
+    // carries the session's recomputed status and offer, and a REFUSED
+    // restart is exactly the case where re-reading the server's current
+    // answer matters (a stale offer is what caused the refusal).
+    let mut current = use_signal(|| session.clone());
+    // Bumped on every successful restart to force the terminal island to
+    // remount. Both reuse cases need it: a reused pane's attachment was
+    // deliberately torn down by the restart (see the supervisor's
+    // `detach_for_restart`), and a fresh terminal is a different pane
+    // entirely. Remounting also replays the pane's scrollback, which for a
+    // reused terminal is what puts the PRIOR run's output back on screen
+    // above the new one.
+    let mut mount_generation = use_signal(|| 0_u32);
+    // Whether a restart is in flight (disables the control and guards
+    // re-entry, mirroring `ListView`'s `pending`), and whether the inline
+    // confirm prompt is open for a still-running agent (the same in-page
+    // pattern delete uses — never a browser dialog, which wry's macOS
+    // webview does not have at all).
+    let mut restarting = use_signal(|| false);
+    let mut confirming = use_signal(|| false);
+    let mut restart_error = use_signal(|| None::<String>);
+
+    // Counts restart ATTEMPTS, and versions every read of this session
+    // against them. The mount-time refresh below is one round trip that
+    // can outlive a restart the user starts immediately after opening the
+    // view; without this, its stale answer would land on top of the
+    // restart's own fresher one and the view would go back to describing
+    // the run that no longer exists.
+    let mut restart_epoch = use_signal(|| 0_u32);
+
+    // One refresh on open, not a poll loop: the `Session` this view is
+    // handed can be a create-time placeholder (`SessionCreated` reports
+    // `Unknown` deliberately — see the supervisor's create docs), and the
+    // restart affordance reads `status` to decide whether to confirm
+    // before killing something. Polling here is deliberately NOT the fix:
+    // PLAN_M2.md's list poll stops while a terminal is open, and the
+    // status this view holds is only ever a UI HINT anyway — the
+    // supervisor rechecks real liveness and refuses a restart that would
+    // kill an agent without consent, which is what makes a hint safe to
+    // act on at all. This fetch just keeps the common case from having to
+    // learn that the hard way.
+    let refresh_base = base.clone();
+    let refresh_id = session.id.clone();
+    use_future(move || {
+        let base = refresh_base.clone();
+        let id = refresh_id.clone();
+        let opened_at = restart_epoch.peek().to_owned();
+        async move {
+            if let Ok(Some(fresh)) = fetch_session(&base, &id).await
+                && *restart_epoch.peek() == opened_at
+            {
+                current.set(fresh);
+            }
+        }
+    });
+
+    let restart_base = base.clone();
+    let restart = move |stop_if_running: bool| {
+        if restarting() {
+            return;
+        }
+        restarting.set(true);
+        restart_error.set(None);
+        restart_epoch += 1;
+        let base = restart_base.clone();
+        let id = current.read().id.clone();
+        let mode = restart_mode_for(current.read().restart_offer);
+        spawn(async move {
+            let outcome = restart_session(&base, &id, mode, stop_if_running).await;
+            if let Err(e) = &outcome {
+                restart_error.set(Some(e.clone()));
+            }
+            // Refreshed on BOTH paths, and from the server rather than
+            // from the reply, for two different reasons that land on the
+            // same call:
+            //
+            // - After a success, the reply's `status` is a deliberate
+            //   `Unknown` (the supervisor cannot claim the agent execed
+            //   yet), and a view that kept it would think the session is
+            //   not running — so the NEXT restart click would skip the
+            //   confirmation that exists to stop it killing a live agent.
+            // - After a failure, the refusal is most often a STALE OFFER,
+            //   whose prescribed handling is to re-present the offer the
+            //   session has NOW rather than retry. And a failure is not
+            //   even proof the restart did not happen: the reply can be
+            //   lost after the relaunch succeeded, which only the server's
+            //   own answer can settle.
+            //
+            // A refresh that fails leaves the reply's own view in place
+            // (or, having none, the last known one): an unreachable helm
+            // is not evidence about the session.
+            match fetch_session(&base, &id).await {
+                Ok(Some(fresh)) => current.set(fresh),
+                Ok(None) => {
+                    // The session is genuinely gone (deleted from
+                    // elsewhere, or a restart that raced a delete). Say so
+                    // rather than leaving a view describing something that
+                    // no longer exists.
+                    restart_error.set(Some(format!("session {id} no longer exists on the server")));
+                }
+                Err(_) => {
+                    if let Ok(session) = outcome.as_ref() {
+                        current.set(session.clone());
+                    }
+                }
+            }
+            // Remounted on both paths too. A success obviously needs it
+            // (new pane, or a respawned one, and the server tore the old
+            // attachment down). A FAILURE needs it just as much: the
+            // server detaches before anything can fail, so a view that
+            // only remounted on success would leave the user staring at a
+            // permanently detached terminal for a session that is running
+            // perfectly well. Remounting when nothing changed is merely a
+            // reattach — the same thing a reload does.
+            mount_generation += 1;
+            restarting.set(false);
+        });
+    };
+    // One closure, two call sites (the confirm button and the direct
+    // restart), cloned rather than duplicated so both send exactly the
+    // same request shape and share the same in-flight guard.
+    let mut confirm_restart = restart.clone();
+    let mut fresh_restart = restart;
 
     use_effect(move || {
+        // Read so this effect re-runs on every restart, not only on mount.
+        let _ = mount_generation();
         // Values are JSON-encoded, never interpolated raw: the session
         // id comes from a supervisor, which with --ssh is a different
         // machine. A hostile or compromised host returning an id
@@ -1381,6 +1639,12 @@ fn SessionView(session: Session, on_back: EventHandler<()>) -> Element {
                 (function waitForIsland() {{
                     if (window.__farhelmMountGeneration !== gen) return;
                     if (window.farhelmTerm) {{
+                        // A no-op on first mount, and load-bearing on every
+                        // later one: the island refuses to mount over an
+                        // existing attachment (its own `active` guard), so
+                        // a restart's remount has to tear the previous one
+                        // down first.
+                        farhelmTerm.unmount();
                         farhelmTerm.mountWhenReady('terminal', {path}, {base_js});
                     }} else {{
                         setTimeout(waitForIsland, 50);
@@ -1406,6 +1670,8 @@ fn SessionView(session: Session, on_back: EventHandler<()>) -> Element {
         );
     });
 
+    let shown = current.read().clone();
+    let alive = shown.status == SessionStatus::Alive;
     rsx! {
         div { class: "layout",
             header { class: "titlebar",
@@ -1414,12 +1680,130 @@ fn SessionView(session: Session, on_back: EventHandler<()>) -> Element {
                     onclick: move |_| on_back.call(()),
                     "← back",
                 }
-                span { class: "title", "{session.title}" }
-                span { class: "meta", "{session.cwd} — {session.invocation}" }
+                span { class: "title", "{shown.title}" }
+                span { class: "meta", "{shown.cwd} — {shown.invocation}" }
+            }
+            // SPEC.md: "Opening an interrupted session offers
+            // restart-with-resume" — which is why this leads the view
+            // rather than hiding behind a menu, and why its wording states
+            // what restarting would do to the CONVERSATION rather than
+            // just naming the action. Declining is simply not clicking it:
+            // there is no dismiss, and nothing about the session changes.
+            // The same affordance serves every other state too, since
+            // restart is the one relaunch mechanism there is.
+            div { class: "restart-offer",
+                span { class: "restart-offer-text",
+                    "{restart_offer_text(&shown.status, shown.restart_offer)}"
+                }
+                if confirming() {
+                    // The inline confirm delete already uses, for the same
+                    // reason (SPEC.md: restart on a running agent confirms,
+                    // stops, then relaunches) and with the same safety
+                    // defaults — consequence text first, focus on cancel.
+                    span { class: "confirm-consequence",
+                        "still running — restarting stops the agent and its whole process tree first:"
+                    }
+                    button {
+                        r#type: "button",
+                        class: "btn restart-confirm",
+                        disabled: restarting(),
+                        onclick: move |_| {
+                            if !confirming() {
+                                return;
+                            }
+                            confirming.set(false);
+                            // The only place `stop_if_running` is ever
+                            // true: it carries THIS click's consent onto
+                            // the wire, which the supervisor then checks
+                            // against liveness it rechecks itself.
+                            confirm_restart(true);
+                        },
+                        "confirm restart"
+                    }
+                    button {
+                        r#type: "button",
+                        class: "btn restart-cancel",
+                        autofocus: true,
+                        onclick: move |_| confirming.set(false),
+                        "cancel"
+                    }
+                } else {
+                    button {
+                        r#type: "button",
+                        class: "btn restart-primary",
+                        // Whether this click opens the confirmation rather
+                        // than restarting outright — the status-derived
+                        // decision, exposed so it is inspectable (the
+                        // browser suite waits on it) instead of only
+                        // observable after the fact by clicking.
+                        "data-confirms": "{alive}",
+                        disabled: restarting(),
+                        onclick: move |_| {
+                            if restarting() {
+                                return;
+                            }
+                            if alive {
+                                // Never a direct request for a live agent:
+                                // restarting one kills it, so the click
+                                // only opens the confirmation.
+                                confirming.set(true);
+                            } else {
+                                fresh_restart(false);
+                            }
+                        },
+                        "{restart_button_label(shown.restart_offer)}"
+                    }
+                }
+                if let Some(err) = restart_error.read().clone() {
+                    div { class: "restart-error", "{err}" }
+                }
             }
             div { id: "term-banner", class: "banner" }
             div { id: "terminal", class: "terminal" }
         }
+    }
+}
+
+/// What restarting this session would do to its conversation, in the
+/// user's own terms — SPEC.md's "restart says so and offers the fallback
+/// or a fresh launch — it must never silently resume the wrong
+/// conversation", which is a promise about what the user is TOLD, not only
+/// about what runs.
+///
+/// The status leads for `Interrupted` because that is the one state where
+/// the user needs to know why their terminal is gone before they are asked
+/// to act (SPEC.md: opening an interrupted session offers
+/// restart-with-resume). Everything else states the offer alone.
+fn restart_offer_text(status: &SessionStatus, offer: RestartOffer) -> String {
+    let offered = match offer {
+        RestartOffer::Resume => "restarting resumes this session's own conversation",
+        RestartOffer::FallbackTemplate => {
+            "no conversation was captured, so restarting runs this session's configured resume \
+             command"
+        }
+        RestartOffer::FreshOnly => {
+            "no conversation was captured for this session, so restarting launches a fresh agent \
+             in the same directory"
+        }
+    };
+    match status {
+        SessionStatus::Interrupted => {
+            format!("interrupted by a host reboot — {offered}.")
+        }
+        SessionStatus::Error { .. } => format!("the agent never started — {offered}."),
+        _ => format!("{offered}."),
+    }
+}
+
+/// The restart control's label, which names the OFFER rather than the
+/// action: "restart" alone would leave a user guessing whether their
+/// conversation survives, which is the exact question SPEC.md requires an
+/// honest answer to before they click.
+fn restart_button_label(offer: RestartOffer) -> &'static str {
+    match offer {
+        RestartOffer::Resume => "resume conversation",
+        RestartOffer::FallbackTemplate => "restart with the configured resume command",
+        RestartOffer::FreshOnly => "restart (fresh launch)",
     }
 }
 
@@ -1435,6 +1819,7 @@ mod tests {
             invocation: format!("agent-{id}"),
             status: SessionStatus::Unknown,
             annotation: None,
+            restart_offer: RestartOffer::FreshOnly,
         }
     }
 
@@ -1513,8 +1898,8 @@ mod tests {
     ///
     /// The live-session case is the one a naive implementation gets
     /// wrong: an annotation describes how a run ENDED, so it must never
-    /// leak onto a session that is running (which, once restart lands, is
-    /// what a stopped-then-restarted session is).
+    /// leak onto a session that is running — which is exactly what a
+    /// stopped-then-restarted session is.
     #[test]
     fn stop_annotation_qualifies_the_exited_badge_without_replacing_it() {
         assert_eq!(
@@ -1641,6 +2026,112 @@ mod tests {
         });
         let decoded: Session = serde_json::from_value(json).unwrap();
         assert_eq!(decoded.status, SessionStatus::Unknown);
+    }
+
+    /// A `Session` JSON with no `restart_offer` (a helm predating
+    /// PLAN_M3.md item 9) must decode as `FreshOnly`, never as something
+    /// that would make this UI offer a resume the supervisor would then
+    /// refuse. The same no-fabrication direction `status`'s own default
+    /// takes.
+    #[test]
+    fn session_without_restart_offer_decodes_as_fresh_only() {
+        let json = serde_json::json!({
+            "id": "s1",
+            "title": "demo",
+            "cwd": "/tmp",
+            "invocation": "agent",
+            "status": { "state": "interrupted" },
+        });
+        let decoded: Session = serde_json::from_value(json).unwrap();
+        assert_eq!(decoded.restart_offer, RestartOffer::FreshOnly);
+
+        let resumable = serde_json::json!({
+            "id": "s1",
+            "title": "demo",
+            "cwd": "/tmp",
+            "invocation": "agent",
+            "status": { "state": "interrupted" },
+            "restart_offer": "resume",
+        });
+        let decoded: Session = serde_json::from_value(resumable).unwrap();
+        assert_eq!(decoded.restart_offer, RestartOffer::Resume);
+    }
+
+    /// Each offer authorizes exactly one mode, and the wire spellings must
+    /// be the ones farhelm-proto's `RestartMode` decodes — a typo here
+    /// would turn every restart into a 400 nothing in this crate could
+    /// explain.
+    #[test]
+    fn each_offer_maps_to_its_one_legal_mode() {
+        assert_eq!(restart_mode_for(RestartOffer::FreshOnly), "fresh");
+        assert_eq!(restart_mode_for(RestartOffer::Resume), "resume");
+        assert_eq!(
+            restart_mode_for(RestartOffer::FallbackTemplate),
+            "fallback_template"
+        );
+    }
+
+    /// SPEC.md requires restart to SAY what it would do to the
+    /// conversation — "it must never silently resume the wrong
+    /// conversation" is a promise about what the user is told before they
+    /// click, not only about what runs. So the three offers must read
+    /// differently, and a fresh launch must say so rather than borrowing
+    /// resume's wording.
+    ///
+    /// The interrupted case leads with WHY the terminal is gone, since
+    /// that is the state where the user is being asked to act on something
+    /// they did not do (SPEC.md: opening an interrupted session offers
+    /// restart-with-resume).
+    #[test]
+    fn the_offer_text_states_what_would_happen_to_the_conversation() {
+        let resumable = restart_offer_text(&SessionStatus::Interrupted, RestartOffer::Resume);
+        assert!(
+            resumable.contains("reboot") && resumable.contains("resumes"),
+            "an interrupted, resumable session must say both: {resumable}"
+        );
+
+        let fresh = restart_offer_text(&SessionStatus::Interrupted, RestartOffer::FreshOnly);
+        assert!(
+            fresh.contains("no conversation was captured") && fresh.contains("fresh agent"),
+            "a fresh-only restart must say plainly that nothing is resumed: {fresh}"
+        );
+
+        let fallback =
+            restart_offer_text(&SessionStatus::Interrupted, RestartOffer::FallbackTemplate);
+        assert!(
+            fallback.contains("configured resume command"),
+            "a configured fallback is labeled honestly, not as a plain fresh launch: {fallback}"
+        );
+
+        let error = restart_offer_text(
+            &SessionStatus::Error {
+                detail: "exec_failed".to_string(),
+            },
+            RestartOffer::FreshOnly,
+        );
+        assert!(
+            error.contains("never started"),
+            "an errored session's own reason leads instead: {error}"
+        );
+    }
+
+    /// The button names the OFFER, not the action: "restart" alone leaves
+    /// the user guessing whether their conversation survives, which is the
+    /// exact question SPEC.md requires answered before they click.
+    #[test]
+    fn the_restart_button_label_names_the_offer() {
+        assert_eq!(
+            restart_button_label(RestartOffer::Resume),
+            "resume conversation"
+        );
+        assert!(
+            restart_button_label(RestartOffer::FreshOnly).contains("fresh"),
+            "a fresh launch must not be labeled as a resume"
+        );
+        assert!(
+            restart_button_label(RestartOffer::FallbackTemplate).contains("resume command"),
+            "a configured fallback is its own thing, distinct from both"
+        );
     }
 
     /// The other half of `SessionListing`'s missing-field tolerance

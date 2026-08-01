@@ -3989,3 +3989,315 @@ test("a create still carries a key when crypto.randomUUID is unavailable", async
     await cleanUpSessionsTitled(request, title);
   }
 });
+
+// ---------------------------------------------------------------------
+// Restart with resume, at the browser level (PLAN_M3.md item 9).
+//
+// SPEC.md's restart is a lifecycle operation with a UI contract of its
+// own: an interrupted session's view leads with the resume offer,
+// declining it changes nothing, a live session confirms first, and a
+// reused terminal still shows the previous run above the new one. All
+// four are below.
+// ---------------------------------------------------------------------
+
+// The interrupted state cannot be produced by driving this stack: it takes
+// a host reboot (or the injected boot-id change the Rust suite uses), so
+// the listing is intercepted exactly like the Unknown-status confirm test
+// above does for the same reason. Everything else here is real — the
+// component, its wording, and the fact that no request is sent.
+//
+// "Declining" has no control of its own by design (SPEC.md: opening an
+// interrupted session OFFERS restart-with-resume; declining leaves it
+// interrupted): the user simply does not click. So what this pins is that
+// navigating away sends nothing and leaves the row exactly as it was —
+// a restart affordance that fired on open, or on back, would be the bug.
+test("an interrupted session's view leads with the resume offer, and declining changes nothing", async ({
+  page,
+}) => {
+  const sessionId = "11111111-2222-3333-4444-555555555555";
+  const title = `interrupted-offer-${Date.now()}`;
+  await page.route("**/api/sessions", async (route) => {
+    if (route.request().method() !== "GET") {
+      await route.continue();
+      return;
+    }
+    // The real listing plus one interrupted row, so every other test's
+    // session (and the shared "e2e-session") keeps coming through
+    // untouched.
+    const response = await route.fetch();
+    const listing = await response.json();
+    listing.sessions.push({
+      id: sessionId,
+      title,
+      cwd: "/tmp",
+      invocation: "claude",
+      status: { state: "interrupted" },
+      restart_offer: "resume",
+    });
+    listing.total += 1;
+    await route.fulfill({ response, json: listing });
+  });
+  let restartRequests = 0;
+  await page.route(`**/api/sessions/${sessionId}/restart`, async (route) => {
+    restartRequests++;
+    await route.fulfill({ status: 200, contentType: "application/json", body: "{}" });
+  });
+
+  await page.goto("/");
+  await rowByTitle(page, title).locator(".session-row-open").click();
+
+  // The offer leads with WHY the terminal is gone and what restarting
+  // would do to the conversation — both, because the user is being asked
+  // to act on something they did not do.
+  const offer = page.locator(".restart-offer-text");
+  await expect(offer).toBeVisible();
+  await expect(offer).toContainText("interrupted by a host reboot");
+  await expect(offer).toContainText("resumes this session's own conversation");
+  // The action names the offer, not the mechanism.
+  await expect(page.locator(".restart-primary")).toHaveText("resume conversation");
+  // An interrupted session has nothing running, so there is no confirm
+  // step in front of it.
+  await expect(page.locator(".restart-confirm")).toHaveCount(0);
+  expect(restartRequests).toBe(0);
+
+  // Declining: leave. Nothing was sent, and the row is still interrupted.
+  await page.locator(".back-button").click();
+  const row = rowByTitle(page, title);
+  await expect(row.locator(".status-badge")).toHaveText("interrupted");
+  expect(restartRequests).toBe(0);
+});
+
+// A live agent is the one case SPEC.md requires a confirmation for
+// ("Restart on a session whose agent is still running confirms, stops the
+// agent, then relaunches"), and the confirmation is in-page for the same
+// reason delete's is: wry ships no native JS dialogs on macOS's WKWebView,
+// where a `window.confirm()` would silently do nothing at all.
+//
+// Driven against a REAL session, so the request that finally goes out is
+// the real one — including `stop_if_running`, which is the whole point of
+// the confirmation and is asserted on the wire rather than assumed.
+test("restarting a live session confirms first, and only then sends the request with consent", async ({
+  page,
+  request,
+}) => {
+  const title = `restart-confirm-${Date.now()}`;
+  const bodies: any[] = [];
+  await page.route("**/api/sessions/*/restart", async (route) => {
+    bodies.push(route.request().postDataJSON());
+    await route.continue();
+  });
+
+  try {
+    await page.goto("/");
+    const form = await fillCreateForm(page, {
+      cwd: "/tmp",
+      invocation: FAKE_AGENT_INVOCATION,
+      title,
+    });
+    await form.locator('button[type="submit"]').click();
+    await page.waitForFunction(() => (window as any).__farhelmTermReady === true);
+    await waitForTermText(page, "FAKE-AGENT READY");
+
+    // Wait until the view's own status-derived decision says this click
+    // will confirm rather than restart outright (`data-confirms`, set from
+    // the session's status): the view opens on the create reply's
+    // deliberate `Unknown` placeholder and refreshes once, so clicking
+    // before that lands would exercise the stale-hint path instead of the
+    // confirmation this test is about.
+    const restartButton = page.locator(".restart-primary");
+    await expect(restartButton).toHaveAttribute("data-confirms", "true", {
+      timeout: 15_000,
+    });
+
+    // The first click only opens the prompt: nothing is sent, and the
+    // consequence text says what restarting would do to the running agent.
+    await restartButton.click();
+    await expect(page.locator(".restart-offer .confirm-consequence")).toContainText(
+      "still running",
+    );
+    expect(bodies).toHaveLength(0);
+
+    // Cancel returns the view to its normal state, still having sent
+    // nothing — the same "cancel is the only way back" rule the delete
+    // prompt follows.
+    await page.locator(".restart-cancel").click();
+    await expect(page.locator(".restart-primary")).toBeVisible();
+    expect(bodies).toHaveLength(0);
+
+    await restartButton.click();
+    await page.locator(".restart-confirm").click();
+    await expect.poll(() => bodies.length).toBe(1);
+    expect(bodies[0].stop_if_running).toBe(true);
+    // The mode is the one the session's own offer authorizes — a
+    // fake-agent session captures no conversation, so a fresh launch is
+    // the only honest thing restart can offer it.
+    expect(bodies[0].mode).toBe("fresh");
+
+    // And the relaunch actually comes up. Counted rather than merely
+    // matched: the reused terminal's scrollback still holds the FIRST
+    // run's banner, so `toContain` would pass without the new run having
+    // printed anything at all.
+    await expect
+      .poll(
+        async () => (await termText(page)).split("FAKE-AGENT READY").length - 1,
+        {
+          timeout: 30_000,
+          message: "the relaunched agent's own ready banner",
+        },
+      )
+      .toBeGreaterThanOrEqual(2);
+  } finally {
+    const id = await findSessionIdByTitle(request, title).catch(() => undefined);
+    if (id) {
+      await cleanupSession(request, id);
+    }
+  }
+});
+
+// SPEC.md: "Restart reuses the session's terminal when it still exists —
+// the previous run's output stays in scrollback". Asserted from the
+// BROWSER's own buffer after the restart's remount, which is the only view
+// a user actually has of that promise: the buffer starts empty on remount,
+// so everything in it afterwards came back through replay of the reused
+// pane's scrollback.
+//
+// The marker is typed rather than taken from the startup banner, because
+// both runs print the same banner — text only the FIRST run could have
+// produced is what makes this about retention rather than about the new
+// run having printed something.
+test("a restarted session's terminal still shows the previous run above the new one", async ({
+  page,
+  request,
+}) => {
+  const title = `restart-scrollback-${Date.now()}`;
+  try {
+    await page.goto("/");
+    const form = await fillCreateForm(page, {
+      cwd: "/tmp",
+      invocation: FAKE_AGENT_INVOCATION,
+      title,
+    });
+    await form.locator('button[type="submit"]').click();
+    await page.waitForFunction(() => (window as any).__farhelmTermReady === true);
+    await waitForTermText(page, "FAKE-AGENT READY");
+
+    await page.locator("#terminal").click();
+    await page.keyboard.type("PRIOR-RUN-MARKER");
+    await page.keyboard.press("Enter");
+    await waitForTermText(page, "echo:PRIOR-RUN-MARKER");
+
+    const restartButton = page.locator(".restart-primary");
+    await expect(restartButton).toHaveAttribute("data-confirms", "true", {
+      timeout: 15_000,
+    });
+    await restartButton.click();
+    await page.locator(".restart-confirm").click();
+
+    // Both facts at once, and in order: the prior run's typed marker is
+    // still there, and the new run's banner is BELOW it. A plain
+    // "contains both" would also pass if the restart had never happened
+    // (the pre-restart buffer contains both too), so the anchor is the
+    // marker's position relative to the LAST banner.
+    await expect
+      .poll(
+        async () => {
+          const text = await termText(page);
+          const marker = text.indexOf("PRIOR-RUN-MARKER");
+          const banner = text.lastIndexOf("FAKE-AGENT READY");
+          return marker >= 0 && banner > marker;
+        },
+        {
+          timeout: 30_000,
+          message: "prior run's output above the relaunched agent's",
+        },
+      )
+      .toBe(true);
+  } finally {
+    const id = await findSessionIdByTitle(request, title).catch(() => undefined);
+    if (id) {
+      await cleanupSession(request, id);
+    }
+  }
+});
+
+// A restart whose RESPONSE is lost is not a restart that did not happen:
+// the request reaches the supervisor, the agent is relaunched, and only
+// the reply dies on the way back. The view has to recover from that on its
+// own, because the server has already torn its attachment down — a client
+// that treated the failure as "nothing happened" would leave the user
+// staring at a permanently detached terminal for a session that is running
+// perfectly well.
+//
+// `route.fetch()` then `route.abort()` reproduces exactly that: the real
+// request is performed, and the page sees a network error instead of its
+// answer.
+test("a restart whose response is lost still recovers the terminal", async ({
+  page,
+  request,
+}) => {
+  const title = `restart-lost-reply-${Date.now()}`;
+  await page.route("**/api/sessions/*/restart", async (route) => {
+    await route.fetch();
+    await route.abort("connectionfailed");
+  });
+
+  try {
+    await page.goto("/");
+    const form = await fillCreateForm(page, {
+      cwd: "/tmp",
+      invocation: FAKE_AGENT_INVOCATION,
+      title,
+    });
+    await form.locator('button[type="submit"]').click();
+    await page.waitForFunction(() => (window as any).__farhelmTermReady === true);
+    await waitForTermText(page, "FAKE-AGENT READY");
+
+    await page.locator("#terminal").click();
+    await page.keyboard.type("BEFORE-LOST-RESTART");
+    await page.keyboard.press("Enter");
+    await waitForTermText(page, "echo:BEFORE-LOST-RESTART");
+
+    const restartButton = page.locator(".restart-primary");
+    await expect(restartButton).toHaveAttribute("data-confirms", "true", {
+      timeout: 15_000,
+    });
+    await restartButton.click();
+    await page.locator(".restart-confirm").click();
+
+    // The failure is surfaced rather than swallowed — the user is owed
+    // that much when their action's outcome is genuinely unknown to the
+    // client.
+    await expect(page.locator(".restart-error")).toBeVisible({ timeout: 15_000 });
+
+    // ...and the view recovers anyway: it re-reads the session, remounts,
+    // and the relaunched agent's own banner appears BELOW the previous
+    // run's output in the reused terminal. A view that had concluded
+    // "nothing happened" would sit detached here forever.
+    await expect
+      .poll(
+        async () => {
+          const text = await termText(page);
+          const marker = text.indexOf("BEFORE-LOST-RESTART");
+          const banner = text.lastIndexOf("FAKE-AGENT READY");
+          return marker >= 0 && banner > marker;
+        },
+        {
+          timeout: 30_000,
+          message: "the relaunched agent's terminal, recovered after a lost reply",
+        },
+      )
+      .toBe(true);
+
+    // The session really was restarted, which is what makes the recovery
+    // the correct behavior rather than a lucky one.
+    const listing = await (await request.get("/api/sessions")).json();
+    const session = listing.sessions.find((s: any) => s.title === title);
+    expect(session).toBeTruthy();
+    expect(session.status.state).toBe("alive");
+  } finally {
+    const id = await findSessionIdByTitle(request, title).catch(() => undefined);
+    if (id) {
+      await cleanupSession(request, id);
+    }
+  }
+});

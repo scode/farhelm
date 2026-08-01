@@ -657,15 +657,36 @@ fn correlators_from(
 /// Whether a conversation identifier is something this module is willing
 /// to store, log, and eventually place on an agent's command line.
 ///
-/// Both vendors use UUIDs. The check is deliberately about SHAPE rather
-/// than a UUID pattern — a vendor is free to change its id format, and
-/// rejecting a valid new one would break capture silently — but a value
-/// with whitespace, control characters, quotes, or unbounded length is not
-/// an identifier under any format, and this is the one value here that
-/// crosses from an on-disk file into an argv.
+/// ## Option injection is the threat, not exotic characters
+///
+/// This value comes off DISK — out of a file the supervisor did not write,
+/// in a directory any process running as this user can create files in —
+/// and ends up as an argv element in `<agent> --resume <id>`. An id
+/// beginning with `-` is therefore not a weird id: it is a FLAG. A record
+/// whose id reads `--last` turns a resume of one conversation into a
+/// resume of whichever the vendor calls last; one reading
+/// `--dangerously-bypass-approvals-and-sandbox` turns it into a permission
+/// escalation. Neither needs a quote, a space, or a control character, so
+/// the shape check alone (below) never sees them coming — which is why the
+/// leading dash is refused outright and unconditionally.
+///
+/// Slot substitution is not a defence against this and never was: it
+/// guarantees the id stays ONE argument, not that the argument is not a
+/// flag. `--` separators are not one either, since neither vendor's CLI is
+/// documented to accept one where the template puts the id.
+///
+/// ## Shape
+///
+/// Both vendors use UUIDs, so a UUID is what a valid id looks like today.
+/// The check stays SHAPE-based rather than UUID-exact — a vendor is free to
+/// change its id format, and rejecting a valid new one would break capture
+/// silently — but everything a legitimate identifier has no business
+/// containing is refused: whitespace, control characters, quotes,
+/// backslashes, and anything past a bounded length.
 fn is_plausible_conversation_id(id: &str) -> bool {
     !id.is_empty()
         && id.len() <= MAX_CONVERSATION_ID_LEN
+        && !id.starts_with('-')
         && id
             .chars()
             .all(|c| c.is_ascii_graphic() && c != '"' && c != '\'' && c != '\\')
@@ -811,6 +832,13 @@ impl IntegrationSnapshot {
     /// `{conversation}` invocation unfilled, so offering it would be
     /// offering a garbled command line.
     pub fn restart_offer(&self, captured: Option<&str>) -> RestartOffer {
+        // An identity this build would refuse to substitute
+        // (`is_plausible_conversation_id` — an option-shaped id being the
+        // case that matters) is not something to OFFER a resume for either:
+        // the offer would be one `filled_resume_argv` then declines to
+        // honor, which is a confusing refusal at the worst moment. Judged
+        // here so the offer and the command it promises can never disagree.
+        let captured = captured.filter(|id| is_plausible_conversation_id(id));
         match (&self.resume_template, captured) {
             (Some(_), Some(_)) if self.integration().is_some() => RestartOffer::Resume,
             (Some(template), _)
@@ -836,6 +864,15 @@ impl IntegrationSnapshot {
     /// tests can assert the end-to-end promise ("resume this exact
     /// conversation") rather than only the id in isolation.
     pub fn filled_resume_argv(&self, conversation: &str) -> Option<Vec<String>> {
+        // Re-validated at the boundary it actually matters at, not only
+        // where the value was captured: a durable column written by an
+        // older build (or edited by hand) reaches this function too, and
+        // this is the last point before the value becomes an argv element.
+        // See `is_plausible_conversation_id` for why a leading dash is the
+        // case worth being paranoid about.
+        if !is_plausible_conversation_id(conversation) {
+            return None;
+        }
         let mut filled = self.resume_template.clone()?;
         for element in &mut filled {
             if element == CONVERSATION_PLACEHOLDER {
@@ -1501,6 +1538,71 @@ mod tests {
             .is_ok()
         );
         assert!(IntegrationSnapshot::resolve("bash", Some(AgentKind::Generic), None).is_ok());
+    }
+
+    /// The option-injection case, which is the reason this validation
+    /// exists at all (fix-batch items 12 and 19): a conversation record is
+    /// a file on disk that any process running as this user can create, and
+    /// its id becomes an argv element in `<agent> --resume <id>`. An id
+    /// that IS a flag — `--last`, or the demonstration case
+    /// `--dangerously-bypass-approvals-and-sandbox` — would turn a resume
+    /// of one conversation into a resume of another, or into a permission
+    /// escalation, without containing a single character the shape check
+    /// would otherwise object to.
+    #[test]
+    fn an_option_shaped_conversation_id_is_refused() {
+        for hostile in [
+            "--last",
+            "--dangerously-bypass-approvals-and-sandbox",
+            "-r",
+            "--resume=other",
+        ] {
+            assert!(
+                !is_plausible_conversation_id(hostile),
+                "{hostile:?} is a flag, not an identifier"
+            );
+        }
+        // ...and the shapes a legitimate vendor id actually takes are
+        // still accepted, so this is a refusal of flags rather than a
+        // narrowing to one vendor's format.
+        for ok in [
+            "0199a4d2-9c1a-7bd6-9d18-2c0f2f1c7f31",
+            "rollout-2026-07-30T08-15-00-0199a4d2",
+        ] {
+            assert!(is_plausible_conversation_id(ok), "{ok:?} must be accepted");
+        }
+    }
+
+    /// The two places that value can reach an agent's command line refuse
+    /// it independently, because they are reached independently: a durable
+    /// column written by an older build (or edited by hand) never passes
+    /// through capture's own validation again.
+    #[test]
+    fn an_option_shaped_identity_neither_fills_a_template_nor_is_offered() {
+        let snapshot = IntegrationSnapshot::resolve("claude", None, None).expect("resolve");
+        assert_eq!(
+            snapshot.filled_resume_argv("--dangerously-bypass-approvals-and-sandbox"),
+            None,
+            "an option-shaped id must never be substituted into an argv"
+        );
+        assert_eq!(
+            snapshot.restart_offer(Some("--dangerously-bypass-approvals-and-sandbox")),
+            RestartOffer::FreshOnly,
+            "and must not be advertised as resumable either, or the offer would promise a \
+             command the substitution then refuses to build"
+        );
+        // The honest case still works, or this test would pass for the
+        // wrong reason.
+        let good = "0199a4d2-9c1a-7bd6-9d18-2c0f2f1c7f31";
+        assert_eq!(snapshot.restart_offer(Some(good)), RestartOffer::Resume);
+        assert_eq!(
+            snapshot
+                .filled_resume_argv(good)
+                .expect("a plausible id fills the template")
+                .last()
+                .map(String::as_str),
+            Some(good)
+        );
     }
 
     /// `restart_offer` is what the UI (PR8) turns into an affordance, so
