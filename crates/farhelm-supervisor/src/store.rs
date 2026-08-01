@@ -29,6 +29,19 @@
 //! command that ran and finished (`service::session_status` spells the
 //! full precedence out).
 //!
+//! M3 also adds a second kind of durable fact, with a lifetime that is
+//! not a session's at all: [`Reservation`] (PLAN_M3.md item 6) records
+//! that a client-supplied create INTENT was claimed, so a create retried
+//! after an ambiguous failure replays its original outcome instead of
+//! launching a second agent. A reservation and its launching row are
+//! committed TOGETHER, so neither predates the other; what makes the
+//! reservation its own table is that it is keyed by the CLIENT's intent
+//! key rather than by a session id (the lookup a replay performs happens
+//! before any session is known), that it can exist with no session row at
+//! all (a create refused before it ever launched), and that it OUTLIVES
+//! the session as a tombstone — so a replay for a deleted session can say
+//! so instead of duplicating it.
+//!
 //! Journal mode and synchronous pragmas are left at SQLite's defaults.
 //! M3 is where PLAN.md places the explicit crash-safety/atomicity policy
 //! for the state store; this module does not invent one ahead of that.
@@ -57,7 +70,7 @@ const BUSY_TIMEOUT: Duration = Duration::from_secs(5);
 /// step in `apply_schema`: version 2 (PLAN_M3.md item 2 — the durable
 /// last-known outcome and the boot id) is the first real migration this
 /// database has ever had, and the template every later one follows.
-const SCHEMA_VERSION: i64 = 2;
+const SCHEMA_VERSION: i64 = 3;
 
 /// The sole row id of [`supervisor_meta`](apply_schema) — the table is
 /// single-row by construction (a `CHECK` on this value), so every read and
@@ -493,6 +506,234 @@ impl Transition {
 /// pass around, not because callers reason about the tuple itself.
 type OutcomeColumns = (String, Option<i32>, Option<String>, Option<String>);
 
+/// One client-supplied create intent, durably claimed (PLAN_M3.md item 6).
+///
+/// The reservation is what makes a retried create idempotent across a
+/// dropped reply, a crash, and a supervisor restart alike: it is committed
+/// BEFORE any side effect of the launch it describes, and it carries the
+/// identities that launch will use — so a retry that finds one still
+/// `Pending` knows exactly which session and which tmux session to look
+/// for rather than having to guess whether the previous attempt got
+/// anywhere.
+///
+/// Rows here are TOMBSTONES: they outlive the session they created (see
+/// [`SessionStore::delete_session_settling_reservations`]), because the
+/// question a replay asks — "did this intent already happen?" — still has
+/// an answer after the session is gone, and the honest answer is "yes, and
+/// it was deleted", never a fresh duplicate.
+///
+/// Nothing prunes them, and the honest accounting is that each row holds a
+/// full copy of its request's canonical fields (`service`'s
+/// `create_fingerprint`), so a create with a long invocation stores a long
+/// row — bounded by the request caps, not small in principle. Two separate
+/// pieces of work would change that and neither is owned here: a DIGEST
+/// would shrink each row to a constant size (and stop the invocation from
+/// being retained past its session's deletion), while an EXPIRY would
+/// bound the row COUNT. They are independent — a digest keeps growth
+/// linear in creates, an expiry keeps the text — and only an expiry trades
+/// against correctness, since a forgotten key is a key that can duplicate
+/// again.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Reservation {
+    pub intent_key: String,
+    /// The canonical encoding of every session-shaping request field this
+    /// key was claimed with; see `service::create_fingerprint`. Compared
+    /// verbatim: equal means "the same request", anything else means the
+    /// client reused a key, which is a bug rather than a merge.
+    pub fingerprint: String,
+    /// The session id assigned when the reservation was made, not when the
+    /// session was created — the two are the same id, which is the point:
+    /// reconciliation looks this up instead of searching for a session it
+    /// has no name for. Every settlement is additionally CONDITIONED on
+    /// this id (see [`Settlement`]), so a settlement computed against one
+    /// attempt can never land on a reservation that has since been
+    /// re-pointed.
+    pub session_id: String,
+    /// The tmux session name assigned alongside `session_id`, for the same
+    /// reason — and read for real: `service`'s pending reconciliation
+    /// probes tmux for exactly this name at decision time rather than
+    /// trusting a session map that may predate a late-completing create.
+    pub tmux_name: String,
+    pub outcome: ReservationOutcome,
+}
+
+/// A create intent being claimed, and the fingerprint that binds it to one
+/// request.
+///
+/// The same type on both sides of the boundary: `service` builds it from
+/// the request, [`SessionStore::insert_session`] commits it beside the
+/// launching row it reserves. The reservation's `session_id`/`tmux_name`
+/// are taken from that row rather than carried here, so the two can never
+/// be committed disagreeing about which session this intent produced.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct IntentClaim {
+    pub intent_key: String,
+    pub fingerprint: String,
+}
+
+/// One reservation's outcome, addressed by BOTH identities it must match.
+///
+/// `session_id` is not redundant with `intent_key`: it is the condition
+/// that keeps a settlement computed for one attempt from landing on a
+/// reservation some other attempt has since re-pointed (see
+/// [`SessionStore::settle_reservations`]). Every settlement in this module
+/// carries it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Settlement {
+    pub intent_key: String,
+    pub session_id: String,
+    pub outcome: ReservationOutcome,
+}
+
+/// What [`SessionStore::insert_session`] found when it tried to claim an
+/// intent key.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Claimed {
+    /// The key was free (or the create carried none): the launching row is
+    /// committed and this process owns the intent.
+    Ours,
+    /// The key was already claimed. NOTHING was committed — the session row
+    /// is rolled back with the refused claim — and the existing reservation
+    /// is returned so the caller can answer from it rather than guessing.
+    ///
+    /// Reachable only by a racer that bypassed `service`'s per-key lock (a
+    /// second supervisor process, which the state-directory claim already
+    /// excludes), which is exactly why it is a returned VALUE and not an
+    /// error: the caller's honest response is to resolve the existing
+    /// reservation, not to fail.
+    TakenBy(Box<Reservation>),
+}
+
+/// The outcome of trying to take over a pending reservation for a relaunch
+/// ([`SessionStore::restart_pending_launch`]).
+///
+/// The three variants are the three things that can be true by the time
+/// the transition actually runs, and distinguishing them is what keeps a
+/// racing delete from being resurrected: the caller decided to relaunch
+/// against evidence it gathered a moment earlier, and this is the atomic
+/// re-check of that decision.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum RetryClaim {
+    /// The reservation was still pending and its row still un-launched:
+    /// a fresh launching row is committed under the same identities and
+    /// this process now owns the relaunch.
+    Acquired,
+    /// The reservation is no longer pending — something settled it first
+    /// (most often a concurrent delete, which tombstones as `Created`). The
+    /// caller must answer from this outcome, which for a deleted session is
+    /// the gone-error rather than a new launch.
+    Resolved(Box<Reservation>),
+    /// The reserved session row moved past `Launching` while the caller was
+    /// deciding: evidence of a launch appeared after all, so the caller
+    /// replays instead of relaunching.
+    Launched,
+}
+
+/// Where a [`Reservation`] stands: claimed, or resolved one way or the
+/// other.
+///
+/// Terminal states are monotonic — [`SessionStore::settle_reservations`]
+/// only ever moves a `Pending` row — so an outcome, once recorded, is what
+/// every later replay of that key reports.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ReservationOutcome {
+    /// Claimed, with the create still in flight — or interrupted by a
+    /// crash, which is indistinguishable from in-flight after the fact and
+    /// is exactly why reconciliation exists.
+    Pending,
+    /// The session named by [`Reservation::session_id`] was created. It
+    /// may since have been DELETED; that is not recorded here, because the
+    /// session table already answers it (`service`'s replay looks the id up
+    /// and reports the gone-error when it is absent) and a second copy of
+    /// the same fact could only ever disagree with the first.
+    Created,
+    /// The create failed, with the error the first attempt reported.
+    ///
+    /// `kind` rides along with the message because replaying an
+    /// `InvalidRequest` as an `Internal` would turn the first attempt's 400
+    /// into a 500 for a byte-identical request — the replay must be the
+    /// same answer, not merely a similar one.
+    Failed {
+        kind: farhelm_proto::ErrorKind,
+        message: String,
+    },
+}
+
+impl ReservationOutcome {
+    /// Split into the three columns that store it. Like
+    /// [`LastOutcome::columns`], the state text is a STABLE on-disk
+    /// vocabulary spelled out here rather than derived from variant names.
+    fn columns(&self) -> (&'static str, Option<&'static str>, Option<&str>) {
+        match self {
+            ReservationOutcome::Pending => ("pending", None, None),
+            ReservationOutcome::Created => ("created", None, None),
+            ReservationOutcome::Failed { kind, message } => {
+                ("failed", Some(error_kind_column(*kind)), Some(message))
+            }
+        }
+    }
+
+    /// Reassemble from the three columns, refusing anything outside the
+    /// vocabulary rather than defaulting — same no-guessing stance as
+    /// [`LastOutcome::from_columns`], and for the same reason: a value this
+    /// build does not recognize means the row is corrupt, and a guessed
+    /// outcome here would either replay a fabricated success or launch a
+    /// duplicate.
+    fn from_columns(
+        state: &str,
+        error_kind: Option<String>,
+        error_detail: Option<String>,
+    ) -> anyhow::Result<ReservationOutcome> {
+        Ok(match state {
+            "pending" => ReservationOutcome::Pending,
+            "created" => ReservationOutcome::Created,
+            "failed" => {
+                let kind = error_kind.ok_or_else(|| {
+                    anyhow::anyhow!("reservation row is 'failed' but carries no error kind")
+                })?;
+                ReservationOutcome::Failed {
+                    kind: error_kind_from_column(&kind)?,
+                    message: error_detail.ok_or_else(|| {
+                        anyhow::anyhow!("reservation row is 'failed' but carries no error text")
+                    })?,
+                }
+            }
+            other => anyhow::bail!("reservation row has unrecognized state {other:?}"),
+        })
+    }
+}
+
+/// The on-disk spelling of an [`ErrorKind`](farhelm_proto::ErrorKind), for
+/// a failed reservation's replay.
+///
+/// Deliberately its own vocabulary rather than the wire's serde
+/// representation: the two happen to agree today, but the wire encoding is
+/// free to change with a protocol bump while every database in the field
+/// keeps the rows it already has.
+fn error_kind_column(kind: farhelm_proto::ErrorKind) -> &'static str {
+    use farhelm_proto::ErrorKind as K;
+    match kind {
+        K::NotFound => "not_found",
+        K::InvalidRequest => "invalid_request",
+        K::Internal => "internal",
+        K::Conflict => "conflict",
+    }
+}
+
+/// The inverse of [`error_kind_column`]; see
+/// [`ReservationOutcome::from_columns`] for why an unrecognized value is
+/// refused rather than defaulted to `Internal`.
+fn error_kind_from_column(text: &str) -> anyhow::Result<farhelm_proto::ErrorKind> {
+    use farhelm_proto::ErrorKind as K;
+    Ok(match text {
+        "not_found" => K::NotFound,
+        "invalid_request" => K::InvalidRequest,
+        "internal" => K::Internal,
+        "conflict" => K::Conflict,
+        other => anyhow::bail!("reservation row has unrecognized error kind {other:?}"),
+    })
+}
+
 /// A failure injected INSIDE [`SessionStore::record_boot`]'s transaction,
 /// between the sentinel overrides and the blanket interrupted conversion —
 /// only ever called when `interrupt_live` is true, since that is the only
@@ -600,6 +841,13 @@ pub struct SessionStore {
 ///   identity because no host identity is stored anywhere yet; this is
 ///   that home, and whatever host identity M6's multi-host work needs
 ///   belongs in the same row.
+/// - 3: PLAN_M3.md item 6 — `create_reservations`, the durable half of
+///   create idempotency (see [`Reservation`]). Its own table rather than
+///   columns on `sessions` because it is keyed by the client's intent key
+///   (the lookup a replay runs before any session is known), because it
+///   can exist with no session row at all, and because it outlives the
+///   session it created as a tombstone. Its lifetime is the INTENT's, not
+///   the session's.
 ///
 /// `may_migrate` is the caller's assertion that it holds this state
 /// directory's exclusivity (see `service::StateDirOwnership`). Upgrading a
@@ -646,7 +894,19 @@ fn apply_schema(conn: &Connection, may_migrate: bool) -> anyhow::Result<()> {
                  id      INTEGER PRIMARY KEY CHECK (id = 0),
                  boot_id TEXT
              ) STRICT;
-             PRAGMA user_version = 2;
+             CREATE TABLE create_reservations (
+                 intent_key   TEXT PRIMARY KEY,
+                 fingerprint  TEXT NOT NULL,
+                 state        TEXT NOT NULL,
+                 session_id   TEXT NOT NULL,
+                 tmux_name    TEXT NOT NULL,
+                 error_kind   TEXT,
+                 error_detail TEXT,
+                 created_at   INTEGER NOT NULL
+             ) STRICT;
+             CREATE INDEX create_reservations_pending
+                 ON create_reservations (session_id) WHERE state = 'pending';
+             PRAGMA user_version = 3;
              COMMIT;",
         )
         .context("creating schema")?;
@@ -683,6 +943,40 @@ fn apply_schema(conn: &Connection, may_migrate: bool) -> anyhow::Result<()> {
         .context("migrating schema from version 1 to 2")?;
         version = 2;
     }
+    if version == 2 {
+        // Purely additive: there is no pre-M3 data to migrate INTO this
+        // table, because no build before item 6 ever accepted an intent
+        // key. Sessions that already exist simply have no reservation, and
+        // a create for one is impossible — a key is claimed at create time
+        // or never.
+        //
+        // The index is PARTIAL, and that is the whole point: this table is
+        // immortal (see `Reservation`'s tombstone docs), so it is the one
+        // table here that grows without bound, while both queries that are
+        // not by primary key touch only PENDING rows — reload's
+        // reconciliation worklist and the delete path's settlement. A
+        // partial index keeps their cost proportional to creates currently
+        // in flight rather than to every create this host has ever done.
+        conn.execute_batch(
+            "BEGIN;
+             CREATE TABLE create_reservations (
+                 intent_key   TEXT PRIMARY KEY,
+                 fingerprint  TEXT NOT NULL,
+                 state        TEXT NOT NULL,
+                 session_id   TEXT NOT NULL,
+                 tmux_name    TEXT NOT NULL,
+                 error_kind   TEXT,
+                 error_detail TEXT,
+                 created_at   INTEGER NOT NULL
+             ) STRICT;
+             CREATE INDEX create_reservations_pending
+                 ON create_reservations (session_id) WHERE state = 'pending';
+             PRAGMA user_version = 3;
+             COMMIT;",
+        )
+        .context("migrating schema from version 2 to 3")?;
+        version = 3;
+    }
     if version == SCHEMA_VERSION {
         return Ok(());
     }
@@ -702,6 +996,72 @@ fn now_unix() -> i64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map_or(0, |d| d.as_secs() as i64)
+}
+
+/// Read one reservation through whatever connection or transaction the
+/// caller already holds.
+///
+/// A free function rather than a method because half its callers are
+/// INSIDE a transaction that must not be interrupted by a second lock
+/// acquisition: the claim's lost-race path and the relaunch takeover both
+/// have to read the reservation as part of their own atomic decision, and
+/// a method that took the store's mutex again would deadlock against the
+/// guard they are already holding.
+/// Apply one [`Settlement`] inside a transaction the caller owns; see
+/// [`SessionStore::settle_reservations`] for what the two `WHERE`
+/// conditions protect and why a non-matching row is a silent no-op.
+///
+/// Shared with `delete_session`'s rollback path, which has to settle in
+/// the same transaction as the row removal it accompanies.
+fn settle_within(conn: &Connection, settlement: &Settlement) -> anyhow::Result<()> {
+    let (state, error_kind, error_detail) = settlement.outcome.columns();
+    conn.execute(
+        "UPDATE create_reservations \
+         SET state = ?3, error_kind = ?4, error_detail = ?5 \
+         WHERE intent_key = ?1 AND session_id = ?2 AND state = 'pending'",
+        rusqlite::params![
+            settlement.intent_key,
+            settlement.session_id,
+            state,
+            error_kind,
+            error_detail
+        ],
+    )
+    .context("settling a create reservation")?;
+    Ok(())
+}
+
+fn read_reservation(conn: &Connection, intent_key: &str) -> anyhow::Result<Option<Reservation>> {
+    let row = conn
+        .query_row(
+            "SELECT fingerprint, state, session_id, tmux_name, error_kind, error_detail \
+             FROM create_reservations WHERE intent_key = ?1",
+            rusqlite::params![intent_key],
+            |r| {
+                Ok((
+                    r.get::<_, String>(0)?,
+                    r.get::<_, String>(1)?,
+                    r.get::<_, String>(2)?,
+                    r.get::<_, String>(3)?,
+                    r.get::<_, Option<String>>(4)?,
+                    r.get::<_, Option<String>>(5)?,
+                ))
+            },
+        )
+        .optional()
+        .context("reading a create reservation")?;
+    let Some((fingerprint, state, session_id, tmux_name, error_kind, error_detail)) = row else {
+        return Ok(None);
+    };
+    let outcome = ReservationOutcome::from_columns(&state, error_kind, error_detail)
+        .with_context(|| format!("create reservation {intent_key}"))?;
+    Ok(Some(Reservation {
+        intent_key: intent_key.to_string(),
+        fingerprint,
+        session_id,
+        tmux_name,
+        outcome,
+    }))
 }
 
 impl SessionStore {
@@ -777,12 +1137,74 @@ impl SessionStore {
     /// evidence that a launch was attempted, not silence. A failure here
     /// therefore fails the create before anything external has happened
     /// at all (see `service::Supervisor::create_session`).
-    pub async fn insert_session(&self, row: StoredSession) -> anyhow::Result<()> {
+    ///
+    /// `reservation` claims a client-supplied intent key for this same
+    /// launch (PLAN_M3.md item 6), in ONE transaction with the row above.
+    /// The atomicity is why the two are not separate calls: a reservation
+    /// without its launching row would send a retry hunting for the side
+    /// effects of an attempt that was never even recorded, and a launching
+    /// row without its reservation would let a retry launch a SECOND
+    /// session for the same intent — the exact duplicate this whole
+    /// mechanism exists to exclude. `None` is a create with no intent key
+    /// (pre-M3 behavior, unchanged) and touches the reservation table not
+    /// at all.
+    ///
+    /// A key already claimed is reported as [`Claimed::TakenBy`] with
+    /// NOTHING committed — not as an error and not as an overwrite. The
+    /// caller reaches here only after finding no reservation for the key,
+    /// so a claim that loses means a racer bypassed `service`'s per-key
+    /// collapse; the honest answer is then to resolve the winner's
+    /// reservation, which needs the winner's row rather than a failure.
+    pub async fn insert_session(
+        &self,
+        row: StoredSession,
+        claim: Option<IntentClaim>,
+    ) -> anyhow::Result<Claimed> {
         let conn = Arc::clone(&self.conn);
-        tokio::task::spawn_blocking(move || -> anyhow::Result<()> {
-            let conn = conn.lock().expect("session db mutex poisoned");
+        tokio::task::spawn_blocking(move || -> anyhow::Result<Claimed> {
+            let mut conn = conn.lock().expect("session db mutex poisoned");
+            let tx = conn
+                .transaction()
+                .context("beginning the session insert transaction")?;
+            if let Some(claim) = &claim {
+                // The claim goes FIRST so a lost race costs nothing: the
+                // session row is only written once the key is provably
+                // ours. `DO NOTHING` (rather than a bare insert) is what
+                // turns "someone else has it" into an answer instead of a
+                // constraint error there would be no way to inspect.
+                let (state, error_kind, error_detail) = ReservationOutcome::Pending.columns();
+                let claimed = tx
+                    .execute(
+                        "INSERT INTO create_reservations \
+                         (intent_key, fingerprint, state, session_id, tmux_name, \
+                          error_kind, error_detail, created_at) \
+                         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8) \
+                         ON CONFLICT(intent_key) DO NOTHING",
+                        rusqlite::params![
+                            claim.intent_key,
+                            claim.fingerprint,
+                            state,
+                            row.id,
+                            row.tmux_name,
+                            error_kind,
+                            error_detail,
+                            now_unix(),
+                        ],
+                    )
+                    .context("claiming the create reservation")?;
+                if claimed == 0 {
+                    let winner = read_reservation(&tx, &claim.intent_key)?.ok_or_else(|| {
+                        anyhow::anyhow!(
+                            "intent key {} refused the claim but has no reservation row",
+                            claim.intent_key
+                        )
+                    })?;
+                    // Rolled back, not committed: no session row, no claim.
+                    return Ok(Claimed::TakenBy(Box::new(winner)));
+                }
+            }
             let (state, exit_code, annotation, error_detail) = row.outcome.columns();
-            conn.execute(
+            tx.execute(
                 "INSERT INTO sessions \
                  (id, title, cwd, invocation, tmux_name, pane, created_at, \
                   outcome_state, exit_code, annotation, error_detail) \
@@ -802,10 +1224,348 @@ impl SessionStore {
                 ],
             )
             .context("inserting session row")?;
-            Ok(())
+            tx.commit().context("committing the session insert")?;
+            Ok(Claimed::Ours)
         })
         .await
         .context("session insert task panicked")?
+    }
+
+    /// Record an intent that failed BEFORE it ever had a session row —
+    /// a create refused by validation (PLAN_M3.md item 6's replay contract
+    /// has no validation exception: acceptance 7's "a failed create
+    /// replays its original error" covers a bad working directory exactly
+    /// like a failed launch).
+    ///
+    /// The reserved identities are still stored, even though nothing was
+    /// ever launched under them, because the columns describe the intent's
+    /// assigned identity rather than a session that exists — and a `Failed`
+    /// row is never reconciled against them.
+    ///
+    /// A key claimed concurrently wins: `DO NOTHING` leaves the existing
+    /// row alone, and the caller finds it on its next lookup. Recording a
+    /// failure over someone else's live claim would be strictly worse than
+    /// letting this one attempt's error go unrecorded.
+    pub async fn record_failed_intent(
+        &self,
+        claim: IntentClaim,
+        session_id: &str,
+        tmux_name: &str,
+        kind: farhelm_proto::ErrorKind,
+        message: &str,
+    ) -> anyhow::Result<()> {
+        let conn = Arc::clone(&self.conn);
+        let session_id = session_id.to_string();
+        let tmux_name = tmux_name.to_string();
+        let message = message.to_string();
+        tokio::task::spawn_blocking(move || -> anyhow::Result<()> {
+            let conn = conn.lock().expect("session db mutex poisoned");
+            let outcome = ReservationOutcome::Failed { kind, message };
+            let (state, error_kind, error_detail) = outcome.columns();
+            conn.execute(
+                "INSERT INTO create_reservations \
+                 (intent_key, fingerprint, state, session_id, tmux_name, \
+                  error_kind, error_detail, created_at) \
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8) \
+                 ON CONFLICT(intent_key) DO NOTHING",
+                rusqlite::params![
+                    claim.intent_key,
+                    claim.fingerprint,
+                    state,
+                    session_id,
+                    tmux_name,
+                    error_kind,
+                    error_detail,
+                    now_unix(),
+                ],
+            )
+            .context("recording a refused create against its intent key")?;
+            Ok(())
+        })
+        .await
+        .context("failed-intent record task panicked")?
+    }
+
+    /// Take over a pending reservation for a RELAUNCH, atomically
+    /// re-checking the decision the caller made against evidence it
+    /// gathered a moment ago (PLAN_M3.md item 6).
+    ///
+    /// The caller decides to relaunch by observing that nothing was ever
+    /// launched under the reserved identities. Between that observation and
+    /// this call, two things can have changed, and both must lose: a
+    /// concurrent DELETE can have tombstoned the reservation (relaunching
+    /// then would resurrect a session the user threw away), and the
+    /// reserved row can have moved past `Launching` (evidence appeared, so
+    /// the honest answer is a replay). Both conditions are re-tested INSIDE
+    /// this transaction, which is what makes the takeover a real state
+    /// transition rather than a check followed by a hopeful write.
+    ///
+    /// On [`RetryClaim::Acquired`] the previous launching row — which by
+    /// the conditions above described nothing — is replaced by `row`, under
+    /// the same id and tmux name the reservation already carries.
+    pub async fn restart_pending_launch(
+        &self,
+        row: StoredSession,
+        intent_key: &str,
+    ) -> anyhow::Result<RetryClaim> {
+        let conn = Arc::clone(&self.conn);
+        let intent_key = intent_key.to_string();
+        tokio::task::spawn_blocking(move || -> anyhow::Result<RetryClaim> {
+            let mut conn = conn.lock().expect("session db mutex poisoned");
+            let tx = conn
+                .transaction()
+                .context("beginning the relaunch takeover transaction")?;
+            let reservation = read_reservation(&tx, &intent_key)?.ok_or_else(|| {
+                anyhow::anyhow!("create reservation {intent_key} vanished before its relaunch")
+            })?;
+            if reservation.outcome != ReservationOutcome::Pending
+                || reservation.session_id != row.id
+            {
+                return Ok(RetryClaim::Resolved(Box::new(reservation)));
+            }
+            let current: Option<(String, String)> = tx
+                .query_row(
+                    "SELECT outcome_state, pane FROM sessions WHERE id = ?1",
+                    rusqlite::params![row.id],
+                    |r| Ok((r.get(0)?, r.get(1)?)),
+                )
+                .optional()
+                .context("reading the reserved session's current state")?;
+            // The same durable-row predicate `service`'s
+            // `reserved_launch_evidence` applies, restated here because
+            // this is where it becomes a TRANSITION rather than a reading:
+            // a recorded pane means something saw this session in tmux, and
+            // any outcome past `launching` means the same — except
+            // `interrupted`, which the reboot conversion blankets over
+            // never-launched rows too and which therefore proves nothing on
+            // its own. Anything showing evidence refuses the takeover, so
+            // the caller replays instead of starting a second agent.
+            if current.is_some_and(|(state, pane)| {
+                !pane.is_empty() || !matches!(state.as_str(), "launching" | "interrupted")
+            }) {
+                return Ok(RetryClaim::Launched);
+            }
+            tx.execute(
+                "DELETE FROM sessions WHERE id = ?1",
+                rusqlite::params![row.id],
+            )
+            .context("clearing the interrupted attempt's launching row")?;
+            let (state, exit_code, annotation, error_detail) = row.outcome.columns();
+            tx.execute(
+                "INSERT INTO sessions \
+                 (id, title, cwd, invocation, tmux_name, pane, created_at, \
+                  outcome_state, exit_code, annotation, error_detail) \
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
+                rusqlite::params![
+                    row.id,
+                    row.title,
+                    row.cwd,
+                    row.invocation,
+                    row.tmux_name,
+                    row.pane,
+                    now_unix(),
+                    state,
+                    exit_code,
+                    annotation,
+                    error_detail,
+                ],
+            )
+            .context("re-inserting the launching row for a relaunch")?;
+            tx.commit().context("committing the relaunch takeover")?;
+            Ok(RetryClaim::Acquired)
+        })
+        .await
+        .context("relaunch takeover task panicked")?
+    }
+
+    /// One session's stored row, if it still exists.
+    ///
+    /// The DURABLE answer to "does this session exist", which every replay
+    /// asks: the in-memory session map is a mirror that a delete updates
+    /// only after its own commit, so a replay landing in that window would
+    /// otherwise hand back a live-looking session whose row is already
+    /// gone.
+    pub async fn session(&self, id: &str) -> anyhow::Result<Option<StoredSession>> {
+        let conn = Arc::clone(&self.conn);
+        let id = id.to_string();
+        tokio::task::spawn_blocking(move || -> anyhow::Result<Option<StoredSession>> {
+            let conn = conn.lock().expect("session db mutex poisoned");
+            // Two stages for the same reason `load_all` uses them: a
+            // corrupt outcome must be refused with its own message rather
+            // than flattened into a rusqlite decode failure.
+            let raw: Option<(StoredSession, OutcomeColumns)> = conn
+                .query_row(
+                    "SELECT id, title, cwd, invocation, tmux_name, pane, \
+                     outcome_state, exit_code, annotation, error_detail \
+                     FROM sessions WHERE id = ?1",
+                    rusqlite::params![id],
+                    |r| {
+                        Ok((
+                            StoredSession {
+                                id: r.get(0)?,
+                                title: r.get(1)?,
+                                cwd: r.get(2)?,
+                                invocation: r.get(3)?,
+                                tmux_name: r.get(4)?,
+                                pane: r.get(5)?,
+                                outcome: LastOutcome::Launching,
+                            },
+                            (r.get(6)?, r.get(7)?, r.get(8)?, r.get(9)?),
+                        ))
+                    },
+                )
+                .optional()
+                .context("reading a session row")?;
+            let Some((mut row, (state, exit_code, annotation, error_detail))) = raw else {
+                return Ok(None);
+            };
+            row.outcome = LastOutcome::from_columns(&state, exit_code, annotation, error_detail)
+                .with_context(|| format!("session {}", row.id))?;
+            Ok(Some(row))
+        })
+        .await
+        .context("session read task panicked")?
+    }
+
+    /// The reservation for `intent_key`, if this state directory has ever
+    /// seen it — the one lookup `service::Supervisor::create_session`'s
+    /// state machine runs before deciding whether a create is a first
+    /// attempt, a replay, or a retry with reconciling to do.
+    pub async fn reservation(&self, intent_key: &str) -> anyhow::Result<Option<Reservation>> {
+        let conn = Arc::clone(&self.conn);
+        let intent_key = intent_key.to_string();
+        tokio::task::spawn_blocking(move || -> anyhow::Result<Option<Reservation>> {
+            let conn = conn.lock().expect("session db mutex poisoned");
+            read_reservation(&conn, &intent_key)
+        })
+        .await
+        .context("reservation read task panicked")?
+    }
+
+    /// Every reservation still `Pending` — the reconciliation worklist
+    /// `service::Supervisor::reload_sessions` resolves against the session
+    /// map it has just rebuilt from tmux.
+    ///
+    /// Only pending rows, because a settled outcome is final: nothing a
+    /// reload observes could move a `Created` or `Failed` row, and loading
+    /// them anyway would mean scanning every create this state directory
+    /// has ever done, on every startup, forever.
+    pub async fn pending_reservations(&self) -> anyhow::Result<Vec<Reservation>> {
+        let conn = Arc::clone(&self.conn);
+        tokio::task::spawn_blocking(move || -> anyhow::Result<Vec<Reservation>> {
+            let conn = conn.lock().expect("session db mutex poisoned");
+            let mut stmt = conn
+                .prepare(
+                    "SELECT intent_key, fingerprint, session_id, tmux_name \
+                     FROM create_reservations WHERE state = 'pending'",
+                )
+                .context("preparing the pending-reservation query")?;
+            let rows = stmt
+                .query_map([], |r| {
+                    Ok(Reservation {
+                        intent_key: r.get(0)?,
+                        fingerprint: r.get(1)?,
+                        session_id: r.get(2)?,
+                        tmux_name: r.get(3)?,
+                        outcome: ReservationOutcome::Pending,
+                    })
+                })
+                .context("querying pending reservations")?
+                .collect::<Result<Vec<_>, rusqlite::Error>>()
+                .context("decoding pending reservations")?;
+            Ok(rows)
+        })
+        .await
+        .context("pending reservation query task panicked")?
+    }
+
+    /// Record the outcome of one or more reservations, in ONE transaction.
+    ///
+    /// Two conditions guard every write, and both are about a settlement
+    /// arriving later than the world it was computed against:
+    ///
+    /// - **`state = 'pending'`** makes settlement MONOTONIC: an outcome,
+    ///   once recorded, is what every later replay reports. What this
+    ///   protects against is not a live create racing a reload — a reload
+    ///   only ever runs before this process serves anything, so that race
+    ///   cannot happen — but the repeated and STALE settlements that
+    ///   genuinely do occur: a retry re-settling what a previous attempt
+    ///   already recorded, and a settlement computed before a concurrent
+    ///   delete tombstoned the same row.
+    /// - **`session_id = ?`** ([`Settlement`]) keeps a settlement from
+    ///   landing on a reservation that has since been re-pointed at a
+    ///   different attempt's identities.
+    ///
+    /// A row matching neither is left alone rather than reported: there is
+    /// no honest repair for "the reservation I was told about is not the
+    /// one that is there", and inventing one would be worse than the no-op.
+    ///
+    /// Batched for the same reason [`SessionStore::transition_many`] is:
+    /// one reload can settle a whole startup's worth of interrupted
+    /// creates, and a journal sync per row buys nothing. The batch is
+    /// atomic — a failure part-way through settles NONE of them, so a
+    /// reload never leaves half its reconciliation recorded.
+    pub async fn settle_reservations(&self, settlements: Vec<Settlement>) -> anyhow::Result<()> {
+        if settlements.is_empty() {
+            return Ok(());
+        }
+        let conn = Arc::clone(&self.conn);
+        tokio::task::spawn_blocking(move || -> anyhow::Result<()> {
+            let mut conn = conn.lock().expect("session db mutex poisoned");
+            let tx = conn
+                .transaction()
+                .context("beginning the reservation settlement transaction")?;
+            for settlement in settlements {
+                settle_within(&tx, &settlement)?;
+            }
+            tx.commit().context("committing reservation settlements")?;
+            Ok(())
+        })
+        .await
+        .context("reservation settlement task panicked")?
+    }
+
+    /// [`SessionStore::delete_session`] for the DELETE path, settling this
+    /// session's still-pending reservations in the SAME transaction as the
+    /// row removal (PLAN_M3.md item 6's tombstone rule).
+    ///
+    /// The settlement direction is `Created`, and it is a statement of
+    /// fact rather than a courtesy: a session cannot be deleted without
+    /// having existed, so a reservation still claiming to be in flight for
+    /// it was merely never told its launch had succeeded. Recording that
+    /// here is what keeps the tombstone honest — a later replay finds
+    /// `Created` with no session behind it and reports the gone-error,
+    /// where leaving the row `Pending` would instead tell the retry "the
+    /// crashed attempt never launched" and produce exactly the duplicate
+    /// this mechanism exists to exclude.
+    ///
+    /// The reservation ROW is deliberately kept; see [`Reservation`]'s docs
+    /// on tombstones. This is a separate method from plain
+    /// [`SessionStore::delete_session`] because that one is ALSO the create
+    /// path's rollback (`service`'s `abandon_launching_record`), where the
+    /// launch provably did not happen and settling its reservation
+    /// `Created` would be a lie in the opposite direction.
+    pub async fn delete_session_settling_reservations(&self, id: &str) -> anyhow::Result<()> {
+        let conn = Arc::clone(&self.conn);
+        let id = id.to_string();
+        tokio::task::spawn_blocking(move || -> anyhow::Result<()> {
+            let mut conn = conn.lock().expect("session db mutex poisoned");
+            let tx = conn
+                .transaction()
+                .context("beginning the session delete transaction")?;
+            tx.execute(
+                "UPDATE create_reservations SET state = 'created' \
+                 WHERE session_id = ?1 AND state = 'pending'",
+                rusqlite::params![id],
+            )
+            .context("settling the deleted session's reservations")?;
+            tx.execute("DELETE FROM sessions WHERE id = ?1", rusqlite::params![id])
+                .context("deleting session row")?;
+            tx.commit().context("committing the session delete")?;
+            Ok(())
+        })
+        .await
+        .context("session delete task panicked")?
     }
 
     /// Offer one witnessed [`Transition`] to a session, returning the
@@ -1050,13 +1810,38 @@ impl SessionStore {
     /// existence first (a check-then-delete would just be a second query
     /// racing nothing, since this connection is already serialized
     /// through one mutex).
-    pub async fn delete_session(&self, id: &str) -> anyhow::Result<()> {
+    ///
+    /// This is the CREATE-ROLLBACK delete, not the user-facing one, and
+    /// `settlement` is what makes the distinction safe to express in one
+    /// method: the rollback runs where a launch provably did NOT happen, so
+    /// its reservation is settled `Failed` (or left pending — see
+    /// `service`'s retention rules), never told a session was created the
+    /// way [`SessionStore::delete_session_settling_reservations`] does.
+    ///
+    /// The settlement rides the SAME transaction as the removal because
+    /// the two are one fact: a rollback whose settlement did not commit
+    /// would leave a reservation pointing at a row that no longer exists,
+    /// and the retry that found it would relaunch under an intent the
+    /// client was already told had failed. `None` is a rollback with no
+    /// intent key to settle.
+    pub async fn delete_session(
+        &self,
+        id: &str,
+        settlement: Option<Settlement>,
+    ) -> anyhow::Result<()> {
         let conn = Arc::clone(&self.conn);
         let id = id.to_string();
         tokio::task::spawn_blocking(move || -> anyhow::Result<()> {
-            let conn = conn.lock().expect("session db mutex poisoned");
-            conn.execute("DELETE FROM sessions WHERE id = ?1", rusqlite::params![id])
+            let mut conn = conn.lock().expect("session db mutex poisoned");
+            let tx = conn
+                .transaction()
+                .context("beginning the launch rollback transaction")?;
+            tx.execute("DELETE FROM sessions WHERE id = ?1", rusqlite::params![id])
                 .context("deleting session row")?;
+            if let Some(settlement) = &settlement {
+                settle_within(&tx, settlement)?;
+            }
+            tx.commit().context("committing the launch rollback")?;
             Ok(())
         })
         .await
@@ -1186,15 +1971,18 @@ mod tests {
     /// since that is the state a real session spends its life in.
     async fn insert_running(store: &SessionStore, id: &str) {
         store
-            .insert_session(StoredSession {
-                id: id.to_string(),
-                title: id.to_string(),
-                cwd: "/tmp/work".to_string(),
-                invocation: "agent".to_string(),
-                tmux_name: format!("fh-{id}"),
-                pane: "%0".to_string(),
-                outcome: LastOutcome::Running,
-            })
+            .insert_session(
+                StoredSession {
+                    id: id.to_string(),
+                    title: id.to_string(),
+                    cwd: "/tmp/work".to_string(),
+                    invocation: "agent".to_string(),
+                    tmux_name: format!("fh-{id}"),
+                    pane: "%0".to_string(),
+                    outcome: LastOutcome::Running,
+                },
+                None,
+            )
             .await
             .expect("insert");
     }
@@ -1262,6 +2050,59 @@ mod tests {
             out.extend(rows);
         }
         out
+    }
+
+    /// Every index, as SQLite itself describes it: the creating DDL (which
+    /// is the only place a PARTIAL index's `WHERE` clause appears) plus the
+    /// columns and uniqueness `index_list`/`index_info` report.
+    ///
+    /// Both, not either: the DDL alone would not notice a difference in
+    /// what SQLite actually built from it, and the pragmas alone cannot see
+    /// the predicate that makes an index partial in the first place.
+    fn indexes_of(path: &Path) -> Vec<(String, Option<String>, i64, Vec<String>)> {
+        let conn = Connection::open(path).expect("open raw");
+        let named: Vec<(String, Option<String>)> = conn
+            .prepare("SELECT name, sql FROM sqlite_schema WHERE type = 'index' ORDER BY name")
+            .expect("prepare")
+            .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))
+            .expect("query")
+            .collect::<Result<_, _>>()
+            .expect("collect");
+        let tables: Vec<String> = conn
+            .prepare("SELECT name FROM sqlite_schema WHERE type = 'table' ORDER BY name")
+            .expect("prepare")
+            .query_map([], |r| r.get(0))
+            .expect("query")
+            .collect::<Result<_, _>>()
+            .expect("collect");
+        let mut unique: HashMap<String, i64> = HashMap::new();
+        for table in tables {
+            let mut stmt = conn
+                .prepare(&format!("PRAGMA index_list({table})"))
+                .expect("prepare index_list");
+            for row in stmt
+                .query_map([], |r| Ok((r.get::<_, String>(1)?, r.get::<_, i64>(2)?)))
+                .expect("query index_list")
+            {
+                let (name, is_unique) = row.expect("index_list row");
+                unique.insert(name, is_unique);
+            }
+        }
+        named
+            .into_iter()
+            .map(|(name, sql)| {
+                let mut stmt = conn
+                    .prepare(&format!("PRAGMA index_info({name})"))
+                    .expect("prepare index_info");
+                let columns: Vec<String> = stmt
+                    .query_map([], |r| r.get::<_, Option<String>>(2))
+                    .expect("query index_info")
+                    .map(|c| c.expect("index_info row").unwrap_or_default())
+                    .collect();
+                let is_unique = unique.get(&name).copied().unwrap_or(-1);
+                (name, sql, is_unique, columns)
+            })
+            .collect()
     }
 
     /// The transition policy in one table, because the RELATIONSHIPS are
@@ -1626,6 +2467,60 @@ mod tests {
         );
     }
 
+    /// The same rule at the 2 → 3 step, which is where every FUTURE
+    /// migration will live: a failure leaves the database at the version it
+    /// actually has, with none of the step's objects half-created.
+    ///
+    /// Worth pinning separately from the 1 → 2 test because this step
+    /// creates an INDEX as well as a table, and an index is exactly the
+    /// kind of object it is tempting to add outside the transaction. The
+    /// conflict is planted on the index name rather than the table so the
+    /// rollback has to undo a `CREATE TABLE` that itself succeeded.
+    #[tokio::test]
+    async fn a_failed_schema_3_migration_leaves_the_database_at_version_2() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let db_path = dir.path().join("supervisor.db");
+        plant_v1_database(&db_path, &[("s1", "fh-1", "%0")]);
+        {
+            // Migrate to 2 only, then block the 3 step. `PRAGMA
+            // user_version = 2` is what stops `apply_schema` from
+            // continuing past the step under test.
+            let conn = Connection::open(&db_path).expect("raw open");
+            conn.execute_batch(
+                "ALTER TABLE sessions ADD COLUMN outcome_state TEXT NOT NULL DEFAULT 'launching';
+                 ALTER TABLE sessions ADD COLUMN exit_code     INTEGER;
+                 ALTER TABLE sessions ADD COLUMN annotation    TEXT;
+                 ALTER TABLE sessions ADD COLUMN error_detail  TEXT;
+                 CREATE TABLE supervisor_meta (
+                     id      INTEGER PRIMARY KEY CHECK (id = 0),
+                     boot_id TEXT
+                 ) STRICT;
+                 CREATE TABLE decoy (x TEXT);
+                 CREATE INDEX create_reservations_pending ON decoy (x);
+                 PRAGMA user_version = 2;",
+            )
+            .expect("plant a version-2 database with a conflicting index name");
+        }
+
+        SessionStore::open(&db_path, true)
+            .await
+            .expect_err("the migration must fail on the conflicting index name");
+
+        let conn = Connection::open(&db_path).expect("raw open");
+        let version: i64 = conn
+            .query_row("PRAGMA user_version", [], |r| r.get(0))
+            .expect("read version");
+        assert_eq!(
+            version, 2,
+            "a rolled-back migration must not claim version 3"
+        );
+        assert!(
+            conn.prepare("SELECT intent_key FROM create_reservations")
+                .is_err(),
+            "the table must have rolled back with the index that failed after it"
+        );
+    }
+
     /// Upgrading a database that belongs to a RUNNING supervisor is
     /// destructive, not neighbourly: that supervisor is an older build, so
     /// the moment it restarts it will refuse the schema this process
@@ -1681,6 +2576,13 @@ mod tests {
         SessionStore::open(&fresh, true).await.expect("create");
 
         assert_eq!(columns_of(&migrated), columns_of(&fresh));
+        // Indexes too, not just columns: the reservation table's index is
+        // PARTIAL, so a migration that created an unqualified one would
+        // still match column-for-column while quietly indexing an immortal
+        // table in full. `sqlite_schema.sql` is what carries the `WHERE`
+        // clause at all — `index_list`/`index_info` describe the columns
+        // and uniqueness but not the predicate — so both are compared.
+        assert_eq!(indexes_of(&migrated), indexes_of(&fresh));
 
         for path in [&migrated, &fresh] {
             let conn = Connection::open(path).expect("open raw");
@@ -1763,7 +2665,7 @@ mod tests {
 
         // A row deleted concurrently is not an error and has no committed
         // outcome to report.
-        store.delete_session("s1").await.expect("delete");
+        store.delete_session("s1", None).await.expect("delete");
         assert_eq!(
             store
                 .transition("s1", Transition::ObservedExit { exit_code: None })
@@ -1781,15 +2683,18 @@ mod tests {
     async fn confirming_a_launch_fills_in_the_pane_and_moves_the_outcome() {
         let (_dir, store) = fresh_store().await;
         store
-            .insert_session(StoredSession {
-                id: "s1".to_string(),
-                title: "demo".to_string(),
-                cwd: "/tmp/work".to_string(),
-                invocation: "agent".to_string(),
-                tmux_name: "fh-1".to_string(),
-                pane: String::new(),
-                outcome: LastOutcome::Launching,
-            })
+            .insert_session(
+                StoredSession {
+                    id: "s1".to_string(),
+                    title: "demo".to_string(),
+                    cwd: "/tmp/work".to_string(),
+                    invocation: "agent".to_string(),
+                    tmux_name: "fh-1".to_string(),
+                    pane: String::new(),
+                    outcome: LastOutcome::Launching,
+                },
+                None,
+            )
             .await
             .expect("insert");
 
@@ -1813,15 +2718,18 @@ mod tests {
     async fn a_rediscovered_dead_pane_commits_the_pane_with_its_outcome() {
         let (_dir, store) = fresh_store().await;
         store
-            .insert_session(StoredSession {
-                id: "s1".to_string(),
-                title: "demo".to_string(),
-                cwd: "/tmp/work".to_string(),
-                invocation: "agent".to_string(),
-                tmux_name: "fh-1".to_string(),
-                pane: String::new(),
-                outcome: LastOutcome::Launching,
-            })
+            .insert_session(
+                StoredSession {
+                    id: "s1".to_string(),
+                    title: "demo".to_string(),
+                    cwd: "/tmp/work".to_string(),
+                    invocation: "agent".to_string(),
+                    tmux_name: "fh-1".to_string(),
+                    pane: String::new(),
+                    outcome: LastOutcome::Launching,
+                },
+                None,
+            )
             .await
             .expect("insert");
 
@@ -2395,15 +3303,18 @@ mod tests {
 
         let store = SessionStore::open(&db_path, true).await.expect("open");
         store
-            .insert_session(StoredSession {
-                id: "s1".to_string(),
-                title: "demo".to_string(),
-                cwd: "/tmp/work".to_string(),
-                invocation: "agent --flag".to_string(),
-                tmux_name: "fh-abc".to_string(),
-                pane: "%3".to_string(),
-                outcome: LastOutcome::Running,
-            })
+            .insert_session(
+                StoredSession {
+                    id: "s1".to_string(),
+                    title: "demo".to_string(),
+                    cwd: "/tmp/work".to_string(),
+                    invocation: "agent --flag".to_string(),
+                    tmux_name: "fh-abc".to_string(),
+                    pane: "%3".to_string(),
+                    outcome: LastOutcome::Running,
+                },
+                None,
+            )
             .await
             .expect("insert");
         drop(store);
@@ -2508,7 +3419,7 @@ mod tests {
         let (_dir, store) = fresh_store().await;
         insert_running(&store, "s1").await;
 
-        store.delete_session("s1").await.expect("delete");
+        store.delete_session("s1", None).await.expect("delete");
         assert!(
             store.load_all().await.expect("load").is_empty(),
             "deleted row must not survive a reload"
@@ -2518,7 +3429,7 @@ mod tests {
         // same "no matching row" case as an id that never existed at
         // all — one call suffices for both) must not error.
         store
-            .delete_session("s1")
+            .delete_session("s1", None)
             .await
             .expect("deleting an already-deleted row must be idempotent");
     }
@@ -2554,5 +3465,627 @@ mod tests {
             (before..=after).contains(&created_at),
             "created_at {created_at} must fall within [{before}, {after}]"
         );
+    }
+
+    // -----------------------------------------------------------------
+    // PLAN_M3.md item 6: create reservations.
+    // -----------------------------------------------------------------
+
+    /// A launching row in the shape `create_session` commits one.
+    fn launching_row(id: &str) -> StoredSession {
+        StoredSession {
+            id: id.to_string(),
+            title: id.to_string(),
+            cwd: "/tmp/work".to_string(),
+            invocation: "agent".to_string(),
+            tmux_name: format!("fh-{id}"),
+            pane: String::new(),
+            outcome: LastOutcome::Launching,
+        }
+    }
+
+    /// Seed one reserved launch: a launching session row plus the pending
+    /// claim that reserved it, exactly as `create_session`'s first step
+    /// commits them.
+    async fn insert_reserved(store: &SessionStore, id: &str, key: &str, fingerprint: &str) {
+        let claimed = store
+            .insert_session(
+                launching_row(id),
+                Some(IntentClaim {
+                    intent_key: key.to_string(),
+                    fingerprint: fingerprint.to_string(),
+                }),
+            )
+            .await
+            .expect("insert with claim");
+        assert_eq!(claimed, Claimed::Ours, "the key {key} must have been free");
+    }
+
+    /// One settlement for a reservation seeded by [`insert_reserved`].
+    fn settlement(key: &str, id: &str, outcome: ReservationOutcome) -> Settlement {
+        Settlement {
+            intent_key: key.to_string(),
+            session_id: id.to_string(),
+            outcome,
+        }
+    }
+
+    /// Read one reservation, insisting it exists.
+    async fn reservation_of(store: &SessionStore, key: &str) -> Reservation {
+        store
+            .reservation(key)
+            .await
+            .expect("read")
+            .unwrap_or_else(|| panic!("reservation {key} must exist"))
+    }
+
+    /// Every reservation shape survives the on-disk round trip, error kind
+    /// included.
+    ///
+    /// The kind is the part worth pinning: a replay must reproduce the
+    /// FIRST attempt's answer exactly, and a kind that decayed to
+    /// `Internal` in storage would silently turn a 400 into a 500 for a
+    /// byte-identical request. Every `ErrorKind` is exercised so a new
+    /// variant with no on-disk spelling fails here rather than in the field.
+    #[tokio::test]
+    async fn every_reservation_outcome_shape_round_trips() {
+        let (_dir, store) = fresh_store().await;
+        let mut expected = vec![
+            ("pending-key", ReservationOutcome::Pending),
+            ("created-key", ReservationOutcome::Created),
+        ];
+        expected.extend(
+            [
+                farhelm_proto::ErrorKind::NotFound,
+                farhelm_proto::ErrorKind::InvalidRequest,
+                farhelm_proto::ErrorKind::Internal,
+                farhelm_proto::ErrorKind::Conflict,
+            ]
+            .into_iter()
+            .zip(["failed-0", "failed-1", "failed-2", "failed-3"])
+            .map(|(kind, key)| {
+                (
+                    key,
+                    ReservationOutcome::Failed {
+                        kind,
+                        message: format!("it failed with {kind:?}"),
+                    },
+                )
+            }),
+        );
+
+        for (index, (key, outcome)) in expected.iter().enumerate() {
+            let id = format!("s{index}");
+            insert_reserved(&store, &id, key, "fp").await;
+            if *outcome != ReservationOutcome::Pending {
+                store
+                    .settle_reservations(vec![settlement(key, &id, outcome.clone())])
+                    .await
+                    .expect("settle");
+            }
+        }
+
+        for (index, (key, outcome)) in expected.iter().enumerate() {
+            let read = reservation_of(&store, key).await;
+            assert_eq!(read.outcome, *outcome, "outcome of {key}");
+            assert_eq!(read.session_id, format!("s{index}"));
+            assert_eq!(read.tmux_name, format!("fh-s{index}"));
+            assert_eq!(read.fingerprint, "fp");
+        }
+        assert_eq!(
+            store.reservation("never-claimed").await.expect("read"),
+            None,
+            "a key this state directory has never seen has no reservation"
+        );
+    }
+
+    /// A key already claimed loses the race as a VALUE, not an error, and
+    /// takes nothing with it.
+    ///
+    /// Both halves matter. The session row must roll back — one left
+    /// behind by a refused claim is an orphan nothing will ever reconcile,
+    /// while the caller was told the create failed. And the answer must
+    /// carry the WINNER's reservation, because that is the only honest
+    /// reply available to the loser: it is exactly what a replay of that
+    /// key returns.
+    #[tokio::test]
+    async fn a_lost_claim_race_rolls_back_and_reports_the_winner() {
+        let (_dir, store) = fresh_store().await;
+        insert_reserved(&store, "first", "shared-key", "fp").await;
+
+        let claimed = store
+            .insert_session(
+                launching_row("second"),
+                Some(IntentClaim {
+                    intent_key: "shared-key".to_string(),
+                    fingerprint: "fp".to_string(),
+                }),
+            )
+            .await
+            .expect("a lost claim is an answer, not a failure");
+        let Claimed::TakenBy(winner) = claimed else {
+            panic!("a key already claimed must report its winner: {claimed:?}");
+        };
+        assert_eq!(winner.session_id, "first");
+        assert_eq!(winner.outcome, ReservationOutcome::Pending);
+
+        let ids: Vec<String> = store
+            .load_all()
+            .await
+            .expect("load")
+            .into_iter()
+            .map(|row| row.id)
+            .collect();
+        assert_eq!(
+            ids,
+            vec!["first".to_string()],
+            "the refused insert must leave no session row behind"
+        );
+        assert_eq!(
+            reservation_of(&store, "shared-key").await.session_id,
+            "first",
+            "and must not re-point the existing intent at a new session"
+        );
+    }
+
+    /// Settlement is monotonic AND identity-conditioned; both guards are
+    /// about a settlement arriving later than the world it was computed
+    /// against.
+    ///
+    /// Monotonicity is what makes repeated and stale settlements harmless —
+    /// a retry re-settling what a previous attempt already recorded, or a
+    /// settlement computed before a concurrent delete tombstoned the same
+    /// row. (It is NOT protecting against a reload racing a live create:
+    /// reload only runs before this process serves anything.) The identity
+    /// condition covers the other direction: a settlement computed for one
+    /// attempt must not land on a reservation now pointing at another.
+    #[tokio::test]
+    async fn settling_a_reservation_is_monotonic_and_identity_conditioned() {
+        let (_dir, store) = fresh_store().await;
+        insert_reserved(&store, "s1", "key", "fp").await;
+
+        // Wrong session id: refused, silently, leaving the row pending.
+        store
+            .settle_reservations(vec![settlement(
+                "key",
+                "some-other-session",
+                ReservationOutcome::Created,
+            )])
+            .await
+            .expect("a mismatched settlement is a no-op, not an error");
+        assert_eq!(
+            reservation_of(&store, "key").await.outcome,
+            ReservationOutcome::Pending,
+            "a settlement naming a different session must not land"
+        );
+
+        store
+            .settle_reservations(vec![settlement("key", "s1", ReservationOutcome::Created)])
+            .await
+            .expect("first settlement");
+        store
+            .settle_reservations(vec![settlement(
+                "key",
+                "s1",
+                ReservationOutcome::Failed {
+                    kind: farhelm_proto::ErrorKind::Internal,
+                    message: "a later, losing answer".to_string(),
+                },
+            )])
+            .await
+            .expect("second settlement must be accepted as a no-op, not an error");
+        assert_eq!(
+            reservation_of(&store, "key").await.outcome,
+            ReservationOutcome::Created
+        );
+
+        // A key with no row at all is likewise a no-op: nothing can make a
+        // reservation appear retroactively.
+        store
+            .settle_reservations(vec![settlement(
+                "no-such-key",
+                "s1",
+                ReservationOutcome::Created,
+            )])
+            .await
+            .expect("settling an unknown key is a no-op");
+    }
+
+    /// A settlement batch is all-or-nothing.
+    ///
+    /// Reload settles a whole startup's worth of reconciliation in one
+    /// call, and a partially-applied batch would leave some intents
+    /// recorded and others not, with nothing to say which — the next
+    /// startup would have to redo an unknown subset. Forced here with a
+    /// trigger that refuses one specific row, which is the only way to make
+    /// a mid-batch failure happen on demand.
+    #[tokio::test]
+    async fn a_failed_settlement_rolls_the_whole_batch_back() {
+        let (dir, store) = fresh_store().await;
+        insert_reserved(&store, "s1", "first-key", "fp").await;
+        insert_reserved(&store, "s2", "poisoned-key", "fp").await;
+        {
+            let conn = Connection::open(dir.path().join("supervisor.db")).expect("open raw");
+            conn.execute_batch(
+                "CREATE TRIGGER refuse_poisoned BEFORE UPDATE ON create_reservations \
+                 WHEN NEW.intent_key = 'poisoned-key' \
+                 BEGIN SELECT RAISE(ABORT, 'refused by test trigger'); END;",
+            )
+            .expect("plant the trigger");
+        }
+
+        store
+            .settle_reservations(vec![
+                settlement("first-key", "s1", ReservationOutcome::Created),
+                settlement("poisoned-key", "s2", ReservationOutcome::Created),
+            ])
+            .await
+            .expect_err("the poisoned row must fail the batch");
+
+        assert_eq!(
+            reservation_of(&store, "first-key").await.outcome,
+            ReservationOutcome::Pending,
+            "a settlement that committed while a later one failed would leave this reload's \
+             reconciliation half-recorded"
+        );
+    }
+
+    /// `pending_reservations` is the reload worklist, so it must return
+    /// exactly the rows reload can still act on — and none of the settled
+    /// ones, which would grow without bound over a state directory's life.
+    #[tokio::test]
+    async fn pending_reservations_lists_only_the_unsettled_ones() {
+        let (_dir, store) = fresh_store().await;
+        insert_reserved(&store, "s1", "still-pending", "fp").await;
+        insert_reserved(&store, "s2", "already-created", "fp").await;
+        store
+            .settle_reservations(vec![settlement(
+                "already-created",
+                "s2",
+                ReservationOutcome::Created,
+            )])
+            .await
+            .expect("settle");
+
+        let pending = store.pending_reservations().await.expect("list");
+        assert_eq!(pending.len(), 1, "got {pending:?}");
+        assert_eq!(pending[0].intent_key, "still-pending");
+        assert_eq!(pending[0].session_id, "s1");
+        assert_eq!(pending[0].outcome, ReservationOutcome::Pending);
+    }
+
+    /// Deleting a session TOMBSTONES its reservations rather than
+    /// removing them, and settles a still-pending one as created.
+    ///
+    /// Both halves are the tombstone rule (PLAN_M3.md item 6). Keeping the
+    /// row is what lets a later replay say "that session was deleted"
+    /// instead of silently creating a second one; settling a pending row
+    /// is what keeps a retry from concluding "the crashed attempt never
+    /// launched" about a session that demonstrably existed — nothing can
+    /// be deleted without having been created.
+    #[tokio::test]
+    async fn deleting_a_session_settles_and_keeps_its_reservations() {
+        let (_dir, store) = fresh_store().await;
+        insert_reserved(&store, "s1", "pending-key", "fp").await;
+        insert_reserved(&store, "s2", "settled-key", "fp").await;
+        store
+            .settle_reservations(vec![settlement(
+                "settled-key",
+                "s2",
+                ReservationOutcome::Created,
+            )])
+            .await
+            .expect("settle");
+
+        for id in ["s1", "s2"] {
+            store
+                .delete_session_settling_reservations(id)
+                .await
+                .expect("delete");
+        }
+
+        assert!(
+            store.load_all().await.expect("load").is_empty(),
+            "both session rows are gone"
+        );
+        for key in ["pending-key", "settled-key"] {
+            assert_eq!(
+                reservation_of(&store, key).await.outcome,
+                ReservationOutcome::Created,
+                "{key}: a deleted session's intent is settled as created, whatever it was before"
+            );
+        }
+    }
+
+    /// The delete's two writes are one transaction: a failure leaves the
+    /// session AND its reservation exactly as they were.
+    ///
+    /// The direction that would hurt is a tombstone recorded over a session
+    /// that then survived the delete — a live session whose intent key
+    /// reports it as gone, permanently. Forced with a trigger that refuses
+    /// the row removal, the only way to fail the second half on demand.
+    #[tokio::test]
+    async fn a_failed_delete_leaves_both_the_session_and_its_reservation() {
+        let (dir, store) = fresh_store().await;
+        insert_reserved(&store, "s1", "key", "fp").await;
+        {
+            let conn = Connection::open(dir.path().join("supervisor.db")).expect("open raw");
+            conn.execute_batch(
+                "CREATE TRIGGER refuse_delete BEFORE DELETE ON sessions \
+                 BEGIN SELECT RAISE(ABORT, 'refused by test trigger'); END;",
+            )
+            .expect("plant the trigger");
+        }
+
+        store
+            .delete_session_settling_reservations("s1")
+            .await
+            .expect_err("the refused row removal must fail the delete");
+
+        assert_eq!(
+            store.load_all().await.expect("load").len(),
+            1,
+            "the session survives its failed delete"
+        );
+        assert_eq!(
+            reservation_of(&store, "key").await.outcome,
+            ReservationOutcome::Pending,
+            "and its intent key must not have been tombstoned over a session that still exists"
+        );
+    }
+
+    /// The create path's ROLLBACK delete settles what the caller tells it
+    /// to, in the same transaction — and settles nothing when told nothing.
+    ///
+    /// The `None` case is the one with teeth: a rollback for a launch that
+    /// may still be reconcilable must leave its reservation pending, since
+    /// recording `Created` there would claim a session that never existed
+    /// and recording `Failed` would close an intent whose agent might be
+    /// running.
+    #[tokio::test]
+    async fn the_rollback_delete_settles_only_what_it_is_given() {
+        let (_dir, store) = fresh_store().await;
+        insert_reserved(&store, "s1", "unsettled", "fp").await;
+        insert_reserved(&store, "s2", "settled", "fp").await;
+
+        store
+            .delete_session("s1", None)
+            .await
+            .expect("rollback delete");
+        store
+            .delete_session(
+                "s2",
+                Some(settlement(
+                    "settled",
+                    "s2",
+                    ReservationOutcome::Failed {
+                        kind: farhelm_proto::ErrorKind::InvalidRequest,
+                        message: "the spec never landed".to_string(),
+                    },
+                )),
+            )
+            .await
+            .expect("rollback delete with settlement");
+
+        assert_eq!(
+            reservation_of(&store, "unsettled").await.outcome,
+            ReservationOutcome::Pending
+        );
+        assert_eq!(
+            reservation_of(&store, "settled").await.outcome,
+            ReservationOutcome::Failed {
+                kind: farhelm_proto::ErrorKind::InvalidRequest,
+                message: "the spec never landed".to_string(),
+            }
+        );
+        assert!(store.load_all().await.expect("load").is_empty());
+    }
+
+    /// A refused intent is recorded with no session row at all — the shape
+    /// a create rejected by validation leaves behind, so its retry replays
+    /// the refusal instead of re-deriving one from a filesystem that may
+    /// have changed.
+    #[tokio::test]
+    async fn a_refused_intent_records_without_a_session_row() {
+        let (_dir, store) = fresh_store().await;
+        store
+            .record_failed_intent(
+                IntentClaim {
+                    intent_key: "key".to_string(),
+                    fingerprint: "fp".to_string(),
+                },
+                "s1",
+                "fh-s1",
+                farhelm_proto::ErrorKind::InvalidRequest,
+                "working directory does not exist: /nope",
+            )
+            .await
+            .expect("record");
+
+        assert!(
+            store.load_all().await.expect("load").is_empty(),
+            "a validation refusal never had a session"
+        );
+        assert_eq!(
+            reservation_of(&store, "key").await.outcome,
+            ReservationOutcome::Failed {
+                kind: farhelm_proto::ErrorKind::InvalidRequest,
+                message: "working directory does not exist: /nope".to_string(),
+            }
+        );
+
+        // A key someone else claimed in the meantime is left alone: a
+        // refusal must never overwrite a live claim.
+        insert_reserved(&store, "s2", "live", "fp").await;
+        store
+            .record_failed_intent(
+                IntentClaim {
+                    intent_key: "live".to_string(),
+                    fingerprint: "fp".to_string(),
+                },
+                "s3",
+                "fh-s3",
+                farhelm_proto::ErrorKind::Internal,
+                "this must not land",
+            )
+            .await
+            .expect("record");
+        let live = reservation_of(&store, "live").await;
+        assert_eq!(live.outcome, ReservationOutcome::Pending);
+        assert_eq!(live.session_id, "s2");
+    }
+
+    /// The relaunch takeover is a real conditional transition: it acquires
+    /// only while BOTH the reservation is still pending and its row is
+    /// still un-launched, and reports which condition failed otherwise.
+    ///
+    /// This is what keeps a racing delete from being resurrected. The
+    /// caller decides to relaunch from evidence gathered a moment earlier;
+    /// if a delete tombstoned the reservation in between, relaunching would
+    /// recreate a session the user deliberately threw away, and if the
+    /// launch landed late, relaunching would start a second agent beside
+    /// the first.
+    #[tokio::test]
+    async fn the_relaunch_takeover_re_checks_both_of_its_conditions() {
+        let (_dir, store) = fresh_store().await;
+
+        // Acquired: pending reservation, launching row.
+        insert_reserved(&store, "s1", "acquire", "fp").await;
+        assert_eq!(
+            store
+                .restart_pending_launch(launching_row("s1"), "acquire")
+                .await
+                .expect("takeover"),
+            RetryClaim::Acquired
+        );
+        assert_eq!(
+            store.session("s1").await.expect("read").unwrap().outcome,
+            LastOutcome::Launching,
+            "the takeover leaves a fresh launching row under the same id"
+        );
+
+        // Resolved: a delete tombstoned the reservation first.
+        insert_reserved(&store, "s2", "deleted", "fp").await;
+        store
+            .delete_session_settling_reservations("s2")
+            .await
+            .expect("the racing delete");
+        let claim = store
+            .restart_pending_launch(launching_row("s2"), "deleted")
+            .await
+            .expect("takeover");
+        let RetryClaim::Resolved(settled) = claim else {
+            panic!("a tombstoned reservation must refuse the takeover: {claim:?}");
+        };
+        assert_eq!(settled.outcome, ReservationOutcome::Created);
+        assert!(
+            store.session("s2").await.expect("read").is_none(),
+            "and must not have resurrected the deleted session"
+        );
+
+        // Launched: the reserved row moved past launching in the meantime.
+        insert_reserved(&store, "s3", "late", "fp").await;
+        store
+            .transition(
+                "s3",
+                Transition::ConfirmRunning {
+                    pane: "%1".to_string(),
+                },
+            )
+            .await
+            .expect("the late-landing launch");
+        assert_eq!(
+            store
+                .restart_pending_launch(launching_row("s3"), "late")
+                .await
+                .expect("takeover"),
+            RetryClaim::Launched
+        );
+        assert_eq!(
+            store.session("s3").await.expect("read").unwrap().pane,
+            "%1",
+            "the late launch's own record must survive the refused takeover"
+        );
+
+        // Acquired even from `interrupted`, when no pane was ever
+        // recorded: the reboot conversion blankets never-launched rows
+        // too, so that status is not evidence of anything and the takeover
+        // must not read it as a launch. An interrupted row that DOES carry
+        // a pane is the opposite case and refuses.
+        insert_reserved(&store, "s4", "rebooted", "fp").await;
+        force_outcome(&store, "s4", &LastOutcome::Interrupted);
+        assert_eq!(
+            store
+                .restart_pending_launch(launching_row("s4"), "rebooted")
+                .await
+                .expect("takeover"),
+            RetryClaim::Acquired
+        );
+        insert_reserved(&store, "s5", "rebooted-live", "fp").await;
+        {
+            let conn = store.conn.lock().expect("db mutex");
+            conn.execute("UPDATE sessions SET pane = '%7' WHERE id = 's5'", [])
+                .expect("record a pane");
+        }
+        force_outcome(&store, "s5", &LastOutcome::Interrupted);
+        assert_eq!(
+            store
+                .restart_pending_launch(launching_row("s5"), "rebooted-live")
+                .await
+                .expect("takeover"),
+            RetryClaim::Launched,
+            "an interrupted row WITH a pane was seen in tmux and must not be relaunched over"
+        );
+    }
+
+    /// A reservation row this build cannot honestly decode is refused, not
+    /// guessed at — same stance as `load_all`'s, and for a sharper reason:
+    /// a guessed outcome here either replays a success that never happened
+    /// or launches a duplicate.
+    ///
+    /// The matrix covers every way a `failed` row can be incomplete,
+    /// because each has its own tempting default (`Internal`, an empty
+    /// message) and every one of them would be a fabrication.
+    #[tokio::test]
+    async fn a_corrupt_reservation_row_is_refused_rather_than_repaired() {
+        let cases = [
+            (
+                "UPDATE create_reservations SET state = 'half-done'",
+                "half-done",
+            ),
+            (
+                "UPDATE create_reservations SET state = 'failed', error_kind = NULL, \
+                 error_detail = 'x'",
+                "no error kind",
+            ),
+            (
+                "UPDATE create_reservations SET state = 'failed', error_kind = 'teapot', \
+                 error_detail = 'x'",
+                "teapot",
+            ),
+            (
+                "UPDATE create_reservations SET state = 'failed', error_kind = 'internal', \
+                 error_detail = NULL",
+                "no error text",
+            ),
+        ];
+        for (corruption, expected) in cases {
+            let (dir, store) = fresh_store().await;
+            insert_reserved(&store, "s1", "key", "fp").await;
+            {
+                let conn = Connection::open(dir.path().join("supervisor.db")).expect("open raw");
+                conn.execute(corruption, []).expect("plant corruption");
+            }
+
+            let error = store
+                .reservation("key")
+                .await
+                .expect_err("a row outside the vocabulary must not be guessed at");
+            let rendered = format!("{error:#}");
+            assert!(
+                rendered.contains(expected) && rendered.contains("key"),
+                "the refusal must name the problem and the row: {rendered}"
+            );
+        }
     }
 }

@@ -49,6 +49,13 @@ Ubuntu 24.04 ships 3.4.
   supervisor's own error shown next to the form and nothing created. A bad EXECUTABLE (a typo'd command, a path that
   does not exist) is different: creation still succeeds — the working directory and terminal both exist — and the
   session then reports error once its agent's own exec fails, with the reason shown right in the list.
+- Submitting the same form twice yields one session, not two. Every create from the form carries an idempotency key, so
+  a submit retried after an ambiguous failure — the request landed but its reply did not, the supervisor restarted
+  mid-create — returns the session the first attempt already made instead of launching a second agent, and a failed
+  create replays the same error rather than re-evaluating it. Editing any field first starts a NEW intent, which is how
+  you fix a bad working directory and try again; it is also how you deliberately create a second session with the same
+  parameters (change a field and change it back, or use the API). A key whose session you have since deleted is spent:
+  the form says so rather than quietly recreating it.
 - Each row also has stop and delete. Stop kills the agent and its whole process tree; the session stays listed, its
   terminal still viewable. Delete removes the session and its stored state — with an inline confirmation first whenever
   the agent might still be alive.
