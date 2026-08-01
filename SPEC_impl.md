@@ -80,7 +80,15 @@ The bypass alone is not sufficient (audited): `term.write()` is non-blocking wit
 discards beyond the cap, and xterm.js parses at roughly 5–35 MB/s while a PTY can produce far faster. The terminal path
 therefore carries end-to-end backpressure — write-completion callbacks drive watermark pause/resume messages over the
 WebSocket, and the supervisor throttles its pane reads accordingly. Interactive agent output never approaches these
-rates; `cat` of a huge file must degrade to slow, never to silent data loss.
+rates; `cat` of a huge file must degrade to slow, never to silent data loss. Precisely (sharpened while planning M2.5,
+when the original sentence met tmux's actual flow-control mechanics): no code Farhelm owns may ever drop a terminal byte
+— every Farhelm-side bound is backpressure or a visible detach, never discard. The one producer-side bound is tmux's
+retained pane history: tmux cannot be told to stop reading a pane's PTY, so a client stalled long enough that the gap
+exceeds retained history catches up by replay from that history, exactly like a reattach. The xterm.js scrollback
+capacity is therefore sized to at most the tmux history floor (both currently 12,000 lines) — an invariant tests must
+pin — which makes the catch-up end state observably equivalent to lossless slow delivery: every byte still within the
+terminal's own retention is present, and bytes beyond it would have been evicted from scrollback even had they been
+delivered one at a time.
 
 ## Terminal substrate: private tmux server
 
