@@ -39,9 +39,10 @@ Ubuntu 24.04 ships 3.4.
 - On the host that will run the agent (or this machine): `target/debug/farhelm supervisor run`.
 - Locally, against a supervisor on this machine:
   `target/debug/farhelm helm run --ui-dist target/dx/farhelm-ui/release/web/public --cwd ~/some/project --agent claude`
-- Against a remote host (passwordless ssh assumed; copy the binary there first): add
-  `--ssh user@host --remote-farhelm /path/to/farhelm` to the helm command. Use an absolute `--cwd` there — it names a
-  directory on the target host, and your local shell would expand a `~` against the wrong home.
+- `--cwd` must be an absolute path — the supervisor rejects a relative one outright. Against a remote host (passwordless
+  ssh assumed; copy the binary there first): add `--ssh user@host --remote-farhelm /path/to/farhelm` to the helm
+  command. This matters even more there — it names a directory on the target host, and your local shell would expand a
+  `~` against the wrong home.
 - Open the printed loopback URL in a browser: a session list (title, working directory, invocation, and a status —
   alive; exited with the code when known, qualified "stopped by user" when you stopped it; interrupted after a host
   reboot; error, with the reason, when the agent's own command could not start at all), refreshing on its own every few
