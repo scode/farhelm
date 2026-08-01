@@ -58,7 +58,9 @@ Ubuntu 24.04 ships 3.4.
   create replays the same error rather than re-evaluating it. Editing any field first starts a NEW intent, which is how
   you fix a bad working directory and try again; it is also how you deliberately create a second session with the same
   parameters (change a field and change it back, or use the API). A key whose session you have since deleted is spent:
-  the form says so rather than quietly recreating it.
+  the form says so rather than quietly recreating it. The create API additionally accepts explicit agent-kind and
+  resume-template overrides for invocations that basename recognition cannot classify (a wrapper script, `env claude`),
+  which the form does not expose.
 - Each row also has stop and delete. Stop kills the agent and its whole process tree; the session stays listed, its
   terminal still viewable. Delete removes the session and its stored state — with an inline confirmation first whenever
   the agent might still be alive.
