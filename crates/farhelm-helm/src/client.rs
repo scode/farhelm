@@ -41,6 +41,31 @@ pub struct SupervisorError {
     pub message: String,
 }
 
+/// `list_sessions`'s return value: the sessions themselves plus the
+/// `SessionList` reply's count/truncation metadata (PLAN_M2.md's "Proto
+/// growth").
+///
+/// A struct rather than a bare `Vec<SessionInfo>` specifically so `total`
+/// and `truncated` survive this call — the HTTP surface (PR6, PLAN_M2.md
+/// step 6) needs both to tell a user "showing N of M" instead of quietly
+/// truncating the list with no indication anything was cut. `GET
+/// /api/sessions` itself still serializes only `sessions` for now (see
+/// that handler); passing the other two through the wire is the next
+/// PR's job, not this one's.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SessionListing {
+    pub sessions: Vec<SessionInfo>,
+    /// The supervisor's full session count before any truncation — see
+    /// `ControlMsg::SessionList`'s own docs for why this can differ from
+    /// `sessions.len()`.
+    pub total: u64,
+    /// Whether `sessions` is missing entries the supervisor held back
+    /// (PLAN_M2.md's list cap/byte-budget). `false` for a supervisor built
+    /// before this field existed, exactly like a fresh-default `total` —
+    /// see `ControlMsg::SessionList`'s docs on that tolerance.
+    pub truncated: bool,
+}
+
 /// What an attached terminal receives from the supervisor side.
 #[derive(Debug)]
 pub enum TermEvent {
@@ -390,16 +415,38 @@ impl SupervisorClient {
         }
     }
 
-    /// Every session this supervisor holds, in no defined order. Always a
-    /// live round trip — the helm caches no session state, because
-    /// SPEC.md makes supervisors the authority.
-    pub async fn list_sessions(&self) -> anyhow::Result<Vec<SessionInfo>> {
+    /// Every session this supervisor holds (subject to its list cap AND
+    /// byte budget — either one can drop entries, independently of the
+    /// other, see `build_list_reply`'s docs), in no defined order, plus
+    /// the full count and whether either cut actually truncated anything.
+    /// Always a live round trip — the helm caches no session state,
+    /// because SPEC.md makes supervisors the authority.
+    pub async fn list_sessions(&self) -> anyhow::Result<SessionListing> {
         let req_id = self.req_id();
         match self
             .request(req_id, ControlMsg::ListSessions { req_id })
             .await?
         {
-            ControlMsg::SessionList { sessions, .. } => Ok(sessions),
+            ControlMsg::SessionList {
+                sessions,
+                total,
+                truncated,
+                ..
+            } => Ok(SessionListing {
+                // Normalized against `sessions.len()`: an older
+                // `PROTOCOL_VERSION` 3 supervisor built before `total`
+                // existed omits the field entirely, which
+                // `#[serde(default)]` decodes as 0 (see
+                // `ControlMsg::SessionList`'s own docs) — even though its
+                // `sessions` vec is complete and non-empty. Reporting a
+                // raw `total: 0` alongside a populated list would be
+                // actively misleading to a caller displaying "showing N
+                // of M" (PLAN_M2.md's UI contract): `total` must never be
+                // smaller than the number of sessions actually in hand.
+                total: total.max(sessions.len() as u64),
+                sessions,
+                truncated,
+            }),
             other => bail!("unexpected reply to list_sessions: {other:?}"),
         }
     }
@@ -607,6 +654,7 @@ mod tests {
             title: id.into(),
             cwd: format!("/{id}"),
             invocation: "agent".into(),
+            status: farhelm_proto::SessionStatus::Alive,
         }
     }
 
@@ -664,6 +712,8 @@ mod tests {
                     .write_control(&ControlMsg::SessionList {
                         req_id,
                         sessions: vec![session(&req_id.to_string())],
+                        total: 1,
+                        truncated: false,
                     })
                     .await
                     .unwrap();
@@ -678,14 +728,127 @@ mod tests {
 
         assert!(matches!(
             first.unwrap(),
-            ControlMsg::SessionList { req_id: 101, sessions }
+            ControlMsg::SessionList { req_id: 101, sessions, .. }
                 if sessions[0].id == "101"
         ));
         assert!(matches!(
             second.unwrap(),
-            ControlMsg::SessionList { req_id: 202, sessions }
+            ControlMsg::SessionList { req_id: 202, sessions, .. }
                 if sessions[0].id == "202"
         ));
+        peer.await.unwrap();
+    }
+
+    /// `list_sessions` must preserve `truncated` exactly, and `total`
+    /// whenever it is not SMALLER than `sessions.len()` — sentinel values
+    /// here (`total: 42`, `truncated: true`, deliberately far from
+    /// `sessions.len()`) prove an honest, larger `total` a truncating
+    /// supervisor sent on purpose survives untouched, rather than being
+    /// recomputed or dropped. This is deliberately NOT a claim that every
+    /// `total` value is preserved verbatim: `total.max(sessions.len())`
+    /// (see that call site's own docs, for the case where an old
+    /// supervisor's `total` UNDER-reports by omitting the field) rewrites
+    /// a `total` smaller than the list actually in hand — a different
+    /// test (`list_sessions_reports_a_populated_legacy_reply_with_a_real_total`)
+    /// pins that rewrite specifically.
+    #[tokio::test]
+    async fn list_sessions_preserves_the_supervisors_total_and_truncated() {
+        let (client_side, peer_side) = tokio::io::duplex(64 * 1024);
+        let peer = tokio::spawn(async move {
+            let (r, w) = tokio::io::split(peer_side);
+            let mut reader = FrameReader::new(r);
+            let mut writer = FrameWriter::new(w);
+            handshake(&mut reader, &mut writer, "supervisor")
+                .await
+                .unwrap();
+            let request = parse_control(&reader.read_frame().await.unwrap().unwrap()).unwrap();
+            let ControlMsg::ListSessions { req_id } = request else {
+                panic!("unexpected request: {request:?}");
+            };
+            writer
+                .write_control(&ControlMsg::SessionList {
+                    req_id,
+                    sessions: vec![session("only-one")],
+                    total: 42,
+                    truncated: true,
+                })
+                .await
+                .unwrap();
+        });
+        let (r, w) = tokio::io::split(client_side);
+        let client = SupervisorClient::start(r, w).await.unwrap();
+
+        let listing = client.list_sessions().await.unwrap();
+        assert_eq!(listing.sessions.len(), 1);
+        assert_eq!(
+            listing.total, 42,
+            "an honest, larger total than sessions.len() must survive unchanged"
+        );
+        assert!(listing.truncated);
+        peer.await.unwrap();
+    }
+
+    /// The other half of the normalization at `list_sessions`'s call
+    /// site: an older `PROTOCOL_VERSION` 3 supervisor, built before
+    /// `total`/`truncated` existed, sends a `SessionList` with those
+    /// fields simply ABSENT — `#[serde(default)]` decodes that as `total:
+    /// 0, truncated: false` (see `ControlMsg::SessionList`'s own docs) —
+    /// even though its `sessions` vec is complete and non-empty. Forwarding
+    /// that raw `0` would be actively misleading ("showing 0 of 0" next to
+    /// a visibly populated list), so `total.max(sessions.len())` must
+    /// rewrite it up to the real count. This is the scripted-peer
+    /// complement to the pure `total.max(...)` arithmetic itself: it pins
+    /// that the client's `list_sessions` call site actually applies the
+    /// rewrite to a wire reply shaped exactly like a real legacy sender's,
+    /// not just to a value constructed directly in a unit test.
+    #[tokio::test]
+    async fn list_sessions_reports_a_populated_legacy_reply_with_a_real_total() {
+        let (client_side, peer_side) = tokio::io::duplex(64 * 1024);
+        let peer = tokio::spawn(async move {
+            let (r, w) = tokio::io::split(peer_side);
+            let mut reader = FrameReader::new(r);
+            let mut writer = FrameWriter::new(w);
+            handshake(&mut reader, &mut writer, "supervisor")
+                .await
+                .unwrap();
+            let request = parse_control(&reader.read_frame().await.unwrap().unwrap()).unwrap();
+            let ControlMsg::ListSessions { req_id } = request else {
+                panic!("unexpected request: {request:?}");
+            };
+            // Write the JSON by hand, WITHOUT `total`/`truncated` at all —
+            // constructing a `ControlMsg::SessionList` in Rust and just
+            // not setting them is not possible (the fields are required
+            // in this build's own type); omitting them from the wire is
+            // exactly what an actual older build's serializer would
+            // produce, which is the scenario under test.
+            let body = serde_json::json!({
+                "type": "session_list",
+                "req_id": req_id,
+                "sessions": [
+                    { "id": "a", "title": "a", "cwd": "/a", "invocation": "agent" },
+                    { "id": "b", "title": "b", "cwd": "/b", "invocation": "agent" },
+                ],
+            });
+            writer
+                .write_frame(&Frame {
+                    kind: FrameKind::Control,
+                    channel: 0,
+                    body: serde_json::to_vec(&body).unwrap(),
+                })
+                .await
+                .unwrap();
+        });
+        let (r, w) = tokio::io::split(client_side);
+        let client = SupervisorClient::start(r, w).await.unwrap();
+
+        let listing = client.list_sessions().await.unwrap();
+        assert_eq!(listing.sessions.len(), 2);
+        assert_eq!(
+            listing.total, 2,
+            "an absent (defaulted-to-0) total must be rewritten up to the real session \
+             count, not forwarded as a false '0 sessions' claim"
+        );
+        assert!(!listing.truncated);
         peer.await.unwrap();
     }
 

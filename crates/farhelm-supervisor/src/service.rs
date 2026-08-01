@@ -21,10 +21,10 @@
 
 use crate::launch::{LaunchSpec, resolve_shell, window_command};
 use crate::store::{SessionStore, StoredSession};
-use crate::tmux::{InputClient, TmuxDriver};
+use crate::tmux::{InputClient, PaneState, TmuxDriver};
 use anyhow::Context;
 use farhelm_proto::io::{FrameReader, FrameWriter, handshake, parse_control};
-use farhelm_proto::{ControlMsg, ErrorKind, Frame, SessionInfo};
+use farhelm_proto::{ControlMsg, ErrorKind, Frame, SessionInfo, SessionStatus};
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -76,7 +76,54 @@ const CREATE_FIELD_CAP: usize = 64 * 1024;
 /// frame slower than the window). This only bounds shutdown —
 /// steady-state backpressure while a connection is still active is out of
 /// scope here (M2.5, PLAN.md).
+///
+/// Interplay with `HANDLER_SHUTDOWN_TIMEOUT`: that bound runs FIRST, and
+/// is what this one implicitly assumes has already happened. Every slow
+/// handler task (`ListSessions`/`StopSession`/`DeleteSession`) that
+/// finishes within `HANDLER_SHUTDOWN_TIMEOUT`'s window enqueues its reply
+/// exactly like a synchronous handler would, and THIS window is what then
+/// gets that reply to a still-reading peer. A straggling task aborted by
+/// `HANDLER_SHUTDOWN_TIMEOUT` instead, by contrast, never enqueues
+/// anything at all — there is nothing left for this drain to wait out on
+/// its behalf, and its own multi-second tmux work is exactly why it gets
+/// a separate, longer budget rather than being folded into this one.
 const WRITER_DRAIN_TIMEOUT: Duration = Duration::from_secs(5);
+
+/// Cap on slow handler tasks (`ListSessions`/`StopSession`/`DeleteSession`
+/// — see their own arms' comments in `handle_control` on why they're
+/// spawned rather than awaited inline) allowed in flight AT ONCE across
+/// the WHOLE supervisor process (`Supervisor::admission`), not per
+/// connection: the resource actually being bounded — tmux subprocesses,
+/// `/proc` sweeps — is process-global, and a per-connection cap would let
+/// every additional helm connection multiply the real concurrency by
+/// another 8, defeating the point of having a bound at all. A permit is
+/// acquired (via `spawn_admitted`) BEFORE spawning each task — in the
+/// caller's own await point, which for every real caller is
+/// `handle_control`, itself driven directly from `handle_connection`'s
+/// read loop — so an unbounded flood of slow requests backpressures
+/// whichever connection sent them once the cap is hit, rather than
+/// spawning an unbounded number of tasks each holding a tmux subprocess or
+/// a multi-second kill sweep open. Acquiring INSIDE the spawned task
+/// instead would still bound how many run concurrently, but would not
+/// bound how many accumulate — every request would still spawn (and
+/// `JoinSet` would still track) a task immediately, just one that sits
+/// parked on the semaphore; that is exactly the unbounded-queuing failure
+/// mode this ordering exists to close. 8 is generous headroom for
+/// ordinary use (a polling UI keeps at most one `ListSessions` in flight
+/// per connection at a time) while still being a REAL bound against a
+/// pathological flood or a buggy client that fires requests without
+/// waiting for replies.
+const HANDLER_ADMISSION_PERMITS: usize = 8;
+
+/// How long `handle_connection`'s shutdown tail waits for spawned slow-
+/// handler tasks (see `HANDLER_ADMISSION_PERMITS`) to finish on their own,
+/// tracked in a `JoinSet`, before aborting whatever remains and logging
+/// it. Generous — `kill_process_tree`'s own sequence (grace period,
+/// quiesce passes, kill confirmation) can legitimately take several
+/// seconds — but not unbounded: a wedged tmux must not leak a task (and
+/// this connection's own shutdown) forever. See `WRITER_DRAIN_TIMEOUT`'s
+/// docs for how the two windows interact.
+const HANDLER_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(30);
 
 /// A classified request failure: attached at the few call sites that
 /// actually know *why* a request failed (bad cwd, unparseable invocation,
@@ -1380,6 +1427,21 @@ pub struct Supervisor {
     pending_snapshots: Mutex<HashMap<String, Vec<u8>>>,
     /// This binary's own path: the launch shim is a subcommand of it.
     farhelm_exe: PathBuf,
+    /// Admission control for the slow handlers spawned by
+    /// `handle_control` (`ListSessions`/`StopSession`/`DeleteSession` —
+    /// see `HANDLER_ADMISSION_PERMITS`'s own docs). Deliberately
+    /// SUPERVISOR-wide, not per-connection: the resource being bounded is
+    /// tmux subprocesses and `/proc` sweeps, which are global to this
+    /// process regardless of how many helm connections are open at once.
+    /// A per-connection semaphore would let N connections each run 8
+    /// concurrent kill sweeps — `8*N`, not 8 — defeating the bound the
+    /// moment more than one connection exists. `JoinSet` task TRACKING,
+    /// by contrast, stays per-connection (see `handle_connection`): each
+    /// connection only ever needs to know about — and clean up after —
+    /// its OWN spawned tasks at its OWN shutdown, so sharing that part
+    /// globally would buy nothing and would entangle unrelated
+    /// connections' teardowns.
+    admission: Arc<tokio::sync::Semaphore>,
 }
 
 impl Supervisor {
@@ -1430,6 +1492,7 @@ impl Supervisor {
             attachments: Mutex::new(HashMap::new()),
             pending_snapshots: Mutex::new(HashMap::new()),
             farhelm_exe,
+            admission: Arc::new(tokio::sync::Semaphore::new(HANDLER_ADMISSION_PERMITS)),
         }))
     }
 
@@ -1480,6 +1543,12 @@ impl Supervisor {
                         title: row.title,
                         cwd: row.cwd,
                         invocation: row.invocation,
+                        // Placeholder only: `ListSessions` recomputes
+                        // `status` fresh from tmux on every reply (see
+                        // `session_status`), so nothing ever reads this
+                        // particular value — `Unknown` is simply the
+                        // honest "not yet computed" default.
+                        status: SessionStatus::default(),
                     },
                     terminal,
                 }),
@@ -1769,6 +1838,18 @@ impl Supervisor {
             title,
             cwd: cwd.to_string(),
             invocation: invocation.to_string(),
+            // Create-time placeholder, deliberately NOT `Alive`:
+            // `SessionCreated`'s own docs say creation establishes that
+            // the session and terminal exist, not that the agent's later
+            // `exec` inside it succeeded — a fast-exiting command (a
+            // typo'd invocation, `true`, ...) can already be dead by the
+            // time this reply reaches the caller. `Unknown` is the
+            // honest "not yet computed" answer, exactly like
+            // `reload_sessions`'s own placeholder; `ListSessions` computes
+            // the real answer from tmux (`session_status`), and this
+            // value is never persisted (see `StoredSession`'s docs)
+            // either way.
+            status: SessionStatus::Unknown,
         };
 
         // DB insert AFTER the tmux session already exists: a session that
@@ -1873,8 +1954,23 @@ where
     // connection, since every client numbers its channels from 1.
     let mut input_routes: HashMap<u32, Arc<SessionEntry>> = HashMap::new();
 
+    // Tracking (not admission — that is now `sup.admission`, shared
+    // across every connection this supervisor serves; see its own docs
+    // for why it must NOT be per-connection) for the slow handlers
+    // (`ListSessions`/`StopSession`/`DeleteSession`) that `handle_control`
+    // spawns instead of awaiting inline. `HANDLER_SHUTDOWN_TIMEOUT`'s own
+    // docs cover why leaving these untracked is not safe: without a
+    // `JoinSet`, this function's shutdown tail would have nothing to wait
+    // on or clean up after.
+    let mut tasks: tokio::task::JoinSet<()> = tokio::task::JoinSet::new();
+
     let result: anyhow::Result<()> = async {
         loop {
+            // Reap whatever spawned handler tasks have already finished
+            // before touching the next frame — see `reap_finished_tasks`'s
+            // own docs for why a long-lived connection needs this every
+            // iteration, not just at shutdown.
+            reap_finished_tasks(&mut tasks);
             // Either half failing ends the connection. Waiting only for
             // read EOF leaks attachments when a half-broken peer keeps
             // writing after it has stopped reading our replies.
@@ -1961,7 +2057,7 @@ where
                 }
                 farhelm_proto::FrameKind::Control => {
                     let msg = parse_control(&frame)?;
-                    handle_control(&sup, msg, &tx, &mut input_routes).await;
+                    handle_control(&sup, msg, &tx, &mut input_routes, &mut tasks).await;
                 }
             }
         }
@@ -1990,6 +2086,41 @@ where
     }
     drop(attachments);
     drop(tx);
+    // Give the connection's spawned slow-handler tasks (list/stop/delete —
+    // see `HANDLER_ADMISSION_PERMITS`'s docs) a bounded chance to finish
+    // and enqueue their replies BEFORE the writer drain below starts
+    // waiting on the queue those replies land in — a task that finishes
+    // after the writer has already given up would have enqueued a reply
+    // nobody drains. `HANDLER_SHUTDOWN_TIMEOUT` is generous (kill sweeps
+    // legitimately take seconds), but a tmux wedged forever must not leak
+    // this connection's shutdown forever either: past that bound, every
+    // remaining task is aborted and logged rather than awaited
+    // unconditionally.
+    if tokio::time::timeout(HANDLER_SHUTDOWN_TIMEOUT, async {
+        while tasks.join_next().await.is_some() {}
+    })
+    .await
+    .is_err()
+    {
+        warn!(
+            remaining = tasks.len(),
+            "spawned request handler(s) did not finish within {HANDLER_SHUTDOWN_TIMEOUT:?}; \
+             aborting"
+        );
+        tasks.abort_all();
+        // `abort_all` only SCHEDULES cancellation — exactly like every
+        // other abort in this module (the attachment forwarders just
+        // above, `drain_writer` below), a task is not actually gone until
+        // its cancellation has been delivered and polled to completion.
+        // Draining `join_next` to empty here is what proves that: only
+        // once every aborted task has been reaped are its resources
+        // (the `tx` clone it held, any locks it could have been mid-
+        // acquiring) provably released. Proceeding to `drain_writer`
+        // before that could undercount `frames_written` against a
+        // straggling task that was about to enqueue a reply, or race a
+        // lock a still-cancelling task had not yet released.
+        while tasks.join_next().await.is_some() {}
+    }
     // Progress-bounded drain, not an unconditional await: see
     // WRITER_DRAIN_TIMEOUT and drain_writer. A peer that stopped reading
     // without erroring leaves the writer parked mid-write forever, with no
@@ -2055,6 +2186,172 @@ async fn drain_writer(
     }
 }
 
+/// `ListSessions`'s count cap (PLAN_M2.md's "Proto growth"). ~500 keeps a
+/// single reply's session count bounded before the byte budget below ever
+/// has to do the harder job of bounding fat, variable-length records.
+const LIST_SESSION_CAP: usize = 500;
+
+/// `ListSessions`'s encoded-size budget, independent of the count cap: a
+/// count alone cannot bound encoded bytes when each session's title, cwd,
+/// and invocation are caller-controlled strings of unbounded length — 500
+/// sessions with fat titles can still blow past `MAX_FRAME_LEN` on their
+/// own. Deliberately well under `MAX_FRAME_LEN` (half of it) rather than
+/// flush against it: `Frame::encoded_len` (what this budget is compared
+/// against, in `build_list_reply`) already accounts for the frame's own
+/// envelope — the header and the `SessionList` object's fixed fields —
+/// which is a few dozen bytes, negligible next to a multi-megabyte cap.
+/// The margin is headroom for a future additive `SessionList`/
+/// `SessionInfo` field instead: a number tuned flush against today's
+/// fields would need re-tuning the moment PLAN_M2.md adds another one.
+/// `reply_frame`'s oversize defusal stays as the last-resort backstop
+/// regardless — this budget is meant to make that backstop unreachable in
+/// practice, not to replace it.
+const LIST_BYTE_BUDGET: usize = (farhelm_proto::MAX_FRAME_LEN / 2) as usize;
+
+/// Compute one session's liveness for a `ListSessions` reply. tmux is the
+/// truth (module docs); this function only ever reports what it can
+/// actually observe, never a guess.
+///
+/// Three cases all collapse into the same honest `Exited { exit_code:
+/// None }` rather than assuming alive:
+/// - no terminal at all (the restart-gap entry);
+/// - this pane id is entirely absent from `pane_states` (removed mid-
+///   query, or never existed on this server at all);
+/// - this pane id IS present, but for a DIFFERENT session name than the
+///   one this entry remembers creating it under. Pane ids reset to `%0`
+///   on a fresh tmux server (`PaneState::session_name`'s own docs), so a
+///   stale, never-reloaded entry's pane id can be silently recycled by an
+///   unrelated NEW session after a server restart; matching pane id alone
+///   would let that entry inherit the new session's liveness. Requiring
+///   BOTH identifiers to agree is also what a tmux-side rename of the
+///   session name (a rare, deliberately-provoked edge case, not a normal
+///   product flow) trips: this function has no positive way to confirm
+///   the renamed pane is still "the same session" rather than tmux having
+///   handed that pane to something else entirely, so it reports the same
+///   honest `Exited` rather than guessing either way.
+///
+/// Only a pane found under BOTH its remembered pane id and its remembered
+/// tmux session name gets to decide `Alive` vs. `Exited` from tmux's own
+/// dead flag and status.
+fn session_status(entry: &SessionEntry, pane_states: &HashMap<String, PaneState>) -> SessionStatus {
+    let Some(state) = entry.terminal.as_ref().and_then(|terminal| {
+        pane_states
+            .get(&terminal.pane)
+            .filter(|state| state.session_name == terminal.tmux_name)
+    }) else {
+        return SessionStatus::Exited { exit_code: None };
+    };
+    if state.dead {
+        SessionStatus::Exited {
+            exit_code: state.exit_code,
+        }
+    } else {
+        SessionStatus::Alive
+    }
+}
+
+/// Byte-budget half of PLAN_M2.md's list truncation. The count cap is the
+/// CALLER's job, applied before this is ever reached — `handle_control`'s
+/// `ListSessions` arm takes at most `LIST_SESSION_CAP` entries from the
+/// session map before cloning or status-annotating a single one of them
+/// (see that arm's own comment for why paying that cost for entries this
+/// function would only drop anyway is wasteful to avoid in the first
+/// place). Because of that, this function cannot reconstruct the true
+/// pre-cap session count from `sessions.len()` — `total` is supplied by
+/// the caller instead, and is reported as-is; `truncated` is set whenever
+/// fewer than `total` survive (whether the caller's cap or this
+/// function's own byte budget is why).
+///
+/// Truncation drops from the TAIL of whatever `sessions` it receives.
+/// Ordering note: sessions have no defined order today (the module docs,
+/// and `SessionList`'s own doc comment), so "the tail" is whatever order
+/// the caller's map iteration happened to yield — an arbitrary subset
+/// survives, not a deliberately chosen one. That is acceptable for a
+/// budget meant to bound worst-case reply size, not to page through a
+/// stable ordering; a defined order (and real pagination) is M6's concern
+/// (PLAN_M2.md), not this one.
+///
+/// Single-pass, exact size accounting, and the final reply is constructed
+/// exactly ONCE — a previous version re-encoded a shrinking candidate on
+/// every dropped entry, which is quadratic in the number of entries
+/// eventually dropped. Instead: `envelope_len` is the encoded size of this
+/// SAME reply shape with an empty `sessions` array, measured once via the
+/// real `Frame`/`ControlMsg` path (never hand-computed, so it can't drift
+/// from what `Frame::control` actually produces); each candidate entry is
+/// serialized exactly once (`serde_json::to_vec`) and its EXACT marginal
+/// contribution to the `sessions` JSON array — its own bytes, plus one
+/// comma separator once it is not the first surviving entry — is added to
+/// a running total seeded from `envelope_len`. An entry that would push
+/// the running total over `byte_budget` stops the scan; everything kept
+/// up to that point is the final answer.
+///
+/// The envelope is deliberately measured with `truncated: false` even
+/// though the real answer might turn out `true`: JSON's `false` encodes
+/// ONE BYTE LONGER than `true` (5 ASCII characters vs. 4), so basing the
+/// accounting on the longer of the two can only ever OVER-count the
+/// envelope's own size, never under-count it — whatever this function
+/// returns is always at least as small as the accounting assumed, never
+/// larger. Getting this backwards (measuring against the SHORTER `true`)
+/// would under-count an untruncated reply by exactly one byte, which is
+/// academic for an ordinary reply deep under budget but tightens to a
+/// real one-byte overshoot — tripping the `debug_assert!` below in tests,
+/// and in release risking a reply one byte over `byte_budget` — for a
+/// reply that lands EXACTLY at the budget boundary.
+///
+/// A `debug_assert!` re-encodes the actual returned reply as a sanity
+/// check that the accounting above never drifted from reality. It is
+/// deliberately not a release-mode check: `reply_frame`'s `MAX_FRAME_LEN`
+/// defusal remains the real last-resort backstop in production; this
+/// assert exists only to catch an accounting bug in tests/debug builds
+/// before it could ever reach that backstop. `byte_budget.max(envelope_len)`
+/// tolerates the degenerate case of a budget smaller than the envelope
+/// itself (only reachable with a pathologically tiny `byte_budget`, never
+/// `LIST_BYTE_BUDGET` in production) — this function must still return
+/// SOMETHING even then, and the assert should not fire over a caller
+/// having chosen an unreasonable budget.
+fn build_list_reply(
+    req_id: u64,
+    sessions: Vec<SessionInfo>,
+    total: u64,
+    byte_budget: usize,
+) -> ControlMsg {
+    let envelope_len = Frame::control(&ControlMsg::SessionList {
+        req_id,
+        sessions: Vec::new(),
+        total,
+        truncated: false,
+    })
+    .encoded_len();
+
+    let mut kept = Vec::with_capacity(sessions.len());
+    let mut used = envelope_len;
+    for session in sessions {
+        let separator = if kept.is_empty() { 0 } else { 1 };
+        let entry_len = serde_json::to_vec(&session)
+            .expect("SessionInfo is always serializable")
+            .len()
+            + separator;
+        if used + entry_len > byte_budget {
+            break;
+        }
+        used += entry_len;
+        kept.push(session);
+    }
+
+    let truncated = (kept.len() as u64) < total;
+    let reply = ControlMsg::SessionList {
+        req_id,
+        sessions: kept,
+        total,
+        truncated,
+    };
+    debug_assert!(
+        Frame::control(&reply).encoded_len() <= byte_budget.max(envelope_len),
+        "build_list_reply's single-pass size accounting drifted from the real encoded size"
+    );
+    reply
+}
+
 /// Build the frame for a per-request reply, degrading to `ControlMsg::Error`
 /// if the honest reply would not fit on the wire.
 ///
@@ -2118,6 +2415,75 @@ fn reply_frame(msg: &ControlMsg) -> Frame {
     }
 }
 
+/// Push `m` (through [`reply_frame`]'s oversize check) onto `tx`.
+///
+/// A tiny free function rather than a closure over `tx` specifically so
+/// spawned handler tasks (`ListSessions`/`StopSession`/`DeleteSession` in
+/// `handle_control` — see those arms' own comments on why they spawn) can
+/// share it after moving their own OWNED clone of `tx` into the task: a
+/// closure captured by reference cannot outlive the stack frame that
+/// spawned it, but this function only ever borrows `tx` for the instant
+/// of the call, so the same helper works whether the caller holds `tx` by
+/// reference (the synchronous arms below) or by owned clone (the spawned
+/// ones).
+fn send_reply(tx: &mpsc::UnboundedSender<Frame>, m: &ControlMsg) {
+    let _ = tx.send(reply_frame(m));
+}
+
+/// Acquire an admission permit and spawn `future` onto `tasks`, holding
+/// the permit for the future's entire lifetime — the one, shared
+/// implementation of the admission-then-spawn pattern every slow
+/// `handle_control` arm (`ListSessions`/`StopSession`/`DeleteSession`)
+/// uses, so the ordering below cannot drift between call sites.
+///
+/// The permit is acquired HERE, in THIS function's own await — which
+/// means in the CALLER's await point, since this is not itself spawned —
+/// not inside `future` once it is already running as its own task. That
+/// ordering is the entire point: every real caller is `handle_control`,
+/// invoked directly from `handle_connection`'s read loop, so an
+/// admission-exhausted flood of slow requests blocks THAT loop right
+/// here, before a task (or a `JoinSet` entry for it) exists at all —
+/// rather than spawning and tracking an unbounded number of not-yet-
+/// admitted tasks that all sit parked on the semaphore. See
+/// `HANDLER_ADMISSION_PERMITS`'s docs for why that distinction matters.
+async fn spawn_admitted<F>(
+    admission: &Arc<tokio::sync::Semaphore>,
+    tasks: &mut tokio::task::JoinSet<()>,
+    future: F,
+) where
+    F: std::future::Future<Output = ()> + Send + 'static,
+{
+    let permit = Arc::clone(admission)
+        .acquire_owned()
+        .await
+        .expect("admission semaphore is never closed");
+    tasks.spawn(async move {
+        let _permit = permit;
+        future.await;
+    });
+}
+
+/// Non-blockingly collect every spawned handler task that has ALREADY
+/// finished, logging (not propagating) any `JoinError` — a panic inside a
+/// handler, or a cancellation from `handle_connection`'s own shutdown
+/// tail. `JoinSet` does not free a task's slot on its own just because
+/// the task completed; something has to call `join_next`/
+/// `try_join_next` to actually collect it, so this must run periodically
+/// on any connection expected to live a while — `handle_connection`'s read
+/// loop calls it once per iteration specifically so a long-lived polling
+/// connection (a UI's `ListSessions` loop, potentially running for hours)
+/// does not accumulate one finished-but-unreaped entry per request for
+/// its entire lifetime. `try_join_next` (not `join_next`) is what keeps
+/// this non-blocking: it returns `None` immediately once nothing is
+/// ready, rather than waiting for the next task to finish.
+fn reap_finished_tasks(tasks: &mut tokio::task::JoinSet<()>) {
+    while let Some(result) = tasks.try_join_next() {
+        if let Err(e) = result {
+            warn!(error = %e, "spawned request handler task panicked or was cancelled");
+        }
+    }
+}
+
 /// Dispatch one control message from a connected client.
 ///
 /// Failures belonging to one request—bad cwd, a tmux hiccup, an unknown
@@ -2130,14 +2496,13 @@ fn reply_frame(msg: &ControlMsg) -> Frame {
 /// is how the handlers tell "the connection that owns this attachment"
 /// from any other, which channel ids alone cannot do.
 async fn handle_control(
-    sup: &Supervisor,
+    sup: &Arc<Supervisor>,
     msg: ControlMsg,
     tx: &mpsc::UnboundedSender<Frame>,
     input_routes: &mut HashMap<u32, Arc<SessionEntry>>,
+    tasks: &mut tokio::task::JoinSet<()>,
 ) {
-    let send = |m: &ControlMsg| {
-        let _ = tx.send(reply_frame(m));
-    };
+    let send = |m: &ControlMsg| send_reply(tx, m);
     match msg {
         ControlMsg::CreateSession {
             req_id,
@@ -2172,291 +2537,439 @@ async fn handle_control(
             }
         }
         ControlMsg::ListSessions { req_id } => {
-            let sessions = sup
-                .sessions
-                .lock()
-                .await
-                .values()
-                .map(|s| s.info.clone())
-                .collect();
-            send(&ControlMsg::SessionList { req_id, sessions });
+            // Spawned onto its own task rather than awaited inline: this
+            // arm is reached from `handle_connection`'s single serial read
+            // loop, and `TmuxDriver::pane_states` is a real subprocess
+            // round trip that can block for as long as tmux takes to
+            // answer (a wedged or merely slow tmux, under load). Awaiting
+            // it inline would stall every OTHER request on this
+            // connection — attach, input, another session's list/stop/
+            // delete — behind this one `ListSessions`. Spawning is safe:
+            // this arm only reads `sup.sessions` under its own lock hold
+            // and never touches `input_routes` (connection-local state,
+            // never shared with a spawned task), the map-wide mutex
+            // already tolerates concurrent requests interleaving (see the
+            // `Supervisor` struct's lock-discipline docs), and replies are
+            // correlated by `req_id` rather than by arrival or completion
+            // order (already true of every request on this connection).
+            //
+            // Tracked in `tasks` (a `JoinSet`) and admitted through
+            // `spawn_admitted` rather than a bare `tokio::spawn`: see
+            // `HANDLER_ADMISSION_PERMITS`/`HANDLER_SHUTDOWN_TIMEOUT`'s own
+            // docs for why an unbounded, untracked spawn per slow request
+            // is not safe to leave unmanaged.
+            let sup2 = Arc::clone(sup);
+            let tx = tx.clone();
+            spawn_admitted(&sup.admission, tasks, async move {
+                let sup = sup2;
+                // `total` is captured, and the count cap applied, BEFORE
+                // a single entry is cloned or status-annotated: cloning
+                // (an `Arc` bump, cheap) is bounded by `.take(cap)` here,
+                // but the PER-ENTRY status computation just below is not
+                // free, and doing it for entries that `build_list_reply`
+                // would only drop a moment later wastes work proportional
+                // to however far over the cap the host is.
+                let (entries, total): (Vec<Arc<SessionEntry>>, u64) = {
+                    let sessions = sup.sessions.lock().await;
+                    let total = sessions.len() as u64;
+                    let entries = sessions.values().take(LIST_SESSION_CAP).cloned().collect();
+                    (entries, total)
+                };
+                // ONE query for every session's liveness, not one per
+                // session (`TmuxDriver::pane_states`'s own docs on why
+                // that multiplies subprocess spawns under a polling UI) —
+                // and skipped altogether when it could not possibly
+                // change the answer: a terminal-less entry's status is
+                // `Exited` unconditionally (`session_status` never
+                // consults the map for one), so a capped subset that is
+                // ALL terminal-less (including the empty list) is fully
+                // decidable without asking tmux anything. This matters
+                // beyond just saving a subprocess spawn: it is what keeps
+                // an authoritative "every session is a restart gap" (or
+                // simply empty) listing from being turned into a spurious
+                // `Internal` error by a private tmux server that happens
+                // to ALSO be down for an unrelated reason.
+                let pane_states = if entries.iter().any(|entry| entry.terminal.is_some()) {
+                    match sup.tmux.pane_states().await {
+                        Ok(states) => states,
+                        // Reached only for a genuinely UNCLASSIFIED tmux
+                        // failure: `TmuxDriver::pane_states` itself now
+                        // tolerates a vanished private tmux server (the
+                        // whole reason a dead-tmux-server `ListSessions`
+                        // no longer lands here at all — see that method's
+                        // own docs for why an empty pane-states map is
+                        // honest, not fabricated, in that case).
+                        Err(e) => {
+                            send_reply(
+                                &tx,
+                                &ControlMsg::Error {
+                                    req_id,
+                                    message: format!("{e:#}"),
+                                    kind: ErrorKind::Internal,
+                                },
+                            );
+                            return;
+                        }
+                    }
+                } else {
+                    HashMap::new()
+                };
+                let sessions: Vec<SessionInfo> = entries
+                    .iter()
+                    .map(|entry| {
+                        let mut info = entry.info.clone();
+                        info.status = session_status(entry, &pane_states);
+                        info
+                    })
+                    .collect();
+                send_reply(
+                    &tx,
+                    &build_list_reply(req_id, sessions, total, LIST_BYTE_BUDGET),
+                );
+            })
+            .await;
         }
         ControlMsg::StopSession { req_id, session_id } => {
-            let entry = sup.sessions.lock().await.get(&session_id).cloned();
-            let Some(entry) = entry else {
-                send(&ControlMsg::Error {
-                    req_id,
-                    message: format!("no such session: {}", truncate_for_error(&session_id)),
-                    kind: ErrorKind::NotFound,
-                });
-                return;
-            };
-            // A dead or absent pane, or a terminal-less (restart-gap)
-            // entry, all mean there is no live pid worth walking ancestry
-            // from — but the environment-marker sweep still runs
-            // regardless (`root_pid: None`), because SPEC.md assigns
-            // reaping any leftover descendants of a PAST run to the
-            // session's next stop or delete, and the marker scan is the
-            // only mechanism that can still find such a survivor once
-            // there is no live pane to walk from at all. See
-            // `kill_process_tree`'s docs.
-            let pane_state = match entry.terminal.as_ref() {
-                Some(terminal) => match sup
-                    .tmux
-                    .pane_process(&terminal.tmux_name, &terminal.pane)
-                    .await
-                {
-                    Ok(pane) => pane,
-                    Err(e) => {
-                        send(&ControlMsg::Error {
+            // Spawned for the same reason as `ListSessions`: the process-
+            // tree sweep below (`kill_process_tree`) is a grace-period
+            // sleep plus repeated `/proc` walks and confirmation polls
+            // that can take real wall-clock seconds (see that function's
+            // own docs), and awaiting it inline would stall every OTHER
+            // session's attach, input, and list/stop/delete behind this
+            // one stop. Safe for the same locking reason: this arm's
+            // `sessions` lookup is a single lock-guarded clone, and stop
+            // deliberately never touches `attachments` or `input_routes`
+            // at all (see `ControlMsg::StopSession`'s own docs on why the
+            // existing attachment is left untouched). Tracked and admitted
+            // exactly like `ListSessions` above — see
+            // `HANDLER_ADMISSION_PERMITS`/`HANDLER_SHUTDOWN_TIMEOUT`.
+            let sup2 = Arc::clone(sup);
+            let tx = tx.clone();
+            spawn_admitted(&sup.admission, tasks, async move {
+                let sup = sup2;
+                let entry = sup.sessions.lock().await.get(&session_id).cloned();
+                let Some(entry) = entry else {
+                    send_reply(
+                        &tx,
+                        &ControlMsg::Error {
+                            req_id,
+                            message: format!(
+                                "no such session: {}",
+                                truncate_for_error(&session_id)
+                            ),
+                            kind: ErrorKind::NotFound,
+                        },
+                    );
+                    return;
+                };
+                // A dead or absent pane, or a terminal-less (restart-gap)
+                // entry, all mean there is no live pid worth walking
+                // ancestry from — but the environment-marker sweep still
+                // runs regardless (`root_pid: None`), because SPEC.md
+                // assigns reaping any leftover descendants of a PAST run
+                // to the session's next stop or delete, and the marker
+                // scan is the only mechanism that can still find such a
+                // survivor once there is no live pane to walk from at
+                // all. See `kill_process_tree`'s docs.
+                let pane_state = match entry.terminal.as_ref() {
+                    Some(terminal) => match sup
+                        .tmux
+                        .pane_process(&terminal.tmux_name, &terminal.pane)
+                        .await
+                    {
+                        Ok(pane) => pane,
+                        Err(e) => {
+                            send_reply(
+                                &tx,
+                                &ControlMsg::Error {
+                                    req_id,
+                                    message: format!("{e:#}"),
+                                    kind: error_kind(&e),
+                                },
+                            );
+                            return;
+                        }
+                    },
+                    None => None,
+                };
+                // One "alive" check feeding BOTH the pid a tree-kill walks
+                // from and the decision to even attempt an alt-screen
+                // capture below, rather than two independent `!pane.dead`
+                // checks scattered across this handler. The stale pid a
+                // dead pane still reports is deliberately never read via
+                // either use of `alive_pane`; it may already be recycled.
+                let alive_pane = pane_state.filter(|pane| !pane.dead);
+                let root_pid = alive_pane.map(|pane| pane.pid);
+
+                // Capture the alt-screen snapshot (if any) BEFORE the kill
+                // destroys it, but do NOT write it to disk yet — see
+                // `publish_alt_screen_snapshot`'s docs for why publishing
+                // waits until the kill's own outcome is known. `alive_pane`
+                // being `Some` is what gates this to a pane actually worth
+                // querying at all; `capture_alt_screen_before_stop` itself
+                // decides (atomically, in tmux) whether that pane is really
+                // on the alternate screen.
+                let pending_snapshot = match (entry.terminal.as_ref(), alive_pane) {
+                    (Some(terminal), Some(_)) => {
+                        capture_alt_screen_before_stop(&sup, &session_id, terminal).await
+                    }
+                    _ => None,
+                };
+                // Published into `Supervisor::pending_snapshots` (see that
+                // field's own docs) BEFORE the kill runs: `kill_process_tree`
+                // can take up to a couple of seconds against an uncooperative
+                // tree, and tmux can mark the pane dead well before that
+                // returns. Making the capture visible to a concurrent
+                // `Attach` for this whole window — not only after
+                // `publish_alt_screen_snapshot` finally writes it to disk —
+                // is what closes the "attach lands mid-stop, sees a dead pane
+                // with nothing to show" gap. Cloned rather than moved: this
+                // handler still needs its own copy below regardless of what
+                // `Attach` does with the map's copy concurrently.
+                if let Some(bytes) = pending_snapshot.clone() {
+                    sup.pending_snapshots
+                        .lock()
+                        .await
+                        .insert(session_id.clone(), bytes);
+                }
+
+                let kill_result = kill_process_tree(root_pid, &session_id).await;
+                if let Err(e) = kill_result {
+                    // The sweep itself failed (not just "nothing was found
+                    // to kill") — this is not a false success. See
+                    // ControlMsg::StopSession's docs: an unknown id is the
+                    // only PRECONDITION failure; a sweep that could not
+                    // complete is reported the same honest way. Any captured
+                    // (but not yet written) snapshot bytes are simply dropped
+                    // here on the way out — including the pending-map entry
+                    // just inserted above, removed without ever being
+                    // published: a failed stop must never plant a snapshot
+                    // file a later, unrelated exit's own dead-pane replay
+                    // could be mistaken for.
+                    sup.pending_snapshots.lock().await.remove(&session_id);
+                    send_reply(
+                        &tx,
+                        &ControlMsg::Error {
                             req_id,
                             message: format!("{e:#}"),
-                            kind: error_kind(&e),
-                        });
-                        return;
-                    }
-                },
-                None => None,
-            };
-            // One "alive" check feeding BOTH the pid a tree-kill walks
-            // from and the decision to even attempt an alt-screen capture
-            // below, rather than two independent `!pane.dead` checks
-            // scattered across this handler. The stale pid a dead pane
-            // still reports is deliberately never read via either use of
-            // `alive_pane`; it may already be recycled.
-            let alive_pane = pane_state.filter(|pane| !pane.dead);
-            let root_pid = alive_pane.map(|pane| pane.pid);
-
-            // Capture the alt-screen snapshot (if any) BEFORE the kill
-            // destroys it, but do NOT write it to disk yet — see
-            // `publish_alt_screen_snapshot`'s docs for why publishing
-            // waits until the kill's own outcome is known. `alive_pane`
-            // being `Some` is what gates this to a pane actually worth
-            // querying at all; `capture_alt_screen_before_stop` itself
-            // decides (atomically, in tmux) whether that pane is really
-            // on the alternate screen.
-            let pending_snapshot = match (entry.terminal.as_ref(), alive_pane) {
-                (Some(terminal), Some(_)) => {
-                    capture_alt_screen_before_stop(sup, &session_id, terminal).await
+                            kind: ErrorKind::Internal,
+                        },
+                    );
+                    return;
                 }
-                _ => None,
-            };
-            // Published into `Supervisor::pending_snapshots` (see that
-            // field's own docs) BEFORE the kill runs: `kill_process_tree`
-            // can take up to a couple of seconds against an uncooperative
-            // tree, and tmux can mark the pane dead well before that
-            // returns. Making the capture visible to a concurrent
-            // `Attach` for this whole window — not only after
-            // `publish_alt_screen_snapshot` finally writes it to disk —
-            // is what closes the "attach lands mid-stop, sees a dead pane
-            // with nothing to show" gap. Cloned rather than moved: this
-            // handler still needs its own copy below regardless of what
-            // `Attach` does with the map's copy concurrently.
-            if let Some(bytes) = pending_snapshot.clone() {
-                sup.pending_snapshots
-                    .lock()
-                    .await
-                    .insert(session_id.clone(), bytes);
-            }
-
-            let kill_result = kill_process_tree(root_pid, &session_id).await;
-            if let Err(e) = kill_result {
-                // The sweep itself failed (not just "nothing was found to
-                // kill") — this is not a false success. See
-                // ControlMsg::StopSession's docs: an unknown id is the
-                // only PRECONDITION failure; a sweep that could not
-                // complete is reported the same honest way. Any captured
-                // (but not yet written) snapshot bytes are simply dropped
-                // here on the way out — including the pending-map entry
-                // just inserted above, removed without ever being
-                // published: a failed stop must never plant a snapshot
-                // file a later, unrelated exit's own dead-pane replay
-                // could be mistaken for.
+                if let Some(bytes) = pending_snapshot {
+                    publish_alt_screen_snapshot(&sup, &session_id, &bytes).await;
+                }
+                // Removed only now, AFTER publish has run (or been skipped
+                // because there was never anything to publish): a concurrent
+                // `Attach` must be able to see this entry for the entire
+                // capture-to-published-file window, not just up to this
+                // point — see `Supervisor::pending_snapshots`'s docs.
                 sup.pending_snapshots.lock().await.remove(&session_id);
-                send(&ControlMsg::Error {
-                    req_id,
-                    message: format!("{e:#}"),
-                    kind: ErrorKind::Internal,
-                });
-                return;
-            }
-            if let Some(bytes) = pending_snapshot {
-                publish_alt_screen_snapshot(sup, &session_id, &bytes).await;
-            }
-            // Removed only now, AFTER publish has run (or been skipped
-            // because there was never anything to publish): a concurrent
-            // `Attach` must be able to see this entry for the entire
-            // capture-to-published-file window, not just up to this
-            // point — see `Supervisor::pending_snapshots`'s docs.
-            sup.pending_snapshots.lock().await.remove(&session_id);
-            // Deliberately untouched: the DB row, the sessions map, and any
-            // live attachment. The pane survives (remain-on-exit), so an
-            // attached client's stream simply goes quiet after the agent's
-            // death output — there is nothing here for it to be notified
-            // of, unlike delete below.
-            send(&ControlMsg::SessionStopped { req_id });
+                // Deliberately untouched: the DB row, the sessions map, and
+                // any live attachment. The pane survives (remain-on-exit),
+                // so an attached client's stream simply goes quiet after the
+                // agent's death output — there is nothing here for it to be
+                // notified of, unlike delete below.
+                send_reply(&tx, &ControlMsg::SessionStopped { req_id });
+            })
+            .await;
         }
         ControlMsg::DeleteSession { req_id, session_id } => {
-            let entry = sup.sessions.lock().await.get(&session_id).cloned();
-            let Some(entry) = entry else {
-                send(&ControlMsg::Error {
-                    req_id,
-                    message: format!("no such session: {}", truncate_for_error(&session_id)),
-                    kind: ErrorKind::NotFound,
-                });
-                return;
-            };
-
-            // The process-tree sweep runs BEFORE any lock is held: it can
-            // take seconds (a grace period plus several /proc walks), and
-            // holding `attachments` for that long would stall every OTHER
-            // session's attach/input behind one slow delete — the map-
-            // wide mutex's already-documented coarseness (see the
-            // `Supervisor` struct's lock-discipline docs) made worse if a
-            // multi-second sweep sat inside it. A concurrent Attach can
-            // therefore install a fresh attachment WHILE this runs; the
-            // lock-held phase below tears down WHATEVER attachment exists
-            // by the time it runs, new or old, and gives it the deleted
-            // notice — that is the one acceptable consequence of not
-            // holding the lock here, not an oversight.
-            //
-            // Same dead/absent/terminal-less handling as `StopSession`:
-            // the marker sweep still runs even with no live pane pid, for
-            // the same leftover-reaping reason documented there.
-            let root_pid = match entry.terminal.as_ref() {
-                Some(terminal) => match sup
-                    .tmux
-                    .pane_process(&terminal.tmux_name, &terminal.pane)
-                    .await
-                {
-                    Ok(Some(pane)) if !pane.dead => Some(pane.pid),
-                    Ok(_) => None,
-                    Err(e) => {
-                        send(&ControlMsg::Error {
+            // Spawned for the same reason as `StopSession` — the same
+            // process-tree sweep, plus tmux teardown and SQLite writes on
+            // top — and, being the slowest of the three handlers spawned
+            // here, the one this change matters most for. Safe for the
+            // same reason: everything this arm touches (`sessions`,
+            // `attachments`, `tmux`, `store`) is already designed to
+            // tolerate concurrent requests interleaving (see the
+            // `Supervisor` struct's lock-discipline docs, and this arm's
+            // own existing comments on why the sweep runs before any lock
+            // is held at all). Tracked and admitted exactly like
+            // `ListSessions` above — see
+            // `HANDLER_ADMISSION_PERMITS`/`HANDLER_SHUTDOWN_TIMEOUT`.
+            let sup2 = Arc::clone(sup);
+            let tx = tx.clone();
+            spawn_admitted(&sup.admission, tasks, async move {
+                let sup = sup2;
+                let entry = sup.sessions.lock().await.get(&session_id).cloned();
+                let Some(entry) = entry else {
+                    send_reply(
+                        &tx,
+                        &ControlMsg::Error {
                             req_id,
-                            message: format!("querying pane process: {e:#}"),
-                            kind: ErrorKind::Internal,
-                        });
-                        return;
-                    }
-                },
-                None => None,
-            };
-            if let Err(e) = kill_process_tree(root_pid, &session_id).await {
-                send(&ControlMsg::Error {
-                    req_id,
-                    message: format!("killing process tree: {e:#}"),
-                    kind: ErrorKind::Internal,
-                });
-                return;
-            }
+                            message: format!(
+                                "no such session: {}",
+                                truncate_for_error(&session_id)
+                            ),
+                            kind: ErrorKind::NotFound,
+                        },
+                    );
+                    return;
+                };
 
-            // Everything from here on is fast (one tmux round trip, two
-            // best-effort-but-fail-closed file removals, one sqlite
-            // write) and runs under `attachments`, mirroring the Attach
-            // handler's takeover for the same reason: a concurrent Attach
-            // must not be able to install itself mid-teardown. This is
-            // also the one path that acquires BOTH locks at once — `map
-            // removal` below briefly takes `sessions` too, while still
-            // holding `attachments` — which is the ordering rule this
-            // establishes and the only one that needs to exist as long as
-            // nothing else ever needs both: `attachments` first,
-            // `sessions` second.
-            let mut attachments = sup.attachments.lock().await;
-            // Abort the forwarder now, before it can race its own natural
-            // "session terminal ended" Detached against whatever truthful
-            // notice this handler sends once the real outcome below is
-            // known — but do not send that notice yet. Destructured
-            // (rather than kept as one `ActiveAttach`) because `forwarder`
-            // is consumed by the await and `channel`/`notify` are needed
-            // again afterwards; `input` is dropped here, which is fine —
-            // dropping it kills its control-mode client via
-            // `kill_on_drop`, exactly like every other teardown path.
-            let notify_detach = match attachments.remove(&session_id) {
-                Some(ActiveAttach {
-                    channel,
-                    notify,
-                    forwarder,
-                    input: _input,
-                }) => {
-                    forwarder.abort();
-                    let _ = forwarder.await;
-                    Some((channel, notify))
-                }
-                None => None,
-            };
-
-            // Fail-closed and sequenced deliberately: artifacts before the
-            // DB row (a leftover launch spec may hold credentials, and
-            // this is the last moment anything will ever come back to
-            // remove it — see `remove_fail_closed`'s docs), and the row
-            // only after the terminal and process tree are positively
-            // gone (a crash here leaves a listed-but-dead session,
-            // recoverable by the next delete or a manual cleanup, rather
-            // than an unlisted-but-running agent, invisible and
-            // unreapable — see lore/2026-07-27-m2-process-tree-stop.md's
-            // final paragraph). One `Result`-returning block with `?`
-            // rather than a hand-threaded `teardown_error` variable, now
-            // that none of these steps need to happen outside the lock.
-            let teardown: Result<(), String> = async {
-                if let Some(terminal) = entry.terminal.as_ref() {
-                    sup.tmux
-                        .kill_session(&terminal.tmux_name)
+                // The process-tree sweep runs BEFORE any lock is held: it can
+                // take seconds (a grace period plus several /proc walks), and
+                // holding `attachments` for that long would stall every OTHER
+                // session's attach/input behind one slow delete — the map-
+                // wide mutex's already-documented coarseness (see the
+                // `Supervisor` struct's lock-discipline docs) made worse if a
+                // multi-second sweep sat inside it. A concurrent Attach can
+                // therefore install a fresh attachment WHILE this runs; the
+                // lock-held phase below tears down WHATEVER attachment exists
+                // by the time it runs, new or old, and gives it the deleted
+                // notice — that is the one acceptable consequence of not
+                // holding the lock here, not an oversight.
+                //
+                // Same dead/absent/terminal-less handling as `StopSession`:
+                // the marker sweep still runs even with no live pane pid, for
+                // the same leftover-reaping reason documented there.
+                let root_pid = match entry.terminal.as_ref() {
+                    Some(terminal) => match sup
+                        .tmux
+                        .pane_process(&terminal.tmux_name, &terminal.pane)
                         .await
-                        .map_err(|e| format!("killing tmux session: {e:#}"))?;
+                    {
+                        Ok(Some(pane)) if !pane.dead => Some(pane.pid),
+                        Ok(_) => None,
+                        Err(e) => {
+                            send_reply(
+                                &tx,
+                                &ControlMsg::Error {
+                                    req_id,
+                                    message: format!("querying pane process: {e:#}"),
+                                    kind: ErrorKind::Internal,
+                                },
+                            );
+                            return;
+                        }
+                    },
+                    None => None,
+                };
+                if let Err(e) = kill_process_tree(root_pid, &session_id).await {
+                    send_reply(
+                        &tx,
+                        &ControlMsg::Error {
+                            req_id,
+                            message: format!("killing process tree: {e:#}"),
+                            kind: ErrorKind::Internal,
+                        },
+                    );
+                    return;
                 }
-                let launch_dir = sup.state_dir.join("launch");
-                remove_fail_closed(
-                    &launch_dir.join(format!("{session_id}.json")),
-                    "launch spec",
-                )
-                .await?;
-                remove_fail_closed(
-                    &launch_dir.join(format!("{session_id}.status")),
-                    "launch status file",
-                )
-                .await?;
-                // Same fail-closed treatment as the launch artifacts above
-                // and for the same reason: the snapshot can hold secrets
-                // an agent echoed to an alt-screen app, and delete is the
-                // last moment anything will ever come back to remove it.
-                remove_fail_closed(
-                    &snapshot_path(&sup.state_dir, &session_id),
-                    "alt-screen snapshot",
-                )
-                .await?;
-                sup.store
-                    .delete_session(&session_id)
-                    .await
-                    .map_err(|e| format!("{e:#}"))
-            }
-            .await;
 
-            if let Err(err_msg) = teardown {
+                // Everything from here on is fast (one tmux round trip, two
+                // best-effort-but-fail-closed file removals, one sqlite
+                // write) and runs under `attachments`, mirroring the Attach
+                // handler's takeover for the same reason: a concurrent Attach
+                // must not be able to install itself mid-teardown. This is
+                // also the one path that acquires BOTH locks at once — `map
+                // removal` below briefly takes `sessions` too, while still
+                // holding `attachments` — which is the ordering rule this
+                // establishes and the only one that needs to exist as long as
+                // nothing else ever needs both: `attachments` first,
+                // `sessions` second.
+                let mut attachments = sup.attachments.lock().await;
+                // Abort the forwarder now, before it can race its own natural
+                // "session terminal ended" Detached against whatever truthful
+                // notice this handler sends once the real outcome below is
+                // known — but do not send that notice yet. Destructured
+                // (rather than kept as one `ActiveAttach`) because `forwarder`
+                // is consumed by the await and `channel`/`notify` are needed
+                // again afterwards; `input` is dropped here, which is fine —
+                // dropping it kills its control-mode client via
+                // `kill_on_drop`, exactly like every other teardown path.
+                let notify_detach = match attachments.remove(&session_id) {
+                    Some(ActiveAttach {
+                        channel,
+                        notify,
+                        forwarder,
+                        input: _input,
+                    }) => {
+                        forwarder.abort();
+                        let _ = forwarder.await;
+                        Some((channel, notify))
+                    }
+                    None => None,
+                };
+
+                // Fail-closed and sequenced deliberately: artifacts before the
+                // DB row (a leftover launch spec may hold credentials, and
+                // this is the last moment anything will ever come back to
+                // remove it — see `remove_fail_closed`'s docs), and the row
+                // only after the terminal and process tree are positively
+                // gone (a crash here leaves a listed-but-dead session,
+                // recoverable by the next delete or a manual cleanup, rather
+                // than an unlisted-but-running agent, invisible and
+                // unreapable — see lore/2026-07-27-m2-process-tree-stop.md's
+                // final paragraph). One `Result`-returning block with `?`
+                // rather than a hand-threaded `teardown_error` variable, now
+                // that none of these steps need to happen outside the lock.
+                let teardown: Result<(), String> = async {
+                    if let Some(terminal) = entry.terminal.as_ref() {
+                        sup.tmux
+                            .kill_session(&terminal.tmux_name)
+                            .await
+                            .map_err(|e| format!("killing tmux session: {e:#}"))?;
+                    }
+                    let launch_dir = sup.state_dir.join("launch");
+                    remove_fail_closed(
+                        &launch_dir.join(format!("{session_id}.json")),
+                        "launch spec",
+                    )
+                    .await?;
+                    remove_fail_closed(
+                        &launch_dir.join(format!("{session_id}.status")),
+                        "launch status file",
+                    )
+                    .await?;
+                    // Same fail-closed treatment as the launch artifacts
+                    // above and for the same reason: the snapshot can hold
+                    // secrets an agent echoed to an alt-screen app, and
+                    // delete is the last moment anything will ever come
+                    // back to remove it.
+                    remove_fail_closed(
+                        &snapshot_path(&sup.state_dir, &session_id),
+                        "alt-screen snapshot",
+                    )
+                    .await?;
+                    sup.store
+                        .delete_session(&session_id)
+                        .await
+                        .map_err(|e| format!("{e:#}"))
+                }
+                .await;
+
+                if let Err(err_msg) = teardown {
+                    if let Some((channel, notify)) = notify_detach {
+                        let _ = notify.send(Frame::control(&ControlMsg::Detached {
+                            channel,
+                            reason: format!("detached during a failed delete: {err_msg}"),
+                        }));
+                    }
+                    drop(attachments);
+                    send_reply(
+                        &tx,
+                        &ControlMsg::Error {
+                            req_id,
+                            message: err_msg,
+                            kind: ErrorKind::Internal,
+                        },
+                    );
+                    return;
+                }
+                sup.sessions.lock().await.remove(&session_id);
+
                 if let Some((channel, notify)) = notify_detach {
                     let _ = notify.send(Frame::control(&ControlMsg::Detached {
                         channel,
-                        reason: format!("detached during a failed delete: {err_msg}"),
+                        reason: "session deleted".to_string(),
                     }));
                 }
                 drop(attachments);
-                send(&ControlMsg::Error {
-                    req_id,
-                    message: err_msg,
-                    kind: ErrorKind::Internal,
-                });
-                return;
-            }
-            sup.sessions.lock().await.remove(&session_id);
-
-            if let Some((channel, notify)) = notify_detach {
-                let _ = notify.send(Frame::control(&ControlMsg::Detached {
-                    channel,
-                    reason: "session deleted".to_string(),
-                }));
-            }
-            drop(attachments);
-            send(&ControlMsg::SessionDeleted { req_id });
+                send_reply(&tx, &ControlMsg::SessionDeleted { req_id });
+            })
+            .await;
         }
         ControlMsg::Attach {
             req_id,
@@ -3024,7 +3537,10 @@ mod tests {
                 title: "x".repeat(farhelm_proto::MAX_FRAME_LEN as usize),
                 cwd: "/tmp".to_string(),
                 invocation: "agent".to_string(),
+                status: SessionStatus::Alive,
             }],
+            total: 1,
+            truncated: false,
         };
         assert!(
             Frame::control(&oversized).exceeds_max_len(),
@@ -3034,29 +3550,28 @@ mod tests {
         let frame = reply_frame(&oversized);
         assert!(!frame.exceeds_max_len(), "substituted reply must fit");
         let decoded: ControlMsg = serde_json::from_slice(&frame.body).unwrap();
-        match decoded {
-            ControlMsg::Error {
-                req_id: got_req_id,
-                message,
-                kind,
-            } => {
-                assert_eq!(got_req_id, req_id);
-                assert!(
-                    message.contains(&farhelm_proto::MAX_FRAME_LEN.to_string()),
-                    "error message must name the limit that was exceeded: {message}"
-                );
-                assert!(
-                    message.contains("exceeding"),
-                    "error message must describe the problem concretely: {message}"
-                );
-                assert_eq!(
-                    kind,
-                    ErrorKind::Internal,
-                    "the reply was too big for the wire, not something the caller's request got wrong"
-                );
-            }
-            other => panic!("expected ControlMsg::Error, got {other:?}"),
-        }
+        let ControlMsg::Error {
+            req_id: got_req_id,
+            message,
+            kind,
+        } = decoded
+        else {
+            panic!("expected ControlMsg::Error, got {decoded:?}");
+        };
+        assert_eq!(got_req_id, req_id);
+        assert!(
+            message.contains(&farhelm_proto::MAX_FRAME_LEN.to_string()),
+            "error message must name the limit that was exceeded: {message}"
+        );
+        assert!(
+            message.contains("exceeding"),
+            "error message must describe the problem concretely: {message}"
+        );
+        assert_eq!(
+            kind,
+            ErrorKind::Internal,
+            "the reply was too big for the wire, not something the caller's request got wrong"
+        );
     }
 
     /// The common case: a reply that fits comes back byte-identical to
@@ -3073,6 +3588,9 @@ mod tests {
                 title: "demo".to_string(),
                 cwd: "/tmp".to_string(),
                 invocation: "agent".to_string(),
+                // Matches real `create_session` output: `Unknown`, not
+                // `Alive` (see that function's own doc comment).
+                status: SessionStatus::Unknown,
             },
         };
         assert_eq!(reply_frame(&msg), Frame::control(&msg));
@@ -3120,6 +3638,7 @@ mod tests {
             .expect("supervisor construction touches only tmux, not the launch shim");
         let (tx, mut rx) = mpsc::unbounded_channel();
         let mut input_routes = HashMap::new();
+        let mut tasks = tokio::task::JoinSet::new();
         let req_id = 99;
 
         handle_control(
@@ -3134,46 +3653,58 @@ mod tests {
             },
             &tx,
             &mut input_routes,
+            &mut tasks,
         )
         .await;
 
         let reply = rx.try_recv().expect("a reply must have been sent");
-        match serde_json::from_slice::<ControlMsg>(&reply.body).unwrap() {
-            ControlMsg::Error {
-                req_id: got_req_id,
-                message,
-                kind,
-            } => {
-                assert_eq!(got_req_id, req_id);
-                assert!(
-                    message.contains(&CREATE_FIELD_CAP.to_string()),
-                    "error message must name the limit that was exceeded: {message}"
-                );
-                assert_eq!(
-                    kind,
-                    ErrorKind::InvalidRequest,
-                    "an oversized request is the caller's mistake, not a server fault"
-                );
-            }
-            other => panic!("expected ControlMsg::Error, got {other:?}"),
-        }
+        let decoded: ControlMsg = serde_json::from_slice(&reply.body).unwrap();
+        let ControlMsg::Error {
+            req_id: got_req_id,
+            message,
+            kind,
+        } = decoded
+        else {
+            panic!("expected ControlMsg::Error, got {decoded:?}");
+        };
+        assert_eq!(got_req_id, req_id);
+        assert!(
+            message.contains(&CREATE_FIELD_CAP.to_string()),
+            "error message must name the limit that was exceeded: {message}"
+        );
+        assert_eq!(
+            kind,
+            ErrorKind::InvalidRequest,
+            "an oversized request is the caller's mistake, not a server fault"
+        );
         assert!(
             sup.sessions.lock().await.is_empty(),
             "a rejected request must create nothing"
         );
     }
 
-    /// Call-site regression, the most important test in this file: it
-    /// drives `handle_control` itself, not `reply_frame` in isolation.
-    /// Reverting the `ListSessions` arm from `reply_frame` back to plain
-    /// `Frame::control` would leave every other test in this module
-    /// green — they all call `reply_frame` directly — and only this test
-    /// would catch it. It also proves the degrade is per-request: a
-    /// second, ordinary request on the same connection (same `tx`) must
-    /// still get an honest reply, so substituting one oversized reply
-    /// must not poison the connection or any shared state.
+    /// Call-site regression: drives `handle_control` itself, not
+    /// `build_list_reply`/`reply_frame` in isolation. Before M2's list
+    /// cap and byte budget existed, an oversized `ListSessions` reply
+    /// could only be caught by `reply_frame`'s backstop degrading it to
+    /// an `Error` — that scenario is still pinned directly against
+    /// `reply_frame` by `reply_frame_substitutes_error_for_oversized_reply`
+    /// above. Once `build_list_reply` sits in front of it at this call
+    /// site, though, the SAME oversized fixture (a single session whose
+    /// title alone exceeds `MAX_FRAME_LEN`) never reaches `reply_frame` in
+    /// an oversized state at all: the byte budget already drops it from
+    /// the reply, honestly reporting `total: 1, truncated: true` with an
+    /// empty `sessions` list — a normal, well-formed answer, not the
+    /// `Error` substitution. This test pins THAT outcome, so a future
+    /// change that quietly dropped `build_list_reply` from this call site
+    /// (reverting to plain, uncapped `Frame::control`) would pass every
+    /// other test in this module — they all call `reply_frame` or
+    /// `build_list_reply` directly — and only this test would catch it. It
+    /// also proves the degrade is per-request: a second, ordinary request
+    /// on the same connection (same `tx`) must still get an honest,
+    /// untruncated reply.
     #[tokio::test]
-    async fn list_sessions_call_site_degrades_oversized_reply_and_keeps_serving() {
+    async fn list_sessions_call_site_applies_the_byte_budget_and_keeps_serving() {
         let state = tempfile::tempdir().expect("state dir");
         let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
             .await
@@ -3190,6 +3721,7 @@ mod tests {
                     title: "x".repeat(farhelm_proto::MAX_FRAME_LEN as usize),
                     cwd: "/tmp".to_string(),
                     invocation: "agent".to_string(),
+                    status: SessionStatus::default(),
                 },
                 terminal: Some(Terminal {
                     tmux_name: "fh-fake".to_string(),
@@ -3200,39 +3732,581 @@ mod tests {
 
         let (tx, mut rx) = mpsc::unbounded_channel();
         let mut input_routes = HashMap::new();
+        let mut tasks = tokio::task::JoinSet::new();
 
         handle_control(
             &sup,
             ControlMsg::ListSessions { req_id: 1 },
             &tx,
             &mut input_routes,
+            &mut tasks,
         )
         .await;
-        let reply = rx.try_recv().expect("a reply must have been sent");
-        match serde_json::from_slice::<ControlMsg>(&reply.body).unwrap() {
-            ControlMsg::Error { req_id, .. } => assert_eq!(req_id, 1),
-            other => panic!("expected ControlMsg::Error for the oversized list, got {other:?}"),
-        }
+        // `ListSessions` is now spawned onto its own task (see that arm's
+        // own comment on why), so `handle_control`'s `.await` above only
+        // proves the request was ACCEPTED, not that the reply has been
+        // sent yet — an immediate `try_recv` would be a race against the
+        // spawned task's own tmux round trip. `recv().await`, bounded by
+        // a timeout so a genuine regression fails fast instead of hanging
+        // the test suite, is what actually waits for it.
+        let reply = tokio::time::timeout(Duration::from_secs(5), rx.recv())
+            .await
+            .expect("spawned ListSessions handler never replied")
+            .expect("reply channel closed before a reply arrived");
+        let decoded: ControlMsg = serde_json::from_slice(&reply.body).unwrap();
+        let ControlMsg::SessionList {
+            req_id,
+            sessions,
+            total,
+            truncated,
+        } = decoded
+        else {
+            panic!("expected a budget-truncated ControlMsg::SessionList, got {decoded:?}");
+        };
+        assert_eq!(req_id, 1);
+        assert!(
+            sessions.is_empty(),
+            "the one oversized session must be dropped by the byte budget"
+        );
+        assert_eq!(
+            total, 1,
+            "total is the count BEFORE the budget's truncation"
+        );
+        assert!(truncated);
 
         // Clear the oversized fixture and send a normal request through
         // the SAME tx: a healthy reply here is what proves the earlier
-        // substitution was scoped to its one request.
+        // substitution was scoped to its one request. Clearing only
+        // AFTER the first reply was actually received (not merely after
+        // the request was accepted) keeps this ordering deliberate rather
+        // than racing the first spawned task's still-in-flight tmux
+        // query.
         sup.sessions.lock().await.clear();
         handle_control(
             &sup,
             ControlMsg::ListSessions { req_id: 2 },
             &tx,
             &mut input_routes,
+            &mut tasks,
         )
         .await;
-        let reply2 = rx.try_recv().expect("a second reply must have been sent");
-        match serde_json::from_slice::<ControlMsg>(&reply2.body).unwrap() {
-            ControlMsg::SessionList { req_id, sessions } => {
-                assert_eq!(req_id, 2);
-                assert!(sessions.is_empty());
+        let reply2 = tokio::time::timeout(Duration::from_secs(5), rx.recv())
+            .await
+            .expect("spawned ListSessions handler never replied a second time")
+            .expect("reply channel closed before a second reply arrived");
+        let decoded2: ControlMsg = serde_json::from_slice(&reply2.body).unwrap();
+        let ControlMsg::SessionList {
+            req_id,
+            sessions,
+            total,
+            truncated,
+        } = decoded2
+        else {
+            panic!("expected a normal ControlMsg::SessionList, got {decoded2:?}");
+        };
+        assert_eq!(req_id, 2);
+        assert!(sessions.is_empty());
+        assert_eq!(total, 0);
+        assert!(!truncated);
+    }
+
+    /// Production call-site coverage for `LIST_SESSION_CAP` itself — the
+    /// cheapest honest way to exercise the REAL wiring (`handle_control`'s
+    /// `ListSessions` arm applying `.take(LIST_SESSION_CAP)` before ever
+    /// cloning or status-annotating an entry) rather than only
+    /// `build_list_reply`'s own pure-function tests, which never touch the
+    /// handler at all. Creating `LIST_SESSION_CAP + 1` REAL tmux sessions
+    /// to exercise this would be slow and environment-dependent for no
+    /// added signal; every entry here is synthetic and terminal-less
+    /// (`terminal: None`), which is enough to drive the cap/total/
+    /// truncated wiring without needing a single real tmux round trip to
+    /// succeed for any of them (`session_status` returns `Exited` for a
+    /// terminal-less entry without ever consulting `pane_states`).
+    #[tokio::test]
+    async fn list_sessions_honors_the_session_cap_at_the_handler_level() {
+        let state = tempfile::tempdir().expect("state dir");
+        let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
+            .await
+            .expect("supervisor construction touches only tmux, not the launch shim");
+
+        {
+            let mut sessions = sup.sessions.lock().await;
+            for i in 0..LIST_SESSION_CAP + 1 {
+                let id = format!("s{i}");
+                sessions.insert(
+                    id.clone(),
+                    Arc::new(SessionEntry {
+                        info: SessionInfo {
+                            id,
+                            title: "t".to_string(),
+                            cwd: "/tmp".to_string(),
+                            invocation: "agent".to_string(),
+                            status: SessionStatus::default(),
+                        },
+                        terminal: None,
+                    }),
+                );
             }
-            other => panic!("expected a normal ControlMsg::SessionList, got {other:?}"),
         }
+
+        let (tx, mut rx) = mpsc::unbounded_channel();
+        let mut input_routes = HashMap::new();
+        let mut tasks = tokio::task::JoinSet::new();
+        handle_control(
+            &sup,
+            ControlMsg::ListSessions { req_id: 1 },
+            &tx,
+            &mut input_routes,
+            &mut tasks,
+        )
+        .await;
+        let reply = tokio::time::timeout(Duration::from_secs(5), rx.recv())
+            .await
+            .expect("spawned ListSessions handler never replied")
+            .expect("reply channel closed before a reply arrived");
+        let decoded: ControlMsg = serde_json::from_slice(&reply.body).unwrap();
+        let ControlMsg::SessionList {
+            sessions,
+            total,
+            truncated,
+            ..
+        } = decoded
+        else {
+            panic!("expected ControlMsg::SessionList, got {decoded:?}");
+        };
+        assert_eq!(
+            sessions.len(),
+            LIST_SESSION_CAP,
+            "the cap must win over the full count at the real handler call site"
+        );
+        assert_eq!(
+            total,
+            (LIST_SESSION_CAP + 1) as u64,
+            "total is the count BEFORE the cap"
+        );
+        assert!(truncated);
+    }
+
+    /// PLAN_M2.md's list-status contract: a `ListSessions` reply whose
+    /// (capped) subset contains NO entry with a terminal at all —
+    /// including the empty-list case, but exercised here with one
+    /// terminal-less entry so the reply is checked for real content too —
+    /// must succeed even if tmux itself is completely unreachable, because
+    /// those statuses are decidable without asking tmux anything
+    /// (`session_status` returns `Exited` for a terminal-less entry
+    /// unconditionally). Proven by actually killing the supervisor's own
+    /// private tmux server (bypassing the supervisor entirely) rather than
+    /// just supplying terminal-less fixtures against a healthy one — if
+    /// `ListSessions` asked tmux anything here, this test would see an
+    /// `Error` reply instead of the expected `SessionList`.
+    #[tokio::test]
+    async fn list_sessions_skips_pane_states_when_nothing_has_a_terminal() {
+        let state = tempfile::tempdir().expect("state dir");
+        let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
+            .await
+            .expect("supervisor construction touches only tmux, not the launch shim");
+
+        let sock = state.path().join("tmux.sock");
+        let killed = std::process::Command::new("tmux")
+            .arg("-S")
+            .arg(&sock)
+            .arg("kill-server")
+            .output()
+            .expect("run tmux kill-server");
+        assert!(
+            killed.status.success(),
+            "test setup: tmux kill-server must succeed, got: {}",
+            String::from_utf8_lossy(&killed.stderr)
+        );
+
+        sup.sessions.lock().await.insert(
+            "s1".to_string(),
+            Arc::new(SessionEntry {
+                info: SessionInfo {
+                    id: "s1".to_string(),
+                    title: "t".to_string(),
+                    cwd: "/tmp".to_string(),
+                    invocation: "agent".to_string(),
+                    status: SessionStatus::default(),
+                },
+                terminal: None,
+            }),
+        );
+
+        let (tx, mut rx) = mpsc::unbounded_channel();
+        let mut input_routes = HashMap::new();
+        let mut tasks = tokio::task::JoinSet::new();
+        handle_control(
+            &sup,
+            ControlMsg::ListSessions { req_id: 1 },
+            &tx,
+            &mut input_routes,
+            &mut tasks,
+        )
+        .await;
+        let reply = tokio::time::timeout(Duration::from_secs(5), rx.recv())
+            .await
+            .expect("spawned ListSessions handler never replied")
+            .expect("reply channel closed before a reply arrived");
+        let decoded: ControlMsg = serde_json::from_slice(&reply.body).unwrap();
+        let ControlMsg::SessionList { sessions, .. } = decoded else {
+            panic!(
+                "expected ControlMsg::SessionList (tmux must not have been consulted at all), \
+                 got {decoded:?}"
+            );
+        };
+        assert_eq!(sessions.len(), 1);
+        assert_eq!(
+            sessions[0].status,
+            SessionStatus::Exited { exit_code: None }
+        );
+    }
+
+    /// Steady-state contract for `reap_finished_tasks` (its own docs): a
+    /// connection that stays open and keeps issuing requests must not
+    /// accumulate one unreaped `JoinSet` entry per request. Drives many
+    /// `ListSessions` requests through the REAL `handle_control` dispatch
+    /// — the same spawn/admission path production uses, not a synthetic
+    /// `JoinSet` fixture — waiting for each reply before reaping
+    /// (mirroring one iteration of `handle_connection`'s read loop: read,
+    /// dispatch, reap) and asserting the tracked task count returns to
+    /// ZERO every time, rather than growing with the number of requests
+    /// issued so far.
+    #[tokio::test]
+    async fn steady_state_reaping_keeps_the_tracked_task_count_bounded() {
+        let state = tempfile::tempdir().expect("state dir");
+        let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
+            .await
+            .expect("supervisor construction touches only tmux, not the launch shim");
+        let (tx, mut rx) = mpsc::unbounded_channel();
+        let mut input_routes = HashMap::new();
+        let mut tasks = tokio::task::JoinSet::new();
+
+        const REQUESTS: u64 = 50;
+        for req_id in 0..REQUESTS {
+            handle_control(
+                &sup,
+                ControlMsg::ListSessions { req_id },
+                &tx,
+                &mut input_routes,
+                &mut tasks,
+            )
+            .await;
+            let reply = tokio::time::timeout(Duration::from_secs(5), rx.recv())
+                .await
+                .expect("spawned ListSessions handler never replied")
+                .expect("reply channel closed before a reply arrived");
+            let decoded: ControlMsg = serde_json::from_slice(&reply.body).unwrap();
+            assert!(
+                matches!(decoded, ControlMsg::SessionList { .. }),
+                "expected ControlMsg::SessionList, got {decoded:?}"
+            );
+
+            reap_finished_tasks(&mut tasks);
+            assert_eq!(
+                tasks.len(),
+                0,
+                "the tracked task count must return to zero after reaping (request {req_id} \
+                 of {REQUESTS}), not grow with the number of requests issued so far"
+            );
+        }
+    }
+
+    /// A minimal, distinct `SessionInfo` for `build_list_reply`'s own
+    /// tests — distinct ids so a truncation bug that drops the wrong
+    /// entries (rather than merely the wrong COUNT) would still be
+    /// caught.
+    fn fake_session(id: &str, title_len: usize) -> SessionInfo {
+        SessionInfo {
+            id: id.to_string(),
+            title: "x".repeat(title_len),
+            cwd: "/tmp".to_string(),
+            invocation: "agent".to_string(),
+            status: SessionStatus::Alive,
+        }
+    }
+
+    /// The common case: everything fits under the byte budget, so nothing
+    /// is dropped and `truncated` is honestly `false`. `total` is passed
+    /// explicitly here (as the real `ListSessions` call site does — see
+    /// that arm's own comment) rather than derived from `sessions.len()`,
+    /// since `build_list_reply` no longer owns count-cap enforcement (the
+    /// caller applies it before this is ever reached; the handler-level
+    /// cap wiring itself is pinned by
+    /// `list_sessions_honors_the_session_cap_at_the_handler_level` below).
+    #[test]
+    fn build_list_reply_keeps_everything_under_the_byte_budget() {
+        let sessions: Vec<SessionInfo> = (0..10).map(|i| fake_session(&i.to_string(), 4)).collect();
+        let reply = build_list_reply(1, sessions, 10, LIST_BYTE_BUDGET);
+        let ControlMsg::SessionList {
+            req_id,
+            sessions,
+            total,
+            truncated,
+        } = reply
+        else {
+            panic!("expected ControlMsg::SessionList, got {reply:?}");
+        };
+        assert_eq!(req_id, 1);
+        assert_eq!(sessions.len(), 10);
+        assert_eq!(total, 10);
+        assert!(!truncated);
+    }
+
+    /// The byte-budget's whole job: a count well under any cap can still
+    /// overflow a small budget if the records themselves are fat, and the
+    /// reply must keep dropping from the tail until it fits.
+    #[test]
+    fn build_list_reply_enforces_the_byte_budget_independent_of_count() {
+        let sessions: Vec<SessionInfo> =
+            (0..5).map(|i| fake_session(&i.to_string(), 200)).collect();
+        let reply = build_list_reply(1, sessions, 5, 400);
+        let ControlMsg::SessionList {
+            sessions,
+            total,
+            truncated,
+            ..
+        } = reply
+        else {
+            panic!("expected ControlMsg::SessionList, got {reply:?}");
+        };
+        assert_eq!(total, 5);
+        assert!(
+            sessions.len() < 5,
+            "fat records must be dropped even though the count never reached any cap"
+        );
+        assert!(truncated);
+        assert!(
+            Frame::control(&ControlMsg::SessionList {
+                req_id: 1,
+                sessions,
+                total,
+                truncated,
+            })
+            .encoded_len()
+                <= 400,
+            "the kept reply must actually respect the byte budget"
+        );
+    }
+
+    /// Exact-prefix pin for the single-pass accounting itself: a budget
+    /// derived from a REAL encoded reply (via `Frame::control`, not by
+    /// repeating `build_list_reply`'s own per-entry/envelope arithmetic —
+    /// an independent measurement, not a restatement of the same math a
+    /// bug in that arithmetic could just as easily share) for EXACTLY `K`
+    /// entries must keep exactly those `K` and drop the rest.
+    ///
+    /// Derived with `truncated: false`, even though the real answer for
+    /// `K < total` is `true`: `build_list_reply`'s own envelope accounting
+    /// is conservatively based on the (longer) `false` shape throughout
+    /// the whole scan (see its doc comment on the envelope-length flip),
+    /// so a budget sized to a `true`-shaped K-entry reply is one byte too
+    /// tight for the algorithm to actually keep entry K — empirically,
+    /// it keeps only `K-1` (an earlier version of this test used `true`
+    /// and had exactly that failure). Budgeting against the `false`-shaped
+    /// size matches the conservative basis the algorithm itself commits
+    /// to and is the honest boundary this test can pin.
+    #[test]
+    fn build_list_reply_keeps_exactly_the_entries_a_derived_budget_fits() {
+        let sessions: Vec<SessionInfo> = (0..5).map(|i| fake_session(&i.to_string(), 20)).collect();
+        let total = sessions.len() as u64;
+        const K: usize = 3;
+
+        let k_reply = ControlMsg::SessionList {
+            req_id: 1,
+            sessions: sessions[..K].to_vec(),
+            total,
+            truncated: false,
+        };
+        let budget = Frame::control(&k_reply).encoded_len();
+
+        // Sanity: one more entry must genuinely exceed this budget, or
+        // the test would not be pinning a real boundary.
+        let k_plus_one_reply = ControlMsg::SessionList {
+            req_id: 1,
+            sessions: sessions[..K + 1].to_vec(),
+            total,
+            truncated: true,
+        };
+        assert!(
+            Frame::control(&k_plus_one_reply).encoded_len() > budget,
+            "test fixture must actually grow past the derived budget with one more entry"
+        );
+
+        let reply = build_list_reply(1, sessions.clone(), total, budget);
+        let ControlMsg::SessionList {
+            sessions: kept,
+            truncated,
+            ..
+        } = reply
+        else {
+            panic!("expected ControlMsg::SessionList, got {reply:?}");
+        };
+        assert_eq!(
+            kept,
+            sessions[..K],
+            "a budget derived from a real K-entry reply must keep exactly those K"
+        );
+        assert!(truncated);
+    }
+
+    /// The envelope-flip boundary itself: a budget sized to fit ALL
+    /// sessions EXACTLY (again derived from a real, untruncated reply's
+    /// own encoded size via `Frame::control`) must keep every one of them
+    /// with `truncated: false` — not silently drop the last one. This is
+    /// the scenario the envelope-flip fix (measuring the envelope with
+    /// `truncated: false`, the LONGER of the two JSON booleans — `"false"`
+    /// is 5 ASCII characters, `"true"` is 4) exists for: getting that flip
+    /// backwards would under-count the envelope by exactly one byte for
+    /// this untruncated case, tripping `build_list_reply`'s own
+    /// `debug_assert!` in tests and, in a release build, risking a reply
+    /// that lands one byte over `byte_budget` for the one case that was
+    /// supposed to fit with room to spare.
+    #[test]
+    fn build_list_reply_keeps_everything_at_an_exact_untruncated_boundary() {
+        let sessions: Vec<SessionInfo> = (0..5).map(|i| fake_session(&i.to_string(), 20)).collect();
+        let total = sessions.len() as u64;
+
+        let full_reply = ControlMsg::SessionList {
+            req_id: 1,
+            sessions: sessions.clone(),
+            total,
+            truncated: false,
+        };
+        let budget = Frame::control(&full_reply).encoded_len();
+
+        let reply = build_list_reply(1, sessions.clone(), total, budget);
+        let ControlMsg::SessionList {
+            sessions: kept,
+            truncated,
+            ..
+        } = reply
+        else {
+            panic!("expected ControlMsg::SessionList, got {reply:?}");
+        };
+        assert_eq!(
+            kept, sessions,
+            "an exact-fit budget must not drop the last entry"
+        );
+        assert!(!truncated);
+    }
+
+    /// The degenerate case for the single-pass entry scan: an empty
+    /// `sessions` vec simply never enters the `for` loop at all, so this
+    /// pins that the empty case still produces a well-formed reply —
+    /// `total: 0`, `truncated: false` — through the ordinary path, not a
+    /// special case that could drift from it.
+    #[test]
+    fn build_list_reply_handles_zero_sessions() {
+        let reply = build_list_reply(1, Vec::new(), 0, LIST_BYTE_BUDGET);
+        let ControlMsg::SessionList {
+            sessions,
+            total,
+            truncated,
+            ..
+        } = reply
+        else {
+            panic!("expected ControlMsg::SessionList, got {reply:?}");
+        };
+        assert!(sessions.is_empty());
+        assert_eq!(total, 0);
+        assert!(!truncated);
+    }
+
+    /// `spawn_admitted`'s entire contract (see its own docs): the permit
+    /// is acquired in the CALLER's own await, before the task is ever
+    /// spawned — not inside the spawned future. Proven with a 2-permit
+    /// semaphore and manually-controlled tasks (a `Notify`, not real
+    /// timing) rather than routing through real `StopSession`/tmux, which
+    /// would make "has the Nth task started running yet" unobservable
+    /// without racing real kill-sweep durations — exactly the flakiness
+    /// this test is designed to avoid.
+    ///
+    /// A regression that moved `acquire_owned().await` to INSIDE the
+    /// spawned task (permit acquired AFTER `tasks.spawn`, not before)
+    /// would make the third `spawn_admitted` call below return
+    /// immediately regardless of how many permits are free, since nothing
+    /// would then block spawning it — the bounded-timeout assertion in
+    /// the middle of this test is exactly what catches that.
+    #[tokio::test]
+    async fn spawn_admitted_acquires_the_permit_before_spawning_not_inside_the_task() {
+        let admission = Arc::new(tokio::sync::Semaphore::new(2));
+        let mut tasks = tokio::task::JoinSet::new();
+        let release = Arc::new(tokio::sync::Notify::new());
+        let started = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+
+        // Claim both permits with two tasks that run and then block on
+        // `release`, so they stay "in flight" (holding their permits)
+        // until this test lets them go.
+        for _ in 0..2 {
+            let started = Arc::clone(&started);
+            let release = Arc::clone(&release);
+            spawn_admitted(&admission, &mut tasks, async move {
+                started.fetch_add(1, Ordering::SeqCst);
+                release.notified().await;
+            })
+            .await;
+        }
+        // `tasks.spawn` only SCHEDULES the task; it does not run until
+        // this task yields to the executor. Neither does
+        // `spawn_admitted`'s own `acquire_owned().await` necessarily
+        // yield — an uncontended semaphore can resolve without ever
+        // suspending. `yield_now` is what actually lets the two spawned
+        // tasks run up to their own first await point (`notified()`).
+        tokio::task::yield_now().await;
+        assert_eq!(
+            started.load(Ordering::SeqCst),
+            2,
+            "both permits must have been claimed by two running tasks"
+        );
+
+        // A third admission call, with both permits still held, must not
+        // resolve at all yet. Scoped in its own block: `tokio::pin!`'s
+        // hidden storage borrows `tasks` for the rest of ITS enclosing
+        // scope regardless of when the `Pin<&mut _>` handle itself is
+        // dropped, so the block boundary — not a manual `drop` — is what
+        // releases that borrow before `tasks` is touched again below.
+        {
+            let started3 = Arc::clone(&started);
+            let release3 = Arc::clone(&release);
+            let third = spawn_admitted(&admission, &mut tasks, async move {
+                started3.fetch_add(1, Ordering::SeqCst);
+                release3.notified().await;
+            });
+            tokio::pin!(third);
+            assert!(
+                tokio::time::timeout(Duration::from_millis(50), &mut third)
+                    .await
+                    .is_err(),
+                "spawn_admitted must block acquiring a permit while both are held, not spawn \
+                 (and run) immediately"
+            );
+            assert_eq!(
+                started.load(Ordering::SeqCst),
+                2,
+                "the third task must not have started running while its spawn_admitted call \
+                 is still blocked on admission"
+            );
+
+            // Free exactly one permit: wakes one of the first two tasks,
+            // which finishes and drops its permit, which is what lets the
+            // third admission proceed.
+            release.notify_one();
+            tokio::time::timeout(Duration::from_secs(5), &mut third)
+                .await
+                .expect("spawn_admitted must proceed once a permit frees");
+            // `third` resolving only proves the permit was acquired and
+            // the task was handed to `tasks.spawn` — not that the newly
+            // spawned task has been polled yet (the same
+            // spawn-schedules-but-does-not-run distinction as the first
+            // `yield_now` above).
+            tokio::task::yield_now().await;
+            assert_eq!(started.load(Ordering::SeqCst), 3);
+        }
+
+        // Let every remaining task finish and reap them all.
+        release.notify_waiters();
+        while tasks.join_next().await.is_some() {}
     }
 
     use std::sync::atomic::AtomicBool;

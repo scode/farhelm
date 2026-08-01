@@ -257,6 +257,44 @@ impl Frame {
     }
 }
 
+/// Whether a session's agent is running, and — once it is not — how it
+/// ended.
+///
+/// Additive within `PROTOCOL_VERSION` 3 (PLAN_M2.md's "Proto growth"):
+/// this enum, `SessionInfo::status`, and `SessionList::total`/`truncated`
+/// are the one wire change M2's list step gets, and it must stay
+/// tolerant on decode both ways — see `SessionInfo::status`'s docs.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(tag = "state", rename_all = "snake_case")]
+pub enum SessionStatus {
+    /// The default exists for wire tolerance first: a peer built before
+    /// this field existed sends `SessionInfo` JSON with no `state` at
+    /// all, and `#[serde(default)]` on the field decodes that as
+    /// `Unknown` — never as a fabricated liveness claim one way or the
+    /// other. This build's own supervisor ALSO produces `Unknown`
+    /// deliberately, for the exact same reason: `SessionCreated`'s reply
+    /// carries it as a create-time placeholder, because creation
+    /// establishes only that the session and terminal exist, not that
+    /// the agent's later `exec` inside it succeeded (see
+    /// `ControlMsg::SessionCreated`'s own docs) — a fast-exiting command
+    /// can already be dead by the time that reply reaches the caller, so
+    /// claiming `Alive` there would itself be a fabricated liveness claim.
+    /// `ListSessions` is the only reply that computes a REAL answer (from
+    /// tmux, via `service.rs`'s `session_status`); every other place this
+    /// value is produced is honestly saying "not yet known", not "known
+    /// to be running".
+    #[default]
+    Unknown,
+    /// The agent's process is running (tmux's pane is not marked dead).
+    Alive,
+    /// The agent's process has ended. `exit_code` is tmux's own
+    /// `#{pane_dead_status}` when parseable — `None` covers a signal
+    /// death tmux cannot reduce to a plain code, and the restart-gap and
+    /// stale-lookup cases where there is no live pane to ask at all (see
+    /// the supervisor's `ListSessions` handler).
+    Exited { exit_code: Option<i32> },
+}
+
 /// A session as the supervisor reports it. The supervisor is authoritative
 /// (SPEC.md); the helm never invents or mutates these fields.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -269,6 +307,19 @@ pub struct SessionInfo {
     /// rejected at the boundary before a `SessionInfo` could exist.
     pub cwd: String,
     pub invocation: String,
+    /// Computed fresh by the supervisor on every `ListSessions` reply —
+    /// never persisted (SQLite has no liveness truth to persist; tmux is
+    /// the only truth, and it does not survive a restart on its own
+    /// terms either) and never trusted from an older sender.
+    /// `#[serde(default)]` is what makes this field additive within
+    /// `PROTOCOL_VERSION` 3: an old peer's JSON has no `status` at all and
+    /// decodes to `SessionStatus::Unknown` rather than failing, and this
+    /// crate carries no `deny_unknown_fields` anywhere on this path, so a
+    /// NEW `status` reaching an OLD decoder is silently ignored rather
+    /// than rejected. Both directions must keep holding for any later
+    /// M2 wire addition, per `PROTOCOL_VERSION`'s own docs.
+    #[serde(default)]
+    pub status: SessionStatus,
 }
 
 /// Control-channel messages. `req_id` correlates a response to its request
@@ -309,6 +360,13 @@ pub enum ControlMsg {
     /// but this does not establish that the agent's later `exec`
     /// succeeded. M1 has no structured launch-status message; failures
     /// remain visible as terminal diagnostics for future classification.
+    ///
+    /// Consequently `session.status` here is `SessionStatus::Unknown`, not
+    /// `Alive` — a create-time placeholder consistent with the paragraph
+    /// above, since a fast-exiting command can already be dead by the time
+    /// this reply reaches the caller. `ListSessions` computes the real
+    /// answer from tmux (`service.rs`'s `session_status`); nothing about
+    /// creation itself can honestly claim more.
     SessionCreated {
         req_id: u64,
         session: SessionInfo,
@@ -316,11 +374,30 @@ pub enum ControlMsg {
     ListSessions {
         req_id: u64,
     },
-    /// Reply to `ListSessions`: the supervisor's complete session set, in
-    /// no defined order.
+    /// Reply to `ListSessions`: the supervisor's session set, in no
+    /// defined order, subject to two independent cuts in
+    /// `service.rs` — a count cap enforced by the `ListSessions` handler
+    /// itself before a single entry is even cloned, and an encoded-size
+    /// budget `build_list_reply` enforces on top of that (see its own
+    /// docs for why the cap deliberately does NOT live inside that
+    /// function).
+    ///
+    /// `total` and `truncated` are additive within `PROTOCOL_VERSION` 3,
+    /// like `SessionInfo::status` (see that field's docs for the same
+    /// tolerance argument). `total` is the FULL session count before any
+    /// truncation, not `sessions.len()`; an old sender's reply decodes
+    /// `total` as 0 via `#[serde(default)]`, which is documented here as
+    /// "sender predates the field" rather than "zero sessions" — tolerable
+    /// because `sessions` itself is still present and correct either way,
+    /// and no M2 caller treats a 0 `total` as authoritative proof of
+    /// emptiness on its own.
     SessionList {
         req_id: u64,
         sessions: Vec<SessionInfo>,
+        #[serde(default)]
+        total: u64,
+        #[serde(default)]
+        truncated: bool,
     },
     /// Kill the agent's entire process tree (MCP servers, dev servers,
     /// every descendant), leaving the session and its terminal in place —
@@ -716,5 +793,174 @@ mod tests {
                 msg
             );
         }
+    }
+
+    /// `SessionStatus`'s three variants and FOUR distinct JSON shapes
+    /// (`Exited` alone has two: `exit_code` present vs. `null`) are
+    /// PLAN_M2.md's "Proto growth" wire addition, pinned exactly like
+    /// `ErrorKind`'s variants above: an `#[serde(tag = ...)]` or
+    /// variant-naming change here would compile and round-trip cleanly
+    /// while quietly producing bytes an unmodified peer cannot parse. All
+    /// four shapes matter individually because `Exited` has an
+    /// internally-tagged field (`exit_code`) that flattens into the same
+    /// object as the `state` tag — a detail `serde_json::to_value`
+    /// equality alone makes visible, unlike a bare round-trip.
+    #[test]
+    fn session_status_json_shapes_are_pinned() {
+        assert_eq!(
+            serde_json::to_value(SessionStatus::Alive).unwrap(),
+            serde_json::json!({ "state": "alive" })
+        );
+        assert_eq!(
+            serde_json::to_value(SessionStatus::Exited { exit_code: Some(3) }).unwrap(),
+            serde_json::json!({ "state": "exited", "exit_code": 3 })
+        );
+        assert_eq!(
+            serde_json::to_value(SessionStatus::Exited { exit_code: None }).unwrap(),
+            serde_json::json!({ "state": "exited", "exit_code": null })
+        );
+        assert_eq!(
+            serde_json::to_value(SessionStatus::Unknown).unwrap(),
+            serde_json::json!({ "state": "unknown" })
+        );
+    }
+
+    /// `SessionList`'s `total`/`truncated` addition, pinned the same way:
+    /// both fields must sit alongside `sessions` in the encoded object,
+    /// under their exact snake_case names, or a mismatched rename would
+    /// pass every Rust-side test here while a real cross-build peer reads
+    /// something else entirely.
+    #[test]
+    fn session_list_total_and_truncated_json_shape_is_pinned() {
+        let msg = ControlMsg::SessionList {
+            req_id: 5,
+            sessions: vec![],
+            total: 7,
+            truncated: true,
+        };
+        assert_eq!(
+            serde_json::to_value(&msg).unwrap(),
+            serde_json::json!({
+                "type": "session_list",
+                "req_id": 5,
+                "sessions": [],
+                "total": 7,
+                "truncated": true,
+            })
+        );
+    }
+
+    /// The additive-decode half of PLAN_M2.md's "Proto growth" contract:
+    /// JSON shaped exactly like a PRE-this-change sender — a `SessionInfo`
+    /// with no `state` field, a `SessionList` with no `total`/`truncated`
+    /// — must still decode successfully, defaulting the new fields rather
+    /// than failing. This is what makes the addition safe within the
+    /// existing `PROTOCOL_VERSION` 3 instead of needing its own bump: an
+    /// old-build supervisor and a new-build helm (or vice versa) must keep
+    /// interoperating.
+    #[test]
+    fn old_shape_session_list_json_decodes_with_defaulted_new_fields() {
+        let old_shape = serde_json::json!({
+            "type": "session_list",
+            "req_id": 9,
+            "sessions": [
+                {
+                    "id": "s1",
+                    "title": "demo",
+                    "cwd": "/tmp",
+                    "invocation": "agent",
+                }
+            ],
+        });
+        let decoded: ControlMsg = serde_json::from_value(old_shape).unwrap();
+        let ControlMsg::SessionList {
+            req_id,
+            sessions,
+            total,
+            truncated,
+        } = decoded
+        else {
+            panic!("expected ControlMsg::SessionList, got {decoded:?}");
+        };
+        assert_eq!(req_id, 9);
+        assert_eq!(total, 0, "an old sender's reply predates the field");
+        assert!(!truncated, "an old sender's reply predates the field");
+        assert_eq!(sessions.len(), 1);
+        assert_eq!(
+            sessions[0].status,
+            SessionStatus::Unknown,
+            "a SessionInfo with no state field must decode as Unknown, never a guess"
+        );
+    }
+
+    /// The REVERSE direction from the test above: a hand-rolled decoder
+    /// shaped like a peer built BEFORE this PR — no `status`, no
+    /// `total`/`truncated` — must still decode a NEW sender's JSON
+    /// successfully, silently dropping the fields it does not know
+    /// about. Serde's default of ignoring unrecognized object keys is
+    /// what makes this work. The shadow types below deliberately carry no
+    /// `#[serde(deny_unknown_fields)]` either, standing in for a real old
+    /// peer that never had a reason to add one — but this test's decode
+    /// path never touches the REAL `ControlMsg`/`SessionInfo` types at
+    /// all, so it says nothing about whether THOSE gaining
+    /// `deny_unknown_fields` would break anything (an earlier version of
+    /// this comment claimed otherwise; it does not, precisely because
+    /// decoding here goes through these shadow types, not the real ones).
+    /// The guarantee that DOES depend on the real types — an old-SHAPED
+    /// JSON still decoding under the CURRENT real decoder — is what the
+    /// sibling `old_shape_session_list_json_decodes_with_defaulted_new_fields`
+    /// test above pins instead. Together, the two tests cover both
+    /// directions of PLAN_M2.md's additivity claim.
+    #[derive(Debug, Deserialize)]
+    struct LegacySessionInfo {
+        id: String,
+        title: String,
+        cwd: String,
+        invocation: String,
+    }
+
+    #[derive(Debug, Deserialize)]
+    #[serde(tag = "type", rename_all = "snake_case")]
+    enum LegacyControlMsg {
+        SessionList {
+            req_id: u64,
+            sessions: Vec<LegacySessionInfo>,
+        },
+    }
+
+    #[test]
+    fn new_session_list_json_decodes_under_a_legacy_pre_status_decoder() {
+        let new_msg = ControlMsg::SessionList {
+            req_id: 4,
+            sessions: vec![SessionInfo {
+                id: "s1".to_string(),
+                title: "demo".to_string(),
+                cwd: "/tmp".to_string(),
+                invocation: "agent".to_string(),
+                status: SessionStatus::Exited { exit_code: Some(1) },
+            }],
+            total: 3,
+            truncated: true,
+        };
+        let json = serde_json::to_value(&new_msg).unwrap();
+
+        let LegacyControlMsg::SessionList { req_id, sessions } =
+            serde_json::from_value(json.clone()).expect(
+                "a legacy decoder without status/total/truncated must still decode new-shape \
+                 JSON",
+            );
+        assert_eq!(req_id, 4);
+        assert_eq!(sessions.len(), 1);
+        assert_eq!(sessions[0].id, "s1");
+        assert_eq!(sessions[0].title, "demo");
+        assert_eq!(sessions[0].cwd, "/tmp");
+        assert_eq!(sessions[0].invocation, "agent");
+
+        // The REAL types round-trip the same JSON too — cheap to check
+        // here, and it makes explicit that this test's own `json` value
+        // is exactly what a real `ControlMsg::SessionList` produces, not
+        // some hand-crafted stand-in.
+        let real_decoded: ControlMsg = serde_json::from_value(json).unwrap();
+        assert_eq!(real_decoded, new_msg);
     }
 }

@@ -13,6 +13,7 @@
 //! design made concrete.
 
 use anyhow::{Context, bail};
+use std::collections::HashMap;
 use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
@@ -644,6 +645,87 @@ fn sgr_is_full_reset(sequence: &[u8]) -> bool {
     first_param.is_empty() || first_param == b"0"
 }
 
+/// One pane's liveness as [`TmuxDriver::pane_states`] reports it —
+/// `ListSessions`'s cheaper cousin of [`PaneProcess`]: no pid (status
+/// never needs one, only whether the pane is alive and, if not, its exit
+/// code), and gathered for every pane on the server in one query rather
+/// than one round trip per session.
+///
+/// No `Default`, deliberately: every field here is either read directly
+/// from tmux or not constructed at all (a pane absent from the map is a
+/// missing HASHMAP ENTRY, never a fabricated `PaneState`). A derived
+/// `Default` would hand out `dead: false` — alive — for a value nothing
+/// ever actually observed, which is exactly the fabricated-liveness claim
+/// `session_status`'s whole "absent means Exited" contract exists to
+/// avoid; this type has no honest zero value to offer.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PaneState {
+    /// The tmux session this pane belonged to AT QUERY TIME
+    /// (`#{session_name}`). Pane ids reset to `%0` on a fresh tmux server
+    /// (verified empirically: killing the server and creating a new
+    /// session hands its first pane `%0` again), so a caller matching
+    /// only on pane id could have a stale, never-reloaded `SessionEntry`
+    /// silently inherit an unrelated NEW session's liveness merely
+    /// because both happen to share a recycled pane number. Requiring
+    /// this to also match the entry's own remembered `tmux_name` (see
+    /// `service.rs`'s `session_status`) is what closes that gap — a
+    /// mismatch on EITHER pane id or session name is treated as "this
+    /// pane is not the one we are asking about" and falls back to the
+    /// same honest `Exited { exit_code: None }` as an outright absent
+    /// pane.
+    pub session_name: String,
+    /// tmux's own `#{pane_dead}` flag, exactly as [`PaneProcess::dead`].
+    pub dead: bool,
+    /// `#{pane_dead_status}` when `dead` and parseable as a plain integer.
+    /// `None` while alive, and also `None` for a dead pane whose status
+    /// tmux could not express as one (a signal death, chiefly) — the same
+    /// honest gap `SessionStatus::Exited`'s own docs describe, just
+    /// discovered here instead of invented by this struct.
+    pub exit_code: Option<i32>,
+}
+
+/// tmux's raw, unmodified stderr from a non-zero exit — attached as the
+/// ROOT CAUSE of the `anyhow::Error` [`TmuxDriver::run`]/`run_bytes`
+/// return (with the human-readable "tmux {args:?} failed (...): ..."
+/// message layered on top via `.context(...)`), so a caller can recover
+/// exactly what tmux printed via `downcast_ref` regardless of how much
+/// further context piles on afterward — the same `anyhow` pattern
+/// `service.rs`'s `RequestError` uses, and for the same reason: searching
+/// the RENDERED error string is not always safe.
+///
+/// [`TmuxDriver::pane_states`] is the one caller that needs this: it must
+/// recognize a handful of tmux's own diagnostic shapes exactly, and doing
+/// that against the rendered message (this driver's own formatting, plus —
+/// for the "no server running on `<path>`" diagnostic — a caller-controlled
+/// state-dir path that tmux itself bakes into its own text) risks a false
+/// match whenever that path happens to CONTAIN one of the recognized
+/// phrases as a substring. Matching against this untouched stderr instead
+/// closes that hole; see [`is_tolerated_list_panes_diagnostic`]'s own docs
+/// for the anchored comparison this makes possible.
+#[derive(Debug)]
+struct TmuxCommandFailure {
+    stderr: Vec<u8>,
+}
+
+impl TmuxCommandFailure {
+    /// tmux's stderr with surrounding whitespace stripped — the exact text
+    /// every diagnostic [`is_tolerated_list_panes_diagnostic`] recognizes
+    /// must equal VERBATIM (never merely contain), since tmux emits each
+    /// of those diagnostics as a complete, standalone message with nothing
+    /// else on the line.
+    fn stderr_trimmed(&self) -> String {
+        String::from_utf8_lossy(&self.stderr).trim().to_string()
+    }
+}
+
+impl std::fmt::Display for TmuxCommandFailure {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.stderr_trimmed())
+    }
+}
+
+impl std::error::Error for TmuxCommandFailure {}
+
 impl TmuxDriver {
     /// `state_dir` owns the socket and generated config. The config file
     /// is rewritten whenever the driver starts, while a server already
@@ -743,12 +825,27 @@ impl TmuxDriver {
             .await
             .context("spawning tmux")?;
         if !out.status.success() {
-            bail!(
+            // The human-readable message is layered on TOP of
+            // `TmuxCommandFailure` via `.context(...)` rather than built by
+            // `bail!` directly, so that struct — carrying tmux's raw,
+            // unmodified stderr — survives as the root cause and stays
+            // reachable via `downcast_ref` at any depth (see its own docs).
+            // `{}`'s rendering of the returned error is unaffected: anyhow
+            // displays only the outermost context by default, which is
+            // exactly this formatted string, so every existing caller that
+            // pattern-matches `e.to_string()` sees the same text as before.
+            // Context formatted BEFORE the move, so the raw stderr can be
+            // handed to `TmuxCommandFailure` without cloning the buffer.
+            let context = format!(
                 "tmux {:?} failed ({}): {}",
                 args,
                 out.status,
                 String::from_utf8_lossy(&out.stderr).trim()
             );
+            return Err(anyhow::Error::new(TmuxCommandFailure {
+                stderr: out.stderr,
+            }))
+            .context(context);
         }
         Ok(out.stdout)
     }
@@ -846,9 +943,17 @@ impl TmuxDriver {
     /// so are all tolerated the same way: `"can't find session"` (another
     /// session exists but not this one), `"no current target"` (the server
     /// is up but has no sessions at all), and `"no server running"` (the
-    /// whole private tmux server is gone, e.g. `has_session`'s docs cover
-    /// the same server-emptiness distinction for the same underlying
-    /// reason). Anything else is a real failure worth surfacing.
+    /// whole private tmux server is gone). This is DELIBERATELY wider than
+    /// `has_session`'s own tolerance list: `has_session` propagates `"no
+    /// server running"` as a real error (see its own docs) because for
+    /// its one caller — deciding whether a PERSISTED row's tmux survived a
+    /// restart — a vanished server is worth surfacing rather than
+    /// silently guessing "not there". This function's caller, by
+    /// contrast, is unwinding a session it JUST tried to create (or
+    /// tearing one down that is being deleted anyway), where "the whole
+    /// server is gone" and "this one session is gone" both mean the exact
+    /// same thing: there is nothing left for `kill_session` to do.
+    /// Anything else is a real failure worth surfacing.
     pub async fn kill_session(&self, name: &str) -> anyhow::Result<()> {
         match self.run(&["kill-session", "-t", name]).await {
             Ok(_) => Ok(()),
@@ -1179,6 +1284,179 @@ impl TmuxDriver {
             );
         }
         Ok(parse_alt_screen_capture(&buf, session, max_bytes))
+    }
+
+    /// A genuinely empty server (started, but nothing created on it yet)
+    /// answers `list-panes -a` with EXACTLY this diagnostic and nothing
+    /// else on the line (verified empirically against both tmux 3.4 and
+    /// 3.7b) — distinct from [`Self::LIST_PANES_NO_SERVER_PREFIX`] and
+    /// [`Self::LIST_PANES_SERVER_EXITED_DIAGNOSTIC`], which mean the
+    /// private tmux server process itself is gone. All three are tolerated
+    /// by `pane_states` today (see its own docs), but are kept as separate
+    /// constants because they answer different questions: this one is "the
+    /// server exists but has nothing on it", the other two are "there is no
+    /// server left to ask at all", reached via two different tmux code
+    /// paths (a clean absence vs. a server that died mid-request).
+    const LIST_PANES_EMPTY_SERVER_DIAGNOSTIC: &str = "no current target";
+
+    /// tmux's `list-panes -a` diagnostic PREFIX when the private tmux
+    /// server process itself is gone (crash, OOM, an operator killing it
+    /// out from under a still-running supervisor) — as opposed to
+    /// [`Self::LIST_PANES_EMPTY_SERVER_DIAGNOSTIC`], where a server is up
+    /// but empty. Verified empirically (both tmux 3.4 and 3.7b) to always
+    /// be followed by the exact socket path passed via `-S`, with nothing
+    /// else on the line — never a bare, path-free message — which is why
+    /// [`is_tolerated_list_panes_diagnostic`] anchors against this prefix
+    /// PLUS this driver's own known socket, rather than a substring search:
+    /// the socket path is caller-controlled (it derives from the
+    /// supervisor's state dir), so a naive `contains("no server running")`
+    /// over the rendered error could misfire if that path happened to
+    /// embed the phrase itself, folding an unrelated failure into "the
+    /// server is gone". See `pane_states`'s own docs for why this
+    /// diagnostic is tolerated exactly like the empty-server case rather
+    /// than propagated as an error.
+    const LIST_PANES_NO_SERVER_PREFIX: &str = "no server running on ";
+
+    /// tmux's `list-panes -a` diagnostic when a request RACES a dying
+    /// server — the exact crash/OOM/`kill-server` timing this fix exists
+    /// for, where the server is mid-teardown rather than already fully
+    /// gone (verified empirically against both tmux 3.4 and 3.7b: racing a
+    /// `kill-server` with a concurrent query reliably produces this
+    /// message on both, standalone with nothing else on the line). The
+    /// harness's own `kill_tmux_server_and_wait` helper (crate `farhelm`'s
+    /// e2e tests) documents seeing this exact text while polling for a
+    /// server to finish dying. Tolerated identically to
+    /// [`Self::LIST_PANES_NO_SERVER_PREFIX`]: both are tmux's own
+    /// definitive statement that no pane can be answered for right now,
+    /// which is the same "no panes exist" fact `pane_states` treats as an
+    /// honest empty map either way.
+    const LIST_PANES_SERVER_EXITED_DIAGNOSTIC: &str = "server exited unexpectedly";
+
+    /// Every pane's liveness state, in ONE tmux round trip.
+    ///
+    /// `ListSessions` needs this per-session (PLAN_M2.md's "Proto growth":
+    /// status is computed at list time), and a naive per-session
+    /// `pane_process` call for each row would multiply one subprocess
+    /// spawn into N — paid on every poll the UI makes, per session. One
+    /// `list-panes -a` query instead returns every pane's state at once,
+    /// keyed by `#{pane_id}` (`Terminal::pane`'s own value) rather than
+    /// session name: a session's window can hold more than one pane (a
+    /// future split, say), and keying by session name would let a second
+    /// pane silently overwrite the first pane's entry in the returned map
+    /// — pane id is the only identifier this module ever uses to address
+    /// one specific pane (see `Terminal`'s own docs), so it is the only
+    /// key that cannot collide between panes sharing a session.
+    ///
+    /// `#{session_name}` rides along in the same query, carried in each
+    /// [`PaneState`] (see its own docs on why): pane ids reset to `%0` on
+    /// a fresh tmux server, so pane id alone is not a stable enough
+    /// identity across a server restart for `session_status` to trust
+    /// blindly — it cross-checks the session name too.
+    ///
+    /// A genuinely empty server ([`LIST_PANES_EMPTY_SERVER_DIAGNOSTIC`]), a
+    /// genuinely ABSENT server ([`LIST_PANES_NO_SERVER_PREFIX`]), and a
+    /// server caught mid-teardown ([`LIST_PANES_SERVER_EXITED_DIAGNOSTIC`])
+    /// all degrade to an empty map rather than an error — mirroring
+    /// `pane_process`'s own empty-expansion handling for the same "nothing
+    /// to inspect" case. `kill_session` tolerates the same "no server
+    /// running" shape for the same underlying reason (both treat "nothing
+    /// left to act on" as success); `has_session`, by contrast, DELIBERATELY
+    /// propagates it as an error, because its one caller — deciding whether
+    /// a PERSISTED row survived a restart — needs to tell "the query itself
+    /// failed" apart from "this row's tmux is genuinely gone", and cannot
+    /// safely guess between them the way this method's own callers can (see
+    /// below).
+    ///
+    /// This supersedes an earlier design (recorded in this module's git
+    /// history and in the e2e test this behavior change rewrote) that
+    /// treated `"no server running"` as a real error here, reasoning that a
+    /// still-live supervisor whose private tmux server vanished out from
+    /// under it should not silently report every tracked session `Exited`
+    /// off a "fabricated" empty map — that would be indistinguishable from
+    /// an honestly observed mass exit, the reasoning went. That conflated
+    /// two different things: an empty pane-states MAP is not an empty
+    /// session LISTING. This method's return value plays no part in WHICH
+    /// rows `ListSessions` selects for its reply — that is the session cap
+    /// and byte budget's job (`service.rs`'s `LIST_SESSION_CAP` and
+    /// `build_list_reply`), applied independently of tmux entirely — an
+    /// empty map here only ever feeds `session_status`'s per-entry liveness
+    /// lookup for whichever rows that selection already kept. `"no server
+    /// running"` is a DEFINITIVE statement from tmux that no pane exists
+    /// anywhere on this socket, so an empty map is not a guess in that case
+    /// — it is the literal truth, and every terminal-bearing entry then
+    /// correctly reports through `session_status`'s existing missing-pane
+    /// branch as `Exited { exit_code: None }`, the same honest answer a
+    /// restart-gap row already gets. The old behavior instead turned a dead
+    /// tmux server into a hard `ListSessions` failure — every session
+    /// unreachable THROUGH THE UI (which has no session ids left to act on,
+    /// including for delete, once the list that would supply them fails to
+    /// load) even though every one of them was intact in SQLite, and
+    /// `DeleteSession`'s own handler was never itself refused — which is the
+    /// actual failure mode this change exists to close. This method does
+    /// NOT attempt to restart or resurrect the vanished server; recovery is
+    /// M3 (PLAN.md), and until then an affected session simply reports
+    /// `Exited` — a plain supervisor restart reloads its row terminal-less
+    /// (the ordinary restart-gap case), still `Exited`, not "recovered".
+    ///
+    /// Any OTHER `pane_states` failure — one that does not match any
+    /// tolerated diagnostic — still propagates as a real `Err`. That
+    /// distinction is deliberate: an unclassified tmux failure is genuinely
+    /// UNKNOWN, and laundering it into a confident "every session exited"
+    /// would be exactly the kind of guessed liveness claim this module
+    /// works hard everywhere else to avoid. The match is against tmux's OWN
+    /// raw stderr (recovered via `downcast_ref::<TmuxCommandFailure>`, not
+    /// a substring search over the rendered error) and anchored to the
+    /// EXACT recognized shapes — see [`is_tolerated_list_panes_diagnostic`]
+    /// for why a substring search is unsafe here.
+    ///
+    /// A pane absent from the returned map — or present under this pane
+    /// id but for a DIFFERENT session name than the caller remembers
+    /// (`PaneState::session_name`'s own docs: pane ids reset to `%0` on a
+    /// fresh server, so a stale, never-reloaded entry's pane id can be
+    /// recycled by an unrelated new session) — is deliberately NOT this
+    /// method's problem to explain. The caller (`service.rs`'s
+    /// `session_status`) is the one that knows what either case means for
+    /// its own session (a race against the pane being removed mid-query,
+    /// or that pane-id-reuse-after-restart scenario): reporting it as
+    /// `Exited { exit_code: None }` is the same "do not guess a liveness
+    /// claim" rule the restart-gap case already applies — that handling
+    /// is unaffected by this method's own, narrower, error tolerance.
+    /// Renaming a session's tmux name, notably, does NOT land in either
+    /// bucket: pane id survives a rename (verified empirically), so a
+    /// renamed session's pane is still found under its ORIGINAL pane id
+    /// with its NEW session name — see `session_status`'s own docs on how
+    /// it is expected to react to that specific mismatch.
+    pub async fn pane_states(&self) -> anyhow::Result<HashMap<String, PaneState>> {
+        let out = match self
+            .run(&[
+                "list-panes",
+                "-a",
+                "-F",
+                "#{pane_id} #{session_name} #{pane_dead} #{pane_dead_status}",
+            ])
+            .await
+        {
+            Ok(out) => out,
+            Err(e) => {
+                // Classify against tmux's own RAW stderr, recovered from
+                // the error chain rather than pattern-matched off the
+                // rendered message — see `TmuxCommandFailure`'s and
+                // `is_tolerated_list_panes_diagnostic`'s docs for why. An
+                // error with no `TmuxCommandFailure` in its chain at all
+                // (a spawn failure, say) is never tolerated: there is no
+                // tmux diagnostic to even inspect.
+                let tolerated = e
+                    .downcast_ref::<TmuxCommandFailure>()
+                    .is_some_and(|failure| {
+                        is_tolerated_list_panes_diagnostic(&failure.stderr_trimmed(), &self.socket)
+                    });
+                if tolerated {
+                    return Ok(HashMap::new());
+                }
+                return Err(e).context("querying pane states");
+            }
+        };
+        Ok(parse_pane_states(&out))
     }
 
     /// Open one control client, capture replay, then turn on its live
@@ -1578,6 +1856,111 @@ impl InputClient {
         }
         Ok(())
     }
+}
+
+/// Whether `stderr` — tmux's own RAW stderr from a failed `list-panes -a`,
+/// already trimmed by [`TmuxCommandFailure::stderr_trimmed`] — is one of
+/// the three diagnostics [`TmuxDriver::pane_states`] tolerates as "nothing
+/// to report" rather than a real failure: a genuinely empty server
+/// ([`TmuxDriver::LIST_PANES_EMPTY_SERVER_DIAGNOSTIC`]), a genuinely absent
+/// one ([`TmuxDriver::LIST_PANES_NO_SERVER_PREFIX`] followed by `socket`),
+/// or one caught mid-teardown
+/// ([`TmuxDriver::LIST_PANES_SERVER_EXITED_DIAGNOSTIC`]).
+///
+/// EVERY comparison here is an exact match against the WHOLE trimmed
+/// string, never a substring search — `stderr.contains(diagnostic)` would
+/// look tempting, but `socket` is a caller-controlled path (it derives from
+/// the supervisor's state dir) that tmux's own "no server running on
+/// `<path>`" diagnostic bakes verbatim into its message. A state dir an
+/// operator happened to name so its path CONTAINS one of these phrases —
+/// `/tmp/no server running/tmux.sock`, however unlikely — would make an
+/// entirely unrelated failure (a permission error, a corrupted socket file)
+/// that merely MENTIONS that same path look like a tolerated diagnostic
+/// under a substring search, silently laundering a genuine fault into "the
+/// server is gone; report everyone exited". Anchoring to the exact,
+/// complete message tmux is verified (both tmux 3.4 and 3.7b) to emit for
+/// each of these three cases — and nothing else — closes that hole:
+/// something merely CONTAINING one of these phrases inside a longer,
+/// differently-shaped message is never one of them.
+///
+/// Split out from [`TmuxDriver::pane_states`] purely so this classification
+/// is unit-testable against constructed strings, without spawning tmux or
+/// killing a real server to provoke any of the three — the same reasoning
+/// [`parse_pane_states`] and `PaneModes::parse` split their own parsing out
+/// for elsewhere in this module. Any OTHER message returns `false`, which is
+/// what sends an unclassified failure down `pane_states`'s error path
+/// instead of being silently folded into an empty (and therefore
+/// all-exited) map.
+fn is_tolerated_list_panes_diagnostic(stderr: &str, socket: &Path) -> bool {
+    stderr == TmuxDriver::LIST_PANES_EMPTY_SERVER_DIAGNOSTIC
+        || stderr == TmuxDriver::LIST_PANES_SERVER_EXITED_DIAGNOSTIC
+        || stderr
+            == format!(
+                "{}{}",
+                TmuxDriver::LIST_PANES_NO_SERVER_PREFIX,
+                socket.display()
+            )
+}
+
+/// Parse `list-panes -a -F
+/// '#{pane_id} #{session_name} #{pane_dead} #{pane_dead_status}'` output
+/// into a per-pane map. Split out from [`TmuxDriver::pane_states`] purely
+/// so this parsing is unit-testable against constructed strings, without
+/// a real tmux server behind it — the same reasoning `PaneModes::parse`
+/// and `parse_stat` split their own parsing out for elsewhere in this
+/// codebase.
+///
+/// Strict on `pane_dead`: it must be the EXACT string `"0"` or `"1"`, not
+/// merely "whatever wasn't `1`". A row whose `pane_dead` field is missing
+/// entirely (an unexpectedly short line) or holds some other value (a
+/// tmux format change this build does not understand) is skipped outright
+/// — not inserted into the map at all — rather than defaulting to `dead:
+/// false`. Defaulting to alive would be a silent liveness guess for a row
+/// this function could not actually parse, exactly the kind of fabricated
+/// answer `session_status`'s whole "missing from the map means Exited"
+/// contract exists to avoid; skipping instead means the caller sees the
+/// SAME honest "not found" outcome as any other absent pane.
+fn parse_pane_states(out: &str) -> HashMap<String, PaneState> {
+    let mut states = HashMap::new();
+    for line in out.lines() {
+        let mut fields = line.split_whitespace();
+        let Some(pane_id) = fields.next() else {
+            // A blank line is the same "nothing to inspect" shape
+            // `pane_process` documents for an all-empty expansion — not a
+            // row worth reporting.
+            continue;
+        };
+        let Some(session_name) = fields.next() else {
+            // A pane id with nothing after it is just as malformed as a
+            // missing pane_dead field below — skip rather than guess.
+            continue;
+        };
+        let dead = match fields.next() {
+            Some("0") => false,
+            Some("1") => true,
+            // Missing, or some value this build does not recognize:
+            // malformed, and skipped rather than guessed at.
+            _ => continue,
+        };
+        // Only trust the status field once the pane is actually dead:
+        // tmux leaves it at a stale or empty value while alive, and
+        // parsing it regardless would risk fabricating an exit code for a
+        // pane that has not exited at all.
+        let exit_code = if dead {
+            fields.next().and_then(|f| f.parse::<i32>().ok())
+        } else {
+            None
+        };
+        states.insert(
+            pane_id.to_string(),
+            PaneState {
+                session_name: session_name.to_string(),
+                dead,
+                exit_code,
+            },
+        );
+    }
+    states
 }
 
 /// The identity tmux repeats on one command reply's begin/end markers.
@@ -2616,5 +2999,161 @@ mod tests {
             !within_snapshot_cap(101, 100),
             "one byte over the cap must be rejected"
         );
+    }
+
+    /// Pins `pane_states`'s diagnostic classification
+    /// (`is_tolerated_list_panes_diagnostic`) directly against tmux's OWN
+    /// raw stderr — not a rendered error string — since provoking every
+    /// case against a real tmux server would require either killing one
+    /// mid-test (slow, and already covered end to end by the e2e
+    /// `list_sessions_survives_when_the_tmux_server_is_gone` test) or
+    /// racing a `kill-server` closely enough to hit the mid-teardown
+    /// shape reliably. Covers all three tolerated diagnostics — a
+    /// genuinely empty server, a genuinely ABSENT one (the behavior this
+    /// change adds), and one caught mid-teardown (ALSO new) — plus a
+    /// plain unclassified failure.
+    #[test]
+    fn is_tolerated_list_panes_diagnostic_pins_all_three_tolerated_cases() {
+        let socket = Path::new("/tmp/fh/tmux.sock");
+        assert!(
+            is_tolerated_list_panes_diagnostic("no current target", socket),
+            "a genuinely empty server must tolerate"
+        );
+        assert!(
+            is_tolerated_list_panes_diagnostic("no server running on /tmp/fh/tmux.sock", socket),
+            "a genuinely absent server must ALSO tolerate — the behavior this change adds"
+        );
+        assert!(
+            is_tolerated_list_panes_diagnostic("server exited unexpectedly", socket),
+            "a server caught mid-teardown must ALSO tolerate — the same 'no panes exist' fact"
+        );
+        assert!(
+            !is_tolerated_list_panes_diagnostic("unexpected tmux failure", socket),
+            "an unclassified failure must not be laundered into an empty (all-exited) map"
+        );
+    }
+
+    /// The anchoring this classifier exists for, pinned directly: a
+    /// caller-controlled socket PATH that happens to CONTAIN the tolerated
+    /// "no server running" phrase must not make an unrelated failure
+    /// mentioning that same path look tolerated. An indiscriminate
+    /// `stderr.contains(diagnostic)` classifier — the bug this test would
+    /// have missed entirely, since its own inputs never embedded the
+    /// phrase anywhere but at the front — passes this exact string (it
+    /// DOES contain "no server running"), so asserting `!tolerated` here
+    /// only means something because the phrase is genuinely present, just
+    /// not as the whole, anchored message tmux actually emits for that
+    /// diagnostic.
+    #[test]
+    fn is_tolerated_list_panes_diagnostic_rejects_a_path_that_merely_contains_a_tolerated_phrase() {
+        let socket = Path::new("/tmp/no server running/tmux.sock");
+        let unrelated_failure = "can't stat socket /tmp/no server running/tmux.sock: \
+                                  Permission denied";
+        assert!(
+            unrelated_failure.contains("no server running"),
+            "test premise: the unrelated message must genuinely contain the tolerated phrase, \
+             or this test is not exercising the anchoring bug it claims to"
+        );
+        assert!(
+            !is_tolerated_list_panes_diagnostic(unrelated_failure, socket),
+            "a permission failure that merely MENTIONS a path containing the phrase must still \
+             propagate as a real error, not be folded into an empty (all-exited) map"
+        );
+    }
+
+    /// The common case: a live pane and a dead one with a parseable exit
+    /// code, keyed by PANE id (`%N`) exactly as `service.rs`'s
+    /// `session_status` looks them up via `Terminal::pane` — not by
+    /// session name, which two panes in the same session's window could
+    /// share (see `pane_states`'s own docs on why keying by session name
+    /// would let one pane's entry silently clobber another's).
+    #[test]
+    fn parse_pane_states_reads_live_and_dead_panes() {
+        let out = "%0 fh-alive 0 0\n%1 fh-dead 1 3\n";
+        let states = parse_pane_states(out);
+        assert_eq!(
+            states.get("%0"),
+            Some(&PaneState {
+                session_name: "fh-alive".to_string(),
+                dead: false,
+                exit_code: None
+            })
+        );
+        assert_eq!(
+            states.get("%1"),
+            Some(&PaneState {
+                session_name: "fh-dead".to_string(),
+                dead: true,
+                exit_code: Some(3)
+            })
+        );
+    }
+
+    /// A live pane's trailing status field must never be trusted, even if
+    /// tmux happens to report a leftover nonzero value there — only a
+    /// dead pane's status is a real exit code. Parsing it regardless would
+    /// fabricate a death that has not happened.
+    #[test]
+    fn parse_pane_states_ignores_status_of_a_live_pane() {
+        let states = parse_pane_states("%0 fh-live 0 7\n");
+        assert_eq!(
+            states.get("%0"),
+            Some(&PaneState {
+                session_name: "fh-live".to_string(),
+                dead: false,
+                exit_code: None
+            })
+        );
+    }
+
+    /// A dead pane whose status tmux could not express as a plain integer
+    /// (a signal death, empirically an empty field on some tmux builds)
+    /// must decode as `exit_code: None`, not fail the whole parse — this
+    /// is the same honest gap `SessionStatus::Exited` documents.
+    #[test]
+    fn parse_pane_states_tolerates_an_unparseable_dead_status() {
+        let states = parse_pane_states("%0 fh-signalled 1 \n");
+        assert_eq!(
+            states.get("%0"),
+            Some(&PaneState {
+                session_name: "fh-signalled".to_string(),
+                dead: true,
+                exit_code: None
+            })
+        );
+    }
+
+    /// A row whose `pane_dead` field is missing entirely, or holds
+    /// anything other than an exact `"0"`/`"1"`, must be skipped rather
+    /// than silently defaulting to `dead: false` — the bug this strict
+    /// parse exists to close. A prior, looser version of this parser
+    /// treated "not exactly `1`" as "alive", which happily accepted a
+    /// missing field as alive too; that pane simply must not appear in the
+    /// map at all, so `session_status`'s existing "absent means Exited"
+    /// handling covers it instead of a fabricated `Alive`. Covers every
+    /// stage a row can go missing: no fields past `pane_id`, no fields
+    /// past `session_name`, and a `pane_dead` field present but not
+    /// recognized.
+    #[test]
+    fn parse_pane_states_skips_rows_with_a_missing_or_unrecognized_dead_field() {
+        let states = parse_pane_states("%0\n%1 fh-sess\n%2 fh-sess maybe\n%3 fh-sess 2\n");
+        assert!(
+            states.is_empty(),
+            "every row here is malformed and must be skipped: {states:?}"
+        );
+    }
+
+    /// Parser-level robustness only: an empty string must parse as an
+    /// empty map, not panic. This is NOT the genuinely-empty-server case
+    /// (`pane_states`'s own `LIST_PANES_EMPTY_SERVER_DIAGNOSTIC` handling)
+    /// — a real empty server makes the tmux COMMAND itself fail with `"no
+    /// current target"` before this function ever sees any output to
+    /// parse, so `parse_pane_states` in production never actually
+    /// receives an empty string from that path. This test exists purely
+    /// so the parser itself does not panic or misbehave if it ever did
+    /// receive one (a future caller feeding it something else, say).
+    #[test]
+    fn parse_pane_states_handles_empty_output() {
+        assert!(parse_pane_states("").is_empty());
     }
 }

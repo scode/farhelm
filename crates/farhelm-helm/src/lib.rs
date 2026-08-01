@@ -29,7 +29,7 @@ use std::sync::Arc;
 use tracing::{error, info};
 
 mod client;
-pub use client::{SupervisorClient, SupervisorError, TermEvent};
+pub use client::{SessionListing, SupervisorClient, SupervisorError, TermEvent};
 
 /// CLI arguments for `farhelm helm run`. Lives here (not in the bin
 /// crate) so the helm's surface and its implementation evolve together.
@@ -410,14 +410,22 @@ async fn connect_supervisor(
     }
 }
 
-/// `GET /api/sessions` — the supervisor's list, passed through unchanged.
-/// The helm caches nothing before M6; supervisors are the authority
-/// (SPEC.md). The last-known-session cache that survives helm restarts
-/// arrives with M6's registry and stale-cache semantics (PLAN.md) — with
-/// one always-connected supervisor there is nothing for a cache to add.
+/// `GET /api/sessions` — today, just the supervisor's `sessions` vec,
+/// JSON-encoded as a bare array (each entry gaining the additive `status`
+/// field for free). `total`/`truncated` are NOT yet in the response body
+/// — threading them through the HTTP surface is PLAN_M2.md step 6, the
+/// next PR; this handler already has both in hand (`SessionListing`) but
+/// deliberately does not shape them into the body yet. The helm caches
+/// nothing before M6; supervisors are the authority (SPEC.md). The
+/// last-known-session cache that survives helm restarts arrives with
+/// M6's registry and stale-cache semantics (PLAN.md) — with one
+/// always-connected supervisor there is nothing for a cache to add.
 async fn list_sessions(State(state): State<Arc<AppState>>) -> impl IntoResponse {
     match state.client.list_sessions().await {
-        Ok(sessions) => axum::Json(sessions).into_response(),
+        // `total`/`truncated` are not yet threaded through the HTTP body —
+        // that is the NEXT PR's job (PLAN_M2.md step 6); today's JSON
+        // gains only the per-session `status` field, additively.
+        Ok(listing) => axum::Json(listing.sessions).into_response(),
         Err(e) => http_error(e),
     }
 }
@@ -967,6 +975,10 @@ mod tests {
                         title: "some-agent".into(),
                         cwd: "/some/dir".into(),
                         invocation: "some-agent".into(),
+                        // Matches real `create_session` output: `Unknown`,
+                        // not `Alive` (creation does not establish the
+                        // agent's later exec succeeded).
+                        status: farhelm_proto::SessionStatus::Unknown,
                     },
                 }))
                 .await
