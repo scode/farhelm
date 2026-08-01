@@ -18,16 +18,26 @@
 //! ```
 //!
 //! Control frames carry JSON (`ControlMsg`) on channel 0 — JSON so a human
-//! can eyeball a protocol trace. Data frames carry raw terminal bytes on a
-//! per-attachment channel; keeping them binary keeps PTY throughput off
-//! the JSON path.
+//! can eyeball a protocol trace. Data frames carry opaque bytes on a
+//! per-channel basis, and as of version 6 a data channel has one of two
+//! meanings, fixed by the control message that established it: terminal
+//! output flowing supervisor-toward-client (established by `Attach`), or
+//! attachment-upload bytes flowing client-toward-supervisor (established
+//! by `BeginUpload`). Keeping both binary keeps PTY throughput and file
+//! bytes off the JSON path.
 //!
 //! ## Paths that cross this protocol are UTF-8-only
 //!
 //! Every path field that actually travels over the wire (`SessionInfo::cwd`,
-//! `ControlMsg::CreateSession::cwd`) is a Rust `String`, and a `String` is
-//! valid UTF-8 by construction — there is no wire representation for a
-//! path that isn't. This is a deliberate v1 contract for *this specific
+//! `ControlMsg::CreateSession::cwd`, and — as of version 6 —
+//! `ControlMsg::UploadCommitted::path`) is a Rust `String`, and a `String`
+//! is valid UTF-8 by construction — there is no wire representation for a
+//! path that isn't. For `UploadCommitted::path` the producing boundary is
+//! the supervisor itself: a published attachment path that is not valid
+//! UTF-8 (a non-UTF-8 state-directory override is the only way to get
+//! one) must fail the commit with an actionable error, never launder
+//! through a lossy conversion — the inserted path IS the product here, so
+//! a path that merely resembles the real one is worse than a refusal. This is a deliberate v1 contract for *this specific
 //! boundary*, not an oversight: a bytes-preserving encoding was considered
 //! and rejected, because JSON, the web UI, and SQLite all fight arbitrary
 //! bytes, while every place a session `cwd` actually enters the system
@@ -89,8 +99,8 @@ pub mod io;
 /// connection loops treat that error as fatal — an unknown variant tears
 /// down an already-established connection instead of being ignored. A new
 /// variant is exactly the "cannot be additive" case that earns its own
-/// bump, per version 3's own docs above; `protocol_version_is_pinned_at_5`
-/// (renamed from `_at_4` when version 5 landed) and
+/// bump, per version 3's own docs above; `protocol_version_is_pinned_at_6`
+/// (renamed at every bump since `_at_4`) and
 /// `unknown_control_message_tag_fails_decode` below (plus the
 /// loop-level teardown test in the farhelm crate's e2e suite) pin both the
 /// number and the reasoning so the next milestone cannot re-assume
@@ -122,7 +132,34 @@ pub mod io;
 /// that cannot be made additive — a new REQUIRED field being the version 2
 /// precedent documented above, where an old decoder has no default to
 /// fall back on — needs another bump; neither is anticipated before M4.
-pub const PROTOCOL_VERSION: u32 = 5;
+///
+/// Bumped to 6 for the complete M4 wire vocabulary (PLAN_M4.md item 1):
+/// terminal tabs and attachment uploads. The new tagged `ControlMsg`
+/// variants — `OpenTab`/`TabOpened`, `CloseTab`/`TabClosed`, and the
+/// upload family (`BeginUpload`/`UploadStarted`/`UploadAck`/
+/// `CommitUpload`/`UploadCommitted`/`AbortUpload`/`UploadAborted`) — each
+/// independently earn the bump by version 4's argument above (an
+/// unrecognized tag is connection-fatal, never a tolerated no-op), so as
+/// with 5, all of M4 lands in ONE bump rather than a version per
+/// variant. The additions that ride along are `SessionInfo::tabs` and
+/// `Attach`'s `terminal`/`lease` fields, all defaulted on absence — but
+/// only `tabs` and `lease` are honestly additive. `terminal`'s default
+/// protects one direction alone (an old-shaped request decoded by a new
+/// peer); the other direction is unsafe, because a field-ignorant
+/// decoder receiving `TerminalSelector::Tab` would silently attach the
+/// agent terminal — exactly the wrong-terminal fallback that type's own
+/// contract forbids. Non-default terminal selection is safe ONLY because
+/// the version-6 handshake guarantees no such decoder is on the other
+/// end; the default expresses compatibility of meaning, not a license to
+/// send tab selectors at older peers. Shipping all three inside the bump
+/// means no mixed-fleet state ever exists where a version-6 peer lacks
+/// them. (`TerminalSelector` and `TabInfo` are new types with no
+/// prior decoder to break — outside the variant count for the same
+/// reason `AgentKind` was at version 5.) Within version 6 the additive
+/// discipline of versions 4 and 5 continues to apply: new optional
+/// fields with decode defaults are fine; a new tagged variant, or a new
+/// REQUIRED field, earns the next bump.
+pub const PROTOCOL_VERSION: u32 = 6;
 
 /// The build version compiled into this binary, carried in the hello for
 /// diagnostics.
@@ -136,8 +173,11 @@ pub enum FrameKind {
     Data,
 }
 
-/// One decoded frame. `channel` is 0 for control frames; data frames use
-/// the channel assigned at attach time.
+/// One decoded frame. `channel` is 0 for control frames; a data frame's
+/// channel was established by whichever control request created it —
+/// `Attach` for a terminal stream, `BeginUpload` for an attachment
+/// upload — and that request is also what fixed the channel's direction
+/// and meaning.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Frame {
     pub kind: FrameKind,
@@ -229,11 +269,15 @@ impl Frame {
         }
     }
 
-    /// Wrap raw terminal bytes for an attachment channel. `bytes` is
-    /// opaque — never inspected, never re-encoded — which is what keeps
-    /// arbitrary PTY output (binary, invalid UTF-8) crossing the wire
-    /// intact. Encoding rejects a body that would exceed
-    /// [`MAX_FRAME_LEN`], before writing any partial frame.
+    /// Wrap opaque bytes for a data channel — terminal output on an
+    /// `Attach`-established channel, or an upload chunk on a
+    /// `BeginUpload`-established one; the channel's controlling request
+    /// is what gives the bytes their meaning and direction. `bytes` is
+    /// opaque either way — never inspected, never re-encoded — which is
+    /// what keeps arbitrary PTY output (binary, invalid UTF-8) and raw
+    /// file contents crossing the wire intact. Encoding rejects a body
+    /// that would exceed [`MAX_FRAME_LEN`], before writing any partial
+    /// frame.
     pub fn data(channel: u32, bytes: Vec<u8>) -> Frame {
         Frame {
             kind: FrameKind::Data,
@@ -464,6 +508,20 @@ pub struct SessionInfo {
     /// rather than an invented "captured" claim.
     #[serde(default)]
     pub restart_offer: RestartOffer,
+    /// The session's terminal tabs, in creation order (PLAN_M4.md item
+    /// 2). Rediscovered from tmux for every reply that carries a
+    /// `SessionInfo` — never persisted, exactly like the live-probed half
+    /// of `status`, and for the same reason: tmux is the only truth for
+    /// what windows exist, and SPEC.md makes tabs non-durable anyway.
+    /// Rides on `SessionInfo` rather than behind a dedicated list message
+    /// for `RestartOffer`'s reason (see that type's design-decision doc):
+    /// every client that could ask already holds a `SessionInfo`, so a
+    /// query pair would buy a round trip and nothing else. Empty for a
+    /// session with no tabs — and, via `#[serde(default)]`, for a sender
+    /// that predates the field, which is the same honest statement: no
+    /// tabs known.
+    #[serde(default)]
+    pub tabs: Vec<TabInfo>,
 }
 
 /// What restarting a session would do to the agent's conversation, as the
@@ -571,6 +629,106 @@ pub enum AgentKind {
 /// independently.
 pub const STOP_ANNOTATION: &str = "stopped by user";
 
+/// Which of a session's terminals an `Attach` targets (PLAN_M4.md item 1).
+/// Before version 6 a session had exactly one terminal, so `Attach` named
+/// none; the selector makes that implicit choice explicit without
+/// breaking it — `#[default]` is `Agent`, and the field it lives on
+/// (`ControlMsg::Attach::terminal`) is `#[serde(default)]`, so a request
+/// that says nothing still means what every pre-M4 request meant.
+///
+/// Internally tagged (`kind`) rather than a bare string because `Tab`
+/// carries the tab id — the same reason `SessionStatus` is tagged while
+/// `ErrorKind` is not.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum TerminalSelector {
+    /// The agent's own terminal — the AGENT-MARKED window, which is
+    /// window 0 in practice (creation order) but is resolved by its
+    /// marker, never by position: PLAN_M4.md item 2 makes rediscovery
+    /// marker-based because pane processes inherit `TMUX` and can
+    /// conjure windows the supervisor never made. The only terminal
+    /// that existed before M4.
+    #[default]
+    Agent,
+    /// A terminal tab by id. The id is the one `TabInfo::id` carries;
+    /// naming a tab that no longer exists (closed, or erased by a reboot)
+    /// is a `NotFound` error, not a silent fallback to the agent
+    /// terminal — attaching the WRONG terminal quietly would be worse
+    /// than failing.
+    Tab { id: String },
+}
+
+/// One terminal tab as the supervisor reports it (PLAN_M4.md item 2). Not
+/// durable metadata — SPEC.md says tabs are gone after a reboot or
+/// archive and nothing recreates them — so this is a live-rediscovered
+/// fact (from tmux, via the window markers), never a stored row.
+///
+/// Deliberately minimal: SPEC.md gives tabs no names and close is their
+/// only operation, so an id is the whole identity. Clients derive their
+/// positional labels ("Terminal 1", "Terminal 2") from list order, which
+/// the supervisor keeps stable (creation order) across rediscovery.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TabInfo {
+    /// Supervisor-assigned opaque tab identity — MINTED per tab and
+    /// stored in the window's marker, deliberately not the raw tmux
+    /// window id, so it is unique across tmux-server lifetimes, not just
+    /// within one: a client holding a selector from before a reboot must
+    /// get `NotFound`, never a recycled window index that happens to
+    /// name someone else's new tab. Clients echo it back
+    /// (`TerminalSelector::Tab`, `ControlMsg::CloseTab`) and never parse
+    /// it.
+    pub id: String,
+}
+
+/// Ceiling for one attachment-upload data frame's body (PLAN_M4.md item
+/// 1). Uploads are chunked well below [`MAX_FRAME_LEN`] for the same
+/// reason terminal output is — no bulk payload may monopolize the
+/// framing layer — and the specific value bounds how long any single
+/// frame can occupy the shared connection ahead of latency-sensitive
+/// terminal input. Rechunking is the PROTOCOL-FRAME SENDER's job,
+/// independent of whatever boundaries the bytes arrived with: the helm
+/// relay splits at this size no matter how its HTTP body stream chunked,
+/// and any client speaking this protocol directly owes the same. The
+/// window alone does not keep typing responsive — a whole window of
+/// chunks sitting in the shared writer's FIFO would still delay input
+/// frames behind megabytes of bulk — so a sender must also bound how
+/// many upload frames it has ENQUEUED to the shared writer at once,
+/// interleaving them with whatever else the connection carries; the
+/// credit window bounds transit, the sender bounds queue occupancy.
+/// An oversized chunk arriving anyway is a data frame with no `req_id`
+/// to hang an `Error` on, so the receiver rejects it the
+/// channel-correlated way: [`ControlMsg::UploadAborted`] on that
+/// channel, temp cleaned — never an uncorrelated `Error` some other
+/// upload might claim.
+pub const UPLOAD_CHUNK_BYTES: usize = 256 * 1024;
+
+/// Maximum bytes an upload sender may have in flight beyond the highest
+/// cumulative [`ControlMsg::UploadAck`] it has seen (PLAN_M4.md item 1).
+/// This is the upload direction's flow control — the analogue of the
+/// terminal path's watermark pause/resume, shaped as a credit window
+/// because the receiver (disk, or the helm→supervisor relay) is the slow
+/// side here, not a rendering client. The initial credit is explicit so
+/// no implementation pair can deadlock waiting for the other to move:
+/// [`ControlMsg::UploadStarted`] itself grants the first window from a
+/// cumulative baseline of zero — the sender may put `UPLOAD_WINDOW_BYTES`
+/// on the wire before the first ack ever arrives. The window is what
+/// keeps "no size cap in v1" honest: a large file costs time, never
+/// memory, on every hop. It bounds ONE transfer; the bound on how many
+/// transfers may run at once is `BeginUpload`'s admission decision (see
+/// that variant's docs), not this constant.
+pub const UPLOAD_WINDOW_BYTES: u64 = 4 * 1024 * 1024;
+
+/// The `reason` an unsolicited [`ControlMsg::UploadAborted`] carries when
+/// a transfer was given up on for lack of progress (PLAN_M4.md item 4's
+/// per-hop progress timeout — SPEC.md's health-check requirement applied
+/// to the paste path). Like [`DETACH_REASON_STALLED`], it is named here
+/// because two independent emitters produce it — the supervisor (its
+/// receiving hop stopped progressing) and the helm (the client→helm hop
+/// stalled) — and their tests must match the identical string. Clients
+/// render it inside their upload-failure surface verbatim, so it reads
+/// as a bare cause: one line, user-legible, no leading "aborted:".
+pub const UPLOAD_ABORT_REASON_STALLED: &str = "transfer stopped making progress (stalled)";
+
 /// The user's chosen resolution on a `ControlMsg::RestartSession` request.
 /// Shares its three shapes with [`RestartOffer`] but is the opposite
 /// direction: `RestartOffer` is the SERVER telling the client what is
@@ -614,8 +772,11 @@ pub enum RestartMode {
 }
 
 /// Control-channel messages. `req_id` correlates a response to its request
-/// so one connection can carry concurrent requests; unsolicited events
-/// (`Detached`) carry no `req_id`.
+/// so one connection can carry concurrent requests; unsolicited events —
+/// `Detached`, and as of version 6 `UploadAck` and `UploadAborted` —
+/// carry no `req_id` and correlate by `channel` instead, so a
+/// demultiplexer must route them by channel rather than treating a
+/// missing `req_id` as an error.
 ///
 /// Compatibility posture: within one protocol version the set of messages
 /// is fixed; anything incompatible bumps `PROTOCOL_VERSION` rather than
@@ -887,16 +1048,101 @@ pub enum ControlMsg {
         req_id: u64,
         session: SessionInfo,
     },
-    /// Attach to a session's terminal. The requester picks the (connection
-    /// -unique) data channel; the supervisor replays history onto it and
-    /// then streams live output. Attaching implicitly detaches any
-    /// previous attachment (SPEC.md: one attachment, last attach wins).
+    /// Open a terminal tab: a plain shell in the session's working
+    /// directory, as a new window on the session's tmux session
+    /// (PLAN_M4.md item 2). Refused — with the session untouched — when
+    /// the working directory has vanished (M3's restart precondition,
+    /// same error shape), when the session's tmux session no longer
+    /// exists (a rebooted or archived session must be restarted first;
+    /// a tab-only terminal substrate is not a state this system has),
+    /// and when the shell is already dead by reply time (the pane's last
+    /// words travel as the error detail — a launch that failed must not
+    /// masquerade as a successful open holding a dead pane).
+    OpenTab {
+        req_id: u64,
+        session_id: String,
+    },
+    /// Success reply to `OpenTab`. The tab exists and its shell was alive
+    /// when this was sent; attach it via `Attach` with
+    /// `TerminalSelector::Tab`. Carries the `TabInfo` alone rather than a
+    /// whole refreshed `SessionInfo` because opening a tab changes
+    /// nothing else about the session — which also means this reply
+    /// says nothing about ORDER: a client deriving positional labels
+    /// (or racing another client's opens) reads the creation-ordered
+    /// list from a refreshed `SessionInfo::tabs`, the one place ordering
+    /// is authoritative; this reply is only what the opener needs to
+    /// attach immediately.
+    TabOpened {
+        req_id: u64,
+        tab: TabInfo,
+    },
+    /// Close a terminal tab: kill its shell and every process it left
+    /// behind (SPEC.md: close "kills that shell and its processes" —
+    /// daemonized children included), then drop the window. The reap runs
+    /// in M2's stop ordering, scoped to the one tab (PLAN_M4.md item 2);
+    /// the agent terminal and other tabs are untouched. An unknown
+    /// `tab_id` is `NotFound`; closing a tab whose shell already exited
+    /// still succeeds — like `StopSession`, "make sure nothing is
+    /// running" already holds, and the window is dropped either way.
+    CloseTab {
+        req_id: u64,
+        session_id: String,
+        tab_id: String,
+    },
+    /// Acknowledges `CloseTab`: sent only once the tab-scoped reap ran to
+    /// completion and the window is gone — `SessionStopped`'s honesty
+    /// rule, per tab. A reap or teardown failure yields `Error` instead,
+    /// never a false success.
+    TabClosed {
+        req_id: u64,
+    },
+    /// Attach to one of a session's terminals. The requester picks the
+    /// (connection-unique) data channel; the supervisor replays history
+    /// onto it and then streams live output. SPEC.md's one-attachment
+    /// rule is enforced per SESSION across all its terminals, grouped by
+    /// `lease` (PLAN_M4.md item 3): an attach under a different lease
+    /// detaches EVERY channel the previous lease held on this session,
+    /// atomically — all old channels are detached before the new attach
+    /// completes, so no interleaving where both leases hold terminals is
+    /// ever observable. Each detached channel still gets its own
+    /// `Detached` (there is deliberately no session-scoped takeover
+    /// message: the losing client knows its own lease, and back-to-back
+    /// `Detached`s sharing a reason coalesce into one banner client-side
+    /// without any new vocabulary). An attach under the SAME lease
+    /// replaces only the named terminal's channel — an ordinary
+    /// reconnect.
     Attach {
         req_id: u64,
         session_id: String,
         channel: u32,
         cols: u16,
         rows: u16,
+        /// Which of the session's terminals to attach. `#[serde(default)]`
+        /// is the agent terminal, so a request that says nothing means
+        /// what every pre-M4 request meant — see [`TerminalSelector`].
+        #[serde(default)]
+        terminal: TerminalSelector,
+        /// The client identity this attachment belongs to, minted by the
+        /// CLIENT (one per session view instance) — not by the helm,
+        /// because every browser tab multiplexes over the helm's single
+        /// supervisor connection, so connection identity cannot tell
+        /// clients apart (the same fact that put `channel` on `Resize`).
+        /// The supervisor groups a session's terminal channels by this
+        /// value to enforce the session-scoped takeover described above.
+        /// Version-6 clients must mint it high-entropy and non-empty
+        /// (one random id per session-view instance): grouping is by
+        /// bare equality, so a collision would fuse two clients into one
+        /// lease and silently bypass the visible takeover. It is a
+        /// CORRECTNESS mechanism, not an authentication boundary —
+        /// anything that can speak this protocol already runs as the
+        /// user (the unix socket is the auth boundary), so guessing a
+        /// lease grants nothing an attacker did not have.
+        /// `#[serde(default)]` (empty) preserves the pre-M4 reading: an
+        /// un-leased attach is its own one-terminal client, so it both
+        /// takes over everything and is taken over by anything — exactly
+        /// the single-terminal semantics every older caller expects.
+        #[serde(default)]
+        lease: String,
     },
     /// Attach accepted. Data frames on `channel` may arrive *before* this
     /// reply is processed — the supervisor starts the replay as soon as
@@ -961,6 +1207,126 @@ pub enum ControlMsg {
     ///
     ResumeOutput {
         channel: u32,
+    },
+    /// Start an attachment upload into a session's attachments directory
+    /// (PLAN_M4.md items 1 and 4). The requester picks a
+    /// connection-unique data channel — `Attach`'s convention, but the
+    /// bytes flow the OTHER way (client toward supervisor), and the
+    /// ordering contract is simpler than `Attach`'s
+    /// register-before-request rule because nothing can arrive early
+    /// here: choose an unused non-zero channel, send this, wait for
+    /// `UploadStarted`, and only then send chunks. `filename` is a
+    /// proposal: the supervisor reduces it to a shell-safe basename,
+    /// generates a fallback name when nothing survives sanitizing — an
+    /// empty proposal, or one that reduces to nothing or to the reserved
+    /// path components `.` and `..`, is NEVER a refusal, because SPEC.md
+    /// rejects only directories, not files for their names — and
+    /// resolves collisions; only `UploadCommitted` says what path
+    /// actually published. `size` is a declaration the commit verifies
+    /// byte-for-byte — a mismatch publishes nothing. What DOES refuse a
+    /// begin: an unknown session, channel 0 (the control channel), a
+    /// channel already in use, and the receiver's admission bound — an
+    /// implementation may cap concurrent uploads per connection, and a
+    /// begin past that cap is an ordinary correlated `Error`, which
+    /// bounds aggregate temp files and window memory the way
+    /// [`UPLOAD_WINDOW_BYTES`] bounds a single transfer.
+    BeginUpload {
+        req_id: u64,
+        session_id: String,
+        channel: u32,
+        filename: String,
+        size: u64,
+    },
+    /// Upload accepted: data frames may flow on `channel`, in chunks of
+    /// at most [`UPLOAD_CHUNK_BYTES`], subject to the credit window.
+    /// This reply IS the initial credit — it grants
+    /// [`UPLOAD_WINDOW_BYTES`] from a cumulative baseline of zero, so
+    /// the sender never waits for a first ack that the receiver is
+    /// waiting to send until data arrives (the deadlock an implicit
+    /// baseline would invite). A refused begin (see `BeginUpload` for
+    /// the refusal set — filenames are never in it) is `Error`, and
+    /// nothing was created on disk.
+    UploadStarted {
+        req_id: u64,
+        channel: u32,
+    },
+    /// Unsolicited receiver progress: `received` is the CUMULATIVE byte
+    /// count safely written so far on `channel`. Two jobs in one message
+    /// (PLAN_M4.md items 1 and 4): it extends the sender's credit window,
+    /// and it is the per-hop progress evidence the stall detection
+    /// watches — a window that stays open with no advancing ack is
+    /// exactly what "stopped making progress" means. Both jobs put
+    /// obligations on the receiver's cadence: acks must advance
+    /// promptly as bytes are written (per chunk, or batched no coarser
+    /// than a fraction of the window) and must not queue behind bulk
+    /// frames, or a healthy transfer stalls on credit and a healthy
+    /// receiver gets declared stalled by the sender's own timeout.
+    /// Validity is part of the contract, not left to good faith:
+    /// `received` is monotonic, never exceeds the bytes actually sent,
+    /// and never exceeds `BeginUpload`'s declared `size` — a violating
+    /// ack is a protocol error the sender answers by aborting the
+    /// transfer, and window arithmetic is checked so no ack value can
+    /// overflow it.
+    UploadAck {
+        channel: u32,
+        received: u64,
+    },
+    /// All bytes sent; publish the file. The supervisor verifies the
+    /// received count against `BeginUpload`'s declared `size`, fsyncs,
+    /// and renames into place (item 4's atomicity tier), replying
+    /// `UploadCommitted` only for a file that actually published. Every
+    /// failure AT commit — size mismatch, a rename or fsync error, the
+    /// session's deletion winning the race — is a correlated `Error`,
+    /// and the temp is cleaned; a torn or partial file is never
+    /// observable at the published path. Failures BEFORE commit are not
+    /// this message's to report: they already tore the channel down as
+    /// `UploadAborted`, and a commit naming a channel that no longer
+    /// carries an upload is itself an `Error`.
+    CommitUpload {
+        req_id: u64,
+        channel: u32,
+    },
+    /// The upload published. `path` is the RAW absolute host-side path —
+    /// UTF-8 by the module-level path contract (a non-UTF-8 publish path
+    /// fails the commit, never lossy-converts), but otherwise
+    /// unescaped: the FILENAME component is shell-safe by item 4's
+    /// sanitizing, while the parent directory is whatever the state dir
+    /// is, spaces and all. How it enters the terminal (the text-paste
+    /// code path, and any insertion-time escaping) is the client's
+    /// contract, decided where insertion lives (PLAN_M4.md item 7) —
+    /// this field just promises the true path, exactly as the
+    /// filesystem knows it.
+    UploadCommitted {
+        req_id: u64,
+        path: String,
+    },
+    /// Abandon an upload. Fire-and-forget and idempotent like `Detach`,
+    /// and for the same reason: a client tearing down (a cancelled drop,
+    /// a closed view) must never have to reason about who won a race
+    /// against a concurrent abort or completion. The receiver drops the
+    /// channel and cleans the temp file.
+    AbortUpload {
+        channel: u32,
+    },
+    /// Unsolicited: the receiver gave up on this upload. This is the
+    /// outcome for EVERY post-start receiver-side failure — the stall
+    /// timeout ([`UPLOAD_ABORT_REASON_STALLED`]), the session deleted
+    /// mid-transfer, a storage or write error while streaming, an
+    /// oversized or otherwise invalid chunk — because once
+    /// `UploadStarted` answered the begin, no pending `req_id` exists
+    /// for an `Error` to correlate with, and `channel` is the only
+    /// identity that can name one of several concurrent transfers.
+    /// `Detached`'s shape and philosophy, including deliberately NO
+    /// `ErrorKind` field: `reason` is a small open-ended set of
+    /// user-legible strings the client renders verbatim in its
+    /// upload-failure surface, never a coded enum it branches on — every
+    /// abort means the same thing to a client (show the reason, insert
+    /// nothing), so a classification would be dead weight on the wire.
+    /// The temp file is already cleaned by the time this is sent;
+    /// nothing published.
+    UploadAborted {
+        channel: u32,
+        reason: String,
     },
     /// A request failed, or (with `req_id` 0) something went wrong that no
     /// request is waiting on. `message` is meant for the user verbatim —
@@ -1108,7 +1474,14 @@ mod tests {
 
     /// The JSON control encoding is part of the wire contract (a different
     /// serde representation is a protocol change even if the Rust types
-    /// compile), so pin one message's exact JSON.
+    /// compile), so pin one message's exact JSON. `terminal`/`lease`
+    /// (PLAN_M4.md item 1) are `#[serde(default)]` but — like every other
+    /// defaulted field in this file (see
+    /// `session_info_annotation_and_restart_offer_json_shapes_are_pinned`)
+    /// — still serialize on every encode, so this default-valued case
+    /// (agent terminal, empty lease) belongs here rather than only in
+    /// `attach_terminal_selector_and_lease_json_shapes_are_pinned` below,
+    /// which covers the non-default values.
     #[test]
     fn control_json_shape_is_pinned() {
         let msg = ControlMsg::Attach {
@@ -1117,6 +1490,8 @@ mod tests {
             channel: 9,
             cols: 80,
             rows: 24,
+            terminal: TerminalSelector::default(),
+            lease: String::new(),
         };
         let json = serde_json::to_value(&msg).unwrap();
         assert_eq!(
@@ -1128,8 +1503,159 @@ mod tests {
                 "channel": 9,
                 "cols": 80,
                 "rows": 24,
+                "terminal": { "kind": "agent" },
+                "lease": "",
             })
         );
+    }
+
+    /// PLAN_M4.md item 1's `terminal`/`lease` additions to `Attach`, golden-
+    /// pinned with non-default values for both `TerminalSelector` shapes —
+    /// the sibling test above only exercises the default (agent, empty
+    /// lease) case. A (message, expected JSON) table rather than two
+    /// separately-named locals with their own assertion blocks, since the
+    /// two cases differ only in the `terminal` value. Checked in both
+    /// directions (`to_value` then `from_value` on the real type) since
+    /// these are the two new fields this PR actually adds meaning to,
+    /// unlike the rest of `Attach`.
+    #[test]
+    fn attach_terminal_selector_and_lease_json_shapes_are_pinned() {
+        for (msg, expected) in [
+            (
+                ControlMsg::Attach {
+                    req_id: 10,
+                    session_id: "s1".into(),
+                    channel: 1,
+                    cols: 80,
+                    rows: 24,
+                    terminal: TerminalSelector::Agent,
+                    lease: "client-abc".into(),
+                },
+                serde_json::json!({
+                    "type": "attach",
+                    "req_id": 10,
+                    "session_id": "s1",
+                    "channel": 1,
+                    "cols": 80,
+                    "rows": 24,
+                    "terminal": { "kind": "agent" },
+                    "lease": "client-abc",
+                }),
+            ),
+            (
+                ControlMsg::Attach {
+                    req_id: 11,
+                    session_id: "s1".into(),
+                    channel: 2,
+                    cols: 80,
+                    rows: 24,
+                    terminal: TerminalSelector::Tab { id: "t1".into() },
+                    lease: "client-abc".into(),
+                },
+                serde_json::json!({
+                    "type": "attach",
+                    "req_id": 11,
+                    "session_id": "s1",
+                    "channel": 2,
+                    "cols": 80,
+                    "rows": 24,
+                    "terminal": { "kind": "tab", "id": "t1" },
+                    "lease": "client-abc",
+                }),
+            ),
+        ] {
+            let json = serde_json::to_value(&msg).unwrap();
+            assert_eq!(json, expected);
+            assert_eq!(serde_json::from_value::<ControlMsg>(json).unwrap(), msg);
+        }
+    }
+
+    /// The reverse direction of the two tests above: JSON shaped exactly
+    /// as every pre-M4 (version 5) `Attach` request always was — no
+    /// `terminal`, no `lease` key at all — must still decode, defaulting
+    /// to `TerminalSelector::Agent` and an empty lease. This is what keeps
+    /// `Attach`'s pre-M4 meaning ("attach my one implicit terminal, own
+    /// everything") alive for any caller that predates the selector,
+    /// mirroring `restart_session_stop_if_running_defaults_false_when_absent`'s
+    /// treatment of an older field whose absence must resolve to a
+    /// specific, safe default rather than an arbitrary one.
+    #[test]
+    fn bare_legacy_attach_json_decodes_to_agent_terminal_and_empty_lease() {
+        let old_shape = serde_json::json!({
+            "type": "attach",
+            "req_id": 5,
+            "session_id": "s1",
+            "channel": 3,
+            "cols": 80,
+            "rows": 24,
+        });
+        let decoded: ControlMsg = serde_json::from_value(old_shape).unwrap();
+        let ControlMsg::Attach {
+            terminal, lease, ..
+        } = decoded
+        else {
+            panic!("expected ControlMsg::Attach, got {decoded:?}");
+        };
+        assert_eq!(terminal, TerminalSelector::Agent);
+        assert_eq!(lease, "");
+    }
+
+    /// The REVERSE tolerance direction from the two tests above
+    /// (mirroring `new_session_list_json_decodes_under_a_legacy_pre_status_decoder`):
+    /// a hand-rolled decoder shaped like a genuine pre-M4 (version 5)
+    /// peer — no `terminal`, no `lease` field at all — must still decode
+    /// a CURRENT sender's `Attach` JSON, silently dropping the two fields
+    /// it predates. `terminal` is deliberately set to the NON-default
+    /// `Tab` selector with a non-empty `lease` here, unlike
+    /// `control_json_shape_is_pinned`'s all-defaults case above, so this
+    /// pins that a legacy peer tolerates losing real information, not
+    /// just a default it would have reconstructed anyway.
+    #[derive(Debug, Deserialize)]
+    #[serde(tag = "type", rename_all = "snake_case")]
+    enum LegacyV5ControlMsg {
+        Attach {
+            req_id: u64,
+            session_id: String,
+            channel: u32,
+            cols: u16,
+            rows: u16,
+        },
+    }
+
+    #[test]
+    fn new_attach_json_decodes_under_a_legacy_pre_terminal_selector_decoder() {
+        let new_msg = ControlMsg::Attach {
+            req_id: 12,
+            session_id: "s1".to_string(),
+            channel: 4,
+            cols: 80,
+            rows: 24,
+            terminal: TerminalSelector::Tab {
+                id: "t1".to_string(),
+            },
+            lease: "client-xyz".to_string(),
+        };
+        let json = serde_json::to_value(&new_msg).unwrap();
+
+        let LegacyV5ControlMsg::Attach {
+            req_id,
+            session_id,
+            channel,
+            cols,
+            rows,
+        } = serde_json::from_value(json.clone()).expect(
+            "a legacy (pre-M4, version 5) decoder without terminal/lease must still decode \
+             new-shape JSON",
+        );
+        assert_eq!(req_id, 12);
+        assert_eq!(session_id, "s1");
+        assert_eq!(channel, 4);
+        assert_eq!((cols, rows), (80, 24));
+
+        // The REAL type round-trips the same JSON too, same as every
+        // sibling test of this shape does.
+        let real_decoded: ControlMsg = serde_json::from_value(json).unwrap();
+        assert_eq!(real_decoded, new_msg);
     }
 
     /// `ControlMsg::Error`'s `kind` field is the thing `PROTOCOL_VERSION`
@@ -1166,14 +1692,14 @@ mod tests {
     }
 
     /// `PROTOCOL_VERSION` is a load-bearing constant (see the const's own
-    /// docs for the M2 bump to 3, the M2.5 bump to 4, and the M3 bump to
-    /// 5): pinning its value here makes an accidental re-bump (or a
-    /// forgotten one, if a later change needed it) a loud test failure
-    /// rather than a silent drift discovered only by two builds refusing
-    /// to talk to each other.
+    /// docs for the M2 bump to 3, the M2.5 bump to 4, the M3 bump to 5,
+    /// and the M4 bump to 6): pinning its value here makes an accidental
+    /// re-bump (or a forgotten one, if a later change needed it) a loud
+    /// test failure rather than a silent drift discovered only by two
+    /// builds refusing to talk to each other.
     #[test]
-    fn protocol_version_is_pinned_at_5() {
-        assert_eq!(PROTOCOL_VERSION, 5);
+    fn protocol_version_is_pinned_at_6() {
+        assert_eq!(PROTOCOL_VERSION, 6);
     }
 
     /// Pins the decode half of the failure PLAN_M2_5.md's version bump
@@ -1473,7 +1999,7 @@ mod tests {
     /// `unknown_control_message_tag_fails_decode` pins the same failure
     /// one level up for `ControlMsg` tags. Nothing before this test
     /// actually checked that a v4 decoder rejects these; every other
-    /// `SessionStatus` test in this file decodes through the CURRENT (v5)
+    /// `SessionStatus` test in this file decodes through the CURRENT (v6)
     /// types, which trivially accept their own variants.
     #[derive(Debug, Deserialize)]
     #[serde(tag = "state", rename_all = "snake_case")]
@@ -1641,6 +2167,7 @@ mod tests {
                 status: SessionStatus::Exited { exit_code: Some(1) },
                 annotation: None,
                 restart_offer: RestartOffer::default(),
+                tabs: Vec::new(),
             }],
             total: 3,
             truncated: true,
@@ -1675,7 +2202,12 @@ mod tests {
     /// serde's own built-in `Option` handling (see that field's doc
     /// comment). Pinning both the present and absent shapes catches a
     /// rename or a dropped default independently of the round-trip tests
-    /// elsewhere in this file.
+    /// elsewhere in this file. `tabs` (PLAN_M4.md item 2, additive within
+    /// 5's successor version 6 the same way) rides along in the absent-
+    /// shape half below rather than earning its own test, since its
+    /// present-shape golden (with actual `TabInfo` entries) is more
+    /// informative pinned separately in
+    /// `session_info_tabs_json_shape_is_pinned`.
     #[test]
     fn session_info_annotation_and_restart_offer_json_shapes_are_pinned() {
         let bare = SessionInfo {
@@ -1686,6 +2218,7 @@ mod tests {
             status: SessionStatus::default(),
             annotation: None,
             restart_offer: RestartOffer::default(),
+            tabs: Vec::new(),
         };
         assert_eq!(
             serde_json::to_value(&bare).unwrap(),
@@ -1697,6 +2230,7 @@ mod tests {
                 "status": { "state": "unknown" },
                 "annotation": null,
                 "restart_offer": "fresh_only",
+                "tabs": [],
             })
         );
 
@@ -1715,18 +2249,18 @@ mod tests {
             serde_json::json!("resume")
         );
 
-        // JSON shaped as if these two fields had not been added YET —
-        // no `annotation`, no `restart_offer` at all — must still decode,
-        // defaulting both. This is intra-version-5 additive discipline,
-        // not real cross-build interop: an actual pre-M3 (v4) peer is
-        // refused outright at the handshake (see `PROTOCOL_VERSION`'s own
-        // docs) and never reaches this decode path at all. What this
-        // pins is the same guarantee `status` needed when THAT field was
-        // added within v3 (see
+        // JSON shaped as if none of `annotation`, `restart_offer`, or
+        // `tabs` had been added YET — must still decode, defaulting all
+        // three. This is intra-version additive discipline, not real
+        // cross-build interop: an actual pre-M3 (v4) peer is refused
+        // outright at the handshake (see `PROTOCOL_VERSION`'s own docs)
+        // and never reaches this decode path at all — `tabs` predates no
+        // real peer either, since it shipped in the same version 6 bump
+        // as every other M4 addition, but pinning it here keeps the same
+        // "additive within one version" guarantee `status` needed when
+        // THAT field was added within v3 (see
         // `old_shape_session_list_json_decodes_with_defaulted_new_fields`
-        // above) — that a later field addition inside one version stays
-        // safe for any JSON that predates it, whatever the reason a given
-        // sender's JSON might lack it.
+        // above) explicit for every field this struct has ever grown.
         let old_shape = serde_json::json!({
             "id": "s1",
             "title": "demo",
@@ -1737,6 +2271,45 @@ mod tests {
         let decoded: SessionInfo = serde_json::from_value(old_shape).unwrap();
         assert_eq!(decoded.annotation, None);
         assert_eq!(decoded.restart_offer, RestartOffer::FreshOnly);
+        assert_eq!(
+            decoded.tabs,
+            Vec::new(),
+            "a sender that predates tabs must decode to \"none known\", not an error"
+        );
+    }
+
+    /// PLAN_M4.md item 2's `SessionInfo::tabs` addition, golden-pinned
+    /// with tabs actually present — the sibling test above only pins the
+    /// empty-tabs case alongside `annotation`/`restart_offer`. `TabInfo`'s
+    /// own wire shape (a bare `{"id": "..."}`, no `kind` tag, unlike
+    /// `TerminalSelector`) is pinned here with a LIST of them; it also
+    /// appears as a single value nested in `ControlMsg::TabOpened`, which
+    /// `tab_open_and_close_json_shapes_are_pinned` pins separately — no
+    /// standalone `TabInfo`-only test exists because both call sites
+    /// already golden-pin its shape.
+    #[test]
+    fn session_info_tabs_json_shape_is_pinned() {
+        let info = SessionInfo {
+            id: "s1".to_string(),
+            title: "demo".to_string(),
+            cwd: "/tmp".to_string(),
+            invocation: "agent".to_string(),
+            status: SessionStatus::Alive,
+            annotation: None,
+            restart_offer: RestartOffer::default(),
+            tabs: vec![
+                TabInfo {
+                    id: "t1".to_string(),
+                },
+                TabInfo {
+                    id: "t2".to_string(),
+                },
+            ],
+        };
+        assert_eq!(
+            serde_json::to_value(&info).unwrap()["tabs"],
+            serde_json::json!([{"id": "t1"}, {"id": "t2"}])
+        );
     }
 
     /// PLAN_M3 review batch item 23: a future field appearing INSIDE a
@@ -1785,71 +2358,242 @@ mod tests {
         assert_eq!(sessions[0].status, SessionStatus::Alive);
     }
 
-    /// `AgentKind`, `RestartOffer`, and `RestartMode` are bare snake_case
-    /// strings (see their doc comments for why, unlike `SessionStatus`),
-    /// golden-pinned per variant below so a rename or `rename_all` change
-    /// fails loudly instead of passing a round-trip test while quietly
-    /// breaking an unmodified peer.
-    ///
-    /// The exhaustive matches at the top are the actual mechanism that
-    /// catches a future variant this test forgets: a golden assertion
-    /// alone would stay green if someone added a variant and simply never
-    /// came back here, since nothing about `assert_eq!` on the variants
-    /// THIS test already knows about would notice. Each `match` has no
-    /// wildcard arm, so a new variant on any of these three enums fails
-    /// THIS FILE to compile until it is added to both the match and a
-    /// golden assertion below — the earlier version of this doc comment
-    /// claimed the golden assertions alone gave this protection, which
-    /// was not true (a genuinely exhaustive check requires exactly this
-    /// kind of construct, not more `assert_eq!` calls).
+    /// PLAN_M4.md item 1's `TerminalSelector` is itself a nested object
+    /// (tagged `kind`), so it needs the same nesting-depth additivity
+    /// proof `session_list_with_unknown_field_inside_session_decodes_through_parse_control`
+    /// gives `SessionInfo` above: a future field appearing inside the
+    /// `terminal` object must still decode through the REAL
+    /// `parse_control` path, not just a hand-rolled
+    /// `serde_json::from_value::<TerminalSelector>`.
     #[test]
-    fn agent_kind_and_restart_vocabulary_json_shapes_are_pinned() {
-        match AgentKind::Claude {
-            AgentKind::Claude | AgentKind::Codex | AgentKind::Generic => {}
-        }
-        match RestartOffer::FreshOnly {
-            RestartOffer::FreshOnly | RestartOffer::Resume | RestartOffer::FallbackTemplate => {}
-        }
-        match RestartMode::Resume {
-            RestartMode::Resume | RestartMode::Fresh | RestartMode::FallbackTemplate => {}
+    fn attach_with_unknown_field_inside_terminal_selector_decodes_through_parse_control() {
+        let frame = Frame {
+            kind: FrameKind::Control,
+            channel: 0,
+            body: serde_json::json!({
+                "type": "attach",
+                "req_id": 13,
+                "session_id": "s1",
+                "channel": 5,
+                "cols": 80,
+                "rows": 24,
+                "terminal": {
+                    "kind": "tab",
+                    "id": "t1",
+                    "future_field_inside_selector": "value from tomorrow",
+                },
+                "lease": "client-abc",
+            })
+            .to_string()
+            .into_bytes(),
+        };
+        let msg = crate::io::parse_control(&frame).expect(
+            "an unknown field nested inside a TerminalSelector object must decode, not error",
+        );
+        let ControlMsg::Attach { terminal, .. } = msg else {
+            panic!("expected ControlMsg::Attach, got {msg:?}");
+        };
+        assert_eq!(
+            terminal,
+            TerminalSelector::Tab {
+                id: "t1".to_string()
+            }
+        );
+    }
+
+    /// The `TabInfo` sibling of the two nesting-additivity tests above:
+    /// a future field inside a `TabInfo` object (here, the one
+    /// `TabOpened` carries) must still decode through `parse_control`,
+    /// keeping the tab id intact.
+    #[test]
+    fn tab_opened_with_unknown_field_inside_tab_info_decodes_through_parse_control() {
+        let frame = Frame {
+            kind: FrameKind::Control,
+            channel: 0,
+            body: serde_json::json!({
+                "type": "tab_opened",
+                "req_id": 20,
+                "tab": {
+                    "id": "t1",
+                    "future_field_inside_tab_info": "value from tomorrow",
+                },
+            })
+            .to_string()
+            .into_bytes(),
+        };
+        let msg = crate::io::parse_control(&frame)
+            .expect("an unknown field nested inside a TabInfo object must decode, not error");
+        let ControlMsg::TabOpened { tab, .. } = msg else {
+            panic!("expected ControlMsg::TabOpened, got {msg:?}");
+        };
+        assert_eq!(tab.id, "t1");
+    }
+
+    /// Unlike an unknown FIELD (tolerated at every nesting level pinned
+    /// above), an unrecognized `TerminalSelector` `kind` tag is decode-
+    /// fatal — the internally-tagged-enum analogue of
+    /// `unknown_control_message_tag_fails_decode`. This is what would
+    /// catch a future terminal kind (a shared or observer selector, say)
+    /// shipping without its own protocol bump: today's decoder must
+    /// refuse an unrecognized `kind` outright, never silently default to
+    /// `Agent`, or a real version skew would attach the wrong terminal
+    /// instead of failing loudly.
+    #[test]
+    fn unknown_terminal_selector_kind_fails_decode() {
+        let frame = Frame {
+            kind: FrameKind::Control,
+            channel: 0,
+            body: serde_json::json!({
+                "type": "attach",
+                "req_id": 14,
+                "session_id": "s1",
+                "channel": 6,
+                "cols": 80,
+                "rows": 24,
+                "terminal": { "kind": "holo" },
+            })
+            .to_string()
+            .into_bytes(),
+        };
+        crate::io::parse_control(&frame).expect_err(
+            "an unrecognized TerminalSelector kind must be a decode error, not a tolerated \
+             default",
+        );
+    }
+
+    /// The decode-direction counterpart to `session_info_tabs_json_shape_is_pinned`
+    /// (which only pins the encode side): a `SessionList` frame carrying
+    /// multiple tabs must decode through the REAL `parse_control` path
+    /// with both tab IDENTITY and ORDER intact — order matters because
+    /// `TabInfo`'s own doc comment promises clients derive their
+    /// positional labels ("Terminal 1", "Terminal 2", ...) from list
+    /// order, so a decoder that silently reordered (a `HashSet`-backed
+    /// field, say) would relabel every tab without any field actually
+    /// being wrong.
+    #[test]
+    fn session_list_tabs_decode_in_order_through_parse_control() {
+        let frame = Frame {
+            kind: FrameKind::Control,
+            channel: 0,
+            body: serde_json::json!({
+                "type": "session_list",
+                "req_id": 15,
+                "sessions": [
+                    {
+                        "id": "s1",
+                        "title": "demo",
+                        "cwd": "/tmp",
+                        "invocation": "agent",
+                        "status": { "state": "alive" },
+                        "tabs": [{"id": "t1"}, {"id": "t2"}, {"id": "t3"}],
+                    }
+                ],
+                "total": 1,
+                "truncated": false,
+            })
+            .to_string()
+            .into_bytes(),
+        };
+        let msg = crate::io::parse_control(&frame).expect("a SessionInfo with tabs must decode");
+        let ControlMsg::SessionList { sessions, .. } = msg else {
+            panic!("expected ControlMsg::SessionList, got {msg:?}");
+        };
+        assert_eq!(
+            sessions[0].tabs,
+            vec![
+                TabInfo {
+                    id: "t1".to_string()
+                },
+                TabInfo {
+                    id: "t2".to_string()
+                },
+                TabInfo {
+                    id: "t3".to_string()
+                },
+            ],
+            "tab identity and creation order must both survive the wire"
+        );
+    }
+
+    /// `AgentKind`, `RestartOffer`, and `RestartMode` are bare snake_case
+    /// strings (see their doc comments for why, unlike `SessionStatus`);
+    /// `TerminalSelector` (PLAN_M4.md item 1) is internally tagged instead
+    /// (see its own doc comment for why — `Tab` carries an id) but is
+    /// exactly the same kind of small, closed wire vocabulary, so it gets
+    /// the same golden-per-variant treatment here rather than a fourth
+    /// near-duplicate test.
+    ///
+    /// Each enum below is checked by a `match` with no wildcard arm whose
+    /// arms ARE the golden assertions, not a separate exhaustive match
+    /// paired with a separate `assert_eq!` list. That used to be two
+    /// artifacts (an early version of this test, and this comment, both
+    /// claimed the pairing was itself exhaustive proof): compilation only
+    /// forces a new variant into the bare top-of-test match, which an
+    /// empty `{}` arm satisfies with no golden value attached anywhere,
+    /// so a variant could be "covered" there while its JSON shape was
+    /// simply never pinned. Collapsing the two into one match per enum
+    /// closes that gap the only way the type system can: the compiler
+    /// still only forces an arm to exist for a new variant, but that arm
+    /// is now the one place this test would ever assert its shape, so
+    /// there is no separate golden list left to forget populating.
+    #[test]
+    fn agent_kind_restart_and_terminal_selector_vocabulary_json_shapes_are_pinned() {
+        for kind in [AgentKind::Claude, AgentKind::Codex, AgentKind::Generic] {
+            let expected = match kind {
+                AgentKind::Claude => "claude",
+                AgentKind::Codex => "codex",
+                AgentKind::Generic => "generic",
+            };
+            assert_eq!(
+                serde_json::to_value(kind).unwrap(),
+                serde_json::json!(expected)
+            );
         }
 
-        assert_eq!(
-            serde_json::to_value(AgentKind::Claude).unwrap(),
-            serde_json::json!("claude")
-        );
-        assert_eq!(
-            serde_json::to_value(AgentKind::Codex).unwrap(),
-            serde_json::json!("codex")
-        );
-        assert_eq!(
-            serde_json::to_value(AgentKind::Generic).unwrap(),
-            serde_json::json!("generic")
-        );
-        assert_eq!(
-            serde_json::to_value(RestartOffer::FreshOnly).unwrap(),
-            serde_json::json!("fresh_only")
-        );
-        assert_eq!(
-            serde_json::to_value(RestartOffer::Resume).unwrap(),
-            serde_json::json!("resume")
-        );
-        assert_eq!(
-            serde_json::to_value(RestartOffer::FallbackTemplate).unwrap(),
-            serde_json::json!("fallback_template")
-        );
-        assert_eq!(
-            serde_json::to_value(RestartMode::Resume).unwrap(),
-            serde_json::json!("resume")
-        );
-        assert_eq!(
-            serde_json::to_value(RestartMode::Fresh).unwrap(),
-            serde_json::json!("fresh")
-        );
-        assert_eq!(
-            serde_json::to_value(RestartMode::FallbackTemplate).unwrap(),
-            serde_json::json!("fallback_template")
-        );
+        for offer in [
+            RestartOffer::FreshOnly,
+            RestartOffer::Resume,
+            RestartOffer::FallbackTemplate,
+        ] {
+            let expected = match offer {
+                RestartOffer::FreshOnly => "fresh_only",
+                RestartOffer::Resume => "resume",
+                RestartOffer::FallbackTemplate => "fallback_template",
+            };
+            assert_eq!(
+                serde_json::to_value(offer).unwrap(),
+                serde_json::json!(expected)
+            );
+        }
+
+        for mode in [
+            RestartMode::Resume,
+            RestartMode::Fresh,
+            RestartMode::FallbackTemplate,
+        ] {
+            let expected = match mode {
+                RestartMode::Resume => "resume",
+                RestartMode::Fresh => "fresh",
+                RestartMode::FallbackTemplate => "fallback_template",
+            };
+            assert_eq!(
+                serde_json::to_value(mode).unwrap(),
+                serde_json::json!(expected)
+            );
+        }
+
+        for selector in [
+            TerminalSelector::Agent,
+            TerminalSelector::Tab {
+                id: "t1".to_string(),
+            },
+        ] {
+            let expected = match &selector {
+                TerminalSelector::Agent => serde_json::json!({"kind": "agent"}),
+                TerminalSelector::Tab { id } => serde_json::json!({"kind": "tab", "id": id}),
+            };
+            assert_eq!(serde_json::to_value(&selector).unwrap(), expected);
+        }
     }
 
     /// `CreateSession`'s three PLAN_M3.md additions (`intent_key`,
@@ -2037,6 +2781,7 @@ mod tests {
                 status: SessionStatus::Alive,
                 annotation: None,
                 restart_offer: RestartOffer::Resume,
+                tabs: Vec::new(),
             },
         };
         let mut wire = Vec::new();
@@ -2124,6 +2869,7 @@ mod tests {
                 status: SessionStatus::Alive,
                 annotation: None,
                 restart_offer: RestartOffer::Resume,
+                tabs: Vec::new(),
             },
         };
         assert_eq!(
@@ -2139,6 +2885,7 @@ mod tests {
                     "status": { "state": "alive" },
                     "annotation": null,
                     "restart_offer": "resume",
+                    "tabs": [],
                 },
             })
         );
@@ -2173,6 +2920,343 @@ mod tests {
                 mode: RestartMode::Fresh,
                 stop_if_running: false,
             }
+        );
+    }
+
+    /// `OpenTab`/`TabOpened` and `CloseTab`/`TabClosed` are PLAN_M4.md item
+    /// 1's tab-lifecycle wire additions, golden-pinned the same way
+    /// `stop_and_delete_json_shapes_are_pinned` pins the M2 session-
+    /// lifecycle pair: a serde attribute drift here would compile and
+    /// round-trip clean while quietly producing bytes an unmodified peer
+    /// cannot parse. A (message, expected JSON) table rather than four
+    /// separately-named locals, since each is the identical
+    /// construct-then-assert shape.
+    #[test]
+    fn tab_open_and_close_json_shapes_are_pinned() {
+        for (msg, expected) in [
+            (
+                ControlMsg::OpenTab {
+                    req_id: 20,
+                    session_id: "s1".to_string(),
+                },
+                serde_json::json!({
+                    "type": "open_tab",
+                    "req_id": 20,
+                    "session_id": "s1",
+                }),
+            ),
+            (
+                ControlMsg::TabOpened {
+                    req_id: 20,
+                    tab: TabInfo {
+                        id: "t1".to_string(),
+                    },
+                },
+                serde_json::json!({
+                    "type": "tab_opened",
+                    "req_id": 20,
+                    "tab": { "id": "t1" },
+                }),
+            ),
+            (
+                ControlMsg::CloseTab {
+                    req_id: 21,
+                    session_id: "s1".to_string(),
+                    tab_id: "t1".to_string(),
+                },
+                serde_json::json!({
+                    "type": "close_tab",
+                    "req_id": 21,
+                    "session_id": "s1",
+                    "tab_id": "t1",
+                }),
+            ),
+            (
+                ControlMsg::TabClosed { req_id: 21 },
+                serde_json::json!({
+                    "type": "tab_closed",
+                    "req_id": 21,
+                }),
+            ),
+        ] {
+            assert_eq!(serde_json::to_value(&msg).unwrap(), expected);
+        }
+    }
+
+    /// Round-trip every tab-lifecycle variant through the real
+    /// encode/decode path (not just `serde_json::to_value`), matching how
+    /// `stop_and_delete_roundtrip_through_frames` exercises the M2
+    /// session-lifecycle pair — this is what would catch a drift between
+    /// the codec's framing and serde's JSON shape, which the pure-JSON
+    /// test just above cannot see.
+    #[test]
+    fn tab_open_and_close_roundtrip_through_frames() {
+        for msg in [
+            ControlMsg::OpenTab {
+                req_id: 1,
+                session_id: "s1".to_string(),
+            },
+            ControlMsg::TabOpened {
+                req_id: 1,
+                tab: TabInfo {
+                    id: "t1".to_string(),
+                },
+            },
+            ControlMsg::CloseTab {
+                req_id: 2,
+                session_id: "s1".to_string(),
+                tab_id: "t1".to_string(),
+            },
+            ControlMsg::TabClosed { req_id: 2 },
+        ] {
+            let mut wire = Vec::new();
+            Frame::control(&msg).encode(&mut wire).unwrap();
+            let (frame, used) = Frame::decode(&wire).unwrap().unwrap();
+            assert_eq!(used, wire.len());
+            assert_eq!(
+                serde_json::from_slice::<ControlMsg>(&frame.body).unwrap(),
+                msg
+            );
+        }
+    }
+
+    /// The full attachment-upload control vocabulary (PLAN_M4.md items 1
+    /// and 4), golden-pinned the same way the tab-lifecycle pair above
+    /// is: every variant's exact JSON shape, since a serde attribute
+    /// drift on any one of them would compile and round-trip cleanly
+    /// while quietly producing bytes an unmodified peer cannot parse. A
+    /// (message, expected JSON) table rather than seven separately-named
+    /// locals, since each is the identical construct-then-assert shape.
+    /// `UploadAborted`'s `reason` uses [`UPLOAD_ABORT_REASON_STALLED`]
+    /// itself rather than a hand-typed string, but the expected JSON below
+    /// still spells the string out literally (mirroring
+    /// `stall_detach_reason_json_shape_is_pinned`'s treatment of
+    /// `DETACH_REASON_STALLED`) so an accidental edit to the constant
+    /// fails this test instead of silently changing what ships.
+    #[test]
+    fn upload_control_json_shapes_are_pinned() {
+        for (msg, expected) in [
+            (
+                ControlMsg::BeginUpload {
+                    req_id: 30,
+                    session_id: "s1".to_string(),
+                    channel: 5,
+                    filename: "screenshot.png".to_string(),
+                    size: 12345,
+                },
+                serde_json::json!({
+                    "type": "begin_upload",
+                    "req_id": 30,
+                    "session_id": "s1",
+                    "channel": 5,
+                    "filename": "screenshot.png",
+                    "size": 12345,
+                }),
+            ),
+            (
+                ControlMsg::UploadStarted {
+                    req_id: 30,
+                    channel: 5,
+                },
+                serde_json::json!({
+                    "type": "upload_started",
+                    "req_id": 30,
+                    "channel": 5,
+                }),
+            ),
+            (
+                ControlMsg::UploadAck {
+                    channel: 5,
+                    received: 4096,
+                },
+                serde_json::json!({
+                    "type": "upload_ack",
+                    "channel": 5,
+                    "received": 4096,
+                }),
+            ),
+            (
+                ControlMsg::CommitUpload {
+                    req_id: 31,
+                    channel: 5,
+                },
+                serde_json::json!({
+                    "type": "commit_upload",
+                    "req_id": 31,
+                    "channel": 5,
+                }),
+            ),
+            (
+                ControlMsg::UploadCommitted {
+                    req_id: 31,
+                    path: "/data/sessions/s1/attachments/screenshot.png".to_string(),
+                },
+                serde_json::json!({
+                    "type": "upload_committed",
+                    "req_id": 31,
+                    "path": "/data/sessions/s1/attachments/screenshot.png",
+                }),
+            ),
+            (
+                ControlMsg::AbortUpload { channel: 5 },
+                serde_json::json!({
+                    "type": "abort_upload",
+                    "channel": 5,
+                }),
+            ),
+            (
+                ControlMsg::UploadAborted {
+                    channel: 5,
+                    reason: UPLOAD_ABORT_REASON_STALLED.to_string(),
+                },
+                serde_json::json!({
+                    "type": "upload_aborted",
+                    "channel": 5,
+                    "reason": "transfer stopped making progress (stalled)",
+                }),
+            ),
+        ] {
+            assert_eq!(serde_json::to_value(&msg).unwrap(), expected);
+        }
+    }
+
+    /// Round-trip every upload variant through the real encode/decode
+    /// path, matching `tab_open_and_close_roundtrip_through_frames`'s
+    /// treatment of the tab-lifecycle pair — the deserialize-direction
+    /// half of the golden test above.
+    #[test]
+    fn upload_control_roundtrip_through_frames() {
+        for msg in [
+            ControlMsg::BeginUpload {
+                req_id: 1,
+                session_id: "s1".to_string(),
+                channel: 1,
+                filename: "a.txt".to_string(),
+                size: 10,
+            },
+            ControlMsg::UploadStarted {
+                req_id: 1,
+                channel: 1,
+            },
+            ControlMsg::UploadAck {
+                channel: 1,
+                received: 5,
+            },
+            ControlMsg::CommitUpload {
+                req_id: 2,
+                channel: 1,
+            },
+            ControlMsg::UploadCommitted {
+                req_id: 2,
+                path: "/tmp/a.txt".to_string(),
+            },
+            ControlMsg::AbortUpload { channel: 1 },
+            ControlMsg::UploadAborted {
+                channel: 1,
+                reason: UPLOAD_ABORT_REASON_STALLED.to_string(),
+            },
+        ] {
+            let mut wire = Vec::new();
+            Frame::control(&msg).encode(&mut wire).unwrap();
+            let (frame, used) = Frame::decode(&wire).unwrap().unwrap();
+            assert_eq!(used, wire.len());
+            assert_eq!(
+                serde_json::from_slice::<ControlMsg>(&frame.body).unwrap(),
+                msg
+            );
+        }
+    }
+
+    /// `BeginUpload::size` and `UploadAck::received` are `u64` specifically
+    /// so PLAN_M4.md's "no size cap in v1" promise is not secretly bounded
+    /// by a 32-bit wire representation. A value that only fits inside a
+    /// `u64` — here, one past `u32::MAX` — golden-pinned and round-tripped
+    /// through the real frame codec is what would catch an accidental
+    /// narrowing (a serde attribute, or a change to either field's type)
+    /// that silently truncated a multi-gigabyte upload's declared or
+    /// acknowledged size.
+    #[test]
+    fn upload_size_and_received_survive_values_above_u32_max() {
+        let big: u64 = u32::MAX as u64 + 1;
+
+        let begin = ControlMsg::BeginUpload {
+            req_id: 40,
+            session_id: "s1".to_string(),
+            channel: 7,
+            filename: "huge.bin".to_string(),
+            size: big,
+        };
+        assert_eq!(
+            serde_json::to_value(&begin).unwrap()["size"],
+            serde_json::json!(big)
+        );
+        let mut wire = Vec::new();
+        Frame::control(&begin).encode(&mut wire).unwrap();
+        let (frame, used) = Frame::decode(&wire).unwrap().unwrap();
+        assert_eq!(used, wire.len());
+        let ControlMsg::BeginUpload { size, .. } =
+            serde_json::from_slice::<ControlMsg>(&frame.body).unwrap()
+        else {
+            panic!("expected ControlMsg::BeginUpload");
+        };
+        assert_eq!(
+            size, big,
+            "size must survive the wire exactly, not truncate"
+        );
+
+        let ack = ControlMsg::UploadAck {
+            channel: 7,
+            received: big,
+        };
+        assert_eq!(
+            serde_json::to_value(&ack).unwrap()["received"],
+            serde_json::json!(big)
+        );
+        let mut wire = Vec::new();
+        Frame::control(&ack).encode(&mut wire).unwrap();
+        let (frame, used) = Frame::decode(&wire).unwrap().unwrap();
+        assert_eq!(used, wire.len());
+        let ControlMsg::UploadAck { received, .. } =
+            serde_json::from_slice::<ControlMsg>(&frame.body).unwrap()
+        else {
+            panic!("expected ControlMsg::UploadAck");
+        };
+        assert_eq!(
+            received, big,
+            "received must survive the wire exactly, not truncate"
+        );
+    }
+
+    /// PLAN_M4.md item 1's three upload constants, pinned the same way
+    /// `PROTOCOL_VERSION` is above: `UPLOAD_CHUNK_BYTES` and
+    /// `UPLOAD_WINDOW_BYTES` are wire-visible sizing decisions every
+    /// sender's framing math depends on, and `UPLOAD_ABORT_REASON_STALLED`
+    /// is matched verbatim by client UI and by both of its emitters (see
+    /// the constant's own doc comment) — an accidental edit to any of the
+    /// three must fail loudly here rather than drift silently. The
+    /// headroom assertion is the const's own reason to exist: a chunk
+    /// size too close to `MAX_FRAME_LEN` would leave no room for the
+    /// frame header before an upload chunk alone could violate the
+    /// bounded-frame rule. It compares entirely in `usize` and adds the
+    /// 5-byte per-frame header (`kind` plus `channel`, the same
+    /// accounting `frame_size_boundary_accepts_the_maximum_and_rejects_one_more`
+    /// uses) rather than casting `UPLOAD_CHUNK_BYTES` down to `u32` and
+    /// comparing bare byte counts — an earlier version of this test did
+    /// the cast, which would silently truncate and pass for a chunk
+    /// constant large enough to overflow `u32`, and omitted the header,
+    /// which understates how much of a frame a chunk actually occupies.
+    #[test]
+    fn upload_consts_are_pinned() {
+        assert_eq!(UPLOAD_CHUNK_BYTES, 256 * 1024);
+        assert!(
+            UPLOAD_CHUNK_BYTES + 5 < MAX_FRAME_LEN as usize / 2,
+            "a chunk plus its frame header must leave real headroom below MAX_FRAME_LEN, not \
+             just technically fit"
+        );
+        assert_eq!(UPLOAD_WINDOW_BYTES, 4 * 1024 * 1024);
+        assert_eq!(
+            UPLOAD_ABORT_REASON_STALLED,
+            "transfer stopped making progress (stalled)"
         );
     }
 }

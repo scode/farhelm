@@ -11,7 +11,9 @@ use anyhow::{Context, bail};
 use farhelm_proto::io::{
     FrameReader, FrameWriter, ProgressWrite, handshake, parse_control, write_frame_before_stall,
 };
-use farhelm_proto::{AgentKind, ControlMsg, ErrorKind, Frame, FrameKind, RestartMode, SessionInfo};
+use farhelm_proto::{
+    AgentKind, ControlMsg, ErrorKind, Frame, FrameKind, RestartMode, SessionInfo, TerminalSelector,
+};
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -643,6 +645,10 @@ impl SupervisorClient {
                     | ControlMsg::SessionDeleted { req_id, .. }
                     | ControlMsg::SessionRestarted { req_id, .. }
                     | ControlMsg::Attached { req_id, .. }
+                    | ControlMsg::TabOpened { req_id, .. }
+                    | ControlMsg::TabClosed { req_id, .. }
+                    | ControlMsg::UploadStarted { req_id, .. }
+                    | ControlMsg::UploadCommitted { req_id, .. }
                     | ControlMsg::Error { req_id, .. }
                         if *req_id != 0 =>
                     {
@@ -1041,6 +1047,13 @@ impl SupervisorClient {
                     channel,
                     cols,
                     rows,
+                    // Vocabulary only for now: this client has no notion of
+                    // tabs or a per-client lease yet (PLAN_M4.md step 4
+                    // gives the helm that plumbing), so every attach means
+                    // exactly what it meant before M4 — the agent terminal,
+                    // owned by no particular lease.
+                    terminal: TerminalSelector::default(),
+                    lease: String::new(),
                 },
             )
             .await;
@@ -1231,6 +1244,7 @@ mod tests {
             status: farhelm_proto::SessionStatus::Alive,
             annotation: None,
             restart_offer: farhelm_proto::RestartOffer::default(),
+            tabs: Vec::new(),
         }
     }
 
@@ -1956,6 +1970,194 @@ mod tests {
         assert!(matches!(
             reply,
             ControlMsg::SessionRestarted { req_id: 7, session } if session.id == "restarted"
+        ));
+        peer.await.unwrap();
+    }
+
+    /// `TabOpened` must resolve its `OpenTab` request through the demux
+    /// exactly like every other req_id-bearing reply
+    /// (`session_restarted_reply_resolves_the_pending_request` above pins
+    /// the same mechanism for `RestartSession`). PLAN_M4.md item 1 added
+    /// this variant to `ControlMsg` without adding it to `dispatch`'s
+    /// reply-classification match, so a scripted peer sending it fell
+    /// into the `other => warn!(...)` arm — the pending caller's oneshot
+    /// would never resolve, hanging `request()` forever.
+    #[tokio::test]
+    async fn tab_opened_reply_resolves_the_pending_request() {
+        let (client_side, peer_side) = tokio::io::duplex(64 * 1024);
+        let peer = tokio::spawn(async move {
+            let (r, w) = tokio::io::split(peer_side);
+            let mut reader = FrameReader::new(r);
+            let mut writer = FrameWriter::new(w);
+            handshake(&mut reader, &mut writer, "supervisor")
+                .await
+                .unwrap();
+            let request = parse_control(&reader.read_frame().await.unwrap().unwrap()).unwrap();
+            let ControlMsg::OpenTab { req_id, .. } = request else {
+                panic!("expected OpenTab, got {request:?}");
+            };
+            writer
+                .write_control(&ControlMsg::TabOpened {
+                    req_id,
+                    tab: farhelm_proto::TabInfo {
+                        id: "t1".to_string(),
+                    },
+                })
+                .await
+                .unwrap();
+        });
+        let (r, w) = tokio::io::split(client_side);
+        let client = SupervisorClient::start(r, w).await.unwrap();
+
+        let reply = client
+            .request(
+                20,
+                ControlMsg::OpenTab {
+                    req_id: 20,
+                    session_id: "s1".to_string(),
+                },
+            )
+            .await
+            .unwrap();
+        assert!(matches!(
+            reply,
+            ControlMsg::TabOpened { req_id: 20, ref tab } if tab.id == "t1"
+        ));
+        peer.await.unwrap();
+    }
+
+    /// `TabClosed`'s sibling case for `CloseTab` — see
+    /// `tab_opened_reply_resolves_the_pending_request`'s doc comment for
+    /// why this specific miss mattered.
+    #[tokio::test]
+    async fn tab_closed_reply_resolves_the_pending_request() {
+        let (client_side, peer_side) = tokio::io::duplex(64 * 1024);
+        let peer = tokio::spawn(async move {
+            let (r, w) = tokio::io::split(peer_side);
+            let mut reader = FrameReader::new(r);
+            let mut writer = FrameWriter::new(w);
+            handshake(&mut reader, &mut writer, "supervisor")
+                .await
+                .unwrap();
+            let request = parse_control(&reader.read_frame().await.unwrap().unwrap()).unwrap();
+            let ControlMsg::CloseTab { req_id, .. } = request else {
+                panic!("expected CloseTab, got {request:?}");
+            };
+            writer
+                .write_control(&ControlMsg::TabClosed { req_id })
+                .await
+                .unwrap();
+        });
+        let (r, w) = tokio::io::split(client_side);
+        let client = SupervisorClient::start(r, w).await.unwrap();
+
+        let reply = client
+            .request(
+                21,
+                ControlMsg::CloseTab {
+                    req_id: 21,
+                    session_id: "s1".to_string(),
+                    tab_id: "t1".to_string(),
+                },
+            )
+            .await
+            .unwrap();
+        assert!(matches!(reply, ControlMsg::TabClosed { req_id: 21 }));
+        peer.await.unwrap();
+    }
+
+    /// `UploadStarted`'s sibling case for `BeginUpload` — see
+    /// `tab_opened_reply_resolves_the_pending_request`'s doc comment for
+    /// why this specific miss mattered.
+    #[tokio::test]
+    async fn upload_started_reply_resolves_the_pending_request() {
+        let (client_side, peer_side) = tokio::io::duplex(64 * 1024);
+        let peer = tokio::spawn(async move {
+            let (r, w) = tokio::io::split(peer_side);
+            let mut reader = FrameReader::new(r);
+            let mut writer = FrameWriter::new(w);
+            handshake(&mut reader, &mut writer, "supervisor")
+                .await
+                .unwrap();
+            let request = parse_control(&reader.read_frame().await.unwrap().unwrap()).unwrap();
+            let ControlMsg::BeginUpload {
+                req_id, channel, ..
+            } = request
+            else {
+                panic!("expected BeginUpload, got {request:?}");
+            };
+            writer
+                .write_control(&ControlMsg::UploadStarted { req_id, channel })
+                .await
+                .unwrap();
+        });
+        let (r, w) = tokio::io::split(client_side);
+        let client = SupervisorClient::start(r, w).await.unwrap();
+
+        let reply = client
+            .request(
+                22,
+                ControlMsg::BeginUpload {
+                    req_id: 22,
+                    session_id: "s1".to_string(),
+                    channel: 4,
+                    filename: "a.txt".to_string(),
+                    size: 10,
+                },
+            )
+            .await
+            .unwrap();
+        assert!(matches!(
+            reply,
+            ControlMsg::UploadStarted {
+                req_id: 22,
+                channel: 4
+            }
+        ));
+        peer.await.unwrap();
+    }
+
+    /// `UploadCommitted`'s sibling case for `CommitUpload` — see
+    /// `tab_opened_reply_resolves_the_pending_request`'s doc comment for
+    /// why this specific miss mattered.
+    #[tokio::test]
+    async fn upload_committed_reply_resolves_the_pending_request() {
+        let (client_side, peer_side) = tokio::io::duplex(64 * 1024);
+        let peer = tokio::spawn(async move {
+            let (r, w) = tokio::io::split(peer_side);
+            let mut reader = FrameReader::new(r);
+            let mut writer = FrameWriter::new(w);
+            handshake(&mut reader, &mut writer, "supervisor")
+                .await
+                .unwrap();
+            let request = parse_control(&reader.read_frame().await.unwrap().unwrap()).unwrap();
+            let ControlMsg::CommitUpload { req_id, .. } = request else {
+                panic!("expected CommitUpload, got {request:?}");
+            };
+            writer
+                .write_control(&ControlMsg::UploadCommitted {
+                    req_id,
+                    path: "/tmp/a.txt".to_string(),
+                })
+                .await
+                .unwrap();
+        });
+        let (r, w) = tokio::io::split(client_side);
+        let client = SupervisorClient::start(r, w).await.unwrap();
+
+        let reply = client
+            .request(
+                23,
+                ControlMsg::CommitUpload {
+                    req_id: 23,
+                    channel: 4,
+                },
+            )
+            .await
+            .unwrap();
+        assert!(matches!(
+            reply,
+            ControlMsg::UploadCommitted { req_id: 23, ref path } if path == "/tmp/a.txt"
         ));
         peer.await.unwrap();
     }

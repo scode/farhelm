@@ -1878,6 +1878,7 @@ mod tests {
                         status: farhelm_proto::SessionStatus::Unknown,
                         annotation: None,
                         restart_offer: farhelm_proto::RestartOffer::default(),
+                        tabs: Vec::new(),
                     },
                 }))
                 .await
@@ -1966,6 +1967,7 @@ mod tests {
                         status: farhelm_proto::SessionStatus::Unknown,
                         annotation: None,
                         restart_offer: farhelm_proto::RestartOffer::default(),
+                        tabs: Vec::new(),
                     },
                 }))
                 .await
@@ -2259,6 +2261,7 @@ mod tests {
                         status: farhelm_proto::SessionStatus::Alive,
                         annotation: None,
                         restart_offer: farhelm_proto::RestartOffer::default(),
+                        tabs: Vec::new(),
                     }],
                     total: 42,
                     truncated: true,
@@ -2329,6 +2332,7 @@ mod tests {
                 status,
                 annotation: annotation.map(str::to_string),
                 restart_offer: farhelm_proto::RestartOffer::default(),
+                tabs: Vec::new(),
             };
             writer
                 .write_control(&ControlMsg::SessionList {
@@ -2614,6 +2618,7 @@ mod tests {
                         status: farhelm_proto::SessionStatus::Unknown,
                         annotation: None,
                         restart_offer: farhelm_proto::RestartOffer::Resume,
+                        tabs: Vec::new(),
                     },
                 })
                 .await

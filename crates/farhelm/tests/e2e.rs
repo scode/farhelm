@@ -17,7 +17,9 @@
 
 use farhelm_helm::{SupervisorClient, SupervisorError, TermEvent, TermStream};
 use farhelm_proto::io::parse_control;
-use farhelm_proto::{ControlMsg, ErrorKind, Frame, FrameKind, SessionInfo, SessionStatus};
+use farhelm_proto::{
+    ControlMsg, ErrorKind, Frame, FrameKind, SessionInfo, SessionStatus, TerminalSelector,
+};
 use farhelm_supervisor::agent_kind::{CaptureWindow, CaptureWindowBounds};
 use farhelm_supervisor::launch::{spec_path_for_launch, status_path_for_spec};
 use farhelm_supervisor::service::{
@@ -903,6 +905,13 @@ async fn attachment_channels_must_be_nonzero_and_unique() {
             channel: 0,
             cols: 80,
             rows: 24,
+            // Vocabulary only for now: this test predates tabs/leases
+            // (PLAN_M4.md step 3) and is only exercising the channel-0/
+            // channel-reuse rejection paths, so the agent terminal with
+            // no lease — today's only meaning — is exactly what belongs
+            // here.
+            terminal: TerminalSelector::default(),
+            lease: String::new(),
         })
         .await
         .unwrap();
@@ -922,6 +931,8 @@ async fn attachment_channels_must_be_nonzero_and_unique() {
             channel: 7,
             cols: 80,
             rows: 24,
+            terminal: TerminalSelector::default(),
+            lease: String::new(),
         })
         .await
         .unwrap();
@@ -940,6 +951,8 @@ async fn attachment_channels_must_be_nonzero_and_unique() {
             channel: 7,
             cols: 80,
             rows: 24,
+            terminal: TerminalSelector::default(),
+            lease: String::new(),
         })
         .await
         .unwrap();

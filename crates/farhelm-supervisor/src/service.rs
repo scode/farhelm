@@ -4571,6 +4571,11 @@ impl Supervisor {
                         // `Resume` at any moment, and a value frozen at
                         // reload would go stale the first time it did.
                         restart_offer,
+                        // Vocabulary only for now (PLAN_M4.md step 3 gives
+                        // tabs real rediscovery from tmux); until then this
+                        // is the honest "none known" value every reload
+                        // reports.
+                        tabs: Vec::new(),
                     },
                     terminal,
                     outcome: std::sync::Mutex::new(outcome),
@@ -5337,6 +5342,9 @@ impl Supervisor {
                     invocation: row.invocation,
                     status: SessionStatus::Unknown,
                     annotation: None,
+                    // Vocabulary only for now — see PLAN_M4.md step 3 for
+                    // where tabs get real rediscovery.
+                    tabs: Vec::new(),
                 })
             }
             None => Err(RequestError::new(
@@ -5799,6 +5807,9 @@ impl Supervisor {
             // fallback to offer, and reporting `FreshOnly` for it would
             // understate what restart could do from the very first reply.
             restart_offer: snapshot.restart_offer(None),
+            // A brand-new session has no tabs; real tab creation lands in
+            // PLAN_M4.md step 3.
+            tabs: Vec::new(),
         };
 
         // Launch confirmed: the pane exists, so the durable record moves
@@ -6819,6 +6830,11 @@ impl Supervisor {
             // the PREVIOUS run ended (item 4).
             annotation: None,
             restart_offer,
+            // Vocabulary only for now: restarting the agent must not
+            // disturb any tabs a session already has (PLAN_M4.md's
+            // acceptance criteria), but until PLAN_M4.md step 3 gives tabs
+            // real rediscovery there is nothing to report here either way.
+            tabs: Vec::new(),
         };
         let published = relaunched_entry(
             entry,
@@ -8517,6 +8533,10 @@ fn reply_frame(msg: &ControlMsg) -> Frame {
         | ControlMsg::SessionDeleted { req_id, .. }
         | ControlMsg::SessionRestarted { req_id, .. }
         | ControlMsg::Attached { req_id, .. }
+        | ControlMsg::TabOpened { req_id, .. }
+        | ControlMsg::TabClosed { req_id, .. }
+        | ControlMsg::UploadStarted { req_id, .. }
+        | ControlMsg::UploadCommitted { req_id, .. }
         | ControlMsg::Error { req_id, .. } => req_id,
         ref other => {
             unreachable!("reply_frame called with a message that carries no req_id: {other:?}")
@@ -10178,6 +10198,13 @@ async fn handle_control(
             channel,
             cols,
             rows,
+            // Vocabulary only for now: every attach still means the one
+            // agent terminal, taken over unconditionally, exactly like
+            // before M4. PLAN_M4.md step 3 wires the per-terminal
+            // selector and the session-scoped lease grouping these two
+            // fields exist to carry.
+            terminal: _,
+            lease: _,
         } => {
             if channel == 0 || input_routes.contains_key(&channel) {
                 let message = if channel == 0 {
@@ -10913,6 +10940,7 @@ mod tests {
                     status: SessionStatus::Unknown,
                     annotation: None,
                     restart_offer: RestartOffer::default(),
+                    tabs: Vec::new(),
                 },
                 terminal: None,
                 outcome: std::sync::Mutex::new(LastOutcome::Running),
@@ -11583,6 +11611,7 @@ mod tests {
                 status: SessionStatus::Alive,
                 annotation: None,
                 restart_offer: RestartOffer::default(),
+                tabs: Vec::new(),
             }],
             total: 1,
             truncated: false,
@@ -11638,6 +11667,7 @@ mod tests {
                 status: SessionStatus::Unknown,
                 annotation: None,
                 restart_offer: RestartOffer::default(),
+                tabs: Vec::new(),
             },
         };
         assert_eq!(reply_frame(&msg), Frame::control(&msg));
@@ -11662,9 +11692,44 @@ mod tests {
                 status: SessionStatus::Alive,
                 annotation: None,
                 restart_offer: RestartOffer::Resume,
+                tabs: Vec::new(),
             },
         };
         assert_eq!(reply_frame(&msg), Frame::control(&msg));
+    }
+
+    /// PLAN_M4.md item 1's four tab/upload replies (`TabOpened`,
+    /// `TabClosed`, `UploadStarted`, `UploadCommitted`) joined
+    /// `reply_frame`'s req_id correlator alongside `SessionRestarted`
+    /// above, and for the identical reason: each is a req_id-bearing
+    /// reply that a not-yet-implemented handler (PLAN_M4.md step 3) will
+    /// eventually build and pass through `reply_frame`, and without an
+    /// arm here that call hits the `unreachable!` branch instead of ever
+    /// reaching the wire. One table-driven test covers all four rather
+    /// than four near-identical copies of
+    /// `reply_frame_accepts_session_restarted`, since none of them nests
+    /// a `SessionInfo` the way that one does.
+    #[test]
+    fn reply_frame_accepts_the_tab_and_upload_replies() {
+        for msg in [
+            ControlMsg::TabOpened {
+                req_id: 10,
+                tab: farhelm_proto::TabInfo {
+                    id: "t1".to_string(),
+                },
+            },
+            ControlMsg::TabClosed { req_id: 11 },
+            ControlMsg::UploadStarted {
+                req_id: 12,
+                channel: 3,
+            },
+            ControlMsg::UploadCommitted {
+                req_id: 13,
+                path: "/tmp/a.txt".to_string(),
+            },
+        ] {
+            assert_eq!(reply_frame(&msg), Frame::control(&msg));
+        }
     }
 
     /// `RestartSession` carries a `req_id` a caller genuinely blocks on
@@ -11760,6 +11825,7 @@ mod tests {
                 status: SessionStatus::default(),
                 annotation: None,
                 restart_offer: RestartOffer::default(),
+                tabs: Vec::new(),
             },
             terminal,
             outcome: std::sync::Mutex::new(outcome),
@@ -14296,6 +14362,7 @@ mod tests {
                     status: SessionStatus::default(),
                     annotation: None,
                     restart_offer: RestartOffer::default(),
+                    tabs: Vec::new(),
                 },
                 terminal: Some(Terminal {
                     tmux_name: "fh-fake".to_string(),
@@ -14431,6 +14498,7 @@ mod tests {
                             status: SessionStatus::default(),
                             annotation: None,
                             restart_offer: RestartOffer::default(),
+                            tabs: Vec::new(),
                         },
                         terminal: None,
                         outcome: std::sync::Mutex::new(LastOutcome::Running),
@@ -14532,6 +14600,7 @@ mod tests {
                     status: SessionStatus::default(),
                     annotation: None,
                     restart_offer: RestartOffer::default(),
+                    tabs: Vec::new(),
                 },
                 terminal: None,
                 outcome: std::sync::Mutex::new(LastOutcome::Running),
@@ -14642,6 +14711,7 @@ mod tests {
             status: SessionStatus::Alive,
             annotation: None,
             restart_offer: RestartOffer::default(),
+            tabs: Vec::new(),
         }
     }
 
