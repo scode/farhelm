@@ -16,13 +16,17 @@
 //! the last outcome the supervisor WITNESSED, plus the boot id it last
 //! saw — which is what makes interrupted-vs-exited a classification
 //! rather than a guess once tmux is gone (PLAN_M3.md item 2, `service`
-//! and `store` module docs). Agent-kind integrations arrive in later
-//! milestones (PLAN.md).
+//! and `store` module docs). M3 also adds the per-session integration
+//! snapshot and conversation-identity capture behind the `AgentKind` seam
+//! (`agent_kind` module, PLAN_M3.md items 7 and 8): which agent a session
+//! runs, how a resume would be invoked, and — read purely by observing the
+//! agents' own on-disk records — which conversation it belongs to.
 //!
 //! Unix-only, unconditionally: the doorway is a unix socket and the
 //! substrate is tmux, so unix APIs are used without cfg gates — a
 //! non-unix port would be a redesign, not a compile flag.
 
+pub mod agent_kind;
 pub mod files;
 pub mod launch;
 pub mod service;

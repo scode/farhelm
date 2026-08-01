@@ -14,6 +14,10 @@ farhelm-supervisor.workspace = true
 # Only for the `hexecho` fake-agent script's raw-mode termios calls
 # (fake_agent.rs); everything else in this binary stays on tokio/std.
 libc.workspace = true
+# The record-writing fake-agent scripts build conversation records the
+# supervisor then parses; a hand-rolled escaper would make a fixture bug
+# look like a parser bug (fake_agent.rs).
+serde_json.workspace = true
 tokio.workspace = true
 tracing-subscriber.workspace = true
 
@@ -21,6 +25,5 @@ tracing-subscriber.workspace = true
 # Only the integration tests speak the wire protocol directly; the binary
 # reaches it through the helm and supervisor crates.
 farhelm-proto.workspace = true
-serde_json.workspace = true
 shell-words.workspace = true
 tempfile.workspace = true

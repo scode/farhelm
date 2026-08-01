@@ -30,7 +30,8 @@ use tracing::{error, info};
 
 mod client;
 pub use client::{
-    SessionListing, SupervisorClient, SupervisorError, TermDetachSignal, TermEvent, TermStream,
+    CreateExtras, SessionListing, SupervisorClient, SupervisorError, TermDetachSignal, TermEvent,
+    TermStream,
 };
 
 /// CLI arguments for `farhelm helm run`. Lives here (not in the bin
