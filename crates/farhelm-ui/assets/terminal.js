@@ -327,7 +327,34 @@
         // dimensions in the connect URL. Assigned as the `onopen`
         // property (not `addEventListener`) so `unmount()` can null it
         // out by name along with the other WS callbacks.
-        ws.onopen = sendResize;
+        //
+        // Also clears any banner left over from a PRIOR mount — the fix
+        // for a real bug found in manual testing (MT-4): `#term-banner`
+        // lives outside the `#terminal` div this file owns, so a
+        // restart's remount inherited the OLD attachment's sticky
+        // "Detached: session restarted" banner (painted by the restart's
+        // own teardown, `detach_for_restart` in the supervisor) and
+        // nothing ever cleared it — it sat there mislabeling a genuinely
+        // live terminal as detached. Resetting the inline `display:
+        // block` lets `.banner`'s CSS `display: none` (app.css) take
+        // back over; `bannered` needs no reset, being a fresh `false` in
+        // this closure already.
+        //
+        // `onopen` is a TRANSPORT-level signal — the WebSocket upgrade
+        // completed — not proof the supervisor-side attach succeeded
+        // (that happens after the upgrade, server-side). Clearing here is
+        // still honest: if the attach then fails, the server closes THIS
+        // socket, and its own close handler re-banners. What onopen does
+        // guarantee is that the stale banner's claim about the PREVIOUS
+        // attachment is obsolete either way.
+        ws.onopen = () => {
+          const banner = document.getElementById("term-banner");
+          if (banner) {
+            banner.style.display = "";
+            banner.textContent = "";
+          }
+          sendResize();
+        };
         // Named (not inline) so unmount() can remove exactly this
         // listener: an anonymous closure captured here would be
         // unreachable later, leaking one stale listener (closing over

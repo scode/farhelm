@@ -4419,3 +4419,122 @@ test("a restart whose response is lost still recovers the terminal", async ({
     }
   }
 });
+
+// MT-4 (manual testing): restarting a live session left the red "Detached:
+// session restarted" banner painted over a terminal that had, by the time
+// a human noticed it, already reattached and was working fine — typing
+// round-tripped, output rendered, the banner just never went away. Root
+// cause was `#term-banner` (farhelm-ui/src/lib.rs) living OUTSIDE the
+// `#terminal` div terminal.js remounts, so nothing about a later mount
+// ever told a PRIOR mount's sticky banner to clear (terminal.js's
+// `showBanner` is deliberately sticky FOR THE LIFE OF ITS OWN SOCKET, so a
+// takeover reason survives the generic close that follows it — see that
+// function's docs — but nothing was clearing it for the NEXT socket
+// either). The fix hooks the new socket's `onopen` — a transport-level
+// signal (the upgrade completed), not proof the supervisor-side attach
+// succeeded; clearing there is still honest because a failed attach
+// closes that same socket and its own close handler re-banners.
+//
+// This is exactly the restart sequence that produces the bug: a live
+// agent's restart tears the OLD attachment down with reason "session
+// restarted" (`detach_for_restart`, farhelm-supervisor/src/service.rs)
+// before the new one ever exists. Proving the banner APPEARED cannot be a
+// locator poll — the fix clears it as soon as the new socket opens, which
+// on loopback routinely beats Playwright's first poll, so the transient
+// visible state is unobservable from outside (this test flaked exactly
+// that way when it polled). A MutationObserver installed before the page
+// loads records every banner transition instead, so the assertion reads
+// the recorded history: shown with the exact restart reason, then hidden
+// once the relaunch is confirmed live — the real sticky-then-clear
+// sequence, with no window for the poll to miss.
+test("a restarted session's banner clears once the new attachment is live", async ({
+  page,
+  request,
+}) => {
+  const title = `restart-banner-clears-${Date.now()}`;
+  try {
+    await page.addInitScript(() => {
+      (window as any).__bannerLog = [];
+      const arm = () => {
+        const el = document.getElementById("term-banner");
+        if (!el) {
+          setTimeout(arm, 50);
+          return;
+        }
+        new MutationObserver(() => {
+          (window as any).__bannerLog.push({
+            shown: el.style.display === "block",
+            text: el.textContent,
+          });
+        }).observe(el, {
+          attributes: true,
+          attributeFilter: ["style"],
+          childList: true,
+          characterData: true,
+          subtree: true,
+        });
+      };
+      document.addEventListener("DOMContentLoaded", arm);
+    });
+    await page.goto("/");
+    const form = await fillCreateForm(page, {
+      cwd: "/tmp",
+      invocation: FAKE_AGENT_INVOCATION,
+      title,
+    });
+    await form.locator('button[type="submit"]').click();
+    await page.waitForFunction(() => (window as any).__farhelmTermReady === true);
+    await waitForTermText(page, "FAKE-AGENT READY");
+
+    const restartButton = page.locator(".restart-primary");
+    await expect(restartButton).toHaveAttribute("data-confirms", "true", {
+      timeout: 15_000,
+    });
+    await restartButton.click();
+    await page.locator(".restart-confirm").click();
+
+    // The banner's appearance is read from the observer's recorded
+    // history (see the doc comment above for why a locator poll cannot
+    // see it): the old attachment's detach must have painted the banner
+    // with the restart's exact reason at SOME point, however briefly.
+    await expect
+      .poll(
+        async () =>
+          await page.evaluate(() =>
+            (window as any).__bannerLog.some(
+              (e: { shown: boolean; text: string }) =>
+                e.shown && e.text.includes("Detached: session restarted"),
+            ),
+          ),
+        { timeout: 15_000, message: "the restart's detach banner was recorded" },
+      )
+      .toBe(true);
+
+    // The relaunch comes up in the SAME (reused) terminal, so its ready
+    // banner is the SECOND occurrence in the buffer — the same anchor the
+    // confirm test above uses to prove the new run actually printed
+    // something rather than merely reattaching to stale output.
+    await expect
+      .poll(
+        async () => (await termText(page)).split("FAKE-AGENT READY").length - 1,
+        { timeout: 30_000, message: "the relaunched agent's own ready banner" },
+      )
+      .toBeGreaterThanOrEqual(2);
+
+    // The bug: the OLD attachment's detach banner stayed painted over a
+    // terminal that is now genuinely live again.
+    await expect(page.locator("#term-banner")).toBeHidden({ timeout: 15_000 });
+
+    // And "live" is proven functionally, not just by the banner's
+    // absence: typing still round-trips through the new attachment.
+    await page.locator("#terminal").click();
+    await page.keyboard.type("post-restart-roundtrip");
+    await page.keyboard.press("Enter");
+    await waitForTermText(page, "echo:post-restart-roundtrip", 10_000);
+  } finally {
+    const id = await findSessionIdByTitle(request, title).catch(() => undefined);
+    if (id) {
+      await cleanupSession(request, id);
+    }
+  }
+});
