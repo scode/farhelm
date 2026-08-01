@@ -927,6 +927,124 @@ test("input round-trips through the real terminal path", async ({ page }) => {
   await waitForTermText(page, "echo:hello-from-playwright", 10_000);
 });
 
+// Regression test for a real bug: xterm.js auto-answers a DECRQM mode
+// query (e.g. vim's own cursor-blink probe, `ESC[?12$p`, which tmux passes
+// through unmodified from the pane) with a DECRPM reply (`ESC[?12;2$y`)
+// through its OWN `onData` callback — the identical callback real
+// keystrokes flow through. terminal.js used to forward that reply
+// straight back as pane input; the render-batch-plus-WebSocket round trip
+// means it lands a full turnaround later, long after the querying app
+// stopped waiting for an answer. vim then parses it as KEYSTROKES rather
+// than a stale reply — '$' is a silent motion and 'y' becomes a pending
+// operator, observed as a stray pending 'y' on every vim launch. The fix
+// (terminal.js's `swallowDecrqm` parser handlers) intercepts the DECRQM
+// QUERY itself on the output side, so xterm never mints a reply at all —
+// user input is never inspected, and even a pasted look-alike of a reply
+// passes through untouched. Safe because tmux answers DECRQM for its own
+// panes itself, instantly (verified directly by probing), so the reply
+// xterm no longer sends was a late duplicate — pure harm, never the only
+// copy.
+//
+// This asserts on the WEBSOCKET FRAMES ACTUALLY SENT rather than driving
+// vim end to end: vim is not otherwise a CI dependency of this suite, and
+// reproducing its stray-'y' symptom would mean racing a real editor
+// against the network — brittle and slow next to checking the fix's own
+// contract directly ("this exact byte shape never leaves the browser as
+// input"). Feeding a real shell's pane output raw DECRQM/OSC-11 query
+// bytes via `printf` makes xterm.js generate the very same auto-replies
+// vim would trigger, deterministically, with no editor involved.
+//
+// Runs against a fresh `bash` session, not the shared fake-agent one: the
+// fake agent's `basic` script only ever echoes typed lines back as text
+// (fake_agent.rs) — it never executes anything, so it could never emit
+// the raw escape bytes this test needs on the wire in the first place.
+test("DECRPM auto-replies to a mode query are dropped, not forwarded as pane input", async ({
+  page,
+  request,
+}) => {
+  // Patch only `send` on the WebSocket PROTOTYPE, before any navigation.
+  // Replacing the `WebSocket` constructor outright (as the mount-rollback
+  // test above does deliberately, to make it throw) would break RECEIVING
+  // frames too — this test still needs that, to see PROBE-DONE arrive.
+  // Binary frames are recorded as plain byte arrays rather than left as
+  // Uint8Array/ArrayBuffer instances, so they survive the `page.evaluate`
+  // round trip back to Node intact.
+  await page.addInitScript(() => {
+    const realSend = WebSocket.prototype.send;
+    (window as any).__sentInput = [];
+    WebSocket.prototype.send = function (this: WebSocket, data: any) {
+      if (data instanceof Uint8Array) {
+        (window as any).__sentInput.push(Array.from(data));
+      } else if (data instanceof ArrayBuffer) {
+        (window as any).__sentInput.push(Array.from(new Uint8Array(data)));
+      } else {
+        (window as any).__sentInput.push(data);
+      }
+      return realSend.call(this, data);
+    };
+  });
+
+  const title = `decrpm-probe-${Date.now()}`;
+  const created = await request.post("/api/sessions", {
+    data: { cwd: "/tmp", invocation: "bash", title },
+  });
+  expect(created.status()).toBe(200);
+  const { id } = await created.json();
+
+  try {
+    await page.goto("/");
+    const row = page.locator(`[data-session-id="${id}"]`);
+    await expect(row).toBeVisible();
+    await row.click();
+    await page.waitForFunction(() => (window as any).__farhelmTermReady === true);
+    // `__farhelmTermReady` means the terminal MOUNTED, not that its
+    // socket reached OPEN — and terminal.js drops input sent before OPEN.
+    // Under WebKit's slower startup that gap is wide enough to eat the
+    // first characters of the probe command, so wait for the socket
+    // itself, the way sendFloodGateByte does.
+    await page.waitForFunction(
+      () => (window as any).__farhelmWs?.readyState === WebSocket.OPEN,
+    );
+
+    await page.locator("#terminal").click();
+    // Two queries go out together: DSR-6 (`\e[6n`, "where is the
+    // cursor?"), which xterm must still answer, and the DECRQM query for
+    // mode 12 (`\e[?12$p`, vim's cursor-blink probe), which must now
+    // provoke NO reply at all. PROBE-DONE is the synchronization marker
+    // proving the whole line — including the 1-second gap — actually ran
+    // in this real shell, not merely that it was typed.
+    //
+    // DSR-6 rather than an OSC-11 color query as the control, and that
+    // choice is CI-hardened rather than arbitrary: headless WebKit on
+    // the CI runner never answers OSC 11 (it has no theme colors to
+    // report), so a color-reply control failed there while the real
+    // assertion held. A cursor report is computed from xterm's own
+    // buffer and is therefore environment-independent.
+    await page.keyboard.type(
+      "printf '\\e[6n\\e[?12$p'; sleep 1; echo PROBE-DONE",
+    );
+    await page.keyboard.press("Enter");
+    await waitForTermText(page, "PROBE-DONE", 15_000);
+
+    const frames = await page.evaluate(
+      () => (window as any).__sentInput as unknown[],
+    );
+    const decoded = frames.map((f) =>
+      Array.isArray(f) ? String.fromCharCode(...(f as number[])) : String(f),
+    );
+
+    // The fix: no DECRPM reply shape ever reached the WebSocket as input.
+    expect(decoded.some((s) => /\x1b\[\?[0-9;]*\$y/.test(s))).toBe(false);
+    // The control: a cursor-position report DID reach the WebSocket,
+    // proving xterm's auto-replies were genuinely live and flowing
+    // through this exact recorded path — without it, the assertion above
+    // could pass vacuously (e.g. if nothing were recorded at all).
+    expect(decoded.some((s) => /\x1b\[[0-9]+;[0-9]+R/.test(s))).toBe(true);
+  } finally {
+    await cleanupSession(request, id);
+  }
+});
+
 // SPEC.md's core durability promise seen from the browser: close the tab,
 // come back, and the session looks as if you had never left. A reload is
 // the harshest form of it — a brand-new xterm.js with an empty buffer, so

@@ -275,6 +275,33 @@
         ws.onerror = () => showBanner("Connection error");
 
         const enc = new TextEncoder();
+        // Swallow DECRQM mode queries (CSI Pm $ p and CSI ? Pm $ p, e.g.
+        // vim's cursor-blink probe ESC[?12$p) at the PARSER, so xterm.js
+        // never mints a DECRPM reply for them at all. The reply is the
+        // problem: it would take a full render-batch-plus-websocket round
+        // trip and land as pane input long after the asking application
+        // stopped waiting — and unlike the color/DA/cursor reports (which
+        // vim and friends keep accepting late), a late DECRPM reply parses
+        // as KEYSTROKES: '$' is a silent motion and 'y' becomes a pending
+        // operator, observed as a stray 'y' on every vim launch. Nothing
+        // is lost by not answering: tmux answers DECRQM for its panes
+        // itself, instantly (verified by probing — the pane sees tmux's
+        // reply long before ours could arrive), so xterm's late duplicate
+        // was the only copy that ever did harm. Intercepting the QUERY on
+        // the output side — rather than filtering reply-shaped chunks out
+        // of the input side, as an earlier version of this fix did — means
+        // user input is never inspected at all: even a pasted look-alike
+        // of a DECRPM reply passes through untouched. Both handlers return
+        // true ("handled"), which stops xterm's built-in responder.
+        const swallowDecrqm = () => true;
+        term.parser.registerCsiHandler(
+          { prefix: "?", intermediates: "$", final: "p" },
+          swallowDecrqm,
+        );
+        term.parser.registerCsiHandler(
+          { intermediates: "$", final: "p" },
+          swallowDecrqm,
+        );
         term.onData((d) => {
           if (ws.readyState === WebSocket.OPEN) ws.send(enc.encode(d));
         });
