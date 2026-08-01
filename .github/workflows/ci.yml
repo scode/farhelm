@@ -119,10 +119,18 @@ jobs:
       - name: Check formatting with dprint
         uses: dprint/check@9cb3a2b17a8e606d37aae341e49df3654933fc23 # v2.3
 
-  # End-to-end: Playwright drives the web build in headless Chromium
-  # against a real helm + supervisor + private tmux + fake agent. This is
-  # the agents-verify-the-GUI-without-a-human path (PLAN_M1.md), so it is
-  # a first-class CI job, not an optional extra.
+  # End-to-end: Playwright drives the web build against a real helm +
+  # supervisor + private tmux + fake agent, in both headless Chromium and
+  # WebKit. This is the agents-verify-the-GUI-without-a-human path
+  # (PLAN_M1.md), so it is a first-class CI job, not an optional extra.
+  # WebKit is included because it is the desktop app's actual engine
+  # family (WKWebView on macOS, WebKitGTK on Linux): engine-level
+  # behavior differences — rendering, input handling, JS API quirks —
+  # are only observable under a WebKit run. It covers the web build in
+  # that engine, NOT the desktop shell itself (a wry integration bug,
+  # like the eval-channel death manual testing found on macOS, lives in
+  # a layer no browser run exercises — that stays with the desktop
+  # smoke harness and manual passes).
   e2e:
     runs-on: ubicloud
     steps:
@@ -161,7 +169,7 @@ jobs:
       - name: Build web UI
         run: cd crates/farhelm-ui && dx build --platform web --release
       - name: Install Playwright
-        run: cd e2e && npm ci && npx playwright install --with-deps chromium
+        run: cd e2e && npm ci && npx playwright install --with-deps chromium webkit
       - name: Run e2e tests
         run: cd e2e && npx playwright test
       - name: Upload Playwright artifacts
