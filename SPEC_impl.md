@@ -198,10 +198,14 @@ Exited-session semantics: `remain-on-exit on` keeps dead panes viewable per SPEC
 pane's status. Exec failure versus ran-and-died cannot be told apart by exit code alone (a missing command yields 127
 and a non-executable file 126 — both indistinguishable from a program exiting with that code), so classification does
 not rely on exit codes: the shell execs `farhelm internal launch`, a shim that always exists, which resolves and execs
-the profile invocation and, on exec failure, writes a sentinel with the errno detail to a per-session status file before
-exiting. The supervisor classifies **error** only on that sentinel. NOTE: a sentinel written by the shell after a failed
-`exec` was audited and rejected — interactive bash survives a failed exec, but zsh terminates on it in every mode, so
-shell-side code after `exec` never runs for zsh users; the shim works identically under any `$SHELL`.
+the profile invocation and, on exec failure, writes a sentinel with the errno detail to a per-launch status file (named
+by session and launch generation, so a sentinel left by a failed earlier launch can never describe a later relaunch)
+before exiting. The supervisor classifies **error** on that sentinel; the one sentinel-less error path is a
+cgroup-scoped launch whose `systemd-run` wrapper died before the shim ever ran, recognized only by its full evidence
+shape (dead pane, launch spec still unconsumed, no sentinel) so it can never claim an agent that actually started. NOTE:
+a sentinel written by the shell after a failed `exec` was audited and rejected — interactive bash survives a failed
+exec, but zsh terminates on it in every mode, so shell-side code after `exec` never runs for zsh users; the shim works
+identically under any `$SHELL`.
 
 Motivation for never rendering through a normal attach: a rendering tmux client takes over the outer terminal on the
 alternate screen and draws everything itself, which kills native scrolling — xterm.js would accumulate no scrollback,
@@ -257,18 +261,19 @@ by eye; raw binary data channels keep PTY throughput off the JSON path.
   systemd older than 255 don't set it), the supervisor falls back to the passwd database, then `/bin/sh`.
 - Status heuristics: periodic sampling of tmux pane activity and captured tail content, sharpened per agent kind (see
   below). Sampling must never sit on the attach/input path — SPEC.md forbids status from gating interaction.
-- Agent-kind integrations live in the supervisor as a small trait (`AgentKind`): status regexes over captured tail, and
-  conversation-identity capture. Claude Code: watch `~/.claude/projects/<munged-cwd>/` for the session record. Audited
-  specifics that shape this: the record appears at first prompt submission, not at launch, so correlation keys on
-  first-input time and tolerates an unbounded launch-to-first-input gap; the cwd munging is non-injective (`/`, `.`, `_`
-  all become `-`); and per-line JSON fields (sessionId, cwd, timestamps) are the reliable correlators — file birth times
-  can postdate content after rewrites. Codex: same approach against `~/.codex/sessions` rollout files. An identity is
-  claimed only when the correlation is unambiguous — two near-simultaneous launches in one cwd stay uncaptured, which
-  triggers SPEC.md's explicit fallback instead of a silent wrong guess. Plain resume appends to the existing record
-  under the same id for both agents (audited on current versions; a new id appears only on explicit forks —
-  `--fork-session`, `forked_from_id`), so a captured identity survives restarts; the watcher treats appends as the
-  resume signal and cheaply re-verifies identity after each restart rather than baking in either behavior. Capture is
-  observation-only per SPEC.md — no hooks, no agent configuration.
+- Agent-kind integrations live in the supervisor as a small trait (`AgentIntegration`; `AgentKind` is the wire enum
+  naming the kind itself): status regexes over captured tail, and conversation-identity capture. Claude Code: watch
+  `~/.claude/projects/<munged-cwd>/` for the session record. Audited specifics that shape this: the record appears at
+  first prompt submission, not at launch, so correlation keys on first-input time and tolerates an unbounded
+  launch-to-first-input gap; the cwd munging is non-injective (`/`, `.`, `_` all become `-`); and per-line JSON fields
+  (sessionId, cwd, timestamps) are the reliable correlators — file birth times can postdate content after rewrites.
+  Codex: same approach against `~/.codex/sessions` rollout files. An identity is claimed only when the correlation is
+  unambiguous — two near-simultaneous launches in one cwd stay uncaptured, which triggers SPEC.md's explicit fallback
+  instead of a silent wrong guess. Plain resume appends to the existing record under the same id for both agents
+  (audited on current versions; a new id appears only on explicit forks — `--fork-session`, `forked_from_id`), so a
+  captured identity survives restarts; the watcher treats appends as the resume signal and cheaply re-verifies identity
+  after each restart rather than baking in either behavior. Capture is observation-only per SPEC.md — no hooks, no agent
+  configuration.
 - Per-session spawn credential: random token in the session's environment (`FARHELM_SESSION_ID`,
   `FARHELM_SESSION_TOKEN`, socket path), checked by the supervisor on the unix socket.
 - Process-tree ownership (SPEC.md's stop/reap promises): killing the tmux pane is not enough — tmux signals the

@@ -11484,9 +11484,10 @@ async fn a_restart_clears_a_previous_launch_error() {
         !matches!(alive.status, SessionStatus::Error { .. }),
         "the previous launch's error describes a run this session no longer has"
     );
-    // The sentinel path is per-session, so the relaunch's own launch wrote
-    // where the failed one's file sat: had it survived, the next list would
-    // read it and paint this running agent as an error again.
+    // Sentinel paths are generation-scoped, so even a surviving gen-0 file
+    // could never describe the relaunch's generation. What this pins is the
+    // cleanup half: the consumed sentinel is removed rather than left as an
+    // orphan for every future reload to re-read and re-classify.
     let sentinel = status_path_for_spec(&spec_path_for_launch(h.state.path(), &session.id, 0));
     assert!(
         !sentinel.exists(),
