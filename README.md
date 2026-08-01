@@ -84,6 +84,6 @@ pointing at the helm (default `http://127.0.0.1:7433`).
 
 `AGENTS.md` has the conventions and the finish-work checks. End-to-end tests: `cargo test -- --show-output` (Rust,
 including real-tmux integration; `--show-output` is what surfaces the skip reasons from tests that need a systemd user
-manager), and `cd e2e && npx playwright test` (browser against a real stack — needs `npm install` and
-`npx playwright install chromium` once). `lore/` holds historical decision records; read `lore/AGENTS.md` before
-touching it.
+manager), and `cd e2e && npx playwright test` (browser against a real stack, Chromium and WebKit both — needs
+`npm install` and `npx playwright install chromium webkit` once). `lore/` holds historical decision records; read
+`lore/AGENTS.md` before touching it.

@@ -24,6 +24,56 @@
 import { test, expect, Page, APIRequestContext } from "@playwright/test";
 import path from "node:path";
 
+// Restore the stack to its canonical state — exactly one shared
+// "e2e-session", freshly launched — before each PROJECT's pass over this
+// file. The suite runs against ONE long-lived stack (see
+// playwright.config.ts's webServer), and these tests were written
+// assuming one stack lifetime per suite run: the multi-megabyte flood
+// test is even placed last in this file specifically so its deliberate
+// scrollback pollution poisons nothing after it. A second engine project
+// (webkit) broke that assumption — "after it" then included the entire
+// second project, whose first attach replayed megabytes of flood output
+// on WebKit's slower parser and timed out a dozen content assertions.
+//
+// A `beforeAll` rather than a setup project or a name-ordered spec file:
+// see playwright.config.ts's projects comment for why those alternatives
+// are unsound. Its failure fails this file's tests outright instead of
+// letting them run against half-reset state.
+//
+// The canonical session's cwd and invocation are captured from the live
+// listing rather than duplicated from start-stack.sh, so the two cannot
+// drift. The shared session being ABSENT here is a real invariant
+// violation — either a test deleted it (nothing may) or a previous
+// project's reset failed mid-way — and is worth failing loudly on
+// rather than papering over with a hardcoded recreation.
+test.beforeAll(async ({ request }) => {
+  const listing = await (await request.get("/api/sessions")).json();
+  const shared = listing.sessions.find(
+    (s: { title: string }) => s.title === "e2e-session",
+  );
+  expect(
+    shared,
+    "the shared e2e-session must exist: a test deleted it, or an earlier project's reset died between delete and recreate",
+  ).toBeTruthy();
+
+  // Delete everything (leaked per-test sessions included) and relaunch
+  // the shared session with its own recorded parameters. Deleting the
+  // polluted original rather than restarting its agent is what actually
+  // resets the SCROLLBACK: stop/relaunch would keep the tmux history.
+  for (const s of listing.sessions) {
+    const deleted = await request.delete(`/api/sessions/${s.id}`);
+    expect(deleted.ok(), `deleting leftover session ${s.title}`).toBe(true);
+  }
+  const created = await request.post("/api/sessions", {
+    data: {
+      cwd: shared.cwd,
+      invocation: shared.invocation,
+      title: shared.title,
+    },
+  });
+  expect(created.ok(), "recreating the shared e2e-session").toBe(true);
+});
+
 /**
  * A real, distinguishable agent invocation for the create-dialog tests
  * (PLAN_M2.md step 8): the same fake-agent binary and `basic` script
