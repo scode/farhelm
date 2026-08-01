@@ -95,6 +95,38 @@ async fn tmux_query(sock: &std::path::Path, args: &[&str]) -> std::process::Outp
         .expect("tmux query")
 }
 
+/// Kill the harness's tmux server and wait until it has genuinely died.
+///
+/// `kill-server` returns before the server finishes tearing down; any
+/// tmux command racing that teardown (an `ensure_server` from a fresh
+/// `Supervisor`, an auto-started server from `new-session`) can connect
+/// to the dying server and fail with "server exited unexpectedly" — a
+/// flake observed on loaded CI runners, never a product bug. Every test
+/// that kills the server must go through this helper rather than a bare
+/// `kill-server`.
+async fn kill_tmux_server_and_wait(sock: &std::path::Path) {
+    let killed = tmux_query(sock, &["kill-server"]).await;
+    assert!(
+        killed.status.success(),
+        "test setup: tmux kill-server must succeed, got: {}",
+        String::from_utf8_lossy(&killed.stderr)
+    );
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
+    loop {
+        let probe = tmux_query(sock, &["list-sessions"]).await;
+        if !probe.status.success()
+            && String::from_utf8_lossy(&probe.stderr).contains("no server running")
+        {
+            return;
+        }
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "tmux server never finished dying after kill-server"
+        );
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+}
+
 /// Whether the harness's tmux knows a given format variable, probed
 /// against its live server (which always has a session by the time any
 /// caller asks).
@@ -678,6 +710,16 @@ async fn attachment_channels_must_be_nonzero_and_unique() {
 
 /// Precondition failures fail the create with a visible error and no
 /// session (SPEC.md's creation-failure split).
+///
+/// The in-memory check alone only proves this process's own map stayed
+/// empty; it says nothing about whether a row still landed in SQLite
+/// despite the rejection (this validation runs before `create_session`
+/// ever touches tmux or the store, so today it cannot, but a future
+/// reordering could reintroduce exactly that gap silently). Constructing
+/// a second, independent `Supervisor` on the same state dir and listing
+/// through IT is what actually proves nothing was persisted — a row
+/// present only in SQLite, invisible to the original process's map, would
+/// still surface here.
 #[tokio::test]
 async fn create_in_missing_directory_errors() {
     let h = harness().await;
@@ -695,6 +737,15 @@ async fn create_in_missing_directory_errors() {
         "a missing directory is the caller's mistake, not a server fault"
     );
     assert!(h.client.list_sessions().await.unwrap().is_empty());
+
+    let sup2 = Supervisor::new_with_exe(h.state.path(), farhelm_bin().into())
+        .await
+        .expect("second supervisor construction reading the same state dir");
+    let client2 = connect_client(&sup2).await;
+    assert!(
+        client2.list_sessions().await.unwrap().is_empty(),
+        "a rejected create must not have persisted a row visible to a fresh supervisor"
+    );
 }
 
 /// An existing file is a different caller error from a missing path.
@@ -2143,3 +2194,183 @@ async fn input_bytes_survive_verbatim_through_hexecho() {
         "ETX (ctrl-C) must not arrive caret-escaped as ^C: {transcript}"
     );
 }
+
+/// PLAN_M2.md's headline SQLite behavior: session metadata must survive
+/// the supervisor process, not just the tmux server underneath it.
+///
+/// A brand-new `Supervisor` on the harness's state dir stands in for a
+/// restarted process — `new_with_exe` (unlike `serve()`) takes no
+/// socket-exclusivity lock, so nothing here fights the harness's own
+/// supervisor for the same reason `serve_refuses_a_second_supervisor_...`
+/// already runs several `Supervisor`s side by side. The harness's private
+/// tmux server is left running throughout (its `TmuxServerGuard` only
+/// tears it down when the harness itself drops, at the end of the test),
+/// which is the normal shape PLAN_M2.md describes: the tmux server
+/// outliving a supervisor restart. Listing alone would not catch a bug
+/// that persists metadata but loses the live reconnect, so this also
+/// attaches and round-trips input through the reloaded entry.
+#[tokio::test]
+async fn persisted_sessions_survive_a_supervisor_restart() {
+    let h = harness().await;
+    let (session, _work) = basic_session(&h).await;
+
+    let sup2 = Supervisor::new_with_exe(h.state.path(), farhelm_bin().into())
+        .await
+        .expect("second supervisor construction on the same state dir");
+    let client2 = connect_client(&sup2).await;
+
+    let listed = client2.list_sessions().await.expect("list after restart");
+    assert_eq!(
+        listed,
+        vec![session.clone()],
+        "session metadata must round-trip identically from SQLite"
+    );
+
+    let (chan, mut rx) = client2
+        .attach(&session.id, 80, 24)
+        .await
+        .expect("attach must succeed: the tmux session is still alive");
+    let mut seen = Vec::new();
+    wait_for(&mut rx, &mut seen, "FAKE-AGENT READY", 20).await;
+    client2.send_input(chan, b"still-alive\r".to_vec());
+    wait_for(&mut rx, &mut seen, "echo:", 10).await;
+    wait_for(&mut rx, &mut seen, "still-alive", 5).await;
+}
+
+/// PLAN_M2.md's "restart gap": a session whose tmux server did NOT
+/// survive a supervisor restart must still be listed — the whole point of
+/// persisting metadata separately from tmux liveness — but attaching to
+/// it must fail loudly rather than fabricate a terminal that no longer
+/// exists.
+///
+/// The private tmux server is killed directly on its socket, standing in
+/// for "the host rebooted" or "tmux crashed independently of the
+/// supervisor" — the case M1 had no answer for at all (the session simply
+/// vanished from the in-memory map). The second `Supervisor` construction
+/// starts a fresh, empty tmux server on the same socket (an ordinary
+/// consequence of `ensure_server`'s idempotent-adopt-or-start behavior),
+/// so `has_session` genuinely finds nothing for the reloaded row's
+/// `tmux_name` — this is not a mocked failure.
+#[tokio::test]
+async fn restart_gap_lists_sessions_without_a_terminal_and_attach_fails() {
+    let h = harness().await;
+    let (session, _work) = basic_session(&h).await;
+
+    let sock = h.state.path().join("tmux.sock");
+    kill_tmux_server_and_wait(&sock).await;
+
+    let sup2 = Supervisor::new_with_exe(h.state.path(), farhelm_bin().into())
+        .await
+        .expect("second supervisor construction after the tmux server died");
+    let client2 = connect_client(&sup2).await;
+
+    let listed = client2
+        .list_sessions()
+        .await
+        .expect("list after restart gap");
+    assert_eq!(
+        listed,
+        vec![session.clone()],
+        "a session must stay listed even once its tmux server is gone — \
+         vanishing is exactly what this PR exists to prevent"
+    );
+
+    let err = client2
+        .attach(&session.id, 80, 24)
+        .await
+        .expect_err("attach must fail: this entry's terminal did not survive the restart");
+    assert!(
+        err.to_string().contains("no terminal"),
+        "error must name the missing terminal, got: {err:#}"
+    );
+    assert_eq!(
+        err.downcast_ref::<SupervisorError>()
+            .expect("a terminal-less attach must carry a SupervisorError")
+            .kind,
+        ErrorKind::NotFound,
+        "a vanished terminal is a not-found, not a bad request or server fault"
+    );
+}
+
+/// The restart-gap decision is PER SESSION, not one answer applied to the
+/// whole reloaded batch.
+///
+/// Two sessions exist; only one's tmux session is killed directly (the
+/// other, and the private tmux server itself, are left untouched). An
+/// implementation that probes `has_session` once and reuses the answer
+/// for every row — or that otherwise conflates "the server is gone" with
+/// "this one session is gone" — would either lose the live session too or
+/// wrongly keep the dead one attachable; this test fails either way,
+/// which is exactly the coverage gap a single-session restart-gap test
+/// cannot close.
+#[tokio::test]
+async fn restart_gap_is_decided_per_session() {
+    let h = harness().await;
+    let (alive_session, _work1) = basic_session(&h).await;
+    let (dead_session, _work2) = basic_session(&h).await;
+
+    // Mirrors `create_session`'s own derivation (`service.rs`): the tmux
+    // session name is `fh-` plus the FULL session id (not a truncated
+    // prefix — see that call site for why a prefix is unsafe).
+    let dead_tmux_name = format!("fh-{}", dead_session.id);
+    let sock = h.state.path().join("tmux.sock");
+    let killed = tmux_query(&sock, &["kill-session", "-t", &dead_tmux_name]).await;
+    assert!(
+        killed.status.success(),
+        "test setup: kill-session must succeed, got: {}",
+        String::from_utf8_lossy(&killed.stderr)
+    );
+
+    let sup2 = Supervisor::new_with_exe(h.state.path(), farhelm_bin().into())
+        .await
+        .expect("second supervisor construction after one session's tmux died");
+    let client2 = connect_client(&sup2).await;
+
+    let mut listed = client2
+        .list_sessions()
+        .await
+        .expect("list after a partial restart gap");
+    listed.sort_by(|a, b| a.id.cmp(&b.id));
+    let mut expected = vec![alive_session.clone(), dead_session.clone()];
+    expected.sort_by(|a, b| a.id.cmp(&b.id));
+    assert_eq!(
+        listed, expected,
+        "both sessions must remain listed regardless of which one's terminal died"
+    );
+
+    let (chan, mut rx) = client2
+        .attach(&alive_session.id, 80, 24)
+        .await
+        .expect("the untouched session must still attach");
+    let mut seen = Vec::new();
+    wait_for(&mut rx, &mut seen, "FAKE-AGENT READY", 20).await;
+    client2.send_input(chan, b"still-alive\r".to_vec());
+    wait_for(&mut rx, &mut seen, "echo:", 10).await;
+    wait_for(&mut rx, &mut seen, "still-alive", 5).await;
+
+    let err = client2
+        .attach(&dead_session.id, 80, 24)
+        .await
+        .expect_err("the killed session's attach must fail");
+    assert!(
+        err.to_string().contains("no terminal"),
+        "error must name the missing terminal, got: {err:#}"
+    );
+    assert_eq!(
+        err.downcast_ref::<SupervisorError>()
+            .expect("a terminal-less attach must carry a SupervisorError")
+            .kind,
+        ErrorKind::NotFound,
+        "a vanished terminal is a not-found, not a bad request or server fault"
+    );
+}
+
+// Not tested here: a DB write failure during `create_session` (the
+// kill-the-just-created-tmux-session unwind path). Reproducing it needs
+// fault injection into the SQLite connection or the filesystem beneath
+// it, which M3 is expected to bring a seam for (PLAN.md's milestone
+// ladder). A filesystem hack (a read-only database file, say) would buy
+// little signal this far ahead of that seam existing, so it is skipped
+// rather than improvised. The unwind logic itself — kill tmux, still
+// return the DB error — is covered by code review and the ordinary
+// create-path tests exercising the happy side of the same call.

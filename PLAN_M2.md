@@ -24,9 +24,11 @@ metadata to live that is not the supervisor's process memory.
 - Stop terminates the agent and its entire process tree; the session stays in the list, terminal still viewable. Delete
   removes the session and its stored state entirely, confirming first when the agent is still alive. Stop does not
   confirm — SPEC.md gives confirmation to delete and archive, not stop, and stop is the recoverable operation.
-- After a supervisor restart, sessions are still listed (from SQLite) as exited with unknown exit code rather than
-  vanishing. Opening one shows its metadata and says why there is no terminal. This is deliberately crude — M3's
-  interrupted classification and rediscovery replace it.
+- After a supervisor restart, sessions are still listed (from SQLite) rather than vanishing. When the private tmux
+  server survived the restart, its sessions simply keep working — the terminal handles reload and attach behaves as if
+  nothing happened; refusing that would mean reporting a running agent as exited, which SPEC.md's no-guessing rule
+  forbids. When tmux did not survive, the session lists as exited with unknown exit code, and opening it shows metadata
+  plus why there is no terminal. That second half is deliberately crude — M3's interrupted classification replaces it.
 
 ## Scope
 
@@ -87,8 +89,9 @@ M2 is done when all of the following hold:
 2. Stop from the GUI kills the agent's whole process tree — pinned by a test whose fake agent spawns a child that must
    also die — and the session remains listed and viewable.
 3. Delete from the GUI removes the session and its stored state in any state, confirming first when the agent is alive.
-4. After `farhelm supervisor run` is killed and restarted, previously created sessions list as exited-unknown and open
-   to metadata plus an explanation instead of a terminal.
+4. After `farhelm supervisor run` is killed and restarted, previously created sessions are still listed: still
+   attachable when the tmux server survived, exited-unknown (metadata plus an explanation instead of a terminal) when it
+   did not.
 5. The list reply is capped with total count and truncated flag, never exceeds the frame limit even with fat records,
    and the UI visibly indicates truncation — pinned at the protocol level and in a UI test.
 6. `cargo test` and the Playwright suite cover the above and pass in CI, including the multi-session flow.

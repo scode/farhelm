@@ -28,6 +28,11 @@ dioxus = "0.7.0"
 futures-util = { version = "0.3", default-features = false }
 libc = "0.2"
 reqwest = { version = "0.12", default-features = false, features = ["json"] }
+# `bundled` compiles SQLite from source rather than linking the host's
+# libsqlite3 — required for the musl-static supervisor artifacts
+# SPEC_impl.md's cross-compilation plan ships (audited there: builds fine
+# for both target triples under cargo-zigbuild).
+rusqlite = { version = "0.40", features = ["bundled"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 shell-words = "1"

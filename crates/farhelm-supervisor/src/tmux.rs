@@ -323,6 +323,95 @@ impl TmuxDriver {
         Ok(())
     }
 
+    /// Whether a tmux session by this name still exists on the private
+    /// server.
+    ///
+    /// Used only at startup (`Supervisor::reload_sessions`'s persisted-
+    /// session load) to decide whether a session row read back from
+    /// SQLite describes a still-live terminal or one that ended along
+    /// with a prior tmux server.
+    ///
+    /// A nonzero exit alone does NOT answer the question: tmux uses the
+    /// same "command failed" exit status for "no such session" as it does
+    /// for "no server running at all" and other transient failures, and
+    /// only the former is this probe's honest `false`. Conflating the two
+    /// would permanently demote a live session to terminal-less on
+    /// nothing more than a hiccup reaching the private tmux server —
+    /// exactly the "do not guess" failure this module's callers are
+    /// supposed to avoid. So this inspects tmux's own diagnostic text
+    /// instead of trusting the exit code alone, and only two exact
+    /// messages (verified empirically against a scratch server) count as
+    /// the honest `false`:
+    /// - `"can't find session"`, tmux's answer when the server has at
+    ///   least one OTHER session but not this one;
+    /// - `"no current target"`, tmux's answer when the server has NO
+    ///   sessions at all (empirically, `has-session -t =name` degrades to
+    ///   this generic message rather than naming the target it could not
+    ///   find once there is nothing to compare it against) — the exact
+    ///   shape of a freshly restarted supervisor's tmux server before any
+    ///   session outlives the restart, so this case matters in practice,
+    ///   not just in principle.
+    ///
+    /// Anything else propagates as an error, stderr included, for the
+    /// caller to surface rather than silently misreport.
+    ///
+    /// The `=` prefix forces exact-name matching: bare `-t` targets fall
+    /// back to prefix and fnmatch resolution, which for a liveness probe
+    /// would mean a differently named session could answer for a dead
+    /// one. Today's fixed-length `fh-<8 hex>` names cannot shadow each
+    /// other, but the probe should not depend on that naming detail.
+    pub async fn has_session(&self, name: &str) -> anyhow::Result<bool> {
+        match self.run(&["has-session", "-t", &format!("={name}")]).await {
+            Ok(_) => Ok(true),
+            Err(e)
+                if e.to_string().contains("can't find session")
+                    || e.to_string().contains("no current target") =>
+            {
+                Ok(false)
+            }
+            Err(e) => Err(e).context("checking tmux session liveness"),
+        }
+    }
+
+    /// Kill a tmux session by name, tolerating its absence.
+    ///
+    /// Used to unwind a session whose tmux window was created but whose
+    /// SQLite insert then failed (`create_session`'s failure-ordering
+    /// contract): best-effort, because the caller returns the DB error
+    /// either way. The already-gone case this tolerates is NOT the agent
+    /// exiting on its own — `remain-on-exit on` keeps a pane (and so its
+    /// session) around after the process inside it dies, so that never
+    /// races this call — but something outside the supervisor's own
+    /// bookkeeping racing it against the same session: a concurrent
+    /// `kill-server` on the private socket, or manual cleanup someone runs
+    /// directly against it.
+    ///
+    /// Three tmux diagnostics (verified empirically) all mean the desired
+    /// state — this name is not a live session — was already reached, and
+    /// so are all tolerated the same way: `"can't find session"` (another
+    /// session exists but not this one), `"no current target"` (the server
+    /// is up but has no sessions at all), and `"no server running"` (the
+    /// whole private tmux server is gone, e.g. `has_session`'s docs cover
+    /// the same server-emptiness distinction for the same underlying
+    /// reason). Anything else is a real failure worth surfacing.
+    pub async fn kill_session(&self, name: &str) -> anyhow::Result<()> {
+        match self.run(&["kill-session", "-t", name]).await {
+            Ok(_) => Ok(()),
+            Err(e)
+                if [
+                    "can't find session",
+                    "no current target",
+                    "no server running",
+                ]
+                .iter()
+                .any(|diagnostic| e.to_string().contains(diagnostic)) =>
+            {
+                Ok(())
+            }
+            Err(e) => Err(e),
+        }
+    }
+
     /// Create a session running `window_cmd` (argv, executed directly by
     /// tmux — no extra shell layer beyond the one in the argv itself).
     /// Returns the pane id (`%N`), the stable handle for all later
