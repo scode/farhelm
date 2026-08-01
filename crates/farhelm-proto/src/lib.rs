@@ -80,7 +80,23 @@ pub mod io;
 /// so that mixed M2-era builds keep interoperating without a bump each
 /// time. Anything that cannot be made additive earns its own bump instead
 /// of retroactively stretching this one's meaning.
-pub const PROTOCOL_VERSION: u32 = 3;
+///
+/// Bumped to 4 for `ControlMsg::PauseOutput`/`ResumeOutput` (PLAN_M2_5.md
+/// step 2). M2's "new message variants are additive" premise above turned
+/// out to be false: `io::parse_control` decodes `ControlMsg` through a
+/// single `#[serde(tag = "type")]` enum, so an unrecognized tag is a decode
+/// error, not a defaulted no-op, and both the helm and the supervisor
+/// connection loops treat that error as fatal — an unknown variant tears
+/// down an already-established connection instead of being ignored. A new
+/// variant is exactly the "cannot be additive" case that earns its own
+/// bump, per version 3's own docs above; `protocol_version_is_pinned_at_4`
+/// and `unknown_control_message_tag_fails_decode` below (plus the
+/// loop-level teardown test in the farhelm crate's e2e suite) pin both the
+/// number and the reasoning so the next milestone cannot re-assume
+/// tolerance that was never there. Within version 4, the same additive
+/// discipline applies: later M2.5 wire changes must be new optional fields
+/// with decode defaults, not new variants, or they earn their own bump too.
+pub const PROTOCOL_VERSION: u32 = 4;
 
 /// The build version compiled into this binary, carried in the hello for
 /// diagnostics.
@@ -129,6 +145,25 @@ pub enum ErrorKind {
 /// chunked well below this by the supervisor; the cap exists so a
 /// corrupted length prefix cannot make the reader allocate gigabytes.
 pub const MAX_FRAME_LEN: u32 = 8 * 1024 * 1024;
+
+/// The `reason` string a `ControlMsg::Detached` carries when a stalled
+/// viewer is given up on (PLAN_M2_5.md's stall-detach contract). Two
+/// emitters will send it: the supervisor, when a single pause lasts
+/// longer than the stall timeout (a hard maximum pause duration — there
+/// is deliberately no progress measurement while paused), and the helm,
+/// when a terminal's bounded event channel fills because its consumer
+/// stopped draining without ever pausing. Named here, in the proto
+/// crate, so the emitters and the tests that match on it cannot drift
+/// independently.
+///
+/// Clients display `reason` inside their own detach banner (terminal.js
+/// prefixes "Detached: "), so this string must read as a bare cause with
+/// no leading "detached:" of its own, one line, user-legible.
+///
+/// This PR only reserves the string as wire vocabulary; nothing sends it
+/// yet. The supervisor stall timer and the helm channel bound land in
+/// later M2.5 PRs.
+pub const DETACH_REASON_STALLED: &str = "terminal stopped consuming output (stalled)";
 
 /// Errors surfaced by frame encoding/decoding.
 #[derive(Debug, thiserror::Error)]
@@ -487,6 +522,14 @@ pub enum ControlMsg {
         channel: u32,
     },
     /// Unsolicited: this channel's attachment was taken over or torn down.
+    ///
+    /// `reason` is one of a small open-ended set of user-legible strings,
+    /// not a coded enum — clients render every reason generically inside
+    /// their detach banner without matching on its value.
+    /// [`DETACH_REASON_STALLED`] is the one reason this crate names,
+    /// because two independent emitters (supervisor and helm) and their
+    /// tests must produce the identical string; the "another client took
+    /// over" case has no constant because only one place emits it.
     Detached {
         channel: u32,
         reason: String,
@@ -504,6 +547,32 @@ pub enum ControlMsg {
         channel: u32,
         cols: u16,
         rows: u16,
+    },
+    /// The client's terminal cannot keep up: stop sending this
+    /// attachment's output until a matching `ResumeOutput`. This is
+    /// PLAN_M2_5.md's watermark-driven flow control — the intended sender
+    /// is xterm.js once its unflushed `term.write()` backlog crosses the
+    /// high-water mark, a sender that lands with the UI work in
+    /// PLAN_M2_5.md step 4. Fire-and-forget like `Resize`, and `channel`
+    /// exists for exactly `Resize`'s reason: see that variant's doc
+    /// comment for why the supervisor must be able to ignore a pause
+    /// still in flight from a client that just lost this attachment's
+    /// takeover.
+    ///
+    /// Wire vocabulary only as of this PR — the supervisor gains no
+    /// handler for it until PLAN_M2_5.md step 3.
+    PauseOutput {
+        channel: u32,
+    },
+    /// The client has drained its backlog below the low-water mark; output
+    /// may flow again. Pairs with `PauseOutput` and shares its rationale
+    /// for carrying `channel` (see `Resize`'s doc comment) and its
+    /// fire-and-forget shape.
+    ///
+    /// Wire vocabulary only as of this PR — the supervisor gains no
+    /// handler for it until PLAN_M2_5.md step 3.
+    ResumeOutput {
+        channel: u32,
     },
     /// A request failed, or (with `req_id` 0) something went wrong that no
     /// request is waiting on. `message` is meant for the user verbatim —
@@ -700,15 +769,63 @@ mod tests {
         );
     }
 
-    /// `PROTOCOL_VERSION` is a load-bearing constant for M2 step 4 (this
-    /// is the ONE version bump that PR gets — see the const's own docs):
-    /// pinning its value here makes an accidental re-bump (or a forgotten
-    /// one, if a later change needed it) a loud test failure rather than a
-    /// silent drift discovered only by two builds refusing to talk to
-    /// each other.
+    /// `PROTOCOL_VERSION` is a load-bearing constant (see the const's own
+    /// docs for the M2 bump to 3 and the M2.5 bump to 4): pinning its value
+    /// here makes an accidental re-bump (or a forgotten one, if a later
+    /// change needed it) a loud test failure rather than a silent drift
+    /// discovered only by two builds refusing to talk to each other.
     #[test]
-    fn protocol_version_is_pinned_at_3() {
-        assert_eq!(PROTOCOL_VERSION, 3);
+    fn protocol_version_is_pinned_at_4() {
+        assert_eq!(PROTOCOL_VERSION, 4);
+    }
+
+    /// Pins the decode half of the failure PLAN_M2_5.md's version bump
+    /// exists because of: `parse_control` fed a syntactically valid
+    /// control frame whose `type` tag is not one this build knows must
+    /// error, not silently ignore the message or default it away. M2
+    /// believed new `ControlMsg` variants could be additive within one
+    /// protocol version; this pins the opposite so a future milestone
+    /// cannot re-assume a tolerance that was never actually there.
+    ///
+    /// This is deliberately only the parse-layer half: that the
+    /// supervisor's connection loop propagates this error and tears the
+    /// connection down is pinned by an integration test in the farhelm
+    /// crate's e2e suite (the helm's loop shares the same `?` shape), so
+    /// a later refactor that catches and swallows the parse error cannot
+    /// hide behind this unit test staying green.
+    #[test]
+    fn unknown_control_message_tag_fails_decode() {
+        let frame = Frame {
+            kind: FrameKind::Control,
+            channel: 0,
+            body: br#"{"type":"not_a_real_message"}"#.to_vec(),
+        };
+        crate::io::parse_control(&frame).expect_err(
+            "an unrecognized ControlMsg tag must be a decode error, not a tolerated no-op",
+        );
+    }
+
+    /// Both future emitters of `DETACH_REASON_STALLED` (supervisor stall
+    /// timer, helm channel-full backstop) and the UI tests that look for
+    /// the banner depend on this exact wire string; golden-pinning the
+    /// full `Detached` JSON here means a wording edit or a reintroduced
+    /// "detached:" prefix (the UI adds its own banner prefix — see the
+    /// constant's docs) fails loudly instead of surfacing as a garbled
+    /// user-facing banner.
+    #[test]
+    fn stall_detach_reason_json_shape_is_pinned() {
+        let detached = ControlMsg::Detached {
+            channel: 7,
+            reason: DETACH_REASON_STALLED.to_string(),
+        };
+        assert_eq!(
+            serde_json::to_value(&detached).unwrap(),
+            serde_json::json!({
+                "type": "detached",
+                "channel": 7,
+                "reason": "terminal stopped consuming output (stalled)",
+            })
+        );
     }
 
     /// `StopSession`/`SessionStopped` and `DeleteSession`/`SessionDeleted`
@@ -793,6 +910,116 @@ mod tests {
                 msg
             );
         }
+    }
+
+    /// `PauseOutput`/`ResumeOutput` round-tripped through the real
+    /// encode/decode path, matching how `stop_and_delete_roundtrip_through_frames`
+    /// exercises the M2 additions above — this is what would catch a drift
+    /// between the codec's framing and serde's JSON shape for the wire
+    /// vocabulary PLAN_M2_5.md's version 4 bump exists for.
+    #[test]
+    fn pause_and_resume_output_roundtrip_through_frames() {
+        for msg in [
+            ControlMsg::PauseOutput { channel: 9 },
+            ControlMsg::ResumeOutput { channel: 9 },
+        ] {
+            let mut wire = Vec::new();
+            Frame::control(&msg).encode(&mut wire).unwrap();
+            let (frame, used) = Frame::decode(&wire).unwrap().unwrap();
+            assert_eq!(used, wire.len());
+            assert_eq!(
+                serde_json::from_slice::<ControlMsg>(&frame.body).unwrap(),
+                msg
+            );
+        }
+    }
+
+    /// Golden JSON for `PauseOutput`/`ResumeOutput`, pinned the same way as
+    /// `stop_and_delete_json_shapes_are_pinned`: a serde attribute change
+    /// here (dropping `rename_all`, renaming a field) would compile and
+    /// round-trip cleanly while quietly producing bytes an unmodified peer
+    /// cannot parse — and for these two variants specifically, "unmodified
+    /// peer" now means a hard decode error rather than a silently ignored
+    /// field, per `unknown_control_message_tag_is_connection_fatal` above.
+    #[test]
+    fn pause_and_resume_output_json_shapes_are_pinned() {
+        let pause = ControlMsg::PauseOutput { channel: 4 };
+        assert_eq!(
+            serde_json::to_value(&pause).unwrap(),
+            serde_json::json!({
+                "type": "pause_output",
+                "channel": 4,
+            })
+        );
+
+        let resume = ControlMsg::ResumeOutput { channel: 4 };
+        assert_eq!(
+            serde_json::to_value(&resume).unwrap(),
+            serde_json::json!({
+                "type": "resume_output",
+                "channel": 4,
+            })
+        );
+    }
+
+    /// Version 4's additive rule (see `PROTOCOL_VERSION`'s docs): later
+    /// M2.5 wire growth must be new optional fields, which only works if
+    /// today's decoder ignores fields it does not know. This is the
+    /// baseline-v4-decoder-meets-future-sender direction, mirroring the
+    /// `SessionList` old/new tolerance pair from M2; without it, someone
+    /// could add `deny_unknown_fields` (or serde could change defaults)
+    /// and mixed v4 builds would break with every test green.
+    #[test]
+    fn pause_and_resume_with_future_extra_fields_decode_through_parse_control() {
+        for (tag, extra) in [("pause_output", "budget"), ("resume_output", "credit")] {
+            let frame = Frame {
+                kind: FrameKind::Control,
+                channel: 0,
+                body: format!(r#"{{"type":"{tag}","channel":6,"{extra}":123}}"#).into_bytes(),
+            };
+            let msg = crate::io::parse_control(&frame)
+                .expect("a known tag with an unknown extra field must decode, not error");
+            let channel = match msg {
+                ControlMsg::PauseOutput { channel } | ControlMsg::ResumeOutput { channel } => {
+                    channel
+                }
+                other => panic!("expected pause/resume, got {other:?}"),
+            };
+            assert_eq!(
+                channel, 6,
+                "known fields must survive alongside ignored ones"
+            );
+        }
+    }
+
+    /// The other tolerance direction within version 4: a decoder built
+    /// with a later optional field (modeled by a shadow struct with a
+    /// serde default, the same technique as M2's legacy-decoder test)
+    /// must accept today's pause/resume bytes and default the absent
+    /// field. Together with the future-extra-fields test above this pins
+    /// both halves of the additive discipline the `PROTOCOL_VERSION`
+    /// docs promise for 4.
+    #[test]
+    fn current_pause_output_decodes_under_a_future_v4_decoder_with_defaults() {
+        #[derive(serde::Deserialize)]
+        struct FuturePauseOutput {
+            channel: u32,
+            #[serde(default)]
+            budget_bytes: Option<u64>,
+        }
+        let mut wire = Vec::new();
+        Frame::control(&ControlMsg::PauseOutput { channel: 5 })
+            .encode(&mut wire)
+            .unwrap();
+        let (frame, _) = Frame::decode(&wire).unwrap().unwrap();
+        let value: serde_json::Value = serde_json::from_slice(&frame.body).unwrap();
+        assert_eq!(value["type"], "pause_output");
+        let decoded: FuturePauseOutput = serde_json::from_value(value).unwrap();
+        assert_eq!(decoded.channel, 5);
+        assert_eq!(
+            decoded.budget_bytes, None,
+            "an absent future field must default, never fail the decode"
+        );
     }
 
     /// `SessionStatus`'s three variants and FOUR distinct JSON shapes

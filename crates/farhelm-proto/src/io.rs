@@ -181,47 +181,58 @@ mod tests {
 
     /// The handshake must refuse a version mismatch with an actionable
     /// error — this is M1 acceptance criterion 6 (SPEC.md version-skew
-    /// rule) pinned at the unit level.
+    /// rule) pinned at the unit level. Both directions of skew are
+    /// exercised: a NEWER peer, and — since the M2.5 bump to 4 made
+    /// "older peer exists" a reality — an OLDER version-3 peer. The old
+    /// side matters independently because a comparison bug that rejects
+    /// only newer versions (`>` instead of `!=`) would accept a v3 peer
+    /// that cannot even decode `PauseOutput`, the exact skew the bump
+    /// exists to refuse.
     #[tokio::test]
     async fn handshake_refuses_protocol_mismatch() {
-        let (a, b) = tokio::io::duplex(64 * 1024);
-        let (ar, aw) = tokio::io::split(a);
-        let (br, bw) = tokio::io::split(b);
+        for wrong_version in [PROTOCOL_VERSION + 1, PROTOCOL_VERSION - 1] {
+            let (a, b) = tokio::io::duplex(64 * 1024);
+            let (ar, aw) = tokio::io::split(a);
+            let (br, bw) = tokio::io::split(b);
 
-        let good = tokio::spawn(async move {
-            let mut r = FrameReader::new(ar);
-            let mut w = FrameWriter::new(aw);
-            handshake(&mut r, &mut w, "helm").await
-        });
+            let good = tokio::spawn(async move {
+                let mut r = FrameReader::new(ar);
+                let mut w = FrameWriter::new(aw);
+                handshake(&mut r, &mut w, "helm").await
+            });
 
-        // The "old build" peer: sends a hello with a wrong version.
-        let mut r = FrameReader::new(br);
-        let mut w = FrameWriter::new(bw);
-        w.write_control(&ControlMsg::Hello {
-            protocol_version: PROTOCOL_VERSION + 1,
-            build_version: "9.9.9".into(),
-            role: "supervisor".into(),
-        })
-        .await
-        .unwrap();
-        // It receives our hello, then the refusal — pinning both fields a
-        // caller relies on to tell this apart from a request-scoped
-        // failure: `req_id: 0` (nothing was waiting on this reply) and
-        // `kind: Internal` (this side's own refusal, not a complaint about
-        // the peer's request).
-        let _their_hello = r.read_frame().await.unwrap().unwrap();
-        let refusal = parse_control(&r.read_frame().await.unwrap().unwrap()).unwrap();
-        assert!(matches!(
-            refusal,
-            ControlMsg::Error {
-                req_id: 0,
-                kind: ErrorKind::Internal,
-                ..
-            }
-        ));
+            // The mismatched-build peer: sends a hello with a wrong version.
+            let mut r = FrameReader::new(br);
+            let mut w = FrameWriter::new(bw);
+            w.write_control(&ControlMsg::Hello {
+                protocol_version: wrong_version,
+                build_version: "9.9.9".into(),
+                role: "supervisor".into(),
+            })
+            .await
+            .unwrap();
+            // It receives our hello, then the refusal — pinning both fields a
+            // caller relies on to tell this apart from a request-scoped
+            // failure: `req_id: 0` (nothing was waiting on this reply) and
+            // `kind: Internal` (this side's own refusal, not a complaint about
+            // the peer's request).
+            let _their_hello = r.read_frame().await.unwrap().unwrap();
+            let refusal = parse_control(&r.read_frame().await.unwrap().unwrap()).unwrap();
+            assert!(matches!(
+                refusal,
+                ControlMsg::Error {
+                    req_id: 0,
+                    kind: ErrorKind::Internal,
+                    ..
+                }
+            ));
 
-        let err = good.await.unwrap().unwrap_err();
-        assert!(err.to_string().contains("protocol version mismatch"));
+            let err = good.await.unwrap().unwrap_err();
+            assert!(
+                err.to_string().contains("protocol version mismatch"),
+                "version {wrong_version} must be refused"
+            );
+        }
     }
 
     /// A peer that dies mid-frame must look like an error, not a clean

@@ -930,6 +930,60 @@ async fn attachment_channels_must_be_nonzero_and_unique() {
     .expect("supervisor did not reject duplicate attachment channel");
 }
 
+/// An unknown control-message tag tears down the whole connection — the
+/// loop-level half of the contract whose parse-layer half lives in the
+/// proto crate (`unknown_control_message_tag_fails_decode`). This is the
+/// behavior that forced PLAN_M2_5.md's `PROTOCOL_VERSION` bump to 4: new
+/// `ControlMsg` variants are not additive, so a peer speaking a newer
+/// message set must be kept out by the version handshake, because once
+/// past it a single unknown message kills the connection. Pinning the
+/// teardown here means a later refactor that catches and swallows the
+/// parse error inside the connection loop — silently converting
+/// "connection-fatal" into "ignored", and with it invalidating the whole
+/// version-bump rationale — fails a test instead of going unnoticed.
+#[tokio::test]
+async fn unknown_control_message_tears_down_the_connection() {
+    use farhelm_proto::io::{FrameReader, FrameWriter, handshake};
+
+    let h = harness().await;
+    let (client_side, server_side) = tokio::io::duplex(1 << 20);
+    let sup = Arc::clone(&h.sup);
+    tokio::spawn(async move {
+        let _ = handle_connection(sup, server_side).await;
+    });
+    let (read_half, write_half) = tokio::io::split(client_side);
+    let mut reader = FrameReader::new(read_half);
+    let mut writer = FrameWriter::new(write_half);
+    handshake(&mut reader, &mut writer, "helm")
+        .await
+        .expect("handshake");
+
+    writer
+        .write_frame(&Frame {
+            kind: FrameKind::Control,
+            channel: 0,
+            body: br#"{"type":"message_from_the_future"}"#.to_vec(),
+        })
+        .await
+        .unwrap();
+
+    // The connection must die: the reader sees EOF or an error, never a
+    // reply, and never a silently-continuing session. A tolerant loop
+    // would leave the stream open and this read hanging, so the timeout
+    // is the failure detector for that regression.
+    let outcome = tokio::time::timeout(std::time::Duration::from_secs(10), async {
+        loop {
+            match reader.read_frame().await {
+                Ok(Some(_)) => continue, // drain any in-flight frame
+                Ok(None) => break,       // clean shutdown: connection torn down
+                Err(_) => break,         // error shutdown: equally torn down
+            }
+        }
+    })
+    .await;
+    outcome.expect("connection must be torn down after an unknown control message, not left open");
+}
+
 /// Precondition failures fail the create with a visible error and no
 /// session (SPEC.md's creation-failure split).
 ///
