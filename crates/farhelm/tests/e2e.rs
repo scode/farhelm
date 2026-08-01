@@ -10990,6 +10990,55 @@ fn fixture_resume_template(
     ]
 }
 
+/// Where [`interrupted_session_resumes_its_conversation`]'s final assertion
+/// finds the record the resumed run appended to, once it knows `kind` and
+/// the conversation id.
+///
+/// Claude's tree is partitioned by working directory, so a listing of the
+/// one project directory the fixture writes into is enough. Codex's is not
+/// — it nests by CALENDAR DATE instead (see `record_path` in
+/// `fake_agent.rs`) — so this walks the whole `.codex/sessions` tree rather
+/// than duplicating that date math: a test-side reimplementation of the
+/// fixture's own path formula would only prove the two agree with each
+/// other, not that either matches what a real resumed Codex session does.
+fn resumed_record_file(
+    home: &std::path::Path,
+    kind: &str,
+    work: &std::path::Path,
+    conversation: &str,
+) -> std::path::PathBuf {
+    match kind {
+        "claude" => {
+            let canonical = std::fs::canonicalize(work).expect("canonicalize the workdir");
+            std::fs::read_dir(home.join(".claude").join("projects").join(
+                farhelm_supervisor::agent_kind::munge_cwd(&canonical.to_string_lossy()),
+            ))
+            .expect("project dir")
+            .map(|entry| entry.expect("dir entry").path())
+            .find(|path| path.to_string_lossy().contains(conversation))
+            .expect("the captured record still exists")
+        }
+        "codex" => {
+            fn walk(dir: &std::path::Path, id: &str) -> Option<std::path::PathBuf> {
+                for entry in std::fs::read_dir(dir).expect("read the sessions tree") {
+                    let path = entry.expect("dir entry").path();
+                    if path.is_dir() {
+                        if let Some(found) = walk(&path, id) {
+                            return Some(found);
+                        }
+                    } else if path.to_string_lossy().contains(id) {
+                        return Some(path);
+                    }
+                }
+                None
+            }
+            walk(&home.join(".codex").join("sessions"), conversation)
+                .expect("the captured record still exists")
+        }
+        other => panic!("resumed_record_file: unknown kind {other}"),
+    }
+}
+
 /// M3 acceptance 9 and 8 together: a session INTERRUPTED by a (simulated)
 /// reboot restarts into a FRESH terminal — there is none left to reuse —
 /// and `Resume` mode fills the snapshot's template with the identity that
@@ -11001,11 +11050,16 @@ fn fixture_resume_template(
 /// is visible as a fact about what RAN), and it reports adopting the
 /// existing record rather than starting a new one — which is what "resumes
 /// exactly that conversation" means on disk.
-#[tokio::test]
-async fn an_interrupted_session_resumes_its_conversation_in_a_fresh_terminal() {
+///
+/// Shared by both agent kinds ([`an_interrupted_session_resumes_its_conversation_in_a_fresh_terminal`]
+/// and [`an_interrupted_codex_session_resumes_its_conversation_in_a_fresh_terminal`]):
+/// the resume path is kind-agnostic once `fixture_resume_template` has
+/// filled in the placeholder, and the only kind-specific step left is
+/// finding where the record landed on disk ([`resumed_record_file`]).
+async fn interrupted_session_resumes_its_conversation(kind: &str) {
     let home = tempfile::tempdir().expect("agent home");
     let bin = tempfile::tempdir().expect("agent bin");
-    std::os::unix::fs::symlink(farhelm_bin(), bin.path().join("claude"))
+    std::os::unix::fs::symlink(farhelm_bin(), bin.path().join(kind))
         .expect("symlink the farhelm binary under the agent's own name");
     let state = tempfile::tempdir().expect("state dir");
     let slot = SLOTS.acquire().await.expect("semaphore is never closed");
@@ -11036,8 +11090,8 @@ async fn an_interrupted_session_resumes_its_conversation_in_a_fresh_terminal() {
             .create_session_with_extras(
                 &work.path().to_string_lossy(),
                 &format!(
-                    "{} internal fake-agent --script claude-record --record-home {}",
-                    shell_words::quote(&bin.path().join("claude").to_string_lossy()),
+                    "{} internal fake-agent --script {kind}-record --record-home {}",
+                    shell_words::quote(&bin.path().join(kind).to_string_lossy()),
                     shell_words::quote(&home.path().to_string_lossy())
                 ),
                 None,
@@ -11045,8 +11099,8 @@ async fn an_interrupted_session_resumes_its_conversation_in_a_fresh_terminal() {
                 24,
                 farhelm_helm::CreateExtras {
                     resume_template: Some(fixture_resume_template(
-                        &bin.path().join("claude"),
-                        "claude",
+                        &bin.path().join(kind),
+                        kind,
                         home.path(),
                     )),
                     ..farhelm_helm::CreateExtras::default()
@@ -11169,21 +11223,12 @@ async fn an_interrupted_session_resumes_its_conversation_in_a_fresh_terminal() {
     )
     .await;
     let record = String::from_utf8(
-        std::fs::read(
-            std::fs::read_dir(
-                home.path().join(".claude").join("projects").join(
-                    farhelm_supervisor::agent_kind::munge_cwd(
-                        &std::fs::canonicalize(work.path())
-                            .expect("canonicalize")
-                            .to_string_lossy(),
-                    ),
-                ),
-            )
-            .expect("project dir")
-            .map(|entry| entry.expect("dir entry").path())
-            .find(|path| path.to_string_lossy().contains(&conversation))
-            .expect("the captured record still exists"),
-        )
+        std::fs::read(resumed_record_file(
+            home.path(),
+            kind,
+            work.path(),
+            &conversation,
+        ))
         .expect("read the record"),
     )
     .expect("the fixture writes UTF-8");
@@ -11192,6 +11237,31 @@ async fn an_interrupted_session_resumes_its_conversation_in_a_fresh_terminal() {
         "the resumed run must append to the captured conversation, not replace it: {record}"
     );
     drop(slot);
+}
+
+/// Thin wrapper around [`interrupted_session_resumes_its_conversation`] for
+/// the Claude-shaped fixture. Kept as its own `#[tokio::test]` (rather than
+/// folded into a loop) so a failure names the agent kind directly in the
+/// test binary's output.
+#[tokio::test]
+async fn an_interrupted_session_resumes_its_conversation_in_a_fresh_terminal() {
+    interrupted_session_resumes_its_conversation("claude").await;
+}
+
+/// The Codex half of PLAN_M3.md acceptance 8: until this test existed, the
+/// "both fixture pairs restart-resume their own conversation" claim was
+/// only pinned for Codex up to offer-and-argv (`snapshot.resume_offer`,
+/// `resume_argv`) — nothing actually EXECUTED a resume relaunch and
+/// confirmed the SAME conversation record grew on disk afterward, the way
+/// [`an_interrupted_session_resumes_its_conversation_in_a_fresh_terminal`]
+/// already does for Claude. The resume machinery itself is kind-agnostic
+/// (see `fixture_resume_template`'s docs), but only running it end to end
+/// against Codex's differently-shaped, date-nested record tree
+/// (`resumed_record_file`) rules out a Claude-only bug hiding behind a
+/// kind-agnostic-looking code path.
+#[tokio::test]
+async fn an_interrupted_codex_session_resumes_its_conversation_in_a_fresh_terminal() {
+    interrupted_session_resumes_its_conversation("codex").await;
 }
 
 /// SPEC.md's verbatim fallback resume, which only an explicitly configured
