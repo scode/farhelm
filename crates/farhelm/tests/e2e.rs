@@ -11968,3 +11968,242 @@ async fn a_restart_respawns_only_its_own_pane() {
         "the bystander's own output must survive: {content}"
     );
 }
+
+/// The reason sentinel paths are generation-scoped at all
+/// (`spec_path_for_launch`/`status_path_for_spec`, both keyed on the
+/// launch's generation number): a stale sentinel from an EARLIER
+/// generation must never be able to paint a LATER, unrelated launch as
+/// `error`, even if something failed to clean it up.
+///
+/// `a_restart_clears_a_previous_launch_error` already pins that a real
+/// failed launch's own sentinel is deleted on a successful restart — this
+/// test pins the complementary, previously-untested half: a gen-0
+/// sentinel that SURVIVES (planted directly, standing in for whatever
+/// cleanup bug might one day leave one behind) still cannot describe
+/// gen-1, because nothing ever looks a generation-0 path up on behalf of
+/// a generation-1 session. The session here never actually failed to
+/// launch; the sentinel is a pure fabrication written straight to the
+/// gen-0 path AFTER the restart has already moved the session to
+/// generation 1, so real cleanup has nothing left to race against.
+///
+/// The sentinel gate (`sentinel_could_still_apply` combined with
+/// `dead_or_absent` in `service.rs`) is only ever consulted for a pane
+/// that is dead or gone — a live gen-1 pane never reaches it regardless of
+/// what the gate would have said, which would make an assertion against a
+/// still-alive gen-1 vacuous. So generation 1's agent is SIGKILLed WITHOUT
+/// an annotation (its own pane pid, not `stop_session` — an annotated
+/// exit is never sentinel-superseded per `sentinel_could_still_apply`'s
+/// own docs, which would make the assertion vacuous the other way) before
+/// either read: this is the exact state — an unannotated dead pane on the
+/// current generation — that a wrongly-scoped sentinel lookup would flip
+/// from `Exited` to `Error`.
+///
+/// Checked twice: once against the live supervisor's `ListSessions`, and
+/// once again after a full supervisor handoff to a fresh process that
+/// actually owns the state directory (`handoff_to_new_supervisor`; a
+/// second supervisor started while the first still holds the directory
+/// would come up read-only and reconcile nothing, per the comment on
+/// `owns_state_dir` elsewhere in this file), which is `reload_sessions`'s
+/// unconditional sentinel check — the stronger of the two reads and the
+/// one most likely to re-surface a generation mismatch if the scoping
+/// were ever accidentally loosened to "the session's latest sentinel"
+/// instead of "this generation's".
+#[tokio::test]
+async fn a_stale_generation_zero_sentinel_cannot_taint_generation_one() {
+    let h = harness().await;
+    let (session, _work) = basic_session(&h).await;
+    assert_eq!(
+        listed(&h.client, &session.id).await.status,
+        SessionStatus::Alive,
+        "the session must start out genuinely healthy"
+    );
+
+    h.client
+        .restart_session(&session.id, farhelm_proto::RestartMode::Fresh, true)
+        .await
+        .expect("restart onto generation 1");
+    wait_for_alive_status(&h.client, &session.id, 30).await;
+
+    // Planted AFTER the restart above, so the restart's own cleanup of
+    // generation 0's real launch files (which never failed) cannot
+    // interfere with this fabricated one.
+    let stale_sentinel =
+        status_path_for_spec(&spec_path_for_launch(h.state.path(), &session.id, 0));
+    std::fs::write(&stale_sentinel, "exec_failed argv0=/nope errno=2")
+        .expect("plant a stale generation-0 sentinel");
+
+    // `Alive` only means the pane hasn't died yet, not that the shim's own
+    // `exec` chain has reached the real agent (`wait_for_alive_status`'s
+    // own docs) — killing on that signal alone would race the shim itself
+    // and reproduce the WRAPPER-failure shape
+    // (`a_failed_scope_wrapper_classifies_as_error_rather_than_a_plain_exit`),
+    // not the one under test here. The shim unlinks its own spec the
+    // moment it has read it, strictly before exec'ing the real agent
+    // (`exec_launch_spec_with_seam`'s docs), so generation 1's spec file
+    // going away is the earliest reliable proof that the shim has handed
+    // off and the real fake agent — not its wrapper — now owns the pane.
+    // (An attach-and-wait-for-the-ready-banner alternative was tried and
+    // rejected: this pane's tmux scrollback can still hold generation 0's
+    // OWN ready banner from before the restart, so a naive text search
+    // matches instantly against stale output rather than generation 1's.)
+    let gen1_spec = spec_path_for_launch(h.state.path(), &session.id, 1);
+    let shim_handoff_deadline = tokio::time::Instant::now() + Duration::from_secs(20);
+    while gen1_spec.exists() {
+        assert!(
+            tokio::time::Instant::now() < shim_handoff_deadline,
+            "generation 1's shim never consumed its own spec"
+        );
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+
+    // Kill generation 1's pane's OWN process directly, bypassing
+    // `stop_session`, so the pane goes dead (tmux keeps a dead pane around
+    // rather than tearing down the session) with no annotation — the only
+    // shape that would ever even attempt a sentinel read. `kill-session`
+    // would destroy the tmux session outright instead of leaving a dead
+    // pane behind, which is not the state under test here.
+    let sock = h.state.path().join("tmux.sock");
+    let tmux_name = format!("fh-{}", session.id);
+    let pid_out = tmux_query(
+        &sock,
+        &["display-message", "-p", "-t", &tmux_name, "#{pane_pid}"],
+    )
+    .await;
+    let pane_pid: u32 = String::from_utf8_lossy(&pid_out.stdout)
+        .trim()
+        .parse()
+        .expect("a live pane must report a pid");
+    // SAFETY: a real, currently-live pid this test just read from tmux.
+    unsafe {
+        libc::kill(pane_pid as libc::pid_t, libc::SIGKILL);
+    }
+    wait_for_dead_pane(&sock, &tmux_name).await;
+
+    let live_read = listed(&h.client, &session.id).await;
+    assert!(
+        matches!(live_read.status, SessionStatus::Exited { .. }),
+        "an unannotated dead generation-1 pane must classify as Exited, not be swallowed by \
+         the gen-0 sentinel: {live_read:?}"
+    );
+
+    // Hand off to a replacement supervisor that actually owns the state
+    // directory, so `reload_sessions`'s unconditional sentinel check runs
+    // for real rather than against a read-only reconciler.
+    let Harness {
+        client,
+        sup,
+        state,
+        _tmux,
+        _slot,
+    } = h;
+    let sup2 = handoff_to_new_supervisor(state.path(), sup, client).await;
+    let client2 = connect_client(&sup2).await;
+    let reloaded = listed(&client2, &session.id).await;
+    assert!(
+        matches!(reloaded.status, SessionStatus::Exited { .. }),
+        "the stale generation-0 sentinel must still not taint generation 1 after a real, \
+         owning reload: {reloaded:?}"
+    );
+
+    // `cleanup_launch_artifacts` only ever removes a launch's OWN files
+    // once ITS OWN generation is classified `Error` (`service.rs`) —
+    // generation 1 here is never classified `Error` and has no sentinel of
+    // its own, so nothing in this path has any reason to touch generation
+    // 0's leftover file. Confirmed empirically (not merely assumed) before
+    // pinning: the real reload's cleanup does NOT sweep other generations'
+    // files, so the plant survives untouched.
+    assert!(
+        stale_sentinel.exists(),
+        "an unconsulted sentinel for the wrong generation is left untouched, not swept, by a \
+         reload that never classified that generation as Error"
+    );
+}
+
+/// PLAN_M3.md item 4 / acceptance 5's exact composition: stop, then
+/// restart, then let the new run end on its own. The stop records
+/// "stopped by user" on generation 0; the restart must clear that
+/// annotation with the new generation (already pinned elsewhere); what is
+/// untested until this is the THIRD leg — once generation 1 exits
+/// NATURALLY, nothing must re-attach generation 0's annotation to it. The
+/// real risk this guards against is not annotation storage (annotations
+/// are intentionally kept on the session row and cleared whenever a new
+/// generation opens) but a STALE-GENERATION OBSERVATION: generation 0's
+/// exit or annotation being reported late and restored onto generation 1
+/// despite the generation fence that is supposed to keep them apart. A bug
+/// that let that happen would pass every other test here and only show up
+/// in exactly this sequence.
+///
+/// The same invocation is used for both generations — `RestartMode::Fresh`
+/// replays the session's original argv verbatim, so there is no
+/// per-restart override to give the second run a different command. A
+/// fixed sleep duration would race under load (generation 0 could exit
+/// naturally before the stop lands, or generation 1 could exit before
+/// `wait_for_alive_status` observes it), so both generations instead loop
+/// on a marker FILE the test controls: `until [ -e released ]; do sleep
+/// 0.2; done`, resolved against the session's own working directory.
+/// Generation 0 is stopped while the marker provably does not exist yet,
+/// so it cannot have exited on its own; generation 1 is left looping until
+/// the test creates the marker, at which point it exits 0 naturally.
+#[tokio::test]
+async fn stop_then_restart_then_natural_exit_carries_no_stale_annotation() {
+    let h = harness().await;
+    let work = tempfile::tempdir().expect("workdir");
+    let marker = work.path().join("released");
+    let session = h
+        .client
+        .create_session(
+            &work.path().to_string_lossy(),
+            "sh -c 'until [ -e released ]; do sleep 0.2; done'",
+            None,
+            80,
+            24,
+        )
+        .await
+        .expect("create");
+    wait_for_alive_status(&h.client, &session.id, 30).await;
+
+    h.client
+        .stop_session(&session.id)
+        .await
+        .expect("stop the running agent");
+    let stopped = wait_for_non_alive_status(&h.client, &session.id, 30).await;
+    assert!(
+        matches!(stopped.status, SessionStatus::Exited { .. }),
+        "the stop must end generation 0: {stopped:?}"
+    );
+    assert_eq!(
+        stopped.annotation.as_deref(),
+        Some("stopped by user"),
+        "the stop's annotation must be recorded where it happens, exactly like the other \
+         stop-annotation tests"
+    );
+    assert!(
+        !marker.exists(),
+        "test setup: generation 0 must still be looping, not having exited on its own, when \
+         it was stopped"
+    );
+
+    // The session already exited, so no live agent needs consent to stop
+    // it first.
+    let restarted = h
+        .client
+        .restart_session(&session.id, farhelm_proto::RestartMode::Fresh, false)
+        .await
+        .expect("restart the already-exited session");
+    assert_eq!(
+        restarted.annotation, None,
+        "a fresh generation must never inherit the previous generation's annotation"
+    );
+    wait_for_alive_status(&h.client, &session.id, 30).await;
+
+    // Release generation 1's loop deliberately, rather than leaving it to
+    // a timer — this is the moment, and only this moment, at which it may
+    // exit on its own.
+    std::fs::write(&marker, "").expect("release generation 1's loop");
+    let exited = wait_for_exit_code(&h.client, &session.id, 0, 30).await;
+    assert_eq!(
+        exited.annotation, None,
+        "a natural exit must carry no annotation at all, stale or otherwise — only a stop \
+         records one"
+    );
+}
