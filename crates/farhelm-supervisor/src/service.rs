@@ -1102,6 +1102,124 @@ fn snapshot_path(state_dir: &Path, session_id: &str) -> PathBuf {
     state_dir.join("snapshots").join(session_id)
 }
 
+/// Sweep `<state_dir>/launch/` at supervisor startup: remove orphaned
+/// staged temp files and launch SPECS that no session in `sessions` still
+/// owns. Called once from `Supervisor::serve`, after the exclusivity bind
+/// (this process must be provably the state dir's one supervisor before
+/// touching anything) and after the session map has been reloaded from
+/// the store (this sweep needs it to answer "does anything still own
+/// this spec").
+///
+/// Sentinels (`.status` files) are NEVER touched here, regardless of
+/// ownership — PLAN_M3.md item 5's durability promise for them would be
+/// worthless if a blanket startup sweep could erase the very evidence a
+/// later classifier needs to read; their lifecycle (supersede on
+/// relaunch, or explicit delete) belongs entirely to that future
+/// consumer, never to this best-effort hygiene pass.
+///
+/// A spec's session id (its file stem) is checked against `sessions` —
+/// rather than removing every entry unconditionally, which is what this
+/// sweep used to do — because a supervisor restart does NOT kill tmux: a
+/// session created just before the restart can have its login shell
+/// STILL mid-flight toward `exec farhelm internal launch <spec>`,
+/// arbitrarily long after tmux itself created the window (a slow or hung
+/// rc-file is a real, if rare, way this stretches out). Its session id is
+/// already durably recorded (the just-reloaded `sessions` map reflects
+/// SQLite, loaded before this sweep runs), so "does a session with this
+/// id exist" is a real ownership question, not a guess: a spec whose id
+/// is UNKNOWN can only have gotten here two ways — the create that wrote
+/// it crashed before the DB insert ever committed (nothing will ever read
+/// it), or its session was since deleted and `DeleteSession`'s own
+/// removal of it already failed (logged there) — either way, nothing
+/// alive will ever come back for it.
+///
+/// Best-effort and log-only: this sweep is credential hygiene (specs hold
+/// full agent command lines), so a failure that leaves debris behind must
+/// at least say so in the log, but never fails startup over it.
+async fn sweep_launch_dir(launch_dir: &Path, sessions: &std::collections::HashSet<String>) {
+    let mut entries = match tokio::fs::read_dir(launch_dir).await {
+        Ok(entries) => entries,
+        Err(e) => {
+            warn!(error = %e, "could not sweep launch dir; orphaned entries may remain");
+            return;
+        }
+    };
+    loop {
+        let entry = match entries.next_entry().await {
+            Ok(None) => break,
+            Ok(Some(entry)) => entry,
+            Err(e) => {
+                warn!(error = %e, "launch-dir sweep aborted early; orphaned entries may remain");
+                break;
+            }
+        };
+        let name = entry.file_name();
+        let name = name.to_string_lossy();
+
+        let should_remove = if crate::files::is_staged_temp_name(&name) {
+            true
+        } else if let Some(id) = name.strip_suffix(".json") {
+            !sessions.contains(id)
+        } else {
+            // `.status` sentinels, and anything else this sweep does not
+            // recognize, are never its to remove — see the function's
+            // own docs.
+            false
+        };
+
+        if should_remove && let Err(e) = tokio::fs::remove_file(entry.path()).await {
+            warn!(path = %entry.path().display(), error = %e,
+                "could not remove orphaned launch-dir entry");
+        }
+    }
+}
+
+/// Sweep abandoned `overwrite_private_file` staging files (`.tmux.conf.tmp-*`)
+/// directly out of `<state_dir>` (the tmux config's own location — the
+/// one write-atomicity-tier file that lives at the state-dir ROOT rather
+/// than under `launch/` or `snapshots/`, so neither of those sweeps would
+/// ever see its debris). Same placement and reasoning as
+/// [`sweep_snapshot_temp_files`]: after the exclusivity bind, best-effort
+/// and log-only.
+///
+/// Scoped specifically to names starting with `.tmux.conf` (not a bare
+/// [`crate::files::is_staged_temp_name`] check against the whole state
+/// dir) because the state-dir root also holds `supervisor.db`,
+/// `supervisor.sock`, and `supervisor.lock` — none of which stage temp
+/// files this way — and `launch/`/`snapshots/` as subdirectories; a
+/// prefix match keeps this sweep from ever needing to reason about
+/// entries that are not its concern at all.
+async fn sweep_tmux_config_temp_files(state_dir: &Path) {
+    const CONFIG_TEMP_PREFIX: &str = ".tmux.conf.tmp-";
+    let mut entries = match tokio::fs::read_dir(state_dir).await {
+        Ok(entries) => entries,
+        Err(e) => {
+            warn!(error = %e, "could not sweep tmux-config temp files; orphaned staging files may remain");
+            return;
+        }
+    };
+    loop {
+        match entries.next_entry().await {
+            Ok(None) => break,
+            Ok(Some(entry)) => {
+                let is_temp_file = entry
+                    .file_name()
+                    .to_str()
+                    .is_some_and(|name| name.starts_with(CONFIG_TEMP_PREFIX));
+                if is_temp_file && let Err(e) = tokio::fs::remove_file(entry.path()).await {
+                    warn!(path = %entry.path().display(), error = %e,
+                        "could not remove orphaned tmux-config temp file");
+                }
+            }
+            Err(e) => {
+                warn!(error = %e,
+                    "tmux-config temp-file sweep aborted early; orphaned staging files may remain");
+                break;
+            }
+        }
+    }
+}
+
 /// Sweep abandoned `overwrite_private_file` staging files (`*.tmp-*`)
 /// out of `<state_dir>/snapshots/` at supervisor startup — called once
 /// from `Supervisor::serve`, same spirit and placement as the launch-dir
@@ -1109,22 +1227,24 @@ fn snapshot_path(state_dir: &Path, session_id: &str) -> PathBuf {
 /// provably the state dir's one supervisor before touching anything).
 ///
 /// `overwrite_private_file` already cleans up its own temp file when its
-/// write or rename fails (`remove_temp_after_failure`, lib.rs), but that
-/// cleanup only runs if THIS process is still alive to run it — a hard
-/// crash (OOM kill, `kill -9`, power loss) between staging the temp file
-/// and either renaming it into place or reaching the failure-cleanup path
-/// skips it entirely, leaving an orphaned `.tmp-*` file behind forever
-/// with nothing else that would ever remove it. This sweep is that
-/// backstop.
+/// write or rename fails (`crate::files::remove_temp_after_failure`), but
+/// that cleanup only runs if THIS process is still alive to run it — a
+/// hard crash (OOM kill, `kill -9`, power loss) between staging the temp
+/// file and either renaming it into place or reaching the failure-cleanup
+/// path skips it entirely, leaving an orphaned `.tmp-*` file behind
+/// forever with nothing else that would ever remove it. This sweep is
+/// that backstop.
 ///
-/// Deliberately narrower than the launch-dir sweep, which removes EVERY
-/// file it finds: `snapshots/` also holds legitimate, PERSISTENT snapshot
-/// files meant to survive a restart (see `snapshot_path`'s "restart
-/// interplay" docs), so this sweep only ever removes entries whose name
-/// matches the temp-file convention (`.<name>.tmp-<uuid>`) — a real
-/// snapshot, named after a session id alone, can never match that pattern
-/// (a session id contains no `.tmp-` substring by construction: it is
-/// either a UUID's hyphenated hex form).
+/// Deliberately narrower than a blanket sweep: `snapshots/` also holds
+/// legitimate, PERSISTENT snapshot files meant to survive a restart (see
+/// `snapshot_path`'s "restart interplay" docs), so this sweep only ever
+/// removes entries matching [`crate::files::is_staged_temp_name`] — the
+/// SAME naming convention every write-atomicity tier's temp file shares,
+/// so this one pattern covers debris from `crate::files`'s helpers
+/// regardless of which tier staged it. A real snapshot, named after a
+/// session id alone, can never match that pattern (a session id contains
+/// no `.tmp-` substring by construction: it is a UUID's hyphenated hex
+/// form).
 ///
 /// Best-effort and log-only, like the launch-dir sweep: an absent
 /// `snapshots/` directory (no supervisor on this state dir has ever
@@ -1149,7 +1269,7 @@ async fn sweep_snapshot_temp_files(state_dir: &Path) {
                 let is_temp_file = entry
                     .file_name()
                     .to_str()
-                    .is_some_and(|name| name.contains(".tmp-"));
+                    .is_some_and(crate::files::is_staged_temp_name);
                 if is_temp_file && let Err(e) = tokio::fs::remove_file(entry.path()).await {
                     warn!(path = %entry.path().display(), error = %e,
                         "could not remove orphaned snapshot temp file");
@@ -1273,7 +1393,50 @@ async fn capture_alt_screen_before_stop(
 /// considered and deliberately not built for this: reusing the existing
 /// coarse `attachments` lock for this one short critical section is
 /// enough to close the race without a new locking primitive.)
-async fn publish_alt_screen_snapshot(sup: &Supervisor, session_id: &str, bytes: &[u8]) {
+///
+/// # Cancellation safety (the other half of the same race)
+///
+/// The `attachments`-lock analysis above assumes this function's own task
+/// runs to completion. That is NOT guaranteed: `handle_connection`'s
+/// shutdown tail (`HANDLER_SHUTDOWN_TIMEOUT`) can `abort()` whatever
+/// `JoinSet`-tracked task is calling this — the `StopSession` handler —
+/// mid-flight. An aborted task's local `attachments` `MutexGuard` is
+/// dropped the moment cancellation unwinds its stack, even while it was
+/// still `.await`ing a write; if that write were a plain
+/// `spawn_blocking`-based one, the DETACHED blocking closure it kicked off
+/// keeps running to completion regardless (blocking tasks are not
+/// cancelled by dropping their `JoinHandle`) — so the rename that
+/// publishes the snapshot can complete AFTER a concurrent `DeleteSession`,
+/// unblocked by the just-released lock, has already found no file to
+/// remove and finished tearing the session down entirely. The result: an
+/// orphaned, secret-bearing snapshot file for a session the system
+/// considers completely gone, which nothing will ever clean up.
+///
+/// The fix is to run the whole lock-acquire-check-write critical section
+/// inside its OWN `tokio::spawn`'d task, entirely independent of whatever
+/// task calls this function. Awaiting that inner task's `JoinHandle` is
+/// itself cancellable — if THIS function's caller gets aborted while
+/// waiting, only that await is cut short; the inner task keeps running to
+/// natural completion exactly as if nothing happened, because nothing
+/// besides its own (never-aborted) `JoinHandle` can cancel it. The
+/// `attachments` lock is therefore held for the write's ENTIRE real
+/// duration no matter what happens to this function's caller.
+///
+/// `seam` is a value, not a `&dyn` reference, and must be `Copy + Send +
+/// 'static` so it can be moved into both the detached outer task and the
+/// `spawn_blocking` closure the actual write runs inside — see
+/// `crate::files::FaultSeam`'s own docs for why nothing in this crate
+/// otherwise needs a seam to survive a thread hop. Production calls this
+/// with [`crate::files::RealFs`] (see the `StopSession` call site); tests
+/// can inject a failure through this exact function.
+async fn publish_alt_screen_snapshot<S>(
+    sup: &Arc<Supervisor>,
+    session_id: &str,
+    bytes: &[u8],
+    seam: S,
+) where
+    S: crate::files::FaultSeam + Copy + Send + 'static,
+{
     let dir = sup.state_dir.join("snapshots");
     if let Err(e) = crate::ensure_private_dir(&dir).await {
         warn!(session = %session_id, error = %e, "creating the snapshots directory failed");
@@ -1281,19 +1444,40 @@ async fn publish_alt_screen_snapshot(sup: &Supervisor, session_id: &str, bytes: 
     }
     let path = snapshot_path(&sup.state_dir, session_id);
 
-    let attachments = sup.attachments.lock().await;
-    let still_exists = sup.sessions.lock().await.contains_key(session_id);
-    if !still_exists {
-        // A concurrent delete already finished (see the analysis above):
-        // nothing to write, and — because nothing was ever written —
-        // nothing to clean up either.
+    let sup = Arc::clone(sup);
+    let session_id = session_id.to_string();
+    let bytes = bytes.to_vec();
+    let inner = tokio::spawn(async move {
+        let attachments = sup.attachments.lock().await;
+        let still_exists = sup.sessions.lock().await.contains_key(&session_id);
+        if !still_exists {
+            // A concurrent delete already finished (see the delete-race
+            // analysis above): nothing to write, and — because nothing
+            // was ever written — nothing to clean up either.
+            drop(attachments);
+            return;
+        }
+        let write_result = tokio::task::spawn_blocking(move || {
+            crate::files::overwrite_private_file_sync(&path, &bytes, &seam)
+        })
+        .await;
+        match write_result {
+            Ok(Ok(())) => {}
+            Ok(Err(e)) => {
+                warn!(session = %session_id, error = %e, "writing the alt-screen snapshot failed");
+            }
+            Err(join_err) => {
+                warn!(session = %session_id, error = %join_err,
+                    "alt-screen snapshot write task panicked");
+            }
+        }
         drop(attachments);
-        return;
+    });
+    // If THIS await is cancelled, `inner` is entirely unaffected — that
+    // is the whole point (see the cancellation-safety docs above).
+    if let Err(join_err) = inner.await {
+        warn!(error = %join_err, "alt-screen snapshot publish task panicked");
     }
-    if let Err(e) = crate::overwrite_private_file(&path, bytes).await {
-        warn!(session = %session_id, error = %e, "writing the alt-screen snapshot failed");
-    }
-    drop(attachments);
 }
 
 /// Read a stored alt-screen snapshot file, bounded the same way capture
@@ -1591,6 +1775,22 @@ impl Supervisor {
         // must not be opened before this call.
         crate::ensure_private_dir(state_dir).await?;
         crate::ensure_private_dir(&state_dir.join("launch")).await?;
+        // Items 6/24: a durable sentinel (`crate::files` module docs) is
+        // only as durable as ITS OWN DIRECTORY'S directory-entry — a
+        // reboot immediately after the very first run could otherwise
+        // lose the just-created `launch/` entry under `state_dir`
+        // entirely (the same rename-atomicity-is-metadata-only gap the
+        // durability-bearing tier's own directory fsync exists to close,
+        // one level up), silently discarding every sentinel this policy
+        // promises to keep before a single one is ever written. Cheap and
+        // idempotent enough to pay unconditionally on every startup
+        // rather than only detecting "was `launch/` actually freshly
+        // created this time."
+        tokio::fs::File::open(state_dir)
+            .await?
+            .sync_all()
+            .await
+            .context("fsyncing state dir after ensuring launch/ exists")?;
 
         // Store before tmux, deliberately: opening the DB (or applying its
         // schema) is the one step in this constructor that can fail for
@@ -1743,37 +1943,20 @@ impl Supervisor {
             use std::os::unix::fs::PermissionsExt;
             tokio::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600)).await?;
         }
-        // Sweep launch specs orphaned by a previous run — a login shell
-        // that died before reaching the shim leaves one behind, and it
-        // holds the agent's command line; nothing later would remove it.
-        // Deliberately AFTER the bind above: the bind is what proves this
-        // process is the state dir's one supervisor. Sweeping in the
-        // constructor let a second `supervisor run` destroy the live
-        // supervisor's in-flight specs and only then bail on the
-        // exclusivity check.
-        // Best-effort, but never silent: this sweep is credential
-        // hygiene, so a failure that leaves specs behind must at least
-        // say so in the log.
-        let launch_dir = self.state_dir.join("launch");
-        match tokio::fs::read_dir(&launch_dir).await {
-            Err(e) => warn!(error = %e, "could not sweep launch dir; orphaned specs may remain"),
-            Ok(mut entries) => loop {
-                match entries.next_entry().await {
-                    Ok(None) => break,
-                    Ok(Some(entry)) => {
-                        if let Err(e) = tokio::fs::remove_file(entry.path()).await {
-                            warn!(spec = %entry.path().display(), error = %e,
-                                "could not remove orphaned launch spec");
-                        }
-                    }
-                    Err(e) => {
-                        warn!(error = %e, "launch-dir sweep aborted early; orphaned specs may remain");
-                        break;
-                    }
-                }
-            },
-        }
+        // Sweep launch-dir debris orphaned by a previous run. Deliberately
+        // AFTER the bind above: the bind is what proves this process is
+        // the state dir's one supervisor. Sweeping in the constructor let
+        // a second `supervisor run` destroy the live supervisor's in-
+        // flight specs and only then bail on the exclusivity check.
+        // Deliberately AFTER the session-map reload just above too: this
+        // sweep needs to know which sessions still exist to avoid
+        // unlinking a spec a surviving shim might still read (see
+        // `sweep_launch_dir`'s own docs).
+        let known_sessions: std::collections::HashSet<String> =
+            self.sessions.lock().await.keys().cloned().collect();
+        sweep_launch_dir(&self.state_dir.join("launch"), &known_sessions).await;
         sweep_snapshot_temp_files(&self.state_dir).await;
+        sweep_tmux_config_temp_files(&self.state_dir).await;
         info!(socket = %path.display(), "supervisor listening");
         loop {
             match listener.accept().await {
@@ -1914,8 +2097,34 @@ impl Supervisor {
                 .to_owned()
         });
 
+        // Named after the SESSION id, not a separate per-launch id — a
+        // deliberate, minimal choice made while settling PLAN_M3.md item 5's
+        // write-atomicity policy, recorded here for whoever builds item 3's
+        // stale-sentinel supersession or item 9's restart: today a session
+        // launches exactly once for its entire life (no restart exists yet),
+        // so the session id already IS the one and only launch's identity —
+        // introducing a distinct launch id now, with nothing yet tracking
+        // durably which launch is "current" for a session (that generation-
+        // tracking is item 2/3's territory), would just be a second id with
+        // no consumer. What keeping this name buys for free: because
+        // `write_durable_sync` always publishes via `rename` (never
+        // truncate-in-place), a FUTURE relaunch reusing this exact path
+        // inherits atomic supersession of a stale sentinel at no extra
+        // design cost — no new file-naming scheme to migrate to later.
+        // What it does NOT buy: PROACTIVELY clearing a leftover sentinel
+        // from a previously failed launch before a relaunch's process even
+        // starts (so a successful relaunch doesn't leave a stale error
+        // sentinel behind for nothing to overwrite) is still open work,
+        // deliberately left to whichever milestone item adds relaunching at
+        // all.
         let spec_path = self.state_dir.join("launch").join(format!("{id}.json"));
-        let status_file_path = self.state_dir.join("launch").join(format!("{id}.status"));
+        // Derived the SAME way the shim derives it from its own copy of
+        // `spec_path` (`launch::status_path_for_spec`) — never computed
+        // independently here — so the two sides can never disagree about
+        // where a launch failure gets recorded, including for the failure
+        // classes (missing/malformed spec) where the shim never gets to
+        // read this struct's own `status_file` field at all.
+        let status_file_path = crate::launch::status_path_for_spec(&spec_path);
         let spec = LaunchSpec {
             argv,
             status_file: status_file_path.clone(),
@@ -3437,7 +3646,8 @@ async fn handle_control(
                     return;
                 }
                 if let Some(bytes) = pending_snapshot {
-                    publish_alt_screen_snapshot(&sup, &session_id, &bytes).await;
+                    publish_alt_screen_snapshot(&sup, &session_id, &bytes, crate::files::RealFs)
+                        .await;
                 }
                 // Removed only now, AFTER publish has run (or been skipped
                 // because there was never anything to publish): a concurrent
@@ -4034,6 +4244,132 @@ mod tests {
         );
     }
 
+    /// Item 8: the alt-screen snapshot write must be injectable through
+    /// its REAL production call site — `publish_alt_screen_snapshot`
+    /// itself, called directly against a real `Supervisor` (constructed
+    /// the same lightweight way `create_session_over_field_cap_...`
+    /// does), not a synthetic call into `crate::files`. A seam that fails
+    /// the write step must leave no snapshot file behind at all.
+    #[tokio::test]
+    async fn publish_alt_screen_snapshot_surfaces_an_injected_write_failure() {
+        #[derive(Clone, Copy)]
+        struct FailWrite;
+        impl crate::files::FaultSeam for FailWrite {
+            fn write(&self, _file: &mut std::fs::File, _bytes: &[u8]) -> std::io::Result<()> {
+                Err(std::io::Error::other("injected snapshot write failure"))
+            }
+        }
+
+        let state = tempfile::tempdir().expect("state dir");
+        let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
+            .await
+            .expect("supervisor construction touches only tmux, not the launch shim");
+        let session_id = "test-session".to_string();
+        sup.sessions.lock().await.insert(
+            session_id.clone(),
+            Arc::new(SessionEntry {
+                info: SessionInfo {
+                    id: session_id.clone(),
+                    title: "t".to_string(),
+                    cwd: "/".to_string(),
+                    invocation: "agent".to_string(),
+                    status: SessionStatus::Unknown,
+                },
+                terminal: None,
+            }),
+        );
+
+        publish_alt_screen_snapshot(&sup, &session_id, b"frame bytes", FailWrite).await;
+
+        assert!(
+            !snapshot_path(&sup.state_dir, &session_id).exists(),
+            "an injected write failure must never publish a partial snapshot"
+        );
+    }
+
+    /// Item 1's regression, and the reason `sweep_launch_dir` exists at
+    /// all instead of the old blanket "remove everything" sweep: a
+    /// durable exec-failure sentinel must survive this sweep no matter
+    /// what, even for a session no longer tracked (there is no session in
+    /// this test at all) — only PR5's future classifier, or an explicit
+    /// delete, may ever remove one. A staged temp file and an ORPHANED
+    /// spec (its session id absent from `sessions`) are seeded alongside
+    /// it and must both go, proving the sweep does not simply skip the
+    /// whole directory.
+    #[tokio::test]
+    async fn sweep_launch_dir_never_removes_a_sentinel() {
+        let tmp = tempfile::tempdir().unwrap();
+        let launch_dir = tmp.path().join("launch");
+        std::fs::create_dir(&launch_dir).unwrap();
+        std::fs::write(
+            launch_dir.join("abc.status"),
+            b"exec_failed argv0=x errno=2",
+        )
+        .unwrap();
+        std::fs::write(launch_dir.join("orphan.json"), b"{}").unwrap();
+        std::fs::write(launch_dir.join(".orphan.json.tmp-deadbeef"), b"partial").unwrap();
+
+        sweep_launch_dir(&launch_dir, &std::collections::HashSet::new()).await;
+
+        assert!(
+            launch_dir.join("abc.status").exists(),
+            "a sentinel must never be removed by this sweep, regardless of session ownership"
+        );
+        assert!(
+            !launch_dir.join("orphan.json").exists(),
+            "a spec whose session id owns nothing in `sessions` must be removed"
+        );
+        assert!(
+            !launch_dir.join(".orphan.json.tmp-deadbeef").exists(),
+            "a staged temp file must always be removed"
+        );
+    }
+
+    /// Item 22's restart race: a spec whose session id IS still present
+    /// in `sessions` must survive the sweep untouched — a supervisor
+    /// restart does not kill tmux, so the login shell behind that session
+    /// can still be mid-flight toward reading this exact spec, arbitrarily
+    /// long after the window itself was created.
+    #[tokio::test]
+    async fn sweep_launch_dir_preserves_a_spec_for_a_surviving_session() {
+        let tmp = tempfile::tempdir().unwrap();
+        let launch_dir = tmp.path().join("launch");
+        std::fs::create_dir(&launch_dir).unwrap();
+        std::fs::write(launch_dir.join("live.json"), b"{}").unwrap();
+
+        let mut sessions = std::collections::HashSet::new();
+        sessions.insert("live".to_string());
+        sweep_launch_dir(&launch_dir, &sessions).await;
+
+        assert!(
+            launch_dir.join("live.json").exists(),
+            "a spec for a session still on record must survive — its shim may still be \
+             mid-flight toward reading it"
+        );
+    }
+
+    /// Item 2's new sweep: a planted `.tmux.conf.tmp-*` orphan must be
+    /// removed while a REAL, current `tmux.conf` right next to it survives
+    /// untouched — proving the sweep is name-scoped rather than a blanket
+    /// removal of the state-dir root.
+    #[tokio::test]
+    async fn sweep_tmux_config_temp_files_removes_only_the_orphan() {
+        let tmp = tempfile::tempdir().unwrap();
+        std::fs::write(tmp.path().join("tmux.conf"), b"set -g exit-empty off\n").unwrap();
+        std::fs::write(tmp.path().join(".tmux.conf.tmp-deadbeef"), b"partial").unwrap();
+
+        sweep_tmux_config_temp_files(tmp.path()).await;
+
+        assert!(
+            tmp.path().join("tmux.conf").exists(),
+            "the real, current tmux config must never be removed by this sweep"
+        );
+        assert!(
+            !tmp.path().join(".tmux.conf.tmp-deadbeef").exists(),
+            "an orphaned tmux-config temp file must be removed"
+        );
+    }
+
     /// The environment-marker matcher's whole job: match a complete,
     /// exact `FARHELM_SESSION_ID=<id>` entry and nothing looser. A
     /// substring match would misfire on a session whose id is a prefix of
@@ -4334,6 +4670,63 @@ mod tests {
         assert!(
             sup.sessions.lock().await.is_empty(),
             "a rejected request must create nothing"
+        );
+    }
+
+    /// Item 9: a launch spec that fails to publish must mean the tmux
+    /// window that would `exec farhelm internal launch <spec>` never
+    /// gets created at all — the shim must never have a CHANCE to
+    /// observe a partial spec, because there must never BE one to
+    /// observe. Driven through the REAL `create_session` call site (a
+    /// genuine `EACCES` from an unwritable `launch/` directory, not a
+    /// synthetic seam substitution), so this pins the actual ordering
+    /// `create_session` relies on (`?` on the spec write, strictly before
+    /// `self.tmux.create_session`) rather than only the write helper's
+    /// own atomicity in isolation.
+    #[tokio::test]
+    async fn create_session_never_launches_tmux_after_a_failed_spec_publish() {
+        let state = tempfile::tempdir().expect("state dir");
+        let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
+            .await
+            .expect("supervisor construction touches only tmux, not the launch shim");
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(
+                state.path().join("launch"),
+                std::fs::Permissions::from_mode(0o500),
+            )
+            .expect("removing write permission from launch/");
+        }
+
+        let (tx, mut rx) = mpsc::channel(CONNECTION_WRITER_QUEUE);
+        let mut input_routes = HashMap::new();
+        let mut tasks = tokio::task::JoinSet::new();
+        handle_control(
+            &sup,
+            ControlMsg::CreateSession {
+                req_id: 1,
+                cwd: "/".to_string(),
+                invocation: "agent".to_string(),
+                title: None,
+                cols: 80,
+                rows: 24,
+            },
+            &tx,
+            &mut input_routes,
+            &mut tasks,
+        )
+        .await;
+
+        let reply = rx.try_recv().expect("a reply must have been sent");
+        let decoded: ControlMsg = serde_json::from_slice(&reply.body).unwrap();
+        assert!(
+            matches!(decoded, ControlMsg::Error { .. }),
+            "create must fail when the spec cannot be published: {decoded:?}"
+        );
+        assert!(
+            sup.sessions.lock().await.is_empty(),
+            "no session may be recorded — proving no tmux window was ever created for a spec \
+             that never made it to disk"
         );
     }
 
