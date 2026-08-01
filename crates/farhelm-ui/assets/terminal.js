@@ -305,6 +305,92 @@
         term.onData((d) => {
           if (ws.readyState === WebSocket.OPEN) ws.send(enc.encode(d));
         });
+        // MT-6: xterm.js anchors a selection to buffer COORDINATES, not
+        // to the text under it. Any input that reaches the pty can move
+        // the cursor, scroll the viewport, or overwrite cells, so a
+        // selection made before that input stays highlighted over
+        // whatever now occupies those coordinates — most visibly,
+        // select-and-copy followed by a paste (or by just resuming
+        // typing) leaves a stale highlight painted over unrelated
+        // content. Cleared on USER-ORIGIN input only: keyboard via
+        // `onKey`, paste via a DOM listener on xterm's own element (which
+        // dies with the terminal on dispose, so no unmount bookkeeping).
+        //
+        // The paste listener must be a CAPTURE-phase one, and that is not
+        // a style choice: xterm registers its own paste handler on the
+        // hidden helper TEXTAREA and that handler calls
+        // `stopPropagation()`, so a bubble-phase listener anywhere above
+        // the textarea — including on the terminal element — never runs
+        // at all. Capture travels downward before the target's handler,
+        // so it fires first and is unaffected. Manual testing on macOS
+        // caught this: typing cleared the highlight (the `onKey` path)
+        // while a real paste left it painted over the pasted text.
+        //
+        // Deliberately NOT cleared in `onData`: that funnel also carries
+        // xterm's auto-generated replies (color/DA/cursor reports a
+        // background TUI can provoke at any moment), and clearing there
+        // would erase a selection the user just made because an
+        // application happened to query the palette. Mouse reports
+        // (`onBinary`) are likewise left alone — a shift-selection
+        // legitimately coexists with mouse reporting, and clearing on
+        // every report would erase it the instant the mouse moved.
+        // Output the PTY sends us never touches selection either, so
+        // watching a selection while output streams in still works,
+        // exactly as it does in a native terminal.
+        //
+        // The explicit `refresh` is not belt-and-braces: WebKit (both
+        // Safari and the desktop app's WKWebView) leaves the selection
+        // LAYER painted after `clearSelection()` alone, so the highlight
+        // survives on screen over rows whose model no longer claims any
+        // selection — it even survived subsequent typing, which is what
+        // identified this as a repaint problem rather than a missed
+        // clear. Marking every row dirty forces the redraw that drops
+        // it. Guarded by `hasSelection()` so the common case (input with
+        // nothing selected) stays free: a full-screen repaint per
+        // keystroke would be a real cost on a busy terminal.
+        const dismissSelection = () => {
+          // TWO selections have to go, and forgetting the second one is
+          // what made this bug look unfixable during manual testing on
+          // macOS: the highlight survived the paste, then survived
+          // typing, then survived a full `term.refresh()`. xterm's own
+          // selection (its `.xterm-selection` overlay) is only half the
+          // story — a mouse drag over the DOM renderer's real text nodes
+          // ALSO leaves a native document selection behind, and that one
+          // is what stays painted, because `clearSelection` never touches
+          // it. Confirmed by probing both engines after a real drag: the
+          // xterm overlay clears itself, `window.getSelection()` does
+          // not.
+          //
+          // Detected by `rangeCount`, NOT by `isCollapsed`: WebKit
+          // reports a drag-made selection as collapsed while its ranges
+          // still exist and stay painted (probed directly — `isCollapsed`
+          // true, `toString()` still returning the selected text). A
+          // guard on `isCollapsed` therefore skips exactly the case this
+          // exists for. Scoped by the selection's anchor so input here
+          // never wipes a selection the user made elsewhere on the page
+          // (the banner text, say).
+          const native = window.getSelection && window.getSelection();
+          const nativeAnchor = native && (native.anchorNode || native.focusNode);
+          const nativeInTerm = native
+            && String(native) !== ""
+            && (!nativeAnchor || term.element.contains(nativeAnchor));
+          if (!term.hasSelection() && !nativeInTerm) return;
+          term.clearSelection();
+          if (nativeInTerm) native.removeAllRanges();
+        };
+        // Run once now and once after the current event finishes. The
+        // second pass is not paranoia: while xterm is handling a
+        // keystroke the document selection briefly belongs to its hidden
+        // helper textarea, so the row selection is invisible to the
+        // synchronous pass and reappears immediately afterwards
+        // (observed on Chromium; WebKit clears on the first pass). One
+        // deferred sweep catches that without leaving a timer running.
+        const dismissSelectionSoon = () => {
+          dismissSelection();
+          setTimeout(dismissSelection, 0);
+        };
+        term.onKey(dismissSelectionSoon);
+        term.element.addEventListener("paste", dismissSelectionSoon, true);
         // onBinary carries mouse reports and other non-UTF8 input as a
         // binary string; encode byte-for-byte.
         term.onBinary((d) => {
