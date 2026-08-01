@@ -401,11 +401,20 @@ impl Default for SupervisorSeams {
 /// until then a Mac build would take the honest `Ok(None)` path and never
 /// claim a reboot.
 fn read_host_boot_id() -> anyhow::Result<Option<String>> {
-    const PATH: &str = "/proc/sys/kernel/random/boot_id";
-    let raw = match std::fs::read_to_string(PATH) {
+    read_boot_id_from(Path::new("/proc/sys/kernel/random/boot_id"))
+}
+
+/// [`read_host_boot_id`]'s logic, parameterized on the path it reads —
+/// split out purely so a unit test can point it at a tempdir-backed file
+/// instead of the real `/proc` entry, per this project's rule against
+/// mutating the test process's own environment. Not itself exposed as a
+/// [`BootIdSource`]: production always wants the fixed `/proc` path, so
+/// only the zero-argument wrapper is wired into [`Seams::default`].
+fn read_boot_id_from(path: &Path) -> anyhow::Result<Option<String>> {
+    let raw = match std::fs::read_to_string(path) {
         Ok(raw) => raw,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
-        Err(e) => return Err(anyhow::Error::new(e).context(format!("reading {PATH}"))),
+        Err(e) => return Err(anyhow::Error::new(e).context(format!("reading {}", path.display()))),
     };
     let trimmed = raw.trim();
     // An empty file is not a usable id, and storing "" would make a later
@@ -10942,6 +10951,112 @@ mod tests {
             !tmp.path().join(".tmux.conf.tmp-deadbeef").exists(),
             "an orphaned tmux-config temp file must be removed"
         );
+    }
+
+    /// Item 1's snapshot-directory counterpart to the launch-dir and
+    /// tmux-config sweeps above: a planted `.tmp-*` orphan in
+    /// `snapshots/` must be removed while a REAL, persistent snapshot
+    /// (named after its session id alone, per `snapshot_path`) survives
+    /// untouched — proving the sweep recognizes only the shared
+    /// `is_staged_temp_name` pattern and never a session id, however that
+    /// id happens to be formatted.
+    #[tokio::test]
+    async fn sweep_snapshot_temp_files_removes_only_the_orphan() {
+        let tmp = tempfile::tempdir().unwrap();
+        let snapshots_dir = tmp.path().join("snapshots");
+        std::fs::create_dir(&snapshots_dir).unwrap();
+        let session_id = uuid::Uuid::new_v4().to_string();
+        std::fs::write(snapshots_dir.join(&session_id), b"a real captured frame").unwrap();
+        std::fs::write(
+            snapshots_dir.join(format!(".{session_id}.tmp-deadbeef")),
+            b"partial",
+        )
+        .unwrap();
+
+        sweep_snapshot_temp_files(tmp.path()).await;
+
+        assert!(
+            snapshots_dir.join(&session_id).exists(),
+            "a real, persistent snapshot must never be removed by this sweep"
+        );
+        assert!(
+            !snapshots_dir
+                .join(format!(".{session_id}.tmp-deadbeef"))
+                .exists(),
+            "an orphaned snapshot temp file must be removed"
+        );
+    }
+
+    /// A missing `snapshots/` directory is the ordinary case for a state
+    /// dir that has never captured a snapshot, and `sweep_snapshot_temp_files`
+    /// is meant to treat it as a silent no-op rather than the generic warn
+    /// branch it takes for any other read failure (see the function's own
+    /// docs). This test pins only the panic/error-freedom half of that:
+    /// startup calls this unconditionally on every boot, so it must never
+    /// panic or block startup on a state dir this ordinary. It does not
+    /// distinguish the silent-no-op path from the warn-and-continue path —
+    /// a regression that routed `NotFound` into the warn branch would still
+    /// pass here.
+    #[tokio::test]
+    async fn sweep_snapshot_temp_files_tolerates_a_missing_directory() {
+        let tmp = tempfile::tempdir().unwrap();
+        sweep_snapshot_temp_files(tmp.path()).await;
+    }
+
+    /// PLAN_M3.md item 2's "unsupported host" branch: a host with no
+    /// `/proc/sys/kernel/random/boot_id` at all (simulated by pointing at
+    /// a path that plain does not exist) must come back `Ok(None)`, never
+    /// an `Err` — see [`BootIdSource`]'s docs for why the two outcomes
+    /// drive opposite reload behavior and must not be collapsed.
+    #[test]
+    fn read_boot_id_from_a_missing_path_is_ok_none() {
+        let tmp = tempfile::tempdir().unwrap();
+        let missing = tmp.path().join("boot_id");
+        assert_eq!(read_boot_id_from(&missing).unwrap(), None);
+    }
+
+    /// An empty (or whitespace-only) boot-id file is not a usable id;
+    /// pinned as `Ok(None)` rather than `Ok(Some(""))`, matching the
+    /// production reasoning inline in `read_boot_id_from`: storing an
+    /// empty string would make a later REAL id look like a reboot on no
+    /// actual evidence.
+    #[test]
+    fn read_boot_id_from_an_empty_or_blank_file_is_ok_none() {
+        let tmp = tempfile::tempdir().unwrap();
+        let empty = tmp.path().join("boot_id");
+        std::fs::write(&empty, b"").unwrap();
+        assert_eq!(read_boot_id_from(&empty).unwrap(), None);
+
+        let blank = tmp.path().join("boot_id_blank");
+        std::fs::write(&blank, b"  \n\t\n").unwrap();
+        assert_eq!(read_boot_id_from(&blank).unwrap(), None);
+    }
+
+    /// The ordinary case: a real boot-id line, trimmed of the trailing
+    /// newline `/proc` files carry, comes back as `Ok(Some(<trimmed>))`.
+    #[test]
+    fn read_boot_id_from_a_normal_file_returns_the_trimmed_id() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("boot_id");
+        std::fs::write(&path, b"1234abcd-56ef-78ab-90cd-ef1234567890\n").unwrap();
+        assert_eq!(
+            read_boot_id_from(&path).unwrap(),
+            Some("1234abcd-56ef-78ab-90cd-ef1234567890".to_string())
+        );
+    }
+
+    /// The `Err` branch, distinct from `Ok(None)`: a path that exists but
+    /// cannot be read as a file must fail loudly rather than being
+    /// silently treated as "unsupported host" — reload degrades instead
+    /// of guessing (see `BootIdSource`'s docs). A directory is the
+    /// portable way to force that read error without `chmod` tricks,
+    /// which break when the test runs as root (repo rule).
+    #[test]
+    fn read_boot_id_from_an_unreadable_path_is_err() {
+        let tmp = tempfile::tempdir().unwrap();
+        let as_dir = tmp.path().join("boot_id");
+        std::fs::create_dir(&as_dir).unwrap();
+        assert!(read_boot_id_from(&as_dir).is_err());
     }
 
     /// The environment-marker matcher's whole job: match a complete,
