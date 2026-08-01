@@ -36,6 +36,123 @@ body,
   white-space: nowrap;
 }
 
+.back-button {
+  background: none;
+  border: 1px solid #3a3f47;
+  border-radius: 3px;
+  color: #d8dee9;
+  font: inherit;
+  font-size: 12px;
+  padding: 2px 8px;
+  cursor: pointer;
+}
+
+.back-button:hover {
+  background: #262a31;
+}
+
+/* List view (PLAN_M2.md step 7): a flat, sorted list of session rows —
+   deliberately plain, matching the rest of M1's undecorated chrome. */
+.session-list {
+  overflow-y: auto;
+}
+
+.session-row {
+  /* Resets: this is a native <button> (real Enter/Space activation,
+     focus, and screen-reader semantics for free — see the SessionRow
+     doc in lib.rs), so it starts from the browser's button box-model
+     and typography and has to be told to look like a plain row instead. */
+  display: flex;
+  width: 100%;
+  align-items: baseline;
+  gap: 12px;
+  padding: 10px 14px;
+  border: none;
+  border-bottom: 1px solid #1d2026;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.session-row:hover,
+.session-row:focus {
+  background: #1d2026;
+  outline: none;
+}
+
+/* Titles, cwds, and invocations are all attacker- or user-controlled
+   strings with no length limit the UI enforces (a title can legally run
+   tens of KB) — every one of the three needs its own overflow/ellipsis
+   handling, not just the two metadata fields that happened to get it
+   originally. Each also gets an explicit `flex-basis: 0` and a
+   `min-width` floor, splitting the row's space by `flex-grow` weight
+   instead of by content length: without a shared basis, a very long cwd
+   (whose default basis IS its content width) would claim most of the
+   row's space during layout and starve invocation — which had no floor
+   of its own — down toward zero width. */
+.session-title {
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1 1 0;
+  min-width: 8em;
+}
+
+.session-cwd,
+.session-invocation {
+  color: #8a919e;
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1 1 0;
+  min-width: 6em;
+}
+
+.session-invocation {
+  /* Weighted higher than cwd: the invocation is usually the more useful
+     field to read in full when space is tight. */
+  flex: 2 1 0;
+  min-width: 8em;
+}
+
+/* Status styling is deliberately minimal and honest (PLAN_M2.md): a
+   color signals the coarse category, never a guess about what the
+   session is doing. */
+.status-badge {
+  font-size: 12px;
+  padding: 2px 8px;
+  border-radius: 3px;
+  white-space: nowrap;
+}
+
+.status-badge.alive {
+  color: #7fd88f;
+}
+
+.status-badge.exited {
+  color: #8a919e;
+}
+
+.status-badge.unknown {
+  color: #5a606b;
+  font-style: italic;
+}
+
+/* Two classes, not one: `.banner`'s own `display: none` (below) must
+   lose to this regardless of stylesheet order, since the rendered
+   element always carries both classes together ("banner
+   truncation-banner") — relying on source order here would silently
+   flip which one wins on the next unrelated edit to this file. */
+.banner.truncation-banner {
+  display: block;
+  background: #3a3520;
+  color: #e0d090;
+}
+
 .banner {
   display: none;
   background: #7a3b3b;

@@ -1,8 +1,13 @@
-// The M1 acceptance suite at the browser level (PLAN_M1.md criterion 5):
-// create is exercised by the stack boot (startup session through the
-// real creation API); these tests cover output rendering, input
-// round-trip, reconnect replay, resize, and last-attach-wins takeover —
-// all against a real helm, supervisor, tmux, and fake agent. No mocks.
+// The M1 acceptance suite at the browser level (PLAN_M1.md criterion 5),
+// grown by PLAN_M2.md step 7 to cover the list view and navigation: these
+// tests cover output rendering, input round-trip, reconnect replay,
+// resize, last-attach-wins takeover, the session list, and the
+// list/terminal navigation lifecycle — all against a real helm,
+// supervisor, tmux, and fake agent, with one deliberate exception: the
+// truncation-banner test below intercepts GET /api/sessions with
+// `page.route`, since pinning that behavior against a REAL ~500-session
+// listing would mean actually creating hundreds of sessions for one
+// assertion. Every other test drives the real stack end to end.
 //
 // Assertions read the xterm.js BUFFER, not the DOM: the DOM renderer
 // materializes only viewport rows, so scrolled-off content (exactly what
@@ -36,12 +41,37 @@ async function waitForTermText(page: Page, needle: string, timeout = 15_000) {
 }
 
 /**
+ * Locator for the shared "e2e-session" row in the list view, matched by
+ * an EXACT `.session-title` match rather than `hasText` on the whole
+ * row: `hasText` matches against the row's full text content (title,
+ * cwd, AND invocation concatenated), so it would happily also match a
+ * row whose cwd or invocation merely CONTAINS "e2e-session" as a
+ * substring. Anchoring the regex against just the title element is what
+ * actually pins "the row named e2e-session", not "some row that
+ * mentions it somewhere".
+ */
+function sharedSessionRow(page: Page) {
+  return page.locator(".session-row").filter({
+    has: page.locator(".session-title", { hasText: /^e2e-session$/ }),
+  });
+}
+
+/**
  * Load the app and wait until the terminal is genuinely usable — mounted,
  * socket attached, agent listening. Every wait keys on a marker rather
  * than a sleep, which is why these tests are not flaky on a loaded CI box.
+ *
+ * PLAN_M2.md step 7 replaces M1's single hardwired session view with a
+ * list-then-terminal navigation, so getting to a live terminal now goes
+ * through the list UI itself (goto, wait for the row, click it) rather
+ * than landing straight on the terminal — every test below that used to
+ * assume M1's one-view app keeps passing through this same helper.
  */
 async function openTerminal(page: Page) {
   await page.goto("/");
+  const row = sharedSessionRow(page);
+  await expect(row).toBeVisible();
+  await row.click();
   // The island sets this once xterm is mounted and the WS is opening.
   await page.waitForFunction(() => (window as any).__farhelmTermReady === true);
   // The fake agent prints this banner once its modes are set.
@@ -59,6 +89,318 @@ test("renders the session and the agent's TUI output", async ({ page }) => {
   // The visible viewport is real DOM text too — the DOM renderer is what
   // makes these tests semantic rather than pixel-diffing.
   await expect(page.locator(".xterm-rows")).toContainText("FAKE-AGENT READY");
+});
+
+// The list view itself (PLAN_M2.md step 7): title, cwd, invocation, and a
+// truthful status badge per row, sourced from the same GET /api/sessions
+// every other test exercises indirectly through openTerminal. cwd and
+// invocation are checked against the API's OWN listing rather than mere
+// non-emptiness, so a row silently rendering the wrong session's
+// metadata (e.g. a copy-paste bug swapping two fields) would still fail
+// this test even though every field it prints is individually non-blank.
+// The fake agent process backing "e2e-session" is long-running, so the
+// row's status must settle on "alive" rather than the create-time
+// "unknown" placeholder — `toHaveText` retries on its own, since the
+// list computes status fresh from tmux on every fetch rather than
+// caching the placeholder forever.
+test("list renders the session row with title, cwd, invocation, and an alive badge", async ({
+  page,
+  request,
+}) => {
+  const listing = await (await request.get("/api/sessions")).json();
+  const expected = listing.sessions.find((s: any) => s.title === "e2e-session");
+  expect(expected).toBeTruthy();
+
+  await page.goto("/");
+  const row = sharedSessionRow(page);
+  await expect(row).toBeVisible();
+  await expect(row.locator(".session-title")).toHaveText("e2e-session");
+  await expect(row.locator(".session-cwd")).toHaveText(expected.cwd);
+  await expect(row.locator(".session-invocation")).toHaveText(expected.invocation);
+  await expect(row.locator(".status-badge")).toHaveText("alive", {
+    timeout: 10_000,
+  });
+});
+
+// Keyboard activation (PLAN_M2.md step 7: rows must be
+// keyboard-activatable). Since SessionRow is a native <button> rather
+// than a div with a hand-rolled onkeydown, Enter activation (and Space)
+// come from the browser for free — this pins that the row is actually
+// reachable and operable via keyboard, not just that it happens to look
+// like a button.
+test("keyboard activation opens the session, matching a real click", async ({
+  page,
+}) => {
+  await page.goto("/");
+  await sharedSessionRow(page).focus();
+  await page.keyboard.press("Enter");
+  await page.waitForFunction(() => (window as any).__farhelmTermReady === true);
+  await expect(page.locator(".titlebar .title")).toHaveText("e2e-session");
+});
+
+// Navigation lifecycle (PLAN_M2.md step 7): SessionView used to assume it
+// never unmounted (M1 had exactly one view), so the JS island only ever
+// needed a mount-time double-mount guard. This pins the FULL round trip:
+// going back must actually tear down the mounted terminal (not just
+// leave it running unobserved), and reopening the SAME session must
+// produce a genuinely NEW mount rather than either a no-op or a reused
+// instance — replay alone cannot distinguish "correctly reattached" from
+// "never actually left", since replaying scrollback from a still-open
+// socket would look identical to a correct fresh reattach. Stamping the
+// live xterm instance before leaving, and asserting a DIFFERENT instance
+// exists after reopening, is what closes that gap.
+test("back tears down the mounted terminal; reopening the same session mounts a fresh one", async ({
+  page,
+}) => {
+  await openTerminal(page);
+  await expect(page.locator(".back-button")).toBeVisible();
+
+  await page.locator("#terminal").click();
+  await page.keyboard.type("marker-before-back");
+  await page.keyboard.press("Enter");
+  await waitForTermText(page, "echo:marker-before-back");
+
+  await page.evaluate(() => {
+    (window as any).__farhelmTerm.__testMarker = "before-back";
+    // Stashed under a different name so it survives terminal.js's own
+    // `delete window.__farhelmWs` on unmount — this is the actual
+    // WebSocket object the mount owned, kept around purely so the
+    // assertion below can check that unmount() really closed it.
+    (window as any).__testWsBeforeBack = (window as any).__farhelmWs;
+  });
+
+  await page.locator(".back-button").click();
+
+  // The teardown itself must be observable, not just its later effects:
+  // every global terminal.js publishes on mount must be gone...
+  await expect
+    .poll(() =>
+      page.evaluate(() => ({
+        ready: (window as any).__farhelmTermReady,
+        term: (window as any).__farhelmTerm,
+        ws: (window as any).__farhelmWs,
+      })),
+    )
+    .toEqual({ ready: undefined, term: undefined, ws: undefined });
+  // ...and the socket it owned must be genuinely closed (readyState 3 —
+  // CLOSED; there is no browser `WebSocket` global in this Node-side
+  // test context to reference `WebSocket.CLOSED` by name), not merely
+  // abandoned with a stale reference that could still fire callbacks
+  // into whatever mounts next (the WS-teardown-callbacks review finding
+  // this guards against).
+  await expect
+    .poll(() =>
+      page.evaluate(() => (window as any).__testWsBeforeBack.readyState),
+    )
+    .toBe(3);
+  // readyState alone is not enough: a socket can be CLOSED while still
+  // holding stale `onmessage`/`onclose`/etc callbacks that reference the
+  // torn-down term/view (they simply never fire again once the socket is
+  // closed — but a callback left in place is exactly what a regression
+  // in unmount()'s "null the handlers before closing" step would look
+  // like, and readyState would not catch it since assigning the socket's
+  // OWN close doesn't require its handler properties to change).
+  expect(
+    await page.evaluate(() => {
+      const ws = (window as any).__testWsBeforeBack;
+      return {
+        onopen: ws.onopen,
+        onmessage: ws.onmessage,
+        onerror: ws.onerror,
+        onclose: ws.onclose,
+      };
+    }),
+  ).toEqual({ onopen: null, onmessage: null, onerror: null, onclose: null });
+
+  await expect(page.locator(".session-list")).toBeVisible();
+  await expect(page.locator("#terminal")).toHaveCount(0);
+
+  await sharedSessionRow(page).click();
+  await page.waitForFunction(() => (window as any).__farhelmTermReady === true);
+
+  const isFreshInstance = await page.evaluate(
+    () => (window as any).__farhelmTerm.__testMarker !== "before-back",
+  );
+  expect(isFreshInstance).toBe(true);
+
+  // Replay must bring back output produced before THIS attachment
+  // existed, exactly like the reload test below — the only difference
+  // is that here the round trip goes through the list/back UI instead
+  // of a full page reload.
+  await waitForTermText(page, "echo:marker-before-back");
+
+  // And the fresh mount must be genuinely live, not just showing stale
+  // replayed content: a new marker must round-trip through it.
+  await page.locator("#terminal").click();
+  await page.keyboard.type("marker-after-reopen");
+  await page.keyboard.press("Enter");
+  await waitForTermText(page, "echo:marker-after-reopen");
+});
+
+// Regression test for the "stale mount retry" bug: terminal.js's wait for
+// xterm's globals used to live entirely in a bare `setTimeout` chain
+// inside the eval'd JS, with nothing SessionView's teardown could reach
+// in and cancel. Backing out of a session before that wait resolved left
+// it running; if the user then opened a DIFFERENT session, the stale
+// loop could eventually fire and mount the FIRST session's terminal into
+// the SECOND session's view (and, since the old mount guard was already
+// set by the real mount, silently no-op the real one instead).
+//
+// An earlier version of this test only clicked through the navigation
+// quickly and asserted the Dioxus-rendered `.titlebar .title` afterward
+// — which passes even if session A's socket is the one that actually
+// mounted, since the titlebar text comes from the `session` PROP
+// SessionView was given, entirely independent of what terminal.js did.
+// It also never forced a genuinely pending retry in the first place: on
+// an unloaded box, `mountWhenReady`'s very first synchronous readiness
+// check routinely just succeeds, so there was nothing left running to
+// cancel and the test could pass for reasons that had nothing to do with
+// the fix.
+//
+// This version forces the pending state for real (withholding
+// `window.Terminal`, which `mountWhenReady` cannot proceed without) and
+// makes the resulting race deterministic with Playwright's fake clock
+// instead of hoping real wall-clock timing falls out favorably: with the
+// clock frozen, session A's retry and session B's retry are scheduled
+// for the IDENTICAL virtual instant, and same-deadline timers fire in
+// registration order — so if A's retry were never cancelled, it would
+// deterministically fire before B's and mount session A's socket into
+// the (shared, same-DOM-id) terminal element first, with B's later mount
+// then no-opping against the "already mounted" guard. Asserting the
+// MOUNTED SOCKET'S URL — not any Dioxus-rendered text — is what actually
+// catches that.
+//
+// terminal.js actually has THREE points that can cancel session A's
+// retry (`mountWhenReady`'s own `clearTimeout` on entry, `unmount()`'s
+// `clearTimeout`, and `tryMount`'s `pending !== attempt` check), and any
+// ONE of them alone is enough to stop the race above — checked directly
+// while writing this test by disabling each in isolation and confirming
+// it still passed. Only disabling all three at once reproduces the
+// original bug (confirmed the same way). That is a real, if incidental,
+// defense-in-depth; this test is only equipped to fail if ALL of a
+// regression's remaining protections vanish together, not to identify
+// which single one a future change removed.
+test("backing out before a terminal is ready, then opening a different session, mounts the right one", async ({
+  page,
+  request,
+}) => {
+  const created = await request.post("/api/sessions", {
+    data: {
+      cwd: "/tmp",
+      invocation: "sleep 300",
+      title: "regression-session-b",
+    },
+  });
+  expect(created.status()).toBe(200);
+  const { id: idB } = await created.json();
+
+  try {
+    await page.goto("/");
+    await expect(sharedSessionRow(page)).toBeVisible();
+
+    // Freeze the page's timers. `install()` alone does NOT pause time —
+    // it only swaps in fake implementations, which by themselves keep
+    // ticking at native speed — so `pauseAt()` is what actually stops
+    // the clock; without it, both retries below would still be driven
+    // by real elapsed wall-clock time between actions, defeating the
+    // whole point of using the fake clock here. Playwright's own waits
+    // (`waitForFunction`) poll from OUTSIDE the page over CDP and are
+    // unaffected by any of this; only the page's OWN `setTimeout` calls
+    // — exactly what `mountWhenReady`'s retry loop uses — come under our
+    // control.
+    await page.clock.install();
+    await page.clock.pauseAt(new Date());
+
+    // Withhold a global `mountWhenReady` genuinely cannot proceed
+    // without, so opening session A puts a REAL pending retry into
+    // flight (rather than resolving on its first synchronous check, as
+    // it almost always would on an unloaded box).
+    await page.evaluate(() => {
+      (window as any).__testStashedTerminal = (window as any).Terminal;
+      delete (window as any).Terminal;
+    });
+
+    await sharedSessionRow(page).click();
+    await page.locator(".back-button").click();
+    await page.locator(`[data-session-id="${idB}"]`).click();
+
+    // Restore the withheld global, THEN advance the frozen clock: both
+    // session A's original retry (if a regression left it running) and
+    // session B's fresh one were scheduled for the same virtual instant
+    // (nothing advanced the clock between the two clicks), so this is
+    // what actually exercises the race described above.
+    await page.evaluate(() => {
+      (window as any).Terminal = (window as any).__testStashedTerminal;
+      delete (window as any).__testStashedTerminal;
+    });
+    await page.clock.runFor(500);
+
+    await page.waitForFunction(() => (window as any).__farhelmTermReady === true);
+    const wsUrl = await page.evaluate(() => (window as any).__farhelmWs.url);
+    expect(wsUrl).toContain(idB);
+    await expect(page.locator(".titlebar .title")).toHaveText(
+      "regression-session-b",
+    );
+  } finally {
+    await request.post(`/api/sessions/${idB}/stop`).catch(() => {});
+    await request.delete(`/api/sessions/${idB}`).catch(() => {});
+  }
+});
+
+// Playwright-level coverage for the PARTIAL-MOUNT ROLLBACK finding:
+// mount() sets its guard (`active`, since terminal.js's simplification —
+// see its docs) only at the very end of a successful mount, so an
+// exception partway through (a `WebSocket` constructor throwing, here)
+// must leave `active` exactly as it was before the attempt — not stuck
+// in a state that wedges every later mount shut. Monkeypatching
+// `window.WebSocket` to throw is the cleanest deterministic way to break
+// mount() partway through: it is the very next thing mount() does after
+// constructing the xterm.js `Terminal` (already-real work that must
+// itself be rolled back — the terminal.js catch block disposes it),
+// requires no changes to production code to trigger, and — restored
+// before the second attempt — reproduces the exact "mount, fail, mount
+// the SAME session again" sequence a real transient failure would leave
+// a user facing.
+test("a failed mount rolls back cleanly; the same session can be mounted again", async ({
+  page,
+}) => {
+  await page.goto("/");
+  await expect(sharedSessionRow(page)).toBeVisible();
+
+  await page.evaluate(() => {
+    (window as any).__testRealWebSocket = window.WebSocket;
+    (window as any).WebSocket = class {
+      constructor() {
+        throw new Error("injected failure for rollback test");
+      }
+    };
+  });
+
+  await sharedSessionRow(page).click();
+  // termReady never becomes true on this path — mount() throws before
+  // reaching the line that sets it — so the banner text (which the
+  // catch block does set) is the only thing to wait on here.
+  await expect(page.locator("#term-banner")).toContainText(
+    "Failed to start terminal",
+  );
+  // The failed attempt must not have left anything looking mounted.
+  expect(
+    await page.evaluate(() => (window as any).__farhelmTerm === undefined),
+  ).toBe(true);
+
+  await page.evaluate(() => {
+    window.WebSocket = (window as any).__testRealWebSocket;
+    delete (window as any).__testRealWebSocket;
+  });
+
+  // Reopening the SAME session (back to the list, then the same row)
+  // must succeed now that the guard was rolled back — a regression that
+  // left `active` (or the old `__farhelmMounted` flag) stuck would make
+  // this mount silently no-op instead.
+  await page.locator(".back-button").click();
+  await sharedSessionRow(page).click();
+  await page.waitForFunction(() => (window as any).__farhelmTermReady === true);
+  await waitForTermText(page, "FAKE-AGENT READY");
 });
 
 // Real keystrokes through the whole chain: xterm's onData, the WebSocket,
@@ -86,6 +428,13 @@ test("reload reattaches with replayed scrollback", async ({ page }) => {
   await waitForTermText(page, "echo:before-reload");
 
   await page.reload();
+  // A reload resets the app's navigation state (App's `Signal<Option
+  // <Session>>` starts at `None` on every fresh load), so it lands back
+  // on the list view, not the terminal directly — the row must be
+  // clicked again, same as openTerminal's own first attach.
+  const row = sharedSessionRow(page);
+  await expect(row).toBeVisible();
+  await row.click();
   await page.waitForFunction(() => (window as any).__farhelmTermReady === true);
   // Replay must bring back output produced before this attachment
   // existed — the reconnect-with-replay acceptance criterion.
@@ -135,15 +484,16 @@ test("second client takes over; first shows the detach banner", async ({
 
   const second = await browser.newContext();
   const page2 = await second.newPage();
-  await page2.goto("/");
-  await page2.waitForFunction(() => (window as any).__farhelmTermReady === true);
+  // A fresh context has its own list view, so it goes through the same
+  // list-then-click path as `page` did in openTerminal(page) above —
+  // there is no direct terminal URL to land on.
+  await openTerminal(page2);
 
   // SPEC.md: last attach wins, and the loser sees it happened.
   await expect(page.locator("#term-banner")).toBeVisible({ timeout: 10_000 });
   await expect(page.locator("#term-banner")).toContainText("Detached");
 
   // The winner is live: input still round-trips.
-  await waitForTermText(page2, "FAKE-AGENT READY");
   await page2.locator("#terminal").click();
   await page2.keyboard.type("takeover-works");
   await page2.keyboard.press("Enter");
@@ -153,9 +503,10 @@ test("second client takes over; first shows the detach banner", async ({
 
 // The creation API is the one true path (PLAN_M1.md: CLI flags feed the
 // same API a UI dialog will call), so its HTTP surface needs coverage
-// even though M1's UI never POSTs. Only the failure case is exercised
-// here: a successful POST would add a second session to a stack whose UI
-// shows one, which would perturb the tests above.
+// even though the UI has no create dialog yet (PLAN_M2.md step 8). Only
+// the failure case is exercised here: a successful POST would leave an
+// extra, untracked session sitting in the list for every test after this
+// one, with nothing to clean it up.
 // The status code is part of the contract, not an implementation detail:
 // a missing cwd is the caller's own precondition failure (4xx), distinct
 // from a server-side fault (5xx) the caller could not have avoided by
@@ -171,8 +522,8 @@ test("create API reports precondition failures verbatim", async ({ request }) =>
 });
 
 // Request-level coverage for the stop/delete HTTP surface (PLAN_M2.md step
-// 6): the full UI flows (list view, stop/delete buttons, delete's
-// confirmation dialog) are the next two PRs, so this exercises the API
+// 6): the full UI flows (stop/delete buttons, delete's confirmation
+// dialog) are PLAN_M2.md step 8's PR, so this exercises the API
 // directly against the real stack, following the request-fixture style of
 // the create-API test above rather than driving a page. It creates its
 // own session (a long-running `sleep`, distinct from the shared
@@ -239,6 +590,134 @@ test("stop and delete a session through the HTTP API", async ({ request }) => {
     // Best-effort: swallow everything, including a 404 for the (expected)
     // case where the happy path already deleted the session. This must
     // never throw over the top of a real assertion failure above.
+    await request.delete(`/api/sessions/${id}`).catch(() => {});
+  }
+});
+
+// A real end-to-end status flip, observed through the LIST UI rather than
+// the API this time (the test above already covers the API's own view of
+// stop/delete). This deliberately does NOT use a session whose command
+// exits near-instantly (`sh -c 'exit 7'`, an earlier design): a command
+// that is already dead by the time the FIRST list fetch happens would
+// only prove that a freshly-fetched already-exited row renders
+// correctly — it would never prove that the list REFRESHES an EXISTING
+// row from alive to exited, which is the actual polling behavior this
+// test exists to pin. `trap ... TERM` keeps the session observably alive
+// first, so stopping it via the API is what exercises a genuine in-place
+// refresh of the same `data-session-id` row.
+test("list refreshes an existing row from alive to exited, then drops it on delete", async ({
+  page,
+  request,
+}) => {
+  const created = await request.post("/api/sessions", {
+    data: {
+      cwd: "/tmp",
+      invocation: `sh -c 'trap "exit 7" TERM; sleep 300'`,
+    },
+  });
+  expect(created.status()).toBe(200);
+  const { id } = await created.json();
+
+  try {
+    await page.goto("/");
+    const row = page.locator(`[data-session-id="${id}"]`);
+    await expect(row.locator(".status-badge")).toHaveText("alive", {
+      timeout: 10_000,
+    });
+
+    await request.post(`/api/sessions/${id}/stop`);
+    // The exact exit code is NOT pinned here: `kill_process_tree`
+    // (farhelm-supervisor/src/service.rs) sends SIGTERM, waits a grace
+    // period, then RE-ENUMERATES the tree and SIGKILLs only whatever it
+    // still finds alive at that point — a process that already exited
+    // from the trap's `exit 7` before the grace period elapsed simply
+    // will not be found, and keeps its trap-driven exit code. So the
+    // genuine race is whether the trap's `exit 7` completes before that
+    // grace period does: if it does not, the process is still alive at
+    // re-enumeration time and gets SIGSTOPped then SIGKILLed instead,
+    // turning the eventual death into a signal death tmux cannot reduce
+    // to a code. The badge could legitimately read "exited (code 7)" or
+    // plain "exited" either way; only the COARSE state transition is
+    // asserted here. The exact text each `SessionStatus` renders into is
+    // already pinned unconditionally by
+    // `status_badge_matches_text_and_class_for_each_status` in lib.rs.
+    await expect(row.locator(".status-badge")).toHaveText(/^exited/, {
+      timeout: 10_000,
+    });
+
+    await request.delete(`/api/sessions/${id}`);
+    await expect(row).toHaveCount(0, { timeout: 10_000 });
+  } finally {
+    // Best-effort cleanup for the case where an assertion above threw
+    // before the happy-path delete ran; see the identical pattern (and
+    // its rationale) on the HTTP-level test above.
+    await request.delete(`/api/sessions/${id}`).catch(() => {});
+  }
+});
+
+// PLAN_M2.md acceptance 5: a capped, truncated list reply must be VISIBLE
+// as such, not silently presented as complete. Reaching a real truncation
+// (the supervisor's ~500-session cap) would mean creating hundreds of
+// sessions just to exercise one banner, so this intercepts the same GET
+// /api/sessions the real list polls and fulfills it with a small,
+// synthetic truncated listing instead — enough to prove the UI's
+// truncation logic without the cost or flakiness of a 500-session stack.
+// No method check, no unroute: this page never makes a non-GET request
+// to /api/sessions, and Playwright tears the route down with the page
+// when the test ends.
+test("truncation banner shows when the listing reports truncated", async ({
+  page,
+}) => {
+  await page.route("**/api/sessions", (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        sessions: [
+          { id: "synthetic-1", title: "synthetic-1", cwd: "/tmp", invocation: "true" },
+          { id: "synthetic-2", title: "synthetic-2", cwd: "/tmp", invocation: "true" },
+        ],
+        total: 700,
+        truncated: true,
+      }),
+    }),
+  );
+
+  await page.goto("/");
+  await expect(page.locator(".truncation-banner")).toBeVisible();
+  await expect(page.locator(".truncation-banner")).toContainText(
+    "showing 2 of 700 sessions",
+  );
+});
+
+// Polling is M2's whole live-update mechanism (PLAN_M2.md: "Out" defers
+// live push to M5), so it needs its own direct test: with the list
+// already open, a session created from elsewhere (the HTTP API, standing
+// in for "any other client") must appear without a reload. Bounded at
+// ~10s — comfortably above the 3s poll interval — so a regression to
+// "never polls" fails the test instead of hanging the suite.
+test("list polls and picks up a session created elsewhere", async ({
+  page,
+  request,
+}) => {
+  await page.goto("/");
+  await expect(page.locator(".session-list")).toBeVisible();
+
+  const created = await request.post("/api/sessions", {
+    data: { cwd: "/tmp", invocation: "sleep 300" },
+  });
+  expect(created.status()).toBe(200);
+  const { id } = await created.json();
+
+  try {
+    await expect(page.locator(`[data-session-id="${id}"]`)).toBeVisible({
+      timeout: 10_000,
+    });
+  } finally {
+    // Best-effort: the session is long-running (`sleep 300`), so it must
+    // be stopped and deleted regardless of whether the assertion above
+    // passed, or it would sit in the list for every test after this one.
+    await request.post(`/api/sessions/${id}/stop`).catch(() => {});
     await request.delete(`/api/sessions/${id}`).catch(() => {});
   }
 });
@@ -408,8 +887,10 @@ test("real backspace erases; real ctrl-c kills the fake agent", async ({
   // observed directly, the banner is gone from replay by the time this
   // test's fresh page attaches. The session is still alive underneath
   // (only its scrollback was evicted), so liveness is reproven below with
-  // a fresh marker instead of the banner.
+  // a fresh marker instead of the banner. Still has to go through the
+  // list view to get there, same as openTerminal does.
   await page.goto("/");
+  await sharedSessionRow(page).click();
   await page.waitForFunction(() => (window as any).__farhelmTermReady === true);
   await page.locator("#terminal").click();
 

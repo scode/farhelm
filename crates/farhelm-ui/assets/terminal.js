@@ -18,7 +18,70 @@
   // it lands.
   const HIGH_WATER = 4 * 1024 * 1024;
 
+  // Handle to the single mounted terminal instance (one terminal per
+  // page at a time). Doubles as the mount guard: `mount()` refuses to
+  // run again while this is non-null, and — together with `pending`
+  // below — this is the ENTIRE guard now; there is no separate
+  // `window.__farhelmMounted` flag to keep in sync. That works because
+  // `mount()` is synchronous start to finish (nothing here yields to
+  // the event loop mid-mount) and its own catch block nulls this back
+  // out on failure, so at every point where other code could run,
+  // `active` already reflects reality. `unmount()` needs this to reach
+  // the socket, the xterm instance, and the window resize listener
+  // registered at mount time. `null` when nothing is mounted.
+  let active = null;
+
+  // A `mountWhenReady()` call still waiting for xterm's globals and the
+  // target DOM element to exist. At most one at a time: starting a new
+  // one, or calling `unmount()`, cancels whatever is still pending.
+  // `null` when nothing is pending.
+  let pending = null;
+
   window.farhelmTerm = {
+    /**
+     * Wait for xterm's globals (`Terminal`, `FitAddon`) and `#elementId`
+     * to exist, then mount — owning the ENTIRE retry loop that used to
+     * live in the `document::eval` snippet calling this (lib.rs).
+     *
+     * That move closes a real bug (the "stale mount retry" finding): the
+     * old loop was a bare `setTimeout` chain with no handle anything
+     * outside it could reach, so backing out of a session before the
+     * loop resolved left it running — unowned and un-cancellable — and
+     * it could later fire `mount()` for the OLD session into whatever
+     * view was open by the time it finally resolved, racing (and
+     * potentially losing to) the REAL mount that was supposed to happen
+     * for the NEW session.
+     *
+     * The fix is `pending`, and it cancels a superseded attempt TWICE
+     * over, deliberately redundantly: this function's own entry
+     * `clearTimeout`s whatever the PREVIOUS `pending` was before
+     * installing a fresh `attempt`, and every tick of `tryMount` also
+     * checks it is still the CURRENT `attempt` before proceeding (in
+     * case a timer already in flight fires despite that `clearTimeout`
+     * — see `unmount()`'s docs for a third such backstop). Any ONE of
+     * these alone stops an old session's retry from firing into
+     * whatever view is open by the time it would otherwise have
+     * resolved. (lib.rs additionally guards its OWN outer wait — for
+     * `window.farhelmTerm` to exist at all, before this function is even
+     * reachable — with a separate generation token; that layer is
+     * unrelated to the mechanisms here.)
+     */
+    mountWhenReady(elementId, wsPath, baseUrl) {
+      if (pending) clearTimeout(pending.timer);
+      const attempt = { timer: null };
+      pending = attempt;
+      const tryMount = () => {
+        if (pending !== attempt) return;
+        if (window.Terminal && window.FitAddon && document.getElementById(elementId)) {
+          pending = null;
+          farhelmTerm.mount(elementId, wsPath, baseUrl);
+        } else {
+          attempt.timer = setTimeout(tryMount, 50);
+        }
+      };
+      tryMount();
+    },
+
     /**
      * Mount a terminal into #elementId, attached to the helm terminal
      * WebSocket at wsPath (e.g. /api/sessions/<id>/term).
@@ -30,91 +93,27 @@
      * failed.
      */
     mount(elementId, wsPath, baseUrl) {
-      // Re-renders may call mount again; one terminal per page in M1.
-      if (window.__farhelmMounted) return null;
-      window.__farhelmMounted = true;
-      const el = document.getElementById(elementId);
-      const term = new Terminal({
-        scrollback: 12000,
-        fontSize: 14,
-        cursorBlink: true,
-      });
-      const fit = new FitAddon.FitAddon();
-      term.loadAddon(fit);
-      term.open(el);
-      fit.fit();
+      // Re-renders may call mount again; one terminal per page at a
+      // time. `active` (see its declaration above) IS the guard;
+      // `unmount()` nulls it on the way out, so a session reopened after
+      // navigating back to the list gets a fresh mount here rather than
+      // silently no-opping against state that no longer has a live DOM
+      // node underneath it.
+      if (active) return null;
 
-      const base = baseUrl
-        ? baseUrl.replace(/^http/, "ws")
-        : (location.protocol === "https:" ? "wss://" : "ws://") + location.host;
-      const ws = new WebSocket(
-        `${base}${wsPath}?cols=${term.cols}&rows=${term.rows}`,
-      );
-      ws.binaryType = "arraybuffer";
-
-      let pendingWrite = 0;
-      ws.onmessage = (ev) => {
-        if (typeof ev.data === "string") {
-          // Text frames are control JSON from the helm; today that is
-          // only the detach notice (SPEC.md: takeover must be visible).
-          const msg = JSON.parse(ev.data);
-          if (msg.type === "detached") {
-            showBanner(`Detached: ${msg.reason}`);
-          }
-          return;
-        }
-        const bytes = new Uint8Array(ev.data);
-        pendingWrite += bytes.length;
-        term.write(bytes, () => {
-          pendingWrite -= bytes.length;
-        });
-        if (pendingWrite > HIGH_WATER) {
-          // Backpressure seam: replace with a pause message when the
-          // end-to-end plumbing lands.
-          console.warn("farhelm: terminal write backlog", pendingWrite);
-        }
-      };
-      // A detach notice is immediately followed by the server closing
-      // the socket; the close handler must not clobber the more specific
-      // banner (the takeover message is the one SPEC.md requires the
-      // user to see).
+      // Declared before the try/catch, not inside it: the rollback path
+      // below needs to reach whatever got created before the exception,
+      // and `bannered`/`showBanner` need to be visible from both the
+      // happy path and the catch (a `let` inside a `try` block is not
+      // visible to its `catch`).
+      let term = null;
+      let ws = null;
       let bannered = false;
-      ws.onclose = () => showBanner("Connection closed");
-      ws.onerror = () => showBanner("Connection error");
-
-      const enc = new TextEncoder();
-      term.onData((d) => {
-        if (ws.readyState === WebSocket.OPEN) ws.send(enc.encode(d));
-      });
-      // onBinary carries mouse reports and other non-UTF8 input as a
-      // binary string; encode byte-for-byte.
-      term.onBinary((d) => {
-        if (ws.readyState !== WebSocket.OPEN) return;
-        const bytes = new Uint8Array(d.length);
-        for (let i = 0; i < d.length; i++) bytes[i] = d.charCodeAt(i) & 0xff;
-        ws.send(bytes);
-      });
-
-      const sendResize = () => {
-        if (ws.readyState === WebSocket.OPEN) {
-          ws.send(
-            JSON.stringify({ type: "resize", cols: term.cols, rows: term.rows }),
-          );
-        }
-      };
-      term.onResize(sendResize);
-      // A resize between socket construction and open would otherwise be
-      // dropped forever, leaving the pane sized to the stale dimensions
-      // in the connect URL.
-      ws.addEventListener("open", sendResize);
-      window.addEventListener("resize", () => fit.fit());
-
-      // Sticky by design, enforced HERE rather than at each call site:
-      // the first banner wins for the life of the socket, so the
-      // specific reason (a takeover) is never overwritten by the generic
-      // close or error that follows it a moment later. Callers must not
-      // need to remember to check the flag.
       function showBanner(text) {
+        // Sticky by design: the first banner wins for the life of the
+        // socket, so a specific reason (a takeover) is never overwritten
+        // by the generic close or error that follows it a moment later.
+        // Callers must not need to remember to check the flag.
         if (bannered) return;
         bannered = true;
         const banner = document.getElementById("term-banner");
@@ -124,16 +123,159 @@
         }
       }
 
-      term.focus();
-      // Test hooks: tests wait on the flag instead of sleeping, read
-      // terminal content through the buffer API — the DOM renderer only
-      // materializes viewport rows, so DOM text misses scrollback — and
-      // reach the raw socket to exercise message-size limits that
-      // keyboard-driven input cannot produce.
-      window.__farhelmTerm = term;
-      window.__farhelmWs = ws;
-      window.__farhelmTermReady = true;
-      return { term, ws };
+      try {
+        const el = document.getElementById(elementId);
+        term = new Terminal({
+          scrollback: 12000,
+          fontSize: 14,
+          cursorBlink: true,
+        });
+        const fit = new FitAddon.FitAddon();
+        term.loadAddon(fit);
+        term.open(el);
+        fit.fit();
+
+        const base = baseUrl
+          ? baseUrl.replace(/^http/, "ws")
+          : (location.protocol === "https:" ? "wss://" : "ws://") + location.host;
+        ws = new WebSocket(
+          `${base}${wsPath}?cols=${term.cols}&rows=${term.rows}`,
+        );
+        ws.binaryType = "arraybuffer";
+
+        let pendingWrite = 0;
+        ws.onmessage = (ev) => {
+          if (typeof ev.data === "string") {
+            // Text frames are control JSON from the helm; today that is
+            // only the detach notice (SPEC.md: takeover must be visible).
+            const msg = JSON.parse(ev.data);
+            if (msg.type === "detached") {
+              showBanner(`Detached: ${msg.reason}`);
+            }
+            return;
+          }
+          const bytes = new Uint8Array(ev.data);
+          pendingWrite += bytes.length;
+          term.write(bytes, () => {
+            pendingWrite -= bytes.length;
+          });
+          if (pendingWrite > HIGH_WATER) {
+            // Backpressure seam: replace with a pause message when the
+            // end-to-end plumbing lands.
+            console.warn("farhelm: terminal write backlog", pendingWrite);
+          }
+        };
+        // A detach notice is immediately followed by the server closing
+        // the socket; the close handler must not clobber the more
+        // specific banner (the takeover message is the one SPEC.md
+        // requires the user to see) — `showBanner`'s own stickiness
+        // handles that.
+        ws.onclose = () => showBanner("Connection closed");
+        ws.onerror = () => showBanner("Connection error");
+
+        const enc = new TextEncoder();
+        term.onData((d) => {
+          if (ws.readyState === WebSocket.OPEN) ws.send(enc.encode(d));
+        });
+        // onBinary carries mouse reports and other non-UTF8 input as a
+        // binary string; encode byte-for-byte.
+        term.onBinary((d) => {
+          if (ws.readyState !== WebSocket.OPEN) return;
+          const bytes = new Uint8Array(d.length);
+          for (let i = 0; i < d.length; i++) bytes[i] = d.charCodeAt(i) & 0xff;
+          ws.send(bytes);
+        });
+
+        const sendResize = () => {
+          if (ws.readyState === WebSocket.OPEN) {
+            ws.send(
+              JSON.stringify({ type: "resize", cols: term.cols, rows: term.rows }),
+            );
+          }
+        };
+        term.onResize(sendResize);
+        // A resize between socket construction and open would otherwise
+        // be dropped forever, leaving the pane sized to the stale
+        // dimensions in the connect URL. Assigned as the `onopen`
+        // property (not `addEventListener`) so `unmount()` can null it
+        // out by name along with the other WS callbacks.
+        ws.onopen = sendResize;
+        // Named (not inline) so unmount() can remove exactly this
+        // listener: an anonymous closure captured here would be
+        // unreachable later, leaking one stale listener (closing over
+        // this disposed term/fit pair) per mount/unmount cycle, each
+        // still firing on every future window resize.
+        const onWindowResize = () => fit.fit();
+        window.addEventListener("resize", onWindowResize);
+
+        term.focus();
+        // Test hooks: tests wait on the flag instead of sleeping, read
+        // terminal content through the buffer API — the DOM renderer
+        // only materializes viewport rows, so DOM text misses
+        // scrollback — and reach the raw socket to exercise
+        // message-size limits that keyboard-driven input cannot
+        // produce.
+        window.__farhelmTerm = term;
+        window.__farhelmWs = ws;
+        window.__farhelmTermReady = true;
+        active = { ws, term, onWindowResize };
+        return { term, ws };
+      } catch (err) {
+        // Roll back completely: `active` must not stay stuck non-null
+        // after a failed mount attempt (it never actually got set on
+        // this path, but the assignment is explicit here anyway — see
+        // below) or the guard above would silently wedge shut every
+        // later mount attempt for the rest of the page's life (the
+        // PARTIAL-MOUNT ROLLBACK finding this closes) — a constructor
+        // throwing partway through (a malformed URL, a missing element)
+        // must leave the world looking like the mount never started.
+        active = null;
+        if (ws) ws.close();
+        if (term) term.dispose();
+        showBanner(`Failed to start terminal: ${err}`);
+        throw err;
+      }
+    },
+
+    /**
+     * Tear down the mounted terminal (SessionView's `use_drop`, lib.rs)
+     * and cancel any still-pending `mountWhenReady()` wait, so
+     * navigating back to the list and reopening a session — the SAME
+     * session or a different one — gets a genuine fresh mount: a fresh
+     * xterm instance, a fresh socket, and a fresh attach/replay, rather
+     * than either compounding onto the previous mount's state or losing
+     * a race to a zombie retry loop. That reopen-after-close path is
+     * exactly the regression this lifecycle work exists to prevent.
+     *
+     * A no-op when nothing is mounted or pending, so callers never need
+     * to track mount state themselves.
+     */
+    unmount() {
+      if (pending) {
+        clearTimeout(pending.timer);
+        pending = null;
+      }
+      if (!active) return;
+      window.removeEventListener("resize", active.onWindowResize);
+      // Null out every WS callback BEFORE closing: close() starts an
+      // asynchronous close handshake with the helm, and a stale
+      // `onclose` in particular would otherwise fire later and paint
+      // "Connection closed" onto #term-banner — an element ID the NEXT
+      // SessionView instance reuses, so a late callback here would
+      // show a stale banner over an unrelated, healthy session. `close()`
+      // and `dispose()` are themselves tolerant of whatever state the
+      // socket/terminal are already in, so no try/catch is needed around
+      // them here.
+      active.ws.onopen = null;
+      active.ws.onmessage = null;
+      active.ws.onerror = null;
+      active.ws.onclose = null;
+      active.ws.close();
+      active.term.dispose();
+      active = null;
+      delete window.__farhelmTerm;
+      delete window.__farhelmWs;
+      delete window.__farhelmTermReady;
     },
   };
 })();
