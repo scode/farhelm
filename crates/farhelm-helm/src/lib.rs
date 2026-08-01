@@ -411,9 +411,10 @@ async fn connect_supervisor(
 }
 
 /// `GET /api/sessions` — the supervisor's list, passed through unchanged.
-/// The helm caches nothing in M1; supervisors are the authority (SPEC.md).
-/// The last-known-session cache that survives helm restarts is M2, and M6
-/// adds the registry and stale-cache semantics on top.
+/// The helm caches nothing before M6; supervisors are the authority
+/// (SPEC.md). The last-known-session cache that survives helm restarts
+/// arrives with M6's registry and stale-cache semantics (PLAN.md) — with
+/// one always-connected supervisor there is nothing for a cache to add.
 async fn list_sessions(State(state): State<Arc<AppState>>) -> impl IntoResponse {
     match state.client.list_sessions().await {
         Ok(sessions) => axum::Json(sessions).into_response(),

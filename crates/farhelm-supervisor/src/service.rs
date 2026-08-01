@@ -727,11 +727,13 @@ async fn drain_writer(
 /// tear down every attachment sharing the connection over one bad reply.
 /// So the check has to happen here, before the frame is ever enqueued.
 /// `ListSessions` is the only M1 reply that can realistically hit this:
-/// one frame carries every
-/// session with no pagination until M2 (PLAN.md), so a host with enough
-/// sessions (or unusually large titles) can legitimately exceed
-/// `MAX_FRAME_LEN`. The substituted `Error` reply is small by construction
-/// — just a `req_id` and a fixed-shape message — so it always fits.
+/// one frame carries every session, so a host with enough sessions (or
+/// unusually large titles) can legitimately exceed `MAX_FRAME_LEN`. M2
+/// adds a count cap plus an encoded-size budget to the list reply, and
+/// real pagination is M6 (PLAN.md); this defusal stays as the last-resort
+/// backstop even then. The substituted `Error` reply is small by
+/// construction — just a `req_id` and a fixed-shape message — so it
+/// always fits.
 ///
 /// Only call this for messages that carry a `req_id`: it panics otherwise,
 /// which is deliberate. A reply silently sent unchecked here would be the
@@ -758,8 +760,7 @@ fn reply_frame(msg: &ControlMsg) -> Frame {
         Frame::control(&ControlMsg::Error {
             req_id,
             message: format!(
-                "reply encodes to {} bytes, exceeding the {}-byte frame limit; session list \
-                 pagination is planned for M2, which will avoid this for ListSessions",
+                "reply encodes to {} bytes, exceeding the {}-byte frame limit",
                 frame.encoded_len(),
                 farhelm_proto::MAX_FRAME_LEN,
             ),
@@ -1124,8 +1125,8 @@ mod tests {
     /// opaque placeholder string.
     ///
     /// `ListSessions` is the one M1 reply built entirely from unbounded
-    /// caller-controlled data (session titles), with no pagination until
-    /// M2 — so it is the realistic way a control reply exceeds
+    /// caller-controlled data (session titles), uncapped until M2's list
+    /// budget — so it is the realistic way a control reply exceeds
     /// `MAX_FRAME_LEN`. One oversized title is enough to clear the cap
     /// (JSON escaping plus the frame header add overhead on top of the
     /// title itself), so a single `SessionInfo` suffices here.
