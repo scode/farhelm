@@ -138,8 +138,9 @@ requirement.
 
 Session creation is one action, not a wizard. Only the working directory is fundamentally required:
 
-- Working directory: any existing directory on the target host. A directory picker/completer against the target host's
-  filesystem is provided.
+- Working directory: an existing directory on the target host, named by an absolute path (a relative path would resolve
+  against the supervisor process rather than the client, and would shift meaning across supervisor restarts). A
+  directory picker/completer against the target host's filesystem is provided.
 - Title: optional; auto-generated when omitted. Renameable later.
 - Agent profile: defaults to the last-used profile on the target host; if that profile no longer exists, the client asks
   instead of guessing.

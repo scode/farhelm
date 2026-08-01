@@ -1630,7 +1630,29 @@ async fn remove_launch_artifacts_for_session(
 /// caller precondition and a host I/O failure. Calling both "does not
 /// exist" sends users looking for a typo when the real problem is
 /// permission, a symlink loop, or a failing filesystem.
+///
+/// `cwd` must be absolute. A relative path, if accepted, would be stored
+/// durably and handed to tmux, which resolves it against the SUPERVISOR
+/// DAEMON's own working directory, not the client's — so its meaning would
+/// shift with wherever the daemon happens to have been started, and
+/// re-shift on every daemon restart. That has already produced a real
+/// failure mode: a session created with a relative cwd would resolve fine
+/// as long as the daemon kept its original working directory, then either
+/// fail to restart with "does not exist" or, worse, silently relaunch the
+/// agent in the wrong directory once the daemon was restarted from
+/// elsewhere. Rejecting relative paths up front — for both create and
+/// restart, since this check is shared — also catches cwds that were
+/// stored before this check existed.
 async fn ensure_cwd_usable(cwd: &str) -> anyhow::Result<()> {
+    if !std::path::Path::new(cwd).is_absolute() {
+        return Err(RequestError::new(
+            ErrorKind::InvalidRequest,
+            format!(
+                "working directory is not absolute: {cwd} (a relative path would resolve against the supervisor process, not the client)"
+            ),
+        )
+        .into());
+    }
     match tokio::fs::metadata(cwd).await {
         Ok(metadata) if metadata.is_dir() => Ok(()),
         Ok(_) => Err(RequestError::new(

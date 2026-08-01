@@ -1060,6 +1060,66 @@ async fn create_in_missing_directory_errors() {
     );
 }
 
+/// A relative cwd must be refused at create time, not merely mis-resolved
+/// later.
+///
+/// tmux resolves a relative working directory against the SUPERVISOR
+/// DAEMON's own cwd, not the client's — so accepting one here would store
+/// a path whose meaning depends on wherever the daemon happened to be
+/// started, and would shift again on every daemon restart (manually
+/// reproduced: a session created this way either fails to restart with
+/// "working directory does not exist", or — if a same-named directory
+/// happens to exist relative to the daemon's new cwd — silently
+/// relaunches the agent in the wrong directory). Refusing it up front in
+/// `ensure_cwd_usable`, shared by create and restart, closes the create
+/// path and also makes a pre-existing stored relative cwd refuse to
+/// restart with a clear error instead of mis-resolving.
+#[tokio::test]
+async fn create_with_relative_cwd_is_rejected() {
+    let h = harness().await;
+    let err = h
+        .client
+        .create_session("crates", "true", None, 80, 24)
+        .await
+        .expect_err("create should reject a relative cwd");
+    let message = err.to_string();
+    assert!(
+        message.contains("crates") && message.contains("absolute"),
+        "the refusal must name the offending path and explain the absoluteness requirement: {message}"
+    );
+    assert_eq!(
+        err.downcast_ref::<SupervisorError>()
+            .expect("a relative-cwd failure must carry a SupervisorError")
+            .kind,
+        ErrorKind::InvalidRequest,
+        "a relative cwd is the caller's mistake, not a server fault"
+    );
+    assert!(
+        h.client.list_sessions().await.unwrap().sessions.is_empty(),
+        "a rejected create must not have created a session (in-memory or tmux)"
+    );
+    // The in-memory check above only proves the supervisor's own bookkeeping
+    // saw nothing; a rejected create could in principle still have raced a
+    // tmux `new-session` before validation ran. Probe the private socket
+    // directly. No prior test in this harness created a tmux session, so
+    // the server may not even be running yet — that absence itself proves
+    // there is no session, the same shape `kill_tmux_server_and_wait` above
+    // relies on.
+    let probe = tmux_query(&h.state.path().join("tmux.sock"), &["list-sessions"]).await;
+    if probe.status.success() {
+        assert!(
+            String::from_utf8_lossy(&probe.stdout).trim().is_empty(),
+            "a rejected create must not have left a tmux session behind"
+        );
+    } else {
+        assert!(
+            String::from_utf8_lossy(&probe.stderr).contains("no server running"),
+            "tmux list-sessions failed for a reason other than an absent server: {}",
+            String::from_utf8_lossy(&probe.stderr)
+        );
+    }
+}
+
 /// An existing file is a different caller error from a missing path.
 /// Keeping that distinction visible prevents a correct path from being
 /// misdiagnosed as a typo.
