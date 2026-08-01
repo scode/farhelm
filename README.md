@@ -5,13 +5,14 @@ interface, through their real TUIs. See SPEC.md for what this is and is not, SPE
 and PLAN.md for where the build currently stands.
 
 NOTE: This is milestone-2 software: several sessions at once, one host, argv-driven setup. Sessions survive a supervisor
-restart (persisted metadata, and a still-viewable terminal whenever the private tmux server survived too); resuming an
-interrupted agent conversation and finer restart classification are M3's narrower addition on top of that, not a
-prerequisite for restarts to work at all today. Usable for real work, minimal in everything else. Two caveats worth
-knowing before that real work: the helm's loopback API carries no authentication yet (the web token is a later
-milestone), so any local account on the helm's machine can drive your sessions — treat multi-user hosts accordingly; and
-every agent invocation (the startup one below, or one entered through the GUI's create dialog) is ordinary argv, visible
-to every local user via `ps`, so credentials do not belong in it.
+restart (persisted metadata, and a still-viewable terminal whenever the private tmux server survived too), a host reboot
+classifies previously-running sessions as interrupted rather than guessing, and a user-stopped session keeps its
+"stopped by user" qualifier durably; resuming an interrupted agent conversation is M3's remaining addition on top of
+that, not a prerequisite for restarts to work at all today. Usable for real work, minimal in everything else. Two
+caveats worth knowing before that real work: the helm's loopback API carries no authentication yet (the web token is a
+later milestone), so any local account on the helm's machine can drive your sessions — treat multi-user hosts
+accordingly; and every agent invocation (the startup one below, or one entered through the GUI's create dialog) is
+ordinary argv, visible to every local user via `ps`, so credentials do not belong in it.
 
 ## Trying it (M2)
 
@@ -39,9 +40,9 @@ Ubuntu 24.04 ships 3.4.
   `--ssh user@host --remote-farhelm /path/to/farhelm` to the helm command. Use an absolute `--cwd` there — it names a
   directory on the target host, and your local shell would expand a `~` against the wrong home.
 - Open the printed loopback URL in a browser: a session list (title, working directory, invocation, and a status —
-  alive, or exited with the code when known), refreshing on its own every few seconds. Click a row to open its terminal;
-  a back control returns to the list. Close the tab, reopen it later: same session, scrollback intact, the agent never
-  noticed.
+  alive; exited with the code when known, qualified "stopped by user" when you stopped it; interrupted after a host
+  reboot), refreshing on its own every few seconds. Click a row to open its terminal; a back control returns to the
+  list. Close the tab, reopen it later: same session, scrollback intact, the agent never noticed.
 - "new session" opens an inline form (working directory and agent command required, title optional); submitting launches
   the agent and takes you straight into its terminal. A bad working directory fails the create in place, with the
   supervisor's own error shown next to the form and nothing created.

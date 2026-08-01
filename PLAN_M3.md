@@ -160,6 +160,13 @@ multi-host (M6), attachments and tabs (M4), spawn CLI, web auth, and provisionin
 classification correct whenever the supervisor comes back, however it was started), the macOS process sweep (with the
 Mac supervisor work, per SPEC_impl.md).
 
+**macOS boot-id reading rides with that same Mac-supervisor work**, and is called out here so it has one recorded owner
+rather than looking like an oversight in item 2. Item 2's detector is Linux's `/proc/sys/kernel/random/boot_id`; the Mac
+equivalent (`kern.boottime` via sysctl) is deliberately not implemented in this milestone, for the same reason the
+/proc-less process sweep is not. The behavior a Mac build gets meanwhile is the honest one item 2 already defines for a
+host that publishes no boot id: the same-boot path runs forever and nothing is ever classified interrupted — never a
+fabricated reboot claim, just a capability that host does not yet have.
+
 ## Testing decisions (settled while planning)
 
 Capture is fixture-driven plus real checks: the fake agent grows modes that write claude-shaped and codex-shaped on-disk

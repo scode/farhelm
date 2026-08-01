@@ -10,11 +10,14 @@
 //! the exec shim lives in `launch`; SQLite-backed session metadata lives
 //! in `store`.
 //!
-//! M2 state model: SQLite (`store` module) is the truth that a session
+//! State model: SQLite (`store` module) is the truth that a session
 //! exists and what its metadata is; tmux remains the truth for whether
-//! its terminal is currently alive. Durability classification proper
-//! (interrupted-vs-exited via boot-id comparison) and agent-kind
-//! integrations arrive in later milestones (PLAN.md).
+//! its terminal is currently alive. M3 adds a third fact to the store —
+//! the last outcome the supervisor WITNESSED, plus the boot id it last
+//! saw — which is what makes interrupted-vs-exited a classification
+//! rather than a guess once tmux is gone (PLAN_M3.md item 2, `service`
+//! and `store` module docs). Agent-kind integrations arrive in later
+//! milestones (PLAN.md).
 //!
 //! Unix-only, unconditionally: the doorway is a unix socket and the
 //! substrate is tmux, so unix APIs are used without cfg gates — a

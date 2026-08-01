@@ -1294,13 +1294,22 @@ test("multi-session flow: create two, open and type in one, stop and delete the 
     // Stop session B via its row button. No confirmation for stop
     // (SPEC.md gives confirmation to delete/archive, not stop), and the
     // badge must flip on the next poll WITHOUT a reload.
+    //
+    // The badge still SAYS exited and adds the stop annotation as a
+    // qualifier: SPEC.md is explicit that "stopped" is not a distinct
+    // status, so the supervisor's durable annotation (PLAN_M3.md item 4)
+    // qualifies the exited badge rather than replacing its text. This is
+    // the browser-side proof of that whole path — the annotation is
+    // written in the supervisor's store, travels the wire and the helm's
+    // JSON, and lands in the DOM. Asserted on `.status-badge.exited` so
+    // the CSS class rides with it: a stopped session must still LOOK like
+    // an ended one.
     await rowByTitle(page, titleB)
       .locator(".session-row-stop")
       .click();
-    await expect(rowByTitle(page, titleB).locator(".status-badge")).toHaveText(
-      /^exited/,
-      { timeout: 10_000 },
-    );
+    await expect(
+      rowByTitle(page, titleB).locator(".status-badge.exited"),
+    ).toHaveText(/^exited — stopped by user/, { timeout: 10_000 });
 
     // Delete session B (now exited): no confirmation expected — pin that
     // the inline prompt never appears at all, not merely that it gets
@@ -2393,9 +2402,13 @@ test("a failed action's error is keyed to its own session, not shared across row
     await expect(rowA.locator(".action-error")).toContainText("error-a-sentinel");
 
     await rowB.locator(".session-row-stop").click();
-    await expect(rowB.locator(".status-badge")).toHaveText(/^exited/, {
-      timeout: 10_000,
-    });
+    // "exited — stopped by user": the durable stop annotation qualifies
+    // the exited badge (PLAN_M3.md item 4, SPEC.md's "'stopped' is not a
+    // distinct status").
+    await expect(rowB.locator(".status-badge")).toHaveText(
+      /^exited — stopped by user/,
+      { timeout: 10_000 },
+    );
 
     // A's error survives B's unrelated success untouched, and B picked up
     // no error of its own from any of this.
@@ -2406,9 +2419,10 @@ test("a failed action's error is keyed to its own session, not shared across row
     // error — B's (already-empty) state is untouched by this too.
     await page.unroute(`**/api/sessions/${idA}/stop`);
     await rowA.locator(".session-row-stop").click();
-    await expect(rowA.locator(".status-badge")).toHaveText(/^exited/, {
-      timeout: 10_000,
-    });
+    await expect(rowA.locator(".status-badge")).toHaveText(
+      /^exited — stopped by user/,
+      { timeout: 10_000 },
+    );
     await expect(rowA.locator(".action-error")).toHaveCount(0);
     await expect(rowB.locator(".action-error")).toHaveCount(0);
   } finally {
@@ -2497,7 +2511,7 @@ test("stop's in-flight guard disables this row's stop, delete, and open, while a
       .poll(() => rowA.locator(".status-badge").textContent(), {
         timeout: 10_000,
       })
-      .toMatch(/^exited/);
+      .toMatch(/^exited — stopped by user/);
 
     // Everything is usable again once the operation completes, and only
     // ONE request ever reached the route — the second click was rejected
@@ -2607,9 +2621,10 @@ test("rapid stop/delete clicks on the same row never let a confirmed delete sile
 
     // The stop won; the queued delete click was refused, so no confirm
     // prompt ever appeared for B at all.
-    await expect(rowB.locator(".status-badge")).toHaveText(/^exited/, {
-      timeout: 10_000,
-    });
+    await expect(rowB.locator(".status-badge")).toHaveText(
+      /^exited — stopped by user/,
+      { timeout: 10_000 },
+    );
     await expect(rowB.locator(".confirm-consequence")).toHaveCount(0);
     expect(stopRequestsB).toBe(1);
   } finally {
@@ -2833,9 +2848,15 @@ test("list refreshes an existing row from alive to exited, then drops it on dele
     // asserted here. The exact text each `SessionStatus` renders into is
     // already pinned unconditionally by
     // `status_badge_matches_text_and_class_for_each_status` in lib.rs.
-    await expect(row.locator(".status-badge")).toHaveText(/^exited/, {
-      timeout: 10_000,
-    });
+    //
+    // "exited — stopped by user": this session ended because the user
+    // stopped it, and PLAN_M3.md item 4's durable annotation QUALIFIES
+    // the exited badge rather than replacing it (SPEC.md: "'stopped' is
+    // not a distinct status").
+    await expect(row.locator(".status-badge.exited")).toHaveText(
+      /^exited — stopped by user/,
+      { timeout: 10_000 },
+    );
 
     await request.delete(`/api/sessions/${id}`);
     await expect(row).toHaveCount(0, { timeout: 10_000 });
@@ -2857,6 +2878,74 @@ test("list refreshes an existing row from alive to exited, then drops it on dele
 // No method check, no unroute: this page never makes a non-GET request
 // to /api/sessions, and Playwright tears the route down with the page
 // when the test ends.
+// PLAN_M3.md item 2 in the browser: an interrupted session must render
+// its own badge AND route delete like an ended session — straight through,
+// no confirmation. The confirmation prompt exists to protect an agent that
+// might still be running, and a host reboot is what produced this status,
+// so there is not even a stray descendant left for a delete to kill.
+//
+// The listing is synthesized rather than provoked, because provoking it
+// for real would mean rebooting the machine running the suite: the status
+// comes from a boot-id comparison the Rust suite covers directly (e2e.rs's
+// `a_reboot_interrupts_live_sessions_and_preserves_ended_ones`). What is
+// under test here is only what the UI does with the status, which is
+// exactly the half that needs a browser. The DELETE is counted and stalled
+// so "no confirm prompt appeared" cannot be confused with "one appeared
+// and vanished before the assertion ran".
+test("an interrupted session shows its badge and deletes without confirming", async ({
+  page,
+}) => {
+  const session = {
+    id: "synthetic-interrupted",
+    title: "synthetic-interrupted",
+    cwd: "/tmp",
+    invocation: "true",
+    status: { state: "interrupted" },
+    annotation: null,
+  };
+  await page.route("**/api/sessions", (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({ sessions: [session], total: 1, truncated: false }),
+    }),
+  );
+  let deleteRequests = 0;
+  let releaseDelete: () => void = () => {};
+  const deleteHeld = new Promise<void>((resolve) => {
+    releaseDelete = resolve;
+  });
+  await page.route(`**/api/sessions/${session.id}`, async (route) => {
+    if (route.request().method() !== "DELETE") {
+      await route.continue();
+      return;
+    }
+    deleteRequests += 1;
+    await deleteHeld;
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: "{}",
+    });
+  });
+
+  await page.goto("/");
+  const row = page.locator(`[data-session-id="${session.id}"]`);
+  await expect(row.locator(".status-badge.interrupted")).toHaveText(
+    "interrupted",
+    { timeout: 10_000 },
+  );
+
+  await row.locator(".session-row-delete").click();
+  // The DELETE is stalled, so the row is still on screen — and while it
+  // is, no confirmation controls exist at all.
+  await expect(row).toHaveCount(1);
+  await expect(row.locator(".confirm-consequence")).toHaveCount(0);
+  await expect(row.locator(".confirm-delete")).toHaveCount(0);
+  expect(deleteRequests).toBe(1);
+  releaseDelete();
+});
+
 test("truncation banner shows when the listing reports truncated", async ({
   page,
 }) => {
