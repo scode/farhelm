@@ -141,7 +141,10 @@ Session creation is one action, not a wizard. Only the working directory is fund
 - Working directory: an existing directory on the target host, named by an absolute path (a relative path would resolve
   against the supervisor process rather than the client, and would shift meaning across supervisor restarts). A
   directory picker/completer against the target host's filesystem is provided.
-- Title: optional; auto-generated when omitted. Renameable later.
+- Title: optional; auto-generated when omitted. Renameable later. A title is a single-line label, so a title you supply
+  is refused if it contains control characters (escape sequences, newlines, tabs); an auto-generated one has any such
+  character replaced with U+FFFD rather than being refused, since the directory it comes from is legitimate and you did
+  not choose the label.
 - Agent profile: defaults to the last-used profile on the target host; if that profile no longer exists, the client asks
   instead of guessing.
 - Host: defaults to the host of the currently open session, else the helm's own host.

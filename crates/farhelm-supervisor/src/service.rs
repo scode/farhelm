@@ -4946,8 +4946,9 @@ impl Supervisor {
 
     /// Everything checkable before the world is touched: the working
     /// directory is usable, the invocation parses into an argv, the
-    /// integration snapshot resolves, and the title is defaulted from the
-    /// cwd when the caller omitted one.
+    /// integration snapshot resolves, and the title is resolved — refused
+    /// if the caller spelled a control character into it, defaulted from
+    /// the cwd (with control characters sanitized) when they omitted it.
     ///
     /// Split out of `create_session` because the idempotency state machine
     /// must be able to run its reservation lookup WITHOUT it (see that
@@ -4991,7 +4992,54 @@ impl Supervisor {
                 RequestError::new(ErrorKind::InvalidRequest, "agent invocation is empty").into(),
             );
         }
-        let title = title.unwrap_or_else(|| {
+        // ## Titles must stay printable on one line
+        //
+        // A title is durable metadata that this supervisor echoes verbatim
+        // in every `SessionList` reply, and its consumers are not all
+        // DOM-shaped: the helm already writes it through `tracing` at
+        // startup (farhelm-helm's "startup session created" line), so a
+        // terminal-bound renderer exists TODAY, and a CLI `list` would be
+        // another. A terminal is unforgiving of arbitrary bytes — an
+        // embedded escape sequence is terminal injection the moment it is
+        // printed, and even a bare newline or tab breaks the one-line-label
+        // assumption every renderer makes. `char::is_control` sweeps all of
+        // that at once: C0 (including \n, \t, ESC), DEL, and the C1 range.
+        //
+        // The two sources of a title are handled ASYMMETRICALLY, and the
+        // asymmetry is the point.
+        //
+        // An EXPLICIT title is caller data, so it is REFUSED rather than
+        // rewritten: silently altering what the caller sent is a worse
+        // surprise than a clear error, and nothing legitimate constructs a
+        // title this way. Living in `validate_create` rather than at the
+        // protocol edge is also what keeps a keyed create honest — every
+        // refusal from this function is recorded against the intent key by
+        // `record_refused_create`, so the retry replays this answer instead
+        // of a fresh one.
+        //
+        // A DERIVED title is SANITIZED instead. It is server-generated from
+        // a directory the caller never chose as a label, and a control
+        // character is legal in a path component, so refusing here would
+        // make an existing, perfectly usable directory impossible to open a
+        // session in — punishing the caller for a name they did not pick.
+        // Replaced with U+FFFD rather than deleted so the label still shows
+        // that something was there.
+        //
+        // `cwd` and `invocation` are deliberately not swept: neither is a
+        // display label. `cwd` becomes tmux's working-directory argument
+        // and `invocation` is parsed into an argv — both are consumed as
+        // data by something that already has to accept arbitrary bytes.
+        let title = match title {
+            Some(explicit) => {
+                if explicit.chars().any(char::is_control) {
+                    return Err(RequestError::new(
+                        ErrorKind::InvalidRequest,
+                        "title must not contain control characters",
+                    )
+                    .into());
+                }
+                explicit
+            }
             // `cwd` arrived as a `String` over the protocol — farhelm-proto's
             // UTF-8-only wire contract — so every component of `cwd_path`,
             // including its basename, is UTF-8 by construction and
@@ -5003,15 +5051,17 @@ impl Supervisor {
             // "session" and silently mislabeling the session. The
             // `unwrap_or` fallback below is unrelated to UTF-8 — it only
             // covers a `cwd` with no basename at all (e.g. "/").
-            cwd_path
+            None => cwd_path
                 .file_name()
                 .map(|n| {
                     n.to_str()
                         .expect("cwd arrived as UTF-8 via the protocol; its components are UTF-8")
                 })
                 .unwrap_or("session")
-                .to_owned()
-        });
+                .chars()
+                .map(|c| if c.is_control() { '\u{FFFD}' } else { c })
+                .collect(),
+        };
         // Derived from `argv[0]`, the ORIGINAL first token — not from a
         // canonical command name — so `/opt/bin/claude` resumes through
         // `/opt/bin/claude`. `crate::agent_kind` owns every rule here,
@@ -13459,6 +13509,295 @@ mod tests {
             message.contains("working directory"),
             "a key at exactly the cap must be accepted and the request judged on its merits: \
              {message}"
+        );
+    }
+
+    /// An EXPLICIT title carrying a control character is refused, and
+    /// nothing about the request survives the refusal.
+    ///
+    /// Titles are durable metadata this supervisor echoes verbatim into
+    /// every `SessionList` reply, and the renderers are not all
+    /// escape-immune: the helm already logs a title through `tracing` when
+    /// it opens its startup session (farhelm-helm's "startup session
+    /// created" line), so a terminal-bound consumer exists today, and a CLI
+    /// `list` would be another. There an embedded escape sequence is
+    /// terminal injection while a bare newline breaks the one-line-label
+    /// assumption every renderer makes. Manual testing against the real
+    /// binary confirmed this was previously accepted and echoed verbatim
+    /// (an ANSI OSC sequence and a newline both went in and came back out
+    /// untouched).
+    ///
+    /// The fixtures are chosen so no single one can carry the test: ESC
+    /// appears ALONE in one of them, because an OSC fixture bundles ESC
+    /// with BEL and would still pass against an implementation that missed
+    /// ESC entirely. DEL and a C1 byte are there because `char::is_control`
+    /// covers three disjoint ranges and a hand-rolled ASCII-only check
+    /// would pass the first two cases. A normal multi-script Unicode title
+    /// — emoji, CJK, spaces — is NOT a control character and must still be
+    /// accepted, so the boundary is pinned on both sides rather than only
+    /// on the refusal.
+    #[tokio::test]
+    async fn a_title_with_control_characters_is_rejected_before_anything_is_stored() {
+        let state = StateDir::new();
+        let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
+            .await
+            .expect("supervisor");
+        let (tx, mut rx) = mpsc::channel(CONNECTION_WRITER_QUEUE);
+        let mut input_routes = HashMap::new();
+        let mut tasks = tokio::task::JoinSet::new();
+
+        for (req_id, title) in [
+            (1u64, "escape \u{1b}]0;evil\u{7} here".to_string()),
+            (2, "line one\nline two".to_string()),
+            // ESC on its own: the OSC fixture above hides an
+            // implementation that only recognizes BEL.
+            (3, "bare escape \u{1b} here".to_string()),
+            (4, "delete \u{7f} here".to_string()),
+            (5, "c1 control \u{9b} here".to_string()),
+        ] {
+            handle_control(
+                &sup,
+                ControlMsg::CreateSession {
+                    req_id,
+                    cwd: "/".to_string(),
+                    invocation: "agent".to_string(),
+                    title: Some(title.clone()),
+                    cols: 80,
+                    rows: 24,
+                    intent_key: None,
+                    agent_kind: None,
+                    resume_template: None,
+                },
+                &tx,
+                &mut input_routes,
+                &mut tasks,
+            )
+            .await;
+            let frame = rx.try_recv().expect("a reply must have been sent");
+            let decoded: ControlMsg = serde_json::from_slice(&frame.body).expect("decode");
+            let ControlMsg::Error { kind, message, .. } = decoded else {
+                panic!("a title with a control character must be refused: {decoded:?} ({title:?})");
+            };
+            assert_eq!(kind, ErrorKind::InvalidRequest, "for {title:?}");
+            assert!(
+                message.contains("control characters"),
+                "the refusal must name what was wrong: {message}"
+            );
+        }
+        assert!(
+            sup.store.load_all().await.expect("load").is_empty(),
+            "a refused request must not have reached the store at all"
+        );
+        assert!(
+            sup.sessions.lock().await.is_empty(),
+            "a refused request must not have created a session either"
+        );
+
+        // A title with no control characters — including non-ASCII script
+        // mixes that are easy to conflate with "unusual" — is accepted and
+        // judged on its merits, same as the intent-key boundary test above.
+        handle_control(
+            &sup,
+            ControlMsg::CreateSession {
+                req_id: 6,
+                cwd: "/".to_string(),
+                invocation: "agent".to_string(),
+                title: Some("🚀 デモ project — a normal title".to_string()),
+                cols: 80,
+                rows: 24,
+                intent_key: None,
+                agent_kind: None,
+                resume_template: None,
+            },
+            &tx,
+            &mut input_routes,
+            &mut tasks,
+        )
+        .await;
+        let frame = rx.try_recv().expect("a reply must have been sent");
+        let decoded: ControlMsg = serde_json::from_slice(&frame.body).expect("decode");
+        assert!(
+            matches!(decoded, ControlMsg::SessionCreated { .. }),
+            "a title with only ordinary Unicode must be accepted: {decoded:?}"
+        );
+    }
+
+    /// A title DERIVED from the cwd is sanitized rather than refused.
+    ///
+    /// The asymmetry with the test above is the whole point, and it is easy
+    /// to "simplify" away: a control character is legal in a path
+    /// component, so refusing a derived title would make an existing,
+    /// perfectly usable directory impossible to open a session in over a
+    /// label the caller never chose. The caller omitted the title precisely
+    /// to let the server pick one, so the server fixes it up — to U+FFFD
+    /// rather than to nothing, so the label still shows something was
+    /// removed — and the create succeeds.
+    #[tokio::test]
+    async fn a_title_derived_from_a_control_character_cwd_is_sanitized_not_refused() {
+        let state = StateDir::new();
+        let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
+            .await
+            .expect("supervisor");
+        let (tx, mut rx) = mpsc::channel(CONNECTION_WRITER_QUEUE);
+        let mut input_routes = HashMap::new();
+        let mut tasks = tokio::task::JoinSet::new();
+
+        // A real directory, because `validate_create` insists the cwd
+        // exists before it ever looks at the title.
+        let work = tempfile::tempdir().expect("work dir");
+        let evil = work.path().join("evil\u{1b}name");
+        std::fs::create_dir(&evil).expect("a control character is legal in a path component");
+
+        handle_control(
+            &sup,
+            ControlMsg::CreateSession {
+                req_id: 1,
+                cwd: evil.to_str().expect("tempdir paths are UTF-8").to_string(),
+                invocation: "agent".to_string(),
+                title: None,
+                cols: 80,
+                rows: 24,
+                intent_key: None,
+                agent_kind: None,
+                resume_template: None,
+            },
+            &tx,
+            &mut input_routes,
+            &mut tasks,
+        )
+        .await;
+        let frame = rx.try_recv().expect("a reply must have been sent");
+        let decoded: ControlMsg = serde_json::from_slice(&frame.body).expect("decode");
+        let ControlMsg::SessionCreated { session, .. } = decoded else {
+            panic!("a legal directory must remain usable as a cwd: {decoded:?}");
+        };
+        assert!(
+            session.title.contains('\u{FFFD}'),
+            "the replacement must be visible in the label: {:?}",
+            session.title
+        );
+        assert!(
+            !session.title.chars().any(char::is_control),
+            "nothing control-shaped may survive derivation: {:?}",
+            session.title
+        );
+
+        // The STORED title, not merely the echoed one: the reply is
+        // built from the same value that was persisted, and a future
+        // sanitize-on-the-way-out would pass the assertion above while
+        // still writing the raw bytes to disk.
+        let stored = sup.store.load_all().await.expect("load");
+        let [row] = stored.as_slice() else {
+            panic!("exactly one session must have been created: {stored:?}");
+        };
+        assert_eq!(row.title, session.title);
+    }
+
+    /// A keyed create refused for its title behaves like every other keyed
+    /// refusal: the retry replays it, and a corrected title is a key reuse.
+    ///
+    /// This is what makes the check's PLACEMENT load-bearing rather than
+    /// cosmetic. Refusing at the protocol edge would answer before the
+    /// reservation lookup, so the refusal would never be recorded and a
+    /// retry would re-derive it — and, worse, a pre-existing SUCCESSFUL
+    /// reservation whose title predates this rule would stop replaying its
+    /// session. Living in `validate_create` puts the refusal on the path
+    /// `record_refused_create` owns, which is what the first two requests
+    /// here prove. The third pins the other half of the contract: fixing
+    /// the title makes it a DIFFERENT request under the same key
+    /// (`create_fingerprint` binds the title), and a reused key is a client
+    /// bug rather than a merge — so it is a `Conflict`, not a belated
+    /// success. Modelled on
+    /// `a_failed_create_replays_its_error_and_a_changed_override_conflicts`.
+    #[tokio::test]
+    async fn a_keyed_title_refusal_replays_and_a_corrected_title_conflicts() {
+        let state = StateDir::new();
+        let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
+            .await
+            .expect("supervisor");
+        let (tx, mut rx) = mpsc::channel(CONNECTION_WRITER_QUEUE);
+        let mut input_routes = HashMap::new();
+        let mut tasks = tokio::task::JoinSet::new();
+        let request = |req_id: u64, title: &str| ControlMsg::CreateSession {
+            req_id,
+            cwd: "/".to_string(),
+            invocation: "agent".to_string(),
+            title: Some(title.to_string()),
+            cols: 80,
+            rows: 24,
+            intent_key: Some("one-intent".to_string()),
+            agent_kind: None,
+            resume_template: None,
+        };
+        let reply = |rx: &mut mpsc::Receiver<Frame>| {
+            let frame = rx.try_recv().expect("a reply must have been sent");
+            serde_json::from_slice::<ControlMsg>(&frame.body).expect("decode")
+        };
+
+        handle_control(
+            &sup,
+            request(1, "bad \u{1b} title"),
+            &tx,
+            &mut input_routes,
+            &mut tasks,
+        )
+        .await;
+        let ControlMsg::Error {
+            message: first_message,
+            kind: first_kind,
+            ..
+        } = reply(&mut rx)
+        else {
+            panic!("a control character in an explicit title must be refused");
+        };
+        assert_eq!(first_kind, ErrorKind::InvalidRequest);
+        assert!(
+            first_message.contains("control characters"),
+            "the refusal must name what was wrong: {first_message}"
+        );
+
+        // Identical request, identical key: the RECORDED answer, replayed
+        // rather than recomputed.
+        handle_control(
+            &sup,
+            request(2, "bad \u{1b} title"),
+            &tx,
+            &mut input_routes,
+            &mut tasks,
+        )
+        .await;
+        let ControlMsg::Error { message, kind, .. } = reply(&mut rx) else {
+            panic!("a replayed failure must still be an error");
+        };
+        assert_eq!(message, first_message, "the replay must be the same answer");
+        assert_eq!(kind, first_kind);
+
+        // Same key, a title that would have been fine on its own: the key
+        // is spent, and a different fingerprint under it is a reuse.
+        handle_control(
+            &sup,
+            request(3, "good title"),
+            &tx,
+            &mut input_routes,
+            &mut tasks,
+        )
+        .await;
+        let ControlMsg::Error { message, kind, .. } = reply(&mut rx) else {
+            panic!("a key reused for a different request must be refused");
+        };
+        assert_eq!(
+            kind,
+            ErrorKind::Conflict,
+            "correcting the title does not un-spend the key: {message}"
+        );
+        assert!(
+            message.contains("one-intent") && message.contains("different create request"),
+            "the refusal must name the key and say why: {message}"
+        );
+
+        assert!(
+            sup.sessions.lock().await.is_empty(),
+            "none of the three attempts may have created a session"
         );
     }
 
