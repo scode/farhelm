@@ -10551,9 +10551,47 @@ pub async fn run(state_dir: &Path) -> anyhow::Result<()> {
 /// the caller's decision to make, not a side effect of dialing.
 pub async fn connect(state_dir: &Path) -> anyhow::Result<UnixStream> {
     let path = Supervisor::socket_path(state_dir);
-    UnixStream::connect(&path)
-        .await
-        .with_context(|| format!("connecting to supervisor socket {}", path.display()))
+    UnixStream::connect(&path).await.map_err(|e| {
+        // `ConnectionRefused` (nothing is listening on the socket file)
+        // and `NotFound` (no socket file at all) are the shapes a plain
+        // "no supervisor here" takes at this layer. Naming that directly —
+        // and the fix — is what turns a raw "Connection refused (os error
+        // 111)" into something an operator can act on without knowing
+        // this is a unix-domain-socket dial at all.
+        //
+        // Linux also answers `ConnectionRefused` for a path that EXISTS
+        // but is not a socket, so a stale regular file squatting the name
+        // lands in this branch too — and the remedy still holds, because
+        // `Supervisor::serve` unlinks whatever it finds at the socket path
+        // before binding. (A DIRECTORY there refuses connections the same
+        // way and is not fixed by the remedy; it is a strange enough state
+        // that the bind error the remedy then produces is the clearer
+        // place to learn about it.) Other kinds — permission denied, a
+        // non-directory component in the path — keep the generic context:
+        // they need the raw error, not a remedy that would not apply.
+        //
+        // `--state-dir` is always spelled out: `internal stdio` is
+        // normally reached over ssh with a state dir the remote's default
+        // would not match, and a remedy that silently drops it starts a
+        // supervisor in the wrong place. The quoting is for spaces, so the
+        // line survives a paste into a shell; `to_string_lossy` is no more
+        // lossy than the `Path::display` already used for the socket path
+        // beside it, and this whole string is advice for a human.
+        let context = if matches!(
+            e.kind(),
+            std::io::ErrorKind::ConnectionRefused | std::io::ErrorKind::NotFound
+        ) {
+            format!(
+                "supervisor does not appear to be running (socket {} is not accepting \
+                 connections); start it with `farhelm supervisor run --state-dir {}`",
+                path.display(),
+                shell_words::quote(&state_dir.to_string_lossy()),
+            )
+        } else {
+            format!("connecting to supervisor socket {}", path.display())
+        };
+        anyhow::Error::new(e).context(context)
+    })
 }
 
 #[cfg(test)]
@@ -15037,5 +15075,94 @@ mod tests {
             ),
             "the deferred notice must be this channel's detach, unchanged"
         );
+    }
+
+    /// "No supervisor is running here" is the single most common way this
+    /// dial fails, and the raw kernel text for it ("No such file or
+    /// directory", "Connection refused (os error 111)") tells an operator
+    /// nothing about unix sockets, this state dir, or what to run. Both
+    /// shapes are pinned because they arise from genuinely different
+    /// states — a host where a supervisor was never started, and one where
+    /// it died and left its socket file behind — reaching this code as
+    /// different `ErrorKind`s that a narrowed match could easily drop.
+    ///
+    /// `--state-dir` is asserted specifically: `internal stdio` is reached
+    /// over ssh with a state dir that is usually not the remote default,
+    /// so a remedy printed without it starts a supervisor somewhere the
+    /// caller will still not find. The io error must survive in the chain
+    /// as well — the friendly context is an addition, not a replacement
+    /// for the errno a bug report needs.
+    #[tokio::test]
+    async fn connect_names_the_socket_and_state_dir_when_nothing_listens() {
+        let dir = tempfile::tempdir().expect("state dir");
+        let socket = Supervisor::socket_path(dir.path());
+
+        // Never started: no socket file at all (`NotFound`).
+        let missing = connect(dir.path()).await.unwrap_err();
+        // Died and left the file behind: `ConnectionRefused`. Neither std
+        // nor tokio unlinks a bound unix socket on drop, which is what
+        // makes this reproduce the stale-socket state exactly.
+        let listener = UnixListener::bind(&socket).expect("bind");
+        drop(listener);
+        assert!(socket.exists(), "the stale socket file must remain");
+        let refused = connect(dir.path()).await.unwrap_err();
+
+        for (err, expected_kind) in [
+            (missing, std::io::ErrorKind::NotFound),
+            (refused, std::io::ErrorKind::ConnectionRefused),
+        ] {
+            let rendered = format!("{err:#}");
+            assert!(
+                rendered.contains(&socket.display().to_string()),
+                "must name the socket it could not reach: {rendered}"
+            );
+            assert!(
+                rendered.contains("farhelm supervisor run --state-dir"),
+                "must suggest starting a supervisor on THIS state dir: {rendered}"
+            );
+            assert!(
+                rendered.contains(&dir.path().display().to_string()),
+                "the suggested command must name the state dir: {rendered}"
+            );
+            let io = err
+                .chain()
+                .find_map(|cause| cause.downcast_ref::<std::io::Error>())
+                .expect("the underlying io error must stay in the chain");
+            assert_eq!(io.kind(), expected_kind);
+        }
+    }
+
+    /// A failure that is NOT "nothing is listening" must keep the generic
+    /// context and the raw error, because the remedy would be a wrong
+    /// answer: no amount of `farhelm supervisor run` fixes a path whose
+    /// parent is a regular file, and printing it would send the operator
+    /// down the wrong trail.
+    ///
+    /// A non-directory component is used rather than the more obvious
+    /// "point at a directory" — Linux answers `ConnectionRefused` for ANY
+    /// existing non-socket path, so a directory takes the remedy branch
+    /// (deliberately, see `connect`) and would not exercise this one.
+    #[tokio::test]
+    async fn connect_keeps_the_generic_context_for_other_failures() {
+        let dir = tempfile::tempdir().expect("state dir");
+        let not_a_dir = dir.path().join("regular-file");
+        std::fs::write(&not_a_dir, b"not a state dir").expect("write");
+
+        let err = connect(&not_a_dir).await.unwrap_err();
+        let rendered = format!("{err:#}");
+        assert!(
+            !rendered.contains("farhelm supervisor run"),
+            "an unrelated dial failure must not gain a guessed remedy: {rendered}"
+        );
+        assert!(
+            rendered.contains("connecting to supervisor socket")
+                && rendered.contains(&not_a_dir.display().to_string()),
+            "the generic context must still name the path: {rendered}"
+        );
+        let io = err
+            .chain()
+            .find_map(|cause| cause.downcast_ref::<std::io::Error>())
+            .expect("the underlying io error must stay in the chain");
+        assert_ne!(io.kind(), std::io::ErrorKind::ConnectionRefused);
     }
 }

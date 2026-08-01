@@ -21,6 +21,7 @@ use axum::{
 };
 use clap::Args;
 use farhelm_proto::ErrorKind;
+use farhelm_proto::io::ClosedBeforeHello;
 use serde::Deserialize;
 use std::net::{Ipv4Addr, SocketAddr};
 use std::path::PathBuf;
@@ -417,9 +418,67 @@ async fn connect_supervisor(
             tokio::spawn(async move {
                 let _ = child.wait().await;
             });
-            SupervisorClient::start(stdout, stdin).await
+            SupervisorClient::start(stdout, stdin)
+                .await
+                .map_err(|e| annotate_ssh_handshake_eof(e, dest, args.remote_state_dir.as_deref()))
         }
     }
+}
+
+/// Turn "the ssh channel closed before the handshake finished" into
+/// something that names the CANDIDATE causes instead of just the symptom.
+///
+/// Nothing on this side can narrow it further, and the message says so
+/// rather than picking one. Two quite different failures land here
+/// identically. The common one: `farhelm internal stdio` on the remote
+/// dials the local supervisor socket before it speaks a word of the wire
+/// protocol, so a host with no supervisor bound makes the proxy exit
+/// immediately — and the remote's own `Error: ... Connection refused`
+/// reaches the operator only as inherited ssh stderr, disconnected from
+/// this side's `anyhow` chain. The other: ssh itself never got as far as
+/// running anything (auth refused, host unresolvable, `remote_farhelm`
+/// missing), which also closes the channel with zero bytes spoken. Both
+/// produce a byte-for-byte identical [`ClosedBeforeHello`], so the remedy
+/// is offered as a possibility and the operator is pointed at the ssh
+/// stderr that disambiguates it.
+///
+/// Matching is by TYPE, never by `io::ErrorKind`: a peer that spoke half a
+/// hello and died raises `UnexpectedEof` as well, and telling that
+/// operator to go start a supervisor would be a wrong answer stated
+/// confidently. Everything else (a version-skewed peer that spoke and was
+/// refused, a decode failure) already carries its own accurate message and
+/// passes through untouched.
+///
+/// `remote_state_dir` mirrors `--remote-state-dir` so the suggested
+/// command is one the operator can paste: a supervisor started without it
+/// binds a socket the remote proxy will not dial.
+fn annotate_ssh_handshake_eof(
+    e: anyhow::Error,
+    dest: &str,
+    remote_state_dir: Option<&str>,
+) -> anyhow::Error {
+    let closed_before_hello = e
+        .chain()
+        .filter_map(|cause| cause.downcast_ref::<std::io::Error>())
+        .any(ClosedBeforeHello::is_cause_of);
+    if !closed_before_hello {
+        return e;
+    }
+    // Quoted the way the REMOTE shell will read it, matching how the same
+    // directory is passed in `ssh_args` — a path with a space has to
+    // survive being pasted into a shell there.
+    let remedy = match remote_state_dir {
+        Some(dir) => format!(
+            "farhelm supervisor run --state-dir {}",
+            shell_words::quote(dir)
+        ),
+        None => "farhelm supervisor run".to_string(),
+    };
+    e.context(format!(
+        "the ssh channel to {dest} closed before the handshake completed: either no supervisor \
+         is running on {dest} (start one there with `{remedy}`), or the ssh connection itself \
+         failed — ssh reports its own errors on stderr above"
+    ))
 }
 
 /// `GET /api/sessions` — the full `SessionListing` as JSON:
@@ -1586,6 +1645,132 @@ mod tests {
         assert!(
             rendered.contains(&non_utf8.to_string_lossy().into_owned()),
             "error should name the offending path so the user can see which one: {rendered}"
+        );
+    }
+
+    /// Run a real [`handshake`] against a peer that writes `peer_prefix`
+    /// and then closes its write direction, and return the failure as the
+    /// helm's `anyhow` chain would carry it.
+    ///
+    /// Synthesizing an `io::Error` here instead would test nothing: the
+    /// whole question these tests ask is whether the error `handshake`
+    /// ACTUALLY produces is the one `annotate_ssh_handshake_eof` matches,
+    /// and a hand-built stand-in would keep passing after the two drifted
+    /// apart. The peer half is kept alive (to the end of this scope) and
+    /// only its WRITE direction is shut down — dropping it whole would
+    /// fail this side's hello write instead, and the read-side failure
+    /// under test would never be reached.
+    async fn handshake_failure_against(peer_prefix: &[u8]) -> anyhow::Error {
+        let (a, mut b) = tokio::io::duplex(64 * 1024);
+        b.write_all(peer_prefix).await.unwrap();
+        b.shutdown().await.unwrap();
+        let (ar, aw) = tokio::io::split(a);
+        let mut r = FrameReader::new(ar);
+        let mut w = FrameWriter::new(aw);
+        anyhow::Error::new(handshake(&mut r, &mut w, "helm").await.unwrap_err())
+    }
+
+    /// MT-1 regression: a dead ssh proxy must not surface as a bare
+    /// "connection closed before hello" with no hint that a supervisor may
+    /// need starting. The annotator is exercised over a real handshake but
+    /// not through `connect_supervisor`, which needs an actual `ssh` child
+    /// and would cost far more for the same coverage.
+    ///
+    /// The message must offer BOTH live possibilities. This side cannot
+    /// tell "no supervisor there" from "ssh never connected" — they arrive
+    /// identically — so naming only the first would state a guess as a
+    /// diagnosis and send the operator to the wrong host to fix it.
+    #[tokio::test]
+    async fn annotate_ssh_handshake_eof_names_host_and_remedy_on_clean_close() {
+        let err = super::annotate_ssh_handshake_eof(
+            handshake_failure_against(&[]).await,
+            "user@host",
+            None,
+        );
+        let rendered = format!("{err:#}");
+        assert!(
+            rendered.contains("user@host") && rendered.contains("farhelm supervisor run"),
+            "must name the host and the fix: {rendered}"
+        );
+        assert!(
+            rendered.contains("ssh connection itself failed"),
+            "must also offer the ssh-transport possibility, not just a missing supervisor: \
+             {rendered}"
+        );
+        assert!(
+            rendered.contains("connection closed before hello"),
+            "the underlying error must survive in the chain, not just the new wrapper: {rendered}"
+        );
+    }
+
+    /// With `--remote-state-dir` in play, a remedy without `--state-dir`
+    /// is worse than none: pasted as printed it starts a supervisor
+    /// bound under the remote's DEFAULT state dir, which the proxy — told
+    /// to use the given one — still will not find, so the operator
+    /// "fixes" the problem and sees the identical error again.
+    #[tokio::test]
+    async fn annotate_ssh_handshake_eof_remedy_carries_the_remote_state_dir() {
+        let err = super::annotate_ssh_handshake_eof(
+            handshake_failure_against(&[]).await,
+            "user@host",
+            Some("/srv/my state/farhelm"),
+        );
+        let rendered = format!("{err:#}");
+        assert!(
+            rendered.contains("farhelm supervisor run --state-dir '/srv/my state/farhelm'"),
+            "the remedy must be pasteable into the remote shell, quoting included: {rendered}"
+        );
+    }
+
+    /// A peer that spoke half a hello and died is a DIFFERENT failure that
+    /// happens to share `ErrorKind::UnexpectedEof`: something was running
+    /// on that host and crashed mid-sentence. Telling that operator to
+    /// start a supervisor would point them away from the real problem, so
+    /// the mid-frame diagnostic must reach them unedited. Guards against
+    /// the matcher regressing to a kind check.
+    #[tokio::test]
+    async fn annotate_ssh_handshake_eof_leaves_a_mid_frame_death_untouched() {
+        let mut hello = Vec::new();
+        Frame::control(&ControlMsg::hello("supervisor"))
+            .encode(&mut hello)
+            .unwrap();
+        let raw = handshake_failure_against(&hello[..hello.len() / 2]).await;
+        let before = format!("{raw:#}");
+        let err = super::annotate_ssh_handshake_eof(raw, "user@host", None);
+        let rendered = format!("{err:#}");
+        assert_eq!(
+            rendered, before,
+            "a mid-frame death must pass through byte for byte"
+        );
+        assert!(
+            rendered.contains("mid-frame") && !rendered.contains("farhelm supervisor run"),
+            "the mid-frame diagnostic must survive and gain no guessed remedy: {rendered}"
+        );
+    }
+
+    /// A handshake failure that is not an EOF at all (protocol mismatch, a
+    /// peer that spoke garbage, ...) already carries its own specific,
+    /// accurate message. Asserting the error survives IDENTICALLY — kind,
+    /// message, chain depth — rather than merely lacking the remedy
+    /// string: an annotator that wrapped every error in a vaguer context
+    /// while only appending the remedy conditionally would pass the weaker
+    /// check and still bury the real diagnosis.
+    #[test]
+    fn annotate_ssh_handshake_eof_leaves_other_errors_untouched() {
+        let mismatch = std::io::Error::other("protocol version mismatch: peer speaks v1...");
+        let err = super::annotate_ssh_handshake_eof(
+            anyhow::Error::new(mismatch),
+            "user@host",
+            Some("/srv/state"),
+        );
+        assert_eq!(err.chain().count(), 1, "no context layer may be added");
+        let io = err
+            .downcast_ref::<std::io::Error>()
+            .expect("the original io::Error must still be the error itself");
+        assert_eq!(io.kind(), std::io::ErrorKind::Other);
+        assert_eq!(
+            io.to_string(),
+            "protocol version mismatch: peer speaks v1..."
         );
     }
 
