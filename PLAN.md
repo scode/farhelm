@@ -55,13 +55,24 @@ Consequences of that stance:
   here because status transitions are what make polling genuinely painful, and the push channel serves both. Also
   session rename: PLAN_M2.md deferred it as "M3+" and no entry ever claimed it (a ladder gap found while planning M3);
   it lands here because it is a metadata-CRUD-plus-list-UX change of exactly this milestone's shape, not durability
-  work.
+  work. Also reattach replay presentation (found in post-M3 manual testing): reopening a session visibly re-scrolls the
+  whole retained history, and the reattach cost grows with scrollback size; doing this right needs a replay-complete
+  marker in the protocol so the client can batch or hide the prefill and land at the tail, and that protocol change
+  belongs with this milestone's push-channel work, not as a client-side idle-timer heuristic. Carried in with it: a
+  confirmation pass for terminal selection dismissal on real WKWebView. A select-and-copy leaves BOTH an xterm selection
+  and a native document selection over the DOM rows, and only the second one stayed painted through paste, typing, and a
+  forced repaint; the fix that drops both is verified headlessly in Chromium and Playwright's WebKit but was still
+  painting on the macOS desktop app when the manual round ran out of time, so the remaining suspect — WKWebView holding
+  the selection layer after its ranges are gone — is unconfirmed either way.
 - **M6 — multi-host.** Registry and host management, local-host supervisor, stale-cache semantics — including the
   helm-side persistent last-known session cache (helm.db) that SPEC.md's stale-list behavior needs, deferred out of M2
   where a single always-connected supervisor made it dead weight. Version-skew refusal. Real cursor pagination of the
   session list replaces M2's hard cap here, when multi-host aggregation is what could actually grow lists past it.
   Deliberately late: M1's argv-specified single host carries dogfooding a long way, and the registry is bookkeeping, not
-  risk.
+  risk. The terminal websocket's auto-reconnect also lands here (found in post-M3 manual testing: a laptop sleep kills
+  only that socket, and today recovery is a manual back-and-reopen): SPEC.md's Errors section already assigns
+  reconnection with bounded retries to the connection-state model this milestone builds, so a client-side quick fix
+  beforehand would preempt the designed behavior.
 - **M6.5 — test-coverage backfill.** Coverage debt deliberately parked while the focus was end-to-end progress, tracked
   here so it cannot be quietly forgotten. Known entries: unit coverage for terminal.js's `onBinary` byte conversion,
   which needs a JS test-harness decision first (the repo has only Playwright today, and adopting a JS unit runner for
