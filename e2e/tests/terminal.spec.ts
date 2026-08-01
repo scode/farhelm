@@ -1789,10 +1789,18 @@ test("alive delete opens an inline confirming state with the is-still-running wo
     // the prompt — `SessionRow` swaps them out entirely.
     await expect(row.locator(".session-row-stop")).toHaveCount(0);
     await expect(row.locator(".session-row-delete")).toHaveCount(0);
-    // The open button stays present but disabled (see `SessionRow`'s doc:
-    // cancel is the only way back to normal, not an implicit click on
-    // open).
+    // The open button stays present (cancel is the only way back to
+    // normal, not an implicit click on open — see `SessionRow`'s doc) but
+    // both disabled AND hidden. MT-8 regression: it used to stay visible
+    // and merely disabled, and its title/cwd/invocation content — each
+    // with its own non-shrinking `min-width` floor — overflowed the
+    // narrower box the confirm prompt's own elements left it and painted
+    // over that prompt instead of being replaced by it. `toBeHidden`
+    // pins the fix deterministically without needing pixel inspection:
+    // app.css's `.session-row-open.confirming` rule is what makes this
+    // true.
     await expect(row.locator(".session-row-open")).toBeDisabled();
+    await expect(row.locator(".session-row-open")).toBeHidden();
     expect(deleteRequests).toBe(0);
 
     // Cancel: the row returns to normal, with no DELETE ever sent and the
