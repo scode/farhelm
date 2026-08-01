@@ -458,6 +458,28 @@ struct CreateReq {
     /// older UI build, the CLI's startup create) keeps working unchanged,
     /// with each request its own create.
     intent_key: Option<String>,
+    /// Override of the integrated-agent kind (PLAN_M3.md item 7), forwarded
+    /// verbatim to `ControlMsg::CreateSession::agent_kind` — see that
+    /// field's doc comment (farhelm-proto's `lib.rs`) for the full
+    /// three-state semantics. Absent, like `intent_key`, decodes as `None`
+    /// and preserves pre-M3 behavior: the supervisor derives the kind from
+    /// `invocation`'s basename. On the wire a present value is one of the
+    /// snake_case strings `"claude"`, `"codex"`, `"generic"` — the same
+    /// representation `AgentKind`'s `#[serde(rename_all = "snake_case")]`
+    /// produces on the supervisor protocol, so a JSON body needs no
+    /// translation between the two.
+    agent_kind: Option<farhelm_proto::AgentKind>,
+    /// Override of the resume invocation template (PLAN_M3.md item 7),
+    /// forwarded verbatim to `ControlMsg::CreateSession::resume_template` —
+    /// see that field's doc comment for the placeholder-placement rule and
+    /// the integrated/non-integrated distinction it enforces. Absent
+    /// decodes as `None`, same posture as `intent_key`: for a session
+    /// whose EFFECTIVE kind (after any `agent_kind` override) is
+    /// integrated (claude/codex), the supervisor derives the template
+    /// from `invocation`'s first token instead; a generic-kind session
+    /// derives none — only this explicit override can give one a
+    /// (verbatim, placeholder-free) resume invocation.
+    resume_template: Option<Vec<String>>,
 }
 
 // Dimensions for a caller that has no terminal yet — the CLI, a script,
@@ -479,22 +501,31 @@ fn default_rows() -> u16 {
 /// A body carrying `intent_key` gets server-enforced idempotency
 /// (PLAN_M3.md item 6): a retry of the same request under the same key
 /// yields the same session rather than a second one, and a key reused for
-/// a DIFFERENT request comes back 409 through `http_error`. Everything
-/// else about this handler is unchanged, including for bodies that omit
-/// the field entirely.
+/// a DIFFERENT request comes back 409 through `http_error`. A body carrying
+/// `agent_kind` and/or `resume_template` (PLAN_M3.md item 7) reaches the
+/// supervisor's create validation unchanged, including its refusal of an
+/// integrated kind paired with a placeholder-free template — that refusal
+/// surfaces as `ErrorKind::InvalidRequest` and comes back 400 through the
+/// same `http_error` mapping every other create precondition failure uses.
+/// Everything else about this handler is unchanged, including for bodies
+/// that omit all three fields entirely.
 async fn create_session(
     State(state): State<Arc<AppState>>,
     axum::Json(req): axum::Json<CreateReq>,
 ) -> impl IntoResponse {
     match state
         .client
-        .create_session_with_key(
+        .create_session_with_extras(
             &req.cwd,
             &req.invocation,
             req.title,
             req.cols,
             req.rows,
-            req.intent_key,
+            CreateExtras {
+                intent_key: req.intent_key,
+                agent_kind: req.agent_kind,
+                resume_template: req.resume_template,
+            },
         )
         .await
     {
@@ -1595,6 +1626,14 @@ mod tests {
     /// This test closes that gap: it omits cols/rows/title from the
     /// request body, asserts the peer received exactly the defaults, and
     /// checks the JSON reply shape a caller actually depends on.
+    ///
+    /// This same minimal body is also the pre-M3 caller posture for
+    /// `agent_kind`/`resume_template` (PLAN_M3.md item 7): the UI and CLI
+    /// currently send neither field, so this test also pins that an
+    /// absent override decodes and forwards as `None` rather than
+    /// inventing a value — the fields are deliberately accepted here for
+    /// non-UI API callers that basename recognition cannot classify, not
+    /// because every production caller is expected to omit them forever.
     #[tokio::test]
     async fn create_session_request_with_omitted_dimensions_uses_80x24_defaults() {
         use farhelm_proto::io::{FrameReader, FrameWriter, handshake, parse_control};
@@ -1617,10 +1656,13 @@ mod tests {
                 title,
                 cols,
                 rows,
+                agent_kind,
+                resume_template,
                 // Not under test here (the assertions below only check
-                // cwd/invocation/title/cols/rows); PLAN_M3.md's new
-                // fields are exercised by farhelm-proto's own golden and
-                // tolerance tests instead.
+                // cwd/invocation/title/cols/rows/agent_kind/resume_template);
+                // PLAN_M3.md's `intent_key` is exercised by
+                // `create_session_forwards_the_bodys_extras_to_the_supervisor`
+                // instead.
                 ..
             } = request
             else {
@@ -1635,6 +1677,8 @@ mod tests {
             assert_eq!(cwd, "/some/dir");
             assert_eq!(invocation, "some-agent");
             assert_eq!(title, None);
+            assert_eq!(agent_kind, None);
+            assert_eq!(resume_template, None);
             writer
                 .write_frame(&Frame::control(&ControlMsg::SessionCreated {
                     req_id,
@@ -1681,19 +1725,20 @@ mod tests {
         peer.await.unwrap();
     }
 
-    /// The create body's `intent_key` reaches the supervisor verbatim
-    /// (PLAN_M3.md item 6).
+    /// The create body's `intent_key`, `agent_kind`, and `resume_template`
+    /// all reach the supervisor verbatim (PLAN_M3.md items 6 and 7).
     ///
     /// Worth its own test because the helm is a pure pass-through here and
     /// pass-throughs are exactly what silently stop passing things
-    /// through: nothing else in this crate would notice if the field were
-    /// dropped, and the symptom in production would not be an error but a
-    /// SECOND session appearing on a retry — the failure the whole feature
-    /// exists to prevent, visible only under a lost reply.
+    /// through: nothing else in this crate would notice if a field were
+    /// dropped, and for `intent_key` specifically the symptom in production
+    /// would not be an error but a SECOND session appearing on a retry —
+    /// the failure the whole feature exists to prevent, visible only under
+    /// a lost reply.
     #[tokio::test]
-    async fn create_session_forwards_the_bodys_intent_key_to_the_supervisor() {
+    async fn create_session_forwards_the_bodys_extras_to_the_supervisor() {
         use farhelm_proto::io::{FrameReader, FrameWriter, handshake, parse_control};
-        use farhelm_proto::{ControlMsg, Frame, SessionInfo};
+        use farhelm_proto::{AgentKind, ControlMsg, Frame, SessionInfo};
         use tower::ServiceExt;
 
         let (client_side, peer_side) = tokio::io::duplex(64 * 1024);
@@ -1706,7 +1751,11 @@ mod tests {
                 .unwrap();
             let request = parse_control(&reader.read_frame().await.unwrap().unwrap()).unwrap();
             let ControlMsg::CreateSession {
-                req_id, intent_key, ..
+                req_id,
+                intent_key,
+                agent_kind,
+                resume_template,
+                ..
             } = request
             else {
                 panic!("expected CreateSession, got {request:?}");
@@ -1715,6 +1764,11 @@ mod tests {
                 intent_key.as_deref(),
                 Some("intent-from-the-browser"),
                 "the key belongs to whoever can retry, so it must arrive unaltered"
+            );
+            assert_eq!(agent_kind, Some(AgentKind::Claude));
+            assert_eq!(
+                resume_template,
+                Some(vec!["claude".to_string(), "{conversation}".to_string()])
             );
             writer
                 .write_frame(&Frame::control(&ControlMsg::SessionCreated {
@@ -1746,6 +1800,8 @@ mod tests {
                     "cwd": "/some/dir",
                     "invocation": "some-agent",
                     "intent_key": "intent-from-the-browser",
+                    "agent_kind": "claude",
+                    "resume_template": ["claude", "{conversation}"],
                 })
                 .to_string(),
             ))
