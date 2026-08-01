@@ -71,7 +71,16 @@ pub mod io;
 /// down an already-established, possibly multi-session connection instead
 /// of failing cleanly before anything was shared. Version skew must be
 /// caught at the hello, not discovered mid-connection.
-pub const PROTOCOL_VERSION: u32 = 2;
+///
+/// Bumped to 3 for `StopSession`/`SessionStopped` and
+/// `DeleteSession`/`SessionDeleted` (PLAN_M2.md step 4). This is the ONE
+/// version bump M2 gets: PLAN_M2.md commits every later M2 wire change to
+/// being strictly additive and tolerant on decode within version 3 (new
+/// optional fields with defaults, new message variants nothing yet sends)
+/// so that mixed M2-era builds keep interoperating without a bump each
+/// time. Anything that cannot be made additive earns its own bump instead
+/// of retroactively stretching this one's meaning.
+pub const PROTOCOL_VERSION: u32 = 3;
 
 /// The build version compiled into this binary, carried in the hello for
 /// diagnostics.
@@ -313,6 +322,67 @@ pub enum ControlMsg {
         req_id: u64,
         sessions: Vec<SessionInfo>,
     },
+    /// Kill the agent's entire process tree (MCP servers, dev servers,
+    /// every descendant), leaving the session and its terminal in place —
+    /// SPEC.md's "stop" (as distinct from "delete", below). The pane
+    /// survives (`remain-on-exit`), so the terminal stays viewable,
+    /// including replaying to a client that was attached when the agent
+    /// died. Stop touches nothing else: not the session's DB row, not the
+    /// in-memory session map, not any live attachment.
+    ///
+    /// Idempotent by design, not by accident: stopping a session whose
+    /// agent already exited (or one whose terminal never existed, the
+    /// restart-gap case) still replies `SessionStopped` rather than
+    /// erring, because from the caller's point of view "make sure nothing
+    /// is running" already holds.
+    ///
+    /// Two distinct failure modes, not one: an unknown `session_id` is the
+    /// only PRECONDITION failure, reported the same way `Attach` reports
+    /// it. But the kill sweep itself — enumerating and signaling the
+    /// process tree, see `kill_process_tree` in the supervisor — can also
+    /// fail (a `/proc` read erroring out, a signal coming back `EPERM`),
+    /// and that is reported as an `Error` too rather than a false
+    /// `SessionStopped`: a caller must be able to tell "nothing was
+    /// running" from "the sweep could not confirm nothing is running"
+    /// apart.
+    StopSession {
+        req_id: u64,
+        session_id: String,
+    },
+    /// Acknowledges `StopSession`: sent only once the kill sweep has
+    /// actually run to completion (or been confirmed unnecessary — a dead
+    /// or absent pane, the restart-gap case), never merely because the
+    /// request was accepted.
+    SessionStopped {
+        req_id: u64,
+    },
+    /// Remove a session and all its stored state — the DB row, the
+    /// in-memory entry, and (if the terminal is still live) the agent's
+    /// process tree and its tmux session — regardless of whether the
+    /// agent is running, stopped, or was never live this process
+    /// (SPEC.md's delete works "in any state"). Unlike `StopSession`, this
+    /// ends the session's existence outright; a subsequent `ListSessions`
+    /// or `Attach` must not find it.
+    ///
+    /// A live attachment is torn down as part of deletion: the attached
+    /// client is told `Detached` before its connection loses the ability
+    /// to reach this session at all, so it learns why rather than just
+    /// going quiet.
+    DeleteSession {
+        req_id: u64,
+        session_id: String,
+    },
+    /// Acknowledges `DeleteSession`: sent only once the row, the tmux
+    /// session, and (if one existed) the process tree are all positively
+    /// confirmed gone. A teardown failure never yields this reply — it
+    /// yields `Error` instead, with the row and in-memory entry left in
+    /// place for a retry (see the supervisor's delete handler and
+    /// lore/2026-07-27-m2-process-tree-stop.md for why removing the last
+    /// handle on a possibly-running agent is the one outcome that must
+    /// never happen silently).
+    SessionDeleted {
+        req_id: u64,
+    },
     /// Attach to a session's terminal. The requester picks the (connection
     /// -unique) data channel; the supervisor replays history onto it and
     /// then streams live output. Attaching implicitly detaches any
@@ -551,5 +621,100 @@ mod tests {
                 "kind": "not_found",
             })
         );
+    }
+
+    /// `PROTOCOL_VERSION` is a load-bearing constant for M2 step 4 (this
+    /// is the ONE version bump that PR gets — see the const's own docs):
+    /// pinning its value here makes an accidental re-bump (or a forgotten
+    /// one, if a later change needed it) a loud test failure rather than a
+    /// silent drift discovered only by two builds refusing to talk to
+    /// each other.
+    #[test]
+    fn protocol_version_is_pinned_at_3() {
+        assert_eq!(PROTOCOL_VERSION, 3);
+    }
+
+    /// `StopSession`/`SessionStopped` and `DeleteSession`/`SessionDeleted`
+    /// are the wire-format additions `PROTOCOL_VERSION` 3 exists for, so
+    /// they get the same golden-JSON treatment as `Attach` and `Error`
+    /// above: a serde attribute change here would compile and pass a
+    /// round-trip test while quietly producing bytes an unmodified peer
+    /// cannot parse.
+    #[test]
+    fn stop_and_delete_json_shapes_are_pinned() {
+        let stop = ControlMsg::StopSession {
+            req_id: 11,
+            session_id: "s1".to_string(),
+        };
+        assert_eq!(
+            serde_json::to_value(&stop).unwrap(),
+            serde_json::json!({
+                "type": "stop_session",
+                "req_id": 11,
+                "session_id": "s1",
+            })
+        );
+
+        let stopped = ControlMsg::SessionStopped { req_id: 11 };
+        assert_eq!(
+            serde_json::to_value(&stopped).unwrap(),
+            serde_json::json!({
+                "type": "session_stopped",
+                "req_id": 11,
+            })
+        );
+
+        let delete = ControlMsg::DeleteSession {
+            req_id: 12,
+            session_id: "s1".to_string(),
+        };
+        assert_eq!(
+            serde_json::to_value(&delete).unwrap(),
+            serde_json::json!({
+                "type": "delete_session",
+                "req_id": 12,
+                "session_id": "s1",
+            })
+        );
+
+        let deleted = ControlMsg::SessionDeleted { req_id: 12 };
+        assert_eq!(
+            serde_json::to_value(&deleted).unwrap(),
+            serde_json::json!({
+                "type": "session_deleted",
+                "req_id": 12,
+            })
+        );
+    }
+
+    /// Round-trip every new variant through the real encode/decode path
+    /// (not just `serde_json::to_value`), matching how
+    /// `frame_roundtrip_control_and_data` exercises `Hello`/data frames
+    /// above — this is what would catch a drift between the codec's
+    /// framing and serde's JSON shape, which the pure-JSON test just
+    /// above cannot see.
+    #[test]
+    fn stop_and_delete_roundtrip_through_frames() {
+        for msg in [
+            ControlMsg::StopSession {
+                req_id: 1,
+                session_id: "s1".to_string(),
+            },
+            ControlMsg::SessionStopped { req_id: 1 },
+            ControlMsg::DeleteSession {
+                req_id: 2,
+                session_id: "s1".to_string(),
+            },
+            ControlMsg::SessionDeleted { req_id: 2 },
+        ] {
+            let mut wire = Vec::new();
+            Frame::control(&msg).encode(&mut wire).unwrap();
+            let (frame, used) = Frame::decode(&wire).unwrap().unwrap();
+            assert_eq!(used, wire.len());
+            assert_eq!(
+                serde_json::from_slice::<ControlMsg>(&frame.body).unwrap(),
+                msg
+            );
+        }
     }
 }

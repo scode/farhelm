@@ -223,10 +223,14 @@ by eye; raw binary data channels keep PTY throughput off the JSON path.
 - Per-session spawn credential: random token in the session's environment (`FARHELM_SESSION_ID`,
   `FARHELM_SESSION_TOKEN`, socket path), checked by the supervisor on the unix socket.
 - Process-tree ownership (SPEC.md's stop/reap promises): killing the tmux pane is not enough — tmux signals the
-  foreground process group, and daemonized descendants escape it. On Linux, each session's command runs inside its own
-  `systemd-run --user --scope` cgroup and stop/reap kills the cgroup; where no user systemd manager exists, and on
-  macOS, the fallback is process-group kill plus a sweep for surviving processes carrying the session's marker
-  environment variable.
+  foreground process group, and daemonized descendants escape it. M2 ships the portable sweep: enumerate the pane's
+  descendants by walking /proc PPIDs, unioned with a scan for processes whose environment carries the session's
+  `FARHELM_SESSION_ID` marker (which catches daemons that already reparented to init), then SIGTERM, a short grace,
+  SIGSTOP-quiesce, re-enumerate, SIGKILL — with process start-time validation so a recycled pid is never signaled.
+  `systemd-run --user --scope` cgroup scopes remain the intended Linux hardening on top (they additionally catch a
+  descendant that scrubbed its environment via exec) and are deferred to M3 (PLAN.md); the macOS variant of the sweep
+  (no /proc there) arrives with the Mac supervisor work. See lore/2026-07-27-m2-process-tree-stop.md for the
+  alternatives as they looked when this was decided.
 - Attachments land in `~/.local/state/farhelm/attachments/<session-id>/`, deleted with the session.
 - The rest of the state directory: `supervisor.sock` (the unix socket that is the supervisor's only doorway — mode 0600,
   inside a 0700 directory, because reaching it means running commands as the user), `tmux.sock` and `tmux.conf` for the

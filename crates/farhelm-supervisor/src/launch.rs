@@ -15,6 +15,23 @@
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 
+/// The environment marker every launched session carries: its own session
+/// id, set by the shim just before `exec`. Two independent consumers rely
+/// on it, both documented in SPEC_impl.md/lore/2026-07-27-m2-process-tree-
+/// stop.md: it is the per-session spawn credential's session identifier,
+/// and — the reason it exists at THIS layer rather than only being passed
+/// as an argument — `kill_process_tree` (service.rs) scans same-user
+/// `/proc/*/environ` for an exact `FARHELM_SESSION_ID=<id>` entry to find
+/// descendants that already reparented to init before a PPID walk could
+/// see them. Environment variables are inherited across fork and exec by
+/// the kernel, so setting this once here reaches every process the agent
+/// ever spawns, transitively, with no further plumbing — UNLESS a
+/// descendant deliberately scrubs or replaces its own environment before
+/// spawning further children, which escapes the marker scan; that
+/// residual is accepted until M3's cgroups hardening (see
+/// `kill_process_tree`'s docs in service.rs).
+pub const SESSION_ID_ENV_VAR: &str = "FARHELM_SESSION_ID";
+
 /// What the shim needs to launch the agent: written as JSON by the
 /// supervisor, read by `farhelm internal launch` inside the session. A
 /// file (not argv) so the invocation never fights shell quoting twice.
@@ -29,6 +46,9 @@ pub struct LaunchSpec {
     /// or the sentinel write itself may have failed. Later status
     /// classification must combine this evidence with pane/process state.
     pub status_file: PathBuf,
+    /// This session's id, injected into the agent's environment as
+    /// [`SESSION_ID_ENV_VAR`] — see that constant's docs for why.
+    pub session_id: String,
 }
 
 /// Resolve the shell to launch sessions through: `$SHELL`, then the
@@ -385,9 +405,13 @@ pub fn exec_launch_spec(spec_path: &Path) -> anyhow::Error {
     if spec.argv.is_empty() {
         return anyhow::anyhow!("launch spec has empty argv");
     }
-    // exec only returns on failure.
+    // exec only returns on failure. `Command::env` adds to (never clears)
+    // the shim's own inherited environment, so this joins the rc-file
+    // variables the login shell already sourced rather than replacing
+    // them — SPEC.md's environment contract is otherwise untouched.
     let err = std::process::Command::new(&spec.argv[0])
         .args(&spec.argv[1..])
+        .env(SESSION_ID_ENV_VAR, &spec.session_id)
         .exec();
     let report = format!(
         "exec_failed argv0={} errno={}",

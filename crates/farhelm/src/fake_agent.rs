@@ -12,6 +12,7 @@
 //! its modes are set and it is listening — tests key on that marker
 //! instead of sleeping.
 
+use anyhow::Context;
 use std::io::{BufRead, Read, Write};
 
 /// Which terminal behavior to act out. A closed set, so clap validates it
@@ -23,12 +24,93 @@ pub enum Script {
     Basic,
     /// Full-screen app on the alternate screen.
     Altscreen,
+    /// Like `Altscreen`, but also spawns a SIGTERM-ignoring child before
+    /// installing its own restore-and-exit handler. The acceptance
+    /// fixture for a mid-stop attach landing between the pane going dead
+    /// and `StopSession` actually publishing its snapshot: this process's
+    /// OWN pid restores the primary screen and exits within milliseconds
+    /// of SIGTERM (the pane goes dead almost immediately), while
+    /// `kill_process_tree` must still run its full SIGSTOP-quiesce-then-
+    /// SIGKILL escalation against the lingering child — several hundred
+    /// milliseconds during which the pane is dead but the stop itself has
+    /// not finished. See `Supervisor::pending_snapshots`'s docs
+    /// (farhelm-supervisor's service.rs) for the gap this fixture
+    /// exercises.
+    AltscreenStubbornChild,
+    /// Enters the alternate screen and IGNORES SIGTERM entirely
+    /// (`SIG_IGN`, no handler at all — never restores the primary
+    /// screen). The acceptance fixture for `StopSession` actually
+    /// finishing a stop against an alt-screen app that never cooperates:
+    /// `kill_process_tree` must run its full grace/SIGSTOP-quiesce/SIGKILL
+    /// escalation against THIS process itself (SIGTERM does nothing;
+    /// SIGKILL — which cannot be ignored — is what finally ends it), and
+    /// it dies still on the alternate screen, with no restore. This is
+    /// the case the alt-screen stop-snapshot feature exists for: without
+    /// it, reattaching afterward would find nothing tmux itself could
+    /// still show (see the `Attach` handler's snapshot-existence gate in
+    /// service.rs for why that is, empirically, not "the ordinary prefill
+    /// already has it").
+    AltscreenIgnoresTerm,
+    /// Like `AltscreenIgnoresTerm`, but this process itself uses the
+    /// DEFAULT SIGTERM disposition (dies within milliseconds, still on
+    /// the alternate screen, no restore — same end state as
+    /// `AltscreenIgnoresTerm`, reached the fast way instead) while a
+    /// spawned child ignores SIGTERM and lingers. Combines
+    /// `AltscreenStubbornChild`'s "pane goes dead almost immediately,
+    /// `kill_process_tree` keeps running against the child for hundreds
+    /// of milliseconds more" window with `AltscreenIgnoresTerm`'s
+    /// dies-still-on-the-alternate-screen end state — the acceptance
+    /// fixture for a mid-stop attach landing in that window while the
+    /// dead pane is STILL on the alternate screen (as opposed to
+    /// `AltscreenStubbornChild`'s already-restored-to-primary case),
+    /// pinning that the `\x1b[?1049l` alt-exit escape and the
+    /// `Supervisor::pending_snapshots` fallback compose correctly.
+    AltscreenStubbornChildStaysAlt,
     /// Raw non-UTF-8 output for byte-fidelity tests.
     Binary,
     /// Continuous numbered records for replay/live cutover tests.
     Counter,
     /// Raw-mode hex echo of every input byte, for input-fidelity tests.
     Hexecho,
+    /// Spawns a child process and prints both pids, for process-tree-kill
+    /// tests.
+    Spawner,
+    /// Like `Spawner`, but the child ignores SIGTERM — the acceptance
+    /// subject for the SIGKILL half of `kill_process_tree`'s sequence.
+    /// Its child writes `stubborn-ready` in the session's working
+    /// directory once the trap is actually installed, since a test
+    /// cannot otherwise observe when that has happened (the child's own
+    /// stdio is not connected to the terminal).
+    SpawnerStubborn,
+    /// A doubly-forked daemon that reparents to init while still carrying
+    /// the session's environment marker — see `spawner_reparent`'s docs.
+    /// The acceptance fixture for the marker-scan half of
+    /// `kill_process_tree`.
+    SpawnerReparent,
+    /// A child that ignores both SIGTERM and SIGHUP (so it keeps running,
+    /// and keeps forking, straight through `kill_process_tree`'s grace
+    /// period rather than dying to the very first signal OR to the
+    /// SIGHUP cascade the kernel sends this process's whole foreground
+    /// group once the pane's session-leader process dies) and
+    /// continuously forks new marked grandchildren, each of which (also
+    /// deliberately) outlives the sweep's own timing — the acceptance
+    /// fixture for the SIGSTOP-quiesce phase: without it, a fork landing
+    /// in the gap between rounds could slip past the sweep entirely and
+    /// survive indefinitely. All three properties are load-bearing
+    /// (verified empirically): a plain child that dies to SIGTERM or the
+    /// SIGHUP cascade stops forking almost immediately, and a
+    /// short-enough-lived grandchild dies on its own regardless of
+    /// whether the sweep ever reaches it — any one of these alone would
+    /// let this fixture pass even with quiescing removed, the opposite of
+    /// what it exists to catch.
+    ///
+    /// Self-expiring regardless: the forking loop is bounded to ~120s of
+    /// total runtime and each grandchild to a 120s lifetime, not an
+    /// unbounded `while true`/`sleep 3600` — a test that fails before
+    /// ever calling stop must not leak processes that run indefinitely.
+    /// A test-side drop guard is the primary cleanup; this is the
+    /// backstop under it.
+    SpawnerForkStorm,
 }
 
 /// Act out one script and exit. Runs synchronously on blocking stdio on
@@ -38,9 +120,34 @@ pub fn run(script: Script) -> anyhow::Result<()> {
     match script {
         Script::Basic => basic(),
         Script::Altscreen => altscreen(),
+        Script::AltscreenStubbornChild => altscreen_stubborn_child(),
+        Script::AltscreenIgnoresTerm => altscreen_ignores_term(),
+        Script::AltscreenStubbornChildStaysAlt => altscreen_stubborn_child_stays_alt(),
         Script::Binary => binary(),
         Script::Counter => counter(),
         Script::Hexecho => hexecho(),
+        Script::Spawner => spawn_and_echo("sleep 3600", "spawner"),
+        Script::SpawnerStubborn => spawn_and_echo(
+            "trap '' TERM; touch stubborn-ready; sleep 3600",
+            "spawner-stubborn",
+        ),
+        Script::SpawnerReparent => spawner_reparent(),
+        Script::SpawnerForkStorm => spawn_and_echo(
+            // Self-expiring: the outer loop runs at most 2400 iterations
+            // (~120s at the 0.05s step) rather than forever, and each
+            // grandchild lives at most 120s rather than an hour — both
+            // bounds exist so a test that fails before ever calling stop
+            // (an assertion panic, say) cannot leak processes that run
+            // indefinitely; the e2e test's own drop guard is the primary
+            // cleanup, this is the defense-in-depth backstop under it.
+            // 120s is still comfortably longer than kill_process_tree's
+            // own ~2s grace-plus-confirm window, so the fixture's
+            // discriminating power (see SpawnerForkStorm's docs) is
+            // unaffected.
+            "trap '' TERM HUP; i=0; while [ $i -lt 2400 ]; do sh -c 'sleep 120' & sleep 0.05; \
+             i=$((i + 1)); done",
+            "spawner-fork-storm",
+        ),
     }
 }
 
@@ -117,13 +224,215 @@ fn basic() -> anyhow::Result<()> {
     Ok(())
 }
 
+/// Restore the primary screen and exit immediately, from inside a signal
+/// handler.
+///
+/// This is what makes `altscreen` a faithful stand-in for a real
+/// full-screen agent (claude, chiefly) rather than just an app that
+/// happens to draw on the alternate screen: claude's own SIGTERM handling
+/// leaves the alternate buffer before exiting, which is EXACTLY the
+/// behavior the alt-screen-stop-snapshot feature (SPEC_impl.md,
+/// e2e.rs's `stop_replays_the_alt_screen_snapshot` and friends) exists to
+/// work around — tmux never records alternate-screen content in history,
+/// so a graceful-looking exit silently destroys the app's last frame
+/// unless something captured it first. Without this handler, `altscreen`
+/// under the default SIGTERM disposition dies mid-alt-screen instead,
+/// which exercises a DIFFERENT (also real, but not this one) case.
+///
+/// Only async-signal-safe operations happen here: a raw `write(2)`
+/// straight to the pane's stdout fd (bypassing Rust's buffered,
+/// lock-based `Stdout` entirely — safe to call from a signal handler,
+/// unlike anything that allocates or takes a lock) followed by `_exit`,
+/// which unlike `exit` never runs atexit handlers or flushes buffered
+/// I/O that might not be in a signal-safe state.
+extern "C" fn restore_primary_screen_and_exit(_signal: libc::c_int) {
+    let restore = b"\x1b[?1049l";
+    // SAFETY: `write` and `_exit` are both on the POSIX async-signal-safe
+    // list; neither allocates, takes a lock, or touches libstd's own
+    // buffered stdout state, all of which are unsafe to touch from a
+    // signal handler.
+    unsafe {
+        libc::write(
+            libc::STDOUT_FILENO,
+            restore.as_ptr() as *const libc::c_void,
+            restore.len(),
+        );
+        libc::_exit(0);
+    }
+}
+
 /// Enter the alternate screen, draw a full-screen frame, wait for a line,
-/// then leave. Lets tests assert alt-screen passthrough end to end and
-/// alt-screen replay on reattach.
+/// then leave. A SIGTERM instead of a line makes it leave the SAME way
+/// (see `restore_primary_screen_and_exit`), exercising the graceful-
+/// alt-screen-exit case an ordinary `quit`-then-line does not need signal
+/// handling to reach. Lets tests assert alt-screen passthrough end to
+/// end, alt-screen replay on reattach, and (via the SIGTERM path) the
+/// stop-time snapshot feature's own motivating scenario.
+///
+/// Draws a SECOND row (`STATUS BAR`) whose background color is painted
+/// via `\x1b[K` (erase-to-end-of-line under the current SGR) rather than
+/// printed as literal space characters — trailing cells styled this way,
+/// with no visible glyph in them, are exactly what `capture-pane`'s `-N`
+/// flag exists to preserve (see `TmuxDriver::capture_alt_screen_if_active`'s
+/// docs); without `-N` tmux trims them from the capture, which is what
+/// e2e.rs's `-N`-coverage test pins.
 fn altscreen() -> anyhow::Result<()> {
     let mut out = std::io::stdout().lock();
     write!(out, "\x1b[?1049h\x1b[2J\x1b[H")?;
     writeln!(out, "\x1b[7m ALT-SCREEN APP \x1b[0m\r")?;
+    // Blue background, print a short label, then erase the rest of the
+    // row under that same background (no trailing spaces are ever
+    // printed) before resetting SGR for whatever comes next.
+    write!(out, "\x1b[44m STATUS BAR \x1b[K\x1b[0m\r\n")?;
+
+    // The SIGTERM handler must be live BEFORE the ready marker is even
+    // written, let alone flushed: a test attaches and may send SIGTERM
+    // (via `stop`) the instant it observes READY, and a stop landing
+    // between the marker and the handler installation would hit the
+    // DEFAULT SIGTERM disposition instead — silently defeating the whole
+    // point of this fixture (see `restore_primary_screen_and_exit`'s
+    // docs for what that default-disposition case looks like, and why it
+    // is a genuinely different scenario from the one this fixture exists
+    // to reproduce).
+    // SAFETY: installs a handler via the POSIX `signal(2)` API exposed by
+    // `libc`; the handler itself is `restore_primary_screen_and_exit`,
+    // whose own docs cover why it only performs async-signal-safe work.
+    unsafe {
+        libc::signal(
+            libc::SIGTERM,
+            restore_primary_screen_and_exit as *const () as libc::sighandler_t,
+        );
+    }
+
+    writeln!(out, "FAKE-AGENT READY\r")?;
+    out.flush()?;
+
+    let stdin = std::io::stdin();
+    let mut line = String::new();
+    stdin.lock().read_line(&mut line)?;
+
+    write!(out, "\x1b[?1049l")?;
+    writeln!(out, "left alt screen\r")?;
+    out.flush()?;
+    Ok(())
+}
+
+/// See `Script::AltscreenStubbornChild`'s docs for the gap this fixture
+/// exists to widen. `kill_process_tree` (service.rs) walks the PPID
+/// closure from THIS process's own pid, so the child spawned below stays
+/// reachable and still gets swept even after this process itself has
+/// long since restored the screen and exited — a real OS descendant, not
+/// merely a delayed exit of the same process, is what forces the sweep
+/// through its full escalation.
+fn altscreen_stubborn_child() -> anyhow::Result<()> {
+    let mut out = std::io::stdout().lock();
+    write!(out, "\x1b[?1049h\x1b[2J\x1b[H")?;
+    writeln!(out, "\x1b[7m ALT-SCREEN APP \x1b[0m\r")?;
+
+    // Installed BEFORE the child spawn below, not just before the ready
+    // marker: a SIGTERM landing between spawning the child and this call
+    // would hit the default disposition instead, exiting without
+    // restoring the screen — defeating the fixture's whole point (see
+    // `altscreen`'s identical ordering rationale).
+    // SAFETY: see `restore_primary_screen_and_exit`'s own docs for why
+    // the handler itself only performs async-signal-safe work.
+    unsafe {
+        libc::signal(
+            libc::SIGTERM,
+            restore_primary_screen_and_exit as *const () as libc::sighandler_t,
+        );
+    }
+
+    // A child that survives ordinary SIGTERM, exactly like
+    // `SpawnerStubborn`'s own child — reused here so `kill_process_tree`
+    // has something left to escalate against once this process itself
+    // has already restored the screen and exited.
+    std::process::Command::new("sh")
+        .arg("-c")
+        .arg("trap '' TERM; sleep 3600")
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+        .context("spawning stubborn child")?;
+
+    writeln!(out, "FAKE-AGENT READY\r")?;
+    out.flush()?;
+
+    let stdin = std::io::stdin();
+    let mut line = String::new();
+    stdin.lock().read_line(&mut line)?;
+
+    write!(out, "\x1b[?1049l")?;
+    writeln!(out, "left alt screen\r")?;
+    out.flush()?;
+    Ok(())
+}
+
+/// See `Script::AltscreenIgnoresTerm`'s docs. `SIG_IGN` rather than a
+/// custom handler: there is nothing to run on SIGTERM at all, which is
+/// the point — this process only ever dies to SIGKILL, near the very end
+/// of `kill_process_tree`'s escalation, and SIGKILL cannot be blocked,
+/// ignored, or handled, so no signal-handler code of ours ever runs on
+/// the way out.
+fn altscreen_ignores_term() -> anyhow::Result<()> {
+    let mut out = std::io::stdout().lock();
+    write!(out, "\x1b[?1049h\x1b[2J\x1b[H")?;
+    writeln!(out, "\x1b[7m ALT-SCREEN APP \x1b[0m\r")?;
+
+    // SAFETY: `SIG_IGN` is a valid `sighandler_t` constant per POSIX
+    // `signal(2)`; no handler code of ours runs as a result of this call
+    // at all, so there is nothing here for async-signal-safety to say
+    // anything about.
+    unsafe {
+        libc::signal(libc::SIGTERM, libc::SIG_IGN);
+    }
+
+    writeln!(out, "FAKE-AGENT READY\r")?;
+    out.flush()?;
+
+    // Never reached in the fixture's OWN acceptance tests (this process
+    // is always killed via SIGKILL before anything sends it a line), but
+    // kept for symmetry with `altscreen`/`altscreen_stubborn_child`: a
+    // manual smoke test attaching and sending a line still gets a clean
+    // exit rather than hanging forever.
+    let stdin = std::io::stdin();
+    let mut line = String::new();
+    stdin.lock().read_line(&mut line)?;
+
+    write!(out, "\x1b[?1049l")?;
+    writeln!(out, "left alt screen\r")?;
+    out.flush()?;
+    Ok(())
+}
+
+/// See `Script::AltscreenStubbornChildStaysAlt`'s docs. Deliberately
+/// installs NO SIGTERM handler at all (unlike `altscreen_stubborn_child`,
+/// whose whole point is installing one) — the default disposition
+/// terminates this process within milliseconds of SIGTERM, still on the
+/// alternate screen, with nothing having run to restore it. The spawned
+/// child ignores SIGTERM exactly like `altscreen_stubborn_child`'s,
+/// forcing `kill_process_tree` through its full escalation regardless of
+/// how quickly this process itself is gone.
+fn altscreen_stubborn_child_stays_alt() -> anyhow::Result<()> {
+    let mut out = std::io::stdout().lock();
+    write!(out, "\x1b[?1049h\x1b[2J\x1b[H")?;
+    writeln!(out, "\x1b[7m ALT-SCREEN APP \x1b[0m\r")?;
+
+    // A child that survives ordinary SIGTERM, exactly like
+    // `SpawnerStubborn`'s and `altscreen_stubborn_child`'s own children —
+    // reused here so `kill_process_tree` has something left to escalate
+    // against once this process itself is already gone (to the default
+    // SIGTERM disposition, not any handler of ours).
+    std::process::Command::new("sh")
+        .arg("-c")
+        .arg("trap '' TERM; sleep 3600")
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+        .context("spawning stubborn child")?;
+
     writeln!(out, "FAKE-AGENT READY\r")?;
     out.flush()?;
 
@@ -222,6 +531,160 @@ fn hexecho() -> anyhow::Result<()> {
         writeln!(out, "{line}\r")?;
         out.flush()?;
     }
+}
+
+/// Spawn a child running `child_shell_cmd` under `sh -c`, print both pids,
+/// then echo like `basic`. Shared body for every `Spawner*` script variant
+/// in `run`'s match, which differ only in what the child does.
+///
+/// The acceptance subject for process-tree-kill tests (PLAN_M2.md step
+/// 4): `stop`/`delete` must reap the agent's entire tree, and a script
+/// that never spawns anything cannot distinguish "killed the agent" from
+/// "killed the agent's whole tree". The child runs under `sh -c` rather
+/// than a second copy of this binary — no argv-parsing or subcommand
+/// plumbing needed, and every POSIX host this project targets has `sh` —
+/// and `sh -c '<simple command>'` genuinely forks rather than exec-
+/// replacing itself (verified empirically against `/bin/sh` on this
+/// project's Linux targets), so the printed child pid and its own
+/// eventual descendant (e.g. `sleep`, forked by `sh` to run it) form a
+/// real three-level chain for tests that need one. The child deliberately
+/// outlives this process without being waited on: nothing here calls
+/// `Child::wait`, so it keeps running (invisible to us) until something
+/// else — ordinarily the very process-tree kill this fixture exists to
+/// test — signals it directly.
+fn spawn_and_echo(child_shell_cmd: &str, script_name: &str) -> anyhow::Result<()> {
+    let mut out = std::io::stdout().lock();
+    write!(out, "\x1b[?2004h")?;
+    writeln!(
+        out,
+        "\x1b[1;32mfake-agent\x1b[0m starting (script={script_name})\r"
+    )?;
+
+    let self_pid = std::process::id();
+    let child_pid = std::process::Command::new("sh")
+        .arg("-c")
+        .arg(child_shell_cmd)
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+        .context("spawning child process")?
+        .id();
+    // The pids a test needs to poll `/proc` for, printed before the ready
+    // marker so a test keying on READY has already seen both lines.
+    writeln!(out, "SELF-PID:{self_pid}\r")?;
+    writeln!(out, "CHILD-PID:{child_pid}\r")?;
+    writeln!(out, "FAKE-AGENT READY\r")?;
+    write!(out, "> ")?;
+    out.flush()?;
+
+    let stdin = std::io::stdin();
+    for line in stdin.lock().lines() {
+        let line = line?;
+        let line = line.replace("\x1b[200~", "").replace("\x1b[201~", "");
+        let trimmed = line.trim();
+        if trimmed == "quit" {
+            writeln!(out, "bye\r")?;
+            out.flush()?;
+            return Ok(());
+        }
+        writeln!(out, "echo:\x1b[36m{trimmed}\x1b[0m\r")?;
+        write!(out, "> ")?;
+        out.flush()?;
+    }
+    Ok(())
+}
+
+/// Spawn a doubly-forked daemon that reparents to init while still
+/// inheriting the session's `FARHELM_SESSION_ID` marker, and print its
+/// own pid plus a ready marker. The daemon also forks its OWN child with
+/// that marker deliberately stripped (`env -u FARHELM_SESSION_ID`) —
+/// see below for why.
+///
+/// The acceptance fixture for the marker-scan half of `kill_process_tree`
+/// (lore/2026-07-27-m2-process-tree-stop.md): `(setsid sh -c '...' &)`
+/// backgrounds a new-session child and then the launching subshell exits
+/// immediately, so by the time anything looks for it, the daemon's
+/// parent is already gone and it has been reparented to init — no longer
+/// reachable by any PPID walk from this process at all. Its environment
+/// still carries the session marker regardless, because environment
+/// variables are inherited across fork and exec unless something along
+/// the way deliberately scrubs or replaces its own environment (which
+/// the daemon itself does not do); finding it is only possible via that
+/// marker.
+///
+/// The daemon's OWN child strips the marker before running, so it is
+/// UNMARKED and unreachable by the marker scan directly — but it IS a
+/// genuine OS child of the (marked) daemon. This is the acceptance
+/// fixture for closure SEEDING (service.rs's `enumerate_tree`): marker
+/// pids seed the PPID closure before it expands, so the daemon becomes a
+/// root the closure walks from, and this unmarked grandchild is reachable
+/// through that closure even though the marker scan alone would never
+/// find it. Both pids are written to files in the (inherited) working
+/// directory, since by the time either process is running there is no
+/// ancestor left that could report them — a test polls for those files
+/// rather than trusting any fixed timing. Both processes' lifetimes are
+/// bounded (120s, not `sleep 3600`) for the same self-expiry reason as
+/// `SpawnerForkStorm` — a test-side drop guard is the primary cleanup,
+/// this is the backstop under it.
+fn spawner_reparent() -> anyhow::Result<()> {
+    let mut out = std::io::stdout().lock();
+    write!(out, "\x1b[?2004h")?;
+    writeln!(
+        out,
+        "\x1b[1;32mfake-agent\x1b[0m starting (script=spawner-reparent)\r"
+    )?;
+
+    let self_pid = std::process::id();
+    // Waited on deliberately: this launcher subshell itself exits almost
+    // immediately (it only forks the detached daemon and backgrounds it),
+    // so waiting for IT to finish is a real synchronization point — proof
+    // the daemon has at least been launched — without depending on the
+    // daemon itself (which outlives this wait) ever being waited on.
+    //
+    // The unmarked child's own pid is captured via `$!` in the DAEMON's
+    // shell (the job-control "pid of the last backgrounded command"),
+    // right after backgrounding it — not via a `$$` inside a further
+    // nested `sh -c "..."` string, which would need escaping through
+    // three quoting levels at once. `env` execs its target directly (no
+    // extra fork), so the backgrounded job's pid is already the real
+    // `sh -c 'sleep 120'` process, identical to what that process would
+    // report for its own `$$`.
+    std::process::Command::new("sh")
+        .arg("-c")
+        .arg(
+            "(setsid sh -c 'echo $$ > reparented.pid; \
+             env -u FARHELM_SESSION_ID sh -c \"sleep 120\" & \
+             echo $! > unmarked-child.pid; sleep 120' &)",
+        )
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+        .context("spawning the reparenting daemon's launcher")?
+        .wait()
+        .context("waiting for the launcher to finish backgrounding the daemon")?;
+
+    writeln!(out, "SELF-PID:{self_pid}\r")?;
+    writeln!(out, "FAKE-AGENT READY\r")?;
+    write!(out, "> ")?;
+    out.flush()?;
+
+    let stdin = std::io::stdin();
+    for line in stdin.lock().lines() {
+        let line = line?;
+        let line = line.replace("\x1b[200~", "").replace("\x1b[201~", "");
+        let trimmed = line.trim();
+        if trimmed == "quit" {
+            writeln!(out, "bye\r")?;
+            out.flush()?;
+            return Ok(());
+        }
+        writeln!(out, "echo:\x1b[36m{trimmed}\x1b[0m\r")?;
+        write!(out, "> ")?;
+        out.flush()?;
+    }
+    Ok(())
 }
 
 /// Put this process's controlling terminal into raw mode: no canonical

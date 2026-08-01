@@ -286,6 +286,8 @@ impl SupervisorClient {
                 match &msg {
                     ControlMsg::SessionCreated { req_id, .. }
                     | ControlMsg::SessionList { req_id, .. }
+                    | ControlMsg::SessionStopped { req_id, .. }
+                    | ControlMsg::SessionDeleted { req_id, .. }
                     | ControlMsg::Attached { req_id, .. }
                     | ControlMsg::Error { req_id, .. }
                         if *req_id != 0 =>
@@ -399,6 +401,67 @@ impl SupervisorClient {
         {
             ControlMsg::SessionList { sessions, .. } => Ok(sessions),
             other => bail!("unexpected reply to list_sessions: {other:?}"),
+        }
+    }
+
+    /// Kill the agent's whole process tree while leaving the session and
+    /// its terminal in place (SPEC.md's "stop"). Idempotent: stopping an
+    /// already-stopped or never-live session still succeeds.
+    ///
+    /// `Err` covers two different things, not one: the connection to the
+    /// supervisor itself failing (a dead transport, surfaced as a plain
+    /// `anyhow::Error`), or the supervisor answering with an `Error` reply
+    /// — which itself can mean either the request was rejected outright
+    /// (an unknown `id`) or that it was accepted but the kill sweep could
+    /// not be confirmed complete (both surfaced via `SupervisorError`,
+    /// `downcast_ref`-able from the returned error). `Ok` is the only
+    /// outcome that means the sweep actually ran to completion.
+    pub async fn stop_session(&self, id: &str) -> anyhow::Result<()> {
+        let req_id = self.req_id();
+        match self
+            .request(
+                req_id,
+                ControlMsg::StopSession {
+                    req_id,
+                    session_id: id.to_string(),
+                },
+            )
+            .await?
+        {
+            ControlMsg::SessionStopped { .. } => Ok(()),
+            other => bail!("unexpected reply to stop_session: {other:?}"),
+        }
+    }
+
+    /// Remove a session and all its stored state, in any state (SPEC.md's
+    /// "delete"). After this returns `Ok`, the session no longer appears
+    /// in `list_sessions` and `attach` against its id fails as unknown.
+    ///
+    /// `Err` is not only "the supervisor rejected the request" (an
+    /// unknown `id`): the supervisor fails the whole delete, row and map
+    /// entry intact, if the process-tree kill, the tmux teardown, or the
+    /// launch-artifact cleanup could not be confirmed complete — removing
+    /// the last handle on a possibly-running agent (or leaving a
+    /// credential-bearing launch spec behind with nothing left to clean
+    /// it up) is the outcome delete must never risk (see
+    /// lore/2026-07-27-m2-process-tree-stop.md). A transport failure
+    /// (the connection itself going away) is a third, distinct cause,
+    /// surfaced as a plain `anyhow::Error` rather than `SupervisorError`.
+    /// Only `Ok` means the session and its state are actually gone.
+    pub async fn delete_session(&self, id: &str) -> anyhow::Result<()> {
+        let req_id = self.req_id();
+        match self
+            .request(
+                req_id,
+                ControlMsg::DeleteSession {
+                    req_id,
+                    session_id: id.to_string(),
+                },
+            )
+            .await?
+        {
+            ControlMsg::SessionDeleted { .. } => Ok(()),
+            other => bail!("unexpected reply to delete_session: {other:?}"),
         }
     }
 
