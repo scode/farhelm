@@ -1243,8 +1243,26 @@ fn CreateSessionForm(mut submitting: Signal<bool>, on_created: EventHandler<Sess
 /// made delete-on-a-live-session silently do nothing on that target. An
 /// in-page prompt has no such platform dependency, so it replaces the
 /// eval-based one everywhere, not just on desktop. While it is open, tab
-/// order instead walks open (disabled) → confirm delete → cancel; initial
-/// FOCUS lands directly on cancel regardless of tab order (see below).
+/// order walks confirm delete → cancel; initial FOCUS lands directly on
+/// cancel regardless of tab order (see below).
+///
+/// The `.session-row-open` button (title/cwd/invocation/badge) is given
+/// the extra `confirming` class and hidden outright (`display: none` in
+/// app.css) rather than merely staying `disabled`, which is what it did
+/// before this fix (MT-8): `.session-row-main` lays out its children in
+/// one non-wrapping flex row, and that button's own children each carry a
+/// `min-width` floor (see `.session-title`/`.session-cwd`/
+/// `.session-invocation`) that does not shrink to nothing just because
+/// the OUTER flex algorithm hands the button a narrower slot to make room
+/// for the confirm prompt's own elements. Past that floor the button's
+/// content overflows its shrunk box — CSS flexbox does not clip
+/// overflow by default — and renders on top of the confirm prompt sitting
+/// immediately after it in the row, rather than being replaced by it.
+/// Removing the button from layout entirely while confirming is open
+/// sidesteps that interaction completely instead of trying to out-shrink
+/// it: the confirm prompt already repeats the title (`.confirm-title`
+/// below), so nothing the hidden button showed is lost information while
+/// it is gone.
 ///
 /// The prompt itself is TWO separate elements, not one combined sentence:
 /// `.confirm-consequence` (from `confirm_consequence`, fixed wording with
@@ -1314,7 +1332,14 @@ fn SessionRow(
             div { class: "session-row-main",
                 button {
                     r#type: "button",
-                    class: "session-row-open",
+                    // The `confirming` modifier is what app.css's
+                    // `.session-row-open.confirming` hides (MT-8, see the
+                    // "Inline delete confirmation" section of this
+                    // component's doc above) — without it, this button's
+                    // own title/cwd/invocation content overflows its
+                    // flex-shrunk box and paints over the confirm prompt
+                    // rendered right after it.
+                    class: if confirming { "session-row-open confirming" } else { "session-row-open" },
                     // Disabled by EITHER lock: the global nav lock (any
                     // in-flight op anywhere), or this row's own
                     // confirmation being open — the simplest way to

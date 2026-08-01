@@ -136,6 +136,22 @@ body,
   cursor: default;
 }
 
+/* MT-8: while the inline delete confirm is open, the row's own open
+   button is hidden outright rather than left `:disabled` and merely
+   dimmed. `.session-row-main` is a non-wrapping flex row, and this
+   button's children (`.session-title`/`.session-cwd`/
+   `.session-invocation`) each carry a `min-width` floor that survives
+   the outer flex algorithm shrinking the button to make room for the
+   confirm prompt's own elements — past that floor the button's content
+   overflows its shrunk box (flexbox does not clip by default) and paints
+   over the confirm prompt sitting right after it in source order.
+   Removing the button from layout sidesteps the interaction instead of
+   trying to out-shrink it; see the `confirming` doc on `SessionRow` in
+   lib.rs for the full account. */
+.session-row-open.confirming {
+  display: none;
+}
+
 /* Stop/delete/confirm-delete/confirm-cancel: small, secondary-looking
    controls that stay out of the open button's way — plain text buttons
    rather than icons, matching the rest of M2's undecorated chrome
