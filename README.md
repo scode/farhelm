@@ -41,11 +41,14 @@ Ubuntu 24.04 ships 3.4.
   directory on the target host, and your local shell would expand a `~` against the wrong home.
 - Open the printed loopback URL in a browser: a session list (title, working directory, invocation, and a status —
   alive; exited with the code when known, qualified "stopped by user" when you stopped it; interrupted after a host
-  reboot), refreshing on its own every few seconds. Click a row to open its terminal; a back control returns to the
-  list. Close the tab, reopen it later: same session, scrollback intact, the agent never noticed.
+  reboot; error, with the reason, when the agent's own command could not start at all), refreshing on its own every few
+  seconds. Click a row to open its terminal; a back control returns to the list. Close the tab, reopen it later: same
+  session, scrollback intact, the agent never noticed.
 - "new session" opens an inline form (working directory and agent command required, title optional); submitting launches
   the agent and takes you straight into its terminal. A bad working directory fails the create in place, with the
-  supervisor's own error shown next to the form and nothing created.
+  supervisor's own error shown next to the form and nothing created. A bad EXECUTABLE (a typo'd command, a path that
+  does not exist) is different: creation still succeeds — the working directory and terminal both exist — and the
+  session then reports error once its agent's own exec fails, with the reason shown right in the list.
 - Each row also has stop and delete. Stop kills the agent and its whole process tree; the session stays listed, its
   terminal still viewable. Delete removes the session and its stored state — with an inline confirmation first whenever
   the agent might still be alive.

@@ -2946,6 +2946,165 @@ test("an interrupted session shows its badge and deletes without confirming", as
   releaseDelete();
 });
 
+// PLAN_M3.md item 3: the launch shim's exec-failure sentinel, surfaced on
+// the wire as `SessionStatus::Error { detail }`. Synthetic and route-mocked
+// exactly like the `interrupted` test just above — real end-to-end coverage
+// of the classification itself (create with a genuinely missing binary,
+// wait for the supervisor to read the sentinel and commit `Error`) lives in
+// `crates/farhelm/tests/e2e.rs`; this test is scoped to what only the
+// BROWSER can prove: the badge's exact text and CSS class, and that
+// deleting an error row — like an exited or interrupted one — skips the
+// confirmation prompt entirely. The reason is not "nothing ever ran": the
+// login shell and the launch shim DID run (the shim is what writes this
+// very sentinel, from inside a real process) — it is that the AGENT'S OWN
+// exec is what failed, before it or anything it might have spawned ever
+// existed, so there is no lingering process tree for a delete to warn
+// about.
+test("an error session shows its badge with detail and deletes without confirming", async ({
+  page,
+}) => {
+  const detail = "exec_failed argv0=/nope errno=2";
+  const session = {
+    id: "synthetic-error",
+    title: "synthetic-error",
+    cwd: "/tmp",
+    invocation: "/nope",
+    status: { state: "error", detail },
+    annotation: null,
+  };
+  await page.route("**/api/sessions", (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({ sessions: [session], total: 1, truncated: false }),
+    }),
+  );
+  let deleteRequests = 0;
+  let releaseDelete: () => void = () => {};
+  const deleteHeld = new Promise<void>((resolve) => {
+    releaseDelete = resolve;
+  });
+  await page.route(`**/api/sessions/${session.id}`, async (route) => {
+    if (route.request().method() !== "DELETE") {
+      await route.continue();
+      return;
+    }
+    deleteRequests += 1;
+    await deleteHeld;
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: "{}",
+    });
+  });
+
+  await page.goto("/");
+  const row = page.locator(`[data-session-id="${session.id}"]`);
+  // The badge must state the shim's own recorded detail, not just the
+  // bare word "error" — it is the one piece of information that actually
+  // explains why the row needs attention, and the class must be the
+  // dedicated `error` modifier (red family), never `exited`'s.
+  await expect(row.locator(".status-badge.error")).toHaveText(
+    `error — ${detail}`,
+    { timeout: 10_000 },
+  );
+
+  await row.locator(".session-row-delete").click();
+  // The DELETE is stalled, so the row is still on screen — and while it
+  // is, no confirmation controls exist at all: the agent's own exec never
+  // succeeded, so there is no lingering process tree for a delete to warn
+  // about (see this test's own top-of-file comment for why that is not
+  // the same claim as "nothing ever ran").
+  await expect(row).toHaveCount(1);
+  await expect(row.locator(".confirm-consequence")).toHaveCount(0);
+  await expect(row.locator(".confirm-delete")).toHaveCount(0);
+  expect(deleteRequests).toBe(1);
+  releaseDelete();
+});
+
+// Review-swarm fix batch item 21: the shim's own detail is argv-derived,
+// so — unlike every OTHER badge's fixed, short vocabulary — its length is
+// not bounded by anything this UI controls. Without `app.css`'s
+// `.status-badge` cap (`max-width`/`min-width: 0`/`overflow: hidden`), a
+// long detail can widen the row past its siblings' shrink budget and push
+// the stop/delete buttons out of reach. Pinned in the browser's actual
+// layout engine, not just against the CSS source: the badge visibly
+// clips (its scrollWidth exceeds its clientWidth) and the delete button
+// stays on screen and clickable regardless.
+test("a long error detail clips the badge without pushing the delete button out of reach", async ({
+  page,
+}) => {
+  const detail = `exec_failed argv0=${"/very/long/path/segment".repeat(40)} errno=2`;
+  const session = {
+    id: "synthetic-error-long",
+    title: "synthetic-error-long",
+    cwd: "/tmp",
+    invocation: "/nope",
+    status: { state: "error", detail },
+    annotation: null,
+  };
+  await page.route("**/api/sessions", (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({ sessions: [session], total: 1, truncated: false }),
+    }),
+  );
+
+  await page.goto("/");
+  const row = page.locator(`[data-session-id="${session.id}"]`);
+  const badge = row.locator(".status-badge.error");
+  await expect(badge).toBeVisible();
+
+  const clips = await badge.evaluate((el) => el.scrollWidth > el.clientWidth);
+  expect(clips).toBe(true);
+
+  const deleteButton = row.locator(".session-row-delete");
+  await expect(deleteButton).toBeVisible();
+  const box = await deleteButton.boundingBox();
+  expect(box).not.toBeNull();
+  const viewport = page.viewportSize();
+  expect(viewport).not.toBeNull();
+  expect(box!.x + box!.width).toBeLessThanOrEqual(viewport!.width);
+  await deleteButton.click();
+  await expect(row.locator(".confirm-consequence")).toHaveCount(0);
+});
+
+// Review-swarm fix batch item 21's other half: the SAME injection idiom
+// `delete confirmation safely displays a title containing executable
+// HTML...` (above) applied to the error badge's `detail` — it renders
+// through Dioxus's normal text interpolation exactly like every other
+// server-controlled string here, but the badge is a NEW render site this
+// PR adds, so it earns its own direct pin rather than relying on the
+// title test's coverage to imply it.
+test("an error detail containing executable HTML renders literally in the badge", async ({
+  page,
+}) => {
+  const detail = `exec_failed argv0=<img src=x onerror="window.__pwned=1"> errno=2`;
+  const session = {
+    id: "synthetic-error-xss",
+    title: "synthetic-error-xss",
+    cwd: "/tmp",
+    invocation: "/nope",
+    status: { state: "error", detail },
+    annotation: null,
+  };
+  await page.route("**/api/sessions", (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({ sessions: [session], total: 1, truncated: false }),
+    }),
+  );
+
+  await page.goto("/");
+  const row = page.locator(`[data-session-id="${session.id}"]`);
+  await expect(row.locator(".status-badge.error")).toHaveText(`error — ${detail}`, {
+    timeout: 10_000,
+  });
+  expect(await page.evaluate(() => (window as any).__pwned)).toBeUndefined();
+});
+
 test("truncation banner shows when the listing reports truncated", async ({
   page,
 }) => {

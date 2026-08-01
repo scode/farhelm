@@ -46,7 +46,7 @@ use std::time::Duration;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite};
 use tokio::net::{UnixListener, UnixStream};
 use tokio::sync::{Mutex, mpsc, oneshot, watch};
-use tracing::{info, warn};
+use tracing::{error, info, warn};
 
 /// Data-frame chunk size for replay. Well under MAX_FRAME_LEN; small
 /// enough that the first screenful renders while the rest streams.
@@ -517,6 +517,75 @@ fn error_kind(e: &anyhow::Error) -> ErrorKind {
     e.downcast_ref::<RequestError>()
         .map(|r| r.kind)
         .unwrap_or(ErrorKind::Internal)
+}
+
+/// Async wrapper around [`crate::launch::read_launch_sentinel`] for the
+/// handlers in this module: `ListSessions` calls it on every poll for
+/// every eligible session, which makes it the genuinely hot one;
+/// `reload_sessions` calls it only once per construction (or handoff), far
+/// off any hot path, but shares this wrapper anyway so the two call sites
+/// can never diverge on how the read reaches the filesystem.
+///
+/// `spawn_blocking` wraps what is usually a single `ENOENT`-returning
+/// `read` (cheap in the overwhelmingly common case: no launch has ever
+/// failed for this session) because a synchronous syscall run inline on
+/// an async worker thread blocks every OTHER session's terminal
+/// forwarding sharing that thread for however long the underlying I/O
+/// takes — worth paying on `ListSessions`'s polling path even though any
+/// one call is ordinarily fast.
+async fn read_launch_sentinel(state_dir: &Path, id: &str) -> anyhow::Result<Option<String>> {
+    let state_dir = state_dir.to_path_buf();
+    let id = id.to_string();
+    tokio::task::spawn_blocking(move || crate::launch::read_launch_sentinel(&state_dir, &id))
+        .await
+        .context("launch sentinel read task panicked")?
+}
+
+/// Whether a launch sentinel discovered NOW could still change `outcome` —
+/// the read-time mirror of `Transition::apply`'s own `SentinelError` rule
+/// (`store.rs`), kept as one function so the two places that decide
+/// whether reading the file is even worth attempting (this module's
+/// `reload_sessions` and `ListSessions` handler) can never drift from what
+/// the store would actually do with the reading once it is offered.
+///
+/// `false` only for an already-`Error` row (idempotent — nothing to gain)
+/// and for a GENUINELY annotated `Exited` (a real stop: retained
+/// knowledge, not an inference a sentinel could outrank). `true` for
+/// everything else, INCLUDING `Interrupted` and an unannotated `Exited` —
+/// PLAN_M3.md item 3 requires a late-discovered sentinel to still
+/// supersede both, because neither is anything more than an inference
+/// from an ordinary dead-or-vanished pane, exactly the evidence class a
+/// sentinel is defined to beat.
+fn sentinel_could_still_apply(outcome: &LastOutcome) -> bool {
+    !matches!(
+        outcome,
+        LastOutcome::Error { .. }
+            | LastOutcome::Exited {
+                annotation: Some(_),
+                ..
+            }
+    )
+}
+
+/// Remove both files a launch's `Error` classification can leave behind:
+/// the sentinel itself, and the per-launch SPEC file the shim's own
+/// missing/malformed-spec early-return paths (or a failed unlink partway
+/// through one) can leave stranded holding the agent's full command line,
+/// credentials included. Called once a launch's `Error` outcome is
+/// confirmed durably committed — nothing ever needs either file again
+/// once the classification is settled — and also, idempotently, on every
+/// row already found to be `Error` on load: a crash between an EARLIER
+/// pass's commit and the cleanup that should have followed it can leave
+/// one or both files behind for an arbitrary number of startups, and this
+/// is what finally sweeps them. Best-effort throughout
+/// (`best_effort_remove`): a failure here is logged, never fatal, and
+/// never blocks a reply — both files are cosmetic once the DURABLE
+/// outcome already says what happened.
+async fn cleanup_launch_artifacts(state_dir: &Path, id: &str) {
+    let spec_path = crate::launch::spec_path_for_session(state_dir, id);
+    let status_path = crate::launch::status_path_for_spec(&spec_path);
+    best_effort_remove(&status_path, "consumed launch sentinel").await;
+    best_effort_remove(&spec_path, "leftover launch spec").await;
 }
 
 /// Best-effort credential-hygiene cleanup: remove `path`, treating its
@@ -2108,7 +2177,7 @@ impl Supervisor {
         tmux.ensure_server().await?;
 
         let (sessions, may_record) =
-            Self::reload_sessions(&store, &tmux, &seams, ownership.is_some()).await?;
+            Self::reload_sessions(state_dir, &store, &tmux, &seams, ownership.is_some()).await?;
 
         Ok(Arc::new(Supervisor {
             state_dir: state_dir.to_path_buf(),
@@ -2205,6 +2274,7 @@ impl Supervisor {
     /// would mean serving a reboot classification this process knows it
     /// could not record, which the next startup would then contradict.
     async fn reload_sessions(
+        state_dir: &Path,
         store: &SessionStore,
         tmux: &TmuxDriver,
         seams: &SupervisorSeams,
@@ -2229,6 +2299,15 @@ impl Supervisor {
             // Nothing stored, or nothing to compare: never a reboot claim.
             (Ok(_), _) => false,
         };
+        // Loaded BEFORE any boot-id write, deliberately: a reboot's blanket
+        // interrupt conversion and a launch sentinel's `Error` classification
+        // must land in the SAME transaction (`SessionStore::record_boot`'s
+        // docs on `sentinel_overrides`), which means the rows have to be in
+        // hand, and their sentinels checked, before that transaction runs —
+        // not discovered afterward, by which point a blanket-converted row
+        // would already be the terminal `Interrupted` this policy can never
+        // reclassify (`Transition::apply`'s catch-all).
+        let mut rows = store.load_all().await?;
         if may_write
             && let Ok(Some(current)) = &current_boot
             && stored_boot.as_ref() != Some(current)
@@ -2241,25 +2320,118 @@ impl Supervisor {
             } else {
                 info!("adopting this host's boot id without claiming a reboot");
             }
-            store.record_boot(current, rebooted, None).await?;
+            let mut sentinel_overrides = HashMap::new();
+            if rebooted {
+                for row in &rows {
+                    if matches!(
+                        row.outcome,
+                        LastOutcome::Launching | LastOutcome::Running | LastOutcome::StopRequested
+                    ) {
+                        match read_launch_sentinel(state_dir, &row.id).await {
+                            Ok(Some(detail)) => {
+                                sentinel_overrides.insert(row.id.clone(), detail);
+                            }
+                            Ok(None) => {}
+                            // Loud propagation, not fall-through (item 1 of
+                            // the review-swarm fix batch): this reload
+                            // ABORTS before `record_boot` is ever called,
+                            // so neither the new boot id nor any outcome
+                            // conversion commits. Continuing here would
+                            // risk exactly what PLAN_M3.md item 3 forbids —
+                            // a corrupt/unreadable sentinel silently
+                            // classifying its row `Interrupted` instead of
+                            // the `Error` it might actually be — and this
+                            // is the one call site where "defer just this
+                            // row" is not available at all: the blanket
+                            // interrupt conversion is one indivisible
+                            // `UPDATE` across every live row, so it cannot
+                            // partially apply while this one row's
+                            // classification stays pending. The next
+                            // startup sees the stored boot id UNCHANGED and
+                            // retries the whole classification from
+                            // scratch, once the file is readable again.
+                            Err(e) => {
+                                return Err(e.context(format!(
+                                    "could not read session {}'s launch sentinel while \
+                                     classifying a reboot; aborting this reload before \
+                                     recording anything, so the next startup retries against \
+                                     the same stored boot id rather than risking a durable \
+                                     misclassification",
+                                    row.id
+                                )));
+                            }
+                        }
+                    }
+                }
+            }
+            store
+                .record_boot(current, rebooted, sentinel_overrides.clone(), None)
+                .await?;
+            // Reflect what was just committed into this pass's in-memory
+            // copy: the reconciliation loop below reads `rows` directly and
+            // must see the POST-boot outcome, not the pre-boot one it was
+            // loaded with a moment ago.
+            if rebooted {
+                for row in &mut rows {
+                    if let Some(detail) = sentinel_overrides.get(&row.id) {
+                        row.outcome = LastOutcome::Error {
+                            detail: detail.clone(),
+                        };
+                    } else if matches!(
+                        row.outcome,
+                        LastOutcome::Launching | LastOutcome::Running | LastOutcome::StopRequested
+                    ) {
+                        row.outcome = LastOutcome::Interrupted;
+                    }
+                }
+                // These overrides committed INSIDE `record_boot`'s own
+                // transaction, never through `transitions`/`transition_many`
+                // below, so their cleanup runs here — immediately after
+                // that commit is confirmed — rather than being folded into
+                // the shared cleanup further down, which only ever sees
+                // what THIS pass's `transitions` vec itself proposed
+                // (item 4 of the review-swarm fix batch).
+                for id in sentinel_overrides.keys() {
+                    cleanup_launch_artifacts(state_dir, id).await;
+                }
+            }
         }
 
         let pane_states = tmux.pane_states().await?;
-        let rows = store.load_all().await?;
         // Two passes over the rows: decide every transition against the
         // freshly loaded outcomes, commit them together, then build the
         // map from what was COMMITTED (which may differ from what this
         // pass proposed — see `SessionStore::transition_many`).
         let mut found_panes: HashMap<String, (String, PaneState)> = HashMap::new();
         let mut transitions = Vec::new();
+        // Sentinels this pass itself proposes as `Error` (as opposed to a
+        // row the boot-conversion branch above already resolved, whose
+        // cleanup already ran) — id to detail, so the removal loop after
+        // `transition_many`'s call can gate cleanup on the commit actually
+        // having landed; see that loop for the lifecycle rationale.
+        let mut sentinel_hits: HashMap<String, String> = HashMap::new();
         for row in &rows {
-            // A row still recorded as launching carries no pane (the id
-            // does not exist until tmux has made the session), so its
-            // pane — if the launch DID happen before whatever interrupted
-            // it — has to be found by session name instead. Deterministic
-            // by pane id so a session that somehow holds several panes
-            // resolves the same way on every reload; farhelm creates one
-            // pane per session, so that is a tie-break, not a feature.
+            // Idempotent cleanup (item 4 of the review-swarm fix batch): a
+            // row already durably `Error` on load may still have a
+            // lingering sentinel/spec file from a crash between an
+            // EARLIER pass's commit and the cleanup that should have
+            // followed it — including the reboot-override branch above,
+            // whose own cleanup cannot rule out a crash on some PREVIOUS
+            // startup. Harmless no-op when both files are already gone,
+            // so this runs unconditionally rather than trying to prove it
+            // is necessary first.
+            if matches!(row.outcome, LastOutcome::Error { .. }) {
+                cleanup_launch_artifacts(state_dir, &row.id).await;
+                continue;
+            }
+
+            // Deterministic pane lookup, computed ONCE and reused by both
+            // the sentinel branch below and the ordinary reconciliation
+            // branch further down (item 6 of the review-swarm fix batch):
+            // a multi-pane tmux session must resolve to the SAME pane
+            // regardless of which branch is asking, and a second,
+            // independent `iter().find()` in the sentinel branch used to
+            // risk disagreeing with this `min_by` tie-break.
             let found = if row.pane.is_empty() {
                 pane_states
                     .iter()
@@ -2272,6 +2444,69 @@ impl Supervisor {
                     .filter(|state| state.session_name == row.tmux_name)
                     .map(|state| (row.pane.clone(), state.clone()))
             };
+
+            // A launch sentinel discovered now outranks every pane-based
+            // inference (PLAN_M3.md item 3) — including "no pane was even
+            // found", which is exactly the case a vanished tmux window
+            // (no remain-on-exit, or a crash before the window was ever
+            // created) produces — and, per item 3's addition 18, including
+            // a row ALREADY recorded as an inferred `Interrupted` or
+            // unannotated `Exited`: both are themselves only inferences
+            // from a dead-or-vanished pane, the exact evidence class a
+            // sentinel is defined to beat. `sentinel_could_still_apply`
+            // (not `is_terminal()`) is what lets this reach those two
+            // states rather than wrongly skipping them.
+            if sentinel_could_still_apply(&row.outcome) {
+                match read_launch_sentinel(state_dir, &row.id).await {
+                    Ok(Some(detail)) => {
+                        transitions.push((
+                            row.id.clone(),
+                            Transition::SentinelError {
+                                detail: detail.clone(),
+                                pane: found.as_ref().map(|(pane, _)| pane.clone()),
+                            },
+                        ));
+                        sentinel_hits.insert(row.id.clone(), detail);
+                        // The pane still rides into `found_panes` even
+                        // though this row takes the sentinel branch (item
+                        // 5/19 of the review-swarm fix batch): a
+                        // `SessionEntry` built with no `terminal` at all
+                        // breaks `Attach` and leaks the tmux session out
+                        // from under `DeleteSession`'s kill sweep — the
+                        // pane genuinely exists in tmux right now
+                        // regardless of which durable outcome this pass
+                        // assigns the row.
+                        if let Some((pane, state)) = found {
+                            found_panes.insert(row.id.clone(), (pane, state));
+                        }
+                        continue;
+                    }
+                    Ok(None) => {}
+                    Err(e) => {
+                        // Loud propagation, not fall-through (item 1): this
+                        // row's reconciliation is DEFERRED for this pass —
+                        // no `Transition` is proposed for it at all, so a
+                        // durable misclassification can never be committed
+                        // from unreliable evidence — while the file
+                        // survives for a later, repaired pass to read. Its
+                        // pane still rides into `found_panes` so a
+                        // genuinely alive session keeps reporting `Alive`
+                        // regardless (`session_status`'s own live-probe
+                        // precedence), but this pass proposes nothing for
+                        // it either way.
+                        error!(
+                            session = %row.id, error = %format!("{e:#}"),
+                            "could not read this session's launch sentinel; deferring its \
+                             reconciliation this pass rather than risking a durable \
+                             misclassification from pane state alone"
+                        );
+                        if let Some((pane, state)) = found {
+                            found_panes.insert(row.id.clone(), (pane, state));
+                        }
+                        continue;
+                    }
+                }
+            }
             let Some((pane, state)) = found else {
                 info!(
                     session = %row.id,
@@ -2281,8 +2516,9 @@ impl Supervisor {
                 // already knows more than this), and so is a LAUNCHING
                 // row: "no side effects found" is not evidence the agent
                 // ran, which is what `Exited` would claim — that row stays
-                // pending for PLAN_M3.md item 3's sentinel or item 6's
-                // reservation to resolve.
+                // pending for a later pass's sentinel check (already tried
+                // once above, this pass) or item 6's reservation to
+                // resolve.
                 if matches!(
                     row.outcome,
                     LastOutcome::Running | LastOutcome::StopRequested
@@ -2328,9 +2564,36 @@ impl Supervisor {
             found_panes.insert(row.id.clone(), (pane, state));
         }
 
+        // Sentinel lifecycle (PLAN_M3.md item 3): once an `Error` this
+        // pass proposed has actually committed durably, both files it can
+        // leave behind — the sentinel itself and the per-launch spec
+        // (item 25 of the review-swarm fix batch: the shim's own
+        // missing/malformed-spec paths, or a failed unlink, can leave the
+        // credential-bearing spec stranded too) — are removed together
+        // via `cleanup_launch_artifacts`. The durable outcome row is now
+        // the truth — nothing ever reads either file again to answer "is
+        // this session an error" (`session_status` consults the store,
+        // never the filesystem) — and leaving them around serves no
+        // reader while risking a future collision: PR8's relaunch reuses
+        // this exact session id's spec/sentinel path
+        // (`spec_path_for_session`), and stale files from THIS launch
+        // sitting at that path could otherwise be misread as evidence
+        // about a launch that hasn't happened yet. Folded into this same
+        // successful arm (item 7) rather than a separate loop afterward:
+        // a failed write means nothing durable exists yet, so the files
+        // must survive for the next pass to retry against — cleaning them
+        // up then would silently convert a real, still-unrecorded failure
+        // into "no sentinel found" for good.
         let committed = if may_write && !transitions.is_empty() {
             match store.transition_many(transitions).await {
-                Ok(committed) => committed,
+                Ok(committed) => {
+                    for id in sentinel_hits.keys() {
+                        if matches!(committed.get(id), Some(LastOutcome::Error { .. })) {
+                            cleanup_launch_artifacts(state_dir, id).await;
+                        }
+                    }
+                    committed
+                }
                 Err(e) => {
                     warn!(
                         error = %format!("{e:#}"),
@@ -2427,7 +2690,8 @@ impl Supervisor {
         // Safe to replace outright here: no connection has been accepted
         // yet, so no attachment can exist against any entry this replaces.
         let (sessions, may_record) =
-            Self::reload_sessions(&self.store, &self.tmux, &self.seams, true).await?;
+            Self::reload_sessions(&self.state_dir, &self.store, &self.tmux, &self.seams, true)
+                .await?;
         *self.sessions.lock().await = sessions;
         self.may_record
             .store(may_record, std::sync::atomic::Ordering::SeqCst);
@@ -2656,7 +2920,7 @@ impl Supervisor {
             crash()?;
         }
 
-        let spec_path = self.state_dir.join("launch").join(format!("{id}.json"));
+        let spec_path = crate::launch::spec_path_for_session(&self.state_dir, &id);
         // Derived the SAME way the shim derives it from its own copy of
         // `spec_path` (`launch::status_path_for_spec`) — never computed
         // independently here — so the two sides can never disagree about
@@ -4327,31 +4591,127 @@ async fn handle_control(
                 // stop running concurrently cannot have its annotation
                 // erased by this list and this list cannot be misled by a
                 // stale reading of its own.
-                // Nothing is recorded at all by a supervisor that may not
-                // record (a handoff candidate, or one whose boot-id read
-                // failed — see `Supervisor::may_record`); the reply below
-                // is still computed and still honest, it just draws no
-                // conclusions this process has no standing to store.
-                let observations: Vec<(String, Transition)> = if sup.may_record() {
-                    entries
-                        .iter()
-                        .filter_map(|entry| {
-                            // The guard is held for the closure body only,
-                            // with no await inside it, so nothing has to be
-                            // cloned to be read.
-                            let recorded = entry.outcome.lock().expect("outcome mutex poisoned");
-                            let live = entry.terminal.as_ref().and_then(|terminal| {
-                                pane_states
-                                    .get(&terminal.pane)
-                                    .filter(|state| state.session_name == terminal.tmux_name)
-                            });
-                            observation(&recorded, live)
-                                .map(|transition| (entry.info.id.clone(), transition))
-                        })
-                        .collect()
-                } else {
-                    Vec::new()
-                };
+                // A launch sentinel is READ regardless of whether this
+                // supervisor `may_record()` (item 2 of the review-swarm
+                // fix batch): a degraded supervisor (a handoff candidate,
+                // or one whose boot-id read failed) still has standing to
+                // REPORT what it can read, even though it must not WRITE a
+                // conclusion it has no standing to store — the two halves
+                // below are deliberately independent (`reply_status`
+                // always reflects a sentinel this pass found; only
+                // `observations` is gated on `may_record()`).
+                //
+                // A plain loop, not `observation()`'s pure `filter_map`
+                // closure, because the sentinel check below is real I/O
+                // (`read_launch_sentinel`) and therefore has to run
+                // between two lock scopes rather than inside one
+                // synchronous closure body: PLAN_M3.md item 3 wants the
+                // SAME observation offered here that `reload_sessions`
+                // offers — a non-terminal outcome whose pane is dead or
+                // gone entirely gets its sentinel checked before falling
+                // back to `observation()`'s plain exit inference, because
+                // the sentinel outranks that inference exactly as surely
+                // here as at reload, including (addition 18) for an entry
+                // ALREADY recorded as an inferred `Interrupted` or
+                // unannotated `Exited` — both are themselves only
+                // inferences a sentinel is defined to beat.
+                let mut observations: Vec<(String, Transition)> = Vec::new();
+                // This pass's sentinel finds, id to detail — used both to
+                // gate post-commit file cleanup on the transition actually
+                // landing, and (`reply_status`, below) to surface the
+                // Error for THIS reply even when it could not be
+                // committed durably this pass (`may_record()` false, or
+                // the commit itself fails) — PLAN_M3.md item 3's
+                // write-inability note: retain the file, retry
+                // persistence on a later poll, but never let the reply
+                // itself regress to a stale `Exited` in the meantime.
+                let mut sentinel_hits: HashMap<String, String> = HashMap::new();
+                for entry in &entries {
+                    let (recorded, dead_or_absent) = {
+                        let recorded = entry
+                            .outcome
+                            .lock()
+                            .expect("outcome mutex poisoned")
+                            .clone();
+                        let live = entry.terminal.as_ref().and_then(|terminal| {
+                            pane_states
+                                .get(&terminal.pane)
+                                .filter(|state| state.session_name == terminal.tmux_name)
+                        });
+                        (recorded, live.is_none_or(|state| state.dead))
+                    };
+
+                    // Idempotent cleanup (item 4): an entry already durably
+                    // `Error` may still have a lingering sentinel/spec file
+                    // from a crash between an earlier pass's commit and the
+                    // cleanup that should have followed it. Harmless no-op
+                    // once both files are gone.
+                    if matches!(recorded, LastOutcome::Error { .. }) {
+                        cleanup_launch_artifacts(&sup.state_dir, &entry.info.id).await;
+                        continue;
+                    }
+
+                    if sentinel_could_still_apply(&recorded) && dead_or_absent {
+                        match read_launch_sentinel(&sup.state_dir, &entry.info.id).await {
+                            Ok(Some(detail)) => {
+                                sentinel_hits.insert(entry.info.id.clone(), detail.clone());
+                                // No pane to rediscover here (unlike
+                                // `reload_sessions`'s by-name search): this
+                                // loop only ever visits sessions this
+                                // process already tracks a `Terminal` for
+                                // or explicitly does not, so there is
+                                // nothing new for this transition to
+                                // record beyond the outcome itself.
+                                if sup.may_record() {
+                                    observations.push((
+                                        entry.info.id.clone(),
+                                        Transition::SentinelError { detail, pane: None },
+                                    ));
+                                }
+                                continue;
+                            }
+                            Ok(None) => {}
+                            Err(e) => {
+                                // Loud propagation, not fall-through (item
+                                // 1): the WHOLE request fails rather than
+                                // silently basing this — or any other —
+                                // entry's reply on an inference the
+                                // unreadable sentinel might contradict.
+                                // Nothing gathered so far this pass is
+                                // committed: this `return` happens before
+                                // `transition_many` is ever called.
+                                send_reply(
+                                    &tx,
+                                    &ControlMsg::Error {
+                                        req_id,
+                                        message: format!(
+                                            "could not read session {}'s launch sentinel: {e:#}",
+                                            entry.info.id
+                                        ),
+                                        kind: ErrorKind::Internal,
+                                    },
+                                )
+                                .await;
+                                return;
+                            }
+                        }
+                    }
+
+                    if sup.may_record() {
+                        // The guard is held for the closure body only,
+                        // with no await inside it, so nothing has to be
+                        // cloned to be read.
+                        let recorded = entry.outcome.lock().expect("outcome mutex poisoned");
+                        let live = entry.terminal.as_ref().and_then(|terminal| {
+                            pane_states
+                                .get(&terminal.pane)
+                                .filter(|state| state.session_name == terminal.tmux_name)
+                        });
+                        if let Some(transition) = observation(&recorded, live) {
+                            observations.push((entry.info.id.clone(), transition));
+                        }
+                    }
+                }
                 if !observations.is_empty() {
                     match sup.store.transition_many(observations).await {
                         Ok(committed) => {
@@ -4359,6 +4719,20 @@ async fn handle_control(
                                 if let Some(outcome) = committed.get(&entry.info.id) {
                                     *entry.outcome.lock().expect("outcome mutex poisoned") =
                                         outcome.clone();
+                                }
+                            }
+                            // Cleanup folded into this successful arm
+                            // (item 7), not a separate loop afterward: see
+                            // `reload_sessions`'s identical step for the
+                            // full lifecycle rationale (both files are
+                            // cosmetic once the durable outcome already
+                            // says what happened; a failed write must
+                            // leave them for the next pass to retry
+                            // against, hence gating on `committed` here
+                            // rather than on `sentinel_hits` alone).
+                            for id in sentinel_hits.keys() {
+                                if matches!(committed.get(id), Some(LastOutcome::Error { .. })) {
+                                    cleanup_launch_artifacts(&sup.state_dir, id).await;
                                 }
                             }
                         }
@@ -4376,10 +4750,21 @@ async fn handle_control(
                 let sessions: Vec<SessionInfo> = entries
                     .iter()
                     .map(|entry| {
-                        let (status, annotation) = session_status(entry, &pane_states);
+                        // A sentinel this pass found overrides whatever
+                        // `session_status` would otherwise compute for
+                        // THIS reply, whether or not it also got committed
+                        // durably above — see `sentinel_hits`'s own docs.
                         let mut info = entry.info.clone();
-                        info.status = status;
-                        info.annotation = annotation;
+                        if let Some(detail) = sentinel_hits.get(&entry.info.id) {
+                            info.status = SessionStatus::Error {
+                                detail: detail.clone(),
+                            };
+                            info.annotation = None;
+                        } else {
+                            let (status, annotation) = session_status(entry, &pane_states);
+                            info.status = status;
+                            info.annotation = annotation;
+                        }
                         info
                     })
                     .collect();
@@ -4484,12 +4869,68 @@ async fn handle_control(
                 // the plain exit instead — with whatever code the dead
                 // pane still retains — because a stop is also the moment
                 // this supervisor witnesses an exit nobody had listed yet.
+                //
+                // The sentinel is checked FIRST, though (item 3a of the
+                // review-swarm fix batch): a dead-or-absent pane at stop
+                // time can just as easily mean the launch never execed at
+                // all, and this is exactly the commit boundary PLAN_M3.md
+                // item 3 warns about — a stop (or any other first
+                // observer) committing a plain `ObservedExit` before
+                // anything ever reads the sentinel locks in "exited"
+                // behind terminal-stickiness, permanently outrunning a
+                // classification the file already had evidence for.
+                // Checking here, before the write, is what keeps a stop
+                // from being the race that loses.
                 let stop_intent = if alive_pane.is_some() {
                     Transition::StopRequested
                 } else {
-                    Transition::ObservedExit {
-                        exit_code: dead_pane_exit_code(&sup, entry.terminal.as_ref(), &session_id)
+                    let current = entry
+                        .outcome
+                        .lock()
+                        .expect("outcome mutex poisoned")
+                        .clone();
+                    let sentinel = if sentinel_could_still_apply(&current) {
+                        read_launch_sentinel(&sup.state_dir, &session_id).await
+                    } else {
+                        Ok(None)
+                    };
+                    match sentinel {
+                        Ok(Some(detail)) => Transition::SentinelError {
+                            detail,
+                            pane: entry.terminal.as_ref().map(|t| t.pane.clone()),
+                        },
+                        Ok(None) => Transition::ObservedExit {
+                            exit_code: dead_pane_exit_code(
+                                &sup,
+                                entry.terminal.as_ref(),
+                                &session_id,
+                            )
                             .await,
+                        },
+                        Err(e) => {
+                            // Loud propagation (item 1's discipline,
+                            // extended to this call site): refuse the
+                            // whole stop rather than durably committing a
+                            // plain exit this sentinel might contradict.
+                            // Nothing was alive to signal anyway
+                            // (`alive_pane` is already `None` in this
+                            // branch), so nothing beyond the classification
+                            // write itself is lost — the caller can retry
+                            // once the sentinel is readable again.
+                            send_reply(
+                                &tx,
+                                &ControlMsg::Error {
+                                    req_id,
+                                    message: format!(
+                                        "could not read this session's launch sentinel, so \
+                                         nothing was recorded: {e:#}"
+                                    ),
+                                    kind: ErrorKind::Internal,
+                                },
+                            )
+                            .await;
+                            return;
+                        }
                     }
                 };
                 if let Err(e) = sup.record(&session_id, &entry, stop_intent).await {
@@ -4511,6 +4952,18 @@ async fn handle_control(
                     )
                     .await;
                     return;
+                }
+                // Sentinel lifecycle: if the intent just recorded WAS a
+                // `SentinelError` and it committed, this stop is the
+                // moment that classification became durable — clean up
+                // both files right away rather than waiting for a later
+                // list or reload to notice (item 4/25 of the review-swarm
+                // fix batch; see `cleanup_launch_artifacts`'s own docs).
+                if matches!(
+                    &*entry.outcome.lock().expect("outcome mutex poisoned"),
+                    LastOutcome::Error { .. }
+                ) {
+                    cleanup_launch_artifacts(&sup.state_dir, &session_id).await;
                 }
 
                 // Capture the alt-screen snapshot (if any) BEFORE the kill
@@ -5955,10 +6408,15 @@ mod tests {
             tokio::time::sleep(Duration::from_millis(50)).await;
         }
 
-        let (sessions, _) =
-            Supervisor::reload_sessions(&sup.store, &sup.tmux, &SupervisorSeams::default(), true)
-                .await
-                .expect("reload");
+        let (sessions, _) = Supervisor::reload_sessions(
+            &sup.state_dir,
+            &sup.store,
+            &sup.tmux,
+            &SupervisorSeams::default(),
+            true,
+        )
+        .await
+        .expect("reload");
 
         assert_eq!(
             *sessions["live"].outcome.lock().unwrap(),
@@ -6058,9 +6516,15 @@ mod tests {
             tokio::time::sleep(Duration::from_millis(50)).await;
         }
 
-        Supervisor::reload_sessions(&sup.store, &sup.tmux, &SupervisorSeams::default(), true)
-            .await
-            .expect("reload");
+        Supervisor::reload_sessions(
+            &sup.state_dir,
+            &sup.store,
+            &sup.tmux,
+            &SupervisorSeams::default(),
+            true,
+        )
+        .await
+        .expect("reload");
 
         let rows: HashMap<String, LastOutcome> = sup
             .store

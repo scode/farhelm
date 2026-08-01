@@ -67,6 +67,15 @@ pub enum SessionStatus {
     /// finished — the two call for different actions (restart-with-resume
     /// vs. nothing).
     Interrupted,
+    /// The agent could not be started at all — the launch shim's
+    /// exec-failure sentinel (PLAN_M3.md item 3), read by the supervisor
+    /// and surfaced here with `detail` carrying its own recorded report
+    /// (errno, argv0, or which pre-exec step failed) verbatim. Distinct
+    /// from `Exited`: the agent never ran, so there is nothing to say it
+    /// "finished" — a failed exec and a command that ran and died look
+    /// identical to tmux, and only the supervisor's own sentinel read
+    /// tells them apart (see farhelm-proto's `SessionStatus::Error`).
+    Error { detail: String },
 }
 
 /// Mirror of the helm's session JSON (farhelm-proto `SessionInfo`). Kept
@@ -574,9 +583,17 @@ fn ListView(on_open: EventHandler<Session>) -> Element {
             // is not even the stray-MCP-server residual to accept. The
             // session's agent is definitively not running, so confirming
             // would be asking about a danger that cannot exist.
-            SessionStatus::Exited { .. } | SessionStatus::Interrupted => {
-                do_delete_on_confirm(target.id)
-            }
+            // `Error` joins them for the strongest version yet: the login
+            // shell and the launch shim DID run briefly (the shim is what
+            // WRITES this very sentinel, from inside a real process), but
+            // the AGENT'S OWN exec is what failed (PLAN_M3.md item 3) —
+            // before it, before anything the agent itself might have
+            // spawned. There is no lingering process tree to worry about,
+            // not because nothing ever ran, but because the one thing
+            // that could have left descendants never got the chance to.
+            SessionStatus::Exited { .. }
+            | SessionStatus::Interrupted
+            | SessionStatus::Error { .. } => do_delete_on_confirm(target.id),
             // Unknown must not borrow Alive's "is still running" claim
             // it has no basis for — SPEC.md's no-guessing rule means an
             // unresolved status is presented as exactly that, uncertain,
@@ -1092,6 +1109,16 @@ fn status_badge(status: &SessionStatus, annotation: Option<&str>) -> (&'static s
             ("exited", text)
         }
         SessionStatus::Interrupted => ("interrupted", "interrupted".to_string()),
+        // The shim's exec-failure sentinel (PLAN_M3.md item 3): the agent
+        // never ran at all, which is a different claim from `Exited`'s
+        // "it ran and finished" — so it gets its own word and its own
+        // red-family color (`app.css`'s `.status-badge.error`), the one
+        // case in this match that IS reporting a failure. `detail` (the
+        // shim's own errno/argv0 report) rides straight into the badge
+        // text rather than being tucked behind a tooltip or a separate
+        // element: it is usually short, and it is the one piece of
+        // information that actually explains why the row needs attention.
+        SessionStatus::Error { detail } => ("error", format!("error — {detail}")),
         SessionStatus::Unknown => ("unknown", "unknown".to_string()),
     }
 }
@@ -1109,16 +1136,22 @@ fn status_badge(status: &SessionStatus, annotation: Option<&str>) -> (&'static s
 /// still running and will be killed. Splitting the two apart, consequence
 /// first, is what makes that unclippable regardless of title length.
 ///
-/// Only ever CALLED for `Alive`/`Unknown` while genuinely confirming — see
-/// its own call site in `SessionRow`, gated on `confirming` — but is
-/// written total over `SessionStatus` rather than partial, because
+/// Only ever OPENED from `Alive`/`Unknown` (see `on_delete`'s own match) —
+/// but is written total over `SessionStatus` rather than partial, because
 /// `confirming` is `ListView`'s own state, decoupled from any single
 /// render: a session that was `Alive` when the user opened this prompt
 /// can flip to `Exited` under it (stopped from another client, say)
 /// before either button is clicked, and this function re-runs on every
 /// render off whatever status the row's LATEST prop carries. The
-/// `Exited` and `Interrupted` arms are that residual case's fallback, not
-/// wordings SPEC.md's confirm-contract actually specifies.
+/// `Exited`, `Interrupted`, AND `Error` arms are all that residual case's
+/// fallback, not wordings SPEC.md's confirm-contract actually specifies —
+/// and `Error` is not merely a defensive completeness case: a session
+/// that was genuinely `Alive` when this prompt opened, whose agent then
+/// turns out never to have execed at all (the launch shim's sentinel is
+/// read only once the pane goes dead-or-absent — `service.rs`'s
+/// dead-or-absent gate), can flip straight from `Alive` to `Error` under
+/// an already-open prompt exactly like the `Exited` case above, just with
+/// a narrower window.
 ///
 /// `Interrupted`'s wording is deliberately NOT a killing warning
 /// (PLAN_M3.md item 2): the status exists only because the HOST rebooted,
@@ -1139,6 +1172,13 @@ fn confirm_consequence(status: &SessionStatus) -> &'static str {
         SessionStatus::Exited { .. } => "delete anyway:",
         SessionStatus::Interrupted => {
             "interrupted by a host reboot — nothing left to kill; deleting discards the session:"
+        }
+        // `Error` never OPENS this prompt (see `on_delete`'s own match),
+        // but a prompt already open for an `Alive` session CAN land here —
+        // see this function's own docs — so this arm is reachable, not
+        // merely a defensive completeness case.
+        SessionStatus::Error { .. } => {
+            "the agent never started — nothing to kill; deleting discards the session:"
         }
     }
 }
@@ -1301,6 +1341,19 @@ mod tests {
             status_badge(&SessionStatus::Interrupted, None),
             ("interrupted", "interrupted".to_string())
         );
+        assert_eq!(
+            status_badge(
+                &SessionStatus::Error {
+                    detail: "exec_failed argv0=/nope errno=2".to_string()
+                },
+                None
+            ),
+            (
+                "error",
+                "error — exec_failed argv0=/nope errno=2".to_string()
+            ),
+            "the shim's own recorded detail must reach the badge text, not just its class"
+        );
     }
 
     /// SPEC.md: "'stopped' is not a distinct status" — a user-stopped
@@ -1378,6 +1431,33 @@ mod tests {
         );
         assert!(
             wording.contains("reboot") && wording.contains("discard"),
+            "the honest consequence is losing the session record itself: {wording}"
+        );
+    }
+
+    /// Review-swarm fix batch item 22: `confirm_consequence`'s `Error` arm
+    /// is reachable — not a defensive completeness case — via the exact
+    /// same residual race `Interrupted`'s own test above exercises in
+    /// prose: a confirm prompt opened while a session was `Alive` stays
+    /// open under a LATER render whose status has since moved on, and
+    /// `Error` is one of the statuses it can have moved to. The wording
+    /// must match `Error`'s actual meaning (never started, not merely
+    /// "finished"), not borrow `Interrupted`'s reboot-specific phrasing.
+    #[test]
+    fn error_consequence_promises_no_kill_and_names_no_reboot() {
+        let wording = confirm_consequence(&SessionStatus::Error {
+            detail: "exec_failed argv0=/nope errno=2".to_string(),
+        });
+        assert!(
+            !wording.contains("kills") && !wording.contains("will be killed"),
+            "an agent that never started leaves nothing for a delete to kill: {wording}"
+        );
+        assert!(
+            !wording.contains("reboot"),
+            "an exec failure is not a reboot; the wording must not borrow that framing: {wording}"
+        );
+        assert!(
+            wording.contains("discard"),
             "the honest consequence is losing the session record itself: {wording}"
         );
     }

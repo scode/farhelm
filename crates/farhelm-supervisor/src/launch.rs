@@ -12,6 +12,7 @@
 //! sourcing an SSH-and-type session gets, which is SPEC.md's environment
 //! contract; `-i` is load-bearing (bare `-c` skips `.zshrc`/`.bashrc`).
 
+use anyhow::Context;
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 
@@ -378,6 +379,84 @@ pub fn window_command(shell: &str, farhelm_exe: &Path, spec_path: &Path) -> Vec<
     ]
 }
 
+/// Where a session's per-launch spec file lives:
+/// `<state_dir>/launch/<id>.json`.
+///
+/// Named by SESSION id, not by a per-launch id: today a session gets
+/// exactly one spec-file path for its whole lifetime, so a relaunch
+/// (PR8's territory) writes a fresh spec to this SAME path, silently
+/// superseding whatever an earlier failed launch left behind. That is
+/// also why a stale sentinel from launch N cannot survive to be
+/// misattributed to launch N+1 without deliberate handling — today's half
+/// of that handling is that a CONSUMED sentinel is deleted once its
+/// `Error` outcome commits durably (`service.rs`'s `reload_sessions` and
+/// `ListSessions` handler both document the lifecycle and the rationale);
+/// PR8's own seam note there covers the other half, an UNCONSUMED
+/// sentinel superseded by a fresh launch before anything ever read it.
+/// `service.rs`'s `create_session` and the sentinel reader both call this
+/// SAME function so the two sides can never compute diverging paths for
+/// the same session.
+pub fn spec_path_for_session(state_dir: &Path, id: &str) -> PathBuf {
+    state_dir.join("launch").join(format!("{id}.json"))
+}
+
+/// Read a session's CURRENT-launch exec-failure sentinel, if one exists.
+///
+/// `Ok(None)` is the ordinary case: no launch failure is known for this
+/// session, which covers both "never failed" and "the shim has not run
+/// yet" — this function draws no distinction between them, exactly like
+/// [`LaunchSpec::status_file`]'s own docs on presence-vs-absence.
+///
+/// A read failure that is NOT "the file does not exist" — a permission
+/// error, the path naming a directory instead of a file, content that
+/// fails to decode as UTF-8, or content that decodes but is empty or pure
+/// whitespace — is returned as `Err` rather than folded into `Ok(None)`.
+/// This is deliberate, not over-caution: the sentinel is written through
+/// [`crate::files::write_durable_sync`], the durability-bearing tier
+/// (`crate::files` module docs), whose entire contract is that a reader
+/// only ever observes complete old content, complete new content, or
+/// nothing at all — and [`record_launch_failure`] never writes an empty
+/// report (every call site passes a real, non-empty message). A torn,
+/// corrupt, or empty sentinel is therefore a state this tier is supposed
+/// to make impossible, so encountering one means that promise has been
+/// violated somewhere beneath this function (a hand-edited state dir, a
+/// corrupted filesystem, a filesystem that lied about `fsync`) — exactly
+/// the class of anomaly this crate treats loudly elsewhere
+/// (`LastOutcome::from_columns`'s refusal to guess at a corrupt row is the
+/// same instinct applied to SQLite instead of a plain file). Silently
+/// treating any of these as "no sentinel" would let a launch that truly
+/// failed read back as a plain, wrong `Exited` — precisely the conversion
+/// PLAN_M3.md item 5 forbids.
+pub fn read_launch_sentinel(state_dir: &Path, id: &str) -> anyhow::Result<Option<String>> {
+    let status_path = status_path_for_spec(&spec_path_for_session(state_dir, id));
+    match std::fs::read(&status_path) {
+        Ok(bytes) => {
+            let content = String::from_utf8(bytes).with_context(|| {
+                format!(
+                    "launch sentinel at {} is not valid UTF-8; the durability-bearing write \
+                     tier should make a torn or corrupt sentinel impossible, so this means \
+                     something has gone wrong beneath that promise",
+                    status_path.display()
+                )
+            })?;
+            if content.trim().is_empty() {
+                anyhow::bail!(
+                    "launch sentinel at {} is empty or pure whitespace; the shim never writes \
+                     an empty report, so this is corrupt state, not evidence of anything",
+                    status_path.display()
+                );
+            }
+            Ok(Some(content))
+        }
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        Err(e) => Err(anyhow::Error::from(e).context(format!(
+            "reading launch sentinel at {} (durability-bearing tier; expected to fail only by \
+             absence)",
+            status_path.display()
+        ))),
+    }
+}
+
 /// Deterministically derive a launch's SENTINEL path from its SPEC path —
 /// pure, requiring no JSON parsing — so the shim can still report a
 /// launch failure when the spec itself cannot be read, or turns out to
@@ -510,6 +589,118 @@ fn record_launch_failure(
 mod tests {
     use super::*;
     use std::os::unix::fs::PermissionsExt;
+
+    /// The ordinary case: no launch has ever failed for this session, so
+    /// there is no sentinel file at all, and the reader must say so
+    /// plainly rather than treating a missing file as any kind of error.
+    #[test]
+    fn read_launch_sentinel_is_none_when_nothing_was_ever_written() {
+        let tmp = tempfile::tempdir().unwrap();
+        let result = read_launch_sentinel(tmp.path(), "never-launched").unwrap();
+        assert_eq!(result, None);
+    }
+
+    /// The reader's whole reason to exist: surfacing exactly what
+    /// [`exec_launch_spec`] left behind, at the SAME path
+    /// [`spec_path_for_session`]/[`status_path_for_spec`] derive
+    /// independently — proving the two sides of this contract (the
+    /// writer inside the shim, the reader inside the supervisor) actually
+    /// agree on where a launch's sentinel lives.
+    #[test]
+    fn read_launch_sentinel_reads_back_what_the_shim_wrote() {
+        let tmp = tempfile::tempdir().unwrap();
+        let id = "session-1";
+        let spec_path = spec_path_for_session(tmp.path(), id);
+        std::fs::create_dir_all(spec_path.parent().unwrap()).unwrap();
+        let missing_binary = tmp.path().join("no-such-farhelm-test-binary");
+        let spec = LaunchSpec {
+            argv: vec![missing_binary.to_string_lossy().into_owned()],
+            status_file: status_path_for_spec(&spec_path),
+            session_id: id.to_string(),
+        };
+        std::fs::write(&spec_path, serde_json::to_vec(&spec).unwrap()).unwrap();
+        exec_launch_spec(&spec_path);
+
+        // Compared against the file's FULL content, not merely `contains`:
+        // the reader's whole job is to hand back exactly what is on disk,
+        // and a substring check would not catch a reader that silently
+        // truncated, trimmed, or otherwise mangled the bytes on the way
+        // through.
+        let status_path = status_path_for_spec(&spec_path);
+        let on_disk = std::fs::read_to_string(&status_path).expect("sentinel must exist on disk");
+        let sentinel = read_launch_sentinel(tmp.path(), id)
+            .expect("read must succeed")
+            .expect("a sentinel must exist after the exec failure above");
+        assert_eq!(
+            sentinel, on_disk,
+            "the reader must hand back the exact bytes the shim wrote, not a paraphrase"
+        );
+        assert!(sentinel.contains("exec_failed"));
+    }
+
+    /// Item 17's directory case: the status path naming a DIRECTORY rather
+    /// than a file is a different `read` failure than a plain permission
+    /// error (`EISDIR`, not `EACCES`), and must get the same loud,
+    /// contextual `Err` treatment as every other non-`NotFound` failure —
+    /// never folded into `Ok(None)`, which would silently convert a real
+    /// anomaly (something else has clobbered this launch's sentinel path)
+    /// into "no launch failure known".
+    #[test]
+    fn read_launch_sentinel_reports_a_directory_at_the_status_path_loudly() {
+        let tmp = tempfile::tempdir().unwrap();
+        let id = "session-dir";
+        let status_path = status_path_for_spec(&spec_path_for_session(tmp.path(), id));
+        std::fs::create_dir_all(&status_path).unwrap();
+
+        let err = read_launch_sentinel(tmp.path(), id)
+            .expect_err("a directory at the sentinel path must be a hard error, not absence");
+        assert!(
+            format!("{err:#}").contains("reading launch sentinel"),
+            "must name what it was doing, not just relay a bare OS error: {err:#}"
+        );
+    }
+
+    /// Item 20: the shim never writes an empty report (every
+    /// `record_launch_failure` call site passes a real message), so an
+    /// empty or pure-whitespace sentinel is corrupt state — the same class
+    /// of anomaly as invalid UTF-8 — and must be refused just as loudly,
+    /// not treated as "no sentinel" (`Ok(None)`) nor as an empty-but-valid
+    /// detail string.
+    #[test]
+    fn read_launch_sentinel_rejects_empty_and_whitespace_only_content() {
+        let tmp = tempfile::tempdir().unwrap();
+        for (id, content) in [("empty", ""), ("blank", "   \n\t  ")] {
+            let status_path = status_path_for_spec(&spec_path_for_session(tmp.path(), id));
+            std::fs::create_dir_all(status_path.parent().unwrap()).unwrap();
+            std::fs::write(&status_path, content).unwrap();
+
+            let err = read_launch_sentinel(tmp.path(), id)
+                .expect_err("an empty or whitespace-only sentinel must be a hard error");
+            assert!(
+                format!("{err:#}").contains("empty or pure whitespace"),
+                "{id}: {err:#}"
+            );
+        }
+    }
+
+    /// The loud half of the reader's contract (its own docs): a sentinel
+    /// that fails to decode as UTF-8 is exactly the anomaly the
+    /// durability-bearing write tier is supposed to make impossible, so
+    /// it must come back as `Err`, never be folded into `Ok(None)` as if
+    /// nothing had ever gone wrong. A silent "no sentinel" here would let
+    /// a genuine launch failure read back as a plain, wrong `Exited`.
+    #[test]
+    fn read_launch_sentinel_refuses_to_treat_invalid_utf8_as_absent() {
+        let tmp = tempfile::tempdir().unwrap();
+        let id = "session-2";
+        let status_path = status_path_for_spec(&spec_path_for_session(tmp.path(), id));
+        std::fs::create_dir_all(status_path.parent().unwrap()).unwrap();
+        std::fs::write(&status_path, [0xff, 0xfe, 0xfd]).unwrap();
+
+        let err = read_launch_sentinel(tmp.path(), id)
+            .expect_err("invalid UTF-8 must be a hard error, not a silent absence");
+        assert!(format!("{err:#}").contains("not valid UTF-8"));
+    }
 
     /// The shim's own end-to-end path from a spec on disk to a durable
     /// sentinel: an argv0 GUARANTEED not to exist (a name inside this

@@ -90,9 +90,20 @@ const META_ROW_ID: i64 = 0;
 /// `Running`, and the later write won). Once `Exited`, `Interrupted`, or
 /// `Error`, an outcome only ever accepts MONOTONIC enrichment: a missing
 /// exit code may be filled in by an observation that has one, and a plain
-/// exit may gain a stop annotation, but nothing ever loses information or
-/// crosses terminal classes (SPEC.md's no-guessing rule: retained
-/// knowledge is not a guess).
+/// exit may gain a stop annotation, but nothing ever loses information
+/// (SPEC.md's no-guessing rule: retained knowledge is not a guess).
+///
+/// One transition crosses terminal classes anyway, and it is not an
+/// exception to that rule so much as its sharpest application: a launch
+/// sentinel (`Transition::SentinelError`) reclassifies an `Interrupted` or
+/// an UNANNOTATED `Exited` straight to `Error`, because both are
+/// themselves just INFERENCES from an ordinary dead-or-vanished pane —
+/// exactly the evidence class a sentinel is defined to outrank — and
+/// protecting a wrong inference with terminal-stickiness would defeat the
+/// reason the sentinel is read at all. A genuinely ANNOTATED `Exited` (a
+/// real stop) is retained knowledge, not an inference, and is the one
+/// terminal state a sentinel still cannot cross; see `Transition::apply`'s
+/// own docs for the full rule.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum LastOutcome {
     /// A launch was begun but never confirmed. Written before the tmux
@@ -142,14 +153,20 @@ pub enum LastOutcome {
     /// The host rebooted while this session was still live — `Launching`,
     /// `Running`, or `StopRequested`: tmux is gone, so nothing can ever be
     /// probed about this agent again (PLAN_M3.md item 2). Written only by
-    /// the boot-id conversion in [`SessionStore::record_boot`], and only
-    /// ever cleared by a restart or a delete.
+    /// the boot-id conversion in [`SessionStore::record_boot`], and
+    /// otherwise cleared only by a restart or a delete — the one other
+    /// route out is a launch sentinel discovered AFTER the conversion
+    /// already ran, which reclassifies straight to `Error` rather than
+    /// leaving a reboot's mere inference (nothing could be probed) stand
+    /// in for a fact this process can actually now name (`Transition`'s
+    /// `SentinelError` docs).
     Interrupted,
     /// The agent could not be started at all — the launch shim's
-    /// exec-failure sentinel (PLAN_M3.md item 3). This PR persists and
-    /// reports the state so the classification precedence has somewhere
-    /// to slot it, but writes it nowhere: the sentinel READER is the next
-    /// PR's, deliberately (see `service.rs`'s classification comment).
+    /// exec-failure sentinel (PLAN_M3.md item 3), read by
+    /// `crate::launch::read_launch_sentinel` and committed via
+    /// [`Transition::SentinelError`]. `detail` is the shim's own recorded
+    /// report (errno, argv0, or which pre-exec step failed), surfaced
+    /// verbatim on the wire as `SessionStatus::Error`'s `detail`.
     Error { detail: String },
 }
 
@@ -266,6 +283,32 @@ pub enum Transition {
         pane: String,
         exit_code: Option<i32>,
     },
+    /// The launch shim's exec-failure sentinel was found for this
+    /// session's CURRENT launch (`crate::launch::read_launch_sentinel`).
+    /// `detail` is the shim's own recorded report, carried straight
+    /// through to [`LastOutcome::Error`] and from there to the wire's
+    /// `SessionStatus::Error` (PLAN_M3.md item 3).
+    ///
+    /// `pane`, when `Some`, is whatever pane the CALLER already had in
+    /// hand for this row at the moment it read the sentinel — mirrors
+    /// [`RediscoveredExit`]'s reasoning for why the pane rides the SAME
+    /// commit as the outcome it accompanies, even though `Error`'s status
+    /// computation (`service::session_status`) does not itself consult
+    /// the pane. Every call site fills this differently: `reload_sessions`
+    /// passes whatever its own pane lookup found (by session name for a
+    /// row with no stored pane yet, by pane id otherwise — either shape,
+    /// not only the empty-pane `Launching` case); `ListSessions` passes
+    /// `None` outright (it only ever visits sessions it already tracks a
+    /// `Terminal` for, so there is nothing new to rediscover); `StopSession`
+    /// passes the pane its own already-loaded `SessionEntry` carries.
+    /// Recording it anyway keeps the stored row internally consistent with
+    /// what tmux actually shows, for whatever later reads the `pane`
+    /// column directly (diagnostics, a future migration) — it is never
+    /// load-bearing for `Error`'s own classification.
+    SentinelError {
+        detail: String,
+        pane: Option<String>,
+    },
 }
 
 impl Transition {
@@ -278,9 +321,15 @@ impl Transition {
     ///
     /// The rules, and why each exists:
     ///
-    /// - **Terminal classes never change class.** `Interrupted` and
-    ///   `Error` describe something no exit observation can contradict —
+    /// - **Terminal classes never change class from an ORDINARY
+    ///   observation.** `Interrupted` and `Error` describe something no
+    ///   `ObservedExit`/`RediscoveredExit`/`StopCompleted` can contradict —
     ///   a reboot destroyed the evidence, or the agent never ran at all.
+    ///   `SentinelError` is the one transition that still crosses this
+    ///   boundary, and only into `Interrupted` or an unannotated `Exited`
+    ///   (never into `Error` itself, which stays genuinely immutable); see
+    ///   its own bullet below for why that is not a contradiction of this
+    ///   one.
     /// - **`Exited` enriches monotonically.** tmux publishes `pane_dead`
     ///   before `pane_dead_status` becomes readable, so the FIRST observer
     ///   of an exit routinely has no code while a later one does; SPEC.md
@@ -292,6 +341,35 @@ impl Transition {
     ///   observer commits first, the answer is the same.
     /// - **Nothing resurrects.** `ConfirmRunning` against a terminal
     ///   outcome is refused rather than reopening a closed session.
+    /// - **A sentinel wins over every state EXCEPT a genuine stop
+    ///   annotation or an already-recorded error.** `SentinelError`
+    ///   reclassifies `Launching`, `Running`, or `StopRequested` straight
+    ///   to `Error` (PLAN_M3.md item 3: "the agent never started" outranks
+    ///   any exit inference, because a failed exec and a command that ran
+    ///   and died leave an identical dead pane behind) — that much needs no
+    ///   special case, since none of those are terminal yet. What DOES
+    ///   need a special case, and is handled by the two `SentinelError`
+    ///   arms placed BEFORE the general terminal-class catch-all below,
+    ///   is that a sentinel discovered late (a stop or a list committed an
+    ///   INFERRED `Exited` or the reboot conversion committed
+    ///   `Interrupted` before anything ever read the file) must still win:
+    ///   both were themselves just inferences from an ordinary dead pane
+    ///   or a vanished terminal, exactly the evidence a sentinel is
+    ///   defined to outrank, and letting terminal-stickiness protect a
+    ///   WRONG terminal classification would defeat the entire point of
+    ///   reading the sentinel at all. The one thing that DOES block it: an
+    ///   `Exited` carrying a stop annotation, because that means a REAL
+    ///   run was observed alive long enough for the user to stop it — a
+    ///   sentinel and a stop annotation cannot both be true of the same
+    ///   launch, so an annotated exit is retained genuine knowledge, not
+    ///   an inference to override. An already-`Error` row is simply
+    ///   unchanged (idempotent), and `Interrupted`/unannotated-`Exited`
+    ///   fall out of the same two arms rather than needing their own.
+    ///   The one case this policy does NOT cover on its own — a sentinel
+    ///   that must outrank the reboot-interrupted conversion AS IT HAPPENS,
+    ///   not just arrive after it — is handled a level up, by
+    ///   `SessionStore::record_boot` applying sentinel overrides before
+    ///   its blanket interrupt `UPDATE` runs; see that function's docs.
     pub fn apply(&self, current: &LastOutcome) -> Option<LastOutcome> {
         /// Merge into an existing `Exited`, keeping every fact either side
         /// has. Returns `None` when the merge changes nothing.
@@ -323,7 +401,39 @@ impl Transition {
         use LastOutcome as O;
         use Transition as T;
         match (self, current) {
-            // Nothing may reopen or reclassify these.
+            // A sentinel supersedes an INFERRED terminal state — `Interrupted`
+            // (the reboot conversion) or an `Exited` with NO stop annotation
+            // (nothing but a dead-or-vanished pane ever backed either one).
+            // Placed before the general terminal-class catch-all below so
+            // these two arms see `current` first; every other transition
+            // still hits that catch-all unchanged.
+            (
+                T::SentinelError { detail, .. },
+                O::Launching
+                | O::Running
+                | O::StopRequested
+                | O::Interrupted
+                | O::Exited {
+                    annotation: None, ..
+                },
+            ) => Some(O::Error {
+                detail: detail.clone(),
+            }),
+            // ...but a GENUINE stop annotation is retained knowledge, not
+            // an inference: it means a real run was observed alive long
+            // enough for the user to stop it, which cannot be true of the
+            // same launch a sentinel also claims never started. And an
+            // already-`Error` row is simply unchanged (idempotent).
+            (
+                T::SentinelError { .. },
+                O::Exited {
+                    annotation: Some(_),
+                    ..
+                }
+                | O::Error { .. },
+            ) => None,
+
+            // Nothing else may reopen or reclassify these.
             (_, O::Interrupted | O::Error { .. }) => None,
 
             // A confirmed launch never resurrects a closed session, and
@@ -371,6 +481,7 @@ impl Transition {
             Transition::ConfirmRunning { pane } | Transition::RediscoveredExit { pane, .. } => {
                 Some(pane)
             }
+            Transition::SentinelError { pane, .. } => pane.as_deref(),
             _ => None,
         }
     }
@@ -383,15 +494,21 @@ impl Transition {
 type OutcomeColumns = (String, Option<i32>, Option<String>, Option<String>);
 
 /// A failure injected INSIDE [`SessionStore::record_boot`]'s transaction,
-/// between the new boot id and the interrupted conversion.
+/// between the sentinel overrides and the blanket interrupted conversion —
+/// only ever called when `interrupt_live` is true, since that is the only
+/// case where either of those two statements runs at all.
 ///
-/// This exists for one test that cannot be written any other way: the
+/// This exists for tests that cannot be written any other way: the
 /// crash-boundary case PLAN_M3.md item 2 calls out, where a crash between
-/// those two writes would — if they were not one transaction — let the
-/// next startup see the new boot id already stored, take the same-boot
-/// path, and misclassify every session the reboot actually interrupted.
-/// Returning an error rolls the whole transaction back, which is exactly
-/// what a crash at that instant does. Production always passes `None`.
+/// the new boot id and the interrupted conversion would — if they were not
+/// one transaction — let the next startup see the new boot id already
+/// stored, take the same-boot path, and misclassify every session the
+/// reboot actually interrupted; and the sharper version PLAN_M3.md item 3
+/// adds, where a crash between the sentinel overrides and the blanket
+/// conversion must roll BOTH back together, not leave a partially-applied
+/// mix of `error` and `interrupted` rows behind. Returning an error rolls
+/// the whole transaction back, which is exactly what a crash at that
+/// instant does. Production always passes `None`.
 pub type BootTxFault = Arc<dyn Fn() -> anyhow::Result<()> + Send + Sync>;
 
 /// The stored fields the supervisor actually consumes: wire metadata plus
@@ -849,10 +966,31 @@ impl SessionStore {
     ///
     /// `fault` is the injection point that makes that boundary testable;
     /// see [`BootTxFault`]. Production passes `None`.
+    ///
+    /// `sentinel_overrides` is PLAN_M3.md item 3's supersession of this
+    /// same conversion: a row about to be blanket-converted to
+    /// `Interrupted` may instead have a launch sentinel on disk proving
+    /// its agent never started at all, and "never started" outranks "lost
+    /// to a reboot" (`Transition::apply`'s docs on `SentinelError`) even
+    /// though that transition's OWN policy cannot reach far enough to say
+    /// so — by the time a normal `Transition` runs, `Interrupted` is
+    /// already terminal and refuses every further reclassification. The
+    /// override has to land INSIDE this same transaction, before the
+    /// blanket `UPDATE`, so the two can never race: this method applies
+    /// each override first (flipping that row straight to `error`), and
+    /// the blanket `UPDATE`'s `WHERE outcome_state IN (...)` then simply
+    /// no longer matches it — no `NOT IN` clause needed, because the row
+    /// already left the states that clause selects. A crash between the
+    /// overrides and the blanket update rolls the whole transaction back
+    /// with the rest of `record_boot`'s atomicity guarantee, so the next
+    /// startup simply redoes both steps together. Empty for every caller
+    /// that is not converting a reboot (`interrupt_live == false`) or has
+    /// no sentinel-bearing rows to override.
     pub async fn record_boot(
         &self,
         boot_id: &str,
         interrupt_live: bool,
+        sentinel_overrides: HashMap<String, String>,
         fault: Option<BootTxFault>,
     ) -> anyhow::Result<()> {
         let conn = Arc::clone(&self.conn);
@@ -866,10 +1004,29 @@ impl SessionStore {
                 rusqlite::params![META_ROW_ID, boot_id],
             )
             .context("storing boot id")?;
-            if let Some(fault) = fault {
-                fault()?;
-            }
             if interrupt_live {
+                // Sentinel overrides FIRST: each affected row leaves the
+                // 'launching'/'running'/'stop_requested' states before the
+                // blanket UPDATE below ever runs, which is what makes the
+                // two statements mutually exclusive without an explicit
+                // `NOT IN` — see this method's own docs.
+                for (id, detail) in &sentinel_overrides {
+                    tx.execute(
+                        "UPDATE sessions SET outcome_state = 'error', exit_code = NULL, \
+                         annotation = NULL, error_detail = ?2 \
+                         WHERE id = ?1 \
+                         AND outcome_state IN ('launching', 'running', 'stop_requested')",
+                        rusqlite::params![id, detail],
+                    )
+                    .context("applying a sentinel override ahead of the boot conversion")?;
+                }
+                // The fault seam's exact position: after the overrides have
+                // been applied, before the blanket conversion runs — see
+                // `BootTxFault`'s own docs for why this specific boundary
+                // is the one worth a dedicated injection point.
+                if let Some(fault) = fault {
+                    fault()?;
+                }
                 tx.execute(
                     "UPDATE sessions SET outcome_state = 'interrupted', exit_code = NULL, \
                      annotation = NULL, error_detail = NULL \
@@ -1246,6 +1403,91 @@ mod tests {
                     detail: "ENOENT".into(),
                 },
                 Transition::StopCompleted { exit_code: None },
+                None,
+            ),
+            // A sentinel reclassifies every non-terminal state to `Error`
+            // — "never started" outranks the inference each of these
+            // states would otherwise be probed against (PLAN_M3.md item
+            // 3).
+            (
+                LastOutcome::Launching,
+                Transition::SentinelError {
+                    detail: "exec_failed errno=2".into(),
+                    pane: None,
+                },
+                Some(LastOutcome::Error {
+                    detail: "exec_failed errno=2".into(),
+                }),
+            ),
+            (
+                LastOutcome::Running,
+                Transition::SentinelError {
+                    detail: "exec_failed errno=13".into(),
+                    pane: Some("%3".into()),
+                },
+                Some(LastOutcome::Error {
+                    detail: "exec_failed errno=13".into(),
+                }),
+            ),
+            (
+                LastOutcome::StopRequested,
+                Transition::SentinelError {
+                    detail: "exec_failed errno=2".into(),
+                    pane: None,
+                },
+                Some(LastOutcome::Error {
+                    detail: "exec_failed errno=2".into(),
+                }),
+            ),
+            // ...and — the sharper half of PLAN_M3.md item 3 — a sentinel
+            // discovered LATE still wins against an `Interrupted` or an
+            // UNANNOTATED `Exited`, because both are themselves only
+            // inferences from an ordinary dead-or-vanished pane: exactly
+            // the evidence a sentinel is defined to outrank. This is what
+            // stops a stop or a list from locking in a wrong classification
+            // by committing an inferred exit before anything ever read the
+            // sentinel file.
+            (
+                exited(Some(0), None),
+                Transition::SentinelError {
+                    detail: "exec_failed errno=2".into(),
+                    pane: None,
+                },
+                Some(LastOutcome::Error {
+                    detail: "exec_failed errno=2".into(),
+                }),
+            ),
+            (
+                LastOutcome::Interrupted,
+                Transition::SentinelError {
+                    detail: "exec_failed errno=2".into(),
+                    pane: None,
+                },
+                Some(LastOutcome::Error {
+                    detail: "exec_failed errno=2".into(),
+                }),
+            ),
+            // ...but a GENUINELY annotated exit (a real stop) is retained
+            // knowledge, not an inference — a sentinel and a stop
+            // annotation cannot both be true of the same launch — so this
+            // is the one terminal state a sentinel still cannot cross. An
+            // already-`Error` row is simply unchanged (idempotent).
+            (
+                exited(Some(0), stopped()),
+                Transition::SentinelError {
+                    detail: "exec_failed errno=2".into(),
+                    pane: None,
+                },
+                None,
+            ),
+            (
+                LastOutcome::Error {
+                    detail: "ENOENT".into(),
+                },
+                Transition::SentinelError {
+                    detail: "exec_failed errno=2".into(),
+                    pane: None,
+                },
                 None,
             ),
         ];
@@ -1739,7 +1981,7 @@ mod tests {
         force_outcome(&store, "already", &LastOutcome::Interrupted);
 
         store
-            .record_boot("boot-b", true, None)
+            .record_boot("boot-b", true, HashMap::new(), None)
             .await
             .expect("record boot");
 
@@ -1762,6 +2004,271 @@ mod tests {
         );
     }
 
+    /// PLAN_M3.md item 3's precedence, pinned at the exact boundary it is
+    /// hardest to get right: a row about to be blanket-converted to
+    /// `Interrupted` by THIS SAME call must land on `Error` instead when a
+    /// sentinel override names it, and every OTHER live row still becomes
+    /// `Interrupted` normally. Without `record_boot` applying overrides
+    /// before its blanket `UPDATE` (see that method's own docs), this row
+    /// would already be `Interrupted` — and therefore terminal and immune
+    /// to any further reclassification — by the time a normal
+    /// `SentinelError` transition could ever reach it.
+    #[tokio::test]
+    async fn record_boot_prefers_a_sentinel_override_over_interrupting_that_row() {
+        let (_dir, store) = fresh_store().await;
+        insert_running(&store, "crashed-launch").await;
+        force_outcome(&store, "crashed-launch", &LastOutcome::Launching);
+        insert_running(&store, "plain-live").await;
+
+        let mut overrides = HashMap::new();
+        overrides.insert(
+            "crashed-launch".to_string(),
+            "exec_failed argv0=/nope errno=2".to_string(),
+        );
+        store
+            .record_boot("boot-b", true, overrides, None)
+            .await
+            .expect("record boot with a sentinel override");
+
+        assert_eq!(
+            outcome_of(&store, "crashed-launch").await,
+            LastOutcome::Error {
+                detail: "exec_failed argv0=/nope errno=2".to_string()
+            },
+            "a sentinel-bearing row must classify error, never interrupted, even though a \
+             reboot happened"
+        );
+        assert_eq!(
+            outcome_of(&store, "plain-live").await,
+            LastOutcome::Interrupted,
+            "a row with no override still gets the ordinary reboot conversion"
+        );
+    }
+
+    /// The override must win regardless of WHICH non-terminal state a row
+    /// was in when the reboot landed — `Launching` (the crash-before-
+    /// confirmation case above), but also `Running` (the ordinary case: a
+    /// launch that DID confirm before its agent's exec failed) and
+    /// `StopRequested` (a stop whose kill sweep never got to report back).
+    /// All three are states `record_boot`'s blanket conversion would
+    /// otherwise sweep into `Interrupted` in one `UPDATE`, so the override
+    /// has to beat that same statement from every one of them, not just
+    /// the one case the test above happens to pin.
+    #[tokio::test]
+    async fn record_boot_override_wins_from_every_non_terminal_state() {
+        for seed in [
+            LastOutcome::Launching,
+            LastOutcome::Running,
+            LastOutcome::StopRequested,
+        ] {
+            let (_dir, store) = fresh_store().await;
+            insert_running(&store, "row").await;
+            force_outcome(&store, "row", &seed);
+
+            let mut overrides = HashMap::new();
+            overrides.insert("row".to_string(), "exec_failed errno=2".to_string());
+            store
+                .record_boot("boot-b", true, overrides, None)
+                .await
+                .expect("record boot with a sentinel override");
+
+            assert_eq!(
+                outcome_of(&store, "row").await,
+                LastOutcome::Error {
+                    detail: "exec_failed errno=2".to_string()
+                },
+                "a sentinel override must win starting from {seed:?}"
+            );
+        }
+    }
+
+    /// PLAN_M3.md item 3's crash-boundary sibling to the item-2 test above:
+    /// a fault injected AFTER the sentinel overrides have been applied but
+    /// BEFORE the blanket interrupt conversion runs must roll back BOTH —
+    /// the override included — not just the conversion. Without this, a
+    /// crash at exactly that instant could leave an override applied (a row
+    /// durably `error`) while the boot id itself never committed, and the
+    /// next startup — seeing the OLD boot id again — would redo the whole
+    /// reboot classification from a store that already disagreed with
+    /// itself about which sessions were live.
+    #[tokio::test]
+    async fn a_fault_between_overrides_and_the_blanket_conversion_rolls_back_both() {
+        let (_dir, store) = fresh_store().await;
+        insert_running(&store, "sentinel-row").await;
+        force_outcome(&store, "sentinel-row", &LastOutcome::Launching);
+        insert_running(&store, "plain-row").await;
+
+        let mut overrides = HashMap::new();
+        overrides.insert(
+            "sentinel-row".to_string(),
+            "exec_failed errno=2".to_string(),
+        );
+        let fault: BootTxFault = Arc::new(|| anyhow::bail!("simulated crash after overrides"));
+        let err = store
+            .record_boot("boot-b", true, overrides.clone(), Some(fault))
+            .await
+            .expect_err("the injected failure must fail the call");
+        assert!(format!("{err:#}").contains("simulated crash"));
+
+        assert_eq!(
+            store.boot_id().await.expect("boot id"),
+            None,
+            "a rolled-back transaction must not leave the new boot id behind either"
+        );
+        assert_eq!(
+            outcome_of(&store, "sentinel-row").await,
+            LastOutcome::Launching,
+            "the override itself must roll back, not just the blanket conversion"
+        );
+        assert_eq!(
+            outcome_of(&store, "plain-row").await,
+            LastOutcome::Running,
+            "no half-applied conversion"
+        );
+
+        // The retry, with no injected failure: both the override and the
+        // ordinary conversion land together.
+        store
+            .record_boot("boot-b", true, overrides, None)
+            .await
+            .expect("retry");
+        assert_eq!(
+            outcome_of(&store, "sentinel-row").await,
+            LastOutcome::Error {
+                detail: "exec_failed errno=2".to_string()
+            }
+        );
+        assert_eq!(
+            outcome_of(&store, "plain-row").await,
+            LastOutcome::Interrupted
+        );
+    }
+
+    /// The store persists a `SentinelError`'s pane alongside its outcome in
+    /// ONE statement, exactly like `RediscoveredExit` — a `Launching` row's
+    /// pane is empty until something writes it, and a crash between an
+    /// outcome write and a separate pane write would resurrect the row as
+    /// `Running` (empty pane) on the next reload. Pinned at the store level
+    /// (not just via `Transition::apply`'s pure function, which never
+    /// touches SQLite) because `Transition::pane`'s wiring into the actual
+    /// `UPDATE` statement is exactly what a pure-function test cannot
+    /// exercise.
+    #[tokio::test]
+    async fn sentinel_error_commits_its_pane_with_its_outcome() {
+        let (_dir, store) = fresh_store().await;
+        insert_running(&store, "row").await;
+        force_outcome(&store, "row", &LastOutcome::Launching);
+
+        store
+            .transition(
+                "row",
+                Transition::SentinelError {
+                    detail: "exec_failed errno=2".to_string(),
+                    pane: Some("%9".to_string()),
+                },
+            )
+            .await
+            .expect("transition");
+
+        let row = store
+            .load_all()
+            .await
+            .expect("load")
+            .into_iter()
+            .find(|r| r.id == "row")
+            .expect("row must still exist");
+        assert_eq!(
+            row.outcome,
+            LastOutcome::Error {
+                detail: "exec_failed errno=2".to_string()
+            }
+        );
+        assert_eq!(
+            row.pane, "%9",
+            "the pane must commit in the SAME statement as the Error outcome"
+        );
+    }
+
+    /// PLAN_M3.md item 3's addition-18 regression: a sentinel-bearing row
+    /// that was ALREADY (mis)classified as an inferred `Exited` or
+    /// `Interrupted` — reachable in this unmerged stack's own dev databases
+    /// from before the sentinel reader existed, since PR4 shipped
+    /// `Interrupted`/inferred-`Exited` writers with no reader yet to
+    /// supersede them — must still reclassify to `Error` once a later pass
+    /// reads the sentinel. Seeded both ways in one test since both are the
+    /// same rule.
+    #[tokio::test]
+    async fn a_sentinel_reclassifies_a_row_already_recorded_as_inferred_exited_or_interrupted() {
+        let (_dir, store) = fresh_store().await;
+        insert_running(&store, "already-exited").await;
+        force_outcome(
+            &store,
+            "already-exited",
+            &LastOutcome::Exited {
+                exit_code: Some(1),
+                annotation: None,
+            },
+        );
+        insert_running(&store, "already-interrupted").await;
+        force_outcome(&store, "already-interrupted", &LastOutcome::Interrupted);
+
+        for id in ["already-exited", "already-interrupted"] {
+            store
+                .transition(
+                    id,
+                    Transition::SentinelError {
+                        detail: "exec_failed errno=2".to_string(),
+                        pane: None,
+                    },
+                )
+                .await
+                .expect("transition");
+            assert_eq!(
+                outcome_of(&store, id).await,
+                LastOutcome::Error {
+                    detail: "exec_failed errno=2".to_string()
+                },
+                "{id} must reclassify from an INFERRED terminal state to Error"
+            );
+        }
+    }
+
+    /// The one terminal state a sentinel still cannot cross: a GENUINE stop
+    /// annotation, because it is retained knowledge (a real run was
+    /// observed alive) rather than an inference a sentinel could outrank.
+    #[tokio::test]
+    async fn a_sentinel_never_overrides_a_genuinely_annotated_exit() {
+        let (_dir, store) = fresh_store().await;
+        insert_running(&store, "stopped").await;
+        force_outcome(
+            &store,
+            "stopped",
+            &LastOutcome::Exited {
+                exit_code: Some(0),
+                annotation: Some(farhelm_proto::STOP_ANNOTATION.to_string()),
+            },
+        );
+
+        let committed = store
+            .transition(
+                "stopped",
+                Transition::SentinelError {
+                    detail: "exec_failed errno=2".to_string(),
+                    pane: None,
+                },
+            )
+            .await
+            .expect("transition");
+        assert_eq!(
+            committed,
+            Some(LastOutcome::Exited {
+                exit_code: Some(0),
+                annotation: Some(farhelm_proto::STOP_ANNOTATION.to_string()),
+            }),
+            "a genuinely annotated exit must survive a sentinel unchanged"
+        );
+    }
+
     /// The same-boot half of the same call: adopting a boot id (a pre-M3
     /// database's first M3 startup) must store it and change NOTHING else.
     /// A conversion that ran unconditionally would interrupt every live
@@ -1774,7 +2281,7 @@ mod tests {
         force_outcome(&store, "starting", &LastOutcome::Launching);
 
         store
-            .record_boot("boot-a", false, None)
+            .record_boot("boot-a", false, HashMap::new(), None)
             .await
             .expect("adopt");
 
@@ -1798,14 +2305,14 @@ mod tests {
     async fn a_failure_inside_the_boot_transaction_leaves_the_next_startup_correct() {
         let (_dir, store) = fresh_store().await;
         store
-            .record_boot("boot-a", false, None)
+            .record_boot("boot-a", false, HashMap::new(), None)
             .await
             .expect("first boot");
         insert_running(&store, "live").await;
 
         let fault: BootTxFault = Arc::new(|| anyhow::bail!("simulated crash mid-transaction"));
         let err = store
-            .record_boot("boot-b", true, Some(fault))
+            .record_boot("boot-b", true, HashMap::new(), Some(fault))
             .await
             .expect_err("the injected failure must fail the call");
         assert!(format!("{err:#}").contains("simulated crash"));
@@ -1823,7 +2330,7 @@ mod tests {
 
         // The next startup: same reboot, no injected failure.
         store
-            .record_boot("boot-b", true, None)
+            .record_boot("boot-b", true, HashMap::new(), None)
             .await
             .expect("retry");
         assert_eq!(outcome_of(&store, "live").await, LastOutcome::Interrupted);
