@@ -4,13 +4,16 @@ Run coding agents (Claude Code, Codex, other terminal agents) on machines you co
 interface, through their real TUIs. See SPEC.md for what this is and is not, SPEC_impl.md for how it is built and why,
 and PLAN.md for where the build currently stands.
 
-NOTE: This is milestone-1 software: one session, one host, argv-driven setup. Usable for real work, minimal in
-everything else. Two caveats worth knowing before that real work: the helm's loopback API carries no authentication yet
-(the web token is a later milestone), so any local account on the helm's machine can drive your sessions — treat
-multi-user hosts accordingly; and the `--agent` invocation is ordinary argv, visible to every local user via `ps`, so
-credentials do not belong in it.
+NOTE: This is milestone-2 software: several sessions at once, one host, argv-driven setup. Sessions survive a supervisor
+restart (persisted metadata, and a still-viewable terminal whenever the private tmux server survived too); resuming an
+interrupted agent conversation and finer restart classification are M3's narrower addition on top of that, not a
+prerequisite for restarts to work at all today. Usable for real work, minimal in everything else. Two caveats worth
+knowing before that real work: the helm's loopback API carries no authentication yet (the web token is a later
+milestone), so any local account on the helm's machine can drive your sessions — treat multi-user hosts accordingly; and
+every agent invocation (the startup one below, or one entered through the GUI's create dialog) is ordinary argv, visible
+to every local user via `ps`, so credentials do not belong in it.
 
-## Trying it (M1)
+## Trying it (M2)
 
 Prerequisites: Rust with the `wasm32-unknown-unknown` target (`rustup target add wasm32-unknown-unknown`), tmux on every
 host involved, and `cargo binstall dioxus-cli@0.7.9` (or `cargo install dioxus-cli@0.7.9` — match the workspace's dioxus
@@ -31,6 +34,12 @@ first time a session is attached) and everything else still works. Ubuntu 24.04 
   alive, or exited with the code when known), refreshing on its own every few seconds. Click a row to open its terminal;
   a back control returns to the list. Close the tab, reopen it later: same session, scrollback intact, the agent never
   noticed.
+- "new session" opens an inline form (working directory and agent command required, title optional); submitting launches
+  the agent and takes you straight into its terminal. A bad working directory fails the create in place, with the
+  supervisor's own error shown next to the form and nothing created.
+- Each row also has stop and delete. Stop kills the agent and its whole process tree; the session stays listed, its
+  terminal still viewable. Delete removes the session and its stored state — with an inline confirmation first whenever
+  the agent might still be alive.
 
 The desktop window is the same UI in a wry webview: `cargo run -p farhelm-ui --features desktop` with `FARHELM_URL`
 pointing at the helm (default `http://127.0.0.1:7433`).
