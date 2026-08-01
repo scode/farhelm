@@ -83,7 +83,7 @@ const BUSY_TIMEOUT: Duration = Duration::from_secs(5);
 /// step in `apply_schema`: version 2 (PLAN_M3.md item 2 — the durable
 /// last-known outcome and the boot id) is the first real migration this
 /// database has ever had, and the template every later one follows.
-const SCHEMA_VERSION: i64 = 5;
+const SCHEMA_VERSION: i64 = 6;
 
 /// The sole row id of [`supervisor_meta`](apply_schema) — the table is
 /// single-row by construction (a `CHECK` on this value), so every read and
@@ -668,13 +668,37 @@ pub struct PriorRun {
     /// never confirmed one. Restored alongside the outcome so an aborted
     /// restart leaves the row describing the same terminal it did before.
     pub pane: String,
+    /// Whether the previous run was scope-wrapped
+    /// ([`StoredSession::launch_scoped`]).
+    ///
+    /// Restored with the rest for the same reason the pane is: an aborted
+    /// restart must leave the row describing the run that is (or was)
+    /// actually there. Dropping it would leave a session whose stop silently
+    /// degraded to sweep-only, because the row would then describe the
+    /// abandoned generation — whose scope never existed — rather than the
+    /// live run, whose does.
+    pub scoped: bool,
 }
+
+/// The columns [`SessionStore::begin_relaunch`] reads before deciding
+/// whether it may open a new generation: the outcome quartet, the pane,
+/// the current generation, the captured conversation, the ambiguity flag,
+/// and the current launch's scope selection — in that positional order.
+///
+/// Named only because the tuple is wide enough that clippy (rightly) asks
+/// for it; it has exactly one producer and one consumer, both inside that
+/// function's transaction.
+type RelaunchBasisColumns = (OutcomeColumns, String, i64, Option<String>, i64, i64);
 
 /// The new launch generation a restart claimed, and what it replaced.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RelaunchClaim {
     pub generation: i64,
     pub prior: PriorRun,
+    /// Whether this new generation committed to running under a scope
+    /// ([`StoredSession::launch_scoped`]), handed back so the launch that
+    /// follows wraps itself exactly as the row now says it did.
+    pub scoped: bool,
 }
 
 /// What [`SessionStore::begin_relaunch`] found when it tried to open a new
@@ -1008,6 +1032,29 @@ pub struct StoredSession {
     /// generation N can never be mistaken for generation N+1's, because the
     /// two are different paths rather than the same path written twice.
     pub generation: i64,
+    /// Whether this LAUNCH was wrapped in its own systemd transient scope
+    /// (PLAN_M3.md item 10), as opposed to relying on the portable sweep
+    /// alone.
+    ///
+    /// The SELECTION only — never the unit's name. The name is a pure
+    /// function of [`StoredSession::id`] and [`StoredSession::generation`]
+    /// (`crate::scope::unit_name`) and is re-derived at every use, so no
+    /// value this database holds can aim a kill at a unit belonging to
+    /// another session; see the version-6 migration for the full argument.
+    ///
+    /// Per-launch, like the generation it is derived alongside: re-decided
+    /// and re-recorded by every create and every relaunch, because a host
+    /// can gain or lose its user manager between two launches of the same
+    /// session and a stale claim would send stop hunting for a unit nothing
+    /// ever created.
+    ///
+    /// Durable so that stop still knows what a launch this supervisor never
+    /// performed chose — a restarted supervisor has no memory of the probe
+    /// that produced it. `true` is not a promise the unit still EXISTS: the
+    /// manager is asked before any signal is aimed at it, so a scope systemd
+    /// already collected costs nothing but a fall through to the sweep.
+    /// `false` is never a degradation — it is exactly M2's stop.
+    pub launch_scoped: bool,
 }
 
 /// The supervisor's session database.
@@ -1113,7 +1160,8 @@ fn apply_schema(conn: &Connection, may_migrate: bool) -> anyhow::Result<()> {
                  captured_record       TEXT,
                  capture_ambiguous     INTEGER NOT NULL DEFAULT 0,
                  first_input_at        INTEGER,
-                 generation            INTEGER NOT NULL DEFAULT 0
+                 generation            INTEGER NOT NULL DEFAULT 0,
+                 launch_scoped         INTEGER NOT NULL DEFAULT 0
              ) STRICT;
              CREATE TABLE supervisor_meta (
                  id      INTEGER PRIMARY KEY CHECK (id = 0),
@@ -1131,7 +1179,7 @@ fn apply_schema(conn: &Connection, may_migrate: bool) -> anyhow::Result<()> {
              ) STRICT;
              CREATE INDEX create_reservations_pending
                  ON create_reservations (session_id) WHERE state = 'pending';
-             PRAGMA user_version = 5;
+             PRAGMA user_version = 6;
              COMMIT;",
         )
         .context("creating schema")?;
@@ -1251,6 +1299,36 @@ fn apply_schema(conn: &Connection, may_migrate: bool) -> anyhow::Result<()> {
         .context("migrating schema from version 4 to 5")?;
         version = 5;
     }
+    if version == 5 {
+        // The cgroup SELECTION one launch made (PLAN_M3.md item 10): 1 for a
+        // launch wrapped in its own transient scope, 0 for one that fell
+        // back to the process-tree sweep alone.
+        //
+        // A boolean rather than the unit's name, deliberately. The name is a
+        // pure function of the session id and generation
+        // (`crate::scope::unit_name`), and this database is a trust boundary
+        // like any other input — a row is whatever the last writer, a crash,
+        // a downgrade, or a hand-edit left behind. A stored NAME could
+        // therefore aim a `systemctl kill` at a unit belonging to some other
+        // session (or to something else entirely); a stored BOOLEAN cannot
+        // say anything except "this launch was scoped", and the name is
+        // re-derived from the row's own identity at every use.
+        //
+        // 0 is the right backfill and not merely the convenient one: every
+        // row predating this column was launched by a build that had no
+        // scopes at all, so no unit exists for it and none ever will. Stop
+        // for those sessions is sweep-only — exactly what 0 means for a row
+        // this build writes too, so old and new fallback rows are
+        // indistinguishable by design rather than by accident.
+        conn.execute_batch(
+            "BEGIN;
+             ALTER TABLE sessions ADD COLUMN launch_scoped INTEGER NOT NULL DEFAULT 0;
+             PRAGMA user_version = 6;
+             COMMIT;",
+        )
+        .context("migrating schema from version 5 to 6")?;
+        version = 6;
+    }
     if version == SCHEMA_VERSION {
         return Ok(());
     }
@@ -1319,9 +1397,9 @@ fn insert_session_row(conn: &Connection, row: &StoredSession) -> anyhow::Result<
          (id, title, cwd, invocation, tmux_name, pane, created_at, \
           outcome_state, exit_code, annotation, error_detail, \
           agent_kind, resume_template, canonical_cwd, captured_conversation, \
-          captured_record, capture_ambiguous, first_input_at, generation) \
+          captured_record, capture_ambiguous, first_input_at, generation, launch_scoped) \
          VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, \
-                 ?18, ?19)",
+                 ?18, ?19, ?20)",
         rusqlite::params![
             row.id,
             row.title,
@@ -1342,6 +1420,7 @@ fn insert_session_row(conn: &Connection, row: &StoredSession) -> anyhow::Result<
             i64::from(row.capture_ambiguous),
             row.first_input_at,
             row.generation,
+            i64::from(row.launch_scoped),
         ],
     )
     .context("inserting session row")?;
@@ -1355,7 +1434,7 @@ const SESSION_COLUMNS: &str = "id, title, cwd, invocation, tmux_name, pane, \
                                outcome_state, exit_code, annotation, error_detail, \
                                agent_kind, resume_template, canonical_cwd, \
                                captured_conversation, captured_record, capture_ambiguous, \
-                               first_input_at, generation";
+                               first_input_at, generation, launch_scoped";
 
 /// The raw columns of one session row, before the fallible decoding that
 /// cannot happen inside a rusqlite row mapper (whose error type is
@@ -1392,6 +1471,7 @@ fn read_session_columns(r: &rusqlite::Row<'_>) -> rusqlite::Result<SessionColumn
             capture_ambiguous: r.get::<_, i64>(15)? != 0,
             first_input_at: r.get(16)?,
             generation: r.get(17)?,
+            launch_scoped: r.get::<_, i64>(18)? != 0,
         },
         (r.get(6)?, r.get(7)?, r.get(8)?, r.get(9)?),
         r.get(10)?,
@@ -1799,6 +1879,10 @@ impl SessionStore {
     ///   new run any capture at all. A `Resume` relaunch passes `false`,
     ///   because reverifying the identity it is resuming is exactly what
     ///   the capture pass must go on doing.
+    /// - `launch_scoped` is re-decided from `scope_available`, because the
+    ///   selection belongs to a launch and not to a session (PLAN_M3.md item
+    ///   10): a host that lost its user manager between two launches must
+    ///   not leave the new run claiming a scope nothing created.
     ///
     /// The immutable create-time snapshot (kind, template, invocation, cwd)
     /// is untouched in every case.
@@ -1807,6 +1891,7 @@ impl SessionStore {
         id: &str,
         basis: OfferBasis,
         reset_capture: bool,
+        scope_available: bool,
     ) -> anyhow::Result<RelaunchDecision> {
         let conn = Arc::clone(&self.conn);
         let id = id.to_string();
@@ -1815,10 +1900,10 @@ impl SessionStore {
             let tx = conn
                 .transaction()
                 .context("beginning the relaunch generation transaction")?;
-            let current: Option<(OutcomeColumns, String, i64, Option<String>, i64)> = tx
+            let current: Option<RelaunchBasisColumns> = tx
                 .query_row(
                     "SELECT outcome_state, exit_code, annotation, error_detail, pane, \
-                     generation, captured_conversation, capture_ambiguous \
+                     generation, captured_conversation, capture_ambiguous, launch_scoped \
                      FROM sessions WHERE id = ?1",
                     rusqlite::params![id],
                     |r| {
@@ -1828,6 +1913,7 @@ impl SessionStore {
                             r.get(5)?,
                             r.get(6)?,
                             r.get(7)?,
+                            r.get(8)?,
                         ))
                     },
                 )
@@ -1839,6 +1925,7 @@ impl SessionStore {
                 generation,
                 captured_conversation,
                 capture_ambiguous,
+                scoped,
             )) = current
             else {
                 return Ok(RelaunchDecision::Gone);
@@ -1852,29 +1939,40 @@ impl SessionStore {
                 outcome: LastOutcome::from_columns(&state, exit_code, annotation, error_detail)
                     .with_context(|| format!("session {id}"))?,
                 pane,
+                scoped: scoped != 0,
             };
             let generation = generation + 1;
             let (state, exit_code, annotation, error_detail) = LastOutcome::Launching.columns();
-            if reset_capture {
-                tx.execute(
-                    "UPDATE sessions SET outcome_state = ?2, exit_code = ?3, annotation = ?4, \
-                     error_detail = ?5, pane = '', generation = ?6, first_input_at = NULL, \
-                     captured_conversation = NULL, captured_record = NULL, \
-                     capture_ambiguous = 0 WHERE id = ?1",
-                    rusqlite::params![id, state, exit_code, annotation, error_detail, generation],
-                )
-            } else {
-                tx.execute(
-                    "UPDATE sessions SET outcome_state = ?2, exit_code = ?3, annotation = ?4, \
-                     error_detail = ?5, pane = '', generation = ?6 WHERE id = ?1",
-                    rusqlite::params![id, state, exit_code, annotation, error_detail, generation],
-                )
-            }
+            // One statement rather than two near-identical ones: the capture
+            // columns are cleared by an expression that is a no-op when the
+            // relaunch is resuming, so the SQL cannot drift between the two
+            // cases the way two copies of it could.
+            tx.execute(
+                "UPDATE sessions SET outcome_state = ?2, exit_code = ?3, annotation = ?4, \
+                 error_detail = ?5, pane = '', generation = ?6, launch_scoped = ?7, \
+                 first_input_at = CASE WHEN ?8 THEN NULL ELSE first_input_at END, \
+                 captured_conversation = \
+                     CASE WHEN ?8 THEN NULL ELSE captured_conversation END, \
+                 captured_record = CASE WHEN ?8 THEN NULL ELSE captured_record END, \
+                 capture_ambiguous = CASE WHEN ?8 THEN 0 ELSE capture_ambiguous END \
+                 WHERE id = ?1",
+                rusqlite::params![
+                    id,
+                    state,
+                    exit_code,
+                    annotation,
+                    error_detail,
+                    generation,
+                    i64::from(scope_available),
+                    i64::from(reset_capture),
+                ],
+            )
             .context("opening a new launch generation for a restart")?;
             tx.commit().context("committing the launch generation")?;
             Ok(RelaunchDecision::Claimed(RelaunchClaim {
                 generation,
                 prior,
+                scoped: scope_available,
             }))
         })
         .await
@@ -1923,12 +2021,14 @@ impl SessionStore {
             error_detail.map(str::to_string),
         );
         let pane = prior.pane.clone();
+        let scoped = i64::from(prior.scoped);
         tokio::task::spawn_blocking(move || -> anyhow::Result<bool> {
             let conn = conn.lock().expect("session db mutex poisoned");
             let restored = conn
                 .execute(
                     "UPDATE sessions SET outcome_state = ?2, exit_code = ?3, annotation = ?4, \
-                     error_detail = ?5, pane = ?6 WHERE id = ?1 AND generation = ?7",
+                     error_detail = ?5, pane = ?6, launch_scoped = ?8 \
+                     WHERE id = ?1 AND generation = ?7",
                     rusqlite::params![
                         id,
                         state,
@@ -1936,7 +2036,8 @@ impl SessionStore {
                         annotation,
                         error_detail,
                         pane,
-                        generation
+                        generation,
+                        scoped
                     ],
                 )
                 .context("restoring the outcome a failed restart replaced")?;
@@ -2685,6 +2786,7 @@ mod tests {
                     capture_ambiguous: false,
                     first_input_at: None,
                     generation: 0,
+                    launch_scoped: false,
                 },
                 None,
             )
@@ -3405,6 +3507,7 @@ mod tests {
                     capture_ambiguous: false,
                     first_input_at: None,
                     generation: 0,
+                    launch_scoped: false,
                 },
                 None,
             )
@@ -3448,6 +3551,7 @@ mod tests {
                     capture_ambiguous: false,
                     first_input_at: None,
                     generation: 0,
+                    launch_scoped: false,
                 },
                 None,
             )
@@ -4045,6 +4149,7 @@ mod tests {
                     capture_ambiguous: false,
                     first_input_at: None,
                     generation: 0,
+                    launch_scoped: false,
                 },
                 None,
             )
@@ -4222,6 +4327,7 @@ mod tests {
             captured_conversation: None,
             first_input_at: None,
             generation: 0,
+            launch_scoped: false,
         }
     }
 
@@ -4864,6 +4970,7 @@ mod tests {
                     capture_ambiguous: false,
                     first_input_at: None,
                     generation: 0,
+                    launch_scoped: false,
                 },
                 None,
             )
@@ -5132,7 +5239,7 @@ mod tests {
 
         let claim = claimed(
             store
-                .begin_relaunch("s1", uncaptured_basis(), true)
+                .begin_relaunch("s1", uncaptured_basis(), true, false)
                 .await
                 .expect("begin relaunch"),
         );
@@ -5175,7 +5282,7 @@ mod tests {
 
         let claim = claimed(
             store
-                .begin_relaunch("s1", uncaptured_basis(), true)
+                .begin_relaunch("s1", uncaptured_basis(), true, false)
                 .await
                 .expect("begin relaunch"),
         );
@@ -5204,13 +5311,13 @@ mod tests {
         insert_running(&store, "s1").await;
         let first = claimed(
             store
-                .begin_relaunch("s1", uncaptured_basis(), true)
+                .begin_relaunch("s1", uncaptured_basis(), true, false)
                 .await
                 .expect("first"),
         );
         let second = claimed(
             store
-                .begin_relaunch("s1", uncaptured_basis(), true)
+                .begin_relaunch("s1", uncaptured_basis(), true, false)
                 .await
                 .expect("second"),
         );
@@ -5240,7 +5347,7 @@ mod tests {
         insert_running(&store, "s1").await;
         let claim = claimed(
             store
-                .begin_relaunch("s1", uncaptured_basis(), true)
+                .begin_relaunch("s1", uncaptured_basis(), true, false)
                 .await
                 .expect("begin relaunch"),
         );
@@ -5281,7 +5388,7 @@ mod tests {
         insert_running(&store, "s1").await;
         let claim = claimed(
             store
-                .begin_relaunch("s1", uncaptured_basis(), true)
+                .begin_relaunch("s1", uncaptured_basis(), true, false)
                 .await
                 .expect("begin relaunch"),
         );
@@ -5350,6 +5457,7 @@ mod tests {
                         capture_ambiguous: true,
                     },
                     true,
+                    false,
                 )
                 .await
                 .expect("begin relaunch"),
@@ -5401,6 +5509,7 @@ mod tests {
                         capture_ambiguous: false,
                     },
                     false,
+                    false,
                 )
                 .await
                 .expect("begin relaunch"),
@@ -5429,7 +5538,7 @@ mod tests {
 
         assert_eq!(
             store
-                .begin_relaunch("s1", basis, true)
+                .begin_relaunch("s1", basis, true, false)
                 .await
                 .expect("begin relaunch"),
             RelaunchDecision::OfferChanged
@@ -5461,7 +5570,7 @@ mod tests {
 
         claimed(
             store
-                .begin_relaunch("s1", uncaptured_basis(), true)
+                .begin_relaunch("s1", uncaptured_basis(), true, false)
                 .await
                 .expect("begin relaunch"),
         );
@@ -5478,7 +5587,7 @@ mod tests {
         let (_dir, store) = fresh_store().await;
         assert_eq!(
             store
-                .begin_relaunch("gone", uncaptured_basis(), true)
+                .begin_relaunch("gone", uncaptured_basis(), true, false)
                 .await
                 .expect("begin relaunch"),
             RelaunchDecision::Gone

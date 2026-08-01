@@ -1662,7 +1662,18 @@ impl TmuxDriver {
         });
 
         let mut buf = Vec::new();
-        let mut chunk = [0u8; ALT_SCREEN_READ_CHUNK];
+        // Heap, not `[0u8; ALT_SCREEN_READ_CHUNK]`. A 64 KiB array here is a
+        // local held across an `.await`, so it becomes part of this
+        // function's FUTURE — and every future that composes this one grows
+        // by that much in turn, which on the restart path is a chain several
+        // deep (`restart_session` → `relaunch` → `relaunch_into_terminal` →
+        // `plan_pane_relaunch` → here). Inflating those futures inflates the
+        // stack the `poll` chain needs to drive them, and a debug build's
+        // restart tests were running within a few hundred kilobytes of a
+        // test thread's default stack because of it; adding one more await
+        // to that chain (the cgroup work's `reap_process_tree`) tipped it
+        // over. One allocation per capture buys the whole chain back.
+        let mut chunk = vec![0u8; ALT_SCREEN_READ_CHUNK];
         let too_large = loop {
             let n = stdout
                 .read(&mut chunk)

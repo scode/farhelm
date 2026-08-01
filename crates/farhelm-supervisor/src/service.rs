@@ -64,7 +64,7 @@ use std::time::Duration;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite};
 use tokio::net::{UnixListener, UnixStream};
 use tokio::sync::{Mutex, mpsc, oneshot, watch};
-use tracing::{error, info, warn};
+use tracing::{debug, error, info, warn};
 
 /// Data-frame chunk size for replay. Well under MAX_FRAME_LEN; small
 /// enough that the first screenful renders while the rest streams.
@@ -361,6 +361,17 @@ pub struct SupervisorSeams {
     /// a difference between the two would be exactly the divergence the
     /// contract forbids.
     pub launch_env: Vec<(String, String)>,
+    /// This supervisor's access to a systemd user manager (PLAN_M3.md item
+    /// 10). Defaults to the real one, which reports itself unavailable on
+    /// every host that has none — CI included.
+    ///
+    /// A seam because the two paths must BOTH be provable on one host:
+    /// `ScopeManager::disabled()` pins the fallback (the M2 behavior CI
+    /// proves by having no manager at all) on a developer machine that does
+    /// have one, and `ScopeManager::fake` makes the ordering of the scope
+    /// kill and the backstop sweep observable, which nothing about the end
+    /// state can show — both mechanisms leave the same corpse.
+    pub scopes: Arc<crate::scope::ScopeManager>,
 }
 
 impl Default for SupervisorSeams {
@@ -372,6 +383,7 @@ impl Default for SupervisorSeams {
             capture_window: CaptureWindowBounds::default(),
             capture_store_fault: None,
             launch_env: Vec::new(),
+            scopes: Arc::new(crate::scope::ScopeManager::systemd()),
         }
     }
 }
@@ -1142,6 +1154,7 @@ fn relaunched_entry(
     info: SessionInfo,
     terminal: Option<Terminal>,
     generation: i64,
+    scope: Option<String>,
     outcome: LastOutcome,
     reset_capture: bool,
 ) -> Arc<SessionEntry> {
@@ -1175,6 +1188,7 @@ fn relaunched_entry(
         first_input: std::sync::Mutex::new(first_input),
         capture: std::sync::Mutex::new(capture),
         generation,
+        scope,
     })
 }
 
@@ -1366,6 +1380,75 @@ enum SpawnFailure {
         spec_path: PathBuf,
         error: anyhow::Error,
     },
+}
+
+/// The explanation for a launch that never reached the exec shim at all,
+/// or `None` when this is not that shape (PLAN_M3.md item 10).
+///
+/// A gap the cgroup wrapper opened, and the reason it needs its own
+/// classifier. Every other launch failure is reported by the SHIM, which
+/// writes a sentinel before exiting (`crate::launch`'s module docs explain
+/// why the shim and not the shell). `systemd-run` runs BEFORE the shim: a
+/// wrapper that fails — the user manager died since the probe, the unit
+/// name was refused, the scope could not be created — exits the pane with
+/// no sentinel written and no `exec` ever attempted. Left alone, that
+/// classifies as a plain `Exited` with whatever code `systemd-run` chose,
+/// which is a lie about an agent that never ran, and leaves the launch
+/// spec (the agent's full command line, credentials included) on disk with
+/// nothing left to consume it.
+///
+/// The recognizable shape has three parts, and every one is load-bearing:
+///
+/// 1. **A DEAD pane, not an absent one.** `remain-on-exit` keeps a pane
+///    whose command exited, so a failed wrapper leaves the pane there and
+///    dead. A pane that is GONE means the tmux window (or the whole server)
+///    was destroyed — which also strands an unconsumed spec, from a launch
+///    that was merely interrupted rather than failed. Conflating the two
+///    reported perfectly ordinary sessions as `error`; the distinction is
+///    what this classifier actually rests on. Callers pass `pane_dead`.
+/// 2. **No sentinel.** The shim's own report outranks every inference,
+///    including this one, so callers ask only after reading no sentinel.
+/// 3. **An unconsumed spec.** The shim unlinks its spec as soon as it has
+///    read it, so a spec still present under a dead pane means the shim
+///    never ran at all.
+///
+/// Narrowed to SCOPED launches deliberately. Without a wrapper there is
+/// nothing between the login shell and the shim but the shell itself, and an
+/// unconsumed spec then means the user's rc files ended the shell — a
+/// pre-existing M2 shape this build has no new evidence about and does not
+/// reclassify.
+///
+/// A stat failure reports `None`: this is an inference of last resort, and
+/// inventing an `error` classification from an unreadable state directory
+/// would be exactly the guess the no-guessing rule forbids.
+async fn wrapper_failure_detail(
+    state_dir: &Path,
+    id: &str,
+    generation: i64,
+    scoped: bool,
+    pane_dead: bool,
+) -> Option<String> {
+    if !scoped || !pane_dead {
+        return None;
+    }
+    let spec = crate::launch::spec_path_for_launch(state_dir, id, generation);
+    match tokio::fs::try_exists(&spec).await {
+        Ok(true) => Some(
+            "the agent was never started: the launch never reached farhelm's exec shim, so \
+             something before it — the transient cgroup scope wrapper, or the login shell \
+             itself — exited first"
+                .to_string(),
+        ),
+        Ok(false) => None,
+        Err(e) => {
+            debug!(
+                session = %id, generation, error = %e,
+                "could not tell whether this launch's spec was consumed; not classifying it \
+                 as a wrapper failure"
+            );
+            None
+        }
+    }
 }
 
 /// Async wrapper around [`crate::launch::read_launch_sentinel`] for the
@@ -1806,9 +1889,10 @@ fn environ_contains_marker(environ: &[u8], session_id: &str) -> bool {
 /// every descendant inherits automatically, transitively, across any
 /// number of forks and execs, UNLESS a process along the way deliberately
 /// scrubs or replaces its own environment (`env -i`, an `exec` with an
-/// explicit empty/rebuilt envp, and the like) — that residual is accepted
-/// until M3's cgroups hardening, alongside the reparented-daemon case
-/// documented on `kill_process_tree`.
+/// explicit empty/rebuilt envp, and the like) — that residual is the one
+/// [`reap_process_tree`]'s cgroup kill closes, alongside the
+/// reparented-daemon case documented on `kill_process_tree`, and remains
+/// open wherever no systemd user manager exists.
 ///
 /// A process belonging to a different user makes `environ` unreadable
 /// (mode 0400, owner-only) — that failure is silently treated as "no
@@ -1857,7 +1941,9 @@ struct ProcSnapshot {
     /// re-checking start-time at the moment of signaling regardless of
     /// how fresh or stale the value recorded here is.
     ///
-    /// Accepted residual (until M3's cgroups hardening): this map is
+    /// Accepted residual, and NOT one the cgroup hardening addresses
+    /// (a cgroup kill names a unit, never a pid, so it neither creates
+    /// nor fixes this): this map is
     /// still just ONE sequential pass, not an atomic system-wide
     /// snapshot, so in principle a pid could exit and be recycled to an
     /// unrelated process WHILE this same walk is still in progress — an
@@ -2211,7 +2297,8 @@ async fn confirm_gone(found: &HashMap<u32, u64>, timeout: Duration) -> Vec<Strin
 ///    first), then poll until every one of them has actually disappeared
 ///    (see [`confirm_gone`]).
 ///
-/// `root_pid` is `None` for a dead or absent pane, or a terminal-less
+/// `root` is the pane process's `(pid, starttime)` as its caller validated
+/// it, and `None` for a dead or absent pane, or a terminal-less
 /// (restart-gap) entry: there is no live pid worth trusting in any of
 /// those cases (a dead pane's remembered pid may already be recycled),
 /// but SPEC.md still assigns reaping any leftover descendants of a PAST
@@ -2235,14 +2322,28 @@ async fn confirm_gone(found: &HashMap<u32, u64>, timeout: Duration) -> Vec<Strin
 /// the rest can wait" from an early return. `Ok(())` is the caller's only
 /// license to treat the sweep as complete.
 ///
-/// Residual, accepted until M3's cgroups hardening (see the lore entry):
+/// Residual, and the reason [`reap_process_tree`] exists on top of this:
 /// a descendant that `exec`'d with a scrubbed environment after
 /// reparenting to init is invisible to both the PPID closure (wrong
-/// parent) and the marker scan (marker gone), and survives.
-async fn kill_process_tree(root_pid: Option<u32>, session_id: &str) -> anyhow::Result<()> {
+/// parent) and the marker scan (marker gone), and survives this sweep. On
+/// a host with a systemd user manager the launch's cgroup catches it
+/// before this ever runs; on a host without one, that gap is still open
+/// and is exactly what M2 shipped with. Nothing in this function changed
+/// with the cgroup work — it remains the whole mechanism wherever no
+/// manager exists, and the backstop everywhere else, so this is still the
+/// function to reason about when asking what stop guarantees at minimum.
+async fn kill_process_tree(root: Option<(u32, u64)>, session_id: &str) -> anyhow::Result<()> {
     let mut errors: Vec<String> = Vec::new();
 
-    let mut found = enumerate_or_reuse(root_pid, session_id, &HashMap::new(), &mut errors).await;
+    // The root enters as a SEED — an identity, not a bare number — so it is
+    // validated exactly like every other carried-forward pid. The identity
+    // was captured by the caller before anything was killed
+    // (`reap_process_tree`), which matters now that a cgroup kill and its
+    // grace period can run first: a pane pid read before that window and
+    // trusted after it could name a completely unrelated process by the
+    // time this walk starts.
+    let seed: HashMap<u32, u64> = root.into_iter().collect();
+    let mut found = enumerate_or_reuse(None, session_id, &seed, &mut errors).await;
     errors.extend(signal_all(&found, libc::SIGTERM));
 
     tokio::time::sleep(KILL_GRACE).await;
@@ -2285,6 +2386,252 @@ async fn kill_process_tree(root_pid: Option<u32>, session_id: &str) -> anyhow::R
         Ok(())
     } else {
         anyhow::bail!("process-tree kill hit {}", summarize_errors(&errors))
+    }
+}
+
+/// The scope unit one launch runs in, or `None` when it selected the
+/// portable sweep alone (or when its id cannot name a unit at all).
+///
+/// The ONE place a unit name is produced for an existing launch, so the
+/// derivation cannot drift between the code that records a selection and
+/// the code that acts on it. Derived rather than read back from the store
+/// on purpose: see `store::StoredSession::launch_scoped`.
+fn launch_scope_unit(id: &str, generation: i64, scoped: bool) -> Option<String> {
+    scoped
+        .then(|| crate::scope::unit_name(id, generation))
+        .flatten()
+}
+
+/// Reap one launch's whole process tree: its cgroup scope first, then —
+/// always, unconditionally — the portable sweep (PLAN_M3.md item 10).
+///
+/// This is the ONE entry point every stop, delete, and restart-reap goes
+/// through, which is what makes "the sweep still runs" a property of the
+/// code rather than a rule call sites are asked to remember.
+///
+/// # Why both, in this order
+///
+/// SPEC_impl.md's belt-and-suspenders rule. The scope kill is strictly
+/// MORE complete than the sweep — cgroup membership is inherited across
+/// fork and exec and cannot be shed, so it catches the double-forked,
+/// environment-scrubbed descendant lore/2026-07-27-m2-process-tree-stop.md
+/// names as the sweep's one blind spot — but it is also strictly NARROWER:
+/// it can only reach what this launch's `systemd-run` actually placed in
+/// the cgroup. A process that carries the session marker but was never in
+/// the scope (a survivor of an earlier, unscoped launch of the same
+/// session; anything the user started with the marker in its environment)
+/// is invisible to it and visible to the sweep. Neither subsumes the
+/// other, so both run, and the scope runs first because a cgroup kill is
+/// one round trip that empties most of the tree before the sweep pays for
+/// enumerating it.
+///
+/// # Why the scope may never fail a stop
+///
+/// The sweep's verdict is the whole answer. `Ok(())` from this function
+/// means the sweep confirmed nothing is left running, and that is exactly
+/// what it meant in M2 — item 10's "absence of a manager never degrades
+/// stop below M2's guarantees" read in the other direction: PRESENCE of a
+/// broken manager must not degrade it either. A scope kill that failed
+/// (unit already collected, manager not answering) is therefore logged and
+/// carried into the error only when the sweep ALSO failed, where it is
+/// diagnostic context for a stop that is genuinely unconfirmed.
+///
+/// `scope` is the unit RECORDED for this launch; existence is re-checked
+/// before use because the name is re-derived from durable state and the
+/// unit may long since have been garbage-collected (item 10's
+/// reload/restart interplay).
+async fn reap_process_tree(
+    scopes: &crate::scope::ScopeManager,
+    scope: Option<&str>,
+    root_pid: Option<u32>,
+    session_id: &str,
+) -> anyhow::Result<()> {
+    // Captured BEFORE anything is killed, and this ordering is the whole
+    // point of doing it here rather than inside the sweep: `kill_scope`
+    // below sends SIGTERM and then sleeps out a grace period, during which
+    // the pane's process can die and the kernel can hand its number to
+    // something unrelated. A bare pid read before that window and trusted
+    // after it is exactly how a sweep signals a stranger.
+    let root = root_pid.and_then(|pid| match read_stat(pid) {
+        Ok(Some((_, starttime, _))) => Some((pid, starttime)),
+        // Already gone, or unreadable: either way there is no identity to
+        // carry, and the marker scan is what finds this session's
+        // processes from here on.
+        Ok(None) => None,
+        Err(e) => {
+            debug!(
+                session = %session_id, pid, error = %e,
+                "could not read the pane process's start time before reaping; the sweep will \
+                 rely on the marker scan alone for it"
+            );
+            None
+        }
+    });
+
+    let scope_error = match scope {
+        Some(unit) => kill_scope(scopes, unit, session_id).await.err(),
+        None => {
+            debug!(
+                session = %session_id,
+                "no cgroup scope recorded for this launch; the process-tree sweep is the \
+                 whole mechanism"
+            );
+            None
+        }
+    };
+
+    match (kill_process_tree(root, session_id).await, scope_error) {
+        (Ok(()), Some(e)) => {
+            // The sweep proved the tree is gone, so this stop is complete
+            // by M2's own standard; the scope's trouble is worth knowing
+            // about but is not the user's problem.
+            warn!(
+                session = %session_id, error = %format!("{e:#}"),
+                "the launch's cgroup scope could not be fully torn down, but the process-tree \
+                 sweep confirmed nothing is left running"
+            );
+            Ok(())
+        }
+        (Ok(()), None) => Ok(()),
+        (Err(sweep), Some(e)) => Err(sweep.context(format!(
+            "the launch's cgroup scope also could not be fully torn down ({e:#})"
+        ))),
+        (Err(sweep), None) => Err(sweep),
+    }
+}
+
+/// How long [`kill_scope`] waits for a killed unit to actually go away
+/// before reporting the cgroup unconfirmed.
+///
+/// `systemctl kill` returns once the signals are DELIVERED, which is not
+/// the same as the cgroup being empty — the same distinction
+/// [`confirm_gone`] exists for on the sweep's side, and for the same
+/// reason: an uncollected unit means processes this stop was supposed to
+/// end may still be running. Generous enough for an ordinary teardown,
+/// bounded because the caller (a user waiting on a stop, or a restart
+/// about to relaunch) cannot wait forever on a manager that has stopped
+/// collecting units.
+const SCOPE_CONFIRM_TIMEOUT: Duration = Duration::from_secs(2);
+
+/// Poll interval within [`SCOPE_CONFIRM_TIMEOUT`].
+const SCOPE_CONFIRM_POLL: Duration = Duration::from_millis(50);
+
+/// SIGTERM the whole scope, wait out the same grace the sweep gives,
+/// SIGKILL it, and confirm the unit actually went away — the existing
+/// escalation, mapped onto cgroup operations.
+///
+/// The mapping is deliberately partial, and honestly so. `kill_process_tree`
+/// has five phases (TERM, grace, SIGSTOP-quiesce to a fixpoint, KILL,
+/// confirm); this has four, because quiescing has nothing to do here:
+/// it exists to stop a dying process from forking a child the NEXT
+/// enumeration would miss, and a cgroup needs no enumeration — a child
+/// forked during teardown lands in the same cgroup its parent is in and
+/// dies to the same `systemctl kill`. Every other phase carries its
+/// meaning across: a well-behaved agent still gets [`KILL_GRACE`] to exit
+/// on SIGTERM before anything unkillable happens to it, and the unit's
+/// disappearance is confirmed rather than assumed, because `systemctl
+/// kill` returning only proves delivery.
+///
+/// # Errors accumulate; nothing short-circuits
+///
+/// Every step runs even when an earlier one failed, and the failures are
+/// aggregated. This is not defensive style — a transient failure at the
+/// existence check or the SIGTERM used to `?` straight out of this
+/// function, skipping the SIGKILL that is the step most likely to have
+/// worked, and leaving a cgroup full of processes the caller was told
+/// nothing about. The one exception is a unit the manager reports as
+/// ALREADY GONE, which is a definitive answer rather than a failure and
+/// ends the escalation with nothing to do.
+async fn kill_scope(
+    scopes: &crate::scope::ScopeManager,
+    unit: &str,
+    session_id: &str,
+) -> anyhow::Result<()> {
+    let mut errors: Vec<String> = Vec::new();
+    match scopes.exists(unit).await {
+        Ok(false) => {
+            // Ordinary, not exceptional: `--collect` disposes of a scope
+            // the moment its last process exits, so every stop of an
+            // already-exited agent takes this path.
+            debug!(
+                session = %session_id, unit,
+                "the launch's cgroup scope is already gone; the process-tree sweep is the \
+                 whole mechanism for this stop"
+            );
+            return Ok(());
+        }
+        Ok(true) => {}
+        // "Cannot tell" is not "gone": the escalation proceeds, because
+        // refusing to signal a unit that may well be full of processes is
+        // the strictly worse failure.
+        Err(e) => errors.push(format!("checking whether scope {unit} still exists: {e:#}")),
+    }
+    info!(
+        session = %session_id, unit,
+        "killing the launch's cgroup scope before the backstop process-tree sweep"
+    );
+    if let Err(e) = scopes.kill(unit, "SIGTERM").await {
+        errors.push(format!("{e:#}"));
+    }
+    tokio::time::sleep(KILL_GRACE).await;
+    // Re-checked rather than killed unconditionally, unlike the sweep's own
+    // SIGKILL (which signals pids, where an already-dead one is a harmless
+    // ESRCH). Here the polite case is the COMMON case: an agent that exits
+    // on SIGTERM empties its cgroup, `--collect` retires the unit
+    // immediately, and a SIGKILL aimed at a retired unit is a hard
+    // `systemctl` error — which would make every clean stop report a scope
+    // failure. A check that itself fails falls through to the kill, since
+    // the honest response to "cannot tell" is to try.
+    if scopes.exists(unit).await.unwrap_or(true)
+        && let Err(e) = scopes.kill(unit, "SIGKILL").await
+    {
+        errors.push(format!("{e:#}"));
+    }
+    if let Err(e) = confirm_scope_gone(scopes, unit).await {
+        errors.push(format!("{e:#}"));
+    }
+    if errors.is_empty() {
+        Ok(())
+    } else {
+        anyhow::bail!(
+            "tearing down cgroup scope {unit} hit {}",
+            summarize_errors(&errors)
+        )
+    }
+}
+
+/// Poll until `unit` is gone, or [`SCOPE_CONFIRM_TIMEOUT`] elapses.
+///
+/// A unit that outlives its SIGKILL is a cgroup that still holds
+/// processes — systemd retires a `--collect` scope as soon as its last
+/// member exits — so "still there" is the one answer that must not be
+/// read as success. A manager that cannot be ASKED is reported for the
+/// same reason: an unconfirmed teardown is unconfirmed either way.
+async fn confirm_scope_gone(scopes: &crate::scope::ScopeManager, unit: &str) -> anyhow::Result<()> {
+    let deadline = tokio::time::Instant::now() + SCOPE_CONFIRM_TIMEOUT;
+    loop {
+        // Carried out of the match rather than accumulated across rounds, so
+        // the message on timeout describes THIS round's reason — a unit that
+        // is still loaded, or a manager that stopped answering — and never a
+        // stale one from a condition that has since changed.
+        let why_not_gone = match scopes.exists(unit).await {
+            Ok(false) => return Ok(()),
+            Ok(true) => None,
+            Err(e) => Some(e),
+        };
+        if tokio::time::Instant::now() >= deadline {
+            return Err(match why_not_gone {
+                Some(e) => e.context(format!(
+                    "could not confirm scope {unit} was collected within \
+                     {SCOPE_CONFIRM_TIMEOUT:?}"
+                )),
+                None => anyhow::anyhow!(
+                    "scope {unit} was still loaded {SCOPE_CONFIRM_TIMEOUT:?} after its SIGKILL, \
+                     so its cgroup may still hold processes"
+                ),
+            });
+        }
+        tokio::time::sleep(SCOPE_CONFIRM_POLL).await;
     }
 }
 
@@ -2399,9 +2746,14 @@ async fn stop_live_agent(
     sup.record(session_id, entry, Transition::StopRequested)
         .await
         .map_err(StopFailure::Unrecorded)?;
-    kill_process_tree(root_pid, session_id)
-        .await
-        .map_err(StopFailure::Sweep)?;
+    reap_process_tree(
+        &sup.seams.scopes,
+        entry.scope.as_deref(),
+        root_pid,
+        session_id,
+    )
+    .await
+    .map_err(StopFailure::Sweep)?;
     let exit_code = dead_pane_exit_code(sup, entry.terminal.as_ref(), session_id).await;
     sup.record(session_id, entry, Transition::StopCompleted { exit_code })
         .await
@@ -3014,6 +3366,17 @@ struct SessionEntry {
     /// `Attach` compares it before installing an attachment on what may be
     /// a respawned pane.
     generation: i64,
+    /// The cgroup scope THIS generation launched into
+    /// (`store::StoredSession::launch_scope`), or `None` for a launch that
+    /// selected the portable sweep alone.
+    ///
+    /// Immutable per entry for exactly the reason `generation` is, and
+    /// carried here rather than re-read from the store at stop time so the
+    /// scope a kill aims at is the one belonging to the run whose liveness
+    /// the caller just decided about — a row re-read mid-restart could
+    /// already name the NEXT generation's unit, and signaling that would
+    /// mean killing the launch that is replacing this one.
+    scope: Option<String>,
 }
 
 /// The first-input correlator and its durability.
@@ -3916,7 +4279,35 @@ impl Supervisor {
                         }
                         continue;
                     }
-                    Ok(None) => {}
+                    Ok(None) => {
+                        // No sentinel, and a pane that is present and
+                        // DEAD: the shape a launch that never reached the
+                        // shim leaves behind.
+                        let pane_dead = found.as_ref().is_some_and(|(_, state)| state.dead);
+                        if let Some(detail) = wrapper_failure_detail(
+                            state_dir,
+                            &row.id,
+                            row.generation,
+                            row.launch_scoped,
+                            pane_dead,
+                        )
+                        .await
+                        {
+                            transitions.push((
+                                row.id.clone(),
+                                row.generation,
+                                Transition::SentinelError {
+                                    detail: detail.clone(),
+                                    pane: found.as_ref().map(|(pane, _)| pane.clone()),
+                                },
+                            ));
+                            sentinel_hits.insert(row.id.clone(), detail);
+                            if let Some((pane, state)) = found {
+                                found_panes.insert(row.id.clone(), (pane, state));
+                            }
+                            continue;
+                        }
+                    }
                     Err(e) => {
                         // Loud propagation, not fall-through (item 1): this
                         // row's reconciliation is DEFERRED for this pass —
@@ -4121,6 +4512,8 @@ impl Supervisor {
                 }
             };
             let restart_offer = snapshot.restart_offer(capture.committed_conversation());
+            // Derived before `row.id` is moved into the entry's `info`.
+            let scope = launch_scope_unit(&row.id, row.generation, row.launch_scoped);
             sessions.insert(
                 row.id.clone(),
                 Arc::new(SessionEntry {
@@ -4160,6 +4553,15 @@ impl Supervisor {
                     }),
                     capture: std::sync::Mutex::new(capture),
                     generation: row.generation,
+                    // The SELECTION comes straight back out of the row
+                    // rather than from this supervisor's own probe: the
+                    // launch that made it may have run under a DIFFERENT
+                    // supervisor, on a host whose manager has since changed
+                    // — and stop must aim at what was actually created, not
+                    // at what would be created now (PLAN_M3.md item 10's
+                    // reload interplay). The NAME is derived here, never
+                    // stored, so the row cannot name somebody else's unit.
+                    scope,
                 }),
             );
         }
@@ -4184,21 +4586,36 @@ impl Supervisor {
         // whose launch left no trace, stay pending: only a retry can create
         // the session the client asked for, under the identities the
         // reservation already holds.
+        // The cgroup is a FOURTH source of provenance, asked here rather than
+        // in the row loop above because it costs a D-Bus round trip per
+        // question and only pending reservations have a question worth
+        // asking: a live scope with the reserved launch's name can only have
+        // been created inside that launch's own tmux window, and it is the
+        // only evidence that survives the pane, the sentinel, and the tmux
+        // session all being gone while a daemon the launch spawned runs on.
+        // Failing to ask (an unreachable manager) leaves the reservation
+        // pending, which is the same answer every other unresolved source
+        // produces.
         if may_write {
             match store.pending_reservations().await {
                 Ok(pending) => {
-                    let settled: Vec<Settlement> = pending
-                        .into_iter()
-                        .filter_map(|reservation| {
-                            launched
-                                .contains(&reservation.session_id)
-                                .then_some(Settlement {
-                                    intent_key: reservation.intent_key,
-                                    session_id: reservation.session_id,
-                                    outcome: ReservationOutcome::Created,
-                                })
-                        })
-                        .collect();
+                    let mut settled: Vec<Settlement> = Vec::new();
+                    for reservation in pending {
+                        let mut evidence = launched.contains(&reservation.session_id);
+                        if !evidence
+                            && seams.scopes.available().await
+                            && let Some(unit) = crate::scope::unit_name(&reservation.session_id, 0)
+                        {
+                            evidence = seams.scopes.exists(&unit).await.unwrap_or(false);
+                        }
+                        if evidence {
+                            settled.push(Settlement {
+                                intent_key: reservation.intent_key,
+                                session_id: reservation.session_id,
+                                outcome: ReservationOutcome::Created,
+                            });
+                        }
+                    }
                     if let Err(e) = store.settle_reservations(settled).await {
                         warn!(
                             error = %format!("{e:#}"),
@@ -4682,6 +5099,11 @@ impl Supervisor {
     ///   existed.
     /// - **The launch sentinel.** The shim wrote it, so the shim ran, so
     ///   tmux started something — even when no pane was ever recorded.
+    /// - **The launch's cgroup scope**, where this host has a user manager.
+    ///   A unit with the reserved generation-0 name can only have been
+    ///   created inside the reserved session's own window, and — unlike
+    ///   every other source here — it survives the agent, the pane, and the
+    ///   tmux session all being gone while a daemon it spawned runs on.
     /// - **tmux itself, right now.** Asked at DECISION time rather than
     ///   inferred from the session map, because the map is a snapshot taken
     ///   at reload: a create that completed after that snapshot (a
@@ -4706,6 +5128,32 @@ impl Supervisor {
             Ok(None) => {}
             Err(e) => {
                 return LaunchEvidence::Unresolved(e.context("reading the reserved session row"));
+            }
+        }
+        // The launch's cgroup, where this host has one. A scope with the
+        // reserved identities' generation-0 name can only have been created
+        // by `systemd-run` inside the reserved session's own tmux window, so
+        // its existence proves that window ran — and it proves it in the one
+        // case every other source misses: a wrapped launch whose agent
+        // daemonized something and then died, leaving no pane, no sentinel,
+        // and a tmux session already gone, while the daemon runs on inside
+        // the cgroup. Relaunching over that would be the duplicate this
+        // whole mechanism exists to exclude.
+        //
+        // Only asked when a manager is actually available, because `exists`
+        // on a manager-less host is an ERROR, and reading that as
+        // `Unresolved` would wedge every reconciliation in CI.
+        if self.seams.scopes.available().await
+            && let Some(unit) = crate::scope::unit_name(&reservation.session_id, 0)
+        {
+            match self.seams.scopes.exists(&unit).await {
+                Ok(true) => return LaunchEvidence::Present,
+                Ok(false) => {}
+                Err(e) => {
+                    return LaunchEvidence::Unresolved(
+                        e.context("asking the user manager about the reserved launch's scope"),
+                    );
+                }
             }
         }
         // Generation 0: a reservation's session is one this create is
@@ -4978,6 +5426,14 @@ impl Supervisor {
         } = request;
         let id = reserved.session_id().to_string();
         let tmux_name = reserved.tmux_name().to_string();
+        // Decided ONCE, here, and carried into every durable write below —
+        // never re-decided per write. A create's launch is generation 0 by
+        // construction (only a restart ever bumps it), so the unit name is
+        // fully determined at this point, and committing the selection with
+        // the launching row is what makes it survive a crash straddling the
+        // launch (PLAN_M3.md items 2 and 10).
+        let scoped = self.scope_selected(&id).await;
+        let launch_scope = launch_scope_unit(&id, 0, scoped);
         if let Reserved::Retry(reservation) = reserved {
             // Clear the interrupted attempt's leftovers before reusing its
             // identities; `clear_launch_artifacts_fail_closed` carries the
@@ -5015,6 +5471,7 @@ impl Supervisor {
                 capture_ambiguous: false,
                 first_input_at: None,
                 generation: 0,
+                launch_scoped: scoped,
             };
             match self
                 .store
@@ -5092,6 +5549,7 @@ impl Supervisor {
                         capture_ambiguous: false,
                         first_input_at: None,
                         generation: 0,
+                        launch_scoped: scoped,
                     },
                     claim,
                 )
@@ -5116,7 +5574,18 @@ impl Supervisor {
         self.simulate_crash(CreateStage::AfterRecord)?;
 
         let spawned = self
-            .spawn_agent(&id, 0, &tmux_name, argv, cwd, cols, rows, None, None)
+            .spawn_agent(
+                &id,
+                0,
+                &tmux_name,
+                argv,
+                cwd,
+                cols,
+                rows,
+                None,
+                None,
+                launch_scope.as_deref(),
+            )
             .await;
         let (pane, spec_path, status_file_path) = match spawned {
             Ok(Spawned {
@@ -5146,6 +5615,32 @@ impl Supervisor {
                 let mut error = error;
                 match self.tmux.has_session(&tmux_name).await {
                     Ok(false) => {
+                        // Reaped BEFORE the row is discarded, and this is
+                        // the ordering the whole rollback rests on:
+                        // removing the row is removing the last handle
+                        // anything has on this launch, so whatever the
+                        // launch managed to start must be provably gone
+                        // FIRST. "tmux has no session" is not that proof —
+                        // a window that ran far enough to create its scope
+                        // and daemonize something leaves exactly this
+                        // shape — so the scope and the marker sweep are
+                        // both asked. An unconfirmed reap RETAINS the row
+                        // (the same rule the ambiguous arms below follow)
+                        // rather than orphaning what it could not reach.
+                        if let Err(sweep) = reap_process_tree(
+                            &self.seams.scopes,
+                            launch_scope.as_deref(),
+                            None,
+                            &id,
+                        )
+                        .await
+                        {
+                            return Err(error.context(format!(
+                                "and the failed launch's process tree could not be swept \
+                                 ({sweep:#}), so session {id} is kept as a launching record \
+                                 rather than deleted"
+                            )));
+                        }
                         // The shim unlinks the spec once it has read it,
                         // so a launch that never happened would strand a
                         // file holding the agent's full command line —
@@ -5256,6 +5751,27 @@ impl Supervisor {
                     truncate_for_error(&id)
                 ),
             ));
+            // The PROCESS tree first, tmux second. Killing the tmux
+            // session ends the pane's own process group and nothing else:
+            // the agent's daemonized descendants — and, on a scoped launch,
+            // everything in its cgroup — outlive it, and the row that could
+            // have found them again is about to be gone for good. A failed
+            // reap therefore rides the error rather than being swallowed;
+            // there is no row left to retry from, so saying so is all this
+            // path can still do for whoever reads the log.
+            if let Err(sweep) =
+                reap_process_tree(&self.seams.scopes, launch_scope.as_deref(), None, &id).await
+            {
+                warn!(
+                    session = %id, error = %format!("{sweep:#}"),
+                    "could not reap the process tree of a create that raced a delete; \
+                     something it started may still be running unlisted"
+                );
+                error = error.context(format!(
+                    "additionally, the new agent's process tree could not be swept ({sweep:#}); \
+                     something it started may still be running with no session record left"
+                ));
+            }
             if let Err(kill_err) = self.tmux.kill_session(&tmux_name).await {
                 warn!(
                     session = %id, error = %kill_err,
@@ -5284,6 +5800,20 @@ impl Supervisor {
             // the caller (and whoever reads the resulting log/HTTP body)
             // has a chance of noticing and cleaning it up by hand.
             let mut result = e.context("confirming the new session's launch in the database");
+            // Same ordering, same reason as the delete race above: the tmux
+            // kill reaches the pane's group and nothing beyond it, and this
+            // path may still go on to remove the row.
+            if let Err(sweep) =
+                reap_process_tree(&self.seams.scopes, launch_scope.as_deref(), None, &id).await
+            {
+                warn!(
+                    session = %id, error = %format!("{sweep:#}"),
+                    "could not reap the process tree of a create whose confirmation failed"
+                );
+                result = result.context(format!(
+                    "additionally, the new agent's process tree could not be swept ({sweep:#})"
+                ));
+            }
             let killed = self.tmux.kill_session(&tmux_name).await;
             if let Err(kill_err) = &killed {
                 warn!(
@@ -5342,6 +5872,10 @@ impl Supervisor {
                 // (`store::StoredSession::generation`); only a restart ever
                 // moves this off zero.
                 generation: 0,
+                // Derived from the same selection the launching row
+                // committed above, not from a fresh probe: the entry must
+                // describe the launch that happened.
+                scope: launch_scope,
             }),
         );
         Ok(info)
@@ -5539,8 +6073,11 @@ impl Supervisor {
             // SPEC.md: an agent exiting on its own does not trigger a hunt
             // for daemonized survivors — the session's next restart does.
             // This is that hunt, and it runs before the new launch rather
-            // than beside it.
-            kill_process_tree(None, session_id)
+            // than beside it. The PRIOR run's scope (`entry.scope`, still
+            // the pre-relaunch generation's here) is what those survivors
+            // would be in — a scope outlives its main process for exactly
+            // as long as something it spawned is still alive.
+            reap_process_tree(&self.seams.scopes, entry.scope.as_deref(), None, session_id)
                 .await
                 .context("reaping the prior run's leftover descendants before relaunching")?;
         }
@@ -5635,6 +6172,12 @@ impl Supervisor {
                     capture_ambiguous: snapshot.capture_ambiguous,
                 },
                 reset_capture,
+                // Re-evaluated here rather than inherited from the run
+                // being replaced (PLAN_M3.md item 10): the selection is a
+                // fact about a LAUNCH, and a restart is a new launch — on a
+                // host that has gained or lost its user manager since, the
+                // previous run's answer is simply the wrong one.
+                self.scope_selected(&id).await,
             )
             .await
             .context("opening a new launch generation for this restart")?;
@@ -5682,6 +6225,7 @@ impl Supervisor {
             .relaunch_into_terminal(
                 entry,
                 claim.generation,
+                launch_scope_unit(&id, claim.generation, claim.scoped),
                 argv,
                 terminal_survives,
                 live_frame,
@@ -5691,6 +6235,30 @@ impl Supervisor {
         match relaunched {
             Ok(info) => Ok(info),
             Err(failure) => {
+                // Which selection the re-published entry describes follows
+                // the same rule the outcome does: on a DEFINITIVE failure
+                // `abort_relaunch` just put the previous run's selection
+                // back in the row, so the entry must agree with it; on an
+                // ambiguous one the new generation's stands, because an
+                // agent may genuinely be running in its scope.
+                //
+                // Note what the derivation then names on the definitive
+                // path: the ABANDONED generation's unit, which by
+                // construction was never created (that is what makes the
+                // failure definitive), so a later stop finds no unit and
+                // falls through to the sweep. That is not a lost kill — the
+                // PREVIOUS run's own scope was already reaped before this
+                // generation was ever opened, by the stop or the leftover
+                // reap the restart performs first.
+                let scope = launch_scope_unit(
+                    &id,
+                    claim.generation,
+                    if failure.definitive {
+                        claim.prior.scoped
+                    } else {
+                        claim.scoped
+                    },
+                );
                 if failure.definitive {
                     // Nothing outside this process changed, so the previous
                     // run's outcome is still the truth about this session —
@@ -5748,6 +6316,7 @@ impl Supervisor {
                             entry.info.clone(),
                             entry.terminal.clone(),
                             claim.generation,
+                            scope,
                             entry
                                 .outcome
                                 .lock()
@@ -5781,6 +6350,7 @@ impl Supervisor {
         &self,
         entry: &SessionEntry,
         generation: i64,
+        scope: Option<String>,
         argv: Vec<String>,
         terminal_survives: bool,
         live_frame: Option<Vec<u8>>,
@@ -5874,6 +6444,7 @@ impl Supervisor {
                 RELAUNCH_ROWS,
                 reuse,
                 preamble,
+                scope.as_deref(),
             )
             .await;
         // Restored whatever the spawn did: this window was shrunk by the
@@ -5899,7 +6470,14 @@ impl Supervisor {
             }
             Err(SpawnFailure::Tmux { spec_path, error }) => {
                 return Err(self
-                    .unwind_failed_relaunch(&id, &tmux_name, reuse, &spec_path, error)
+                    .unwind_failed_relaunch(
+                        &id,
+                        &tmux_name,
+                        scope.as_deref(),
+                        reuse,
+                        &spec_path,
+                        error,
+                    )
                     .await);
             }
         };
@@ -5937,6 +6515,7 @@ impl Supervisor {
                         tmux_name: tmux_name.clone(),
                         pane: pane.clone(),
                     },
+                    scope.clone(),
                     LastOutcome::Launching,
                     reset_capture,
                 )
@@ -5957,7 +6536,9 @@ impl Supervisor {
             // agent running with no row that knows about it.
             None => {
                 let mut teardown = Vec::new();
-                if let Err(e) = kill_process_tree(None, &id).await {
+                if let Err(e) =
+                    reap_process_tree(&self.seams.scopes, scope.as_deref(), None, &id).await
+                {
                     teardown.push(format!("the new agent's process tree ({e:#})"));
                 }
                 if let Err(e) = self.tmux.kill_session(&tmux_name).await {
@@ -6012,6 +6593,7 @@ impl Supervisor {
                             tmux_name: tmux_name.clone(),
                             pane: pane.clone(),
                         },
+                        scope,
                         other,
                         reset_capture,
                     )
@@ -6025,6 +6607,7 @@ impl Supervisor {
                 entry,
                 generation,
                 Terminal { tmux_name, pane },
+                scope,
                 LastOutcome::Running,
                 reset_capture,
             )
@@ -6042,10 +6625,16 @@ impl Supervisor {
     /// failure, converting a live session into a fabricated exec error.
     /// This probes first, exactly as the create path does, and only cleans
     /// up on confirmed absence.
+    ///
+    /// `scope` is the FAILED launch's own cgroup unit, not the previous
+    /// run's: `systemd-run` can have created the scope and placed processes
+    /// in it before whatever made tmux fail, so the sweep this performs
+    /// must be able to reach them.
     async fn unwind_failed_relaunch(
         &self,
         id: &str,
         tmux_name: &str,
+        scope: Option<&str>,
         reuse: Option<&Terminal>,
         spec_path: &Path,
         error: anyhow::Error,
@@ -6094,7 +6683,7 @@ impl Supervisor {
         // The marker sweep, not just tmux: a launch that got far enough to
         // start the login shell can have left descendants even though tmux
         // now reports nothing running.
-        if let Err(sweep) = kill_process_tree(None, id).await {
+        if let Err(sweep) = reap_process_tree(&self.seams.scopes, scope, None, id).await {
             return RelaunchFailure::ambiguous(error.context(format!(
                 "and the failed launch's process tree could not be swept ({sweep:#})"
             )));
@@ -6115,6 +6704,7 @@ impl Supervisor {
         entry: &SessionEntry,
         generation: i64,
         terminal: Terminal,
+        scope: Option<String>,
         outcome: LastOutcome,
         reset_capture: bool,
     ) -> SessionInfo {
@@ -6154,6 +6744,7 @@ impl Supervisor {
             info.clone(),
             Some(terminal),
             generation,
+            scope,
             outcome,
             reset_capture,
         );
@@ -6195,6 +6786,43 @@ impl Supervisor {
         notify_detached(&notify, channel, "session restarted".to_string());
     }
 
+    /// Whether a launch of `id` may run in its own cgroup scope
+    /// (PLAN_M3.md item 10) — the SELECTION, recorded durably per launch.
+    ///
+    /// Two independent conditions, both of which must hold: this host has a
+    /// usable systemd user manager, and this session's id can safely name a
+    /// unit at all (`scope::unit_name` — a non-UUID id, which only a
+    /// hand-edited or foreign database can produce, is refused rather than
+    /// sanitized into a name that might collide with another session's).
+    /// Nameability does not depend on the generation, so this answers for
+    /// every launch of the session.
+    ///
+    /// Per LAUNCH, never per session and never per supervisor: the answer is
+    /// recorded with the row it describes, so two launches of the same
+    /// session on either side of a supervisor restart can honestly differ.
+    /// The underlying availability probe is what is cached
+    /// (`scope::ScopeManager::available`); this call is the cheap read of
+    /// that verdict.
+    async fn scope_selected(&self, id: &str) -> bool {
+        if !self.seams.scopes.available().await {
+            debug!(
+                session = %id,
+                "no systemd user manager; this launch relies on the process-tree sweep alone"
+            );
+            return false;
+        }
+        if crate::scope::unit_name(id, 0).is_none() {
+            warn!(
+                session = %id,
+                "this session's id cannot safely name a systemd unit, so its launches rely on \
+                 the process-tree sweep alone"
+            );
+            return false;
+        }
+        true
+    }
+
+    /// Publish one launch's spec and start its window command in tmux —
     /// Publish one launch's spec and start its window command in tmux —
     /// the side-effecting half of a launch, shared by create (PLAN_M3.md
     /// items 2/6) and restart (item 9).
@@ -6212,6 +6840,12 @@ impl Supervisor {
     /// creates a fresh tmux session (create, and a restart whose terminal
     /// is gone), `Some(pane)` respawns into an existing pane so the prior
     /// run stays in scrollback (see [`TmuxDriver::relaunch_in_pane`]).
+    ///
+    /// `scope` is the cgroup unit this launch was ALREADY recorded as
+    /// running in (PLAN_M3.md item 10) — the caller decides and commits it
+    /// durably first, so this function only spends it. It reaches the agent
+    /// through the window command, never through the spec, because the spec
+    /// is read by the shim and the scope has to exist before the shim runs.
     ///
     /// Failures are classified rather than flattened, because the two
     /// classes cannot be unwound the same way: a spec that never landed
@@ -6231,6 +6865,7 @@ impl Supervisor {
         rows: u16,
         reuse: Option<&Terminal>,
         preamble: Option<Vec<u8>>,
+        scope: Option<&str>,
     ) -> Result<Spawned, SpawnFailure> {
         let spec_path = crate::launch::spec_path_for_launch(&self.state_dir, id, generation);
         // Derived the SAME way the shim derives it from its own copy of
@@ -6283,7 +6918,34 @@ impl Supervisor {
         }
 
         let shell = resolve_shell().await;
-        let cmd = window_command(&shell, &self.farhelm_exe, &spec_path);
+        // The scope wrapper, or nothing at all. Note the asymmetry with the
+        // rest of this function: `scope` is DECIDED and RECORDED durably by
+        // the caller, before the launching row commits, and only consumed
+        // here — the selection has to precede the side effect it describes
+        // (item 2's ordering rule), or a crash mid-launch would leave a row
+        // that cannot say what stop should do.
+        //
+        // A selected scope whose prefix cannot be built is a contradiction
+        // this supervisor can only have reached by losing its user manager
+        // between the selection and now. Launching UNWRAPPED is the right
+        // answer to it — never worse than M2 — and it is loud, because the
+        // row will go on claiming a scope that no longer exists.
+        let scope_prefix = match scope {
+            Some(unit) => match self.seams.scopes.launch_prefix(unit).await {
+                Some(prefix) => prefix,
+                None => {
+                    warn!(
+                        session = %id, unit,
+                        "this launch selected a cgroup scope but the user manager is no longer \
+                         usable; launching without one, so stop falls back to the \
+                         process-tree sweep"
+                    );
+                    Vec::new()
+                }
+            },
+            None => Vec::new(),
+        };
+        let cmd = window_command(&shell, &self.farhelm_exe, &spec_path, scope_prefix);
         let started = match reuse {
             Some(terminal) => self
                 .tmux
@@ -8666,7 +9328,7 @@ async fn handle_control(
                 // itself regress to a stale `Exited` in the meantime.
                 let mut sentinel_hits: HashMap<String, String> = HashMap::new();
                 for entry in &entries {
-                    let (recorded, dead_or_absent) = {
+                    let (recorded, dead_or_absent, pane_dead) = {
                         let recorded = entry
                             .outcome
                             .lock()
@@ -8677,7 +9339,16 @@ async fn handle_control(
                                 .get(&terminal.pane)
                                 .filter(|state| state.session_name == terminal.tmux_name)
                         });
-                        (recorded, live.is_none_or(|state| state.dead))
+                        // Two different questions, deliberately not one:
+                        // "no live process" (which a sentinel check needs)
+                        // and "a pane that EXISTS and is dead" (which the
+                        // wrapper-failure classifier needs — see its docs
+                        // for why an absent pane must not qualify).
+                        (
+                            recorded,
+                            live.is_none_or(|state| state.dead),
+                            live.is_some_and(|state| state.dead),
+                        )
                     };
 
                     // Idempotent cleanup (item 4): an entry already durably
@@ -8713,7 +9384,30 @@ async fn handle_control(
                                 }
                                 continue;
                             }
-                            Ok(None) => {}
+                            Ok(None) => {
+                                // The wrapper-failure shape: no sentinel, a
+                                // pane that is present and dead, and a
+                                // launch spec nothing ever consumed.
+                                if let Some(detail) = wrapper_failure_detail(
+                                    &sup.state_dir,
+                                    &entry.info.id,
+                                    entry.generation,
+                                    entry.scope.is_some(),
+                                    pane_dead,
+                                )
+                                .await
+                                {
+                                    sentinel_hits.insert(entry.info.id.clone(), detail.clone());
+                                    if sup.may_record() {
+                                        observations.push((
+                                            entry.info.id.clone(),
+                                            entry.generation,
+                                            Transition::SentinelError { detail, pane: None },
+                                        ));
+                                    }
+                                    continue;
+                                }
+                            }
                             Err(e) => {
                                 // Loud propagation, not fall-through (item
                                 // 1): the WHOLE request fails rather than
@@ -9033,13 +9727,30 @@ async fn handle_control(
                             detail,
                             pane: entry.terminal.as_ref().map(|t| t.pane.clone()),
                         },
-                        Ok(None) => Transition::ObservedExit {
-                            exit_code: dead_pane_exit_code(
-                                &sup,
-                                entry.terminal.as_ref(),
-                                &session_id,
-                            )
-                            .await,
+                        // The wrapper-failure shape outranks the plain exit
+                        // for the same reason a sentinel does: an agent that
+                        // never started did not "run and finish".
+                        Ok(None) => match wrapper_failure_detail(
+                            &sup.state_dir,
+                            &session_id,
+                            entry.generation,
+                            entry.scope.is_some(),
+                            pane_state.is_some_and(|state| state.dead),
+                        )
+                        .await
+                        {
+                            Some(detail) => Transition::SentinelError {
+                                detail,
+                                pane: entry.terminal.as_ref().map(|t| t.pane.clone()),
+                            },
+                            None => Transition::ObservedExit {
+                                exit_code: dead_pane_exit_code(
+                                    &sup,
+                                    entry.terminal.as_ref(),
+                                    &session_id,
+                                )
+                                .await,
+                            },
                         },
                         Err(e) => {
                             // Loud propagation (item 1's discipline,
@@ -9099,12 +9810,22 @@ async fn handle_control(
                         cleanup_launch_artifacts(&sup.state_dir, &session_id, entry.generation)
                             .await;
                     }
-                    // The marker sweep still runs with no live pid to walk
-                    // from: SPEC.md assigns reaping a PAST run's leftover
+                    // The reap still runs with no live pid to walk from:
+                    // SPEC.md assigns reaping a PAST run's leftover
                     // descendants to the session's next stop or delete, and
                     // once there is no live pane the environment-marker
-                    // scan is the only mechanism that can still find one.
-                    if let Err(e) = kill_process_tree(None, &session_id).await {
+                    // scan and this launch's cgroup are the only mechanisms
+                    // that can still find one. The scope in particular
+                    // outlives the agent for exactly as long as something
+                    // it spawned does, which is the case at hand.
+                    if let Err(e) = reap_process_tree(
+                        &sup.seams.scopes,
+                        entry.scope.as_deref(),
+                        None,
+                        &session_id,
+                    )
+                    .await
+                    {
                         // The sweep itself failed (not just "nothing was
                         // found to kill") — this is not a false success.
                         // See `ControlMsg::StopSession`'s docs: a caller
@@ -9226,7 +9947,14 @@ async fn handle_control(
                     },
                     None => None,
                 };
-                if let Err(e) = kill_process_tree(root_pid, &session_id).await {
+                if let Err(e) = reap_process_tree(
+                    &sup.seams.scopes,
+                    entry.scope.as_deref(),
+                    root_pid,
+                    &session_id,
+                )
+                .await
+                {
                     send_reply(
                         &tx,
                         &ControlMsg::Error {
@@ -9751,6 +10479,75 @@ pub async fn connect(state_dir: &Path) -> anyhow::Result<UnixStream> {
 mod tests {
     use super::*;
 
+    /// A supervisor state directory that also kills the private tmux
+    /// server rooted inside it when it goes out of scope.
+    ///
+    /// Drop-based, and the drop is the whole point: a test that fails an
+    /// assertion never reaches an explicit teardown, and every test here
+    /// that creates a session starts a tmux server that nothing else will
+    /// ever stop. Measured before this existed: one `cargo test -p
+    /// farhelm-supervisor --lib` run left 24 tmux servers behind, and they
+    /// accumulate across runs until the host is visibly degraded (~2,000
+    /// were found on the development machine).
+    ///
+    /// Wraps the `TempDir` rather than sitting beside it so the ordering is
+    /// not a rule each test has to remember: the server is killed in this
+    /// type's own `Drop`, which runs before the inner `TempDir`'s and
+    /// therefore before the directory holding the server's socket is
+    /// removed. Its `path()` mirrors `TempDir::path`, so call sites read
+    /// exactly as they did.
+    struct StateDir(tempfile::TempDir);
+
+    impl StateDir {
+        fn new() -> StateDir {
+            StateDir(tempfile::tempdir().expect("state dir"))
+        }
+
+        fn path(&self) -> &std::path::Path {
+            self.0.path()
+        }
+    }
+
+    /// How long [`StateDir`]'s teardown waits for `tmux kill-server` before
+    /// giving up on it.
+    ///
+    /// `Drop` cannot await, so this is a real blocking wait on a test
+    /// thread — and an unbounded one would let a single wedged tmux hang
+    /// the whole suite with no output and no clue why. A `kill-server` that
+    /// has not returned in this long is not going to; the server it was
+    /// aimed at leaks, which is a bounded cost, unlike the hang.
+    const KILL_SERVER_DEADLINE: Duration = Duration::from_secs(10);
+
+    impl Drop for StateDir {
+        fn drop(&mut self) {
+            // Best-effort: the common case is a test that never started a
+            // server at all, and `kill-server` on an absent socket is an
+            // error worth ignoring rather than reporting.
+            let Ok(mut child) = std::process::Command::new("tmux")
+                .arg("-S")
+                .arg(self.0.path().join("tmux.sock"))
+                .arg("kill-server")
+                .stdout(std::process::Stdio::null())
+                .stderr(std::process::Stdio::null())
+                .spawn()
+            else {
+                return;
+            };
+            let deadline = std::time::Instant::now() + KILL_SERVER_DEADLINE;
+            loop {
+                match child.try_wait() {
+                    Ok(Some(_)) | Err(_) => return,
+                    Ok(None) if std::time::Instant::now() >= deadline => {
+                        let _ = child.kill();
+                        let _ = child.wait();
+                        return;
+                    }
+                    Ok(None) => std::thread::sleep(Duration::from_millis(20)),
+                }
+            }
+        }
+    }
+
     /// A snapshot shaped exactly as `session_snapshot` would build one for
     /// a session with `offer` — used by the mode/offer matrix below, which
     /// is about the PAIRING rules rather than about how an offer is
@@ -9981,7 +10778,7 @@ mod tests {
             }
         }
 
-        let state = tempfile::tempdir().expect("state dir");
+        let state = StateDir::new();
         let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
             .await
             .expect("supervisor construction touches only tmux, not the launch shim");
@@ -10011,6 +10808,7 @@ mod tests {
                 }),
                 capture: std::sync::Mutex::new(CaptureState::Unclaimed),
                 generation: 0,
+                scope: None,
             }),
         );
 
@@ -10189,6 +10987,260 @@ mod tests {
             b"PATH=/bin\0HOME=/root\0",
             session_id
         ));
+    }
+
+    /// Spawn a process carrying `FARHELM_SESSION_ID=<id>`, returning its
+    /// pid — the only thing the marker sweep can find in a unit test.
+    ///
+    /// `Command::env` sets the CHILD's environment; the test process's own
+    /// is never touched (a repo-wide rule). `sleep 30` bounds the leak if
+    /// an assertion panics before the sweep under test runs.
+    fn spawn_marked_process(session_id: &str) -> std::process::Child {
+        std::process::Command::new("sh")
+            .arg("-c")
+            .arg("sleep 30")
+            .env(crate::launch::SESSION_ID_ENV_VAR, session_id)
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .spawn()
+            .expect("spawning a marked test process")
+    }
+
+    /// Whether `pid` is gone in the sense a kill test means it: no `/proc`
+    /// entry, or a zombie still waiting to be reaped.
+    ///
+    /// The zombie case is not pedantry here — it is the ONLY outcome these
+    /// tests produce. The marked process is a direct child of the test
+    /// process, which does not `wait()` on it until the assertions are
+    /// done, so a successfully SIGKILLed victim keeps its `/proc` entry
+    /// until then; a bare `Path::exists` check would call every successful
+    /// sweep a failure. An unparseable `stat` reports "still there", so an
+    /// unreadable `/proc` fails the assertion loudly rather than passing it
+    /// by accident.
+    fn marked_process_gone(pid: u32) -> bool {
+        let Ok(stat) = std::fs::read(format!("/proc/{pid}/stat")) else {
+            return true;
+        };
+        parse_stat(&stat).is_ok_and(|(_, _, state)| state == 'Z')
+    }
+
+    /// The ORDER of stop's two mechanisms, which nothing about the end
+    /// state can show: both the cgroup kill and the marker sweep leave the
+    /// same corpse, so "scope, then sweep" and "sweep, then scope" are
+    /// indistinguishable afterwards. This pins it by watching a process only
+    /// the SWEEP can reach and asking, at every scope operation, whether it
+    /// is still alive — the answer is yes for all of them if and only if the
+    /// sweep has not started yet.
+    ///
+    /// Worth pinning because the order is a real decision and a silent one:
+    /// SPEC_impl.md's belt-and-suspenders rule says the sweep is the
+    /// BACKSTOP, which is a claim about sequence. A refactor that ran the
+    /// sweep first would still pass every other test in this file.
+    ///
+    /// The escalation itself is pinned in the same pass, including the
+    /// post-SIGKILL confirmation: `systemctl kill` returning proves delivery,
+    /// not that the cgroup emptied, so a stop that skipped the confirmation
+    /// could report a tree reaped while processes it was meant to end were
+    /// still running.
+    ///
+    /// Runs everywhere, systemd or not: the manager is a fake, and the only
+    /// real process involved is one this test spawns itself.
+    #[tokio::test]
+    async fn the_backstop_sweep_runs_after_the_scope_kill_never_before() {
+        let session_id = uuid::Uuid::new_v4().to_string();
+        let mut child = spawn_marked_process(&session_id);
+        let decoy = child.id();
+
+        // Each recorded op carries whether the sweep's victim was still
+        // alive when it happened.
+        let observed: Arc<std::sync::Mutex<Vec<(crate::scope::ScopeOp, bool)>>> =
+            Arc::new(std::sync::Mutex::new(Vec::new()));
+        let sink = {
+            let observed = Arc::clone(&observed);
+            Arc::new(move |op: &crate::scope::ScopeOp| {
+                let alive = !marked_process_gone(decoy);
+                observed.lock().unwrap().push((op.clone(), alive));
+            }) as crate::scope::ScopeOpSink
+        };
+        // The unit survives the first two existence checks (the pre-TERM one
+        // and the pre-KILL one) and is gone by the third, which is the
+        // confirmation — the shape a real teardown produces.
+        let scopes = crate::scope::ScopeManager::fake_vanishing(2, sink);
+
+        let unit = crate::scope::unit_name(&session_id, 0).expect("a UUID id must name a unit");
+        reap_process_tree(&scopes, Some(&unit), None, &session_id)
+            .await
+            .expect("the sweep must confirm the marked process is gone");
+
+        let observed = observed.lock().expect("op sink mutex poisoned");
+        assert_eq!(
+            observed
+                .iter()
+                .map(|(op, _)| op.clone())
+                .collect::<Vec<_>>(),
+            vec![
+                crate::scope::ScopeOp::Exists(unit.clone()),
+                crate::scope::ScopeOp::Kill {
+                    unit: unit.clone(),
+                    signal: "SIGTERM".to_string(),
+                },
+                crate::scope::ScopeOp::Exists(unit.clone()),
+                crate::scope::ScopeOp::Kill {
+                    unit: unit.clone(),
+                    signal: "SIGKILL".to_string(),
+                },
+                crate::scope::ScopeOp::Exists(unit.clone()),
+            ],
+            "the scope escalation must check existence, TERM, re-check, KILL, then confirm"
+        );
+        assert!(
+            observed.iter().all(|(_, alive)| *alive),
+            "the sweep must not have run yet at any point during the scope kill: {observed:?}"
+        );
+        assert!(
+            marked_process_gone(decoy),
+            "the backstop sweep must still have run afterwards and reaped the marked process"
+        );
+        let _ = child.wait();
+    }
+
+    /// A cgroup that never empties must not be reported as reaped — and must
+    /// still not fail a stop the sweep confirmed.
+    ///
+    /// Both halves matter and they pull in opposite directions. Skipping the
+    /// confirmation would let `systemctl kill`'s "signals delivered" pass for
+    /// "processes gone"; treating the unconfirmed unit as fatal would make a
+    /// stubborn cgroup fail a stop that M2 (which has no cgroups at all)
+    /// would have called complete. The scope's trouble is diagnostic, the
+    /// sweep's verdict is the answer.
+    #[tokio::test]
+    async fn a_scope_that_never_goes_away_is_reported_but_does_not_fail_the_stop() {
+        let session_id = uuid::Uuid::new_v4().to_string();
+        let mut child = spawn_marked_process(&session_id);
+        let decoy = child.id();
+
+        // Never vanishes: every existence check answers "still loaded", so
+        // the confirmation runs out its bound.
+        let scopes = crate::scope::ScopeManager::fake(true, Arc::new(|_| {}));
+        let unit = crate::scope::unit_name(&session_id, 0).expect("a UUID id must name a unit");
+        reap_process_tree(&scopes, Some(&unit), None, &session_id)
+            .await
+            .expect("an unconfirmed scope must not fail a stop the sweep confirmed");
+        assert!(
+            marked_process_gone(decoy),
+            "the sweep must still have reaped the marked process"
+        );
+        let _ = child.wait();
+    }
+
+    /// A manager that is present but cannot kill must not weaken stop:
+    /// PLAN_M3.md item 10's "absence of a manager never degrades stop below
+    /// M2's guarantees", read in the direction it is easier to get wrong.
+    ///
+    /// The failure mode this excludes is a stop that reports failure — and,
+    /// through `StopFailure::Sweep`, refuses a restart — because a cgroup
+    /// operation errored while the sweep it exists to reinforce succeeded
+    /// completely. The sweep's verdict is the whole answer.
+    #[tokio::test]
+    async fn a_broken_user_manager_never_fails_a_stop_the_sweep_confirmed() {
+        let session_id = uuid::Uuid::new_v4().to_string();
+        let mut child = spawn_marked_process(&session_id);
+        let decoy = child.id();
+
+        let scopes = crate::scope::ScopeManager::fake_failing_kills(Arc::new(|_| {}));
+        let unit = crate::scope::unit_name(&session_id, 0).expect("a UUID id must name a unit");
+        reap_process_tree(&scopes, Some(&unit), None, &session_id)
+            .await
+            .expect("a failing scope kill must not fail a stop the sweep confirmed");
+        assert!(
+            marked_process_gone(decoy),
+            "the sweep must still have reaped the marked process"
+        );
+        let _ = child.wait();
+    }
+
+    /// The wrapper-failure predicate, pinned in all three of its arms.
+    ///
+    /// Runs everywhere, systemd or not, because the shape it recognizes is
+    /// entirely on-disk — which is also why it needs its own test: the e2e
+    /// version can only run where a user manager exists, and this is the
+    /// classifier that decides whether an agent that never started is
+    /// reported as `error` or as a plain exit.
+    ///
+    /// The unscoped arm is the one that is easy to get wrong in the
+    /// permissive direction. Without a wrapper there is nothing between the
+    /// login shell and the shim but the shell, so an unconsumed spec there
+    /// means the user's rc files killed the shell — a pre-existing M2 shape
+    /// this build has no new evidence about and must not reclassify.
+    #[tokio::test]
+    async fn a_wrapper_failure_is_recognized_only_by_its_full_shape() {
+        let state = StateDir::new();
+        let id = uuid::Uuid::new_v4().to_string();
+        let spec = crate::launch::spec_path_for_launch(state.path(), &id, 0);
+        std::fs::create_dir_all(spec.parent().expect("launch dir")).expect("launch dir");
+
+        assert_eq!(
+            wrapper_failure_detail(state.path(), &id, 0, true, true).await,
+            None,
+            "no spec on disk means the shim consumed it and really did run"
+        );
+
+        std::fs::write(&spec, b"{}").expect("plant an unconsumed spec");
+        assert_eq!(
+            wrapper_failure_detail(state.path(), &id, 0, false, true).await,
+            None,
+            "an unscoped launch has no wrapper to have failed"
+        );
+        assert_eq!(
+            wrapper_failure_detail(state.path(), &id, 0, true, false).await,
+            None,
+            "an ABSENT pane means the window or the whole tmux server was destroyed, which \
+             strands a spec from a launch that was interrupted rather than failed"
+        );
+        assert!(
+            wrapper_failure_detail(state.path(), &id, 0, true, true)
+                .await
+                .is_some_and(|detail| detail.contains("never reached farhelm's exec shim")),
+            "a scoped launch whose spec was never consumed, under a dead pane, never started"
+        );
+
+        // Per LAUNCH, like every other artifact keyed on the generation: a
+        // spec left by generation 0 must not paint generation 1 as failed.
+        assert_eq!(
+            wrapper_failure_detail(state.path(), &id, 1, true, true).await,
+            None,
+            "a previous generation's leftover spec is not this launch's evidence"
+        );
+    }
+
+    /// A scope kill must never leave the sweep seeding itself from a pid the
+    /// kill's own grace window let the kernel recycle.
+    ///
+    /// The window is real: `kill_scope` sends SIGTERM and sleeps out
+    /// [`KILL_GRACE`], and the pane's process is precisely the one most
+    /// likely to die inside it. Passing a bare pid through that window and
+    /// then walking the PPID closure from it would mean sweeping — and
+    /// signaling — a completely unrelated process tree that happened to
+    /// inherit the number.
+    ///
+    /// Reproduced without racing the kernel for a recycled pid: the pane pid
+    /// handed in is one that is ALREADY gone, so any implementation that
+    /// trusts the number would seed from whatever now holds it, while one
+    /// that captured `(pid, starttime)` first correctly finds no identity to
+    /// carry at all.
+    #[tokio::test]
+    async fn a_dead_pane_pid_is_never_seeded_into_the_sweep() {
+        let session_id = uuid::Uuid::new_v4().to_string();
+        let mut gone = spawn_marked_process(&session_id);
+        let gone_pid = gone.id();
+        let _ = gone.kill();
+        let _ = gone.wait();
+
+        let scopes = crate::scope::ScopeManager::disabled();
+        reap_process_tree(&scopes, None, Some(gone_pid), &session_id)
+            .await
+            .expect("a dead pane pid must not fail the sweep");
     }
 
     /// `parse_stat`'s whole reason to exist: a `comm` field containing
@@ -10403,7 +11455,7 @@ mod tests {
     /// would race the task rather than test it.
     #[tokio::test]
     async fn restart_of_an_unknown_session_replies_not_found() {
-        let state = tempfile::tempdir().expect("state dir");
+        let state = StateDir::new();
         let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
             .await
             .expect("supervisor construction touches only tmux, not the launch shim");
@@ -10497,6 +11549,7 @@ mod tests {
             }),
             capture: std::sync::Mutex::new(CaptureState::Unclaimed),
             generation: 0,
+            scope: None,
         }
     }
 
@@ -10709,7 +11762,7 @@ mod tests {
     /// and silently matches nothing.
     #[tokio::test]
     async fn reload_rediscovers_the_pane_of_a_launching_row_that_did_launch() {
-        let state = tempfile::tempdir().expect("state dir");
+        let state = StateDir::new();
         let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
             .await
             .expect("supervisor");
@@ -10744,6 +11797,7 @@ mod tests {
                         capture_ambiguous: false,
                         first_input_at: None,
                         generation: 0,
+                        launch_scoped: false,
                     },
                     None,
                 )
@@ -10827,7 +11881,7 @@ mod tests {
     /// transition policy alone.
     #[tokio::test]
     async fn reload_reconciles_a_stop_intent_against_the_pane_it_left_behind() {
-        let state = tempfile::tempdir().expect("state dir");
+        let state = StateDir::new();
         let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
             .await
             .expect("supervisor");
@@ -10859,6 +11913,7 @@ mod tests {
                         capture_ambiguous: false,
                         first_input_at: None,
                         generation: 0,
+                        launch_scoped: false,
                     },
                     None,
                 )
@@ -10935,7 +11990,7 @@ mod tests {
     /// before anything is written.
     #[tokio::test]
     async fn a_stop_that_cannot_record_its_intent_reports_instead_of_killing() {
-        let state = tempfile::tempdir().expect("state dir");
+        let state = StateDir::new();
         let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
             .await
             .expect("supervisor");
@@ -10957,6 +12012,7 @@ mod tests {
                     capture_ambiguous: false,
                     first_input_at: None,
                     generation: 0,
+                    launch_scoped: false,
                 },
                 None,
             )
@@ -11014,7 +12070,7 @@ mod tests {
     /// this test opens it the same way a `sqlite3` prompt would.
     #[tokio::test]
     async fn a_failed_outcome_write_leaves_the_mirror_untouched() {
-        let state = tempfile::tempdir().expect("state dir");
+        let state = StateDir::new();
         let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
             .await
             .expect("supervisor construction touches only tmux, not the launch shim");
@@ -11036,6 +12092,7 @@ mod tests {
                     capture_ambiguous: false,
                     first_input_at: None,
                     generation: 0,
+                    launch_scoped: false,
                 },
                 None,
             )
@@ -11086,7 +12143,7 @@ mod tests {
     /// be achieved by "computed nothing".
     #[tokio::test]
     async fn a_supervisor_without_the_state_dir_claim_reconciles_nothing_durably() {
-        let state = tempfile::tempdir().expect("state dir");
+        let state = StateDir::new();
         let db_path = state.path().join("supervisor.db");
         let store = SessionStore::open(&db_path, true).await.expect("store");
         store
@@ -11107,6 +12164,7 @@ mod tests {
                     capture_ambiguous: false,
                     first_input_at: None,
                     generation: 0,
+                    launch_scoped: false,
                 },
                 None,
             )
@@ -11164,7 +12222,7 @@ mod tests {
     /// exactly the case this flag covers.
     #[tokio::test]
     async fn a_second_serve_on_the_same_state_dir_is_refused() {
-        let state = tempfile::tempdir().expect("state dir");
+        let state = StateDir::new();
         let first = Supervisor::new_with_exe(state.path(), dummy_exe())
             .await
             .expect("supervisor");
@@ -11199,7 +12257,7 @@ mod tests {
     /// protects is about what happens at the call site.
     #[tokio::test]
     async fn create_session_over_field_cap_is_rejected_before_any_side_effect() {
-        let state = tempfile::tempdir().expect("state dir");
+        let state = StateDir::new();
         let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
             .await
             .expect("supervisor construction touches only tmux, not the launch shim");
@@ -11265,7 +12323,7 @@ mod tests {
     /// own atomicity in isolation.
     #[tokio::test]
     async fn create_session_never_launches_tmux_after_a_failed_spec_publish() {
-        let state = tempfile::tempdir().expect("state dir");
+        let state = StateDir::new();
         let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
             .await
             .expect("supervisor construction touches only tmux, not the launch shim");
@@ -11472,7 +12530,7 @@ mod tests {
     /// row behind would be far worse than one that never happened.
     #[tokio::test]
     async fn a_creates_snapshot_is_resolved_once_and_stored_with_the_session() {
-        let state = tempfile::tempdir().expect("state dir");
+        let state = StateDir::new();
         let work = tempfile::tempdir().expect("workdir");
         let cwd = work.path().to_string_lossy().to_string();
         let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
@@ -11565,7 +12623,7 @@ mod tests {
     /// `Internal` would turn the first attempt's 400 into a 500.
     #[tokio::test]
     async fn a_failed_create_replays_its_error_and_a_changed_override_conflicts() {
-        let state = tempfile::tempdir().expect("state dir");
+        let state = StateDir::new();
         let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
             .await
             .expect("supervisor");
@@ -11708,7 +12766,7 @@ mod tests {
     /// rather than hoping a spawned task interleaves the right way.
     #[tokio::test(flavor = "multi_thread")]
     async fn a_delete_that_lands_mid_launch_wins_and_the_create_tears_down() {
-        let state = tempfile::tempdir().expect("state dir");
+        let state = StateDir::new();
         let db = state.path().join("supervisor.db");
         let deleted: Arc<std::sync::atomic::AtomicBool> = Arc::default();
         let sup = {
@@ -11822,7 +12880,7 @@ mod tests {
     /// before the directory is looked at.
     #[tokio::test]
     async fn a_keyed_precondition_failure_is_recorded_and_replayed_verbatim() {
-        let state = tempfile::tempdir().expect("state dir");
+        let state = StateDir::new();
         let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
             .await
             .expect("supervisor");
@@ -11904,7 +12962,7 @@ mod tests {
     /// because that is the only instant the property is about.
     #[tokio::test(flavor = "multi_thread")]
     async fn a_relaunch_hides_its_session_from_stop_and_delete_until_it_completes() {
-        let state = tempfile::tempdir().expect("state dir");
+        let state = StateDir::new();
         let seen: Arc<std::sync::Mutex<Option<bool>>> = Arc::default();
         let handle: Arc<std::sync::OnceLock<std::sync::Weak<Supervisor>>> = Arc::default();
         let sup = {
@@ -11957,6 +13015,7 @@ mod tests {
                     capture_ambiguous: false,
                     first_input_at: None,
                     generation: 0,
+                    launch_scoped: false,
                 },
                 Some(IntentClaim {
                     intent_key: "key".to_string(),
@@ -12009,7 +13068,7 @@ mod tests {
     /// outcomes of a launch that happened.
     #[tokio::test]
     async fn a_pending_reservation_whose_session_ended_replays_it() {
-        let state = tempfile::tempdir().expect("state dir");
+        let state = StateDir::new();
         let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
             .await
             .expect("supervisor");
@@ -12032,6 +13091,7 @@ mod tests {
                     capture_ambiguous: false,
                     first_input_at: None,
                     generation: 0,
+                    launch_scoped: false,
                 },
                 Some(IntentClaim {
                     intent_key: "key".to_string(),
@@ -12087,7 +13147,7 @@ mod tests {
     /// first's session instead of making its own.
     #[tokio::test]
     async fn a_degenerate_intent_key_is_rejected_before_anything_is_stored() {
-        let state = tempfile::tempdir().expect("state dir");
+        let state = StateDir::new();
         let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
             .await
             .expect("supervisor");
@@ -12196,7 +13256,7 @@ mod tests {
     /// sized by the request.
     #[tokio::test]
     async fn an_oversized_resume_template_is_refused_before_anything_is_stored() {
-        let state = tempfile::tempdir().expect("state dir");
+        let state = StateDir::new();
         let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
             .await
             .expect("supervisor");
@@ -12267,7 +13327,7 @@ mod tests {
     /// the error must say so.
     #[tokio::test]
     async fn an_ambiguous_tmux_failure_keeps_the_launching_record() {
-        let state = tempfile::tempdir().expect("state dir");
+        let state = StateDir::new();
         let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
             .await
             .expect("supervisor");
@@ -12355,7 +13415,7 @@ mod tests {
     /// merely being absent.
     #[tokio::test]
     async fn an_unreadable_sentinel_blocks_the_relaunch_rather_than_guessing() {
-        let state = tempfile::tempdir().expect("state dir");
+        let state = StateDir::new();
         let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
             .await
             .expect("supervisor");
@@ -12378,6 +13438,7 @@ mod tests {
                     capture_ambiguous: false,
                     first_input_at: None,
                     generation: 0,
+                    launch_scoped: false,
                 },
                 Some(IntentClaim {
                     intent_key: "key".to_string(),
@@ -12437,7 +13498,7 @@ mod tests {
     /// reservation pending, which is recoverable; launching anyway is not.
     #[tokio::test]
     async fn a_relaunch_refuses_to_start_over_artifacts_it_cannot_remove() {
-        let state = tempfile::tempdir().expect("state dir");
+        let state = StateDir::new();
         let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
             .await
             .expect("supervisor");
@@ -12460,6 +13521,7 @@ mod tests {
                     capture_ambiguous: false,
                     first_input_at: None,
                     generation: 0,
+                    launch_scoped: false,
                 },
                 Some(IntentClaim {
                     intent_key: "key".to_string(),
@@ -12540,7 +13602,7 @@ mod tests {
     /// transaction (which carries it) fails as a whole.
     #[tokio::test]
     async fn a_create_whose_outcome_cannot_be_recorded_reports_the_ambiguity() {
-        let state = tempfile::tempdir().expect("state dir");
+        let state = StateDir::new();
         let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
             .await
             .expect("supervisor");
@@ -12621,7 +13683,7 @@ mod tests {
     /// untruncated reply.
     #[tokio::test]
     async fn list_sessions_call_site_applies_the_byte_budget_and_keeps_serving() {
-        let state = tempfile::tempdir().expect("state dir");
+        let state = StateDir::new();
         let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
             .await
             .expect("supervisor construction touches only tmux, not the launch shim");
@@ -12657,6 +13719,7 @@ mod tests {
                 }),
                 capture: std::sync::Mutex::new(CaptureState::Unclaimed),
                 generation: 0,
+                scope: None,
             }),
         );
 
@@ -12754,7 +13817,7 @@ mod tests {
     /// terminal-less entry without ever consulting `pane_states`).
     #[tokio::test]
     async fn list_sessions_honors_the_session_cap_at_the_handler_level() {
-        let state = tempfile::tempdir().expect("state dir");
+        let state = StateDir::new();
         let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
             .await
             .expect("supervisor construction touches only tmux, not the launch shim");
@@ -12788,6 +13851,7 @@ mod tests {
                         }),
                         capture: std::sync::Mutex::new(CaptureState::Unclaimed),
                         generation: 0,
+                        scope: None,
                     }),
                 );
             }
@@ -12845,7 +13909,7 @@ mod tests {
     /// `Error` reply instead of the expected `SessionList`.
     #[tokio::test]
     async fn list_sessions_skips_pane_states_when_nothing_has_a_terminal() {
-        let state = tempfile::tempdir().expect("state dir");
+        let state = StateDir::new();
         let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
             .await
             .expect("supervisor construction touches only tmux, not the launch shim");
@@ -12888,6 +13952,7 @@ mod tests {
                 }),
                 capture: std::sync::Mutex::new(CaptureState::Unclaimed),
                 generation: 0,
+                scope: None,
             }),
         );
 
@@ -12932,7 +13997,7 @@ mod tests {
     /// issued so far.
     #[tokio::test]
     async fn steady_state_reaping_keeps_the_tracked_task_count_bounded() {
-        let state = tempfile::tempdir().expect("state dir");
+        let state = StateDir::new();
         let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
             .await
             .expect("supervisor construction touches only tmux, not the launch shim");

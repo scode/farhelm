@@ -26,7 +26,8 @@ Before creating or updating a PR, or claiming work is done, run exactly what CI 
 
 - `cargo fmt --all -- --check`
 - `cargo clippy --all-targets -- -D warnings`
-- `cargo test`
+- `cargo test -- --show-output` — `--show-output` is what makes a loudly-skipped test's reason visible; the cgroup tests
+  skip themselves where no systemd user manager exists, and libtest hides a passing test's output otherwise.
 - `cargo check -p farhelm-ui --features desktop` — the desktop renderer compiles nowhere else; needs the webkit2gtk/gtk
   dev packages (see the CI job for the apt list).
 - `dprint check`
