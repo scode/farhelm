@@ -304,12 +304,13 @@ mod tests {
     /// The handshake must refuse a version mismatch with an actionable
     /// error — this is M1 acceptance criterion 6 (SPEC.md version-skew
     /// rule) pinned at the unit level. Both directions of skew are
-    /// exercised: a NEWER peer, and — since the M2.5 bump to 4 made
-    /// "older peer exists" a reality — an OLDER version-3 peer. The old
-    /// side matters independently because a comparison bug that rejects
-    /// only newer versions (`>` instead of `!=`) would accept a v3 peer
-    /// that cannot even decode `PauseOutput`, the exact skew the bump
-    /// exists to refuse.
+    /// exercised: a NEWER peer, and — since the M2.5 bump to 4 first made
+    /// "older peer exists" a reality, and the M3 bump to 5 keeps it one —
+    /// an OLDER version-4 peer. The old side matters independently because
+    /// a comparison bug that rejects only newer versions (`>` instead of
+    /// `!=`) would accept a v4 peer that cannot even decode
+    /// `SessionStatus::Interrupted`/`Error` or `ControlMsg::RestartSession`,
+    /// the exact skew the version 5 bump exists to refuse.
     #[tokio::test]
     async fn handshake_refuses_protocol_mismatch() {
         for wrong_version in [PROTOCOL_VERSION + 1, PROTOCOL_VERSION - 1] {
