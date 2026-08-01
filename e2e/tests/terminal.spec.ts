@@ -1045,6 +1045,94 @@ test("DECRPM auto-replies to a mode query are dropped, not forwarded as pane inp
   }
 });
 
+// MT-6 regression test: a select-and-copy in the terminal leaves TWO
+// selections behind, and both stay painted over content the user is no
+// longer selecting once input moves the buffer underneath them. xterm's
+// own selection is anchored to buffer COORDINATES rather than to the
+// text in them; the DOM renderer's real text nodes additionally carry a
+// NATIVE document selection, which `Terminal.clearSelection()` does not
+// touch. Manual testing on macOS found the second one: the highlight
+// survived a paste, then survived typing, then survived a forced
+// `refresh()` — because only the native selection was still there.
+//
+// The fix (terminal.js's `dismissSelection`) drops both on user-origin
+// input: keyboard through `onKey`, paste through a capture-phase DOM
+// listener (xterm's own paste handler sits on the hidden textarea and
+// calls stopPropagation, so a bubble-phase listener never runs).
+//
+// The selection is made with a REAL MOUSE DRAG, not `selectAll()`: only
+// a drag produces the native selection that carried this bug, so a
+// programmatic selection would test the half that already worked. And
+// the native side is asserted through `window.getSelection()` rather
+// than `isCollapsed`, which WebKit reports as `true` for a drag-made
+// selection whose ranges are still present and still painted.
+test("input dismisses both the xterm and native selections", async ({
+  page,
+}) => {
+  await openTerminal(page);
+  await page.locator("#terminal").click();
+
+  const selectionState = () =>
+    page.evaluate(() => ({
+      xterm: (window as any).__farhelmTerm.hasSelection(),
+      nativeChars: String(window.getSelection() || "").length,
+    }));
+
+  // Drag across a few rows of the terminal's own output.
+  const dragSelect = async () => {
+    const box = (await page.locator("#terminal").boundingBox())!;
+    await page.mouse.move(box.x + 30, box.y + 40);
+    await page.mouse.down();
+    await page.mouse.move(box.x + 300, box.y + 90, { steps: 10 });
+    await page.mouse.up();
+    await expect.poll(selectionState).toMatchObject({ xterm: true });
+    expect((await selectionState()).nativeChars).toBeGreaterThan(0);
+  };
+
+  try {
+    // First leg: a selection SURVIVES terminal-generated traffic. The
+    // fake agent echoes the typed line back, and that inbound output —
+    // like any auto-reply xterm generates in response to queries — flows
+    // through paths that must NOT clear a selection: only user-origin
+    // input may. A `clearSelection` that migrated into `onData` (where
+    // those replies also flow) would fail here.
+    await page.keyboard.type("probe");
+    await page.keyboard.press("Enter");
+    await waitForTermText(page, "echo:probe", 10_000);
+    await dragSelect();
+    await page.waitForTimeout(200);
+    expect(await selectionState()).toMatchObject({ xterm: true });
+
+    // Second leg: a keystroke dismisses both selections.
+    await page.keyboard.press("x");
+    await expect.poll(selectionState).toEqual({ xterm: false, nativeChars: 0 });
+    await page.keyboard.press("Backspace");
+
+    // Third leg: so does a paste. Dispatched as a synthetic
+    // ClipboardEvent rather than driving the OS clipboard, whose
+    // permissions differ per engine; the event is exactly what a real
+    // ⌘V/Ctrl-V delivers to this same target.
+    await dragSelect();
+    await page.evaluate(() => {
+      const data = new DataTransfer();
+      data.setData("text/plain", "pasted");
+      (window as any).__farhelmTerm.textarea.dispatchEvent(
+        new ClipboardEvent("paste", {
+          clipboardData: data,
+          bubbles: true,
+          cancelable: true,
+        }),
+      );
+    });
+    await expect.poll(selectionState).toEqual({ xterm: false, nativeChars: 0 });
+  } finally {
+    // The pasted text lands at the prompt; clear the whole line rather
+    // than counting characters, so the shared session's prompt is left
+    // as this test found it.
+    await page.keyboard.press("Control+U");
+  }
+});
+
 // SPEC.md's core durability promise seen from the browser: close the tab,
 // come back, and the session looks as if you had never left. A reload is
 // the harshest form of it — a brand-new xterm.js with an empty buffer, so
