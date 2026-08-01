@@ -242,6 +242,49 @@ pub fn parse_control(frame: &Frame) -> std::io::Result<ControlMsg> {
     serde_json::from_slice(&frame.body).map_err(std::io::Error::other)
 }
 
+/// The peer hung up cleanly, at a frame boundary, before it ever sent a
+/// hello — i.e. it never spoke this protocol at all.
+///
+/// Exists as a distinct type because `io::ErrorKind` cannot express it:
+/// [`FrameReader::read_frame`] reports a mid-frame hangup with
+/// `UnexpectedEof` too, and those two failures call for opposite advice.
+/// "Nothing arrived" is the signature of a transport that came up and
+/// found nothing behind it (an ssh exec channel whose remote
+/// `farhelm internal stdio` could not reach a supervisor and exited);
+/// "half a frame arrived, then silence" means something WAS speaking and
+/// died mid-sentence, where suggesting "start a supervisor" would send
+/// the operator chasing the wrong problem. Callers that add a remedy must
+/// therefore match on this type, never on the kind.
+///
+/// Rides inside the `io::Error` this crate already returns rather than
+/// replacing `handshake`'s signature: `farhelm-proto` is deliberately
+/// free of an error-reporting framework, and every other caller of
+/// `handshake` wants a plain `io::Error`. Use [`ClosedBeforeHello::is_cause_of`]
+/// to recognize it — the marker is the error's *payload*, not a link in
+/// its `source()` chain (`io::Error` forwards `source()` past its own
+/// inner error), so a plain chain walk will not find it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ClosedBeforeHello;
+
+impl std::fmt::Display for ClosedBeforeHello {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        // This is also the Display of the wrapping `io::Error`, so it has
+        // to read as a complete diagnostic on its own.
+        f.write_str("connection closed before hello")
+    }
+}
+
+impl std::error::Error for ClosedBeforeHello {}
+
+impl ClosedBeforeHello {
+    /// Whether `err` is the clean-close-before-any-hello failure, as
+    /// opposed to any other `UnexpectedEof`.
+    pub fn is_cause_of(err: &std::io::Error) -> bool {
+        err.get_ref()
+            .is_some_and(|inner| inner.is::<ClosedBeforeHello>())
+    }
+}
+
 /// Exchange hellos on a fresh connection and enforce the version-skew
 /// rule: send ours, read theirs, refuse a protocol mismatch. Returns the
 /// peer's hello on success so callers can log build versions.
@@ -255,10 +298,18 @@ pub async fn handshake<R: AsyncRead + Unpin, W: AsyncWrite + Unpin>(
     role: &str,
 ) -> std::io::Result<ControlMsg> {
     writer.write_control(&ControlMsg::hello(role)).await?;
+    // The kind is `UnexpectedEof` for anything that only looks at kinds,
+    // but the actionable signal is the [`ClosedBeforeHello`] payload:
+    // `read_frame`'s mid-frame hangup carries the same kind and means
+    // something quite different. Callers over an ssh exec channel — where
+    // a dead remote proxy is indistinguishable from "no supervisor there"
+    // until you look at whether ANY bytes arrived — match the type and add
+    // host-aware guidance, instead of matching a kind that is ambiguous or
+    // parsing this message's text.
     let frame = reader
         .read_frame()
         .await?
-        .ok_or_else(|| std::io::Error::other("connection closed before hello"))?;
+        .ok_or_else(|| std::io::Error::new(std::io::ErrorKind::UnexpectedEof, ClosedBeforeHello))?;
     let msg = parse_control(&frame)?;
     let ControlMsg::Hello {
         protocol_version,
@@ -383,6 +434,51 @@ mod tests {
         drop(b);
         let mut reader = FrameReader::new(a);
         assert!(reader.read_frame().await.unwrap().is_none());
+    }
+
+    /// The two ways a handshake can end in EOF must stay TELLABLE APART,
+    /// because a caller turns one of them into "no supervisor is running
+    /// over there, start one" and would be lying if it said that about the
+    /// other. A peer that says nothing and hangs up never spoke this
+    /// protocol; a peer that emits half a hello and dies plainly did.
+    ///
+    /// The kind is deliberately identical in both cases (`UnexpectedEof`
+    /// describes both truthfully), which is exactly why this test asserts
+    /// on [`ClosedBeforeHello::is_cause_of`] and pins that the kind alone
+    /// does NOT discriminate — a caller tempted back to kind-matching
+    /// fails here.
+    #[tokio::test]
+    async fn handshake_marks_a_clean_close_but_not_a_mid_frame_death() {
+        // The peer half is kept alive (it lives to the end of this scope)
+        // and only its WRITE direction is shut down. Dropping it whole
+        // would fail this side's hello write instead, and the read-side
+        // failure under test would never be reached — the half-open shape
+        // here is that of a live ssh channel whose remote end exited.
+        async fn handshake_against(peer_prefix: &[u8]) -> std::io::Error {
+            let (a, mut b) = tokio::io::duplex(64 * 1024);
+            b.write_all(peer_prefix).await.unwrap();
+            b.shutdown().await.unwrap();
+            let (ar, aw) = tokio::io::split(a);
+            let mut r = FrameReader::new(ar);
+            let mut w = FrameWriter::new(aw);
+            handshake(&mut r, &mut w, "helm").await.unwrap_err()
+        }
+
+        let clean = handshake_against(&[]).await;
+        assert_eq!(clean.kind(), std::io::ErrorKind::UnexpectedEof);
+        assert!(ClosedBeforeHello::is_cause_of(&clean));
+
+        // Half of a real hello frame: something spoke, then died.
+        let mut hello = Vec::new();
+        Frame::control(&ControlMsg::hello("supervisor"))
+            .encode(&mut hello)
+            .unwrap();
+        let partial = handshake_against(&hello[..hello.len() / 2]).await;
+        assert_eq!(partial.kind(), std::io::ErrorKind::UnexpectedEof);
+        assert!(
+            !ClosedBeforeHello::is_cause_of(&partial),
+            "a peer that spoke a partial hello must not be reported as one that never spoke: {partial}"
+        );
     }
 
     /// Matching versions succeed and surface the peer's hello.
