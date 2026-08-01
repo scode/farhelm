@@ -2768,6 +2768,15 @@ mod tests {
     /// pane and `Running`. The starting point for every transition test,
     /// since that is the state a real session spends its life in.
     async fn insert_running(store: &SessionStore, id: &str) {
+        insert_running_with_scope(store, id, false).await;
+    }
+
+    /// Seed a running session with an explicit `launch_scoped` value —
+    /// `insert_running`'s twin, needed because every other fixture in this
+    /// module hardcodes `false` and the PLAN_M3.md item 10 tests below need
+    /// to start from either side (a prior scoped launch, or a prior
+    /// unscoped one) before driving a relaunch across it.
+    async fn insert_running_with_scope(store: &SessionStore, id: &str, scoped: bool) {
         store
             .insert_session(
                 StoredSession {
@@ -2786,7 +2795,7 @@ mod tests {
                     capture_ambiguous: false,
                     first_input_at: None,
                     generation: 0,
-                    launch_scoped: false,
+                    launch_scoped: scoped,
                 },
                 None,
             )
@@ -5333,6 +5342,128 @@ mod tests {
         let row = store.session("s1").await.expect("read").expect("present");
         assert_eq!(row.outcome, LastOutcome::Launching);
         assert_eq!(row.generation, second.generation);
+    }
+
+    /// PLAN_M3.md item 10's `launch_scoped` column, on the side no other
+    /// test in this module reaches: every other fixture here inserts with
+    /// `launch_scoped: false` (systemd-scope availability is host-
+    /// dependent, and this module's tests must pass with no user manager
+    /// present), so the `true` side of the column has never round-tripped
+    /// through an insert-and-read-back at the store level. Pins that a row
+    /// created scoped actually reports scoped, both from the immediate
+    /// `session` lookup and from `load_all`'s independent read path.
+    /// Neither read checks whether any unit currently exists — the column
+    /// records which mechanism the launch SELECTED, and preserving that
+    /// recorded selection is what lets a later stop, delete, or restart
+    /// reap through the scope the launch actually ran under.
+    #[tokio::test]
+    async fn launch_scoped_true_round_trips_through_insert_and_reload() {
+        let (_dir, store) = fresh_store().await;
+        insert_running_with_scope(&store, "s1", true).await;
+
+        let read_back = store.session("s1").await.expect("read").expect("present");
+        assert!(
+            read_back.launch_scoped,
+            "a session inserted with launch_scoped = true must report true immediately"
+        );
+
+        let rows = store.load_all().await.expect("load");
+        assert!(
+            rows.iter()
+                .find(|r| r.id == "s1")
+                .expect("present")
+                .launch_scoped,
+            "and must still report true through load_all's independent read path"
+        );
+    }
+
+    /// The re-decide half of PLAN_M3.md item 10, in both directions: a
+    /// relaunch's `scope_available` argument is the CURRENT probe result,
+    /// not a carry-over of the previous launch's own selection, because a
+    /// host can gain or lose its user manager between two launches of the
+    /// same session (see `begin_relaunch`'s docs).
+    ///
+    /// The scoped-to-unscoped direction is the one that matters most and
+    /// was, before this test, exercised by nothing host-independent: every
+    /// other relaunch test in this module passes `scope_available: false`
+    /// throughout, so a relaunch dropping a TRUE prior claim had only ever
+    /// been reachable through the systemd-gated e2e suite, which skips
+    /// wherever no user manager exists (including CI).
+    #[tokio::test]
+    async fn a_relaunch_re_decides_launch_scoped_from_the_current_probe() {
+        let (_dir, store) = fresh_store().await;
+
+        // One case per direction the host can drift between two launches:
+        // it lost its user manager (scoped -> unscoped), or gained one
+        // (unscoped -> scoped).
+        for (id, prior_scoped, probe_scoped) in
+            [("was-scoped", true, false), ("was-unscoped", false, true)]
+        {
+            insert_running_with_scope(&store, id, prior_scoped).await;
+            let claim = claimed(
+                store
+                    .begin_relaunch(id, uncaptured_basis(), true, probe_scoped)
+                    .await
+                    .expect("begin relaunch"),
+            );
+            assert_eq!(
+                claim.prior.scoped, prior_scoped,
+                "{id}: the prior run's own record must keep its original selection"
+            );
+            assert_eq!(
+                claim.scoped, probe_scoped,
+                "{id}: the new generation must take the current probe's answer, not inherit \
+                 the prior claim"
+            );
+            let relaunched = store.session(id).await.expect("read").expect("present");
+            assert_eq!(
+                relaunched.launch_scoped, probe_scoped,
+                "{id}: the stored row must reflect the re-decided selection"
+            );
+        }
+    }
+
+    /// `abort_relaunch` restores everything item 4 promises the prior run
+    /// gets back — [`PriorRun::scoped`]'s own docs call the scope
+    /// selection out by name, alongside the pane and the outcome, as
+    /// something a failed restart must not leave describing an abandoned
+    /// generation's claim. Every OTHER abort test in this module begins
+    /// and ends at `launch_scoped = false`, so the restore had never been
+    /// asserted for a `true` prior value, nor in either direction of a
+    /// flip.
+    #[tokio::test]
+    async fn aborting_a_relaunch_restores_the_prior_scope_selection() {
+        let (_dir, store) = fresh_store().await;
+
+        // Both flip directions: an aborted relaunch must hand back exactly
+        // the selection the prior run recorded, whichever way the attempt
+        // had re-decided it.
+        for (id, prior_scoped, attempted_scoped) in
+            [("was-scoped", true, false), ("was-unscoped", false, true)]
+        {
+            insert_running_with_scope(&store, id, prior_scoped).await;
+            let claim = claimed(
+                store
+                    .begin_relaunch(id, uncaptured_basis(), true, attempted_scoped)
+                    .await
+                    .expect("begin relaunch"),
+            );
+            assert_eq!(
+                claim.scoped, attempted_scoped,
+                "{id}: sanity — the relaunch must have flipped the selection before the abort"
+            );
+            assert!(
+                store
+                    .abort_relaunch(id, claim.generation, &claim.prior)
+                    .await
+                    .expect("abort"),
+            );
+            let restored = store.session(id).await.expect("read").expect("present");
+            assert_eq!(
+                restored.launch_scoped, prior_scoped,
+                "{id}: abort must restore the pre-relaunch scope selection"
+            );
+        }
     }
 
     /// The generation fence, from the side that matters most: an observer

@@ -11978,6 +11978,86 @@ mod tests {
         }
     }
 
+    /// PLAN_M3.md item 10's other reload contract, and the one host-
+    /// independent tests never reached before this: `reload_sessions`
+    /// derives each entry's in-memory `scope` from the STORED
+    /// `launch_scoped` column (`launch_scope_unit`, called at the row-to-
+    /// entry conversion), not from a fresh systemd probe. A row that
+    /// recorded a scoped launch must therefore come back out of reload
+    /// still naming that generation's unit — with no systemd user manager
+    /// involved anywhere in this test, since the derivation is a pure
+    /// function of the row and the scope manager is never consulted at
+    /// reload time — only later, when a stop, delete, or restart reaps the
+    /// prior run through its scope (and a restart additionally re-probes
+    /// availability for the launch it is about to make).
+    ///
+    /// Driven against a real tmux server, like the sibling reload tests
+    /// above, because `reload_sessions` is one pass and this is a property
+    /// of that pass rather than of `launch_scope_unit` in isolation
+    /// (already a one-line pure function with nothing else worth pinning
+    /// on its own).
+    #[tokio::test]
+    async fn reload_carries_forward_the_scope_a_stored_launch_recorded() {
+        let state = StateDir::new();
+        let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
+            .await
+            .expect("supervisor");
+
+        let scoped_id = uuid::Uuid::new_v4().to_string();
+        sup.tmux
+            .create_session(
+                "fh-scoped",
+                "/tmp",
+                80,
+                24,
+                &[],
+                &["sh".to_string(), "-c".to_string(), "sleep 300".to_string()],
+            )
+            .await
+            .expect("create a tmux session directly");
+        sup.store
+            .insert_session(
+                StoredSession {
+                    id: scoped_id.clone(),
+                    title: "scoped".to_string(),
+                    cwd: "/tmp".to_string(),
+                    invocation: "agent".to_string(),
+                    tmux_name: "fh-scoped".to_string(),
+                    pane: String::new(),
+                    outcome: LastOutcome::Launching,
+                    agent_kind: farhelm_proto::AgentKind::Generic,
+                    resume_template: None,
+                    canonical_cwd: None,
+                    captured_conversation: None,
+                    captured_record: None,
+                    capture_ambiguous: false,
+                    first_input_at: None,
+                    generation: 0,
+                    launch_scoped: true,
+                },
+                None,
+            )
+            .await
+            .expect("insert a scoped launching row");
+
+        let (sessions, _) = Supervisor::reload_sessions(
+            &sup.state_dir,
+            &sup.store,
+            &sup.tmux,
+            &SupervisorSeams::default(),
+            true,
+        )
+        .await
+        .expect("reload");
+
+        assert_eq!(
+            sessions[&scoped_id].scope,
+            crate::scope::unit_name(&scoped_id, 0),
+            "reload must re-derive the unit from the stored generation and \
+             launch_scoped flag rather than leaving the entry unscoped"
+        );
+    }
+
     /// PLAN_M3.md item 4's crash boundary, both edges: what reload makes
     /// of a stop intent whose sweep never reported back.
     ///
