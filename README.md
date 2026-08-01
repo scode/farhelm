@@ -19,9 +19,17 @@ Prerequisites: Rust with the `wasm32-unknown-unknown` target (`rustup target add
 host involved, and `cargo binstall dioxus-cli@0.7.9` (or `cargo install dioxus-cli@0.7.9` — match the workspace's dioxus
 version) for the web UI build.
 
-NOTE on tmux versions: 3.3 or newer runs everything. Restoring bracketed paste when you reattach additionally needs 3.7,
-because that is when tmux gained the `bracket_paste_flag` format — below it the supervisor logs a warning (once, the
-first time a session is attached) and everything else still works. Ubuntu 24.04 ships 3.4.
+NOTE on tmux versions: 3.3 or newer runs everything. Two fidelity details depend on the version, and neither stops a
+session working:
+
+- Restoring bracketed paste when you reattach needs 3.7, because that is when tmux gained the `bracket_paste_flag`
+  format — below it the supervisor logs a warning (once, the first time a session is attached) and everything else still
+  works.
+- On 3.3, `capture-pane -N` does not preserve trailing styled padding, so the snapshot a stopped session replays can
+  lose background colour painted past the last character of a row (a full-width status bar, say). Content and layout are
+  unaffected. 3.4 and newer keep it.
+
+Ubuntu 24.04 ships 3.4.
 
 - Build: `cargo build`, then `(cd crates/farhelm-ui && dx build --platform web --release)`.
 - On the host that will run the agent (or this machine): `target/debug/farhelm supervisor run`.

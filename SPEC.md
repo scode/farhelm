@@ -254,11 +254,15 @@ whatever the agent renders is what you see. There is no composer, no message abs
   terminal retains, and replay covers, at least the current screen plus 10,000 lines of scrollback.
 - One attached client per session, enforced by the supervisor: attaching from a second client visibly detaches the
   first, which keeps a non-live snapshot and an explicit take-control action. No shared-input mirroring in v1.
-- A viewer that is slow is served slowly, for as long as it takes; the session's agent is never slowed or paused by how
-  fast any viewer renders. A viewer that stops consuming output entirely for a sustained interval (a wedged tab, a
-  machine asleep past its connection's lifetime) is detached with a visible stall reason rather than honored forever —
-  the same surface as a takeover detach, with reattach behaving exactly as any reconnect does. Flow control never drops
-  terminal output: whatever bound it degrades to is the same replay floor above, never a silent gap.
+- A viewer that is slow is served slowly, for as long as it takes. Honoring that can briefly slow the agent's OUTPUT — a
+  paused viewer may leave the agent's writes blocking for as long as the flow-control window allows — but never
+  indefinitely and never silently: the delay is bounded by that window and, in the limit, by the stall timeout below,
+  after which the viewer is detached and the agent runs unimpeded. No viewer can stop a session's work outright, and no
+  viewer can slow one it is not attached to.
+- A viewer that stops consuming output entirely for a sustained interval (a wedged tab, a machine asleep past its
+  connection's lifetime) is detached with a visible stall reason rather than honored forever — the same surface as a
+  takeover detach, with reattach behaving exactly as any reconnect does. Flow control never drops terminal output:
+  whatever bound it degrades to is the same replay floor above, never a silent gap.
 
 ## Attachments
 

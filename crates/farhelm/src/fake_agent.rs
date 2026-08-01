@@ -68,6 +68,14 @@ pub enum Script {
     AltscreenStubbornChildStaysAlt,
     /// Raw non-UTF-8 output for byte-fidelity tests.
     Binary,
+    /// Numbered records emitted as fast as the pty will take them, for
+    /// backpressure tests (PLAN_M2_5.md). Deliberately unlike `Counter`,
+    /// which paces itself: this one exists to be FASTER than any consumer
+    /// on the path and to emit far more bytes than every bound on it
+    /// combined, so that pausing it genuinely provokes tmux's own
+    /// `pause-after` rather than being absorbed by a buffer somewhere.
+    /// See `flood`'s own docs for the record shape tests key on.
+    Flood,
     /// Continuous numbered records for replay/live cutover tests.
     Counter,
     /// Raw-mode hex echo of every input byte, for input-fidelity tests.
@@ -124,6 +132,7 @@ pub fn run(script: Script) -> anyhow::Result<()> {
         Script::AltscreenIgnoresTerm => altscreen_ignores_term(),
         Script::AltscreenStubbornChildStaysAlt => altscreen_stubborn_child_stays_alt(),
         Script::Binary => binary(),
+        Script::Flood => flood(),
         Script::Counter => counter(),
         Script::Hexecho => hexecho(),
         Script::Spawner => spawn_and_echo("sleep 3600", "spawner"),
@@ -480,6 +489,62 @@ fn counter() -> anyhow::Result<()> {
         std::thread::sleep(std::time::Duration::from_millis(2));
     }
     unreachable!("the counter fixture runs until its session is killed")
+}
+
+/// Number of `FLOOD-` records [`flood`] emits. See its docs for the
+/// sizing argument; at 16 bytes per record this is ~12 MiB.
+pub const FLOOD_RECORDS: u64 = 800_000;
+
+/// Emit [`FLOOD_RECORDS`] numbered records at full speed, then say so and
+/// wait to be killed.
+///
+/// The acceptance fixture for PLAN_M2_5.md's backpressure work, and every
+/// property here is chosen against a specific way the tests could lie:
+///
+/// - **Volume.** ~12 MiB exceeds every Farhelm-side bound on the path
+///   combined (the supervisor's per-connection writer and the helm's
+///   per-terminal queue), so a test that pauses mid-burst is genuinely
+///   provoking flow control rather than watching a queue quietly swallow
+///   the whole run. It says nothing about tmux's own limit: `pause-after`
+///   bounds by the AGE of queued output, not by bytes, so no volume makes
+///   tmux's behavior deterministic — which is why the tests that care
+///   force the pause outright.
+/// - **Speed.** Unpaced writes — unlike [`counter`], which sleeps between
+///   records so replay-cutover tests can reason about individual PTY
+///   writes. Buffered through one `BufWriter` for throughput, since this
+///   fixture wants bytes on the wire fast rather than per-record write
+///   boundaries. A producer slower than the consumer could never fill
+///   anything.
+/// - **Consecutive, fixed-width record numbers.** This is what makes both
+///   loss and duplication detectable at all: correct delivery across a
+///   pause is exactly `n, n+1, n+2, ...`, so a gap is loss and a repeat
+///   or a step backwards is duplicated replay. A marker without a number
+///   could show neither.
+/// - **A terminal `FLOOD-DONE` marker, then an idle wait.** Tests need a
+///   definite end to assert a tail against, and the process must not exit
+///   — a dead pane would replace the pane's content with tmux's "Pane is
+///   dead" placeholder and destroy the very scrollback under test.
+fn flood() -> anyhow::Result<()> {
+    let mut out = std::io::stdout().lock();
+    writeln!(out, "FAKE-AGENT READY\r")?;
+    out.flush()?;
+    // One buffered writer, flushed once at the end, deliberately: this
+    // fixture wants throughput, not per-record write boundaries. Records
+    // split across PTY writes are fine — every consumer on this path is
+    // byte-oriented, and the tests scan for records in the byte stream
+    // rather than assuming any framing.
+    let mut buffered = std::io::BufWriter::with_capacity(64 * 1024, &mut out);
+    for sequence in 0..FLOOD_RECORDS {
+        writeln!(buffered, "FLOOD-{sequence:08}\r")?;
+    }
+    buffered.flush()?;
+    drop(buffered);
+    writeln!(out, "FLOOD-DONE\r")?;
+    out.flush()?;
+
+    let mut line = String::new();
+    std::io::stdin().lock().read_line(&mut line)?;
+    Ok(())
 }
 
 /// Echo every input byte back as lowercase hex, one space-separated line

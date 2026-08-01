@@ -7,7 +7,129 @@
 //! stays IO-free and golden-testable.
 
 use crate::{ControlMsg, ErrorKind, Frame, PROTOCOL_VERSION};
+use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
+
+/// An `AsyncWrite` that counts bytes the transport actually accepted, so
+/// a writer that has STALLED can be told apart from one that is merely
+/// slow.
+///
+/// That distinction is a product requirement, not a tuning detail.
+/// SPEC.md promises a slow viewer is served "for as long as it takes",
+/// and only one that stops consuming entirely may be cut. Both ends of
+/// this protocol funnel every sender through a single writer task behind
+/// a BOUNDED queue, so a peer that stops reading parks that task and
+/// everything queued behind it — with no error to report and no EOF to
+/// notice — which is why some bound is needed at all. Timing a whole
+/// [`FrameWriter::write_frame`] would be the wrong bound: one large frame
+/// (a full `SessionList` reply) on a slow link can outlast any window
+/// while bytes land steadily the entire time, and cutting there would
+/// break exactly the promise above.
+///
+/// Counting successful `poll_write` calls is the finest progress signal
+/// available at this layer, and it is sufficient: any peer still reading
+/// advances the counter. `Relaxed` throughout — this is a liveness
+/// heartbeat compared against its own earlier value by one observer, not
+/// a value anything is synchronized on.
+///
+/// Lives here, beside `FrameWriter`, because both the supervisor's and
+/// the helm's writer tasks need identical behavior and neither crate is
+/// the natural owner of the other's copy.
+pub struct ProgressWrite<W> {
+    inner: W,
+    bytes_written: Arc<AtomicU64>,
+}
+
+impl<W: AsyncWrite + Unpin> ProgressWrite<W> {
+    /// Wrap `inner`, returning the wrapper and a shared counter of bytes
+    /// accepted so far. The counter is handed out rather than read back
+    /// through the wrapper because the writer is owned by its writer task
+    /// while the progress check happens around it.
+    pub fn new(inner: W) -> (ProgressWrite<W>, Arc<AtomicU64>) {
+        let bytes_written = Arc::new(AtomicU64::new(0));
+        (
+            ProgressWrite {
+                inner,
+                bytes_written: Arc::clone(&bytes_written),
+            },
+            bytes_written,
+        )
+    }
+}
+
+impl<W: AsyncWrite + Unpin> AsyncWrite for ProgressWrite<W> {
+    fn poll_write(
+        mut self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+        buf: &[u8],
+    ) -> std::task::Poll<std::io::Result<usize>> {
+        let polled = std::pin::Pin::new(&mut self.inner).poll_write(cx, buf);
+        if let std::task::Poll::Ready(Ok(written)) = &polled
+            && *written > 0
+        {
+            self.bytes_written
+                .fetch_add(*written as u64, Ordering::Relaxed);
+        }
+        polled
+    }
+
+    fn poll_flush(
+        mut self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<std::io::Result<()>> {
+        std::pin::Pin::new(&mut self.inner).poll_flush(cx)
+    }
+
+    fn poll_shutdown(
+        mut self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<std::io::Result<()>> {
+        std::pin::Pin::new(&mut self.inner).poll_shutdown(cx)
+    }
+}
+
+/// Write one frame, failing only if the transport accepts NOTHING for a
+/// whole `window`.
+///
+/// The window re-arms on every byte of progress rather than bounding the
+/// frame as a whole, so a frame arbitrarily larger than the window still
+/// reaches a peer that is merely slow — see [`ProgressWrite`] for why that
+/// is the contract rather than a nicety. The `Err` carries a diagnostic
+/// for the caller to report; a genuine write error and a total stall are
+/// reported the same way on purpose, because both mean this connection can
+/// no longer deliver anything.
+///
+/// The in-flight write is polled again after each expired window rather
+/// than dropped and retried: `write_frame` is not cancel-safe, and
+/// abandoning it mid-frame would put half a frame on the wire and
+/// desynchronize the stream permanently.
+pub async fn write_frame_before_stall<W>(
+    writer: &mut FrameWriter<W>,
+    progress: &AtomicU64,
+    frame: &Frame,
+    window: std::time::Duration,
+) -> Result<(), String>
+where
+    W: AsyncWrite + Unpin,
+{
+    let write = writer.write_frame(frame);
+    tokio::pin!(write);
+    loop {
+        let before = progress.load(Ordering::Relaxed);
+        match tokio::time::timeout(window, &mut write).await {
+            Ok(Ok(())) => return Ok(()),
+            Ok(Err(e)) => return Err(e.to_string()),
+            Err(_) => {
+                if progress.load(Ordering::Relaxed) == before {
+                    return Err(format!("peer accepted no bytes for {window:?}"));
+                }
+                // Bytes landed during the window that just expired: the
+                // peer is slow, not gone. Re-arm and keep writing.
+            }
+        }
+    }
+}
 
 /// Incremental frame reader: buffers bytes from the stream and yields
 /// complete frames. Returns `Ok(None)` on clean EOF at a frame boundary.
