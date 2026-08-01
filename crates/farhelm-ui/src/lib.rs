@@ -318,24 +318,67 @@ async fn create_session(
     resp.json::<Session>().await.map_err(|e| e.to_string())
 }
 
-/// The JavaScript one intended create's idempotency key comes from.
+/// The JavaScript the WEB (wasm) build's intended-create idempotency key
+/// comes from — see `mint_intent_key` for why the desktop build does not
+/// use this at all.
 ///
 /// `crypto.randomUUID()` is the real generator; the branch exists because
 /// it is only defined in a SECURE context, which the web build always has
-/// (the helm serves it over loopback) but a desktop webview's custom
-/// scheme need not. The fallback is not cryptographically random and does
-/// not need to be: a key only has to be unique among the creates ONE user
-/// is making, and a millisecond timestamp plus two `Math.random()` draws
-/// is far past that. It is never a security boundary — the key names an
-/// intent, it does not authorize anything.
+/// (the helm serves it over loopback). wasm has no other way to reach an
+/// OS random-number generator without extra plumbing (a JS import, a
+/// getrandom shim), and `crypto.randomUUID()` is already right there and
+/// Playwright-tested, fallback included — standing up that plumbing for
+/// one UUID was not worth it. The fallback is not cryptographically random
+/// and does not need to be: a key only has to be unique among the creates
+/// ONE user is making, and a millisecond timestamp plus two
+/// `Math.random()` draws is far past that. It is never a security
+/// boundary — the key names an intent, it does not authorize anything.
 ///
 /// What there is deliberately NO fallback for is producing no key at all;
 /// see `CreateSessionForm`'s own docs on why an unkeyed create is not an
 /// acceptable degradation.
+///
+/// wasm-only (`mint_intent_key`'s desktop branch never references it):
+/// gated so the desktop build does not carry a dead string constant for a
+/// code path it cannot take.
+#[cfg(target_arch = "wasm32")]
 const INTENT_KEY_JS: &str = "return (globalThis.crypto && crypto.randomUUID) \
      ? crypto.randomUUID() \
      : Date.now().toString(36) + '-' + Math.random().toString(36).slice(2) \
        + Math.random().toString(36).slice(2);";
+
+/// Mints one intended create's idempotency key (PLAN_M3.md item 6, MT-5).
+///
+/// The two renderers deliberately do NOT share a code path. wasm has no
+/// direct line to an OS RNG, so it runs `INTENT_KEY_JS` through the
+/// document eval channel — see that const's docs for why that is an
+/// acceptable, tested tradeoff there. The desktop renderer must NOT do the
+/// same: manual macOS testing found that wry's eval channel on WKWebView
+/// resolves every call to `Err(Finished)` — the channel is dead on
+/// arrival, not merely slow — which made `CreateSessionForm`'s fail-closed
+/// guard refuse EVERY create with "could not generate an idempotency key"
+/// (MT-5). Minting the UUID in Rust removes the dependency on that channel
+/// entirely rather than working around one platform's flaky eval; desktop
+/// already links a real RNG (`uuid`'s `v4` feature), so there was never a
+/// reason to route this through the webview to begin with.
+///
+/// Returns `Err` with a message suitable for direct display (matching what
+/// `CreateSessionForm` showed before this helper existed): on wasm, the
+/// debug-formatted eval outcome that failed; the desktop branch has no
+/// error path; UUID generation cannot fail.
+async fn mint_intent_key() -> Result<String, String> {
+    #[cfg(target_arch = "wasm32")]
+    {
+        match dioxus::document::eval(INTENT_KEY_JS).await {
+            Ok(serde_json::Value::String(key)) if !key.is_empty() => Ok(key),
+            outcome => Err(format!("{outcome:?}")),
+        }
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        Ok(uuid::Uuid::new_v4().to_string())
+    }
+}
 
 /// POST the stop endpoint for one session. The empty `Ok(())` on success
 /// mirrors the helm's own reply (`{}` — see farhelm-helm's `stop_session`);
@@ -942,9 +985,10 @@ fn ListView(on_open: EventHandler<Session>) -> Element {
 ///
 /// The inputs are DISABLED while a create is in flight, which is what makes
 /// that lifecycle a rule rather than a race: key generation is itself
-/// asynchronous (`INTENT_KEY_JS` runs in the renderer), so without it a
-/// keystroke could land between minting a key and sending it, publishing a
-/// key that belongs to values the user has already changed. Disabling was
+/// asynchronous (`mint_intent_key` is an `await` on both renderers, even
+/// though only the wasm build's half of it actually yields), so without it
+/// a keystroke could land between minting a key and sending it, publishing
+/// a key that belongs to values the user has already changed. Disabling was
 /// chosen over reconciling generations afterwards because the form is inert
 /// for that window anyway — the submit button and both navigation controls
 /// are already disabled by the same flag.
@@ -1000,23 +1044,19 @@ fn CreateSessionForm(mut submitting: Signal<bool>, on_created: EventHandler<Sess
                 let cwd_value = cwd();
                 let invocation_value = invocation();
                 let title_value = title();
-                // Created here, in the component's own scope, and awaited
-                // inside the task: `document::eval` needs the renderer's
-                // document from context, which is unambiguously available
-                // at this point. No edit can land while it runs — the
-                // inputs below are disabled for the whole submission.
-                let pending_key = intent_key()
-                    .is_none()
-                    .then(|| dioxus::document::eval(INTENT_KEY_JS));
+                // Snapshotted before disabling the form, not re-read
+                // inside the task: either way is race-free (no edit can
+                // land once `submitting` is true, below), but reading it
+                // here keeps the "already have one" retry path free of an
+                // await instead of calling `mint_intent_key` unconditionally.
+                let needs_key = intent_key().is_none();
                 submitting.set(true);
                 error.set(None);
                 spawn(async move {
-                    if let Some(eval) = pending_key {
-                        match eval.await {
-                            Ok(serde_json::Value::String(key)) if !key.is_empty() => {
-                                intent_key.set(Some(key));
-                            }
-                            outcome => {
+                    if needs_key {
+                        match mint_intent_key().await {
+                            Ok(key) => intent_key.set(Some(key)),
+                            Err(reason) => {
                                 // No key, no create: see this component's
                                 // docs on why an unkeyed create is not an
                                 // acceptable degradation. The message says
@@ -1026,7 +1066,7 @@ fn CreateSessionForm(mut submitting: Signal<bool>, on_created: EventHandler<Sess
                                 error.set(Some(format!(
                                     "could not generate an idempotency key for this create, so \
                                      it was not sent (a retry could otherwise create a second \
-                                     session): {outcome:?}"
+                                     session): {reason}"
                                 )));
                                 submitting.set(false);
                                 return;
