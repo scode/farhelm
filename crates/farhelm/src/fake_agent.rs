@@ -307,8 +307,16 @@ fn record_agent(shape: RecordShape, home: Option<std::path::PathBuf>) -> anyhow:
     if let Ok(resumed) = std::env::var(RESUME_ENV_VAR)
         && !resumed.is_empty()
     {
-        let path = record_path(shape, &home, &cwd, &resumed);
-        if path.exists() {
+        // `record_path` stamps Codex paths with TODAY's date, but a resumed
+        // conversation's record was created when the conversation started —
+        // resume a session across UTC midnight and the recomputed path names
+        // a directory the record was never in. A real `codex resume` finds
+        // the rollout file wherever it sits, so the fixture searches the
+        // sessions tree by id before concluding the record is missing.
+        let path = Some(record_path(shape, &home, &cwd, &resumed))
+            .filter(|p| p.exists())
+            .or_else(|| find_codex_record(shape, &home, &resumed));
+        if let Some(path) = path {
             writeln!(out, "RECORD-RESUMED:{resumed}\r")?;
             current = Some((resumed, path));
         } else {
@@ -419,6 +427,40 @@ fn record_path(
                 .join(format!("rollout-{id}.jsonl"))
         }
     }
+}
+
+/// Locate an existing Codex rollout record by conversation id anywhere in
+/// the date-nested sessions tree. Only the resume path needs this: a fresh
+/// record is written under today's date by construction, but a RESUMED
+/// conversation's record lives under the date it was created, which
+/// `record_path`'s now-stamped reconstruction gets wrong across a UTC
+/// midnight. Claude records are not date-nested, so their recomputed path
+/// is always right and this returns `None` for that shape.
+fn find_codex_record(
+    shape: RecordShape,
+    home: &std::path::Path,
+    id: &str,
+) -> Option<std::path::PathBuf> {
+    if shape != RecordShape::Codex {
+        return None;
+    }
+    fn walk(dir: &std::path::Path, name: &str) -> Option<std::path::PathBuf> {
+        for entry in std::fs::read_dir(dir).ok()? {
+            let path = entry.ok()?.path();
+            if path.is_dir() {
+                if let Some(found) = walk(&path, name) {
+                    return Some(found);
+                }
+            } else if path.file_name().is_some_and(|f| f == name) {
+                return Some(path);
+            }
+        }
+        None
+    }
+    walk(
+        &home.join(".codex").join("sessions"),
+        &format!("rollout-{id}.jsonl"),
+    )
 }
 
 /// One record line in the shape the corresponding real agent writes.
