@@ -48,6 +48,10 @@ Ubuntu 24.04 ships 3.4.
 - Each row also has stop and delete. Stop kills the agent and its whole process tree; the session stays listed, its
   terminal still viewable. Delete removes the session and its stored state — with an inline confirmation first whenever
   the agent might still be alive.
+- Sustained heavy output (piping a huge file through the pane, say) is flow-controlled end to end rather than freezing
+  the tab or silently dropping bytes. A viewer that stops consuming entirely — a wedged tab, a laptop asleep past its
+  connection timeout — is detached, with a visible reason, after a bounded stall; the session keeps running unaffected,
+  and reattaching picks it back up.
 
 The desktop window is the same UI in a wry webview: `cargo run -p farhelm-ui --features desktop` with `FARHELM_URL`
 pointing at the helm (default `http://127.0.0.1:7433`).

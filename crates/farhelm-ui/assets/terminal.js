@@ -10,13 +10,29 @@
 (function () {
   "use strict";
 
-  // Watermark backpressure seam (SPEC_impl.md): term.write() buffers
+  // Watermark backpressure (PLAN_M2_5.md step 4): term.write() buffers
   // asynchronously up to a hard ~50MB cap, then silently discards, so
-  // track unwritten bytes via write callbacks. M1 only observes
-  // (interactive agent output never approaches these rates); the
-  // pause/resume message to the supervisor hangs off this counter when
-  // it lands.
+  // the unwritten-byte counter below (driven by write callbacks) is the
+  // only honest signal of how far behind the renderer has fallen.
+  // Crossing HIGH_WATER sends `{"type":"pause"}`, which the helm
+  // forwards to the supervisor as `ControlMsg::PauseOutput`
+  // (crates/farhelm-helm/src/lib.rs, `term_ws`'s docs); the supervisor
+  // stops reading that attachment's tmux control client until
+  // `{"type":"resume"}` arrives, or — if the pause outlives the
+  // supervisor's stall timeout — detaches the attachment as stalled
+  // instead (PLAN_M2_5.md, "Stall detach").
   const HIGH_WATER = 4 * 1024 * 1024;
+
+  // A quarter of HIGH_WATER, not just "some smaller number": the gap
+  // between the two marks is what stops a producer hovering right at the
+  // boundary from flapping pause/resume/pause on every few bytes drained.
+  // A resume this close behind the pause still recovers in well under a
+  // second even at xterm.js's slowest realistic parse rate (PLAN_M2_5.md:
+  // 5-35 MB/s), so nothing is given up by not waiting for a fuller drain.
+  // Derived from HIGH_WATER, not a second duplicated literal — a future
+  // edit to one mark must not silently un-derive the ratio this comment
+  // describes.
+  const LOW_WATER = HIGH_WATER / 4;
 
   // Handle to the single mounted terminal instance (one terminal per
   // page at a time). Doubles as the mount guard: `mount()` refuses to
@@ -126,6 +142,20 @@
       try {
         const el = document.getElementById(elementId);
         term = new Terminal({
+          // At most the tmux history floor (`HISTORY_LIMIT`,
+          // farhelm-supervisor/src/tmux.rs), never more: PLAN_M2_5.md
+          // holds this browser-side cap at or below that floor so that
+          // when tmux ITSELF pauses a stalled control client (its own
+          // `pause-after`, distinct from the supervisor's stall-detach
+          // timeout — a stall-detach just ends the attachment, no replay
+          // involved) the reset-then-replay catch-up that follows is
+          // observably equivalent to lossless slow delivery — a bigger
+          // buffer here would let a user watch history they already had
+          // get truncated by the very recovery meant to save it (and, on
+          // the other end, SPEC.md's own 10,000-line minimum). Pinned
+          // cross-language by farhelm/tests/e2e.rs's
+          // `browser_scrollback_stays_within_the_product_floor_and_the_tmux_history_ceiling`,
+          // which reads this literal.
           scrollback: 12000,
           fontSize: 14,
           cursorBlink: true,
@@ -143,7 +173,56 @@
         );
         ws.binaryType = "arraybuffer";
 
+        // Watermark state for THIS attachment only. Declared inside
+        // mount() (not module scope) so every fresh WS — a reload, or a
+        // back-then-reopen — starts from pendingWrite 0 / unpaused,
+        // regardless of what the previous socket last sent: there is no
+        // way for a stale pause/resume to leak across attachments when
+        // the counters themselves do not survive the old closure's death.
         let pendingWrite = 0;
+        let paused = false;
+
+        // Test-only observability (e2e/tests/terminal.spec.ts): the
+        // watermark state machine lives entirely inside this closure, so
+        // the suite has no way to see it crossed a mark or which way
+        // without a hook. Never read by production code.
+        //
+        // Captured in a LOCAL (`testHook`) rather than written straight
+        // to `window.__farhelmTest`, and published there only once mount
+        // finishes successfully (see the bottom of this function) — a
+        // real hazard closed here: `term.write()`'s completion callback
+        // below is queued asynchronously and can still fire AFTER
+        // `unmount()` has deleted `window.__farhelmTest`, or after a
+        // LATER mount has replaced it with a different attachment's
+        // object. Either way, a callback that wrote through the global
+        // would throw (deleted) or corrupt a stranger's counts (replaced)
+        // instead of harmlessly updating an object nobody reads anymore.
+        // Every update below goes through `testHook` directly, so a
+        // late-firing callback from a torn-down mount only ever touches
+        // its OWN already-orphaned object.
+        const testHook = {
+          paused: false,
+          pauseCount: 0,
+          resumeCount: 0,
+        };
+
+        function sendControl(type) {
+          if (ws.readyState === WebSocket.OPEN) {
+            ws.send(JSON.stringify({ type }));
+          }
+        }
+
+        // Sanity backstop, NOT part of the flow-control contract itself:
+        // pause/resume above should keep the backlog within a few MiB of
+        // HIGH_WATER. Landing here means flow control is not doing its
+        // job (a pause message that never reached the supervisor, a
+        // socket the browser thinks is open but isn't) and the backlog is
+        // now within striking distance of term.write()'s ~50MB silent-
+        // discard cliff (this file's own docs, above) — worth one log
+        // line, not a spammy one per byte past the mark.
+        const BACKLOG_SANITY_BOUND = 32 * 1024 * 1024;
+        let sanityWarned = false;
+
         ws.onmessage = (ev) => {
           if (typeof ev.data === "string") {
             // Text frames are control JSON from the helm; today that is
@@ -158,11 +237,33 @@
           pendingWrite += bytes.length;
           term.write(bytes, () => {
             pendingWrite -= bytes.length;
+            // Resume only out of an ACTUAL prior pause: this is the other
+            // half of exactly-once semantics (see the pause check below)
+            // — without the `paused` guard, a producer whose backlog
+            // merely dips below LOW_WATER before ever crossing HIGH_WATER
+            // would send a resume the supervisor never asked to answer.
+            if (paused && pendingWrite <= LOW_WATER) {
+              paused = false;
+              testHook.paused = false;
+              testHook.resumeCount++;
+              sendControl("resume");
+            }
           });
-          if (pendingWrite > HIGH_WATER) {
-            // Backpressure seam: replace with a pause message when the
-            // end-to-end plumbing lands.
-            console.warn("farhelm: terminal write backlog", pendingWrite);
+          // Exactly once per crossing: `paused` blocks every repeat check
+          // while the backlog stays above HIGH_WATER, so one crossing
+          // sends one pause, not a flood of them.
+          if (!paused && pendingWrite > HIGH_WATER) {
+            paused = true;
+            testHook.paused = true;
+            testHook.pauseCount++;
+            sendControl("pause");
+          }
+          if (pendingWrite > BACKLOG_SANITY_BOUND && !sanityWarned) {
+            sanityWarned = true;
+            console.warn(
+              "farhelm: terminal write backlog far past high-water",
+              pendingWrite,
+            );
           }
         };
         // A detach notice is immediately followed by the server closing
@@ -218,7 +319,12 @@
         window.__farhelmTerm = term;
         window.__farhelmWs = ws;
         window.__farhelmTermReady = true;
-        active = { ws, term, onWindowResize };
+        // Published only now, alongside the other readiness globals —
+        // see `testHook`'s own docs above for why a callback queued
+        // earlier must never have been able to reach this reference
+        // before mount succeeded.
+        window.__farhelmTest = testHook;
+        active = { ws, term, onWindowResize, testHook };
         return { term, ws };
       } catch (err) {
         // Roll back completely: `active` must not stay stuck non-null
@@ -272,6 +378,20 @@
       active.ws.onclose = null;
       active.ws.close();
       active.term.dispose();
+      // Guarded, unlike the three deletes below it: comparing against
+      // `active.testHook` (this mount's own object, captured at publish
+      // time — see `mount()`'s docs) before deleting means this teardown
+      // can only ever remove a `__farhelmTest` reference IT installed,
+      // never one a later mount already replaced it with. Every
+      // `term.write()` callback queued by THIS mount already writes to
+      // its own closed-over `testHook` object directly rather than through
+      // `window.__farhelmTest` (same docs), so those callbacks firing
+      // late are harmless regardless of this guard; this guard is the
+      // second, independent line of defense — for `unmount()` itself
+      // running out of the order callers are supposed to keep it in.
+      if (window.__farhelmTest === active.testHook) {
+        delete window.__farhelmTest;
+      }
       active = null;
       delete window.__farhelmTerm;
       delete window.__farhelmWs;

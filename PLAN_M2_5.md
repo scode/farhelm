@@ -137,6 +137,14 @@ for as long as the wedge lasts. After the stall timeout the supervisor detaches 
 frees it, and the session continues unwatched. The timeout is generous because a false detach costs a reattach (cheap,
 automatic replay) while a missed one costs memory for exactly as long as the stall lasts.
 
+One edge is deliberately DEFERRED rather than fixed here, found in review: pause/resume control messages share the same
+ordered WebSocket as terminal input (`term_ws`'s framing, farhelm-helm/src/lib.rs), so on a slow link a very large paste
+can queue ahead of a pending high-water pause and delay it behind that input — for as long as the paste takes to drain
+from the socket, the pane is free to grow past HIGH_WATER's intent. A priority path for control messages would close it,
+but complicates message ordering to serve a case this milestone's own tests never need (a paste large enough to matter,
+over a link slow enough to matter, coinciding with a producer already flooding). Revisit alongside M4's paste/attachment
+work, where large pastes become a first-class flow of their own rather than an edge case of this one.
+
 ## Order of work
 
 Each step is a PR on the single stack; tests ride with their behavior.

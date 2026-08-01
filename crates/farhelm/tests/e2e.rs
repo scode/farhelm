@@ -6403,23 +6403,35 @@ async fn a_pause_past_the_stall_timeout_detaches_and_leaves_the_session_healthy(
 }
 
 /// The cross-language invariant PLAN_M2_5.md's honesty argument rests on:
-/// the browser's scrollback capacity must never exceed tmux's history
-/// floor.
+/// the browser's scrollback capacity must sit between SPEC.md's promised
+/// floor and tmux's actual history floor, never outside either end.
 ///
-/// Why it matters: after a deep stall the catch-up replays at most
-/// `HISTORY_LIMIT` lines. If xterm.js could retain MORE than that, a user
-/// would watch scrollback they already had get truncated by the recovery
-/// — visible, unexplained loss. Holding the browser at or below the floor
-/// is what makes the catch-up's end state observably equivalent to
-/// lossless slow delivery instead.
+/// Why the UPPER bound matters: after a deep stall the catch-up replays at
+/// most `HISTORY_LIMIT` lines. If xterm.js could retain MORE than that, a
+/// user would watch scrollback they already had get truncated by the
+/// recovery — visible, unexplained loss. Holding the browser at or below
+/// the floor is what makes the catch-up's end state observably equivalent
+/// to lossless slow delivery instead.
+///
+/// Why the LOWER bound matters, and why it is pinned HERE rather than left
+/// implicit: SPEC.md's own product promise is "at least the current screen
+/// plus 10,000 lines of scrollback" — a real minimum, not merely "whatever
+/// happens to be at most `HISTORY_LIMIT`". Before this bound was added,
+/// `scrollback: 0` (or any value far below the promised floor) satisfied
+/// the upper-bound check just as well as a correct value, silently
+/// defeating the whole product guarantee this test exists to protect.
 ///
 /// Asserted by reading the UI asset directly, because nothing else
-/// connects the two numbers: they live in different languages, in
-/// different crates, with no shared build step. A test that pinned only
-/// the Rust constant would go green while the JavaScript drifted, which
-/// is precisely the failure this exists to catch.
+/// connects these numbers: they live in different languages, in different
+/// crates, with no shared build step. A test that pinned only the Rust
+/// constants would go green while the JavaScript drifted, which is
+/// precisely the failure this exists to catch.
 #[test]
-fn browser_scrollback_never_exceeds_the_tmux_history_floor() {
+fn browser_scrollback_stays_within_the_product_floor_and_the_tmux_history_ceiling() {
+    /// SPEC.md: "the terminal retains, and replay covers, at least the
+    /// current screen plus 10,000 lines of scrollback."
+    const SPEC_MINIMUM_SCROLLBACK: u32 = 10_000;
+
     let terminal_js =
         std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../farhelm-ui/assets/terminal.js");
     let source = std::fs::read_to_string(&terminal_js)
@@ -6438,5 +6450,10 @@ fn browser_scrollback_never_exceeds_the_tmux_history_floor() {
         "terminal.js keeps {scrollback} lines of scrollback but tmux only guarantees {} — a \
          post-stall catch-up would visibly truncate history the user already had",
         farhelm_supervisor::tmux::HISTORY_LIMIT
+    );
+    assert!(
+        scrollback >= SPEC_MINIMUM_SCROLLBACK,
+        "terminal.js keeps only {scrollback} lines of scrollback but SPEC.md promises at least \
+         {SPEC_MINIMUM_SCROLLBACK} — this is a broken product promise, not merely a cosmetic gap"
     );
 }
