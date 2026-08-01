@@ -128,12 +128,12 @@ nothing captures which conversation a session's agent was running.
    ever discard the captured identity; placeholder-free templates belong to non-integrated kinds, where they are the
    future M5 fallback shape. This is SPEC.md's snapshot rule applied to the pieces M3 needs.
 8. **Conversation-identity capture** for Claude Code and Codex, observation-only (no hooks, no agent configuration),
-   behind the small `AgentKind` trait SPEC_impl.md sketches. The audited constraints bind: the on-disk record appears at
-   first prompt submission (not launch), so correlation keys on first-input time with an unbounded gap tolerated; cwd
-   munging is non-injective, so per-line JSON fields are the correlators; identity is claimed only when unambiguous —
-   two near-simultaneous launches in one cwd stay uncaptured and take the fallback rather than a guess; plain resume
-   appends under the same id (new ids only on explicit forks), so the watcher treats appends as the resume signal and
-   re-verifies identity after each restart.
+   behind the small `AgentIntegration` trait SPEC_impl.md sketches (`AgentKind` became the wire enum's name). The
+   audited constraints bind: the on-disk record appears at first prompt submission (not launch), so correlation keys on
+   first-input time with an unbounded gap tolerated; cwd munging is non-injective, so per-line JSON fields are the
+   correlators; identity is claimed only when unambiguous — two near-simultaneous launches in one cwd stay uncaptured
+   and take the fallback rather than a guess; plain resume appends under the same id (new ids only on explicit forks),
+   so the watcher treats appends as the resume signal and re-verifies identity after each restart.
 
    **Known limitation, accepted in M3: a session whose own INVOCATION resumes a conversation is never captured.** Create
    a session with `claude --resume <id>` typed by hand and the agent appends to that conversation's existing record,
@@ -209,8 +209,10 @@ Performed 2026-07-31 on the Linux development host (systemd 255, tmux 3.7b, Ubun
   pre-trusted in its config, a `codex`-named shim carrying the variable into the launch). This is dependency injection
   at the test boundary through the existing `agent_home` seam; the user's real `~/.codex` is never written to and
   nothing in the product changed.
-- **Cgroup scope tests, real, passed** on the same host: four e2e and nine unit tests, none announcing a skip, so every
-  one exercised the real transient-scope path rather than the fallback.
+- **Cgroup scope tests, real, passed** on the same host: four e2e and eleven unit tests. The manager-dependent ones —
+  three of the four e2e plus the two scope.rs tests that probe a real user manager — announced no skip, so each
+  exercised the real transient-scope path rather than the fallback; the fourth e2e pins the no-manager fallback through
+  an injected disabled manager, and the remaining unit tests are host-independent, so both run everywhere.
 
 **Recorded limitation, upstream, user-facing.** Codex 0.146.0's folder-trust modal is input-dead under tmux: verified
 with strace, the pane's carriage return arrives as a completed `read(0, "\r", 1024) = 1` inside codex and is discarded,
@@ -231,8 +233,8 @@ Each step leaves something runnable; later steps only add. Tests ride with their
 4. Boot-id tracking and interrupted classification, through helm and UI badge; durable stop annotation with it.
 5. error status from the shim's sentinel, with the per-launch sentinel lifecycle.
 6. Server-enforced create idempotency, store through UI retry behavior.
-7. The per-session integration snapshot, then conversation capture behind `AgentKind` (fixtures first, the ignored
-   real-agent tests with it).
+7. The per-session integration snapshot, then conversation capture behind `AgentIntegration` (fixtures first, the
+   ignored real-agent tests with it).
 8. Restart with resume, supervisor through helm API through UI (restart affordance; the interrupted-session resume
    offer), including terminal reuse, vanished-cwd failure, and the confirm-stop-relaunch path.
 9. Cgroup hardening with fallback and backstop.
