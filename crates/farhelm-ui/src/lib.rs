@@ -70,6 +70,17 @@ pub fn App() -> Element {
     }
 }
 
+/// Mirror of the helm's `GET /api/sessions` response body (farhelm-helm's
+/// `SessionListing`, PLAN_M2.md step 6): `{"sessions": [...], "total": N,
+/// "truncated": bool}`. A local type for the same reason `Session` is one
+/// — the UI depends on the HTTP contract, not on `farhelm-helm` internals
+/// — and, like `Session`, only `sessions` is read today; the list UI that
+/// displays "showing N of M" from `total`/`truncated` is the next PR.
+#[derive(Deserialize)]
+struct SessionListing {
+    sessions: Vec<Session>,
+}
+
 /// Fetch the session list, flattening every failure into a displayable
 /// string.
 ///
@@ -94,11 +105,14 @@ async fn fetch_sessions(base: &str) -> Result<Vec<Session>, String> {
             format!("GET {url}: {status}: {detail}")
         });
     }
-    let sessions = resp
-        .json::<Vec<Session>>()
+    // The response is the full listing object now (PLAN_M2.md step 6), not
+    // a bare array — only `.sessions` is used here; `total`/`truncated`
+    // wait for the list-UI PR that actually displays truncation.
+    let listing = resp
+        .json::<SessionListing>()
         .await
         .map_err(|e| e.to_string())?;
-    Ok(sort_sessions(sessions))
+    Ok(sort_sessions(listing.sessions))
 }
 
 /// Stabilize M1's single-session choice across the protocol's undefined
