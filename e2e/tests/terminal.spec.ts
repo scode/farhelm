@@ -453,6 +453,91 @@ async function openFloodSession(
 }
 
 /**
+ * Drain a `flood_gated` session to its `FLOOD-DONE` marker over a raw
+ * WebSocket that belongs to nobody, so that whatever attaches NEXT sees a
+ * finished producer and pure replay instead of a live tail.
+ *
+ * The reconnect test below needs this: it leaves attachment one paused
+ * mid-flood on purpose, and a paused client stops the bytes moving, so the
+ * fake agent is still producing when that attachment goes away. The next
+ * attachment then gets the session's replay AND however much of the
+ * ~12 MiB fixture the producer still had left — measured directly at between
+ * 1.7 MiB and 5.4 MiB across consecutive runs on an idle machine, which
+ * straddles terminal.js's 4 MiB HIGH_WATER. Above the mark, that
+ * attachment pauses for entirely legitimate reasons, and a test asserting
+ * "a fresh attachment neither pauses nor resumes" fails on a system that
+ * is behaving exactly as designed. Quiescing the producer first removes
+ * the variable instead of tolerating it.
+ *
+ * A RAW socket, not a second UI attachment, and that distinction is the
+ * whole point: the reconnect invariant under test is about terminal.js's
+ * per-mount closure state surviving (or not) an unmount/mount pair, so the
+ * attachment doing the draining must not be one of terminal.js's own
+ * mounts. This one never touches `mount()`, so the mount that follows is
+ * still the FIRST one after the paused mount.
+ *
+ * `cols`/`rows` come from the caller (whatever geometry the previous
+ * attachment used) rather than the query defaults: every attach resizes
+ * the tmux window BEFORE it captures the replay (farhelm-supervisor's
+ * `Attach` handler), so draining at a different size would reflow the
+ * ~12,000 lines of history that the attachment under test then measures.
+ * A drain has no business changing what the next replay looks like.
+ *
+ * Rejects rather than returning on a socket that closes or errors before
+ * the marker arrives — a silent early return would hand the caller the
+ * live-tail race back, which is the one thing this exists to remove.
+ */
+function drainFloodOffScreen(
+  page: Page,
+  id: string,
+  geometry: { cols: number; rows: number },
+) {
+  return page.evaluate(
+    ({ id, cols, rows }) =>
+      new Promise<void>((resolve, reject) => {
+        const ws = new WebSocket(
+          `ws://${location.host}/api/sessions/${id}/term?cols=${cols}&rows=${rows}`,
+        );
+        ws.binaryType = "arraybuffer";
+        const decoder = new TextDecoder();
+        // The marker can straddle two frames, so carry its length minus
+        // one byte across chunks; nothing else about the stream matters
+        // here, which keeps this constant-memory over ~12 MiB.
+        const marker = "FLOOD-DONE";
+        let carry = "";
+        let settled = false;
+        const finish = (err?: Error) => {
+          if (settled) return;
+          settled = true;
+          clearTimeout(timer);
+          ws.onmessage = null;
+          ws.onclose = null;
+          ws.onerror = null;
+          ws.close();
+          if (err) reject(err);
+          else resolve();
+        };
+        const timer = setTimeout(
+          () => finish(new Error("flood_gated did not reach FLOOD-DONE in 60s")),
+          60_000,
+        );
+        ws.onmessage = (ev) => {
+          // Text frames are the helm's control JSON (a detach notice),
+          // never terminal bytes.
+          if (typeof ev.data === "string") return;
+          const text = carry + decoder.decode(ev.data);
+          if (text.includes(marker)) finish();
+          else carry = text.slice(-(marker.length - 1));
+        };
+        ws.onclose = () =>
+          finish(new Error("the drain socket closed before FLOOD-DONE"));
+        ws.onerror = () => finish(new Error("the drain socket errored"));
+      }),
+    { id, ...geometry },
+  );
+}
+
+/**
  * Stop then delete a session, tolerating ONLY "already gone" (404 — the
  * expected case when a test's own happy path already cleaned up). Every
  * OTHER failure is surfaced rather than swallowed: a silently leaked flood
@@ -1145,6 +1230,61 @@ test("DECRPM auto-replies to a mode query are dropped, not forwarded as pane inp
 // the native side is asserted through `window.getSelection()` rather
 // than `isCollapsed`, which WebKit reports as `true` for a drag-made
 // selection whose ranges are still present and still painted.
+//
+// WHAT `window.getSelection()` ACTUALLY REPORTS HERE, because it is not
+// the same thing on the machine that found the bug and the machine that
+// runs this suite. xterm.js supports X11's PRIMARY selection by copying
+// every mouse selection into its hidden helper textarea and calling
+// `focus()` + `select()` on it (`onLinuxMouseSelection`, gated on
+// `navigator.platform` containing "Linux" — true for BOTH Playwright
+// engines on a Linux host, including WebKit, whose user agent claims
+// macOS while its platform string does not). So under this suite the
+// document selection a drag leaves behind is anchored in `.xterm-helpers`,
+// not in the rendered rows: probing it directly, `getSelection()` tracks
+// `textarea.selectionStart..selectionEnd` character for character, and
+// reports zero while that textarea's selection is momentarily collapsed
+// even though xterm's own selection is unchanged. On real macOS
+// (`isLinux` false, no mirror) it is the row-anchored selection the MT-6
+// bug was about. Both are cleared by the same `removeAllRanges()`, so
+// this test pins the same contract on both — but only the macOS shape is
+// ever painted over content.
+//
+// THE FLAKE, and why the key leg presses a key without releasing it:
+// this test failed intermittently under CI load with `nativeChars` back
+// at its pre-input value (150 characters on the CI viewport) after the
+// dismissal. Reproduced locally at two to three failures per 50-60
+// repetitions with a dozen spinning CPU hogs alongside, and traced by
+// patching `Selection.prototype.removeAllRanges` and
+// `HTMLTextAreaElement.prototype.focus`/`select` to log stacks. The
+// blame lands on the KEY RELEASE, not on the dismissal: xterm's own
+// `_keyUp` handler calls `Terminal.focus()`, and refocusing a text
+// control makes the engine restore that control's cached selection —
+// still the mirrored drag text, because `removeAllRanges()` cleared the
+// live selection without invalidating that cache. About 30ms after the
+// refocus, the selection reappears. Nothing is painted (the helper
+// textarea is `opacity: 0`, parked at `left: -9999em`) and no user could
+// see it, and terminal.js cannot prevent it either — the restore comes
+// from xterm refocusing its own helper element. Whether this test noticed
+// came down to whether its first poll sample landed inside the ~40ms
+// window between the dismissal and the restore.
+//
+// Hence `keyboard.down("x")` with the matching `up` deferred all the way
+// to `finally`, instead of `press`. That is not a weaker assertion — same
+// real, trusted key event, and the keydown is where the input contract
+// lives: xterm sends the character and fires `onKey` (and therefore
+// `dismissSelection`) on the way DOWN, while the release carries no input
+// at all. Deferring it only stops an unrelated xterm behavior from racing
+// the state this test reads. It has to be deferred past the LAST
+// assertion, not just its own: a restoration scheduled by releasing "x"
+// (or by any intervening keypress, which is why the paste leg no longer
+// erases the typed character first) lands tens of milliseconds later, by
+// which point the paste leg's poll is the one it would corrupt.
+//
+// Both legs still poll rather than sample once, because the dismissal
+// genuinely is eventually-consistent by design: terminal.js sweeps once
+// synchronously and once on a `setTimeout(0)`, and traces show either
+// sweep landing the actual `removeAllRanges()` depending on where the
+// engine had the document selection at that instant.
 test("input dismisses both the xterm and native selections", async ({
   page,
 }) => {
@@ -1182,15 +1322,22 @@ test("input dismisses both the xterm and native selections", async ({
     await page.waitForTimeout(200);
     expect(await selectionState()).toMatchObject({ xterm: true });
 
-    // Second leg: a keystroke dismisses both selections.
-    await page.keyboard.press("x");
+    // Second leg: a keystroke dismisses both selections. The key is never
+    // released inside the test body — see this test's own docs: a release
+    // schedules the mirrored selection's restoration, and that restoration
+    // would then be in flight across the paste leg below, racing ITS poll
+    // the same way it raced this one. The only release is in `finally`,
+    // after every assertion has been made.
+    await page.keyboard.down("x");
     await expect.poll(selectionState).toEqual({ xterm: false, nativeChars: 0 });
-    await page.keyboard.press("Backspace");
 
     // Third leg: so does a paste. Dispatched as a synthetic
     // ClipboardEvent rather than driving the OS clipboard, whose
     // permissions differ per engine; the event is exactly what a real
-    // ⌘V/Ctrl-V delivers to this same target.
+    // ⌘V/Ctrl-V delivers to this same target. No Backspace first: erasing
+    // the typed "x" would mean another press, another release, and another
+    // restoration in flight — and the `Control+U` in `finally` clears the
+    // whole line anyway, which is all this test owes the shared session.
     await dragSelect();
     await page.evaluate(() => {
       const data = new DataTransfer();
@@ -1205,9 +1352,13 @@ test("input dismisses both the xterm and native selections", async ({
     });
     await expect.poll(selectionState).toEqual({ xterm: false, nativeChars: 0 });
   } finally {
-    // The pasted text lands at the prompt; clear the whole line rather
-    // than counting characters, so the shared session's prompt is left
-    // as this test found it.
+    // Release the held "x" (harmless if an earlier failure meant it was
+    // never pressed), and only here, so its restoration can no longer
+    // overlap any assertion above.
+    await page.keyboard.up("x");
+    // The typed "x" and the pasted text both land at the prompt; clear the
+    // whole line rather than counting characters, so the shared session's
+    // prompt is left as this test found it.
     await page.keyboard.press("Control+U");
   }
 });
@@ -3716,10 +3867,41 @@ test("a client that stops draining is detached with the stall reason after the f
 // not `holdTermWrites` (which self-releases the instant it observes a
 // pause, which would let attachment one recover before this test ever got
 // to navigate away from it).
+//
+// THE FLAKE that cost several M4 triage rounds, and why the drain below
+// exists: keeping attachment one paused is exactly what keeps the PRODUCER
+// running. A paused client stops the bytes, not the fake agent, so when
+// that attachment goes away the rest of the ~12 MiB fixture is still
+// coming — and the next attachment gets replay PLUS that live tail, which
+// is a legitimate live stream, not a replay. Instrumented byte
+// counts on an idle machine put the tail between 1.7 MiB and 5.4 MiB on
+// consecutive runs, i.e. straddling terminal.js's 4 MiB HIGH_WATER, and
+// the 5.4 MiB run produced `pauseCount: 1, resumeCount: 1` on attachment
+// two. That is flow control working, not failing, so the old "replay
+// cannot reach HIGH_WATER" premise was simply false whenever the producer
+// had not finished yet.
+//
+// The premise is now made true rather than assumed: `drainFloodOffScreen`
+// takes the whole rest of the flood on a raw socket that is nobody's
+// mount, so the attachment under test starts against a finished producer
+// and sees only tmux's ~12,000-line history — a few hundred KiB, orders of
+// magnitude below the mark. The three assertions at the end are unchanged
+// and mean exactly what they always claimed to mean. Note that the
+// assertions were NOT relaxed to tolerate a live-tail pause: `pauseCount:
+// 0` on a replay-only attachment is a much sharper statement than "either
+// zero, or one that we will excuse", and the sharper one is available for
+// free once the producer is quiesced.
 test("reconnecting within the same page resets flow-control state; the new attachment neither inherits a pause nor sends a bare resume", async ({
   page,
   request,
 }) => {
+  // The producer's whole ~12 MiB now has to finish before the measurement
+  // can even start: attachment one carries it as far as the pause, the
+  // drain takes the entire rest, and only then comes the reattach. About
+  // 20s end to end on an idle box, but the default 60s leaves little room
+  // on a loaded CI runner, and busting it would look like a hang rather
+  // than the flake it replaced.
+  test.setTimeout(180_000);
   const title = `flood-reconnect-${Date.now()}`;
   let id: string | undefined;
   try {
@@ -3765,6 +3947,14 @@ test("reconnecting within the same page resets flow-control state; the new attac
       delete (window as any).__testRealWrite;
     });
 
+    // Captured while a terminal still exists: the drain below reattaches
+    // at this same geometry rather than the query defaults, so it does not
+    // reflow the pane out from under the replay this test then measures.
+    const geometry = await page.evaluate(() => {
+      const term = (window as any).__farhelmTerm;
+      return { cols: term.cols as number, rows: term.rows as number };
+    });
+
     await page.locator(".back-button").click();
     // The old attachment's hook must be gone entirely — the same
     // assertion the navigation-lifecycle test above pins for
@@ -3776,9 +3966,17 @@ test("reconnecting within the same page resets flow-control state; the new attac
       .poll(() => page.evaluate(() => (window as any).__farhelmTest))
       .toBeUndefined();
 
+    // Nothing is attached at this point, so the flood can finish without
+    // any of it landing on the attachment this test is about to measure.
+    await drainFloodOffScreen(page, id, geometry);
+
     await row.click();
     await page.waitForFunction(() => (window as any).__farhelmTermReady === true);
-    await sendFloodGateByte(page);
+    // No second gate byte: `flood_gated` reads its gate exactly once, and
+    // the drain above already carried that one run to its end. What this
+    // attachment waits for is the marker coming back out of tmux's
+    // history, which is also the proof that what it received is REPLAY —
+    // there is no producer left to send it live.
     await waitForTermText(page, "FLOOD-DONE", 15_000);
 
     // The reattach's replay is bounded by the tmux history floor (~12,000
@@ -3787,10 +3985,10 @@ test("reconnecting within the same page resets flow-control state; the new attac
     // so a healthy fresh attachment neither pauses nor resumes delivering
     // it. A resume observed here would mean the new socket inherited the
     // OLD one's paused state instead of starting clean; a pause observed
-    // here would mean the replay itself grew past HIGH_WATER, which would
-    // invalidate this test's premise (that ordinary replay volume cannot
-    // trip the same mark the first attachment's live flood did) rather
-    // than exercising the invariant this test is actually for.
+    // here would mean the replay itself grew past HIGH_WATER, which (now
+    // that the producer is provably done — see the drain above) would mean
+    // the history floor itself had grown past the mark, invalidating this
+    // test's premise rather than exercising the invariant it is for.
     const hooks = await page.evaluate(() => (window as any).__farhelmTest);
     expect(hooks.pauseCount).toBe(0);
     expect(hooks.resumeCount).toBe(0);
