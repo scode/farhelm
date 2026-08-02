@@ -13,7 +13,7 @@
 //! design made concrete.
 
 use anyhow::{Context, bail};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
@@ -62,12 +62,95 @@ pub const HISTORY_LIMIT: u32 = 12_000;
 /// long. Without the flag at all, an undrained control client grows the
 /// tmux server's RSS without bound (audited 2026-07-29: ~3.5 MB/s against
 /// a `yes` pane on 3.4), which is the failure this exists to close.
+///
+/// The bound is per (CLIENT, PANE), not per client, and once terminal tabs
+/// exist that detail is load-bearing rather than trivia (PLAN_M4.md item
+/// 3): a stalled tab viewer falls behind on its own pane and on every
+/// other pane of the session its control client hears, and tmux answers
+/// per pane — so the panes it is behind on are cut for THAT client while
+/// the agent's own client, which is keeping up, keeps receiving. That is
+/// what makes one control client per attached terminal sufficient for
+/// stall isolation; sharing one across a session's terminals would not be.
 pub const TMUX_PAUSE_AFTER_SECS: u64 = 5;
 
 /// One tmux control-mode notification may expand each terminal byte into
 /// a four-byte octal escape. Bound the line above the protocol frame cap
 /// without rejecting the largest valid escaped notification.
 const MAX_CONTROL_LINE: usize = farhelm_proto::MAX_FRAME_LEN as usize * 4 + 1024;
+
+/// How many lines of scrollback [`TmuxDriver::capture_pane_text`] looks
+/// back over for a dead pane's last words.
+///
+/// One screen plus a margin, not the whole history: the caller is
+/// building an error message, and a failed shell says what it has to say
+/// in a line or two. Reaching further would mostly harvest the blank rows
+/// a mostly-empty pane is padded with.
+const LAST_WORDS_LINES: u32 = 50;
+
+/// Reduce a `capture-pane` transcript to the last non-blank text it
+/// holds, at most `max_bytes` of it.
+///
+/// Split out from [`TmuxDriver::capture_pane_text`] so the trimming and
+/// tail-truncation rules are unit-testable against constructed strings —
+/// the same reasoning [`parse_pane_facts`] and [`PaneModes::parse`] were
+/// split out for.
+///
+/// Trailing blank rows go first, because a pane is padded to its full
+/// height and those rows are not something anyone printed. What remains
+/// is truncated from the FRONT when it is too long — see the caller's
+/// docs for why the tail is the part worth keeping — landing on a
+/// character boundary so the result is always valid UTF-8.
+fn last_words(transcript: &str, max_bytes: usize) -> String {
+    let trimmed = transcript.trim_end();
+    if trimmed.len() <= max_bytes {
+        return trimmed.to_string();
+    }
+    let start = trimmed.len() - max_bytes;
+    let start = (start..trimmed.len())
+        .find(|index| trimmed.is_char_boundary(*index))
+        .unwrap_or(trimmed.len());
+    trimmed[start..].to_string()
+}
+
+/// The tmux window option carrying a TAB's minted id (PLAN_M4.md item 2).
+///
+/// Windows are the substrate for terminal tabs, and tabs are deliberately
+/// not durable metadata — SPEC.md says a reboot or an archive erases them
+/// and nothing recreates them — so the marker on the window IS the record.
+/// It has to be a marker rather than a position: a pane's own processes
+/// inherit `TMUX` and can create windows on this private server, so a
+/// "windows 1 and up" scan would adopt strangers with the wrong working
+/// directory and the wrong teardown semantics.
+///
+/// The value is a MINTED uuid, never the tmux window id. Window ids come
+/// from a server-wide counter that restarts with the server, so a client
+/// holding a selector from before a reboot would otherwise be handed
+/// whatever window later inherited that number — see `TabInfo::id`'s own
+/// contract, which promises `NotFound` instead.
+///
+/// User options (`@`-prefixed) are the only option namespace tmux
+/// guarantees never to interpret, and window-scoped ones survive
+/// everything a window survives. They are also world-writable by anything
+/// that inherited `TMUX`, which is why every read of this value is
+/// shape-checked (`scope::is_uuid_shaped`) before it is trusted.
+pub const TAB_WINDOW_OPTION: &str = "@farhelm-tab";
+
+/// The tmux window option marking the AGENT's window, carrying its session
+/// id (PLAN_M4.md item 2).
+///
+/// Window 0 remains the agent's window in practice — nothing about tabs
+/// changes the layout — but identity is by marker, not by index. The
+/// supervisor finds the agent's PANE through its own durable record and
+/// never needs this to locate it; what this buys is the other direction:
+/// a window carrying it is provably not a tab, so a tab scan can exclude
+/// the agent positively instead of by assuming index 0.
+///
+/// Set at create (and at the restart that has to build a fresh tmux
+/// session), best-effort: a session launched by an older build carries no
+/// marker at all, and nothing degrades — tab discovery keys on
+/// [`TAB_WINDOW_OPTION`] alone, which such a session's agent window
+/// equally lacks.
+pub const AGENT_WINDOW_OPTION: &str = "@farhelm-agent";
 
 /// One deadline covers attaching the control client, taking the replay
 /// snapshot, and enabling live output. A wedged tmux command must fail
@@ -137,11 +220,18 @@ fn continue_pane_command(pane: &str) -> String {
 /// replies against: modes, history snapshot, visible snapshot, cutover.
 /// A second copy of this string for the resume path would be a second
 /// place for that block-count contract to drift.
-fn replay_command_group(pane: &str, cutover: &str) -> String {
+fn replay_command_group(session: &str, pane: &str, cutover: &str) -> String {
+    // Every pane target is paired with its session ([`pane_in_session`]),
+    // quoted because the pairing contains a `:`. A control client attaches
+    // to a session but its COMMANDS resolve server-wide, so a bare `%N`
+    // here would let a pane id that went stale across a tmux-server
+    // restart capture — and replay — a completely different session's
+    // terminal into this one.
+    let target = format!("\"{}\"", pane_in_session(session, pane));
     format!(
-        "display-message -p -t {pane} '{PANE_MODE_FORMAT}' ; \
-         capture-pane -p -e -N -t {pane} -S -{HISTORY_LIMIT} ; \
-         capture-pane -p -e -N -t {pane} ; \
+        "display-message -p -t {target} '{PANE_MODE_FORMAT}' ; \
+         capture-pane -p -e -N -t {target} -S -{HISTORY_LIMIT} ; \
+         capture-pane -p -e -N -t {target} ; \
          {cutover}\n"
     )
 }
@@ -770,12 +860,121 @@ pub struct PaneState {
     pub session_name: String,
     /// tmux's own `#{pane_dead}` flag, exactly as [`PaneProcess::dead`].
     pub dead: bool,
+    /// The id (`@N`) of the window this pane lives in.
+    ///
+    /// Carried for ORDERING, not for addressing (every window-scoped
+    /// command here goes through [`pane_in_session`] instead — see its
+    /// docs for why a bare window id is unsafe to act on). tmux assigns
+    /// window ids from a monotonically increasing per-server counter, so
+    /// within one tmux-server lifetime their numeric order IS the order
+    /// the windows were created in — which is exactly what
+    /// `SessionInfo::tabs` promises its readers.
+    pub window: String,
+    /// The numeric part of [`Self::window`] (`@7` → 7), parsed once here
+    /// because every consumer wants creation ORDER and `@10` sorts before
+    /// `@9` as a string.
+    pub window_ordinal: u64,
+    /// The numeric part of this pane's own id (`%12` → 12), for the same
+    /// reason: comparing pane ids as strings puts `%10` before `%9`.
+    pub pane_ordinal: u64,
+    /// `#{window_index}` — the window's POSITION in its session, as
+    /// opposed to the server-wide creation counter [`Self::window`] is.
+    ///
+    /// Only one consumer: the last-resort agent-window fallback for a
+    /// session that carries no markers at all (a session created by a
+    /// build that predates them). Position is exactly what that fallback
+    /// wants and exactly what nothing else may use.
+    pub window_index: u64,
+    /// This pane's window's [`TAB_WINDOW_OPTION`] marker, when it carries
+    /// one whose SYNTAX matches an id this supervisor mints.
+    ///
+    /// `None` covers three cases the caller does not need to tell apart,
+    /// because all three mean "not one of our tabs": the agent's own
+    /// window, a window someone conjured behind the supervisor's back
+    /// (pane processes inherit `TMUX`), and a window whose marker holds
+    /// something this supervisor would never have minted.
+    ///
+    /// SYNTAX is all this establishes, and the distinction matters: tmux
+    /// window options are writable by anything that inherited `TMUX`, so a
+    /// pane can mark its own window — or another window of any session on
+    /// this private server — with a perfectly well-formed uuid. What the
+    /// validation buys is that such a value cannot be malformed in a way
+    /// that shifts the parse or names something outside tmux's own
+    /// namespace; what makes acting on it safe is that every operation
+    /// addresses the pane paired with its session
+    /// ([`pane_in_session`]), so a marker can never reach ANOTHER
+    /// session's terminal. Provenance itself is not authenticated and
+    /// deliberately not claimed to be.
+    pub tab: Option<String>,
+    /// This pane's window's [`AGENT_WINDOW_OPTION`] marker — the session
+    /// id the window was created for — under the same syntax-only caveat
+    /// as [`Self::tab`].
+    ///
+    /// Read, not merely written: a session whose durable pane record is
+    /// empty recovers its agent terminal by preferring the window marked
+    /// for that session, rather than by position (see `service.rs`'s
+    /// reload). `None` means the window carries no recognizable agent
+    /// marker — a tab's window, a foreign window, or a session created
+    /// before markers existed.
+    pub agent: Option<String>,
     /// `#{pane_dead_status}` when `dead` and parseable as a plain integer.
     /// `None` while alive, and also `None` for a dead pane whose status
     /// tmux could not express as one (a signal death, chiefly) — the same
     /// honest gap `SessionStatus::Exited`'s own docs describe, just
     /// discovered here instead of invented by this struct.
     pub exit_code: Option<i32>,
+}
+
+#[cfg(test)]
+impl PaneState {
+    /// A pane state with everything but the fields a test cares about
+    /// filled in plausibly — for the many tests across this crate whose
+    /// subject is one field and whose noise floor is the other seven.
+    ///
+    /// Deliberately NOT a `Default` impl: the production type has no
+    /// honest zero value (see the struct's own docs on why `dead: false`
+    /// must never be fabricated), and a `Default` would be reachable from
+    /// production code as soon as somebody wrote `..Default::default()`.
+    pub(crate) fn for_test(session_name: &str, pane: &str, window: &str) -> PaneState {
+        PaneState {
+            session_name: session_name.to_string(),
+            dead: false,
+            window: window.to_string(),
+            window_ordinal: tmux_ordinal(window, '@').expect("test window ids are well formed"),
+            pane_ordinal: tmux_ordinal(pane, '%').expect("test pane ids are well formed"),
+            window_index: 0,
+            tab: None,
+            agent: None,
+            exit_code: None,
+        }
+    }
+
+    /// Builder sugar for the marker under test.
+    pub(crate) fn with_tab(mut self, tab: &str) -> PaneState {
+        self.tab = Some(tab.to_string());
+        self
+    }
+
+    /// Builder sugar for the agent marker under test.
+    pub(crate) fn with_agent(mut self, session_id: &str) -> PaneState {
+        self.agent = Some(session_id.to_string());
+        self
+    }
+
+    /// Builder sugar for the dead/exit-code pair, which are only ever
+    /// meaningful together.
+    pub(crate) fn dead_with(mut self, exit_code: Option<i32>) -> PaneState {
+        self.dead = true;
+        self.exit_code = exit_code;
+        self
+    }
+
+    /// Builder sugar for the window INDEX, which only the legacy
+    /// agent-window fallback reads.
+    pub(crate) fn at_index(mut self, index: u64) -> PaneState {
+        self.window_index = index;
+        self
+    }
 }
 
 /// tmux's raw, unmodified stderr from a non-zero exit — attached as the
@@ -840,6 +1039,38 @@ impl std::error::Error for TmuxCommandFailure {}
 /// to act on that stranger, and tmux refuses a mismatched pairing itself
 /// ("can't find pane") — an atomic check rather than a probe that could go
 /// stale between asking and acting.
+///
+/// This doubles as the safe WINDOW target (PLAN_M4.md item 2), which is
+/// why window-scoped commands here take a pane rather than a window id: a
+/// tmux command given a window target resolves it to the window CONTAINING
+/// the named pane, so `resize-window`/`kill-window`/`set-option -w` all
+/// inherit the session pairing above. A bare `@N` window id would not —
+/// audited empirically against tmux 3.7b, `set-option -w -t
+/// '=other-session:@1'` happily acts on `@1` even when `@1` belongs to a
+/// DIFFERENT session, because tmux resolves a window id directly and
+/// ignores the session qualifier in front of it. Window ids reset with the
+/// server exactly as pane ids do, so that combination is the stale-handle
+/// hazard above with its one safeguard removed.
+///
+/// # What this form does NOT do: detect a VANISHED pane
+///
+/// Audited against tmux 3.7b, and surprising enough to have caused a real
+/// bug: when the named pane no longer exists at all, this target does not
+/// fail — the empty window component falls back to the session's CURRENT
+/// window and its active pane, so the command silently acts on a
+/// DIFFERENT terminal of the same session. (`display-message -t
+/// '=fh:.%1'` after `%1`'s window was killed reported `%0`, exit 0.)
+///
+/// So this form answers "never another session's terminal", not "exactly
+/// this pane or nothing". Every caller must therefore address a pane it
+/// has just resolved and holds still — which is what the session lifecycle
+/// claim buys the tab operations — and the two queries whose whole job is
+/// to DETECT a vanished or recycled pane ([`TmuxDriver::pane_process`] and
+/// [`TmuxDriver::capture_alt_screen_if_active`]) deliberately use the bare
+/// pane id instead: it expands empty for a pane that is gone, which is the
+/// signal they are built to read, and each cross-checks `#{session_name}`
+/// from the same atomic invocation for the scoping this form would have
+/// given them.
 fn pane_in_session(session: &str, pane: &str) -> String {
     format!("={session}:.{pane}")
 }
@@ -1381,7 +1612,7 @@ impl TmuxDriver {
                 carry_over,
             };
         }
-        if let Err(e) = self.resize_window(session, cols, 1).await {
+        if let Err(e) = self.resize_window(session, pane, cols, 1).await {
             warn!(
                 session, error = %e,
                 "could not shrink this window before a relaunch; the prior run's visible \
@@ -1444,17 +1675,150 @@ impl TmuxDriver {
             .context("respawning the session's pane for a relaunch")
     }
 
-    /// Resize a session's window. `cols`/`rows` are clamped to tmux's
-    /// accepted range: a browser reporting 0 columns (or an absurd
+    /// Add a window to an existing session and run `window_cmd` in it —
+    /// the substrate for a terminal tab (PLAN_M4.md item 2). Returns the
+    /// new window's id and its pane id.
+    ///
+    /// `-d` is load-bearing rather than tidy: without it the new window
+    /// becomes the session's CURRENT window, and every tmux command that
+    /// resolves a bare session target (anything a future caller writes
+    /// against `-t <session>` instead of a pane) would silently start
+    /// addressing whichever tab was opened last. Opening a tab must change
+    /// nothing about any other terminal.
+    ///
+    /// Both ids come back from the SAME invocation that creates the
+    /// window, for `create_session`'s reason: a follow-up query that
+    /// failed would leave a window (and the shell already starting in it)
+    /// that nothing owns.
+    ///
+    /// `env`, `--`, and the dimension-free signature all match
+    /// `create_session`'s contract — values are literal argv elements, so
+    /// no quoting applies, and a new window inherits the session's
+    /// geometry, which the attach that follows resizes to the client's own
+    /// anyway.
+    pub async fn new_window(
+        &self,
+        session: &str,
+        cwd: &str,
+        env: &[(String, String)],
+        window_cmd: &[String],
+    ) -> anyhow::Result<(String, String)> {
+        let target = format!("={session}:");
+        let env_args = env_assignments(env);
+        let mut args: Vec<&str> = vec![
+            "new-window",
+            "-d",
+            "-P",
+            "-F",
+            "#{window_id} #{pane_id}",
+            "-t",
+            &target,
+            "-c",
+            cwd,
+        ];
+        for assignment in &env_args {
+            args.push("-e");
+            args.push(assignment);
+        }
+        args.push("--");
+        args.extend(window_cmd.iter().map(String::as_str));
+        let out = self.run(&args).await?;
+        let mut fields = out.split_whitespace();
+        let window = fields
+            .next()
+            .with_context(|| format!("new-window returned no window id: {out:?}"))?;
+        let pane = fields
+            .next()
+            .with_context(|| format!("new-window returned no pane id: {out:?}"))?;
+        Ok((window.to_string(), pane.to_string()))
+    }
+
+    /// Set a window user option on the window CONTAINING `pane` — how a
+    /// window is marked as farhelm's (see [`TAB_WINDOW_OPTION`] and
+    /// [`AGENT_WINDOW_OPTION`]).
+    ///
+    /// Addressed through the pane rather than a window id so the session
+    /// pairing actually binds; see [`pane_in_session`] for the audit that
+    /// makes that necessary rather than stylistic.
+    pub async fn mark_window(
+        &self,
+        session: &str,
+        pane: &str,
+        option: &str,
+        value: &str,
+    ) -> anyhow::Result<()> {
+        self.run(&[
+            "set-option",
+            "-w",
+            "-t",
+            &pane_in_session(session, pane),
+            option,
+            value,
+        ])
+        .await
+        .map(|_| ())
+        .with_context(|| format!("marking a window with {option}"))
+    }
+
+    /// Kill the window containing `pane`, tolerating its absence.
+    ///
+    /// The tolerated diagnostics are the same ones [`Self::kill_session`]
+    /// accepts, plus tmux's own "can't find pane" — the shape a window
+    /// already gone leaves behind, since the target is expressed as a pane
+    /// within a session. All of them mean the desired state (this window
+    /// no longer exists) has already been reached, which is what makes
+    /// `CloseTab` safe to retry after a partial failure.
+    ///
+    /// This is deliberately NOT the whole of closing a tab: it must run
+    /// only AFTER the tab's process tree has been reaped, because killing
+    /// the window first would destroy the live pane the descendant walk
+    /// anchors on and leave the weaker marker scan as the only mechanism
+    /// (PLAN_M4.md item 2).
+    pub async fn kill_window(&self, session: &str, pane: &str) -> anyhow::Result<()> {
+        match self
+            .run(&["kill-window", "-t", &pane_in_session(session, pane)])
+            .await
+        {
+            Ok(_) => Ok(()),
+            // Classified against tmux's OWN raw stderr, anchored at its
+            // start, rather than by searching the rendered error — the
+            // rendered form embeds this driver's formatting AND the
+            // caller-controlled target string, so a session named after
+            // one of these phrases could make an unrelated failure look
+            // tolerated (the hazard `is_tolerated_list_panes_diagnostic`
+            // documents in full). Each of these is a complete tmux
+            // message; the ones naming a target continue past the phrase,
+            // which is why this anchors rather than compares whole.
+            Err(e) if tmux_said_any(&e, TmuxDriver::WINDOW_ALREADY_GONE_DIAGNOSTICS) => Ok(()),
+            Err(e) => Err(e).context("killing a terminal tab's window"),
+        }
+    }
+
+    /// Resize the window containing `pane`. `cols`/`rows` are clamped to
+    /// tmux's accepted range: a browser reporting 0 columns (or an absurd
     /// value) must not turn into a tmux error, because callers treat
     /// resize as fire-and-forget.
-    pub async fn resize_window(&self, name: &str, cols: u16, rows: u16) -> anyhow::Result<()> {
+    ///
+    /// Targeted through the pane, not through the session name, and that
+    /// is a correctness fix rather than a refactor (PLAN_M4.md item 3:
+    /// resize goes per window). A bare `-t <session>` resolves to the
+    /// session's CURRENT window, which was unambiguous only while a
+    /// session had exactly one — with tabs it would reflow whichever
+    /// window tmux last made current, so a client resizing its agent view
+    /// could reshape somebody's tab instead.
+    pub async fn resize_window(
+        &self,
+        session: &str,
+        pane: &str,
+        cols: u16,
+        rows: u16,
+    ) -> anyhow::Result<()> {
         let cols = cols.clamp(1, 10_000);
         let rows = rows.clamp(1, 10_000);
         self.run(&[
             "resize-window",
             "-t",
-            name,
+            &pane_in_session(session, pane),
             "-x",
             &cols.to_string(),
             "-y",
@@ -1724,6 +2088,77 @@ impl TmuxDriver {
         Ok(parse_alt_screen_capture(&buf, session, max_bytes))
     }
 
+    /// The last thing `pane` printed, as plain text, bounded to
+    /// `max_bytes`.
+    ///
+    /// Exists for exactly one caller: the refused `OpenTab`'s error detail
+    /// (PLAN_M4.md item 2 — "the pane's last words"). Deliberately NOT
+    /// [`Self::capture_alt_screen_if_active`]: this wants human-readable
+    /// prose to put inside a protocol error message, so escape sequences
+    /// are left out (`-e` omitted) and the alternate screen is
+    /// irrelevant — a shell that could not start prints a line or two to
+    /// the primary screen and dies.
+    ///
+    /// # Why history, not the visible screen
+    ///
+    /// The pane this is called on is a DEAD one, and `remain-on-exit`
+    /// replaces a dead pane's visible grid with tmux's own
+    /// `remain-on-exit-format` banner ("Pane is dead (status 9, …)") —
+    /// verified against tmux 3.7b. A plain `capture-pane -p` therefore
+    /// returns that banner and nothing else, which restates the exit code
+    /// the caller already has and loses the one thing worth reporting. The
+    /// shell's actual output is one scroll back, in history, which
+    /// [`LAST_WORDS_LINES`] reaches.
+    ///
+    /// The TAIL is kept when the result is over `max_bytes`, not the head:
+    /// these are last words, and a shell that printed a wall of rc-file
+    /// noise before its real complaint would otherwise have the complaint
+    /// truncated away. Truncation lands on a CHARACTER boundary so the
+    /// result is always valid UTF-8, and the text is lossy-decoded rather
+    /// than refused for an exotic byte — mangling one beats declining to
+    /// explain the failure.
+    ///
+    /// The pane is paired with its session ([`pane_in_session`]) so a
+    /// stale pane id cannot quote a stranger's terminal into this
+    /// session's error message.
+    pub async fn capture_pane_text(
+        &self,
+        session: &str,
+        pane: &str,
+        max_bytes: usize,
+    ) -> anyhow::Result<String> {
+        let out = self
+            .run_bytes(&[
+                "capture-pane",
+                "-p",
+                "-t",
+                &pane_in_session(session, pane),
+                "-S",
+                &format!("-{LAST_WORDS_LINES}"),
+            ])
+            .await
+            .context("capturing a pane's text")?;
+        Ok(last_words(&String::from_utf8_lossy(&out), max_bytes))
+    }
+
+    /// The tmux diagnostics that all mean "the window this names is
+    /// already gone" — the tolerated outcomes of [`Self::kill_window`],
+    /// which is what makes `CloseTab` safe to retry after a partial
+    /// failure.
+    ///
+    /// The target is expressed as a pane within a session, so tmux
+    /// reports a vanished window through whichever part of that pairing
+    /// it failed to resolve first; all four spellings, plus the whole
+    /// server being gone, are the same fact for a caller.
+    const WINDOW_ALREADY_GONE_DIAGNOSTICS: &[&str] = &[
+        "can't find pane",
+        "can't find session",
+        "can't find window",
+        "no such window",
+        "no current target",
+        "no server running",
+    ];
+
     /// A genuinely empty server (started, but nothing created on it yet)
     /// answers `list-panes -a` with EXACTLY this diagnostic and nothing
     /// else on the line (verified empirically against both tmux 3.4 and
@@ -1864,14 +2299,23 @@ impl TmuxDriver {
     /// renamed session's pane is still found under its ORIGINAL pane id
     /// with its NEW session name — see `session_status`'s own docs on how
     /// it is expected to react to that specific mismatch.
+    /// # Two queries, and when the second is skipped
+    ///
+    /// The window markers this also reports (`PaneState::tab`/`agent`) are
+    /// the only fields anything outside this supervisor can write, so they
+    /// are fetched by a SECOND query and joined against the first — see
+    /// [`PANE_MARKER_FORMAT`] for the fabrication that separation closes.
+    ///
+    /// That second round trip is skipped entirely when no session on the
+    /// server has more than one window, which keeps the pre-tabs cost of
+    /// this call — one subprocess, paid on every `ListSessions` poll —
+    /// exactly what it was. The skip is sound because a tab IS an
+    /// additional window: a session with one window can have no tab, and
+    /// the one consumer of the AGENT marker (reload's pane-less recovery)
+    /// falls back to the single window it would have chosen anyway.
     pub async fn pane_states(&self) -> anyhow::Result<HashMap<String, PaneState>> {
-        let out = match self
-            .run(&[
-                "list-panes",
-                "-a",
-                "-F",
-                "#{pane_id} #{session_name} #{pane_dead} #{pane_dead_status}",
-            ])
+        let facts = match self
+            .run(&["list-panes", "-a", "-F", PANE_FACT_FORMAT])
             .await
         {
             Ok(out) => out,
@@ -1883,18 +2327,46 @@ impl TmuxDriver {
                 // error with no `TmuxCommandFailure` in its chain at all
                 // (a spawn failure, say) is never tolerated: there is no
                 // tmux diagnostic to even inspect.
-                let tolerated = e
-                    .downcast_ref::<TmuxCommandFailure>()
-                    .is_some_and(|failure| {
-                        is_tolerated_list_panes_diagnostic(&failure.stderr_trimmed(), &self.socket)
-                    });
-                if tolerated {
+                if self.is_definitively_empty(&e) {
                     return Ok(HashMap::new());
                 }
                 return Err(e).context("querying pane states");
             }
         };
-        Ok(parse_pane_states(&out))
+        let mut states = parse_pane_facts(&facts);
+        if !any_session_has_several_windows(&states) {
+            return Ok(states);
+        }
+        match self
+            .run(&["list-panes", "-a", "-F", PANE_MARKER_FORMAT])
+            .await
+        {
+            Ok(markers) => join_pane_markers(&mut states, &markers),
+            // The server going away between the two queries is the same
+            // "nothing to report" the first query tolerates, and leaves
+            // every pane honestly unmarked rather than failing a call
+            // whose authoritative half already succeeded.
+            Err(e) if self.is_definitively_empty(&e) => {}
+            Err(e) => return Err(e).context("querying pane window markers"),
+        }
+        Ok(states)
+    }
+
+    /// Whether `error` is tmux definitively saying there is nothing on
+    /// this driver's socket to answer for — an empty server, an absent
+    /// one, or one caught mid-teardown.
+    ///
+    /// Public so callers that must tell "there is genuinely nothing here"
+    /// apart from "the query failed" can ask the same question this
+    /// module answers internally, against tmux's own raw stderr rather
+    /// than a substring search over a rendered error (see
+    /// [`is_tolerated_list_panes_diagnostic`]).
+    pub fn is_definitively_empty(&self, error: &anyhow::Error) -> bool {
+        error
+            .downcast_ref::<TmuxCommandFailure>()
+            .is_some_and(|failure| {
+                is_tolerated_list_panes_diagnostic(&failure.stderr_trimmed(), &self.socket)
+            })
     }
 
     /// Open one control client, capture replay, then turn on its live
@@ -1916,6 +2388,11 @@ impl TmuxDriver {
     /// avoids a second mode/capture race without depending on nested
     /// `if-shell` reply blocks, whose shape changed across supported tmux
     /// releases.
+    ///
+    /// `session` and `pane` are BOTH needed and mean different things: a
+    /// control client can only attach to a session, while everything this
+    /// stream then carries is filtered down to the one pane — see
+    /// [`OutputStream`] for why that filter exists and what it costs.
     pub async fn open_replay_stream(
         &self,
         session: &str,
@@ -1949,16 +2426,19 @@ impl TmuxDriver {
             reader: BufReader::new(stdout),
             line: Vec::with_capacity(8192),
             passthrough: PassthroughDecoder::default(),
+            pane: pane.to_string(),
+            session: session.to_string(),
         };
         read_command_block(
             &mut stream.reader,
             &mut stream.line,
             deadline,
             "control-mode attach",
+            pane,
         )
         .await?;
         let (modes, prefill) = stream
-            .snapshot_then_cutover(pane, deadline, &attach_cutover_command())
+            .snapshot_then_cutover(deadline, &attach_cutover_command())
             .await?;
         Ok((modes, prefill, stream))
     }
@@ -1967,13 +2447,18 @@ impl TmuxDriver {
     ///
     /// Attaches with `-f no-output` PERMANENTLY, unlike the replay
     /// client's transient use of the same flag: this client must never
-    /// see a pane-output notification, because [`InputClient::send`] reads
-    /// exactly one command-reply block per chunk it writes, and an
-    /// interleaved pane-output line would desynchronize that read from
-    /// the write that produced it. See [`InputClient`] for why input gets
-    /// its own client at all rather than riding the replay client's
-    /// stdin.
-    pub async fn open_input_client(&self, pane: &str) -> anyhow::Result<InputClient> {
+    /// see a pane-output notification — from THIS pane or from any other
+    /// window's, since a control client attached to a session receives
+    /// every pane on it — because [`InputClient::send`] reads exactly one
+    /// command-reply block per chunk it writes, and an interleaved
+    /// pane-output line would desynchronize that read from the write that
+    /// produced it. See [`InputClient`] for why input gets its own client
+    /// at all rather than riding the replay client's stdin.
+    pub async fn open_input_client(
+        &self,
+        session: &str,
+        pane: &str,
+    ) -> anyhow::Result<InputClient> {
         let deadline = tokio::time::Instant::now() + CONTROL_EXCHANGE_TIMEOUT;
         let mut child = self
             .command()
@@ -1997,19 +2482,30 @@ impl TmuxDriver {
         // this client's stdout carries is the reply to its own implicit
         // `attach-session`, which must be drained before any `send-keys`
         // reply can be read cleanly.
-        read_command_block(&mut reader, &mut line, deadline, "input-client attach").await?;
+        read_command_block(
+            &mut reader,
+            &mut line,
+            deadline,
+            "input-client attach",
+            pane,
+        )
+        .await?;
         Ok(InputClient {
             child,
             stdin,
             reader,
             line,
             pane: pane.to_string(),
+            // Quoted for `replay_command_group`'s reason: the pairing
+            // contains a `:`, and input must not be able to reach another
+            // session's pane through a stale id any more than replay can.
+            target: format!("\"{}\"", pane_in_session(session, pane)),
             delivered_any_bytes: false,
         })
     }
 }
 
-/// A control-mode client streaming one session's pane output.
+/// A control-mode client streaming ONE PANE's output.
 ///
 /// It starts with output disabled and is only returned after replay
 /// capture and the live cutover have completed. The client counts as
@@ -2018,6 +2514,48 @@ impl TmuxDriver {
 /// geometry comes only from explicit `resize-window` calls. Dropping it
 /// kills the client process (`kill_on_drop`), which detaches it; the tmux
 /// server and pane are unaffected.
+///
+/// # One pane, filtered from a whole session's stream
+///
+/// tmux control clients attach to a SESSION, not to a window or a pane,
+/// and a control client receives `%output`/`%extended-output` for every
+/// pane in every window of that session — audited empirically against
+/// tmux 3.7b with a second window present, which is the shape terminal
+/// tabs introduce (PLAN_M4.md item 2). There is no attach-time way to
+/// narrow it: `refresh-client -A <pane>:off` exists, but tmux stops
+/// READING a pane whose every attached control client has turned it off,
+/// which would silently freeze an unattached terminal's scrollback — so
+/// this type filters by pane id on the way through instead.
+///
+/// The filter runs BEFORE any decoding: [`classify_control_line`] splits
+/// the pane id out of each notification, and a line naming another pane
+/// is dropped there — never fed to [`PassthroughDecoder`], which carries
+/// wrapper state across notifications and would be corrupted by a
+/// stranger's bytes landing inside a wrapper of ours. Only the escaping
+/// and passthrough decode of the pane's OWN payloads costs anything past
+/// the line split.
+///
+/// # What this design costs, and what it does not deliver
+///
+/// Every attached terminal drains the whole session's traffic through its
+/// own pipe and discards most of it, so a session's total control-mode
+/// read work is O(attached terminals × session traffic) rather than
+/// O(session traffic). With tab counts bounded by the user opening them
+/// by hand this is affordable, but it is a real multiplier and not a
+/// rounding error.
+///
+/// It also does not deliver COMPLETE stall isolation, and claiming
+/// otherwise would be wrong. `pause-after` is per (client, pane), so a
+/// stalled terminal's client is cut per pane and the healthy terminals'
+/// own clients keep receiving — but tmux answers a lagging client in one
+/// of TWO ways, nondeterministically (see [`TMUX_PAUSE_AFTER_SECS`]), and
+/// on the branch where it THROTTLES the pane instead of cutting the
+/// client, a stalled terminal can transiently slow the other panes of its
+/// session until its `pause-after` bound trips and the stall detach
+/// fires. The window is bounded by those two timeouts; it is not zero.
+/// Removing it means not draining a session's traffic once per terminal
+/// at all — a session-sink design, which is the next PR's subject rather
+/// than something this filter can approximate.
 pub struct OutputStream {
     child: Child,
     /// Held open for the lifetime of the client. Carries only the
@@ -2031,6 +2569,31 @@ pub struct OutputStream {
     /// Stateful because tmux may split one passthrough wrapper across
     /// several output notifications.
     passthrough: PassthroughDecoder,
+    /// The one pane this stream speaks for — see the type's own docs for
+    /// why a session-wide client needs to know that at all.
+    ///
+    /// Held as the raw tmux pane id (`%N`) so every comparison is a plain
+    /// byte equality against what a notification carries, with no
+    /// re-parsing per line.
+    pane: String,
+    /// The tmux session that pane belongs to, kept so the catch-up replay
+    /// can address it the same session-paired way the attach did — and so
+    /// no caller has to carry a second copy of either handle (see
+    /// [`Self::pane`]).
+    session: String,
+}
+
+impl OutputStream {
+    /// The pane this stream carries.
+    ///
+    /// Exists so the forwarder driving this stream does not keep its own
+    /// copy of the pane id: two fields that must agree, in two structs
+    /// with different lifetimes, is exactly the kind of duplication that
+    /// goes wrong quietly — a forwarder replaying the wrong pane's
+    /// history would look like a plain terminal glitch.
+    pub fn pane(&self) -> &str {
+        &self.pane
+    }
 }
 
 /// One thing read off a control client's stream that the forwarder cares
@@ -2075,11 +2638,12 @@ impl OutputStream {
     /// method exists to remove.
     async fn snapshot_then_cutover(
         &mut self,
-        pane: &str,
         deadline: tokio::time::Instant,
         cutover: &str,
     ) -> anyhow::Result<(PaneModes, Vec<u8>)> {
-        let command = replay_command_group(pane, cutover);
+        let command = replay_command_group(&self.session, &self.pane, cutover);
+        let pane = self.pane.clone();
+        let pane = pane.as_str();
         let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
         tokio::time::timeout(remaining, async {
             self.stdin
@@ -2094,13 +2658,20 @@ impl OutputStream {
         .await
         .context("timed out writing tmux replay cutover commands")??;
 
-        let modes_output =
-            read_command_block(&mut self.reader, &mut self.line, deadline, "pane modes").await?;
+        let modes_output = read_command_block(
+            &mut self.reader,
+            &mut self.line,
+            deadline,
+            "pane modes",
+            pane,
+        )
+        .await?;
         let history_output = read_command_block(
             &mut self.reader,
             &mut self.line,
             deadline,
             "history snapshot",
+            pane,
         )
         .await?;
         let visible_output = read_command_block(
@@ -2108,6 +2679,7 @@ impl OutputStream {
             &mut self.line,
             deadline,
             "visible snapshot",
+            pane,
         )
         .await?;
         let _cutover = read_command_block(
@@ -2115,6 +2687,7 @@ impl OutputStream {
             &mut self.line,
             deadline,
             "live-output cutover",
+            pane,
         )
         .await?;
 
@@ -2155,6 +2728,15 @@ impl OutputStream {
     /// behind, which the next call discards. Callers may only abandon this
     /// future on a path that tears the whole stream down (the stall detach
     /// does exactly that), never to resume reading afterwards.
+    ///
+    /// Notifications about ANOTHER pane are chatter here, discarded with
+    /// the same indifference as a `%layout-change`. That filter is what
+    /// makes this stream a TERMINAL's stream rather than a session's (see
+    /// the type's own docs): without it, opening a tab would start
+    /// spraying the tab's shell output into every already-attached
+    /// terminal of that session, and a foreign pane's `%pause` would send
+    /// this terminal through a reset-and-replay catch-up for bytes it was
+    /// never carrying.
     pub async fn next_output(&mut self) -> anyhow::Result<Option<OutputEvent>> {
         // Fields are destructured up front so the borrow checker can see
         // that the scratch line buffer, the reader, and the passthrough
@@ -2165,8 +2747,10 @@ impl OutputStream {
             reader,
             line,
             passthrough,
+            pane,
             ..
         } = self;
+        let own_pane = pane.as_bytes();
         loop {
             line.clear();
             let n = read_control_line(reader, line).await?;
@@ -2174,13 +2758,22 @@ impl OutputStream {
                 return Ok(None);
             }
             match classify_control_line(strip_line_ending(line)) {
-                Some(ControlLine::Payload(escaped)) => {
+                Some(ControlLine::Payload { pane, escaped }) if pane == own_pane => {
                     let bytes = decode_output_payload(passthrough, escaped);
                     if !bytes.is_empty() {
                         return Ok(Some(OutputEvent::Bytes(bytes)));
                     }
                 }
-                Some(ControlLine::Paused) => return Ok(Some(OutputEvent::Paused)),
+                Some(ControlLine::Paused { pane }) if pane == own_pane => {
+                    return Ok(Some(OutputEvent::Paused));
+                }
+                // Another window's pane, on the same session-attached
+                // control client. Deliberately NOT fed to the passthrough
+                // decoder: that decoder carries wrapper state across
+                // notifications, and mixing a stranger's bytes into it
+                // would corrupt a wrapper of ours that happened to be
+                // open at the time.
+                Some(ControlLine::Payload { .. } | ControlLine::Paused { .. }) => {}
                 Some(ControlLine::Exit) => return Ok(None),
                 None => {}
             }
@@ -2208,10 +2801,7 @@ impl OutputStream {
     /// The caller must reset the client's terminal before writing the
     /// returned prefill: the replay assumes an empty terminal, and this
     /// one lands in a terminal already showing the pre-pause bytes.
-    pub async fn resume_paused_with_replay(
-        &mut self,
-        pane: &str,
-    ) -> anyhow::Result<(PaneModes, Vec<u8>)> {
+    pub async fn resume_paused_with_replay(&mut self) -> anyhow::Result<(PaneModes, Vec<u8>)> {
         // Discard any half-decoded passthrough wrapper left over from the
         // stream tmux just cut. `%pause` can land in the middle of a
         // wrapper split across notifications, and that partial state
@@ -2222,8 +2812,8 @@ impl OutputStream {
         // never contains a wrapper, so nothing is lost by clearing here.
         self.passthrough = PassthroughDecoder::default();
         let deadline = tokio::time::Instant::now() + CONTROL_EXCHANGE_TIMEOUT;
-        self.snapshot_then_cutover(pane, deadline, &continue_pane_command(pane))
-            .await
+        let cutover = continue_pane_command(&self.pane);
+        self.snapshot_then_cutover(deadline, &cutover).await
     }
 
     /// Submit a raw command line on this client's stdin, for tests only.
@@ -2366,8 +2956,13 @@ pub struct InputClient {
     stdin: ChildStdin,
     reader: BufReader<tokio::process::ChildStdout>,
     line: Vec<u8>,
-    /// The pane this client addresses every `send-keys -t <pane>` at.
+    /// The pane this client addresses, for the block reader's own
+    /// filtering.
     pane: String,
+    /// The quoted `=<session>:.<pane>` target every `send-keys` names —
+    /// see [`pane_in_session`] for why input is session-paired rather than
+    /// addressed by bare pane id.
+    target: String,
     /// Whether tmux has ever CONFIRMED executing a `send-keys` carrying at
     /// least one byte through this client.
     ///
@@ -2434,7 +3029,8 @@ impl InputClient {
         for batch in chunks.chunks(Self::PIPELINE_BATCH) {
             for chunk in batch {
                 line.clear();
-                write!(line, "send-keys -t {} -H", self.pane).expect("String write is infallible");
+                write!(line, "send-keys -t {} -H", self.target)
+                    .expect("String write is infallible");
                 for byte in *chunk {
                     write!(line, " {byte:02x}").expect("String write is infallible");
                 }
@@ -2461,6 +3057,7 @@ impl InputClient {
                     &mut self.line,
                     deadline,
                     "send-keys input",
+                    &self.pane,
                 )
                 .await?;
                 // Marked per CONFIRMED chunk, not once at the end: a send
@@ -2509,11 +3106,33 @@ impl InputClient {
 /// Split out from [`TmuxDriver::pane_states`] purely so this classification
 /// is unit-testable against constructed strings, without spawning tmux or
 /// killing a real server to provoke any of the three — the same reasoning
-/// [`parse_pane_states`] and `PaneModes::parse` split their own parsing out
+/// [`parse_pane_facts`] and `PaneModes::parse` split their own parsing out
 /// for elsewhere in this module. Any OTHER message returns `false`, which is
 /// what sends an unclassified failure down `pane_states`'s error path
 /// instead of being silently folded into an empty (and therefore
 /// all-exited) map.
+/// Whether `error` carries tmux's own stderr and it BEGINS with any of
+/// `prefixes`.
+///
+/// Anchored at the START rather than searched anywhere in the message,
+/// and read off [`TmuxCommandFailure`] rather than off the rendered
+/// `anyhow` chain. Both halves matter for the same reason
+/// [`is_tolerated_list_panes_diagnostic`] spells out at length: the
+/// rendered error embeds this driver's own formatting and the target
+/// string the caller supplied, and a session or path named after one of
+/// these phrases would otherwise make an unrelated failure look
+/// tolerated. tmux emits each of these as a complete standalone message
+/// beginning with the phrase, sometimes continuing with the target it
+/// could not find — hence a prefix rather than an equality.
+fn tmux_said_any(error: &anyhow::Error, prefixes: &[&str]) -> bool {
+    error
+        .downcast_ref::<TmuxCommandFailure>()
+        .is_some_and(|failure| {
+            let stderr = failure.stderr_trimmed();
+            prefixes.iter().any(|prefix| stderr.starts_with(prefix))
+        })
+}
+
 fn is_tolerated_list_panes_diagnostic(stderr: &str, socket: &Path) -> bool {
     stderr == TmuxDriver::LIST_PANES_EMPTY_SERVER_DIAGNOSTIC
         || stderr == TmuxDriver::LIST_PANES_SERVER_EXITED_DIAGNOSTIC
@@ -2525,65 +3144,234 @@ fn is_tolerated_list_panes_diagnostic(stderr: &str, socket: &Path) -> bool {
             )
 }
 
-/// Parse `list-panes -a -F
-/// '#{pane_id} #{session_name} #{pane_dead} #{pane_dead_status}'` output
-/// into a per-pane map. Split out from [`TmuxDriver::pane_states`] purely
-/// so this parsing is unit-testable against constructed strings, without
-/// a real tmux server behind it — the same reasoning `PaneModes::parse`
-/// and `parse_stat` split their own parsing out for elsewhere in this
+/// The AUTHORITATIVE half of pane discovery: everything tmux itself owns
+/// about a pane, and nothing a pane can write.
+///
+/// Field order is not arbitrary, and both ends of it are load-bearing.
+/// `#{session_name}` goes LAST and is taken as the whole remainder of the
+/// line, because a session name may legally contain spaces (and a pane
+/// that inherited `TMUX` can `rename-session` into one); every field
+/// before it is a fixed tmux-owned shape that the parse validates
+/// outright. `#{pane_dead_status}` is the one tmux field that expands
+/// EMPTY for a healthy pane, so it rides through tmux's own `#{?cond,a,b}`
+/// conditional into a literal `-` placeholder rather than vanishing and
+/// shifting everything after it.
+///
+/// The exit status carries a literal `s` PREFIX rather than riding tmux's
+/// `#{?cond,a,b}` conditional, and that is a bug fix rather than a style
+/// choice: tmux's conditional treats the string `"0"` as FALSE, so a pane
+/// that exited CLEANLY — the single most common exit code there is —
+/// expanded to the "no status" branch and every clean exit read back as
+/// `Exited { exit_code: None }`. A constant prefix cannot be falsy.
+///
+/// No window user options here, deliberately — see
+/// [`PANE_MARKER_FORMAT`], which fetches them separately precisely
+/// because they are the fields a pane can write.
+const PANE_FACT_FORMAT: &str = concat!(
+    "#{pane_id} #{window_id} #{window_index} #{pane_dead} ",
+    "s#{pane_dead_status} #{session_name}"
+);
+
+/// The PANE-WRITABLE half of pane discovery: the two farhelm window
+/// markers, fetched in a query of their own.
+///
+/// Separate from [`PANE_FACT_FORMAT`] because these are the only fields
+/// anything outside this supervisor can set, and a value carrying a
+/// NEWLINE can fabricate an entire extra row in any format output. Keeping
+/// them out of the authoritative query is what makes that fabrication
+/// harmless: [`join_pane_markers`] admits a marker row only for a pane the
+/// fact query independently reported, and drops BOTH rows when a pane id
+/// appears twice — so a forged row either names a pane that does not exist
+/// (dropped) or collides with that pane's real row (both dropped, leaving
+/// the pane merely unmarked). Neither outcome lets one pane's option value
+/// hand another pane a marker.
+///
+/// Both markers still ride ONE row rather than one query each: with the
+/// join and the duplicate rule above, ordering between two writable fields
+/// no longer decides anything.
+const PANE_MARKER_FORMAT: &str = concat!(
+    "#{pane_id} #{?#{@farhelm-agent},#{@farhelm-agent},-} ",
+    "#{?#{@farhelm-tab},#{@farhelm-tab},-}"
+);
+
+/// The placeholder both formats emit where a value would otherwise be
+/// empty. Never a legal id, so it needs no special case beyond the shape
+/// checks every field already gets.
+const EMPTY_FIELD: &str = "-";
+
+/// The numeric part of a tmux id (`%12` → 12, `@7` → 7), or `None` when
+/// the id is not exactly `<sigil><digits>`.
+///
+/// Strict on purpose. It doubles as the shape check for a pane or window
+/// id — the ids a fabricated row would have to spell — and as the parse
+/// for the ordinals every consumer actually wants, because tmux hands both
+/// out from monotonic counters and `@10` sorts before `@9` as a string.
+fn tmux_ordinal(id: &str, sigil: char) -> Option<u64> {
+    let digits = id.strip_prefix(sigil)?;
+    (!digits.is_empty() && digits.bytes().all(|b| b.is_ascii_digit()))
+        .then(|| digits.parse().ok())
+        .flatten()
+}
+
+/// A marker value as read back out of a tmux window option, or `None` when
+/// it is not one this supervisor could have written.
+///
+/// SYNTAX only — see [`PaneState::tab`] for what that does and does not
+/// establish. The empty placeholder and any other shape both answer
+/// `None`, so callers have one case to handle rather than three.
+fn parse_marker(value: &str) -> Option<String> {
+    (value != EMPTY_FIELD && crate::scope::is_uuid_shaped(value)).then(|| value.to_string())
+}
+
+/// Parse [`PANE_FACT_FORMAT`]'s `list-panes -a` output into a per-pane
+/// map. Split out from [`TmuxDriver::pane_states`] purely so this parsing
+/// is unit-testable against constructed strings, without a real tmux
+/// server behind it — the same reasoning `PaneModes::parse` and
+/// `parse_stat` split their own parsing out for elsewhere in this
 /// codebase.
 ///
-/// Strict on `pane_dead`: it must be the EXACT string `"0"` or `"1"`, not
-/// merely "whatever wasn't `1`". A row whose `pane_dead` field is missing
-/// entirely (an unexpectedly short line) or holds some other value (a
-/// tmux format change this build does not understand) is skipped outright
-/// — not inserted into the map at all — rather than defaulting to `dead:
-/// false`. Defaulting to alive would be a silent liveness guess for a row
-/// this function could not actually parse, exactly the kind of fabricated
-/// answer `session_status`'s whole "missing from the map means Exited"
-/// contract exists to avoid; skipping instead means the caller sees the
-/// SAME honest "not found" outcome as any other absent pane.
-fn parse_pane_states(out: &str) -> HashMap<String, PaneState> {
-    let mut states = HashMap::new();
+/// Every fixed field is validated by SHAPE, not merely by presence: pane
+/// and window ids must be `%N`/`@N`, the window index must be numeric,
+/// `pane_dead` must be exactly `"0"` or `"1"`. A row failing any of them
+/// is skipped outright — not inserted with a guessed value — because a
+/// fabricated liveness claim is precisely what `session_status`'s "missing
+/// from the map means Exited" contract exists to avoid, and a row this
+/// function could not parse is not evidence of anything.
+///
+/// A pane id appearing TWICE drops the pane entirely rather than letting
+/// either row win. tmux emits exactly one row per pane, so a second one
+/// can only have been fabricated — by a newline inside the one remaining
+/// caller-controlled field, a session name (`rename-session` is available
+/// to any pane that inherited `TMUX`). Dropping is the safe direction: the
+/// affected session reports `Exited { exit_code: None }` through the
+/// ordinary absent-pane path, which is a nuisance a same-server pane can
+/// inflict and never a liveness claim it can forge.
+fn parse_pane_facts(out: &str) -> HashMap<String, PaneState> {
+    let mut states: HashMap<String, PaneState> = HashMap::new();
+    let mut seen_twice: HashSet<String> = HashSet::new();
     for line in out.lines() {
-        let mut fields = line.split_whitespace();
-        let Some(pane_id) = fields.next() else {
-            // A blank line is the same "nothing to inspect" shape
-            // `pane_process` documents for an all-empty expansion — not a
-            // row worth reporting.
+        // `splitn` on the LAST field: a session name may contain spaces,
+        // so everything past the fixed prefix belongs to it verbatim.
+        let mut fields = line.splitn(6, ' ');
+        let Some(pane_ordinal) = fields.next().and_then(|id| tmux_ordinal(id, '%')) else {
             continue;
         };
-        let Some(session_name) = fields.next() else {
-            // A pane id with nothing after it is just as malformed as a
-            // missing pane_dead field below — skip rather than guess.
+        let pane_id = format!("%{pane_ordinal}");
+        let Some(window) = fields.next() else {
+            continue;
+        };
+        let Some(window_ordinal) = tmux_ordinal(window, '@') else {
+            continue;
+        };
+        let Some(window_index) = fields.next().and_then(|index| index.parse::<u64>().ok()) else {
             continue;
         };
         let dead = match fields.next() {
             Some("0") => false,
             Some("1") => true,
-            // Missing, or some value this build does not recognize:
-            // malformed, and skipped rather than guessed at.
             _ => continue,
         };
         // Only trust the status field once the pane is actually dead:
-        // tmux leaves it at a stale or empty value while alive, and
+        // tmux leaves it at a stale or placeholder value while alive, and
         // parsing it regardless would risk fabricating an exit code for a
         // pane that has not exited at all.
+        // `s`-prefixed so the field is never empty (see the format's own
+        // docs); `s` alone is tmux reporting no status at all.
+        let status = fields.next().and_then(|field| field.strip_prefix('s'));
         let exit_code = if dead {
-            fields.next().and_then(|f| f.parse::<i32>().ok())
+            status.and_then(|s| s.parse().ok())
         } else {
             None
         };
+        let Some(session_name) = fields.next().filter(|name| !name.is_empty()) else {
+            continue;
+        };
+        if states.contains_key(&pane_id) {
+            seen_twice.insert(pane_id);
+            continue;
+        }
         states.insert(
-            pane_id.to_string(),
+            pane_id,
             PaneState {
                 session_name: session_name.to_string(),
                 dead,
+                window: window.to_string(),
+                window_ordinal,
+                pane_ordinal,
+                window_index,
+                tab: None,
+                agent: None,
                 exit_code,
             },
         );
     }
+    for pane in seen_twice {
+        states.remove(&pane);
+    }
     states
+}
+
+/// Whether any tmux session in `states` holds panes from more than one
+/// window — the cheap precondition [`TmuxDriver::pane_states`] uses to
+/// decide whether the marker query can matter at all.
+fn any_session_has_several_windows(states: &HashMap<String, PaneState>) -> bool {
+    let mut first_window: HashMap<&str, &str> = HashMap::new();
+    states.values().any(|state| {
+        first_window
+            .insert(state.session_name.as_str(), state.window.as_str())
+            .is_some_and(|seen| seen != state.window)
+    })
+}
+
+/// Fold [`PANE_MARKER_FORMAT`]'s output into an already-parsed fact map.
+///
+/// The authoritative map decides which panes exist; this only ever
+/// DECORATES panes already in it, which is what makes a fabricated marker
+/// row unable to invent a pane. A pane id appearing twice among the
+/// syntactically valid marker rows leaves that pane unmarked, for
+/// [`parse_pane_facts`]'s reason applied to the fields most likely to be
+/// hostile — and unmarked is the safe degradation here, since it costs a
+/// tab its listing rather than pointing an operation at the wrong pane.
+///
+/// Rows are validated whole: exactly three space-separated tokens, a
+/// well-formed pane id, and two fields that are each either the empty
+/// placeholder or a complete minted-shaped id. `uuid` plus trailing
+/// garbage is not a uuid.
+fn join_pane_markers(states: &mut HashMap<String, PaneState>, out: &str) {
+    let mut seen: HashSet<String> = HashSet::new();
+    let mut ambiguous: HashSet<String> = HashSet::new();
+    for line in out.lines() {
+        let fields: Vec<&str> = line.split(' ').filter(|f| !f.is_empty()).collect();
+        let [pane, agent, tab] = fields[..] else {
+            continue;
+        };
+        let Some(ordinal) = tmux_ordinal(pane, '%') else {
+            continue;
+        };
+        let pane_id = format!("%{ordinal}");
+        if !states.contains_key(&pane_id) {
+            // A marker row for a pane the authoritative query never
+            // reported: either fabricated outright, or a pane that
+            // appeared between the two queries. Neither is something to
+            // invent a pane from.
+            continue;
+        }
+        if !seen.insert(pane_id.clone()) {
+            ambiguous.insert(pane_id);
+            continue;
+        }
+        let (agent, tab) = (parse_marker(agent), parse_marker(tab));
+        if let Some(state) = states.get_mut(&pane_id) {
+            state.agent = agent;
+            state.tab = tab;
+        }
+    }
+    for pane in ambiguous {
+        if let Some(state) = states.get_mut(&pane) {
+            state.agent = None;
+            state.tab = None;
+        }
+    }
 }
 
 /// The identity tmux repeats on one command reply's begin/end markers.
@@ -2643,12 +3431,38 @@ fn parse_control_marker(line: &[u8]) -> Option<ControlMarker> {
 /// content; commands in this client are serialized, so another real
 /// reply cannot nest here. EOF and timeout are hard errors because
 /// accepting a partial snapshot would manufacture terminal history.
+///
+/// `own_pane` is the pane the caller's client speaks for, and it makes
+/// the difference between "the cutover ordering broke" and "some other
+/// window is busy". A control client attached to a session hears every
+/// pane on it (see [`OutputStream`]), and on the CATCH-UP path — where
+/// only this stream's own pane is paused while the rest of the session
+/// keeps running — a neighbour's output notification landing between two
+/// of this group's reply blocks is entirely ordinary. Treating that as
+/// the ordering violation it would be for our OWN pane (which is exactly
+/// what this did before tabs existed, when a session had one pane and the
+/// two cases could not be told apart) would fail a perfectly healthy
+/// resume, tearing down the attachment.
+///
+/// The foreign-output tolerance is scoped to BETWEEN blocks and does not
+/// extend inside one, deliberately. Block bodies are terminal content:
+/// `capture-pane` output is unescaped, so a pane displaying a control-mode
+/// transcript can legitimately contain a line that reads exactly like a
+/// notification, and dropping those would corrupt the replay. tmux is
+/// audited (3.7b, a neighbouring pane driven at full tilt across a
+/// complete replay group) never to interleave notifications INSIDE a
+/// command's reply block — commands run to completion in the server's own
+/// loop before queued pane output is flushed — which is the same
+/// assumption this function has always made and the reason its body loop
+/// appends everything unconditionally.
 async fn read_command_block<R: AsyncRead + Unpin>(
     reader: &mut BufReader<R>,
     line: &mut Vec<u8>,
     deadline: tokio::time::Instant,
     purpose: &str,
+    own_pane: &str,
 ) -> anyhow::Result<Vec<u8>> {
+    let own_pane = own_pane.as_bytes();
     let id = loop {
         line.clear();
         let read = read_control_line_before(reader, line, deadline, purpose).await?;
@@ -2661,20 +3475,25 @@ async fn read_command_block<R: AsyncRead + Unpin>(
             Some(ControlMarker::End(_) | ControlMarker::Error(_)) => {
                 bail!("tmux control protocol ended a block before beginning the {purpose} reply");
             }
-            // Both dialects, for the same reason: live output arriving
-            // BETWEEN reply blocks means the cutover ordering broke, and
-            // silently folding those bytes into the next block's captured
-            // output would manufacture terminal history. Which dialect it
-            // arrives in depends only on whether `pause-after` is set on
-            // this client, which is not this function's business to know.
-            None if stripped.starts_with(b"%output ")
-                || stripped.starts_with(b"%extended-output ") =>
+            // Both dialects, for the same reason: live output for OUR pane
+            // arriving BETWEEN reply blocks means the cutover ordering
+            // broke, and silently folding those bytes into the next
+            // block's captured output would manufacture terminal history.
+            // Which dialect it arrives in depends only on whether
+            // `pause-after` is set on this client, which is not this
+            // function's business to know.
+            None if classify_control_line(stripped).is_some_and(
+                |line| matches!(line, ControlLine::Payload { pane, .. } if pane == own_pane),
+            ) =>
             {
                 bail!("tmux emitted live output before the replay cutover completed");
             }
             None if stripped.starts_with(b"%exit") => {
                 bail!("tmux control client exited before the {purpose} reply");
             }
+            // Everything else — a neighbouring pane's output or pause, a
+            // `%layout-change`, a `%window-renamed` — is chatter between
+            // blocks, exactly as it is to `OutputStream::next_output`.
             None => {}
         }
     };
@@ -2927,7 +3746,7 @@ fn strip_command_output_terminator(output: &[u8]) -> &[u8] {
 /// Split out from the read loop as a pure function over one line
 /// specifically so the notification GRAMMAR is unit-testable without a
 /// tmux server or a live process behind it — the same reasoning
-/// [`parse_pane_states`] and [`PaneModes::parse`] were split out for.
+/// [`parse_pane_facts`] and [`PaneModes::parse`] were split out for.
 /// Shapes worth testing here are otherwise awkward or impossible to
 /// provoke on demand from a real server: a `%pause` requires stalling a
 /// client for seconds, and a future tmux's extra `%extended-output`
@@ -2937,11 +3756,21 @@ fn strip_command_output_terminator(output: &[u8]) -> &[u8] {
 /// `%layout-change`, `%window-renamed`, and anything a newer tmux invents.
 enum ControlLine<'a> {
     /// Escaped pane bytes from either output dialect, still to be
-    /// unescaped and passthrough-decoded.
-    Payload(&'a [u8]),
-    /// `%pause <pane-id>`.
-    Paused,
-    /// `%exit`: this control client is going away.
+    /// unescaped and passthrough-decoded, together with the pane id the
+    /// notification named.
+    ///
+    /// The pane id was dropped on the floor before PLAN_M4.md item 2: a
+    /// session had exactly one pane, so every notification a control
+    /// client saw was necessarily its own. Tabs make a session's control
+    /// client see other windows' panes too, so the id has to survive
+    /// classification for [`OutputStream::next_output`] to filter on.
+    Payload { pane: &'a [u8], escaped: &'a [u8] },
+    /// `%pause <pane-id>`, carrying that pane id for the same reason
+    /// `Payload` does.
+    Paused { pane: &'a [u8] },
+    /// `%exit`: this control client is going away. Carries no pane —
+    /// unlike the two above it is a statement about the CLIENT, so it
+    /// applies whichever pane this stream is filtering for.
     Exit,
 }
 
@@ -2950,12 +3779,16 @@ enum ControlLine<'a> {
 fn classify_control_line(line: &[u8]) -> Option<ControlLine<'_>> {
     if let Some(rest) = line.strip_prefix(b"%output ") {
         // Format: "%<pane-id> <escaped-data>".
-        split_output_payload(rest).map(ControlLine::Payload)
+        split_output_payload(rest).map(|(pane, escaped)| ControlLine::Payload { pane, escaped })
     } else if let Some(rest) = line.strip_prefix(b"%extended-output ") {
         // Format: "%<pane-id> <age> ... : <escaped-data>".
-        split_extended_output_payload(rest).map(ControlLine::Payload)
-    } else if line.starts_with(b"%pause ") {
-        Some(ControlLine::Paused)
+        split_extended_output_payload(rest)
+            .map(|(pane, escaped)| ControlLine::Payload { pane, escaped })
+    } else if let Some(pane) = line.strip_prefix(b"%pause ") {
+        // Format: "%pause %<pane-id>", the whole line. Trailing content
+        // would mean a shape this build does not understand, so the id is
+        // taken verbatim and simply fails to match any stream's pane.
+        Some(ControlLine::Paused { pane })
     } else if line.starts_with(b"%exit") {
         Some(ControlLine::Exit)
     } else {
@@ -2979,34 +3812,40 @@ fn decode_output_payload(decoder: &mut PassthroughDecoder, escaped: &[u8]) -> Ve
 }
 
 /// Split a `%output` notification's tail (everything past `"%output "`)
-/// into just its escaped payload, dropping the pane id.
+/// into its pane id and its escaped payload.
 ///
 /// `None` for a malformed line with no separator at all — treated as
 /// chatter rather than as empty output, so a truncated notification can
 /// never be mistaken for the pane genuinely emitting nothing.
-fn split_output_payload(rest: &[u8]) -> Option<&[u8]> {
+fn split_output_payload(rest: &[u8]) -> Option<(&[u8], &[u8])> {
     let separator = rest.iter().position(|&byte| byte == b' ')?;
-    Some(&rest[separator + 1..])
+    Some((&rest[..separator], &rest[separator + 1..]))
 }
 
 /// Split an `%extended-output` notification's tail (everything past
-/// `"%extended-output "`) into just its escaped payload.
+/// `"%extended-output "`) into its pane id and its escaped payload.
 ///
 /// The documented shape is `pane-id age ... : value`, where tmux
 /// explicitly reserves the space between the age and the `:` for future
 /// arguments a client "should ignore". So this deliberately does NOT
-/// count fields: it scans space-separated fields for the first one that
-/// is EXACTLY `":"` and takes everything after it, which is what makes a
-/// future tmux adding a field a no-op here instead of a payload shifted
-/// by one token. Anchoring on a lone `:` field (not the first `:` byte)
-/// matters because the payload itself routinely contains colons — pane
-/// output is arbitrary bytes.
+/// count fields: it takes the FIRST field as the pane id (tmux documents
+/// it first and has never moved it) and then scans space-separated fields
+/// for the first one that is EXACTLY `":"`, taking everything after it —
+/// which is what makes a future tmux adding a field a no-op here instead
+/// of a payload shifted by one token. Anchoring on a lone `:` field (not
+/// the first `:` byte) matters because the payload itself routinely
+/// contains colons — pane output is arbitrary bytes.
 ///
 /// `None` when no such separator field exists, for the same reason
 /// [`split_output_payload`] returns `None`: a line this function cannot
 /// locate a payload in is chatter, not empty output.
-fn split_extended_output_payload(rest: &[u8]) -> Option<&[u8]> {
-    let mut offset = 0;
+fn split_extended_output_payload(rest: &[u8]) -> Option<(&[u8], &[u8])> {
+    let pane_end = rest
+        .iter()
+        .position(|&byte| byte == b' ')
+        .unwrap_or(rest.len());
+    let pane = &rest[..pane_end];
+    let mut offset = pane_end + 1;
     while offset < rest.len() {
         let end = rest[offset..]
             .iter()
@@ -3017,7 +3856,7 @@ fn split_extended_output_payload(rest: &[u8]) -> Option<&[u8]> {
             // an `%extended-output` whose payload is genuinely empty ends
             // right at the marker, which `get` turns into an empty slice
             // rather than a panic.
-            return Some(rest.get(end + 1..).unwrap_or(&[]));
+            return Some((pane, rest.get(end + 1..).unwrap_or(&[])));
         }
         offset = end + 1;
     }
@@ -3268,6 +4107,7 @@ mod tests {
             &mut line,
             tokio::time::Instant::now() + CONTROL_EXCHANGE_TIMEOUT,
             "test snapshot",
+            "%0",
         )
         .await
         .expect("complete block");
@@ -3301,6 +4141,7 @@ mod tests {
                 &mut line,
                 tokio::time::Instant::now() + CONTROL_EXCHANGE_TIMEOUT,
                 "pane modes",
+                "%0",
             )
             .await
             .expect_err("live output before the cutover must fail the attach");
@@ -3310,6 +4151,99 @@ mod tests {
                 String::from_utf8_lossy(live)
             );
         }
+    }
+
+    /// The other side of that guard, and the one terminal tabs made
+    /// necessary: a NEIGHBOURING pane's output between reply blocks is
+    /// ordinary chatter, not a broken cutover.
+    ///
+    /// A control client attaches to a tmux SESSION and therefore hears
+    /// every window's panes. On the catch-up path only this stream's own
+    /// pane is paused, so a busy tab in another window emits between the
+    /// replay group's blocks routinely — audited against tmux 3.7b by
+    /// driving a second pane at full tilt across a complete resume group.
+    /// Failing there would tear down a perfectly healthy attachment every
+    /// time the user had a busy tab open, which is precisely the case
+    /// tabs make common.
+    ///
+    /// Both dialects, and both a payload and a `%pause`, because a foreign
+    /// pane can produce either.
+    #[tokio::test]
+    async fn a_neighbouring_panes_notifications_between_blocks_are_not_a_broken_cutover() {
+        // TWO complete blocks read back to back, with foreign chatter
+        // before the first, BETWEEN them, and in both dialects — the
+        // shape a replay group actually meets on the catch-up path, where
+        // only this stream's own pane is paused.
+        let mut input =
+            b"%output %7 other window\n%extended-output %7 0 : more\n%pause %7\n".to_vec();
+        input.extend_from_slice(b"%begin 10 20 1\nmodes\n%end 10 20 1\n");
+        input.extend_from_slice(b"%output %7 still busy\n%extended-output %7 3 x : lots\n");
+        input.extend_from_slice(b"%layout-change @3 whatever\n");
+        input.extend_from_slice(b"%begin 10 21 1\nhistory\n%end 10 21 1\n");
+        let mut reader = BufReader::new(&input[..]);
+        let mut line = Vec::new();
+        let deadline = tokio::time::Instant::now() + CONTROL_EXCHANGE_TIMEOUT;
+        let modes = read_command_block(&mut reader, &mut line, deadline, "pane modes", "%0")
+            .await
+            .expect("a neighbouring pane's chatter must not fail the first block");
+        let history = read_command_block(&mut reader, &mut line, deadline, "history", "%0")
+            .await
+            .expect("nor the second");
+        assert_eq!(
+            (modes.as_slice(), history.as_slice()),
+            (&b"modes\n"[..], &b"history\n"[..]),
+            "each block's own output must be exactly its own, with the chatter around it              neither folded in nor treated as a broken cutover"
+        );
+    }
+
+    /// Notifications must carry their pane id through classification, and
+    /// [`OutputStream::next_output`] must drop the ones that are not its
+    /// own pane's.
+    ///
+    /// This is the whole of "each terminal's stream carries only its own
+    /// pane" (PLAN_M4.md item 3). Without it, opening a tab would spray
+    /// that tab's shell output into every already-attached terminal of the
+    /// same session, and a foreign pane's `%pause` would send this
+    /// terminal through a reset-and-replay catch-up for bytes it never
+    /// carried. Exercised through `classify_control_line` (the same
+    /// function `next_output` calls) rather than a live tmux, so the
+    /// notification GRAMMAR is what is pinned.
+    #[test]
+    fn notifications_carry_their_pane_id_so_a_stream_can_keep_only_its_own() {
+        let mine = b"%0";
+        let mut kept = Vec::new();
+        let mut paused_for_me = false;
+        for line in [
+            &b"%output %0 mine"[..],
+            &b"%output %11 theirs"[..],
+            &b"%extended-output %0 0 : mine-extended"[..],
+            &b"%extended-output %11 0 : theirs-extended"[..],
+            &b"%pause %11"[..],
+            &b"%pause %0"[..],
+        ] {
+            match classify_control_line(line) {
+                Some(ControlLine::Payload { pane, escaped }) if pane == mine => {
+                    kept.push(String::from_utf8_lossy(escaped).into_owned());
+                }
+                Some(ControlLine::Paused { pane }) if pane == mine => paused_for_me = true,
+                _ => {}
+            }
+        }
+        assert_eq!(
+            kept,
+            vec!["mine".to_string(), "mine-extended".to_string()],
+            "only this pane's payloads may reach the decoder"
+        );
+        assert!(
+            paused_for_me,
+            "this pane's own %pause must still surface — a swallowed one loses bytes for good"
+        );
+        // `%0` must not match `%01` or `%011`: pane ids are compared as
+        // complete fields, and a prefix match would fuse two panes.
+        assert!(matches!(
+            classify_control_line(b"%output %01 not mine"),
+            Some(ControlLine::Payload { pane, .. }) if pane != mine
+        ));
     }
 
     /// `%error` closes the matching command block and must retain tmux's
@@ -3325,6 +4259,7 @@ mod tests {
             &mut line,
             tokio::time::Instant::now() + CONTROL_EXCHANGE_TIMEOUT,
             "history snapshot",
+            "%0",
         )
         .await
         .expect_err("tmux error must fail the block");
@@ -3348,6 +4283,7 @@ mod tests {
             &mut line,
             tokio::time::Instant::now() + CONTROL_EXCHANGE_TIMEOUT,
             "visible snapshot",
+            "%0",
         )
         .await
         .expect_err("unterminated block must fail");
@@ -3380,7 +4316,7 @@ mod tests {
         let mut line = Vec::new();
         let deadline = tokio::time::Instant::now() + CONTROL_EXCHANGE_TIMEOUT;
         for purpose in ["modes", "history", "visible", "cutover"] {
-            read_command_block(&mut reader, &mut line, deadline, purpose)
+            read_command_block(&mut reader, &mut line, deadline, purpose, "%0")
                 .await
                 .expect("complete block");
         }
@@ -3875,26 +4811,40 @@ mod tests {
     /// session name, which two panes in the same session's window could
     /// share (see `pane_states`'s own docs on why keying by session name
     /// would let one pane's entry silently clobber another's).
+    ///
+    /// Also pins that the ORDINALS are parsed rather than left to the
+    /// caller: every consumer wants creation order, and `@10` sorts
+    /// before `@9` as a string.
     #[test]
-    fn parse_pane_states_reads_live_and_dead_panes() {
-        let out = "%0 fh-alive 0 0\n%1 fh-dead 1 3\n";
-        let states = parse_pane_states(out);
+    fn parse_pane_facts_reads_live_and_dead_panes() {
+        let out = "%0 @0 0 0 s fh-alive\n%1 @4 2 1 s3 fh-dead\n";
+        let states = parse_pane_facts(out);
         assert_eq!(
             states.get("%0"),
-            Some(&PaneState {
-                session_name: "fh-alive".to_string(),
-                dead: false,
-                exit_code: None
-            })
+            Some(&PaneState::for_test("fh-alive", "%0", "@0"))
         );
         assert_eq!(
             states.get("%1"),
-            Some(&PaneState {
-                session_name: "fh-dead".to_string(),
-                dead: true,
-                exit_code: Some(3)
-            })
+            Some(
+                &PaneState::for_test("fh-dead", "%1", "@4")
+                    .at_index(2)
+                    .dead_with(Some(3))
+            )
         );
+        assert_eq!(states["%1"].window_ordinal, 4);
+        assert_eq!(states["%1"].pane_ordinal, 1);
+    }
+
+    /// A session name may legally contain SPACES — `rename-session` is
+    /// available to anything that inherited `TMUX` — which is why it is
+    /// the last field and is taken as the whole remainder of the line. A
+    /// parser that split it on whitespace would silently truncate the
+    /// name, and `session_status`'s pane-belongs-to-this-session check
+    /// compares it verbatim.
+    #[test]
+    fn parse_pane_facts_takes_a_session_name_with_spaces_whole() {
+        let states = parse_pane_facts("%0 @0 0 0 s a session with spaces\n");
+        assert_eq!(states["%0"].session_name, "a session with spaces");
     }
 
     /// A live pane's trailing status field must never be trusted, even if
@@ -3902,53 +4852,210 @@ mod tests {
     /// dead pane's status is a real exit code. Parsing it regardless would
     /// fabricate a death that has not happened.
     #[test]
-    fn parse_pane_states_ignores_status_of_a_live_pane() {
-        let states = parse_pane_states("%0 fh-live 0 7\n");
+    fn parse_pane_facts_ignores_status_of_a_live_pane() {
+        let states = parse_pane_facts("%0 @0 0 0 s7 fh-live\n");
         assert_eq!(
             states.get("%0"),
-            Some(&PaneState {
-                session_name: "fh-live".to_string(),
-                dead: false,
-                exit_code: None
-            })
+            Some(&PaneState::for_test("fh-live", "%0", "@0"))
         );
     }
 
     /// A dead pane whose status tmux could not express as a plain integer
     /// (a signal death, empirically an empty field on some tmux builds)
     /// must decode as `exit_code: None`, not fail the whole parse — this
-    /// is the same honest gap `SessionStatus::Exited` documents.
+    /// is the same honest gap `SessionStatus::Exited` documents. A bare
+    /// `s` is what that empty field arrives as.
+    ///
+    /// The sibling case is the one this format's `s` prefix exists for at
+    /// all, and it is covered above: a pane that exited with code ZERO
+    /// must read back as `Some(0)`. tmux's `#{?cond,a,b}` conditional
+    /// treats the string `"0"` as false, so routing the status through
+    /// one turned every clean exit into "no code".
     #[test]
-    fn parse_pane_states_tolerates_an_unparseable_dead_status() {
-        let states = parse_pane_states("%0 fh-signalled 1 \n");
+    fn parse_pane_facts_tolerates_an_unparseable_dead_status() {
+        let states = parse_pane_facts("%0 @0 0 1 s fh-signalled\n");
         assert_eq!(
             states.get("%0"),
-            Some(&PaneState {
-                session_name: "fh-signalled".to_string(),
-                dead: true,
-                exit_code: None
-            })
+            Some(&PaneState::for_test("fh-signalled", "%0", "@0").dead_with(None))
         );
     }
 
-    /// A row whose `pane_dead` field is missing entirely, or holds
-    /// anything other than an exact `"0"`/`"1"`, must be skipped rather
-    /// than silently defaulting to `dead: false` — the bug this strict
-    /// parse exists to close. A prior, looser version of this parser
-    /// treated "not exactly `1`" as "alive", which happily accepted a
-    /// missing field as alive too; that pane simply must not appear in the
-    /// map at all, so `session_status`'s existing "absent means Exited"
-    /// handling covers it instead of a fabricated `Alive`. Covers every
-    /// stage a row can go missing: no fields past `pane_id`, no fields
-    /// past `session_name`, and a `pane_dead` field present but not
-    /// recognized.
+    /// Every fixed field is validated by SHAPE, and a row failing any of
+    /// them is skipped rather than inserted with a guessed value — a
+    /// fabricated liveness claim is exactly what `session_status`'s
+    /// "missing means Exited" contract exists to avoid. Covers each field
+    /// in turn: a truncated row, a pane id that is not `%N`, a window id
+    /// that is not `@N`, a non-numeric window index, an unrecognized
+    /// `pane_dead`, and an empty session name.
     #[test]
-    fn parse_pane_states_skips_rows_with_a_missing_or_unrecognized_dead_field() {
-        let states = parse_pane_states("%0\n%1 fh-sess\n%2 fh-sess maybe\n%3 fh-sess 2\n");
+    fn parse_pane_facts_skips_every_malformed_row_shape() {
+        let states = parse_pane_facts(
+            "%0\n\
+             %1 @0\n\
+             notapane @0 0 0 s fh\n\
+             %2 window0 0 0 s fh\n\
+             %3 @0 index 0 s fh\n\
+             %4 @0 0 maybe s fh\n\
+             %5 @0 0 2 s fh\n",
+        );
         assert!(
             states.is_empty(),
             "every row here is malformed and must be skipped: {states:?}"
         );
+    }
+
+    /// A pane id appearing TWICE drops the pane entirely rather than
+    /// letting either row win.
+    ///
+    /// tmux emits exactly one row per pane, so a second one can only have
+    /// been fabricated — a newline inside the one caller-controlled field
+    /// left in this query, the session name. Dropping is the safe
+    /// direction: the pane reports through the ordinary absent-pane path
+    /// as `Exited { exit_code: None }`, which is a nuisance a same-server
+    /// pane can inflict and never a liveness claim it can forge.
+    #[test]
+    fn parse_pane_facts_drops_a_pane_that_appears_twice() {
+        let states =
+            parse_pane_facts("%0 @0 0 0 s fh-real\n%0 @9 9 0 s fh-forged\n%1 @1 1 0 s fh-real\n");
+        assert!(
+            !states.contains_key("%0"),
+            "a duplicated pane id must yield NO entry, not the first or last one: {states:?}"
+        );
+        assert!(
+            states.contains_key("%1"),
+            "an unaffected pane must survive its neighbour's forgery"
+        );
+    }
+
+    /// The markers are the fields a pane can WRITE, so the join is where
+    /// their syntax is settled: exactly three tokens, a well-formed pane
+    /// id, and two values that are each either the empty placeholder or a
+    /// COMPLETE minted-shaped id.
+    ///
+    /// What this establishes is syntax, not provenance — a pane can mark
+    /// its own window with a perfectly well-formed uuid, and nothing here
+    /// or anywhere else authenticates who wrote a window option. What it
+    /// buys is that a marker can never be malformed in a way that shifts
+    /// a parse or names something outside tmux's own namespace; safety in
+    /// USE comes from every operation addressing a pane paired with its
+    /// session (`pane_in_session`).
+    #[test]
+    fn join_pane_markers_accepts_only_complete_minted_shaped_values() {
+        const TAB: &str = "9c3d5a71-0000-4000-8000-0000000000ff";
+        const AGENT: &str = "2b1f0e4c-0000-4000-8000-000000000001";
+        let mut states: HashMap<String, PaneState> = ["%0", "%1", "%2", "%3", "%4"]
+            .into_iter()
+            .map(|pane| (pane.to_string(), PaneState::for_test("fh-s", pane, "@0")))
+            .collect();
+        join_pane_markers(
+            &mut states,
+            &format!(
+                "%0 - -\n\
+                 %1 - {TAB}\n\
+                 %2 {AGENT} -\n\
+                 %3 - {TAB}trailing\n\
+                 %4 - ../../etc/passwd\n",
+            ),
+        );
+        assert_eq!(states["%0"].tab, None);
+        assert_eq!(states["%0"].agent, None);
+        assert_eq!(states["%1"].tab.as_deref(), Some(TAB));
+        assert_eq!(states["%2"].agent.as_deref(), Some(AGENT));
+        assert_eq!(
+            states["%3"].tab, None,
+            "a uuid with trailing garbage is not a uuid"
+        );
+        assert_eq!(states["%4"].tab, None);
+    }
+
+    /// The fabrication a newline inside a marker value can attempt, and
+    /// the two rules that contain it.
+    ///
+    /// A hostile value can inject an entire extra marker row. If it names
+    /// a pane the AUTHORITATIVE query never reported, the join drops it —
+    /// a marker query may only decorate panes, never invent them. If it
+    /// names a real pane, it collides with that pane's own row and BOTH
+    /// are discarded, leaving the victim merely unmarked. Neither outcome
+    /// lets one pane's option value hand another pane a marker.
+    #[test]
+    fn join_pane_markers_contains_a_row_fabricated_by_a_newline() {
+        const TAB: &str = "9c3d5a71-0000-4000-8000-0000000000ff";
+        let mut states: HashMap<String, PaneState> = ["%0", "%1"]
+            .into_iter()
+            .map(|pane| (pane.to_string(), PaneState::for_test("fh-s", pane, "@0")))
+            .collect();
+        join_pane_markers(
+            &mut states,
+            &format!(
+                // %0's own row, then a forged row for the real pane %1,
+                // then a forged row for a pane that does not exist.
+                "%0 - -\n\
+                 %1 - {TAB}\n\
+                 %1 - {TAB}\n\
+                 %77 - {TAB}\n",
+            ),
+        );
+        assert_eq!(
+            states["%1"].tab, None,
+            "a pane whose marker row was duplicated must end up unmarked, not marked by \
+             whichever row happened to be last"
+        );
+        assert!(
+            !states.contains_key("%77"),
+            "a marker row may decorate a pane, never invent one"
+        );
+    }
+
+    /// The second query is skipped when it cannot matter — the
+    /// optimization that keeps a tab-less deployment paying exactly the
+    /// one subprocess it always paid.
+    #[test]
+    fn the_marker_query_is_skipped_only_when_no_session_has_two_windows() {
+        let one_each: HashMap<String, PaneState> = [("%0", "fh-a", "@0"), ("%1", "fh-b", "@1")]
+            .into_iter()
+            .map(|(pane, session, window)| {
+                (pane.to_string(), PaneState::for_test(session, pane, window))
+            })
+            .collect();
+        assert!(!any_session_has_several_windows(&one_each));
+
+        let mut with_a_tab = one_each.clone();
+        with_a_tab.insert("%2".to_string(), PaneState::for_test("fh-a", "%2", "@2"));
+        assert!(any_session_has_several_windows(&with_a_tab));
+
+        // Two panes in ONE window (a split) is not two windows.
+        let mut split: HashMap<String, PaneState> = HashMap::new();
+        split.insert("%0".to_string(), PaneState::for_test("fh-a", "%0", "@0"));
+        split.insert("%1".to_string(), PaneState::for_test("fh-a", "%1", "@0"));
+        assert!(!any_session_has_several_windows(&split));
+    }
+
+    /// A dead pane's last words must survive the padding a pane comes
+    /// with and the cap an error message imposes — keeping the TAIL,
+    /// because the complaint a failing shell makes comes after whatever
+    /// noise preceded it, and on a character boundary, because the result
+    /// travels as a `String` on the wire.
+    #[test]
+    fn last_words_trims_padding_and_keeps_the_tail_within_the_cap() {
+        assert_eq!(
+            last_words("SHELL-REFUSED\n\n\n   \n", 1024),
+            "SHELL-REFUSED",
+            "the blank rows a pane is padded to its full height with are not output"
+        );
+        assert_eq!(
+            last_words("noise\nthe real complaint", 15),
+            "the real complaint"[3..],
+            "an over-cap transcript keeps its END, not its beginning"
+        );
+        // A cap landing mid-character must not split it: the caller puts
+        // this straight into a protocol error message.
+        let multibyte = "aaaa\u{00e9}\u{00e9}\u{00e9}";
+        let cut = last_words(multibyte, 5);
+        assert!(
+            multibyte.ends_with(&cut) && cut.len() <= 5,
+            "expected a valid suffix within the cap, got {cut:?}"
+        );
+        assert_eq!(last_words("   \n\n", 1024), "");
     }
 
     /// Run a scripted control-mode transcript through the exact
@@ -3967,13 +5074,13 @@ mod tests {
         let mut events = Vec::new();
         for line in transcript {
             match classify_control_line(line) {
-                Some(ControlLine::Payload(escaped)) => {
+                Some(ControlLine::Payload { escaped, .. }) => {
                     let bytes = decode_output_payload(&mut decoder, escaped);
                     if !bytes.is_empty() {
                         events.push(OutputEvent::Bytes(bytes));
                     }
                 }
-                Some(ControlLine::Paused) => events.push(OutputEvent::Paused),
+                Some(ControlLine::Paused { .. }) => events.push(OutputEvent::Paused),
                 Some(ControlLine::Exit) => break,
                 None => {}
             }
@@ -4068,6 +5175,92 @@ mod tests {
         );
     }
 
+    /// The pane filter driven through the PRODUCTION path —
+    /// [`OutputStream::next_output`] itself, over a real reader — rather
+    /// than through `classify_control_line` alone.
+    ///
+    /// The grammar test above pins which lines carry which pane; this
+    /// pins what the method built on it actually EMITS, which is a
+    /// different claim and the one that matters. Two properties only this
+    /// shape can show:
+    ///
+    /// - A passthrough wrapper of OUR pane, split across notifications,
+    ///   survives foreign payloads interleaved into the split. The
+    ///   decoder carries wrapper state across calls, so a filter that
+    ///   dropped foreign lines only AFTER decoding would feed a
+    ///   stranger's bytes into our half-open wrapper and corrupt it.
+    /// - A foreign `%pause` produces no event at all. Surfacing it would
+    ///   send this terminal through a full reset-and-replay catch-up for
+    ///   bytes it never carried.
+    #[tokio::test]
+    async fn next_output_emits_only_its_own_panes_events_through_a_split_wrapper() {
+        let transcript: &[u8] = b"%output %0 before\\033Ptmux;\\033\\033]52;c;\n\
+                                  %output %7 foreign-one\n\
+                                  %extended-output %7 0 : foreign-two\n\
+                                  %pause %7\n\
+                                  %window-renamed @3 something\n\
+                                  %extended-output %0 0 : aGk=\\007\\033\\134after\n\
+                                  %pause %0\n\
+                                  %exit\n";
+        // A real `ChildStdout` is what `OutputStream` reads, so the
+        // transcript is fed through an actual child rather than an
+        // in-memory pipe: `cat` echoes it back and then EOFs when its
+        // stdin is dropped, which is exactly the shape a tmux control
+        // client's exit has.
+        let mut feeder = Command::new("cat")
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .kill_on_drop(true)
+            .spawn()
+            .expect("spawning the transcript feeder");
+        let mut feeder_stdin = feeder.stdin.take().expect("piped stdin");
+        let feeder_stdout = feeder.stdout.take().expect("piped stdout");
+        tokio::spawn(async move {
+            let _ = feeder_stdin.write_all(transcript).await;
+        });
+        // The stream's own `stdin` is never written to on this path (it
+        // carries only the one-shot replay group, which this test does
+        // not exercise), so it gets a throwaway handle rather than a
+        // second meaning for the feeder's.
+        let mut unused = Command::new("cat")
+            .stdin(Stdio::piped())
+            .stdout(Stdio::null())
+            .kill_on_drop(true)
+            .spawn()
+            .expect("spawning the unused-stdin holder");
+        let unused_stdin = unused.stdin.take().expect("piped stdin");
+
+        let mut stream = OutputStream {
+            child: feeder,
+            stdin: unused_stdin,
+            reader: BufReader::new(feeder_stdout),
+            line: Vec::new(),
+            passthrough: PassthroughDecoder::default(),
+            pane: "%0".to_string(),
+            session: "fh-s".to_string(),
+        };
+        let mut events = Vec::new();
+        while let Some(event) = stream.next_output().await.expect("stream must not fail") {
+            events.push(event);
+        }
+        assert_eq!(
+            events,
+            vec![
+                // The wrapper opened in the first notification; its
+                // payload so far comes out with it.
+                OutputEvent::Bytes(b"before\x1b]52;c;".to_vec()),
+                // ...and CLOSES correctly in ours, three foreign
+                // notifications later, proving none of them reached the
+                // decoder.
+                OutputEvent::Bytes(b"aGk=\x07after".to_vec()),
+                // Only OUR pane's pause surfaces.
+                OutputEvent::Paused,
+            ],
+            "a foreign pane's payloads and pauses must be dropped before decoding, and this \
+             pane's split wrapper must close intact across them"
+        );
+    }
+
     /// The exact attach-cutover text, pinned like every other generated
     /// tmux command in this module. Both flags ride one comma-separated
     /// `-f` list, and the `!` prefix is what CLEARS `no-output` rather
@@ -4102,14 +5295,18 @@ mod tests {
     /// history capture — cannot pass.
     #[test]
     fn replay_command_group_differs_only_in_its_cutover() {
-        let attach = replay_command_group("%1", &attach_cutover_command());
-        let resume = replay_command_group("%1", &continue_pane_command("%1"));
+        let attach = replay_command_group("fh-s", "%1", &attach_cutover_command());
+        let resume = replay_command_group("fh-s", "%1", &continue_pane_command("%1"));
+        // Every pane target is the QUOTED session-paired form: a bare
+        // `%1` would resolve server-wide, and a pane id that went stale
+        // across a tmux-server restart would then capture another
+        // session's terminal into this one.
         assert_eq!(
             attach,
             format!(
-                "display-message -p -t %1 '{PANE_MODE_FORMAT}' ; \
-                 capture-pane -p -e -N -t %1 -S -{HISTORY_LIMIT} ; \
-                 capture-pane -p -e -N -t %1 ; \
+                "display-message -p -t \"=fh-s:.%1\" '{PANE_MODE_FORMAT}' ; \
+                 capture-pane -p -e -N -t \"=fh-s:.%1\" -S -{HISTORY_LIMIT} ; \
+                 capture-pane -p -e -N -t \"=fh-s:.%1\" ; \
                  refresh-client -f !no-output,pause-after={TMUX_PAUSE_AFTER_SECS}\n"
             )
         );
@@ -4121,6 +5318,69 @@ mod tests {
             format!("{common}{}\n", continue_pane_command("%1")),
             "the two groups must share every snapshot command verbatim"
         );
+    }
+
+    /// The cross-session guarantee `pane_in_session` actually delivers,
+    /// against a real tmux: a window-scoped command aimed at a pane that
+    /// belongs to a DIFFERENT session is refused outright.
+    ///
+    /// Pane ids come from a server-wide counter that restarts at `%0`
+    /// with the server, so a handle carried across a tmux restart can name
+    /// a live pane of an unrelated session — and `resize-window` would
+    /// then reflow a stranger's terminal. tmux refuses the mismatched
+    /// pairing itself, which makes the check atomic with the act rather
+    /// than a probe that can go stale; this pins that it really does.
+    ///
+    /// The complement is pinned in the same test, because it is the half
+    /// that surprised us: the same target for a pane that no longer
+    /// exists at all does NOT fail — the empty window component falls back
+    /// to the session's current window — so this form means "never another
+    /// session", not "exactly this pane". See `pane_in_session`'s docs for
+    /// what that costs and which callers must therefore hold their pane
+    /// still.
+    #[tokio::test]
+    async fn a_window_command_is_refused_for_another_sessions_pane() {
+        let server = ScratchServer::start().await;
+        let mine = server
+            .driver
+            .create_session("mine", "/", 80, 24, &[], &["sleep".into(), "60".into()])
+            .await
+            .expect("create the owning session");
+        let theirs = server
+            .driver
+            .create_session("theirs", "/", 80, 24, &[], &["sleep".into(), "60".into()])
+            .await
+            .expect("create the other session");
+
+        server
+            .driver
+            .resize_window("mine", &mine, 100, 30)
+            .await
+            .expect("a pane paired with its own session must resize");
+        let refused = server
+            .driver
+            .resize_window("mine", &theirs, 40, 10)
+            .await
+            .expect_err("another session's pane must be refused, not silently resized");
+        assert!(
+            format!("{refused:#}").contains("can't find pane"),
+            "expected tmux's own refusal, got: {refused:#}"
+        );
+
+        // The other session's geometry is untouched — the refusal is a
+        // refusal, not a partially applied command.
+        let geometry = server
+            .driver
+            .run(&[
+                "display-message",
+                "-p",
+                "-t",
+                &theirs,
+                "#{window_width}x#{window_height}",
+            ])
+            .await
+            .expect("querying the other session's geometry");
+        assert_eq!(geometry.trim(), "80x24");
     }
 
     /// A tmux server on a throwaway socket, killed on drop.
@@ -4261,7 +5521,7 @@ mod tests {
             .expect("pause command reply");
 
         let (modes, content) = stream
-            .resume_paused_with_replay(&pane)
+            .resume_paused_with_replay()
             .await
             .expect("catch-up replay");
         assert!(
@@ -4288,12 +5548,12 @@ mod tests {
     /// (`pane_states`'s own `LIST_PANES_EMPTY_SERVER_DIAGNOSTIC` handling)
     /// — a real empty server makes the tmux COMMAND itself fail with `"no
     /// current target"` before this function ever sees any output to
-    /// parse, so `parse_pane_states` in production never actually
+    /// parse, so `parse_pane_facts` in production never actually
     /// receives an empty string from that path. This test exists purely
     /// so the parser itself does not panic or misbehave if it ever did
     /// receive one (a future caller feeding it something else, say).
     #[test]
-    fn parse_pane_states_handles_empty_output() {
-        assert!(parse_pane_states("").is_empty());
+    fn parse_pane_facts_handles_empty_output() {
+        assert!(parse_pane_facts("").is_empty());
     }
 }

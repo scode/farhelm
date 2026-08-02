@@ -85,10 +85,15 @@ growing a tab dimension afterwards.
    shell and its processes" is a promise about daemonized children too. Tabs force a marker split that M3's stop
    machinery did not need: stop and restart sweep by session marker today, and once tab processes carry that marker the
    sweep would reap them — directly against SPEC.md's "terminal tabs keep running" after stop and "restart touches the
-   agent terminal only". So the agent's own launches gain an agent-scoped marker, stop and restart narrow their sweep to
-   it (unioned with the agent pane's descendants, as today), and the session-wide marker sweep remains exactly the
-   delete/archive semantic, which now also covers every tab. A test pins stop and restart leaving a tab's shell and its
-   daemonized child untouched.
+   agent terminal only". So the agent's own launches gain an agent-scoped marker, stop and restart select agent-marked
+   processes (unioned with the agent pane's descendants, as today) plus a legacy bucket — session-marked processes
+   carrying no kind marker at all, which keeps daemons from pre-split launches covered — and the session-wide marker
+   sweep remains exactly the delete/archive semantic, which now also covers every tab. Two rules sharpened during
+   implementation ride with this: every launch boundary scrubs the OTHER kind's inherited markers, because a supervisor
+   dogfooded inside a farhelm tab would otherwise hand its agents an ambient tab marker that exempts them from their own
+   stop sweep; and tab selection anywhere requires the session marker and a non-empty minted tab value together, never
+   the tab variable's mere presence. A test pins stop and restart leaving a tab's shell and its daemonized child
+   untouched, and another pins the ambient-marker agent still being reaped.
 3. **Per-terminal attach channels under session-scoped ownership.** SPEC.md's one-attached-client rule is per SESSION:
    the attached client owns all of the session's terminals, and a takeover detaches every terminal channel the previous
    client held, as one visible event. Item 1's lease is what makes that enforceable — the supervisor groups terminal
@@ -247,12 +252,18 @@ Each step leaves something runnable; later steps only add. Tests ride with their
 4. Supervisor tabs: windows, open/close/list-by-rediscovery, the marker split that keeps stop and restart off tabs, the
    tab-scoped reap; the two-terminal same-session forms of the stall-scope, input-routing, resize-targeting, restart,
    and delete tests land here, where a second terminal first exists to test against.
-5. Helm tab plumbing: REST open/close, tab list on session detail, terminal WebSocket selector.
-6. UI tabs: the strip, concurrent attachment, close-with-confirm, Playwright coverage.
-7. Supervisor attachments: the storage path, size verification, naming, delete cleanup.
-8. Helm attachment upload: the streaming relay endpoint.
-9. UI interception: classification, upload, path insertion, failure surfacing, Playwright coverage; the wry drop-config
-   check rides here.
+5. Stream-isolation hardening — found while reviewing step 4: every per-terminal control client receives the whole
+   session's pane traffic, and under tmux's nondeterministic pane-throttle path a stalled terminal's client can
+   transiently slow the session's other panes until the stall detach fires, which is bounded but weaker than this plan's
+   isolation claim. The fix is one always-drained per-session sink client (so tmux never stops reading any pane) plus
+   foreign-panes-off on per-terminal clients — safe only in that combination, which is why step 4 shipped the honest
+   qualification instead of a quick flag.
+6. Helm tab plumbing: REST open/close, tab list on session detail, terminal WebSocket selector.
+7. UI tabs: the strip, concurrent attachment, close-with-confirm, Playwright coverage.
+8. Supervisor attachments: the storage path, size verification, naming, delete cleanup.
+9. Helm attachment upload: the streaming relay endpoint.
+10. UI interception: classification, upload, path insertion, failure surfacing, Playwright coverage; the wry drop-config
+    check rides here.
 
 ## Acceptance
 

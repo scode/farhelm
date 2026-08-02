@@ -116,12 +116,64 @@ pub fn unit_name(session_id: &str, generation: i64) -> Option<String> {
     is_uuid_shaped(session_id).then(|| format!("{UNIT_PREFIX}{session_id}-{generation}.scope"))
 }
 
+/// The transient scope unit name for one TERMINAL TAB (PLAN_M4.md item 2),
+/// or `None` when either id cannot safely name a unit.
+///
+/// A tab's scope is keyed by (session, tab) rather than by generation,
+/// because a tab is not a launch of the session: it has no generation
+/// column, it survives the agent's own restarts, and its lifetime is
+/// bounded by exactly one open/close pair. The tab id is minted per open
+/// and never reused, which gives this name the same
+/// unique-over-time property [`unit_name`]'s generation suffix gives
+/// launches.
+///
+/// Both ids go through the same UUID-shape refusal `unit_name` documents,
+/// and for the same reason — plus one this name has and that one does not:
+/// a tab id is read back out of a tmux WINDOW MARKER, and any process that
+/// inherited `TMUX` can write window options on the private server. A unit
+/// name derived from an id this supervisor did not mint could aim a kill
+/// at something else entirely, so an unrecognized shape selects the same
+/// fallback a missing user manager does — the marker sweep alone.
+///
+/// The `-tab-` infix keeps this namespace disjoint from `unit_name`'s
+/// `<session>-<generation>` shape without needing a second prefix: a
+/// generation is always digits, so no launch unit can ever spell `tab`.
+pub fn tab_unit_name(session_id: &str, tab_id: &str) -> Option<String> {
+    (is_uuid_shaped(session_id) && is_uuid_shaped(tab_id))
+        .then(|| format!("{UNIT_PREFIX}{session_id}-tab-{tab_id}.scope"))
+}
+
+/// The glob every one of a session's TAB scopes matches, or `None` for a
+/// session id that cannot safely name a unit.
+///
+/// Exists so a teardown can find a session's tab scopes WITHOUT asking
+/// tmux (`ScopeManager::units_matching`). That independence is the point:
+/// a delete whose tmux server has already died would otherwise have no
+/// tab ids to derive names from, and an environment-scrubbed tab daemon —
+/// reachable only through its cgroup — would outlive a delete that
+/// reported success. The manager knows its own units regardless of what
+/// tmux is doing.
+///
+/// Anchored on the same `-tab-` infix [`tab_unit_name`] builds, so it can
+/// never match a LAUNCH unit of the same session (a generation is always
+/// digits).
+pub fn tab_unit_glob(session_id: &str) -> Option<String> {
+    is_uuid_shaped(session_id).then(|| format!("{UNIT_PREFIX}{session_id}-tab-*.scope"))
+}
+
 /// Whether `id` is a plain lowercase hyphenated UUID (8-4-4-4-12 hex).
 ///
 /// Deliberately stricter than "parses as a UUID": accepting uppercase or
 /// braced forms would reintroduce two spellings of one id, and the only
 /// producer this needs to accept is `uuid::Uuid::new_v4().to_string()`.
-fn is_uuid_shaped(id: &str) -> bool {
+///
+/// Public because it doubles as the ACCEPTANCE test for a tab id read back
+/// out of a tmux window marker (`service.rs`'s tab rediscovery): the
+/// marker is writable by anything that inherited `TMUX`, so a value that
+/// is not the shape this supervisor mints is treated as not a tab at all,
+/// rather than carried on into an attachment key, an error message, or a
+/// derived unit name.
+pub fn is_uuid_shaped(id: &str) -> bool {
     const GROUPS: [usize; 5] = [8, 4, 4, 4, 12];
     let mut parts = id.split('-');
     for len in GROUPS {
@@ -151,6 +203,8 @@ pub enum ScopeOp {
     Probe,
     /// Existence of a unit was checked.
     Exists(String),
+    /// Units matching a pattern were enumerated.
+    List(String),
     /// A signal was sent to a unit's whole cgroup.
     Kill { unit: String, signal: String },
 }
@@ -483,6 +537,68 @@ impl ScopeManager {
         }
     }
 
+    /// Every unit this manager knows whose name matches `pattern` — the
+    /// tmux-independent half of a session teardown (see
+    /// [`tab_unit_glob`]).
+    ///
+    /// `Ok(vec![])` means the manager answered and has none, which is the
+    /// ordinary case and a real answer. An `Err` means the manager could
+    /// not be asked, which a teardown must NOT flatten into "there are
+    /// none": the whole reason this exists is the case where tmux has
+    /// already died and the cgroup is the only remaining handle on a
+    /// scrubbed daemon.
+    ///
+    /// `--all` is deliberate: a scope whose processes have all exited is
+    /// still worth naming (it costs one no-op kill), while omitting it
+    /// would hide units in states this code has no reason to enumerate.
+    /// `--plain --no-legend` strips systemd's table decoration so the
+    /// first field of each line is the unit name and nothing else.
+    pub async fn units_matching(&self, pattern: &str) -> anyhow::Result<Vec<String>> {
+        match &self.mode {
+            Mode::Disabled => Ok(Vec::new()),
+            #[cfg(test)]
+            Mode::Fake {
+                available, sink, ..
+            } => {
+                sink(&ScopeOp::List(pattern.to_string()));
+                // A fake owns no real units; the availability flag is what
+                // a test is asserting against here.
+                let _ = available;
+                Ok(Vec::new())
+            }
+            Mode::Systemd => {
+                let tools = self.tools().await.ok_or_else(|| {
+                    anyhow::anyhow!("no systemd user manager to list units matching {pattern}")
+                })?;
+                let out = run_with_timeout(
+                    tokio::process::Command::new(&tools.systemctl)
+                        .arg("--user")
+                        .arg("list-units")
+                        .arg("--all")
+                        .arg("--plain")
+                        .arg("--no-legend")
+                        .arg("--type=scope")
+                        .arg(pattern),
+                )
+                .await
+                .with_context(|| format!("listing user units matching {pattern}"))?;
+                if !out.status.success() {
+                    anyhow::bail!(
+                        "systemctl --user list-units {pattern} exited {:?}: {}",
+                        out.status.code(),
+                        String::from_utf8_lossy(&out.stderr).trim()
+                    );
+                }
+                Ok(String::from_utf8_lossy(&out.stdout)
+                    .lines()
+                    .filter_map(|line| line.split_whitespace().next())
+                    .filter(|name| name.starts_with(UNIT_PREFIX))
+                    .map(str::to_string)
+                    .collect())
+            }
+        }
+    }
+
     /// Send `signal` to EVERY process in `unit`'s cgroup.
     ///
     /// The whole point of the mechanism: `systemctl kill` with the default
@@ -777,6 +893,48 @@ mod tests {
             "",
         ] {
             assert_eq!(unit_name(bad, 0), None, "{bad:?} must not name a unit");
+        }
+    }
+
+    /// A tab's unit name must be keyed by BOTH ids and must refuse either
+    /// one that is not the shape this supervisor mints.
+    ///
+    /// The tab id is the half that matters most, and for a reason the
+    /// session id does not share: it is read back out of a tmux window
+    /// option, and anything that inherited `TMUX` inside a pane can write
+    /// one. A name derived from an attacker-chosen (or merely corrupted)
+    /// marker would aim a `systemctl kill` at whatever unit that marker
+    /// spelled. Refusing is what makes that unconstructible, exactly as
+    /// for [`unit_name`].
+    #[test]
+    fn tab_unit_names_are_keyed_by_both_ids_and_refuse_anything_else() {
+        const UUID_B: &str = "9c3d5a71-0000-4000-8000-0000000000ff";
+        assert_eq!(
+            tab_unit_name(UUID_A, UUID_B).as_deref(),
+            Some(
+                "farhelm-2b1f0e4c-0000-4000-8000-000000000001-tab-\
+                 9c3d5a71-0000-4000-8000-0000000000ff.scope"
+            )
+        );
+        // Two tabs of one session, and one tab id under two sessions, must
+        // all be distinct names — a collision either way would have one
+        // close kill another terminal's processes.
+        assert_ne!(tab_unit_name(UUID_A, UUID_B), tab_unit_name(UUID_A, UUID_A));
+        assert_ne!(tab_unit_name(UUID_A, UUID_B), tab_unit_name(UUID_B, UUID_B));
+        // Disjoint from the LAUNCH namespace: a generation is always
+        // digits, so no launch unit can spell `-tab-`.
+        assert_ne!(tab_unit_name(UUID_A, UUID_B), unit_name(UUID_A, 0));
+        for bad in ["", "not-a-uuid", "../../etc", "9c3d5a71 0000 4000 8000"] {
+            assert_eq!(
+                tab_unit_name(UUID_A, bad),
+                None,
+                "tab id {bad:?} must not name a unit"
+            );
+            assert_eq!(
+                tab_unit_name(bad, UUID_B),
+                None,
+                "session id {bad:?} must not name a unit"
+            );
         }
     }
 

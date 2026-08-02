@@ -12,7 +12,8 @@ use farhelm_proto::io::{
     FrameReader, FrameWriter, ProgressWrite, handshake, parse_control, write_frame_before_stall,
 };
 use farhelm_proto::{
-    AgentKind, ControlMsg, ErrorKind, Frame, FrameKind, RestartMode, SessionInfo, TerminalSelector,
+    AgentKind, ControlMsg, ErrorKind, Frame, FrameKind, RestartMode, SessionInfo, TabInfo,
+    TerminalSelector,
 };
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -1005,6 +1006,69 @@ impl SupervisorClient {
         {
             ControlMsg::SessionDeleted { .. } => Ok(()),
             other => bail!("unexpected reply to delete_session: {other:?}"),
+        }
+    }
+
+    /// Open a terminal tab on a session (PLAN_M4.md item 2), returning the
+    /// supervisor-minted tab identity to attach it by.
+    ///
+    /// Exists ahead of the helm's own REST plumbing (item 5) for
+    /// [`Self::attach_terminal`]'s reason: the supervisor's tab behavior is
+    /// only reachable from the integration tests through this client, and
+    /// a second, test-only encoding of the same request would be a second
+    /// place for the wire shape to drift.
+    ///
+    /// `Err` distinguishes nothing the caller has to branch on but does
+    /// carry the supervisor's own refusal verbatim via [`SupervisorError`]:
+    /// a vanished working directory, a session whose tmux is gone (restart
+    /// it first), and a shell already dead by reply time all arrive here as
+    /// errors naming what happened, with the session and its other
+    /// terminals untouched in every case.
+    pub async fn open_tab(&self, session_id: &str) -> anyhow::Result<TabInfo> {
+        let req_id = self.req_id();
+        match self
+            .request(
+                req_id,
+                ControlMsg::OpenTab {
+                    req_id,
+                    session_id: session_id.to_string(),
+                },
+            )
+            .await?
+        {
+            ControlMsg::TabOpened { tab, .. } => Ok(tab),
+            other => bail!("unexpected reply to open_tab: {other:?}"),
+        }
+    }
+
+    /// Close a terminal tab: kill its shell and everything that shell left
+    /// behind, then drop its window.
+    ///
+    /// `Ok` means the reap ran to completion AND the window is gone —
+    /// `SessionStopped`'s honesty rule applied per tab. It carries the
+    /// same guarantee [`Self::stop_session`] does and no more: the sweep
+    /// confirmed that everything it can find is gone, which on a host
+    /// with a systemd user manager includes the tab's whole cgroup, and
+    /// on a host without one excludes a descendant that both double-forked
+    /// and scrubbed its environment (SPEC_impl.md's recorded boundary —
+    /// the guarantee covers accidental daemonization, not an adversary).
+    /// An unknown tab id is a `NotFound` [`SupervisorError`]; a tab whose
+    /// shell had already exited still closes successfully.
+    pub async fn close_tab(&self, session_id: &str, tab_id: &str) -> anyhow::Result<()> {
+        let req_id = self.req_id();
+        match self
+            .request(
+                req_id,
+                ControlMsg::CloseTab {
+                    req_id,
+                    session_id: session_id.to_string(),
+                    tab_id: tab_id.to_string(),
+                },
+            )
+            .await?
+        {
+            ControlMsg::TabClosed { .. } => Ok(()),
+            other => bail!("unexpected reply to close_tab: {other:?}"),
         }
     }
 

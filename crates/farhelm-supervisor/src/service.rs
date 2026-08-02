@@ -50,14 +50,17 @@ use crate::store::{
     Claimed, IntentClaim, LastOutcome, Reservation, ReservationOutcome, RetryClaim, SessionStore,
     Settlement, StoredSession, Transition,
 };
-use crate::tmux::{InputClient, OutputEvent, OutputStream, PaneModes, PaneState, TmuxDriver};
+use crate::tmux::{
+    AGENT_WINDOW_OPTION, InputClient, OutputEvent, OutputStream, PaneModes, PaneState,
+    TAB_WINDOW_OPTION, TmuxDriver,
+};
 use anyhow::Context;
 use farhelm_proto::io::{
     FrameReader, FrameWriter, ProgressWrite, handshake, parse_control, write_frame_before_stall,
 };
 use farhelm_proto::{
     AgentKind, ControlMsg, DETACH_REASON_STALLED, ErrorKind, Frame, RestartMode, RestartOffer,
-    SessionInfo, SessionStatus, TerminalSelector,
+    SessionInfo, SessionStatus, TabInfo, TerminalSelector,
 };
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
@@ -375,7 +378,52 @@ pub struct SupervisorSeams {
     /// kill and the backstop sweep observable, which nothing about the end
     /// state can show — both mechanisms leave the same corpse.
     pub scopes: Arc<crate::scope::ScopeManager>,
+    /// The shell every launch of this supervisor runs through, overriding
+    /// [`crate::launch::resolve_shell`]'s `$SHELL`/passwd chain.
+    ///
+    /// `None` in production, which is the real chain. It exists because a
+    /// TERMINAL TAB has no invocation of its own (PLAN_M4.md item 2: the
+    /// window command IS the shell), so the only way to drive a tab launch
+    /// into a chosen state — a shell that exits immediately, which is what
+    /// makes the dead-at-open-reply refusal testable — is to choose the
+    /// shell. The agent path has never needed this because its argv is the
+    /// caller's, and a test can simply pass a command that fails.
+    ///
+    /// Dependency injection rather than `$SHELL`, for this repo's standing
+    /// reason (tests never mutate the test process's environment) and one
+    /// more specific to it: `$SHELL` is process-wide, and this file's
+    /// harnesses run concurrently, so a per-process override would leak
+    /// between unrelated supervisors.
+    ///
+    /// Applied to the AGENT launch as well as to tabs, deliberately: the
+    /// two share one shell-resolution contract, and a seam that covered
+    /// only one of them would be a second place for that contract to live.
+    pub launch_shell: Option<String>,
+    /// See [`TabOpenFault`]. `None` in production.
+    pub tab_open_fault: Option<TabOpenFault>,
 }
+
+/// Where an [`TabOpenFault`] can fail a tab open.
+///
+/// One variant, because one stage has an unwind worth proving: the window
+/// exists and its shell is already running, but the tab has no identity
+/// yet. Nothing else can reach that state on demand — the tmux call that
+/// creates the window either works or leaves nothing behind.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TabOpenStage {
+    /// Immediately after `new-window`, before the window is marked.
+    BeforeMarking,
+}
+
+/// A failure injected into an `OpenTab` at one of its stages.
+///
+/// A seam rather than a fault-injecting tmux wrapper because what needs
+/// exercising is the SUPERVISOR's unwind: a window that exists but was
+/// never marked is invisible to rediscovery, so leaving it would strand a
+/// live shell nothing can list or close — and the only way to reach that
+/// state deliberately is to fail the marking step. Production installs
+/// none, so the call site is one `Option` check.
+pub type TabOpenFault = Arc<dyn Fn(TabOpenStage) -> anyhow::Result<()> + Send + Sync>;
 
 impl Default for SupervisorSeams {
     fn default() -> Self {
@@ -387,6 +435,8 @@ impl Default for SupervisorSeams {
             capture_store_fault: None,
             launch_env: Vec::new(),
             scopes: Arc::new(crate::scope::ScopeManager::systemd()),
+            launch_shell: None,
+            tab_open_fault: None,
         }
     }
 }
@@ -1899,34 +1949,188 @@ fn read_stat(pid: u32) -> Result<Option<(u32, u64, char)>, String> {
     }
 }
 
-/// Whether `environ` (raw `/proc/<pid>/environ` content: NUL-delimited
-/// `KEY=VALUE` entries) contains an EXACT entry for `session_id`'s
-/// [`crate::launch::SESSION_ID_ENV_VAR`] marker.
+/// Every farhelm marker one process's environment carries, decided in a
+/// SINGLE pass over `/proc/<pid>/environ`.
 ///
-/// Split out from [`environ_has_marker`] purely so this matching logic is
-/// unit-testable against constructed byte buffers, without a real process
-/// or a real `/proc` behind it.
-///
-/// Matches a complete NUL-delimited entry, never a substring: `environ`
-/// packs `KEY=VALUE\0KEY=VALUE\0...`, and a substring match would count
-/// `FARHELM_SESSION_ID=abc-1` as containing session `abc`, or misfire on
-/// an unrelated variable that happens to embed the same text.
-fn environ_contains_marker(environ: &[u8], session_id: &str) -> bool {
-    let marker = format!("{}={session_id}", crate::launch::SESSION_ID_ENV_VAR);
-    environ
-        .split(|&b| b == 0)
-        .any(|entry| entry == marker.as_bytes())
+/// One pass rather than four because this is read for every same-uid
+/// process on the host on every sweep round, and because four independent
+/// reads would describe four different instants of a process that can
+/// `exec` in between.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+struct EnvironMarkers {
+    /// An exact `FARHELM_SESSION_ID=<session>` entry for the session being
+    /// swept. Every farhelm-launched process of that session has this, and
+    /// it is the only marker that has existed since M2 — which is why the
+    /// legacy bucket below can lean on it alone.
+    session: bool,
+    /// An exact `FARHELM_AGENT_ID=<session>` entry: this process belongs
+    /// to THIS session's agent launch.
+    agent: bool,
+    /// Any non-empty `FARHELM_AGENT_ID` entry, whatever session it names.
+    ///
+    /// Distinct from `agent` because it answers a different question: not
+    /// "is this ours" but "has something already claimed this process for
+    /// an agent". A process carrying another session's agent marker is not
+    /// a pre-marker legacy process, so the legacy bucket must not claim it.
+    any_agent: bool,
+    /// An exact `FARHELM_TAB_ID=<tab>` entry for the tab being swept.
+    /// Meaningful only when a tab is named.
+    tab: bool,
+    /// Any `FARHELM_TAB_ID` entry whose value is a complete minted-shaped
+    /// id — the same "has something already claimed this" role `any_agent`
+    /// plays. An empty or malformed value is deliberately NOT a claim: it
+    /// would otherwise let anything that exports `FARHELM_TAB_ID=` shield
+    /// itself from the legacy bucket.
+    any_tab: bool,
 }
 
-/// Whether `pid`'s environment carries this session's marker — the
-/// environment [`crate::launch::SESSION_ID_ENV_VAR`] sets at launch and
-/// every descendant inherits automatically, transitively, across any
-/// number of forks and execs, UNLESS a process along the way deliberately
-/// scrubs or replaces its own environment (`env -i`, an `exec` with an
-/// explicit empty/rebuilt envp, and the like) — that residual is the one
-/// [`reap_process_tree`]'s cgroup kill closes, alongside the
-/// reparented-daemon case documented on `kill_process_tree`, and remains
-/// open wherever no systemd user manager exists.
+/// Scan one process's raw environment for [`EnvironMarkers`].
+///
+/// Split out from [`environ_marker_verdict`] purely so this matching logic
+/// is unit-testable against constructed byte buffers, without a real
+/// process or a real `/proc` behind it.
+///
+/// Every match is against a complete NUL-delimited entry, never a
+/// substring: `environ` packs `KEY=VALUE\0KEY=VALUE\0...`, so a substring
+/// match would count `FARHELM_SESSION_ID=abc-1` as containing session
+/// `abc`, or misfire on an unrelated variable that merely embeds the same
+/// text (`OTHER=FARHELM_SESSION_ID=abc`). The "any" forms additionally
+/// require the `=`, so a variable merely PREFIXED with a marker's name
+/// (`FARHELM_TAB_ID_ALT=...`) is not that marker.
+fn environ_markers(environ: &[u8], session_id: &str, tab_id: Option<&str>) -> EnvironMarkers {
+    let session_marker = format!("{}={session_id}", crate::launch::SESSION_ID_ENV_VAR);
+    let agent_marker = format!("{}={session_id}", crate::launch::AGENT_ID_ENV_VAR);
+    let agent_prefix = format!("{}=", crate::launch::AGENT_ID_ENV_VAR);
+    let tab_prefix = format!("{}=", crate::launch::TAB_ID_ENV_VAR);
+    let tab_marker = tab_id.map(|id| format!("{tab_prefix}{id}"));
+    let mut found = EnvironMarkers::default();
+    for entry in environ.split(|&b| b == 0) {
+        if entry == session_marker.as_bytes() {
+            found.session = true;
+        }
+        if entry == agent_marker.as_bytes() {
+            found.agent = true;
+        }
+        if let Some(value) = entry.strip_prefix(agent_prefix.as_bytes())
+            && !value.is_empty()
+        {
+            found.any_agent = true;
+        }
+        if let Some(value) = entry.strip_prefix(tab_prefix.as_bytes())
+            && std::str::from_utf8(value).is_ok_and(crate::scope::is_uuid_shaped)
+        {
+            found.any_tab = true;
+        }
+        if tab_marker
+            .as_deref()
+            .is_some_and(|marker| entry == marker.as_bytes())
+        {
+            found.tab = true;
+        }
+    }
+    found
+}
+
+/// Which of a session's processes one sweep claims — the marker split
+/// PLAN_M4.md item 2 forces once tabs exist.
+///
+/// Before tabs, "the session's processes" was one set and the sweep was
+/// keyed on the session's environment marker alone. Tabs break that in
+/// three directions at once: SPEC.md says stopping or restarting the agent
+/// leaves a tab's shell running, deleting or archiving takes everything
+/// down, and closing ONE tab must reach that tab and nothing else. Those
+/// are three different sets over the same marked processes, so the sweep
+/// has to be told which one it is running.
+///
+/// ## Selection is POSITIVE, and why that matters
+///
+/// Each kind of launch marks itself — `FARHELM_AGENT_ID` for an agent,
+/// `FARHELM_TAB_ID` for a tab — and each sweep names the marker it wants
+/// rather than subtracting the marker it does not. An earlier cut did the
+/// opposite (sweep the session marker, subtract anything wearing a tab
+/// marker) and had a hole that appears the moment farhelm supervises
+/// farhelm: an inner agent launched by a supervisor running inside
+/// somebody's tab inherits that tab's marker, so exclusion filed it as a
+/// tab process and its own session's stop never reaped it. See
+/// [`crate::launch::AGENT_ID_ENV_VAR`] for the full argument and for the
+/// scrub at each launch boundary that keeps an ambient marker from
+/// crossing into a launch of the opposite kind.
+///
+/// ## The legacy bucket
+///
+/// Positive agent marking alone would silently stop reaching daemons left
+/// by sessions launched BEFORE this build: they carry the session marker
+/// and neither kind marker, so nothing would claim them and stop would
+/// quietly get weaker on every host that upgraded. `AgentOnly` therefore
+/// claims that exact shape as a third root set.
+///
+/// ## What the markers do NOT deliver
+///
+/// A process that scrubs its whole environment is invisible to every
+/// variant here, and so is one that selectively scrubs exactly ONE farhelm
+/// marker — a tab descendant that drops `FARHELM_TAB_ID` while keeping
+/// `FARHELM_SESSION_ID` lands in the legacy bucket and is reaped by a
+/// stop that was supposed to leave tabs alone. Both are the recorded
+/// adversarial case: SPEC_impl.md's cgroup section says plainly that the
+/// guarantee stops at ACCIDENTAL daemonization and that containing a
+/// process determined to escape needs cgroups (and, past that, a
+/// delegation boundary v1 does not build). Nothing here is claimed to
+/// authenticate a marker's provenance; the markers describe what a
+/// well-behaved process tree looks like, and the per-launch scopes are the
+/// answer where that is not enough.
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum SweepTarget {
+    /// The agent and everything under it: what `StopSession` and the
+    /// restart's pre-relaunch reap claim. Three root sets — the agent
+    /// pane's PPID closure (supplied by the caller), this session's agent
+    /// marker, and the legacy bucket.
+    AgentOnly,
+    /// Every process carrying the session marker, tabs included: what
+    /// `DeleteSession` (and, later, archive) claims.
+    WholeSession,
+    /// One tab's own processes: what `CloseTab` claims. Selection requires
+    /// the session marker AND that tab's exact minted id — never a tab
+    /// marker on its own, which would let a process of an unrelated
+    /// session be reaped by a close it has nothing to do with.
+    Tab(String),
+}
+
+impl SweepTarget {
+    /// The tab id whose marker this sweep selects on, if any.
+    fn selects_tab(&self) -> Option<&str> {
+        match self {
+            SweepTarget::Tab(id) => Some(id.as_str()),
+            _ => None,
+        }
+    }
+
+    /// Whether `markers` put this process in the sweep's root set.
+    ///
+    /// The session marker is required by every variant, which is what
+    /// keeps one session's sweep from ever reaching another's processes
+    /// however their other markers read.
+    fn claims(&self, markers: &EnvironMarkers) -> bool {
+        if !markers.session {
+            return false;
+        }
+        match self {
+            SweepTarget::AgentOnly => markers.agent || (!markers.any_agent && !markers.any_tab),
+            SweepTarget::WholeSession => true,
+            SweepTarget::Tab(_) => markers.tab,
+        }
+    }
+}
+
+/// Whether `pid`'s environment puts it in `target`'s root set for
+/// `session_id` — the environment [`crate::launch::SESSION_ID_ENV_VAR`]
+/// sets at launch and every descendant inherits automatically,
+/// transitively, across any number of forks and execs, UNLESS a process
+/// along the way deliberately scrubs or replaces its own environment
+/// (`env -i`, an `exec` with an explicit empty/rebuilt envp, and the like)
+/// — that residual is the one [`reap_process_tree`]'s cgroup kill closes,
+/// alongside the reparented-daemon case documented on
+/// [`kill_process_tree`], and remains open wherever no systemd user
+/// manager exists.
 ///
 /// A process belonging to a different user makes `environ` unreadable
 /// (mode 0400, owner-only) — that failure is silently treated as "no
@@ -1947,12 +2151,74 @@ fn environ_contains_marker(environ: &[u8], session_id: &str) -> bool {
 /// path at all: every failure mode here (gone, permission, non-dumpable)
 /// is routine and expected for a directory-wide scan of processes this
 /// sweep does not necessarily own.
-fn environ_has_marker(pid: u32, session_id: &str) -> bool {
+///
+/// An unreadable environment yielding "not claimed" is the SAFE
+/// direction: a sweep never signals a process it could not identify.
+fn environ_marker_verdict(pid: u32, session_id: &str, target: &SweepTarget) -> bool {
     let Ok(bytes) = std::fs::read(format!("/proc/{pid}/environ")) else {
         return false;
     };
-    environ_contains_marker(&bytes, session_id)
+    target.claims(&environ_markers(&bytes, session_id, target.selects_tab()))
 }
+
+/// What one relaunch produced, as [`Supervisor::publish_relaunched`]
+/// needs it.
+///
+/// A struct rather than five more parameters because they describe ONE
+/// thing — the state this relaunch arrived at — and because three of them
+/// (`outcome`, `reset_capture`, `tabs`) are easy to transpose at a call
+/// site while still type-checking.
+struct Relaunched {
+    terminal: Terminal,
+    /// The cgroup scope the NEW generation launched into.
+    scope: Option<String>,
+    /// The outcome that actually committed, which is not always the one
+    /// the relaunch intended — see the call sites.
+    outcome: LastOutcome,
+    /// Whether the new run starts conversation capture from scratch.
+    reset_capture: bool,
+    /// The session's tabs as they were BEFORE the relaunch: restart
+    /// touches the agent terminal alone, so these are still exactly the
+    /// tabs it has. Captured early rather than rediscovered here — see
+    /// `relaunch_into_terminal`'s own comment for why a post-restart
+    /// query must not be allowed to report `[]`.
+    tabs: Vec<TabInfo>,
+}
+
+/// What a tab reap anchors its descendant walk on.
+///
+/// Not a `bool` because the two callers differ on a safety property, not
+/// on an optimization: see [`Supervisor::reap_tab_tree`]'s `anchor` docs
+/// for the sibling-tab reap that asking about an already-destroyed pane
+/// produced.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum TabReapAnchor {
+    /// Look the pane up and use its process as the closure's root when it
+    /// is alive — what a reap performed while the window still exists
+    /// does.
+    PaneIfLive,
+    /// Do not look the pane up at all: the caller knows it is gone.
+    MarkerOnly,
+}
+
+/// How long an `OpenTab` watches a new tab's pane before accepting that
+/// its shell started (PLAN_M4.md item 2's dead-at-reply refusal).
+///
+/// Sized against tmux's own latency in marking a pane dead, not against
+/// the shell's: a shell that cannot start is gone in microseconds, but
+/// tmux publishes `#{pane_dead}` only after reaping the child and
+/// draining its pty — measured at 4–18 ms on an idle host (tmux 3.7b).
+/// A quarter second is an order of magnitude of headroom over that for a
+/// loaded CI runner, and it is the WORST case a healthy open pays, on an
+/// operation a human performs by hand. Shortening it would make the
+/// refusal flaky in exactly the direction that matters (a failed launch
+/// reported as a live tab); lengthening it buys nothing but latency.
+const TAB_LAUNCH_SETTLE: Duration = Duration::from_millis(250);
+
+/// Poll interval within [`TAB_LAUNCH_SETTLE`]. Each step is one tmux
+/// subprocess, so this trades a handful of spawns for the settle's own
+/// early exit on the failing path.
+const TAB_LAUNCH_SETTLE_STEP: Duration = Duration::from_millis(25);
 
 /// One `/proc` walk's findings: every readable process's (ppid,
 /// start-time), plus which of those carry `session_id`'s environment
@@ -1994,8 +2260,10 @@ struct ProcSnapshot {
     /// it — is accepted as the honest cost of a single-pass, `/proc`-only
     /// implementation.
     stats: HashMap<u32, (u32, u64)>,
-    /// pids whose environment carried this session's marker in this same
-    /// walk.
+    /// pids this sweep's markers CLAIMED in this same walk, per
+    /// [`SweepTarget::claims`] — positive selection throughout, so a
+    /// process is here because something said it belongs to this sweep,
+    /// never merely because nothing excluded it.
     marked: HashSet<u32>,
 }
 
@@ -2019,7 +2287,10 @@ struct ProcSnapshot {
 /// child that does not exist yet. [`kill_process_tree`] is what actually
 /// compensates for this: it re-walks `/proc` between each signal phase
 /// rather than trusting one walk to see a tree that can still be growing.
-fn snapshot_proc(session_id: &str) -> Result<(ProcSnapshot, Vec<String>), String> {
+fn snapshot_proc(
+    session_id: &str,
+    target: &SweepTarget,
+) -> Result<(ProcSnapshot, Vec<String>), String> {
     let mut stats = HashMap::new();
     let mut marked = HashSet::new();
     let mut soft_errors = Vec::new();
@@ -2054,7 +2325,7 @@ fn snapshot_proc(session_id: &str) -> Result<(ProcSnapshot, Vec<String>), String
             Ok(None) => {}
             Err(e) => soft_errors.push(e),
         }
-        if environ_has_marker(pid, session_id) {
+        if environ_marker_verdict(pid, session_id, target) {
             marked.insert(pid);
         }
     }
@@ -2092,12 +2363,20 @@ fn snapshot_proc(session_id: &str) -> Result<(ProcSnapshot, Vec<String>), String
 /// any soft per-pid errors `snapshot_proc` collected — the values a
 /// caller re-validates via [`signal_validated`] before ever signaling, so
 /// nothing here is trusted past the moment it was read.
+///
+/// `target` decides which markers admit a process as a ROOT (PLAN_M4.md
+/// item 2's marker split — see [`SweepTarget`] for the three sets and why
+/// selection is positive rather than subtractive). It changes nothing
+/// about the closure itself: a process reached only by walking down from
+/// a root really is a descendant of something this sweep claims, whatever
+/// markers it happens to wear.
 fn enumerate_tree(
     root_pid: Option<u32>,
     session_id: &str,
     seeds: &HashMap<u32, u64>,
+    target: &SweepTarget,
 ) -> Result<(HashMap<u32, u64>, Vec<String>), String> {
-    let (snapshot, soft_errors) = snapshot_proc(session_id)?;
+    let (snapshot, soft_errors) = snapshot_proc(session_id, target)?;
     let mut found: HashMap<u32, u64> = HashMap::new();
 
     // Marker pids first: roots the closure expands FROM.
@@ -2107,6 +2386,8 @@ fn enumerate_tree(
         }
     }
     // The pane root, establishing its identity fresh on round one only.
+    // Always admitted: it is the terminal this sweep was called FOR, named
+    // by the caller rather than discovered by a marker.
     if let Some(pid) = root_pid
         && let Some(&(_, starttime)) = snapshot.stats.get(&pid)
     {
@@ -2206,11 +2487,17 @@ async fn enumerate_or_reuse(
     root_pid: Option<u32>,
     session_id: &str,
     fallback: &HashMap<u32, u64>,
+    target: &SweepTarget,
     errors: &mut Vec<String>,
 ) -> HashMap<u32, u64> {
     let session_id = session_id.to_string();
     let seeds = fallback.clone();
-    match tokio::task::spawn_blocking(move || enumerate_tree(root_pid, &session_id, &seeds)).await {
+    let target = target.clone();
+    match tokio::task::spawn_blocking(move || {
+        enumerate_tree(root_pid, &session_id, &seeds, &target)
+    })
+    .await
+    {
         Ok(Ok((found, soft_errors))) => {
             errors.extend(soft_errors);
             found
@@ -2306,10 +2593,11 @@ async fn confirm_gone(found: &HashMap<u32, u64>, timeout: Duration) -> Vec<Strin
     errors
 }
 
-/// Kill an agent's entire process tree (SPEC.md: stop/delete reap the
+/// Kill one terminal's entire process tree (SPEC.md: stop/delete reap the
 /// agent and every descendant — MCP servers, dev servers, anything it
-/// started), per the sequence lore/2026-07-27-m2-process-tree-stop.md
-/// settled on after simpler cuts proved insufficient:
+/// started; close does the same for one tab's shell), per the sequence
+/// lore/2026-07-27-m2-process-tree-stop.md settled on after simpler cuts
+/// proved insufficient:
 ///
 /// 1. Enumerate (PPID closure from `root_pid` if any, unioned with the
 ///    environment-marker scan for `session_id`) and SIGTERM the result.
@@ -2330,6 +2618,13 @@ async fn confirm_gone(found: &HashMap<u32, u64>, timeout: Duration) -> Vec<Strin
 ///    stopped process unconditionally, so no `SIGCONT` step is needed
 ///    first), then poll until every one of them has actually disappeared
 ///    (see [`confirm_gone`]).
+///
+/// `target` says WHICH of the session's processes this sweep claims —
+/// the agent's with tabs subtracted, the whole session, or one tab (see
+/// [`SweepTarget`], and PLAN_M4.md item 2 for why the split exists at
+/// all). It changes only which processes the marker scan admits as roots
+/// and which the closure may expand through; the five-phase escalation
+/// below is identical for all three.
 ///
 /// `root` is the pane process's `(pid, starttime)` as its caller validated
 /// it, and `None` for a dead or absent pane, or a terminal-less
@@ -2366,7 +2661,11 @@ async fn confirm_gone(found: &HashMap<u32, u64>, timeout: Duration) -> Vec<Strin
 /// with the cgroup work — it remains the whole mechanism wherever no
 /// manager exists, and the backstop everywhere else, so this is still the
 /// function to reason about when asking what stop guarantees at minimum.
-async fn kill_process_tree(root: Option<(u32, u64)>, session_id: &str) -> anyhow::Result<()> {
+async fn kill_process_tree(
+    root: Option<(u32, u64)>,
+    session_id: &str,
+    target: &SweepTarget,
+) -> anyhow::Result<()> {
     let mut errors: Vec<String> = Vec::new();
 
     // The root enters as a SEED — an identity, not a bare number — so it is
@@ -2377,17 +2676,17 @@ async fn kill_process_tree(root: Option<(u32, u64)>, session_id: &str) -> anyhow
     // trusted after it could name a completely unrelated process by the
     // time this walk starts.
     let seed: HashMap<u32, u64> = root.into_iter().collect();
-    let mut found = enumerate_or_reuse(None, session_id, &seed, &mut errors).await;
+    let mut found = enumerate_or_reuse(None, session_id, &seed, target, &mut errors).await;
     errors.extend(signal_all(&found, libc::SIGTERM));
 
     tokio::time::sleep(KILL_GRACE).await;
 
-    found = enumerate_or_reuse(None, session_id, &found, &mut errors).await;
+    found = enumerate_or_reuse(None, session_id, &found, target, &mut errors).await;
     errors.extend(signal_all(&found, libc::SIGSTOP));
 
     let mut converged = false;
     for _ in 0..MAX_QUIESCE_PASSES {
-        let next = enumerate_or_reuse(None, session_id, &found, &mut errors).await;
+        let next = enumerate_or_reuse(None, session_id, &found, target, &mut errors).await;
         // Identity, not just pid: a pid present in BOTH `found` and `next`
         // but with a DIFFERENT starttime is not the same process anymore
         // — the old one died and the kernel already recycled its number —
@@ -2470,15 +2769,22 @@ fn launch_scope_unit(id: &str, generation: i64, scoped: bool) -> Option<String> 
 /// carried into the error only when the sweep ALSO failed, where it is
 /// diagnostic context for a stop that is genuinely unconfirmed.
 ///
-/// `scope` is the unit RECORDED for this launch; existence is re-checked
-/// before use because the name is re-derived from durable state and the
-/// unit may long since have been garbage-collected (item 10's
-/// reload/restart interplay).
+/// `units` are the scopes to kill before the sweep — normally the one
+/// RECORDED for the launch being torn down, and for a DELETE additionally
+/// every open tab's own scope (PLAN_M4.md item 2), since delete is the one
+/// teardown that claims tabs too and a tab's cgroup is the only mechanism
+/// that reaches an environment-scrubbing double-fork under it. Existence
+/// is re-checked before each use because the names are re-derived rather
+/// than stored, and a unit may long since have been garbage-collected
+/// (item 10's reload/restart interplay). An empty slice means this
+/// teardown has no cgroup to lean on at all, which is the ordinary state
+/// on a host with no user manager.
 async fn reap_process_tree(
     scopes: &crate::scope::ScopeManager,
-    scope: Option<&str>,
+    units: &[String],
     root_pid: Option<u32>,
     session_id: &str,
+    target: &SweepTarget,
 ) -> anyhow::Result<()> {
     // Captured BEFORE anything is killed, and this ordering is the whole
     // point of doing it here rather than inside the sweep: `kill_scope`
@@ -2502,33 +2808,43 @@ async fn reap_process_tree(
         }
     });
 
-    let scope_error = match scope {
-        Some(unit) => kill_scope(scopes, unit, session_id).await.err(),
-        None => {
-            debug!(
-                session = %session_id,
-                "no cgroup scope recorded for this launch; the process-tree sweep is the \
-                 whole mechanism"
-            );
-            None
+    if units.is_empty() {
+        debug!(
+            session = %session_id,
+            "no cgroup scope recorded for this teardown; the process-tree sweep is the \
+             whole mechanism"
+        );
+    }
+    // Every unit is killed even when an earlier one failed, for
+    // `kill_scope`'s own accumulate-never-short-circuit reason one level
+    // up: a delete that stopped at the first unresponsive tab scope would
+    // skip the agent's, which is the one most likely to have worked.
+    let mut scope_errors: Vec<String> = Vec::new();
+    for unit in units {
+        if let Err(e) = kill_scope(scopes, unit, session_id).await {
+            scope_errors.push(format!("{e:#}"));
         }
-    };
+    }
+    let scope_error = (!scope_errors.is_empty()).then(|| scope_errors.join("; "));
 
-    match (kill_process_tree(root, session_id).await, scope_error) {
+    match (
+        kill_process_tree(root, session_id, target).await,
+        scope_error,
+    ) {
         (Ok(()), Some(e)) => {
             // The sweep proved the tree is gone, so this stop is complete
             // by M2's own standard; the scope's trouble is worth knowing
             // about but is not the user's problem.
             warn!(
-                session = %session_id, error = %format!("{e:#}"),
-                "the launch's cgroup scope could not be fully torn down, but the process-tree \
+                session = %session_id, error = %e,
+                "a cgroup scope could not be fully torn down, but the process-tree \
                  sweep confirmed nothing is left running"
             );
             Ok(())
         }
         (Ok(()), None) => Ok(()),
         (Err(sweep), Some(e)) => Err(sweep.context(format!(
-            "the launch's cgroup scope also could not be fully torn down ({e:#})"
+            "a cgroup scope also could not be fully torn down ({e})"
         ))),
         (Err(sweep), None) => Err(sweep),
     }
@@ -2780,11 +3096,15 @@ async fn stop_live_agent(
     sup.record(session_id, entry, Transition::StopRequested)
         .await
         .map_err(StopFailure::Unrecorded)?;
+    // `AgentOnly`, shared verbatim by `StopSession` and the restart's
+    // pre-relaunch reap — the two operations SPEC.md says leave a
+    // session's terminal tabs running (PLAN_M4.md item 2's marker split).
     reap_process_tree(
         &sup.seams.scopes,
-        entry.scope.as_deref(),
+        entry.scope.as_slice(),
         root_pid,
         session_id,
+        &SweepTarget::AgentOnly,
     )
     .await
     .map_err(StopFailure::Sweep)?;
@@ -2794,12 +3114,24 @@ async fn stop_live_agent(
         .map_err(StopFailure::UnrecordedOutcome)
 }
 
-/// The two tmux handles that address one session's terminal.
+/// The two tmux handles that address one of a session's terminals.
 ///
 /// Both are needed and neither substitutes for the other: session name is
-/// the target for anything window-scoped (`resize-window`, the
-/// control-mode attach), pane id (`%N`) for anything pane-scoped
-/// (`send-keys`, `capture-pane`, format queries).
+/// the target for the control-mode attach (control clients attach to a
+/// session, never to a window — see [`crate::tmux::OutputStream`]), pane
+/// id (`%N`) for anything pane-scoped (`send-keys`, `capture-pane`, format
+/// queries).
+///
+/// There is deliberately no window handle, even though a tab IS a window
+/// (PLAN_M4.md item 2): tmux resolves a window target from any pane inside
+/// it, so `crate::tmux`'s window-scoped calls take the pane and pair it
+/// with the session — which a bare window id cannot be made to do safely
+/// (see `tmux::pane_in_session`'s audit). One less handle to keep in sync,
+/// and the one that remains is already the session-validated one.
+///
+/// The same struct describes the AGENT's terminal and a TAB's, because
+/// nothing below this level distinguishes them; which terminal a given
+/// value describes is the caller's [`TerminalId`], not a field here.
 #[derive(Clone)]
 struct Terminal {
     tmux_name: String,
@@ -3586,14 +3918,17 @@ impl CaptureState {
 /// CLIENT asked for, while a `TerminalId` is a terminal this supervisor
 /// has resolved against the session (`resolve_terminal`), so nothing past
 /// that resolution can accidentally key state off an unvalidated request.
-/// The two shapes are otherwise deliberately parallel, so the tabs PR
-/// (PLAN_M4.md item 2) only has to teach `resolve_terminal` how to find a
-/// tab's pane — no key, map, or handler here changes shape again.
+/// The two shapes are otherwise deliberately parallel, and that paid off
+/// exactly as intended: teaching this supervisor to serve tabs (PLAN_M4.md
+/// item 2) taught `resolve_terminal` how to find a tab's pane and changed
+/// no key, map, or handler shape at all.
 ///
-/// `Tab` exists today only to be REFUSED: no tab windows are created yet,
-/// so every tab selector resolves to a `NotFound`. It is modelled anyway
-/// because the alternative — keying attachments by session id until tabs
-/// arrive — is exactly the reshaping this PR exists to do once.
+/// The two variants differ in how much they cost to resolve, which is
+/// worth knowing before adding a caller: `Agent` is answered from the
+/// session entry, while `Tab` costs a tmux round trip, because a tab is
+/// rediscovered from window markers rather than stored (`SessionInfo::tabs`
+/// — tabs are not durable metadata, so there is nothing to cache that a
+/// second client could not invalidate).
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 enum TerminalId {
     /// The session's agent terminal: the one terminal every session has
@@ -3646,54 +3981,230 @@ impl AttachmentKey {
     }
 }
 
+/// One of a session's tab windows as rediscovery found it.
+///
+/// Ordered by [`Ord`] on `window_ordinal` alone, which is what makes
+/// `SessionInfo::tabs`'s "creation order" promise mechanical rather than
+/// bookkept: tmux hands out window ids from a monotonically increasing
+/// per-server counter, so their numeric order IS creation order — within
+/// ONE tmux-server lifetime, which is the only lifetime a tab can survive
+/// anyway (a reboot erases tabs by contract).
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct DiscoveredTab {
+    id: String,
+    pane: String,
+    /// The numeric part of `pane` (`%9` → 9) — how a split window's panes
+    /// are compared, since `%10` sorts before `%9` as a string.
+    pane_ordinal: u64,
+    /// The numeric part of the tmux window id (`@7` → 7). Parsed rather
+    /// than compared as a string because `@10` sorts before `@9`
+    /// lexically, which would reorder a session's tab strip the moment a
+    /// user opened a tenth window.
+    window_ordinal: u64,
+}
+
+/// Rediscover one session's tabs from a pane-state map, in creation order.
+///
+/// Tabs are not durable metadata — SPEC.md says a reboot or archive erases
+/// them and nothing recreates them — so tmux's own window markers are the
+/// record, and this is the one function that turns them back into tabs.
+/// Taking an already-fetched map rather than querying keeps the
+/// `ListSessions` path from paying a second lookup per session.
+///
+/// Every filter closes a different way a window could be misreported as a
+/// tab:
+///
+/// - **Session name must match.** The map is server-wide.
+/// - **The window must carry a tab marker at all.** A window a pane
+///   process conjured on our private server carries none — pane processes
+///   inherit `TMUX`, which is why a positional "windows 1 and up" scan was
+///   never an option.
+/// - **The marker must be complete and minted-shaped**, validated where it
+///   is read (`tmux::join_pane_markers`) rather than here.
+/// - **An AGENT-marked window is never a tab**, whatever else is written
+///   on it. Nothing stops a pane from adding a tab marker to the agent's
+///   own window, and adopting it would offer a "tab" whose close would
+///   reap the agent.
+/// - **A tab id claimed by two WINDOWS is ambiguous and drops BOTH.** Ids
+///   are minted unique, so a duplicate means one of them was written by
+///   something else — and there is no basis for preferring either. Picking
+///   one would let a forged marker capture an existing tab's identity and
+///   redirect close and attach onto a window of the forger's choosing.
+///
+/// A single window holding several panes (someone split one of ours) is
+/// still ONE tab, keyed on its lowest pane NUMERICALLY — `%9` before
+/// `%10`, which a string comparison gets backwards — so repeated
+/// rediscovery answers the same way rather than depending on hash-map
+/// iteration order.
+fn tabs_from_pane_states(
+    states: &HashMap<String, crate::tmux::PaneState>,
+    tmux_name: &str,
+) -> Vec<DiscoveredTab> {
+    let mut found: HashMap<String, DiscoveredTab> = HashMap::new();
+    let mut ambiguous: HashSet<String> = HashSet::new();
+    for state in states.values() {
+        if state.session_name != tmux_name || state.agent.is_some() {
+            continue;
+        }
+        let Some(tab_id) = state.tab.as_deref() else {
+            continue;
+        };
+        let candidate = DiscoveredTab {
+            id: tab_id.to_string(),
+            pane: format!("%{}", state.pane_ordinal),
+            pane_ordinal: state.pane_ordinal,
+            window_ordinal: state.window_ordinal,
+        };
+        match found.entry(tab_id.to_string()) {
+            std::collections::hash_map::Entry::Occupied(mut existing) => {
+                if existing.get().window_ordinal == candidate.window_ordinal {
+                    // The same window, seen through a second pane: a
+                    // split, not a second claimant.
+                    if candidate.pane_ordinal < existing.get().pane_ordinal {
+                        existing.insert(candidate);
+                    }
+                } else {
+                    ambiguous.insert(tab_id.to_string());
+                }
+            }
+            std::collections::hash_map::Entry::Vacant(slot) => {
+                slot.insert(candidate);
+            }
+        }
+    }
+    let mut tabs: Vec<DiscoveredTab> = found
+        .into_iter()
+        .filter(|(id, _)| !ambiguous.contains(id))
+        .map(|(_, tab)| tab)
+        .collect();
+    tabs.sort_by_key(|tab| tab.window_ordinal);
+    tabs
+}
+
+/// The pane backing one session's AGENT terminal when the durable record
+/// has none — the pane-less recovery `reload_sessions` performs for a row
+/// whose `pane` column is empty (a launch that crashed before the pane id
+/// could be written, or a row that predates the column).
+///
+/// Preference order, and the reason for each rung:
+///
+/// 1. **The window marked for THIS session.** Identity, not position; it
+///    is why the agent window is marked at all.
+/// 2. **Nothing marked for another session, and nothing marked as a tab.**
+///    Adopting a tab's window would make the agent terminal and a tab the
+///    same pane — stop would reap the tab, restart would respawn into it.
+///    Adopting a foreign window is the "conjured window" case in the other
+///    direction.
+/// 3. **Otherwise the lowest window INDEX.** The legacy rung, for a
+///    session created before markers existed: window 0 is the agent's in
+///    every layout this system has ever produced, so position is the only
+///    evidence left and it is right in exactly the case it applies to.
+///
+/// Ties within a rung break on the lowest pane ordinal, so repeated
+/// reloads answer identically.
+fn agent_pane_from_states(
+    states: &HashMap<String, crate::tmux::PaneState>,
+    tmux_name: &str,
+    session_id: &str,
+) -> Option<(String, crate::tmux::PaneState)> {
+    let mine = || {
+        states
+            .values()
+            .filter(move |state| state.session_name == tmux_name)
+    };
+    let lowest = |mut candidates: Vec<&crate::tmux::PaneState>| {
+        candidates.sort_by_key(|state| (state.window_index, state.pane_ordinal));
+        candidates
+            .first()
+            .map(|state| (format!("%{}", state.pane_ordinal), (*state).clone()))
+    };
+    let marked: Vec<&crate::tmux::PaneState> = mine()
+        .filter(|state| state.agent.as_deref() == Some(session_id))
+        .collect();
+    if !marked.is_empty() {
+        return lowest(marked);
+    }
+    lowest(
+        mine()
+            .filter(|state| state.agent.is_none() && state.tab.is_none())
+            .collect(),
+    )
+}
+
 /// Find the tmux handles behind one of a session's terminals, or say why
 /// there are none.
 ///
 /// The ONE place a resolved [`TerminalId`] becomes something attachable,
-/// so the tabs PR (PLAN_M4.md item 2) has a single function to teach
-/// about tab windows rather than a handler to re-shape. Borrows from the
-/// entry rather than cloning: `SessionEntry` is immutable once published,
-/// so the handles cannot change under a caller holding it.
+/// which is why the attach, resize, input, and close paths all funnel
+/// through it rather than each learning what a tab is.
 ///
-/// Both failures are `NotFound`, and neither ever falls back to another
-/// terminal: attaching the WRONG terminal quietly would be worse than
-/// failing (`TerminalSelector`'s own contract), so there is deliberately
-/// no fallback path here at all.
-fn resolve_terminal<'a>(
-    entry: &'a SessionEntry,
+/// Async and OWNING, unlike the pre-tab version which borrowed from the
+/// entry. Both changes follow from the same fact: a `SessionEntry` is
+/// immutable once published, and a session's tabs are not — they are
+/// opened and closed while the entry stands still, possibly by another
+/// client. So a tab cannot be a field to borrow; it has to be rediscovered
+/// from tmux at the moment of use, which costs one round trip. The AGENT
+/// terminal keeps its old cost exactly: it is answered from the entry with
+/// no tmux call at all.
+///
+/// A terminal that does not exist is `NotFound` — the shape `Attach`
+/// promises for a stale selector (`TerminalSelector::Tab`'s own contract)
+/// — and there is deliberately no fallback to another terminal, because
+/// attaching the WRONG one quietly would be worse than failing. A tmux
+/// query that FAILS keeps its own error kind instead: "we could not ask"
+/// and "it is not there" are different answers, and only one of them
+/// means the client should stop retrying.
+async fn resolve_terminal(
+    sup: &Supervisor,
+    entry: &SessionEntry,
     terminal: &TerminalId,
-) -> Result<&'a Terminal, RequestError> {
-    match terminal {
-        // The restart-gap case (PLAN_M2.md): this entry was reloaded from
-        // SQLite at startup and its tmux session was gone by then.
-        // Reporting `NotFound` — rather than fabricating a dead terminal
-        // to attach to — is the same "do not guess" discipline SPEC.md
-        // applies elsewhere; the session stays visible in the list either
-        // way.
-        TerminalId::Agent => entry.terminal.as_ref().ok_or_else(|| {
-            RequestError::new(
-                ErrorKind::NotFound,
-                format!(
-                    "session {} has no terminal: the supervisor (or its tmux server) restarted \
-                     after the agent ended",
-                    entry.info.id
-                ),
-            )
-        }),
-        // No window is ever marked as a tab yet, so every tab selector
-        // names a terminal that does not exist. The message says which
-        // supervisor-side capability is missing rather than pretending the
-        // tab was closed, because "reopen it" is not yet advice anyone can
-        // follow.
-        TerminalId::Tab(id) => Err(RequestError::new(
+) -> Result<Terminal, RequestError> {
+    // The restart-gap case (PLAN_M2.md): this entry was reloaded from
+    // SQLite at startup and its tmux session was gone by then. Reporting
+    // `NotFound` — rather than fabricating a dead terminal to attach to —
+    // is the same "do not guess" discipline SPEC.md applies elsewhere; the
+    // session stays visible in the list either way. It is also the gate
+    // every TAB lookup passes through first: with no tmux session there is
+    // no window to carry a marker, so a tab selector on such a session is
+    // not-found for the same underlying reason.
+    let agent = entry.terminal.as_ref().ok_or_else(|| {
+        RequestError::new(
             ErrorKind::NotFound,
             format!(
-                "session {} has no terminal tab {}: this supervisor does not serve terminal tabs \
-                 yet, so only the agent terminal can be attached",
-                truncate_for_error(&entry.info.id),
-                truncate_for_error(id),
+                "session {} has no terminal: the supervisor (or its tmux server) restarted \
+                 after the agent ended",
+                truncate_for_error(&entry.info.id)
             ),
-        )),
+        )
+    })?;
+    match terminal {
+        TerminalId::Agent => Ok(agent.clone()),
+        TerminalId::Tab(id) => {
+            let states = sup.tmux.pane_states().await.map_err(|e| {
+                RequestError::new(
+                    error_kind(&e),
+                    format!("could not ask tmux which terminal tabs this session has: {e:#}"),
+                )
+            })?;
+            tabs_from_pane_states(&states, &agent.tmux_name)
+                .into_iter()
+                .find(|tab| tab.id == *id)
+                .map(|tab| Terminal {
+                    tmux_name: agent.tmux_name.clone(),
+                    pane: tab.pane,
+                })
+                .ok_or_else(|| {
+                    RequestError::new(
+                        ErrorKind::NotFound,
+                        format!(
+                            "session {} has no terminal tab {}: it was closed, or a reboot \
+                             erased it",
+                            truncate_for_error(&entry.info.id),
+                            truncate_for_error(id),
+                        ),
+                    )
+                })
+        }
     }
 }
 
@@ -4011,7 +4522,8 @@ pub struct Supervisor {
     /// mechanism and what it is (and is not) responsible for.
     intent_locks: Arc<KeyedLocks>,
     /// One claim per SESSION, held for the whole of any operation that
-    /// changes what is running under it: restart, stop, and delete.
+    /// changes what is running under it: restart, stop, delete, and — since
+    /// PLAN_M4.md item 2 — opening and closing a terminal tab.
     ///
     /// The map-wide `sessions` mutex cannot do this job — it is released
     /// the moment an entry is cloned out of it, and every one of these
@@ -4511,11 +5023,14 @@ impl Supervisor {
             // independent `iter().find()` in the sentinel branch used to
             // risk disagreeing with this `min_by` tie-break.
             let found = if row.pane.is_empty() {
-                pane_states
-                    .iter()
-                    .filter(|(_, state)| state.session_name == row.tmux_name)
-                    .min_by(|(a, _), (b, _)| a.cmp(b))
-                    .map(|(pane, state)| (pane.clone(), state.clone()))
+                // Marker-led, not positional (PLAN_M4.md item 2): with
+                // tabs on the same tmux session, "the lowest pane id"
+                // could hand this row a TAB's pane — after which stop
+                // would reap that tab and restart would respawn into it.
+                // See `agent_pane_from_states` for the preference ladder
+                // and the legacy fallback it keeps for sessions created
+                // before markers existed.
+                agent_pane_from_states(&pane_states, &row.tmux_name, &row.id)
             } else {
                 pane_states
                     .get(&row.pane)
@@ -5968,9 +6483,10 @@ impl Supervisor {
                         // rather than orphaning what it could not reach.
                         if let Err(sweep) = reap_process_tree(
                             &self.seams.scopes,
-                            launch_scope.as_deref(),
+                            launch_scope.as_slice(),
                             None,
                             &id,
+                            &SweepTarget::AgentOnly,
                         )
                         .await
                         {
@@ -6101,8 +6617,14 @@ impl Supervisor {
             // reap therefore rides the error rather than being swallowed;
             // there is no row left to retry from, so saying so is all this
             // path can still do for whoever reads the log.
-            if let Err(sweep) =
-                reap_process_tree(&self.seams.scopes, launch_scope.as_deref(), None, &id).await
+            if let Err(sweep) = reap_process_tree(
+                &self.seams.scopes,
+                launch_scope.as_slice(),
+                None,
+                &id,
+                &SweepTarget::AgentOnly,
+            )
+            .await
             {
                 warn!(
                     session = %id, error = %format!("{sweep:#}"),
@@ -6145,8 +6667,14 @@ impl Supervisor {
             // Same ordering, same reason as the delete race above: the tmux
             // kill reaches the pane's group and nothing beyond it, and this
             // path may still go on to remove the row.
-            if let Err(sweep) =
-                reap_process_tree(&self.seams.scopes, launch_scope.as_deref(), None, &id).await
+            if let Err(sweep) = reap_process_tree(
+                &self.seams.scopes,
+                launch_scope.as_slice(),
+                None,
+                &id,
+                &SweepTarget::AgentOnly,
+            )
+            .await
             {
                 warn!(
                     session = %id, error = %format!("{sweep:#}"),
@@ -6419,9 +6947,19 @@ impl Supervisor {
             // the pre-relaunch generation's here) is what those survivors
             // would be in — a scope outlives its main process for exactly
             // as long as something it spawned is still alive.
-            reap_process_tree(&self.seams.scopes, entry.scope.as_deref(), None, session_id)
-                .await
-                .context("reaping the prior run's leftover descendants before relaunching")?;
+            // `AgentOnly` for the same reason `stop_live_agent` uses it:
+            // SPEC.md says restart touches the agent terminal only, so a
+            // hunt for the PRIOR run's survivors must not reap a tab's
+            // shell that has been happily running across the restart.
+            reap_process_tree(
+                &self.seams.scopes,
+                entry.scope.as_slice(),
+                None,
+                session_id,
+                &SweepTarget::AgentOnly,
+            )
+            .await
+            .context("reaping the prior run's leftover descendants before relaunching")?;
         }
 
         // Everything from here on is destructive, and runs on a task this
@@ -6700,6 +7238,25 @@ impl Supervisor {
     ) -> Result<SessionInfo, RelaunchFailure> {
         let id = entry.info.id.clone();
         let terminal = entry.terminal.as_ref();
+        // The session's tabs, captured BEFORE anything destructive and
+        // carried through to the reply. A restart touches the agent
+        // terminal alone (SPEC.md), so the tabs it does not touch are
+        // exactly these; rediscovering them AFTERWARDS and reporting `[]`
+        // on a query failure would have a reply claim a session lost its
+        // tabs when the restart never went near them. The lifecycle claim
+        // this runs under is what makes "before" and "after" the same
+        // list. A failure to read it refuses the restart outright, which
+        // is safe here precisely because nothing has happened yet.
+        let tabs = match terminal {
+            Some(terminal) => self.session_tabs(terminal).await.map_err(|e| {
+                RelaunchFailure::definitive(
+                    e.context("reading this session's terminal tabs before relaunching it"),
+                )
+            })?,
+            // No terminal means no tmux session, and therefore no windows
+            // for a tab to be.
+            None => Vec::new(),
+        };
         let tmux_name = match terminal {
             Some(terminal) => terminal.tmux_name.clone(),
             // A session whose terminal did not survive keeps the tmux name
@@ -6792,8 +7349,20 @@ impl Supervisor {
         // Restored whatever the spawn did: this window was shrunk by the
         // plan above, and leaving it one row tall because the launch failed
         // would be a second, unrelated injury.
+        //
+        // Addressed through the pane, like every window-scoped command
+        // since tabs (PLAN_M4.md item 2): a bare session target names the
+        // session's CURRENT window, which a tab can be. `plan.restore` is
+        // only ever `Some` on the reuse path, where `reuse` names the very
+        // pane whose window `plan_pane_relaunch` shrank — and `respawn-pane`
+        // keeps that pane id across the relaunch, so it is still the right
+        // handle here.
         if let Some((cols, rows)) = plan.restore
-            && let Err(e) = self.tmux.resize_window(&tmux_name, cols, rows).await
+            && let Some(reused) = reuse
+            && let Err(e) = self
+                .tmux
+                .resize_window(&tmux_name, &reused.pane, cols, rows)
+                .await
         {
             warn!(
                 session = %id, error = %format!("{e:#}"),
@@ -6853,13 +7422,16 @@ impl Supervisor {
                 self.publish_relaunched(
                     entry,
                     generation,
-                    Terminal {
-                        tmux_name: tmux_name.clone(),
-                        pane: pane.clone(),
+                    Relaunched {
+                        terminal: Terminal {
+                            tmux_name: tmux_name.clone(),
+                            pane: pane.clone(),
+                        },
+                        scope: scope.clone(),
+                        outcome: LastOutcome::Launching,
+                        reset_capture,
+                        tabs: tabs.clone(),
                     },
-                    scope.clone(),
-                    LastOutcome::Launching,
-                    reset_capture,
                 )
                 .await;
                 return Err(RelaunchFailure::ambiguous(e.context(
@@ -6878,8 +7450,14 @@ impl Supervisor {
             // agent running with no row that knows about it.
             None => {
                 let mut teardown = Vec::new();
-                if let Err(e) =
-                    reap_process_tree(&self.seams.scopes, scope.as_deref(), None, &id).await
+                if let Err(e) = reap_process_tree(
+                    &self.seams.scopes,
+                    scope.as_slice(),
+                    None,
+                    &id,
+                    &SweepTarget::AgentOnly,
+                )
+                .await
                 {
                     teardown.push(format!("the new agent's process tree ({e:#})"));
                 }
@@ -6931,13 +7509,16 @@ impl Supervisor {
                     .publish_relaunched(
                         entry,
                         generation,
-                        Terminal {
-                            tmux_name: tmux_name.clone(),
-                            pane: pane.clone(),
+                        Relaunched {
+                            terminal: Terminal {
+                                tmux_name: tmux_name.clone(),
+                                pane: pane.clone(),
+                            },
+                            scope,
+                            outcome: other,
+                            reset_capture,
+                            tabs,
                         },
-                        scope,
-                        other,
-                        reset_capture,
                     )
                     .await);
             }
@@ -6948,10 +7529,13 @@ impl Supervisor {
             .publish_relaunched(
                 entry,
                 generation,
-                Terminal { tmux_name, pane },
-                scope,
-                LastOutcome::Running,
-                reset_capture,
+                Relaunched {
+                    terminal: Terminal { tmux_name, pane },
+                    scope,
+                    outcome: LastOutcome::Running,
+                    reset_capture,
+                    tabs,
+                },
             )
             .await)
     }
@@ -7025,7 +7609,15 @@ impl Supervisor {
         // The marker sweep, not just tmux: a launch that got far enough to
         // start the login shell can have left descendants even though tmux
         // now reports nothing running.
-        if let Err(sweep) = reap_process_tree(&self.seams.scopes, scope, None, id).await {
+        if let Err(sweep) = reap_process_tree(
+            &self.seams.scopes,
+            scope.map(str::to_string).as_slice(),
+            None,
+            id,
+            &SweepTarget::AgentOnly,
+        )
+        .await
+        {
             return RelaunchFailure::ambiguous(error.context(format!(
                 "and the failed launch's process tree could not be swept ({sweep:#})"
             )));
@@ -7045,11 +7637,15 @@ impl Supervisor {
         &self,
         entry: &SessionEntry,
         generation: i64,
-        terminal: Terminal,
-        scope: Option<String>,
-        outcome: LastOutcome,
-        reset_capture: bool,
+        result: Relaunched,
     ) -> SessionInfo {
+        let Relaunched {
+            terminal,
+            scope,
+            outcome,
+            reset_capture,
+            tabs,
+        } = result;
         let restart_offer = if reset_capture {
             // The new window has captured nothing yet, so the only offer
             // this session can honestly make is what its snapshot alone
@@ -7080,11 +7676,11 @@ impl Supervisor {
             // the PREVIOUS run ended (item 4).
             annotation: None,
             restart_offer,
-            // Vocabulary only for now: restarting the agent must not
-            // disturb any tabs a session already has (PLAN_M4.md's
-            // acceptance criteria), but until PLAN_M4.md step 4 gives tabs
-            // real rediscovery there is nothing to report here either way.
-            tabs: Vec::new(),
+            // Captured before the relaunch by `relaunch_into_terminal`,
+            // never rediscovered here: see that capture's own comment for
+            // why a post-restart query must not be allowed to report `[]`
+            // for a session whose tabs the restart never touched.
+            tabs,
         };
         let published = relaunched_entry(
             entry,
@@ -7144,6 +7740,678 @@ impl Supervisor {
         forwarder.abort();
         let _ = forwarder.await;
         notify_detached(&notify, channel, "session restarted".to_string());
+    }
+
+    /// The shell every launch of this supervisor runs through — the seam
+    /// (`SupervisorSeams::launch_shell`) when one is installed, the real
+    /// `$SHELL`/passwd chain otherwise.
+    ///
+    /// Resolved PER LAUNCH rather than once at construction, which is
+    /// SPEC.md's environment contract rather than an implementation
+    /// detail: "the environment is evaluated at each launch", so a user who
+    /// changes their login shell sees it on the next agent launch or tab
+    /// open without restarting the supervisor.
+    async fn launch_shell(&self) -> String {
+        match &self.seams.launch_shell {
+            Some(shell) => shell.clone(),
+            None => resolve_shell().await,
+        }
+    }
+
+    /// One session's tabs, rediscovered from tmux, in creation order.
+    ///
+    /// Fallible on purpose, and the two failure shapes are not the same
+    /// answer. tmux definitively reporting that there is no server (or no
+    /// panes) is `Ok(vec![])` — the session genuinely has no tabs, which
+    /// is exactly what a rebooted or archived session looks like. Any
+    /// OTHER query failure is an `Err`: "we could not ask" is not "there
+    /// are none", and a caller that flattened the two would publish an
+    /// empty tab strip for a session whose tabs are alive and attached.
+    /// [`crate::tmux::TmuxDriver::is_definitively_empty`] is what draws
+    /// the line, against tmux's own stderr rather than a rendered string.
+    ///
+    /// Its own tmux round trip, unlike the `ListSessions` path (which
+    /// reuses the pane-state map it already fetched for liveness), because
+    /// a single-session reply has no such map to share.
+    async fn session_tabs(&self, terminal: &Terminal) -> anyhow::Result<Vec<TabInfo>> {
+        let states = self.tmux.pane_states().await?;
+        Ok(tabs_from_pane_states(&states, &terminal.tmux_name)
+            .into_iter()
+            .map(|tab| TabInfo { id: tab.id })
+            .collect())
+    }
+
+    /// Open a terminal tab: a new tmux window on the session's tmux
+    /// session, running the user's login shell in the session's working
+    /// directory (PLAN_M4.md item 2, `ControlMsg::OpenTab`'s contract).
+    ///
+    /// ## Ordering, and what each step buys
+    ///
+    /// 1. **Resolve the session's agent terminal.** Not because a tab
+    ///    needs it, but because it is where the tmux session name lives —
+    ///    and its absence IS the restart-first refusal: a session whose
+    ///    terminals a reboot or archive erased has no tmux session to add
+    ///    a window to, and building a tab-only substrate for an agent-less
+    ///    session is not a state this system has.
+    /// 2. **Check the working directory.** The same `ensure_cwd_usable`
+    ///    precondition restart makes, so the two refusals read the same
+    ///    (M3's error shape, reused unchanged per PLAN_M4.md item 1).
+    /// 3. **Mint the id and create the window.** The id is minted BEFORE
+    ///    the window so it can go into the window's environment as the tab
+    ///    marker (`FARHELM_TAB_ID`) in the very same `new-window` — every
+    ///    process the shell ever forks then carries it, which is what
+    ///    close reaps by.
+    /// 4. **Mark the window.** This is the tab's only record (tabs are not
+    ///    durable metadata), so a failure here is a FAILED OPEN with the
+    ///    window cleaned up — the alternative is a live shell nothing can
+    ///    ever find again, list, or close.
+    /// 5. **Check the pane is alive.** SPEC.md's every-failed-operation
+    ///    rule: a shell already dead by reply time is a refused open
+    ///    carrying the pane's last words, not a successful open holding a
+    ///    corpse. A shell that starts and later exits is a different thing
+    ///    entirely and stays viewable, like any dead pane.
+    ///
+    /// Nothing here WRITES to supervisor.db or the sessions map. That is
+    /// the point: rediscovery from window markers is the honest
+    /// implementation of "tabs are not durable metadata", and a tab that
+    /// survives a supervisor restart does so by the same mechanism the
+    /// agent terminal does — tmux outliving the supervisor.
+    ///
+    /// ## Two safety properties, both structural
+    ///
+    /// It takes the session's LIFECYCLE claim, for the same reason
+    /// `StopSession` and `DeleteSession` do (see
+    /// `Supervisor::lifecycle_locks`). Without it a delete could complete
+    /// its process-tree sweep, and this could then start a shell in the
+    /// tmux session the delete is about to tear down — leaving that
+    /// shell's daemonized children alive with no row left to reap them
+    /// from. Serialized, both orders are correct: an open that wins is
+    /// swept by the delete that follows, and an open that loses finds no
+    /// session at all.
+    ///
+    /// And everything from the first side effect onward runs on a
+    /// SUPERVISOR-OWNED task. A client that disconnects mid-open cancels
+    /// the await, not the work: a cancellation between `new-window` and
+    /// the marking would otherwise strand a live, unmarked, unfindable
+    /// shell forever.
+    async fn open_tab(self: &Arc<Self>, session_id: &str) -> Result<TabInfo, RequestError> {
+        let lifecycle = self.lifecycle_locks.claim(session_id).await;
+        let entry = self.sessions.lock().await.get(session_id).cloned();
+        let Some(entry) = entry else {
+            return Err(RequestError::new(
+                ErrorKind::NotFound,
+                format!("no such session: {}", truncate_for_error(session_id)),
+            ));
+        };
+        let restart_first = || {
+            RequestError::new(
+                ErrorKind::Conflict,
+                format!(
+                    "session {} has no terminals to add a tab to (a reboot or an archive ended \
+                     them); restart the session first",
+                    truncate_for_error(session_id)
+                ),
+            )
+        };
+        let Some(agent) = entry.terminal.clone() else {
+            return Err(restart_first());
+        };
+        // The tmux session can also be gone WITHOUT the entry knowing —
+        // this process may have been serving since before an external
+        // `kill-session`, or since before the whole tmux server died. Both
+        // are the same fact for a caller ("there is no terminal substrate
+        // here") and get the same restart-first advice; a raw tmux
+        // diagnostic would be honest and useless. Anything else propagates
+        // as itself, because "we could not ask" is not "it is gone".
+        match self.tmux.has_session(&agent.tmux_name).await {
+            Ok(true) => {}
+            Ok(false) => return Err(restart_first()),
+            Err(e) if self.tmux.is_definitively_empty(&e) => return Err(restart_first()),
+            Err(e) => return Err(RequestError::new(error_kind(&e), format!("{e:#}"))),
+        }
+        ensure_cwd_usable(&entry.info.cwd)
+            .await
+            .map_err(|e| RequestError::new(error_kind(&e), format!("{e:#}")))?;
+
+        // Everything past here is destructive or owes cleanup, so it runs
+        // on a task this supervisor owns and the lifecycle claim moves
+        // into it. Awaiting the handle is itself cancellable; the work is
+        // not.
+        let sup = Arc::clone(self);
+        let session_id = session_id.to_string();
+        let cwd = entry.info.cwd.clone();
+        let task = tokio::spawn(async move {
+            let _lifecycle = lifecycle;
+            sup.open_tab_window(&session_id, &agent, &cwd).await
+        });
+        match task.await {
+            Ok(result) => result,
+            Err(join) => Err(RequestError::new(
+                ErrorKind::Internal,
+                format!("the terminal-tab open task failed: {join}"),
+            )),
+        }
+    }
+
+    /// [`Self::open_tab`]'s side-effecting half, split out so the whole of
+    /// it runs on one supervisor-owned task; see that method for the
+    /// ordering argument.
+    async fn open_tab_window(
+        &self,
+        session_id: &str,
+        agent: &Terminal,
+        cwd: &str,
+    ) -> Result<TabInfo, RequestError> {
+        let tab_id = uuid::Uuid::new_v4().to_string();
+        // The scope, decided per OPEN the way an agent's is decided per
+        // launch — and, unlike the agent's, never recorded: a tab has no
+        // durable row to record it in, so `close_tab` re-derives the same
+        // name from the same two ids and lets `exists` settle whether
+        // there is anything there.
+        let unit = crate::scope::tab_unit_name(session_id, &tab_id);
+        let scope_prefix = match unit.as_deref() {
+            Some(unit) => match self.seams.scopes.launch_prefix(unit).await {
+                Some(prefix) => prefix,
+                // Loud for the agent path's reason: the tab still opens
+                // (never worse than a host with no manager at all), but
+                // close falls back to the marker sweep, and a silent
+                // downgrade of a containment guarantee is exactly what
+                // this project does not do.
+                None => {
+                    warn!(
+                        session = %session_id, tab = %tab_id, unit,
+                        "this host's systemd user manager is not usable, so this tab opens \
+                         without a cgroup scope and its close falls back to the process-tree \
+                         sweep"
+                    );
+                    Vec::new()
+                }
+            },
+            None => Vec::new(),
+        };
+        let shell = self.launch_shell().await;
+        let mut env = self.seams.launch_env.clone();
+        // BOTH markers, and the pair is load-bearing: the session marker
+        // keeps delete and archive reaching this shell, the tab marker
+        // selects it for close. The opposite kind's marker is scrubbed by
+        // `tab_window_command`'s own `env -u`, not here, because tmux's
+        // `-e` can only set.
+        env.push((
+            crate::launch::SESSION_ID_ENV_VAR.to_string(),
+            session_id.to_string(),
+        ));
+        env.push((crate::launch::TAB_ID_ENV_VAR.to_string(), tab_id.clone()));
+        let window_cmd = crate::launch::tab_window_command(&shell, scope_prefix);
+        let (window, pane) = self
+            .tmux
+            .new_window(&agent.tmux_name, cwd, &env, &window_cmd)
+            .await
+            .map_err(|e| {
+                RequestError::new(
+                    error_kind(&e),
+                    format!("could not open a terminal tab for session {session_id}: {e:#}"),
+                )
+            })?;
+        let terminal = Terminal {
+            tmux_name: agent.tmux_name.clone(),
+            pane,
+        };
+
+        // The seam stands in for the marking itself when installed: what
+        // it exists to reach is the state AFTER this call fails — a live,
+        // unmarked, unfindable window — which no other input can produce.
+        let marked = match &self.seams.tab_open_fault {
+            Some(fault) => fault(TabOpenStage::BeforeMarking),
+            None => Ok(()),
+        };
+        let marked = match marked {
+            Ok(()) => {
+                self.tmux
+                    .mark_window(
+                        &terminal.tmux_name,
+                        &terminal.pane,
+                        TAB_WINDOW_OPTION,
+                        &tab_id,
+                    )
+                    .await
+            }
+            Err(e) => Err(e),
+        };
+        if let Err(e) = marked {
+            // An unmarked window is invisible to rediscovery, so leaving
+            // it would strand a live shell nothing can list or close.
+            return Err(self
+                .discard_failed_tab_window(
+                    session_id,
+                    &terminal,
+                    &tab_id,
+                    format!("could not mark the new terminal tab's window: {e:#}"),
+                )
+                .await);
+        }
+
+        // The dead-at-reply refusal (`ControlMsg::OpenTab`'s contract).
+        //
+        // Bounded settle rather than one instantaneous read, and the
+        // difference is the promise itself. A shell that cannot start dies
+        // in microseconds, but tmux marks the pane dead only once it has
+        // reaped the child and drained the pty — measured at 4–18 ms on an
+        // idle host (tmux 3.7b), and load only widens that. A single check
+        // fired the moment `new-window` returns therefore races tmux's own
+        // bookkeeping, and losing that race means reporting a SUCCESSFUL
+        // open holding a corpse, which is exactly what this refusal
+        // exists to prevent. "Already dead when the open would reply" is a
+        // statement about when the supervisor chooses to reply, so it
+        // chooses to reply late enough for the answer to mean something.
+        //
+        // Bounded on the other side too: a healthy open pays the whole
+        // window, so it is sized for a hand-driven operation rather than a
+        // hot path. The settle ends early the moment the pane IS dead, so
+        // the failing case stays fast.
+        match self.settled_tab_pane(&terminal).await {
+            Ok(Some(state)) if !state.dead => {}
+            Ok(state) => {
+                // Captured BEFORE the window is destroyed — it is the
+                // whole point of the refusal — and the three outcomes stay
+                // distinguishable: what the shell said, that it said
+                // nothing, and that we could not look.
+                //
+                // Only when the pane still EXISTS, though: a capture
+                // addressed at a vanished pane falls back to the session's
+                // current one (see `tmux::pane_in_session`), which would
+                // quote the agent terminal's screen into this refusal.
+                let (gone, detail) = match state {
+                    None => (" (its pane was already gone)", String::new()),
+                    Some(_) => (
+                        "",
+                        match self.tab_pane_last_words(&terminal).await {
+                            Ok(words) if !words.trim().is_empty() => {
+                                format!(": {}", words.trim())
+                            }
+                            Ok(_) => " and printed nothing".to_string(),
+                            Err(e) => format!(", and its output could not be read ({e:#})"),
+                        },
+                    ),
+                };
+                return Err(self
+                    .discard_failed_tab_window(
+                        session_id,
+                        &terminal,
+                        &tab_id,
+                        format!(
+                            "the terminal tab's shell ({shell}) was already dead when the tab \
+                             opened{gone}{detail}"
+                        ),
+                    )
+                    .await);
+            }
+            Err(e) => {
+                return Err(self
+                    .discard_failed_tab_window(
+                        session_id,
+                        &terminal,
+                        &tab_id,
+                        format!("could not confirm the new terminal tab's shell is running: {e:#}"),
+                    )
+                    .await);
+            }
+        }
+
+        info!(
+            session = %session_id, tab = %tab_id, tmux = %terminal.tmux_name, %window,
+            pane = %terminal.pane, scoped = unit.is_some(),
+            "terminal tab opened"
+        );
+        Ok(TabInfo { id: tab_id })
+    }
+
+    /// Close a terminal tab: reap its shell and everything that shell left
+    /// behind, then drop its window (`ControlMsg::CloseTab`'s contract).
+    ///
+    /// ## The ordering, and why it is not the obvious one
+    ///
+    /// Never kill-window-first (PLAN_M4.md item 2). The window's pane is
+    /// what anchors the descendant walk — a PPID closure needs a live root
+    /// — so killing it up front would orphan the walk and leave only the
+    /// weaker marker scan, which a process that scrubbed its environment
+    /// escapes. So: reap while the pane is alive, THEN drop the window,
+    /// THEN sweep once more.
+    ///
+    /// That last pass is not redundant with the first. Between them the
+    /// window dies, and `kill-window` is itself a kill — it SIGHUPs the
+    /// pane's process group — so it is the step that ends anything the
+    /// first pass had no way to reach (a tab whose pane was already dead
+    /// has no root to walk from at all, and its shell's children may only
+    /// die with the pty). The second pass is what turns `TabClosed` into
+    /// the honest statement `SessionStopped` is: the reply is sent only
+    /// once nothing of this tab is left running, with the same
+    /// no-systemd-manager blind spot `kill_process_tree` documents.
+    ///
+    /// ## The attachment goes last, and unconditionally
+    ///
+    /// Once the window is gone, any client still attached to it is
+    /// streaming a terminal that does not exist, so the detach happens
+    /// even when the second sweep fails and this reports an error. A close
+    /// that returned an error while leaving a live attachment on a dead
+    /// window would leave the user with a frozen terminal and a retry that
+    /// answers `NotFound`.
+    ///
+    /// An unknown tab id is `NotFound` (`resolve_terminal`'s answer, so
+    /// close and attach agree on what "that tab is gone" means). A tab
+    /// whose shell already exited still closes successfully — like
+    /// `StopSession`, "make sure nothing is running" already holds, and
+    /// the window is dropped either way.
+    async fn close_tab(
+        self: &Arc<Self>,
+        session_id: &str,
+        tab_id: &str,
+    ) -> Result<(), RequestError> {
+        // The session's lifecycle claim, held for the whole close — see
+        // `open_tab` for the argument, which applies symmetrically here:
+        // a close interleaved with a delete would have two sweeps and two
+        // teardowns racing over the same window. It is also what makes
+        // `Attach`'s own tab revalidation meaningful (see that handler).
+        let lifecycle = self.lifecycle_locks.claim(session_id).await;
+        let entry = self.sessions.lock().await.get(session_id).cloned();
+        let Some(entry) = entry else {
+            return Err(RequestError::new(
+                ErrorKind::NotFound,
+                format!("no such session: {}", truncate_for_error(session_id)),
+            ));
+        };
+        let terminal = resolve_terminal(self, &entry, &TerminalId::Tab(tab_id.to_string())).await?;
+
+        // Supervisor-owned, like the open: a client disconnecting between
+        // the first sweep and the window kill must not leave a half-reaped
+        // tab with no owner to finish it.
+        let sup = Arc::clone(self);
+        let session_id = session_id.to_string();
+        let tab_id = tab_id.to_string();
+        let task = tokio::spawn(async move {
+            let _lifecycle = lifecycle;
+            sup.close_tab_window(&session_id, &terminal, &tab_id).await
+        });
+        match task.await {
+            Ok(result) => result,
+            Err(join) => Err(RequestError::new(
+                ErrorKind::Internal,
+                format!("the terminal-tab close task failed: {join}"),
+            )),
+        }
+    }
+
+    /// [`Self::close_tab`]'s side-effecting half, split out so the whole
+    /// of it runs on one supervisor-owned task.
+    async fn close_tab_window(
+        &self,
+        session_id: &str,
+        terminal: &Terminal,
+        tab_id: &str,
+    ) -> Result<(), RequestError> {
+        self.reap_tab_tree(session_id, terminal, tab_id, TabReapAnchor::PaneIfLive)
+            .await
+            .map_err(|e| {
+                RequestError::new(
+                    ErrorKind::Internal,
+                    format!("closing terminal tab {}: {e:#}", truncate_for_error(tab_id)),
+                )
+            })?;
+        self.tmux
+            .kill_window(&terminal.tmux_name, &terminal.pane)
+            .await
+            .map_err(|e| {
+                RequestError::new(
+                    error_kind(&e),
+                    format!(
+                        "terminal tab {}'s processes were reaped but its window could not be \
+                         removed: {e:#}",
+                        truncate_for_error(tab_id)
+                    ),
+                )
+            })?;
+        // The re-enumeration, marker-only: the pane that would have
+        // supplied a root died with the window a moment ago, and asking
+        // tmux about a pane it no longer has would resolve to a SIBLING
+        // TAB's pane — see `reap_tab_tree`'s `anchor` docs.
+        let survivors = self
+            .reap_tab_tree(session_id, terminal, tab_id, TabReapAnchor::MarkerOnly)
+            .await;
+        // Unconditional, and before the error below: see the method docs.
+        self.detach_closed_tab(session_id, tab_id).await;
+        survivors.map_err(|e| {
+            RequestError::new(
+                ErrorKind::Internal,
+                format!(
+                    "terminal tab {}'s window is gone but survivors of its shell could not be \
+                     confirmed reaped: {e:#}",
+                    truncate_for_error(tab_id)
+                ),
+            )
+        })?;
+        info!(session = %session_id, tab = %tab_id, "terminal tab closed");
+        Ok(())
+    }
+
+    /// Tear down whatever attachment a just-closed tab still had.
+    ///
+    /// Scoped to the ONE terminal, unlike `DeleteSession`'s session-wide
+    /// sweep: closing a tab says nothing about the session's other
+    /// terminals, and the client keeps its lease on them (PLAN_M4.md item
+    /// 3 — the lease groups a session's channels, and this removes one of
+    /// them rather than dissolving the group).
+    ///
+    /// Aborts before notifying, like every other teardown here, so the
+    /// forwarder cannot race its own end-of-stream `Detached` against this
+    /// truthful one.
+    ///
+    /// This is also the ONLY thing that ends a tab's attachment while its
+    /// session lives, and that is worth knowing: a tab's forwarder holds a
+    /// control client attached to the tmux SESSION, so losing the tab's
+    /// WINDOW does not end that client the way losing the session would —
+    /// the stream simply goes quiet. Every path the product itself offers
+    /// is covered (a close comes through here; a reboot or archive takes
+    /// the whole tmux session, which does end the client). A window killed
+    /// by hand, directly against the private tmux server, is the residual:
+    /// its viewer sees a terminal that stops updating until it detaches or
+    /// reattaches. Detecting it would mean teaching the output stream
+    /// tmux's window-close notifications, which no product path needs.
+    async fn detach_closed_tab(&self, session_id: &str, tab_id: &str) {
+        let attachment = self.attachments.lock().await.remove(&AttachmentKey::new(
+            session_id,
+            TerminalId::Tab(tab_id.to_string()),
+        ));
+        // `..` drops this attachment's input client (killing its
+        // control-mode process via `kill_on_drop`) and its pause sender.
+        let Some(ActiveAttach {
+            channel,
+            notify,
+            forwarder,
+            ..
+        }) = attachment
+        else {
+            return;
+        };
+        forwarder.abort();
+        let _ = forwarder.await;
+        notify_detached(&notify, channel, "terminal tab closed".to_string());
+    }
+
+    /// Tear down a window an `OpenTab` decided not to keep, and turn
+    /// `because` into the error that open reports.
+    ///
+    /// Reaps before killing the window, for the same reason `close_tab`
+    /// does (the live pane anchors the descendant walk) — and it is not
+    /// merely symmetry: the failure that brings us here can be the MARKING
+    /// step, by which point the shell has been running for a round trip
+    /// and may already have forked.
+    ///
+    /// Cleanup failures are AGGREGATED INTO the returned error rather than
+    /// logged past it. The open has failed either way, but "the tab was
+    /// removed again" and "a shell you cannot see is still running" are
+    /// very different things to tell a user, and the second one has to
+    /// name the tab id — it is the only handle left for cleaning it up by
+    /// hand, since an unmarked or unlisted window is exactly what
+    /// rediscovery cannot see.
+    async fn discard_failed_tab_window(
+        &self,
+        session_id: &str,
+        terminal: &Terminal,
+        tab_id: &str,
+        because: String,
+    ) -> RequestError {
+        let mut left_behind: Vec<String> = Vec::new();
+        if let Err(e) = self
+            .reap_tab_tree(session_id, terminal, tab_id, TabReapAnchor::PaneIfLive)
+            .await
+        {
+            left_behind.push(format!("its processes ({e:#})"));
+        }
+        if let Err(e) = self
+            .tmux
+            .kill_window(&terminal.tmux_name, &terminal.pane)
+            .await
+        {
+            left_behind.push(format!("its window ({e:#})"));
+        }
+        if left_behind.is_empty() {
+            return RequestError::new(
+                ErrorKind::Internal,
+                format!("{because}, so the tab was removed again"),
+            );
+        }
+        warn!(
+            session = %session_id, tab = %tab_id, pane = %terminal.pane,
+            "a failed terminal-tab open could not be fully unwound"
+        );
+        RequestError::new(
+            ErrorKind::Internal,
+            format!(
+                "{because}, and it could not be cleaned up: {} of terminal tab {} may still \
+                 exist (pane {})",
+                left_behind.join(" and "),
+                truncate_for_error(tab_id),
+                terminal.pane
+            ),
+        )
+    }
+
+    /// Watch a freshly-created tab pane until it is either confirmed dead
+    /// or has survived [`TAB_LAUNCH_SETTLE`] — see the `OpenTab` handler's
+    /// own comment for why the open waits at all.
+    ///
+    /// Returns the LAST observation, so the caller's `None`/`dead`
+    /// branches read exactly as they would from a bare `pane_process`
+    /// call. A query error ends the settle immediately: an open that
+    /// cannot ask tmux anything must not spend the whole window
+    /// re-asking, and the caller refuses on it either way.
+    async fn settled_tab_pane(
+        &self,
+        terminal: &Terminal,
+    ) -> anyhow::Result<Option<crate::tmux::PaneProcess>> {
+        let deadline = tokio::time::Instant::now() + TAB_LAUNCH_SETTLE;
+        loop {
+            let observed = self
+                .tmux
+                .pane_process(&terminal.tmux_name, &terminal.pane)
+                .await?;
+            let alive = observed.is_some_and(|state| !state.dead);
+            if !alive || tokio::time::Instant::now() >= deadline {
+                return Ok(observed);
+            }
+            tokio::time::sleep(TAB_LAUNCH_SETTLE_STEP).await;
+        }
+    }
+
+    /// The last thing a failed tab shell printed, for the refused open's
+    /// error detail.
+    ///
+    /// Thin over [`crate::tmux::TmuxDriver::capture_pane_text`], which
+    /// does the work worth knowing about: it reads SCROLLBACK rather than
+    /// the visible grid (a dead pane's grid is replaced by tmux's own
+    /// "Pane is dead" banner, which would restate the exit code and lose
+    /// the shell's actual complaint), keeps the TAIL when the text is over
+    /// cap, and pairs the pane with its session so a stale pane id cannot
+    /// quote a stranger's terminal into this session's error.
+    ///
+    /// The `Err` is passed through rather than flattened into an empty
+    /// capture, because the refusal distinguishes all three outcomes: what
+    /// the shell said, that it said nothing, and that we could not look.
+    /// A cap far below the snapshot cap, because this ends up inside a
+    /// protocol error message rather than a replay frame.
+    async fn tab_pane_last_words(&self, terminal: &Terminal) -> anyhow::Result<String> {
+        const MAX_LAST_WORDS: usize = 4 * 1024;
+        self.tmux
+            .capture_pane_text(&terminal.tmux_name, &terminal.pane, MAX_LAST_WORDS)
+            .await
+            .inspect_err(|e| {
+                debug!(
+                    pane = %terminal.pane, error = %format!("{e:#}"),
+                    "could not capture a failed tab pane's output for the refusal's detail"
+                );
+            })
+    }
+
+    /// Reap one tab's process tree: its own cgroup scope where one exists,
+    /// then the marker sweep keyed on that tab's marker.
+    ///
+    /// Shared by `close_tab` and by the failed-open unwind so both reap
+    /// identically. The pane's own pid is looked up here rather than
+    /// passed in, and the three answers are NOT the same: a live pane is
+    /// the PPID closure's root, a CONFIRMED-absent or dead pane means
+    /// there is no root to walk from (a dead pane's remembered pid may
+    /// already be recycled), and a pane query that FAILED propagates —
+    /// falling back to the marker scan there would let a close report
+    /// success having quietly swept less than it claims.
+    ///
+    /// `anchor` says whether to look the pane up at all, and the caller
+    /// that says `MarkerOnly` is not being lazy: after `kill-window` the
+    /// pane is gone BY CONSTRUCTION, and asking tmux about it again is not
+    /// merely pointless but unsafe — a `=session:.%pane` target for a
+    /// vanished pane falls back to the session's CURRENT pane (audited;
+    /// see `tmux::pane_in_session`), so the second sweep would anchor its
+    /// descendant walk on a SIBLING TAB and reap it. That is not
+    /// hypothetical: it is the bug this parameter exists to make
+    /// unexpressible.
+    ///
+    /// The scope unit is DERIVED (see `scope::tab_unit_name`), never
+    /// stored, and it is derived even when this supervisor's own
+    /// availability probe says there is no user manager: the scope may
+    /// predate this supervisor, or the probe may have run while the
+    /// manager was briefly unreachable, and `kill_scope`'s own existence
+    /// check is what settles whether there is anything there. Naming a
+    /// unit that does not exist costs one query; skipping one that does
+    /// costs the containment guarantee.
+    async fn reap_tab_tree(
+        &self,
+        session_id: &str,
+        terminal: &Terminal,
+        tab_id: &str,
+        anchor: TabReapAnchor,
+    ) -> anyhow::Result<()> {
+        let root_pid = match anchor {
+            TabReapAnchor::PaneIfLive => self
+                .tmux
+                .pane_process(&terminal.tmux_name, &terminal.pane)
+                .await
+                .context("reading a terminal tab's pane process before reaping it")?
+                .filter(|state| !state.dead)
+                .map(|state| state.pid),
+            TabReapAnchor::MarkerOnly => None,
+        };
+        let units: Vec<String> = crate::scope::tab_unit_name(session_id, tab_id)
+            .into_iter()
+            .collect();
+        // `session_id` is carried purely for the log lines inside the
+        // sweep; `SweepTarget::Tab` is what actually selects processes
+        // here, by the session marker AND this tab's own id.
+        reap_process_tree(
+            &self.seams.scopes,
+            &units,
+            root_pid,
+            session_id,
+            &SweepTarget::Tab(tab_id.to_string()),
+        )
+        .await
     }
 
     /// Whether a launch of `id` may run in its own cgroup scope
@@ -7277,7 +8545,7 @@ impl Supervisor {
             ));
         }
 
-        let shell = resolve_shell().await;
+        let shell = self.launch_shell().await;
         // The scope wrapper, or nothing at all. Note the asymmetry with the
         // rest of this function: `scope` is DECIDED and RECORDED durably by
         // the caller, before the launching row commits, and only consumed
@@ -7325,11 +8593,41 @@ impl Supervisor {
                 .map_err(|e| e.context("creating the session's tmux session")),
         };
         match started {
-            Ok(pane) => Ok(Spawned {
-                pane,
-                spec_path,
-                status_path,
-            }),
+            Ok(pane) => {
+                // Mark the agent's window (PLAN_M4.md item 2). Only on the
+                // fresh-session path: a REUSED pane's window was marked
+                // when its session was created, and `respawn-pane` keeps
+                // the window (and so its options) intact.
+                //
+                // After the launch rather than before it, because the
+                // window does not exist until then — and FATAL, not best
+                // effort. The marker is what a pane-less reload uses to
+                // tell this session's agent window from its tabs
+                // (`agent_pane_from_states`), so an unmarked agent window
+                // is a session that can later recover onto a tab's pane
+                // and reap it. `SpawnFailure::Tmux` is the right shape for
+                // it too: the tmux session genuinely exists at this point,
+                // which is exactly what that variant's unwind expects.
+                if reuse.is_none()
+                    && let Err(error) = self
+                        .tmux
+                        .mark_window(tmux_name, &pane, AGENT_WINDOW_OPTION, id)
+                        .await
+                {
+                    return Err(SpawnFailure::Tmux {
+                        spec_path,
+                        error: error.context(
+                            "marking the session's agent window, without which a later reload \
+                             could not tell it apart from a terminal tab",
+                        ),
+                    });
+                }
+                Ok(Spawned {
+                    pane,
+                    spec_path,
+                    status_path,
+                })
+            }
             Err(error) => Err(SpawnFailure::Tmux { spec_path, error }),
         }
     }
@@ -9001,10 +10299,6 @@ struct Forwarder {
     /// other terminals, and reconstructing the key from the session id
     /// alone could no longer say which one stalled.
     terminal: TerminalId,
-    /// The tmux pane id, needed by the catch-up replay — the forwarder
-    /// cannot go look it up, since consulting `Supervisor::sessions`
-    /// would break the no-locks rule above.
-    pane: String,
     channel: u32,
     tx: mpsc::Sender<Frame>,
     stream: OutputStream,
@@ -9287,7 +10581,7 @@ impl Forwarder {
             session = %self.session_id,
             "tmux paused the pane for this client; catching up by reset and replay"
         );
-        let (modes, content) = match self.stream.resume_paused_with_replay(&self.pane).await {
+        let (modes, content) = match self.stream.resume_paused_with_replay().await {
             Ok(replay) => replay,
             Err(e) => return Err(ForwarderEnd::StreamFailed(format!("{e:#}"))),
         };
@@ -9916,6 +11210,23 @@ async fn handle_control(
                         // `Resume`, and the value frozen at create or
                         // reload would go stale the moment it did.
                         info.restart_offer = session_restart_offer(entry);
+                        // Tabs likewise, and for a stronger reason: they
+                        // are not stored anywhere at all
+                        // (`SessionInfo::tabs`), so this rediscovery from
+                        // the pane-state map this pass already fetched IS
+                        // the tab list. A terminal-less entry has no tmux
+                        // session and therefore no tabs, which the empty
+                        // default states honestly.
+                        info.tabs = entry
+                            .terminal
+                            .as_ref()
+                            .map(|terminal| {
+                                tabs_from_pane_states(&pane_states, &terminal.tmux_name)
+                                    .into_iter()
+                                    .map(|tab| TabInfo { id: tab.id })
+                                    .collect()
+                            })
+                            .unwrap_or_default();
                         if let Some(detail) = sentinel_hits.get(&entry.info.id) {
                             info.status = SessionStatus::Error {
                                 detail: detail.clone(),
@@ -10222,11 +11533,16 @@ async fn handle_control(
                     // that can still find one. The scope in particular
                     // outlives the agent for exactly as long as something
                     // it spawned does, which is the case at hand.
+                    //
+                    // `AgentOnly` like the live-agent path above: this is
+                    // still a stop, and stop leaves tabs running whether
+                    // or not the agent was alive to begin with.
                     if let Err(e) = reap_process_tree(
                         &sup.seams.scopes,
-                        entry.scope.as_deref(),
+                        entry.scope.as_slice(),
                         None,
                         &session_id,
+                        &SweepTarget::AgentOnly,
                     )
                     .await
                     {
@@ -10351,11 +11667,102 @@ async fn handle_control(
                     },
                     None => None,
                 };
+                // `WholeSession`: delete is the one lifecycle operation
+                // that takes tabs down with the agent (SPEC.md — stop
+                // leaves them running, delete and archive do not), so this
+                // sweep deliberately does NOT subtract tab processes. It
+                // needs no per-tab PPID root either: a tab's shell carries
+                // the session marker like everything else the session
+                // launched, and the marker scan finds it wherever it is.
+                // (Rediscovery below only needs the tab's WINDOW, which
+                // survives whether or not its shell already exited —
+                // `remain-on-exit` keeps a dead pane's window listed — so
+                // "the tmux teardown has not run yet" is what matters
+                // here, not that any pane is still alive.)
+                //
+                // Every tab's SCOPE, however, does have to be named: a
+                // cgroup kill can only reach what its own `systemd-run`
+                // placed there, so the agent's unit alone would leave a
+                // tab's environment-scrubbing double-fork behind — the one
+                // shape the marker sweep provably cannot find.
+                //
+                // Named from TWO independent sources, and the second is
+                // the load-bearing one. Rediscovering tabs from tmux
+                // covers the ordinary case, but the case that matters here
+                // is a tmux server that died BEFORE the delete: there are
+                // no windows left to read tab ids from, while a scrubbed
+                // tab daemon is still running inside a cgroup that
+                // outlived its pane. So the manager is also asked directly
+                // for every unit matching this session's tab glob, which
+                // needs no tmux at all. A failure to ENUMERATE fails the
+                // delete outright, row retained: publishing "deleted" over
+                // an unenumerated cgroup is exactly the unreapable,
+                // invisible agent lore/2026-07-27-m2-process-tree-stop.md
+                // ends on.
+                let mut units = entry.scope.clone().into_iter().collect::<Vec<_>>();
+                if let Some(terminal) = entry.terminal.as_ref() {
+                    match sup.session_tabs(terminal).await {
+                        Ok(tabs) => units.extend(
+                            tabs.iter()
+                                .filter_map(|tab| {
+                                    crate::scope::tab_unit_name(&session_id, &tab.id)
+                                }),
+                        ),
+                        // Strict: "we could not ask tmux" is not "there
+                        // are no tabs", and a delete that assumed the
+                        // latter would skip live tab scopes.
+                        Err(e) => {
+                            send_reply(
+                                &tx,
+                                &ControlMsg::Error {
+                                    req_id,
+                                    message: format!(
+                                        "could not determine this session's terminal tabs, so                                          nothing was deleted: {e:#}"
+                                    ),
+                                    kind: ErrorKind::Internal,
+                                },
+                            )
+                            .await;
+                            return;
+                        }
+                    }
+                }
+                if let Some(glob) = crate::scope::tab_unit_glob(&session_id) {
+                    match sup.seams.scopes.units_matching(&glob).await {
+                        Ok(found) => units.extend(found),
+                        // Only a host with a usable manager can be asked at
+                        // all; where there is none this is not a failure,
+                        // it is the sweep-only world M2 already lived in.
+                        Err(e) if !sup.seams.scopes.available().await => debug!(
+                            session = %session_id, error = %format!("{e:#}"),
+                            "no systemd user manager to enumerate this session's tab scopes;                              the process-tree sweep is the whole mechanism"
+                        ),
+                        Err(e) => {
+                            send_reply(
+                                &tx,
+                                &ControlMsg::Error {
+                                    req_id,
+                                    message: format!(
+                                        "this host has a systemd user manager but its terminal-\
+                                         tab scopes could not be enumerated, so nothing was \
+                                         deleted: {e:#}"
+                                    ),
+                                    kind: ErrorKind::Internal,
+                                },
+                            )
+                            .await;
+                            return;
+                        }
+                    }
+                }
+                units.sort();
+                units.dedup();
                 if let Err(e) = reap_process_tree(
                     &sup.seams.scopes,
-                    entry.scope.as_deref(),
+                    &units,
                     root_pid,
                     &session_id,
+                    &SweepTarget::WholeSession,
                 )
                 .await
                 {
@@ -10545,6 +11952,24 @@ async fn handle_control(
                 .await;
                 return;
             }
+            let terminal_id = TerminalId::from(selector);
+            // A TAB attach holds the session's lifecycle claim across its
+            // resolution and its takeover; an AGENT attach does not.
+            //
+            // The asymmetry is deliberate. A tab is a window another
+            // client can CLOSE, so between resolving it and displacing the
+            // incumbent it can stop existing — and a refused attach must
+            // be side-effect-free even when the close wins the race, which
+            // it cannot be if the terminal was resolved outside any claim.
+            // Holding it is what makes `close_tab`'s own claim mean
+            // something from this side. The agent terminal has no such
+            // race (nothing removes it while its session lives), and
+            // taking the claim for it would queue every ordinary attach
+            // behind a multi-second stop or delete for no gain.
+            let _lifecycle = match &terminal_id {
+                TerminalId::Tab(_) => Some(sup.lifecycle_locks.claim(&session_id).await),
+                TerminalId::Agent => None,
+            };
             let entry = sup.sessions.lock().await.get(&session_id).cloned();
             let Some(entry) = entry else {
                 send_reply(
@@ -10565,9 +11990,10 @@ async fn handle_control(
             // Resolved BEFORE the takeover below, deliberately: an attach
             // that cannot be honored must take nothing over, so naming a
             // terminal that does not exist can never cost this session's
-            // current client its attachments.
-            let terminal_id = TerminalId::from(selector);
-            let terminal = match resolve_terminal(&entry, &terminal_id) {
+            // current client its attachments. Also resolved before the
+            // `attachments` lock is taken, because resolving a tab is a
+            // tmux subprocess and that mutex is supervisor-wide.
+            let terminal = match resolve_terminal(sup, &entry, &terminal_id).await {
                 Ok(terminal) => terminal,
                 Err(e) => {
                     send_reply(
@@ -10729,7 +12155,7 @@ async fn handle_control(
             // nobody is using.
             if let Err(e) = sup
                 .tmux
-                .resize_window(&terminal.tmux_name, cols, rows)
+                .resize_window(&terminal.tmux_name, &terminal.pane, cols, rows)
                 .await
             {
                 warn!(session = %session_id, error = %e, "resize during attach failed");
@@ -10755,11 +12181,11 @@ async fn handle_control(
             // viewer pause another terminal's stream (PLAN_M4.md item 3).
             // The overlap hazard above is per TERMINAL too — it is about
             // two clients streaming one pane, not about a session having
-            // several. Note for the tabs PR: this stream is opened
-            // against the tmux SESSION, whose control client sees output
-            // from panes beyond the one being replayed, so serving a
-            // second terminal will mean targeting the window (or
-            // filtering by pane) rather than reusing this call as-is.
+            // several. The stream is opened against the tmux SESSION,
+            // because that is the only thing a control client can attach
+            // to; it therefore hears every window's panes and filters down
+            // to this one by pane id (see `tmux::OutputStream`), which is
+            // what keeps a tab's output out of the agent's terminal.
             let (modes, prefill, stream) = match sup
                 .tmux
                 .open_replay_stream(&terminal.tmux_name, &terminal.pane)
@@ -10783,7 +12209,11 @@ async fn handle_control(
             // stdin. A failure here must tear down the replay stream just
             // opened above: leaving it live would attach this session to
             // a client nothing will ever read from or write to again.
-            let input = match sup.tmux.open_input_client(&terminal.pane).await {
+            let input = match sup
+                .tmux
+                .open_input_client(&terminal.tmux_name, &terminal.pane)
+                .await
+            {
                 Ok(input) => input,
                 Err(e) => {
                     drop(attachments);
@@ -10826,7 +12256,6 @@ async fn handle_control(
                 sup: Arc::clone(sup),
                 session_id: session_id.clone(),
                 terminal: key.terminal.clone(),
-                pane: terminal.pane.clone(),
                 channel,
                 tx: tx.clone(),
                 stream,
@@ -10928,28 +12357,55 @@ async fn handle_control(
             // and the kicked client's already-authorized resize would
             // land after the winner's attach-time resize, reflowing the
             // winner's terminal with nothing to correct it.
+            // Resolved BEFORE the lock, never under it. Resolving a TAB is
+            // a tmux subprocess, and `attachments` is a supervisor-wide
+            // mutex that every session's attach, input and resize queues
+            // behind — running a subprocess inside it would serialize the
+            // whole supervisor on one client's drag. The ownership check
+            // that follows is what makes resolving early safe: a
+            // resolution that went stale by the time the lock is held
+            // simply does not act.
+            //
+            // Re-resolved rather than remembered, and no longer
+            // infallible: a TAB is a tmux window that another client can
+            // close while this one still holds an attachment to it, so
+            // "the terminal this channel names" can genuinely stop
+            // existing between attach and resize. Reflowing nothing is
+            // the right answer then — the forwarder is already on its way
+            // to detaching this channel — and it is the same
+            // fire-and-forget silence a resize gets for any other reason
+            // it cannot land.
+            let terminal = match resolve_terminal(sup, &route.entry, &route.key.terminal).await {
+                Ok(terminal) => terminal,
+                Err(e) => {
+                    debug!(
+                        session = %session_id, channel,
+                        reason = %e.message,
+                        "ignoring a resize for a terminal that no longer resolves"
+                    );
+                    return;
+                }
+            };
             let attachments = sup.attachments.lock().await;
             let owns = attachments
                 .get(&route.key)
                 .is_some_and(|a| a.channel == channel && a.notify.same_channel(tx));
             if owns {
-                // The route's entry is the one the attach resolved
-                // against, and it is still the live one: a restart
-                // replaces the entry AND detaches the agent terminal, so
-                // an attachment that is still ours means no restart has
-                // landed since. `SessionEntry` is immutable once
-                // published, so this cannot fail — an attachment is only
-                // ever registered for a terminal that resolved.
-                let terminal = resolve_terminal(&route.entry, &route.key.terminal).expect(
-                    "attachments are only ever registered for terminals that resolve — \
-                     see the Attach handler",
-                );
                 // Fire-and-forget: a resize has no req_id to answer,
                 // and a tmux failure here must not take the
                 // connection (and every other session on it) down.
+                //
+                // Targeted at the terminal's own WINDOW (through its
+                // pane), never at the session: with tabs, a bare session
+                // target names whichever window tmux last made current,
+                // so a client resizing its agent view could reflow
+                // somebody's tab (PLAN_M4.md item 3: resize goes per
+                // window). The pane is paired with its session in the
+                // target, so even a resolution that went stale in an
+                // unexpected way cannot reach another session's window.
                 if let Err(e) = sup
                     .tmux
-                    .resize_window(&terminal.tmux_name, cols, rows)
+                    .resize_window(&terminal.tmux_name, &terminal.pane, cols, rows)
                     .await
                 {
                     warn!(session = %session_id, error = %e, "resize failed");
@@ -10994,6 +12450,62 @@ async fn handle_control(
                                 req_id,
                                 message: format!("{e:#}"),
                                 kind: error_kind(&e),
+                            },
+                        )
+                        .await;
+                    }
+                }
+            })
+            .await;
+        }
+        ControlMsg::OpenTab { req_id, session_id } => {
+            // Spawned for the same reason the other slow handlers are: an
+            // open is a handful of tmux round trips plus a liveness probe,
+            // and awaiting it inline would stall every other request on
+            // this connection. It touches neither `input_routes` (which is
+            // connection-local) nor `attachments`.
+            let sup2 = Arc::clone(sup);
+            let tx = tx.clone();
+            spawn_admitted(&sup.admission, tasks, async move {
+                let sup = sup2;
+                match sup.open_tab(&session_id).await {
+                    Ok(tab) => send_reply(&tx, &ControlMsg::TabOpened { req_id, tab }).await,
+                    Err(e) => {
+                        send_reply(
+                            &tx,
+                            &ControlMsg::Error {
+                                req_id,
+                                message: e.message,
+                                kind: e.kind,
+                            },
+                        )
+                        .await;
+                    }
+                }
+            })
+            .await;
+        }
+        ControlMsg::CloseTab {
+            req_id,
+            session_id,
+            tab_id,
+        } => {
+            // Spawned like `StopSession`, and for the identical reason:
+            // closing a tab runs the same multi-second process-tree
+            // escalation on that tab's own tree.
+            let sup2 = Arc::clone(sup);
+            let tx = tx.clone();
+            spawn_admitted(&sup.admission, tasks, async move {
+                let sup = sup2;
+                match sup.close_tab(&session_id, &tab_id).await {
+                    Ok(()) => send_reply(&tx, &ControlMsg::TabClosed { req_id }).await,
+                    Err(e) => {
+                        send_reply(
+                            &tx,
+                            &ControlMsg::Error {
+                                req_id,
+                                message: e.message,
+                                kind: e.kind,
                             },
                         )
                         .await;
@@ -11641,49 +13153,236 @@ mod tests {
         assert!(read_boot_id_from(&as_dir).is_err());
     }
 
-    /// The environment-marker matcher's whole job: match a complete,
-    /// exact `FARHELM_SESSION_ID=<id>` entry and nothing looser. A
-    /// substring match would misfire on a session whose id is a prefix of
-    /// another's, or on an unrelated variable that happens to embed the
-    /// marker text — either would make `kill_process_tree` reap or spare
-    /// the wrong session's processes. Constructed byte buffers, not a
-    /// real process, since `environ_contains_marker` is factored exactly
-    /// so this needs neither.
+    /// The environment-marker scanner's whole job: match COMPLETE, exact
+    /// NUL-delimited entries and nothing looser.
+    ///
+    /// A substring match would misfire on a session whose id is a prefix
+    /// of another's, or on an unrelated variable that happens to embed
+    /// the marker text — either would make `kill_process_tree` reap or
+    /// spare the wrong session's processes. Constructed byte buffers, not
+    /// a real process, since `environ_markers` is factored exactly so
+    /// this needs neither.
     #[test]
-    fn environ_marker_matches_exact_entries_only() {
-        let session_id = "abc-123";
+    fn environ_markers_match_exact_entries_only() {
+        let session = "abc-123";
+        let read = |environ: &[u8]| environ_markers(environ, session, None);
 
-        // Exact match, alone or alongside unrelated entries.
-        assert!(environ_contains_marker(
-            b"FARHELM_SESSION_ID=abc-123\0",
-            session_id
-        ));
         let mut buf = b"PATH=/bin\0".to_vec();
         buf.extend_from_slice(b"FARHELM_SESSION_ID=abc-123\0");
         buf.extend_from_slice(b"HOME=/root\0");
-        assert!(environ_contains_marker(&buf, session_id));
+        assert!(read(&buf).session);
 
         // A value merely PREFIXED by the id ("abc-123" is a proper prefix
         // of "abc-1234", a DIFFERENT session) must not match.
-        assert!(!environ_contains_marker(
-            b"FARHELM_SESSION_ID=abc-1234\0",
-            session_id
-        ));
+        assert!(!read(b"FARHELM_SESSION_ID=abc-1234\0").session);
         // A different variable that merely embeds the marker text must
         // not match — only a complete NUL-delimited entry counts.
-        assert!(!environ_contains_marker(
-            b"OTHER_VAR=FARHELM_SESSION_ID=abc-123\0",
-            session_id
-        ));
-        assert!(!environ_contains_marker(
-            b"FARHELM_SESSION_ID_ALT=abc-123\0",
-            session_id
-        ));
-        // No marker at all.
-        assert!(!environ_contains_marker(
-            b"PATH=/bin\0HOME=/root\0",
-            session_id
-        ));
+        assert!(!read(b"OTHER_VAR=FARHELM_SESSION_ID=abc-123\0").session);
+        // A variable merely PREFIXED with a marker's NAME is not that
+        // marker, which is why the "any" forms require the `=` too.
+        assert!(!read(b"FARHELM_SESSION_ID_ALT=abc-123\0").session);
+        assert!(!read(b"FARHELM_AGENT_ID_ALT=abc-123\0").any_agent);
+        assert!(!read(b"FARHELM_TAB_ID_ALT=abc-123\0").any_tab);
+        // No markers at all.
+        assert_eq!(read(b"PATH=/bin\0HOME=/root\0"), EnvironMarkers::default());
+    }
+
+    /// The two "any" flags answer a different question from their exact
+    /// siblings — not "is this ours" but "has something already claimed
+    /// this process for a kind of terminal" — and that difference is what
+    /// keeps the legacy bucket from swallowing another session's agent.
+    ///
+    /// The tab flag additionally demands a COMPLETE minted-shaped value:
+    /// an empty or malformed `FARHELM_TAB_ID` is not a claim, or anything
+    /// that exported the name could shield itself from a stop.
+    #[test]
+    fn the_any_marker_flags_require_a_real_claim() {
+        let session = "abc-123";
+        let tab = "9c3d5a71-0000-4000-8000-0000000000ff";
+
+        let other_agent = environ_markers(b"FARHELM_AGENT_ID=other-session\0", session, None);
+        assert!(
+            other_agent.any_agent,
+            "another session's agent marker is still a claim"
+        );
+        assert!(!other_agent.agent, "but it is not THIS session's");
+
+        assert!(!environ_markers(b"FARHELM_AGENT_ID=\0", session, None).any_agent);
+        assert!(!environ_markers(b"FARHELM_TAB_ID=\0", session, None).any_tab);
+        assert!(
+            !environ_markers(b"FARHELM_TAB_ID=not-a-uuid\0", session, None).any_tab,
+            "a malformed tab value is not a claim either"
+        );
+
+        let real_tab = format!("FARHELM_TAB_ID={tab}\0");
+        assert!(environ_markers(real_tab.as_bytes(), session, None).any_tab);
+        // The EXACT tab flag only lights for the tab actually being swept.
+        assert!(environ_markers(real_tab.as_bytes(), session, Some(tab)).tab);
+        assert!(!environ_markers(real_tab.as_bytes(), session, Some("other-tab")).tab);
+    }
+
+    /// The three sweeps' selection rules, pinned as a table so the split
+    /// reads as one decision rather than three scattered matches.
+    ///
+    /// Every row starts from the SESSION marker, which every variant
+    /// requires: that is what keeps one session's sweep from ever reaching
+    /// another session's processes however their other markers read.
+    #[test]
+    fn each_sweep_target_claims_exactly_what_its_operation_promises() {
+        let markers = |agent: bool, any_agent: bool, any_tab: bool, tab: bool| EnvironMarkers {
+            session: true,
+            agent,
+            any_agent,
+            any_tab,
+            tab,
+        };
+        let agent_launch = markers(true, true, false, false);
+        let tab_launch = markers(false, false, true, true);
+        let other_tab = markers(false, false, true, false);
+        // A daemon left by a session launched before either kind marker
+        // existed: session-marked and nothing else.
+        let legacy = markers(false, false, false, false);
+        // An INNER agent launched by a supervisor running inside somebody
+        // else's tab, if the launch scrub ever regressed: it carries its
+        // own agent marker AND an ambient outer tab marker.
+        let inner_agent_with_ambient_tab = markers(true, true, true, false);
+
+        let stop = SweepTarget::AgentOnly;
+        assert!(stop.claims(&agent_launch));
+        assert!(
+            stop.claims(&legacy),
+            "a pre-marker daemon must stay reachable, or stop silently weakens on upgrade"
+        );
+        assert!(
+            !stop.claims(&tab_launch) && !stop.claims(&other_tab),
+            "SPEC.md: stopping the agent leaves the session's tabs running"
+        );
+        assert!(
+            stop.claims(&inner_agent_with_ambient_tab),
+            "a positive agent marker outranks an ambient tab marker — the dogfooding hole \
+             exclusion-only selection left open"
+        );
+
+        let delete = SweepTarget::WholeSession;
+        assert!(delete.claims(&agent_launch) && delete.claims(&tab_launch));
+        assert!(delete.claims(&legacy));
+
+        let close = SweepTarget::Tab("9c3d5a71-0000-4000-8000-0000000000ff".to_string());
+        assert_eq!(
+            close.selects_tab(),
+            Some("9c3d5a71-0000-4000-8000-0000000000ff")
+        );
+        assert!(close.claims(&tab_launch));
+        assert!(
+            !close.claims(&other_tab) && !close.claims(&agent_launch) && !close.claims(&legacy),
+            "closing one tab reaches that tab and nothing else"
+        );
+
+        // And nothing at all without the session marker, whatever else is
+        // set — the cross-session boundary.
+        let foreign = EnvironMarkers {
+            session: false,
+            agent: true,
+            any_agent: true,
+            any_tab: true,
+            tab: true,
+        };
+        for target in [stop, delete, close] {
+            assert!(
+                !target.claims(&foreign),
+                "{target:?} claimed a process carrying no session marker"
+            );
+        }
+    }
+
+    /// A pane-state map is a whole tmux SERVER's worth of panes, and this
+    /// is what turns it back into ONE session's tab strip. Every filter
+    /// here closes a way a window could be misreported as a tab, and the
+    /// ORDER is the `SessionInfo::tabs` contract clients derive their
+    /// positional labels from.
+    ///
+    /// The `@10`-before-`@9` case is the one a plain string sort gets
+    /// wrong, and it would not show up until a user opened a tenth window
+    /// — at which point the whole strip would silently relabel itself.
+    #[test]
+    fn tabs_are_rediscovered_in_window_creation_order_and_nothing_else_qualifies() {
+        const AGENT_SESSION: &str = "2b1f0e4c-0000-4000-8000-000000000001";
+        let tab = |n: u8| format!("9c3d5a71-0000-4000-8000-0000000000{n:02x}");
+        let state = |session: &str, pane: &str, window: &str, tab: Option<String>| {
+            let base = PaneState::for_test(session, pane, window);
+            match tab {
+                Some(tab) => base.with_tab(&tab),
+                None => base,
+            }
+        };
+        let states = HashMap::from([
+            // The agent's own window: marked as the agent, never as a tab.
+            (
+                "%0".to_string(),
+                state("fh-mine", "%0", "@0", None).with_agent(AGENT_SESSION),
+            ),
+            ("%1".to_string(), state("fh-mine", "%1", "@9", Some(tab(9)))),
+            (
+                "%2".to_string(),
+                state("fh-mine", "%2", "@10", Some(tab(10))),
+            ),
+            // A window a pane process conjured on the private server: no
+            // marker, so not a tab (the reason discovery is not positional).
+            ("%3".to_string(), state("fh-mine", "%3", "@11", None)),
+            // Another session's tab, on the same server.
+            (
+                "%4".to_string(),
+                state("fh-other", "%4", "@12", Some(tab(12))),
+            ),
+            // A window carrying BOTH markers: the agent's window is never
+            // adopted as a tab, whatever else was written on it.
+            (
+                "%5".to_string(),
+                state("fh-mine", "%5", "@13", Some(tab(13))).with_agent(AGENT_SESSION),
+            ),
+        ]);
+
+        let tabs = tabs_from_pane_states(&states, "fh-mine");
+        assert_eq!(
+            tabs.iter().map(|t| t.id.clone()).collect::<Vec<_>>(),
+            vec![tab(9), tab(10)],
+            "creation order comes from the window id's NUMERIC part, so @9 precedes @10"
+        );
+        assert_eq!(tabs[0].pane, "%1");
+        assert_eq!(tabs[1].pane, "%2");
+        assert!(
+            tabs_from_pane_states(&states, "fh-nobody").is_empty(),
+            "a session with no windows on this server has no tabs"
+        );
+    }
+
+    /// A tab window someone split into two panes must still be ONE tab.
+    ///
+    /// Splitting is not something farhelm does, but nothing stops a pane's
+    /// own processes from doing it on the private server — and reporting
+    /// the same tab twice would hand a client two strip entries claiming
+    /// one id, both of which it would then try to attach. The lowest pane
+    /// is chosen so the answer is stable across repeated rediscovery
+    /// rather than dependent on hash-map iteration order.
+    #[test]
+    fn a_tab_window_holding_several_panes_is_reported_once_by_its_lowest_pane() {
+        let tab_id = "9c3d5a71-0000-4000-8000-0000000000ff".to_string();
+        let state = |pane: &str| {
+            (
+                pane.to_string(),
+                PaneState::for_test("fh-mine", pane, "@3").with_tab(&tab_id),
+            )
+        };
+        // `%9` is deliberately present alongside `%10`: string ordering
+        // would pick `%10`, and the pane the tab resolves to must not
+        // depend on how many panes happen to have been created first.
+        let states = HashMap::from([state("%9"), state("%10"), state("%11")]);
+        let tabs = tabs_from_pane_states(&states, "fh-mine");
+        assert_eq!(tabs.len(), 1, "one window is one tab: {tabs:?}");
+        assert_eq!(
+            tabs[0].pane, "%9",
+            "the lowest pane is chosen NUMERICALLY: %9 precedes %10"
+        );
     }
 
     /// Spawn a process carrying `FARHELM_SESSION_ID=<id>`, returning its
@@ -11766,9 +13465,15 @@ mod tests {
         let scopes = crate::scope::ScopeManager::fake_vanishing(2, sink);
 
         let unit = crate::scope::unit_name(&session_id, 0).expect("a UUID id must name a unit");
-        reap_process_tree(&scopes, Some(&unit), None, &session_id)
-            .await
-            .expect("the sweep must confirm the marked process is gone");
+        reap_process_tree(
+            &scopes,
+            std::slice::from_ref(&unit),
+            None,
+            &session_id,
+            &SweepTarget::AgentOnly,
+        )
+        .await
+        .expect("the sweep must confirm the marked process is gone");
 
         let observed = observed.lock().expect("op sink mutex poisoned");
         assert_eq!(
@@ -11821,9 +13526,15 @@ mod tests {
         // the confirmation runs out its bound.
         let scopes = crate::scope::ScopeManager::fake(true, Arc::new(|_| {}));
         let unit = crate::scope::unit_name(&session_id, 0).expect("a UUID id must name a unit");
-        reap_process_tree(&scopes, Some(&unit), None, &session_id)
-            .await
-            .expect("an unconfirmed scope must not fail a stop the sweep confirmed");
+        reap_process_tree(
+            &scopes,
+            std::slice::from_ref(&unit),
+            None,
+            &session_id,
+            &SweepTarget::AgentOnly,
+        )
+        .await
+        .expect("an unconfirmed scope must not fail a stop the sweep confirmed");
         assert!(
             marked_process_gone(decoy),
             "the sweep must still have reaped the marked process"
@@ -11847,9 +13558,15 @@ mod tests {
 
         let scopes = crate::scope::ScopeManager::fake_failing_kills(Arc::new(|_| {}));
         let unit = crate::scope::unit_name(&session_id, 0).expect("a UUID id must name a unit");
-        reap_process_tree(&scopes, Some(&unit), None, &session_id)
-            .await
-            .expect("a failing scope kill must not fail a stop the sweep confirmed");
+        reap_process_tree(
+            &scopes,
+            std::slice::from_ref(&unit),
+            None,
+            &session_id,
+            &SweepTarget::AgentOnly,
+        )
+        .await
+        .expect("a failing scope kill must not fail a stop the sweep confirmed");
         assert!(
             marked_process_gone(decoy),
             "the sweep must still have reaped the marked process"
@@ -11935,9 +13652,15 @@ mod tests {
         let _ = gone.wait();
 
         let scopes = crate::scope::ScopeManager::disabled();
-        reap_process_tree(&scopes, None, Some(gone_pid), &session_id)
-            .await
-            .expect("a dead pane pid must not fail the sweep");
+        reap_process_tree(
+            &scopes,
+            &[],
+            Some(gone_pid),
+            &session_id,
+            &SweepTarget::AgentOnly,
+        )
+        .await
+        .expect("a dead pane pid must not fail the sweep");
     }
 
     /// `parse_stat`'s whole reason to exist: a `comm` field containing
@@ -12288,10 +14011,7 @@ mod tests {
         }
     }
 
-    /// The one terminal the classification tests below use. A function
-    /// rather than a shared value because `Terminal` is deliberately not
-    /// `Clone` — no production path duplicates one, and adding the derive
-    /// for a test would weaken that.
+    /// The one terminal the classification tests below use.
     fn a_terminal() -> Terminal {
         Terminal {
             tmux_name: "fh-1".to_string(),
@@ -12301,15 +14021,19 @@ mod tests {
 
     /// A `pane_states` map containing exactly [`a_terminal`]'s pane in the
     /// given state.
+    ///
+    /// Unmarked and at window index 0, which is what an ordinary agent
+    /// window looked like before markers existed — the classification
+    /// tests below are about liveness and the durable record, and read
+    /// neither the tab nor the agent marker.
     fn pane_map(dead: bool, exit_code: Option<i32>) -> HashMap<String, PaneState> {
-        HashMap::from([(
-            "%0".to_string(),
-            PaneState {
-                session_name: "fh-1".to_string(),
-                dead,
-                exit_code,
-            },
-        )])
+        let state = PaneState::for_test("fh-1", "%0", "@0");
+        let state = if dead {
+            state.dead_with(exit_code)
+        } else {
+            state
+        };
+        HashMap::from([("%0".to_string(), state)])
     }
 
     /// The classification precedence PLAN_M3.md items 2 and 3 define, in
@@ -12419,21 +14143,9 @@ mod tests {
     /// death routinely has no code while the next one does.
     #[test]
     fn observations_offered_to_the_store_cover_silence_and_enrichment() {
-        let dead_with_code = PaneState {
-            session_name: "fh-1".to_string(),
-            dead: true,
-            exit_code: Some(3),
-        };
-        let dead_without_code = PaneState {
-            session_name: "fh-1".to_string(),
-            dead: true,
-            exit_code: None,
-        };
-        let alive = PaneState {
-            session_name: "fh-1".to_string(),
-            dead: false,
-            exit_code: None,
-        };
+        let dead_with_code = PaneState::for_test("fh-1", "%0", "@0").dead_with(Some(3));
+        let dead_without_code = PaneState::for_test("fh-1", "%0", "@0").dead_with(None);
+        let alive = PaneState::for_test("fh-1", "%0", "@0");
 
         assert_eq!(observation(&LastOutcome::Running, Some(&alive)), None);
         assert_eq!(

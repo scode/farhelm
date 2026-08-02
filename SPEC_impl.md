@@ -117,8 +117,12 @@ from scrollback even had they been delivered one at a time.
 
 Each supervisor runs a dedicated tmux server on a private socket (`~/.local/state/farhelm/tmux.sock`) with a locked-down
 generated config: status bar off, `history-limit` sized to SPEC.md's replay floor, `remain-on-exit on`. One tmux session
-per Farhelm session; window 0 is the agent terminal, additional windows are the terminal tabs. The user's own tmux usage
-and config are untouched.
+per Farhelm session; window 0 is the agent terminal in practice, additional windows are the terminal tabs. Neither is
+identified by position: the supervisor stamps each window it creates with a tmux user option — the agent's window with
+the session id, a tab's window with a minted tab id that is also that tab's whole record. The agent terminal is
+identified by its durable pane record first, with the marker as the recovery aid for a session whose record is empty;
+tabs have no durable record at all and are rediscovered from their markers alone, because a pane's own processes inherit
+`TMUX` and can conjure windows a positional scan would adopt. The user's own tmux usage and config are untouched.
 
 Farhelm requires tmux ≥ 3.3 (dependable control mode) to operate at all. One capability sits higher: restoring bracketed
 paste on reattach reads the `bracket_paste_flag` format, which tmux only gained in 3.7 — below that the supervisor warns

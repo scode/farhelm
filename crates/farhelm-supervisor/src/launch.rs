@@ -36,6 +36,57 @@ use std::path::{Path, PathBuf};
 /// than left to the cgroup.
 pub const SESSION_ID_ENV_VAR: &str = "FARHELM_SESSION_ID";
 
+/// The environment marker every TERMINAL TAB carries on top of
+/// [`SESSION_ID_ENV_VAR`]: the tab's own id (PLAN_M4.md item 2). Set by
+/// tmux itself (`new-window -e`) rather than by a shim, because a tab has
+/// no shim — its window command IS the user's login shell.
+///
+/// Its job is SELECTION: closing a tab must reap that tab's shell and
+/// everything it left behind, and nothing else of the session, so the
+/// close sweep scans for an exact `FARHELM_TAB_ID=<tab>` entry alongside
+/// the session marker. It never selects on its own — see
+/// [`AGENT_ID_ENV_VAR`] for the shape of the whole split, and
+/// `service.rs`'s `SweepTarget` for the rules.
+pub const TAB_ID_ENV_VAR: &str = "FARHELM_TAB_ID";
+
+/// The environment marker every AGENT launch carries on top of
+/// [`SESSION_ID_ENV_VAR`]: its own session id again, under a name that
+/// says which KIND of terminal it belongs to (PLAN_M4.md item 2).
+///
+/// # Why both kinds are marked positively
+///
+/// Stop and restart must reap the agent and leave the session's tabs
+/// running (SPEC.md); delete must take everything; close must take one
+/// tab. Three different sets over the same session-marked processes, so
+/// something has to tell them apart.
+///
+/// An earlier cut did that by EXCLUSION — sweep the session marker,
+/// subtract anything wearing a tab marker — and it had a hole that only
+/// shows up when farhelm supervises farhelm. A supervisor running inside
+/// somebody's tab inherits that tab's `FARHELM_TAB_ID`, its tmux server
+/// inherits it, and every INNER agent it launches inherits it too. Under
+/// exclusion, every one of those inner agents looks like a tab process and
+/// escapes its own session's stop entirely. Positive marking closes it:
+/// an inner agent carries `FARHELM_AGENT_ID=<its own session>`, which is
+/// what stop selects on, and the stale outer tab marker decides nothing.
+///
+/// # Why the legacy bucket still exists
+///
+/// A positive agent marker alone would silently stop reaching daemons left
+/// by sessions launched BEFORE this build — they carry the session marker
+/// and neither kind marker. So the stop sweep also claims exactly that
+/// shape (`SweepTarget::AgentOnly`'s third root set): session-marked,
+/// wearing neither marker.
+///
+/// # Scrubbing
+///
+/// Every launch boundary removes the OTHER kind's marker before setting
+/// its own — the agent shim `env_remove`s [`TAB_ID_ENV_VAR`], a tab's
+/// window command runs through `env -u FARHELM_AGENT_ID` — so an ambient
+/// marker inherited from an outer farhelm can never survive into an inner
+/// launch of the opposite kind and misfile it.
+pub const AGENT_ID_ENV_VAR: &str = "FARHELM_AGENT_ID";
+
 /// What the shim needs to launch the agent: written as JSON by the
 /// supervisor, read by `farhelm internal launch` inside the session. A
 /// file (not argv) so the invocation never fights shell quoting twice.
@@ -435,6 +486,53 @@ pub fn window_command(
     ]
 }
 
+/// Build the tmux window command for a TERMINAL TAB: the user's shell as
+/// an interactive login shell, and nothing else (PLAN_M4.md item 2).
+///
+/// The contrast with [`window_command`] is the whole design, not an
+/// omission. An agent launch needs a shim between the shell and the agent
+/// so a failed `exec` can leave a sentinel; a tab has nothing to exec —
+/// the shell IS what the user asked for — so there is no spec, no shim,
+/// no sentinel, and no error-vs-exited classification to make. A tab shell
+/// that starts and later exits is just a dead pane (`remain-on-exit` keeps
+/// it viewable), and a tab shell that never starts at all is caught at
+/// open time by the pane-liveness check in the `OpenTab` handler.
+///
+/// `-l -i` is the same SSH-and-type contract the agent launch delivers,
+/// and `-i` is equally load-bearing here: without it the shell skips
+/// `.zshrc`/`.bashrc`, so a tab would not see the environment the user's
+/// own terminals do.
+///
+/// `scope_prefix` wraps the SHELL, unlike [`window_command`] where it
+/// wraps only the shim. That difference is deliberate and follows from the
+/// same rule both obey — everything the operation promises to reap must be
+/// inside the cgroup. For an agent that is the shim and its exec'd agent,
+/// and keeping the login shell outside spares the rc files' own
+/// subprocesses from the scope. For a tab, "kills that shell and its
+/// processes" (SPEC.md) names the shell itself, so the shell must be in
+/// the cgroup, rc-file subprocesses and all.
+///
+/// tmux runs this argv directly, so — unlike `window_command`'s `-c`
+/// payload — nothing here is ever re-parsed by a shell and nothing needs
+/// quoting.
+///
+/// The `env -u` is the tab side of the marker scrub ([`AGENT_ID_ENV_VAR`]).
+/// tmux's own `-e` can only SET a variable, so removing an inherited one
+/// takes a process that can: `env` is POSIX-mandated, and putting it
+/// INNERMOST — after any scope prefix, immediately before the shell —
+/// guarantees the shell and everything under it start without an ambient
+/// agent marker from an outer farhelm, whatever the wrapper above did.
+pub fn tab_window_command(shell: &str, scope_prefix: Vec<String>) -> Vec<String> {
+    let mut argv = scope_prefix;
+    argv.push("env".to_string());
+    argv.push("-u".to_string());
+    argv.push(AGENT_ID_ENV_VAR.to_string());
+    argv.push(shell.to_string());
+    argv.push("-l".to_string());
+    argv.push("-i".to_string());
+    argv
+}
+
 /// Where one LAUNCH's spec file lives:
 /// `<state_dir>/launch/<id>.<generation>.json`.
 ///
@@ -656,9 +754,18 @@ pub fn exec_launch_spec_with_seam(
     // the shim's own inherited environment, so this joins the rc-file
     // variables the login shell already sourced rather than replacing
     // them — SPEC.md's environment contract is otherwise untouched.
+    //
+    // The one thing deliberately REMOVED is the opposite kind's marker
+    // (see [`AGENT_ID_ENV_VAR`]): a supervisor running inside somebody's
+    // farhelm tab passes that tab's `FARHELM_TAB_ID` down through its own
+    // tmux server, and an inner agent still wearing it would be filed as a
+    // tab process by its own session's stop sweep and never reaped. This
+    // is the exec that ends that inheritance.
     let err = std::process::Command::new(&spec.argv[0])
         .args(&spec.argv[1..])
         .env(SESSION_ID_ENV_VAR, &spec.session_id)
+        .env(AGENT_ID_ENV_VAR, &spec.session_id)
+        .env_remove(TAB_ID_ENV_VAR)
         .exec();
     let report = format!(
         "exec_failed argv0={} errno={}",
@@ -1068,6 +1175,50 @@ mod tests {
                 "internal",
                 "launch",
                 "/state/launch/abc.0.json",
+            ]
+        );
+    }
+
+    /// A tab is a bare interactive login shell — no shim, no spec, no
+    /// `-c` payload — and `-i` is the flag whose loss would silently cost
+    /// the user their rc-file environment (SPEC.md's environment
+    /// contract). Pinned as a complete argv so a future addition to the
+    /// chain cannot slip in unnoticed.
+    #[test]
+    fn tab_window_command_is_a_bare_login_interactive_shell() {
+        assert_eq!(
+            tab_window_command("/bin/zsh", Vec::new()),
+            vec!["env", "-u", AGENT_ID_ENV_VAR, "/bin/zsh", "-l", "-i"]
+        );
+    }
+
+    /// The tab scope wraps the SHELL, where the agent's wraps only the
+    /// shim — the asymmetry `tab_window_command`'s docs argue for, pinned
+    /// here so it reads as a decision rather than as a bug the next reader
+    /// "fixes" into symmetry with `window_command`. A prefix that ended up
+    /// inside or after the shell would leave the tab's own shell outside
+    /// the cgroup, which is exactly the process close promises to kill.
+    #[test]
+    fn a_tab_scope_prefix_wraps_the_shell_itself() {
+        let prefix: Vec<String> = ["systemd-run", "--user", "--scope", "--"]
+            .iter()
+            .map(|s| s.to_string())
+            .collect();
+        assert_eq!(
+            tab_window_command("/bin/bash", prefix),
+            vec![
+                "systemd-run",
+                "--user",
+                "--scope",
+                "--",
+                // The scrub stays INNERMOST even under a wrapper, so the
+                // shell itself is what starts without the ambient marker.
+                "env",
+                "-u",
+                AGENT_ID_ENV_VAR,
+                "/bin/bash",
+                "-l",
+                "-i"
             ]
         );
     }
