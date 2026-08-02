@@ -1070,26 +1070,55 @@ test("DECRPM auto-replies to a mode query are dropped, not forwarded as pane inp
     // report), so a color-reply control failed there while the real
     // assertion held. A cursor report is computed from xterm's own
     // buffer and is therefore environment-independent.
-    await page.keyboard.type(
-      "printf '\\e[6n\\e[?12$p'; sleep 1; echo PROBE-DONE",
+    //
+    // The probe line is PASTED (xterm's programmatic paste API), not
+    // typed. This test's one recurring CI flake was the control
+    // assertion finding no cursor report: `page.keyboard.type` delivers
+    // the line one keystroke at a time, and a single dropped character
+    // inside the escape portion under CI load yields a printf that emits
+    // no DSR query — while `echo PROBE-DONE`, a separate command after
+    // the `;`, still runs, so the synchronization marker looked healthy.
+    // A paste delivers the whole line as one input frame, so it either
+    // arrives intact or not at all; PROBE-DONE then proves it ran.
+    //
+    // The marker is built with printf %s so the string "PROBE-DONE"
+    // never appears in the COMMAND itself: the shell echoes the pasted
+    // line immediately, and a literal marker in the echo would satisfy
+    // the wait below before the command — including the 1-second gap
+    // the queries need — had actually executed.
+    const probeLine =
+      "printf '\\e[6n\\e[?12$p'; sleep 1; printf 'PROBE-%s\\n' DONE";
+    await page.evaluate(
+      (line) => (window as any).__farhelmTerm.paste(line),
+      probeLine,
     );
     await page.keyboard.press("Enter");
     await waitForTermText(page, "PROBE-DONE", 15_000);
 
-    const frames = await page.evaluate(
-      () => (window as any).__sentInput as unknown[],
-    );
-    const decoded = frames.map((f) =>
-      Array.isArray(f) ? String.fromCharCode(...(f as number[])) : String(f),
-    );
+    const recordedFrames = () =>
+      page.evaluate(() =>
+        ((window as any).__sentInput as unknown[]).map((f) =>
+          Array.isArray(f)
+            ? String.fromCharCode(...(f as number[]))
+            : String(f),
+        ),
+      );
 
+    // The control first, and polled rather than sampled once: a cursor-
+    // position report DID reach the WebSocket, proving xterm's
+    // auto-replies were genuinely live and flowing through this exact
+    // recorded path — without it, the assertion below could pass
+    // vacuously (e.g. if nothing were recorded at all). The recording
+    // hook is synchronous and xterm parses the DSR long before the
+    // marker prints, so the poll is defensive depth, not a required
+    // wait — the marker output already sequences everything.
+    await expect
+      .poll(recordedFrames, { timeout: 5_000 })
+      .toContainEqual(expect.stringMatching(/\x1b\[[0-9]+;[0-9]+R/));
     // The fix: no DECRPM reply shape ever reached the WebSocket as input.
-    expect(decoded.some((s) => /\x1b\[\?[0-9;]*\$y/.test(s))).toBe(false);
-    // The control: a cursor-position report DID reach the WebSocket,
-    // proving xterm's auto-replies were genuinely live and flowing
-    // through this exact recorded path — without it, the assertion above
-    // could pass vacuously (e.g. if nothing were recorded at all).
-    expect(decoded.some((s) => /\x1b\[[0-9]+;[0-9]+R/.test(s))).toBe(true);
+    expect(await recordedFrames()).not.toContainEqual(
+      expect.stringMatching(/\x1b\[\?[0-9;]*\$y/),
+    );
   } finally {
     await cleanupSession(request, id);
   }
