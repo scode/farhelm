@@ -72,6 +72,19 @@ Ubuntu 24.04 ships 3.4.
   confirms first, then stops the whole process tree before relaunching; leftover daemons from a previous run are reaped
   the same way. A working directory that has vanished (or that now resolves somewhere else) fails the restart by name
   and leaves the session, its stop annotation included, exactly as it was.
+- A session view has a tab strip: the agent terminal, plus any number of plain shells opened in the session's working
+  directory with "+ terminal". Every open tab stays attached while you are in the session, so switching between them is
+  instant and a background tab keeps up with its own output. Tabs survive a reload and a supervisor restart with their
+  scrollback, and a tab opened or closed from another client shows up here on its own; a host reboot or an archive takes
+  them all, and nothing recreates them. Closing a tab confirms first, then kills that shell and everything it started —
+  the agent and the other tabs are untouched.
+- Opening a tab needs somewhere to open it: if the working directory has vanished, the open fails in place with the
+  directory named, and on a session whose terminals a reboot or an archive already erased it fails telling you to
+  restart the session first — a session with no terminal does not grow a tab-only one. Both messages are the
+  supervisor's own, shown under the strip.
+- Opening a second view of the same session takes over ALL of the first view's terminals at once, each saying so where
+  it was. The displaced view then stops attaching anything — including tabs the new owner opens while it watches — until
+  you press "take control" in its banner, which takes the session back the same visible way.
 - Sustained heavy output (piping a huge file through the pane, say) is flow-controlled end to end rather than freezing
   the tab or silently dropping bytes. A viewer that stops consuming entirely — a wedged tab, a laptop asleep past its
   connection timeout — is detached, with a visible reason, after a bounded stall; the session keeps running unaffected,

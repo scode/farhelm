@@ -2,9 +2,12 @@
 //!
 //! The same components render as the web app (wasm32, real DOM, served
 //! by the helm at loopback) and the desktop app (wry webview). The
-//! terminal itself is an xterm.js island (assets/terminal.js) whose byte
-//! path bypasses Dioxus entirely — Dioxus owns the chrome around the
-//! terminal, never its content (SPEC_impl.md, "Terminal widget").
+//! terminals themselves are xterm.js islands (assets/terminal.js) whose
+//! byte paths bypass Dioxus entirely — Dioxus owns the chrome around a
+//! terminal, never its content (SPEC_impl.md, "Terminal widget"). Since
+//! M4's terminal tabs a session view holds SEVERAL of those islands at
+//! once, all attached concurrently; the boundary is unchanged, only its
+//! multiplicity (see [`SessionView`]).
 //!
 //! Data fetching uses reqwest, which works on both native (desktop) and
 //! wasm (browser fetch) — one code path, no per-target HTTP client.
@@ -17,7 +20,9 @@
 //! PLAN_M2.md names a premature router as a risk this milestone
 //! deliberately avoids — two states and one signal cover everything M2
 //! needs, and a router can still be introduced later if M4's terminal
-//! tabs (or something else) actually demands one.
+//! tabs (or something else) actually demands one. M4's tabs came and went
+//! without demanding one: a tab selection is view-local state, not a
+//! location, and nothing links to a specific tab.
 
 use std::collections::{HashMap, HashSet};
 
@@ -151,6 +156,38 @@ pub struct Session {
     /// tolerance as `status`, defaulting to the safe `FreshOnly`.
     #[serde(default)]
     pub restart_offer: RestartOffer,
+    /// The session's terminal tabs, in the supervisor's creation order
+    /// (PLAN_M4.md item 6). This is the ONE authoritative statement of
+    /// which tabs exist and in what order — a tab-open reply deliberately
+    /// says nothing about ordering (farhelm-proto's `TabOpened`), so the
+    /// positional labels the strip renders are derived from this list, not
+    /// from the order this client happened to open things in.
+    ///
+    /// Carried on BOTH routes, and both matter to the session view: the
+    /// listing is where its FIRST tab snapshot comes from (the `Session`
+    /// the list hands `SessionView` when a row is opened is already
+    /// populated, so a session with tabs renders its strip on the first
+    /// frame rather than after a round trip), and the detail poll is what
+    /// keeps it current afterwards.
+    ///
+    /// `#[serde(default)]` for the same old-peer tolerance as `status` —
+    /// and, unlike `status`, the default is also the everyday case: a
+    /// session with no tabs.
+    #[serde(default)]
+    pub tabs: Vec<Tab>,
+}
+
+/// Mirror of the helm's tab JSON (farhelm-proto `TabInfo`): an opaque,
+/// supervisor-minted id and nothing else.
+///
+/// Deliberately as minimal as the wire type. SPEC.md gives tabs no names
+/// and close is their only operation, so an id is the whole identity —
+/// labels are positional and computed at render time (see `tab_label`).
+/// The id is echoed back verbatim on the terminal WebSocket's `?tab=` and
+/// on the close request; this UI never parses it.
+#[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
+pub struct Tab {
+    pub id: String,
 }
 
 const VENDOR_XTERM_CSS: Asset = asset!("/assets/vendor/xterm.css");
@@ -200,6 +237,76 @@ struct SessionListing {
     total: u64,
     #[serde(default)]
     truncated: bool,
+}
+
+// ---------------------------------------------------------------------
+// URL building
+//
+// Every identifier this UI puts in a URL came from a supervisor, which
+// under `--ssh` is a DIFFERENT and possibly untrusted machine. Neither
+// helper below trusts the shape of what it is given; both exist so that a
+// hostile or merely buggy id cannot change which resource a request names.
+// ---------------------------------------------------------------------
+
+/// Percent-encode one URL query value (RFC 3986's unreserved set passes
+/// through; everything else becomes `%XX`).
+///
+/// An unescaped `&` or `#` in a tab id or a lease would silently truncate
+/// or re-split the terminal WebSocket's query and attach the WRONG
+/// terminal, which is precisely the failure `TerminalSelector::Tab`'s docs
+/// call worse than an outright error.
+///
+/// Encodes per BYTE, so non-ASCII is UTF-8 percent-encoded correctly
+/// rather than mangled. Hand-rolled rather than pulling in a crate for two
+/// tiny functions.
+fn encode_query_value(value: &str) -> String {
+    encode_bytes(
+        value,
+        |byte| matches!(byte, b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'.' | b'_' | b'~'),
+    )
+}
+
+/// Percent-encode one value that will occupy exactly ONE path segment.
+///
+/// Strictly narrower than `encode_query_value`, and the two exclusions are
+/// the whole point:
+///
+/// - `/` would end the segment, so a tab id of `../../victim` would turn
+///   `DELETE /api/sessions/S/tabs/<id>` into `DELETE /api/sessions/victim`
+///   — a supervisor-supplied string choosing which SESSION this UI
+///   deletes. Not theoretical: URL parsers resolve dot segments before the
+///   request is ever sent, so the traversal happens client-side, below
+///   anything the helm could refuse.
+/// - `.` passes through the query-value set, but a segment that is exactly
+///   `.` or `..` is *itself* a dot segment and gets resolved away even
+///   with no slash in sight — `.../tabs/..` normalizes to the session
+///   route. Encoding `.` everywhere in a segment is the cheap way to make
+///   that impossible without special-casing two literals, and costs
+///   nothing for the ids this actually carries (UUIDs contain none).
+///
+/// Not a claim that the resulting id EXISTS — an id that survives escaping
+/// and names nothing is an ordinary 404, which is the honest outcome.
+fn encode_path_segment(value: &str) -> String {
+    encode_bytes(
+        value,
+        |byte| matches!(byte, b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'~'),
+    )
+}
+
+/// Shared body of the two encoders above: keep the bytes `keep` accepts,
+/// percent-encode every other byte. Split out so the two differ only in
+/// their allowed set, which is the only thing that should ever distinguish
+/// them.
+fn encode_bytes(value: &str, keep: impl Fn(u8) -> bool) -> String {
+    let mut out = String::with_capacity(value.len());
+    for byte in value.bytes() {
+        if keep(byte) {
+            out.push(byte as char);
+        } else {
+            out.push_str(&format!("%{byte:02X}"));
+        }
+    }
+    out
 }
 
 /// Fetch the session listing, flattening every failure into a displayable
@@ -252,8 +359,15 @@ fn sort_sessions(mut sessions: Vec<Session>) -> Vec<Session> {
     sessions
 }
 
-/// How often the list view refetches (PLAN_M2.md: "Polling for list
-/// freshness" is the M2 mechanism; live push is out of scope until M5).
+/// How often the views refetch (PLAN_M2.md: "Polling for list freshness"
+/// is the M2 mechanism; live push is out of scope until M5).
+///
+/// Shared by both polls, deliberately one constant rather than two:
+/// `ListView` polls the listing and `SessionView` polls its own session's
+/// detail for tab-list changes (PLAN_M4.md item 6 asks for "the same
+/// polling M2 settled for the session list"), and M5 replaces both with
+/// live push together, so a divergence here would be a difference no one
+/// chose and no one would maintain.
 const POLL_INTERVAL_MS: u64 = 3_000;
 
 /// POST the create endpoint, returning the decoded `Session` on success or
@@ -318,61 +432,123 @@ async fn create_session(
     resp.json::<Session>().await.map_err(|e| e.to_string())
 }
 
-/// The JavaScript the WEB (wasm) build's intended-create idempotency key
-/// comes from — see `mint_intent_key` for why the desktop build does not
-/// use this at all.
+/// The JavaScript the WEB (wasm) build's random client-side identifiers
+/// come from — see `mint_lease` for why the desktop build does not use
+/// this at all.
 ///
-/// `crypto.randomUUID()` is the real generator; the branch exists because
-/// it is only defined in a SECURE context, which the web build always has
-/// (the helm serves it over loopback). wasm has no other way to reach an
-/// OS random-number generator without extra plumbing (a JS import, a
-/// getrandom shim), and `crypto.randomUUID()` is already right there and
-/// Playwright-tested, fallback included — standing up that plumbing for
-/// one UUID was not worth it. The fallback is not cryptographically random
-/// and does not need to be: a key only has to be unique among the creates
-/// ONE user is making, and a millisecond timestamp plus two
-/// `Math.random()` draws is far past that. It is never a security
-/// boundary — the key names an intent, it does not authorize anything.
+/// `crypto.randomUUID()` is the real generator, and the ONLY one this
+/// constant offers: it is defined in a SECURE context, which the web build
+/// always has (the helm serves it over loopback). wasm has no other way to
+/// reach an OS random-number generator without extra plumbing (a JS
+/// import, a getrandom shim), and `crypto.randomUUID()` is already right
+/// there and Playwright-tested — standing up that plumbing for one UUID
+/// was not worth it. Returning `null` rather than substituting something
+/// weaker is what lets the caller decide: see `mint_lease` (which must
+/// refuse) and `mint_intent_key` (which may degrade).
 ///
-/// What there is deliberately NO fallback for is producing no key at all;
-/// see `CreateSessionForm`'s own docs on why an unkeyed create is not an
-/// acceptable degradation.
-///
-/// wasm-only (`mint_intent_key`'s desktop branch never references it):
-/// gated so the desktop build does not carry a dead string constant for a
-/// code path it cannot take.
+/// wasm-only (the desktop branches never reference it): gated so the
+/// desktop build does not carry a dead string constant for a code path it
+/// cannot take.
 #[cfg(target_arch = "wasm32")]
-const INTENT_KEY_JS: &str = "return (globalThis.crypto && crypto.randomUUID) \
-     ? crypto.randomUUID() \
-     : Date.now().toString(36) + '-' + Math.random().toString(36).slice(2) \
-       + Math.random().toString(36).slice(2);";
+const CSPRNG_ID_JS: &str =
+    "return (globalThis.crypto && crypto.randomUUID) ? crypto.randomUUID() : null;";
+
+/// The intent key's LAST RESORT, used only when `CSPRNG_ID_JS` came back
+/// empty-handed — a browser with no `crypto.randomUUID` at all.
+///
+/// Not cryptographically random and does not need to be for that one
+/// caller: an intent key only has to be unique among the creates ONE user
+/// is making, so a millisecond timestamp plus two `Math.random()` draws is
+/// far past enough, and the alternative (refusing every create on such a
+/// browser) is strictly worse for a value that authorizes nothing.
+///
+/// Deliberately NOT reachable from `mint_lease`. A lease is specified as
+/// high-entropy (`ControlMsg::Attach::lease` in farhelm-proto: "version-6
+/// clients must mint it high-entropy and non-empty"), and the reason is
+/// concrete rather than ceremonial — leases are grouped by BARE EQUALITY,
+/// so two clients that collide fuse into one lease and silently bypass the
+/// visible takeover SPEC.md's one-attached-client rule is built on.
+/// `Math.random()` is not seeded per client and has no such guarantee; two
+/// views opened in the same millisecond on the same engine are exactly the
+/// case it cannot promise to separate. So the lease fails closed instead
+/// (see `SessionView`, which already has that path for the eval channel
+/// dying).
+#[cfg(target_arch = "wasm32")]
+const WEAK_ID_JS: &str = "return Date.now().toString(36) + '-' \
+     + Math.random().toString(36).slice(2) \
+     + Math.random().toString(36).slice(2);";
+
+/// Run one id-minting snippet through the document eval channel, flattening
+/// "the channel failed" and "the snippet declined" into the same `None`.
+///
+/// The two callers differ only in what they do with that `None`, which is
+/// why the distinction is not preserved here: neither can act on WHY it has
+/// no id, only on whether it has one.
+#[cfg(target_arch = "wasm32")]
+async fn eval_minted_id(js: &str) -> Option<String> {
+    match dioxus::document::eval(js).await {
+        Ok(serde_json::Value::String(id)) if !id.is_empty() => Some(id),
+        _ => None,
+    }
+}
+
+/// Mints this view's attachment lease (PLAN_M4.md item 3) — high-entropy
+/// or nothing.
+///
+/// The two renderers deliberately do NOT share a code path. wasm has no
+/// direct line to an OS RNG, so it runs `CSPRNG_ID_JS` through the document
+/// eval channel — see that const's docs for why that is an acceptable,
+/// tested tradeoff there. The desktop renderer must NOT do the same: manual
+/// macOS testing found that wry's eval channel on WKWebView resolves every
+/// call to `Err(Finished)` — the channel is dead on arrival, not merely
+/// slow — which made `CreateSessionForm`'s fail-closed guard refuse EVERY
+/// create (MT-5). Minting the UUID in Rust removes the dependency on that
+/// channel entirely rather than working around one platform's flaky eval;
+/// desktop already links a real RNG (`uuid`'s `v4` feature, `getrandom`
+/// underneath), so there was never a reason to route this through the
+/// webview to begin with. That precedent is why the lease is minted here at
+/// all rather than in terminal.js, where the desktop build would have hit
+/// exactly the same dead channel.
+///
+/// `Err` carries a message suitable for direct display. Both of its causes
+/// — a dead eval channel and a browser without `crypto.randomUUID` — are
+/// reported the same way, because the caller's response is the same either
+/// way: attach nothing, and say so.
+async fn mint_lease() -> Result<String, String> {
+    #[cfg(target_arch = "wasm32")]
+    {
+        eval_minted_id(CSPRNG_ID_JS).await.ok_or_else(|| {
+            "this browser did not provide crypto.randomUUID (or the eval channel failed), and a \
+             session lease must be high-entropy — a guessable or colliding one would silently \
+             merge two clients into one attachment"
+                .to_string()
+        })
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        Ok(uuid::Uuid::new_v4().to_string())
+    }
+}
 
 /// Mints one intended create's idempotency key (PLAN_M3.md item 6, MT-5).
 ///
-/// The two renderers deliberately do NOT share a code path. wasm has no
-/// direct line to an OS RNG, so it runs `INTENT_KEY_JS` through the
-/// document eval channel — see that const's docs for why that is an
-/// acceptable, tested tradeoff there. The desktop renderer must NOT do the
-/// same: manual macOS testing found that wry's eval channel on WKWebView
-/// resolves every call to `Err(Finished)` — the channel is dead on
-/// arrival, not merely slow — which made `CreateSessionForm`'s fail-closed
-/// guard refuse EVERY create with "could not generate an idempotency key"
-/// (MT-5). Minting the UUID in Rust removes the dependency on that channel
-/// entirely rather than working around one platform's flaky eval; desktop
-/// already links a real RNG (`uuid`'s `v4` feature), so there was never a
-/// reason to route this through the webview to begin with.
+/// Same two-renderer split as `mint_lease` (see its docs for the wry
+/// eval-channel history), with one deliberate difference: this one accepts
+/// the `WEAK_ID_JS` fallback when no CSPRNG is available, because an intent
+/// key only has to be unique among one user's own creates. See that
+/// constant's docs for why the lease may not make the same trade.
 ///
-/// Returns `Err` with a message suitable for direct display (matching what
-/// `CreateSessionForm` showed before this helper existed): on wasm, the
-/// debug-formatted eval outcome that failed; the desktop branch has no
-/// error path; UUID generation cannot fail.
+/// Returns `Err` only when BOTH snippets fail — in practice, a dead eval
+/// channel — with a message suitable for direct display.
 async fn mint_intent_key() -> Result<String, String> {
     #[cfg(target_arch = "wasm32")]
     {
-        match dioxus::document::eval(INTENT_KEY_JS).await {
-            Ok(serde_json::Value::String(key)) if !key.is_empty() => Ok(key),
-            outcome => Err(format!("{outcome:?}")),
+        if let Some(id) = eval_minted_id(CSPRNG_ID_JS).await {
+            return Ok(id);
         }
+        eval_minted_id(WEAK_ID_JS)
+            .await
+            .ok_or_else(|| "the browser eval channel produced no value".to_string())
     }
     #[cfg(not(target_arch = "wasm32"))]
     {
@@ -396,7 +572,7 @@ async fn mint_intent_key() -> Result<String, String> {
 /// the suite to reach — a regression here would show up as a generic
 /// reqwest error string rather than a wrong one, not a silent failure.
 async fn stop_session(base: &str, id: &str) -> Result<(), String> {
-    let url = format!("{base}/api/sessions/{id}/stop");
+    let url = format!("{base}/api/sessions/{}/stop", encode_path_segment(id));
     let resp = reqwest::Client::new()
         .post(&url)
         .send()
@@ -420,16 +596,31 @@ async fn stop_session(base: &str, id: &str) -> Result<(), String> {
 
 /// Fetch ONE session's current state (`GET /api/sessions/{id}`).
 ///
-/// Used by the session view's recovery paths rather than the full listing,
-/// which the supervisor caps: on a host with more sessions than that cap,
-/// the one session this view is about can simply be missing from a listing
-/// reply, and a view that concluded "it is gone" from that would be wrong
-/// in the worst direction (a restart that DID happen, reported as failed).
-/// `Ok(None)` is a genuine 404 — the session really is gone — while a
-/// transport failure stays an `Err`, because those two must not be
-/// confused.
+/// Used by the session view rather than the full listing, because a
+/// listing REPLY is a whole page of sessions this view has no use for.
+///
+/// ## What `Ok(None)` does and does not mean
+///
+/// It means the helm answered 404 for this id. It does NOT mean the
+/// session is gone, and callers must not treat it that way — an earlier
+/// version of this doc claimed exactly that, and it was wrong about the
+/// server it describes. The helm's detail route (`get_session` in
+/// farhelm-helm) is not a per-session query at all: it fetches the
+/// LISTING and searches it, so it inherits the supervisor's listing cap.
+/// On a host with more sessions than that cap, a perfectly healthy session
+/// beyond it answers 404 here every time, and a session near the boundary
+/// can move in and out of the reply as other sessions come and go.
+///
+/// So a 404 is genuinely ambiguous between "deleted" and "not in this
+/// page", and the honest client behavior is to keep the last known state
+/// rather than either fabricate a deletion or silently pretend the refresh
+/// worked — see `SessionView`, which keeps what it has and says the
+/// refresh is not landing.
+///
+/// A transport failure stays an `Err`, because "the helm did not answer"
+/// and "the helm answered 404" must not be confused either.
 async fn fetch_session(base: &str, id: &str) -> Result<Option<Session>, String> {
-    let url = format!("{base}/api/sessions/{id}");
+    let url = format!("{base}/api/sessions/{}", encode_path_segment(id));
     let resp = reqwest::get(&url).await.map_err(|e| e.to_string())?;
     if resp.status() == reqwest::StatusCode::NOT_FOUND {
         return Ok(None);
@@ -473,7 +664,7 @@ async fn restart_session(
     mode: &str,
     stop_if_running: bool,
 ) -> Result<Session, String> {
-    let url = format!("{base}/api/sessions/{id}/restart");
+    let url = format!("{base}/api/sessions/{}/restart", encode_path_segment(id));
     let body = serde_json::json!({ "mode": mode, "stop_if_running": stop_if_running });
     let resp = reqwest::Client::new()
         .post(&url)
@@ -501,7 +692,108 @@ async fn restart_session(
 /// shape (including the body-read-failure context), different verb and
 /// endpoint.
 async fn delete_session(base: &str, id: &str) -> Result<(), String> {
-    let url = format!("{base}/api/sessions/{id}");
+    let url = format!("{base}/api/sessions/{}", encode_path_segment(id));
+    let resp = reqwest::Client::new()
+        .delete(&url)
+        .send()
+        .await
+        .map_err(|e| e.to_string())?;
+    if !resp.status().is_success() {
+        let status = resp.status();
+        let detail = resp
+            .text()
+            .await
+            .map_err(|error| format!("DELETE {url}: {status}: reading error response: {error}"))?;
+        let detail = detail.trim();
+        return Err(if detail.is_empty() {
+            format!("DELETE {url}: {status}")
+        } else {
+            detail.to_string()
+        });
+    }
+    Ok(())
+}
+
+/// The success body of `POST /api/sessions/{id}/tabs`: the newly opened
+/// tab, wrapped (farhelm-helm's `open_tab` returns `{"tab": TabInfo}`
+/// rather than a bare object, because a client needs the minted id before
+/// it can attach). Private and `Deserialize`-only — nothing keeps one of
+/// these around past unwrapping it.
+#[derive(Deserialize)]
+struct TabOpened {
+    tab: Tab,
+}
+
+/// POST the tab-open endpoint for one session (PLAN_M4.md item 6), giving
+/// back the tab the supervisor minted.
+///
+/// No request body: unlike a create, a tab has nothing for a caller to
+/// specify — it is always a plain shell in the session's own working
+/// directory. Failures reach the user as the supervisor's own words, the
+/// same as every other endpoint here: SPEC.md wants the vanished-working-
+/// directory and restart-first refusals to say exactly what is wrong, and
+/// they only do that if this returns the body verbatim rather than a
+/// generic "could not open a tab".
+///
+/// Deliberately NOT idempotency-keyed, unlike `create_session`. The key
+/// there exists because a lost reply could otherwise cost the user a
+/// second AGENT — a real process doing real work under a duplicate
+/// session, invisible until it collides with the first.
+///
+/// A duplicated tab is a smaller problem, though not a free one: it is a
+/// real login shell, and a login shell runs the user's rc files, which can
+/// start anything. What makes it acceptable is that it is VISIBLE and
+/// individually reversible — the next detail poll lists both tabs, and
+/// closing one is a click that reaps that shell's whole process tree. The
+/// duplicate-agent case has neither property, which is the actual
+/// distinction. This UI also cannot lose a reply and retry silently: the
+/// add control is single-shot per click (`opening_tab`), so a duplicate
+/// takes a second deliberate press.
+async fn open_tab(base: &str, session_id: &str) -> Result<Tab, String> {
+    let url = format!(
+        "{base}/api/sessions/{}/tabs",
+        encode_path_segment(session_id)
+    );
+    let resp = reqwest::Client::new()
+        .post(&url)
+        .send()
+        .await
+        .map_err(|e| e.to_string())?;
+    if !resp.status().is_success() {
+        let status = resp.status();
+        let detail = resp
+            .text()
+            .await
+            .map_err(|error| format!("POST {url}: {status}: reading error response: {error}"))?;
+        let detail = detail.trim();
+        return Err(if detail.is_empty() {
+            format!("POST {url}: {status}")
+        } else {
+            detail.to_string()
+        });
+    }
+    resp.json::<TabOpened>()
+        .await
+        .map(|opened| opened.tab)
+        .map_err(|e| e.to_string())
+}
+
+/// DELETE one terminal tab: kill its shell and everything it left behind
+/// (SPEC.md's per-tab close, the whole per-tab operation set in v1). Same
+/// error-surfacing shape as `delete_session`.
+///
+/// A 404 is NOT special-cased into success here, even though "the tab is
+/// already gone" is the outcome the caller wanted: the caller acts on the
+/// answer by tearing down that tab's island, and a 404 is at least as
+/// likely to mean the id was wrong (a bug) as to mean another client got
+/// there first. Reporting it lets the user see something disagreed, while
+/// the poll that follows reconciles the list either way.
+async fn close_tab(base: &str, session_id: &str, tab_id: &str) -> Result<(), String> {
+    let url = format!(
+        "{base}/api/sessions/{}/tabs/{}",
+        encode_path_segment(session_id),
+        encode_path_segment(tab_id)
+    );
     let resp = reqwest::Client::new()
         .delete(&url)
         .send()
@@ -1526,10 +1818,243 @@ fn confirm_consequence(status: &SessionStatus) -> &'static str {
     }
 }
 
-/// One session, terminal filling the window, with a back control above
-/// it. The terminal div is handed to the JS island on mount; Dioxus
-/// never touches its children again — that boundary is the whole
-/// design.
+// ---------------------------------------------------------------------
+// Terminal tabs (PLAN_M4.md item 6)
+//
+// The session view holds one xterm.js island per terminal — the agent's
+// plus one per open tab — all attached CONCURRENTLY. Everything below is
+// the pure part of that: which tabs to show, what to call them, which DOM
+// nodes they own, and how their WebSocket URLs are built. The stateful
+// half lives in `SessionView`, and the mount/unmount half lives in
+// terminal.js; keeping the derivations here as free functions is what
+// makes them testable without a renderer.
+// ---------------------------------------------------------------------
+
+/// The DOM id of the agent terminal's mount point, and of its banner.
+///
+/// Unchanged from before tabs existed, deliberately: "the terminal" of a
+/// session still unambiguously means its agent terminal, the browser suite
+/// keys off these two ids throughout, and a session with no tabs must
+/// render exactly the DOM it always did.
+const AGENT_TERMINAL_ELEMENT_ID: &str = "terminal";
+const AGENT_BANNER_ELEMENT_ID: &str = "term-banner";
+
+/// How many TAB terminals this view will ever mount at once. The agent
+/// terminal is always mounted and is not counted against it.
+///
+/// PLAN_M4.md item 6 deliberately adds no artificial cap on TABS, and this
+/// is not one: it is a bound on what this client will do with a LIST it
+/// did not author. The plan's reasoning — "tab count is bounded by the
+/// user opening them by hand" — is a statement about a healthy supervisor,
+/// and the tab list arrives over a connection that under `--ssh` reaches a
+/// different machine. A supervisor that is compromised, or merely wrong
+/// (a rediscovery bug adopting every window on a shared tmux server),
+/// could list thousands, and this view would answer by constructing
+/// thousands of xterm.js instances and opening thousands of WebSockets —
+/// wedging the browser, and with it the user's only way to see what
+/// happened. A trust boundary needs a bound even where the cooperative
+/// case does not.
+///
+/// 32 is chosen to be far past hand-driven use (SPEC.md's tabs are for
+/// "poking at the workspace next to the agent") while still being a
+/// resource count a browser will not notice. Tabs beyond it are NOT hidden
+/// — the strip lists every one the server reports, and their panes say
+/// they are not attached — because silently dropping tabs would be its own
+/// lie about what the session holds.
+const MAX_MOUNTED_TAB_ISLANDS: usize = 32;
+
+/// The two properties the number above has to keep, checked at COMPILE
+/// time rather than by a test: both are statements about a constant, so a
+/// violation should never get as far as being runnable. Below the floor it
+/// stops being a trust boundary and becomes a feature limit a real user
+/// could hit by hand; above the ceiling it stops bounding what a hostile
+/// or buggy tab list can make this browser construct.
+const _: () = assert!(MAX_MOUNTED_TAB_ISLANDS >= 16);
+const _: () = assert!(MAX_MOUNTED_TAB_ISLANDS <= 256);
+
+/// `tab_errors`' key for the add-tab control, which — unlike a close — has
+/// no tab id of its own to be keyed by yet. A fixed non-id string rather
+/// than an `Option` key so the map stays one flat, renderable structure;
+/// it cannot collide with a real tab id, which is a supervisor-minted
+/// opaque token and never this word.
+const TAB_OPEN_ERROR_KEY: &str = "open";
+
+/// The DOM id of a tab's mount point, and of its banner. Derived from the
+/// tab id rather than from its position so that a tab's island keeps its
+/// identity when a SIBLING is closed — a position-derived id would make
+/// every tab after the closed one look like a different island to
+/// terminal.js's reconciliation and force a pointless remount (and, with
+/// it, a full replay) of terminals nothing happened to.
+///
+/// The tab id is supervisor-minted and opaque; it reaches the DOM only
+/// through `getElementById`, which imposes no syntax on an id, so nothing
+/// here has to assume it is a UUID even though today it always is.
+fn tab_terminal_element_id(tab_id: &str) -> String {
+    format!("terminal-{tab_id}")
+}
+
+/// The banner half of the pair above; see `tab_terminal_element_id` for
+/// why both are derived from the id rather than the position.
+fn tab_banner_element_id(tab_id: &str) -> String {
+    format!("term-banner-{tab_id}")
+}
+
+/// A tab's display label: purely positional, one-based (PLAN_M4.md item
+/// 6). SPEC.md gives tabs no names and close is their only operation, so
+/// v1 invents no naming surface — and because the position comes from
+/// `SessionInfo::tabs`' creation order, two clients looking at the same
+/// session agree on which tab is "Terminal 2".
+fn tab_label(index: usize) -> String {
+    format!("Terminal {}", index + 1)
+}
+
+/// The tabs to render, in order: the server's authoritative list, then any
+/// this view opened that the server has not listed back yet, minus any it
+/// has closed that the server still lists.
+///
+/// Both corrections are the same optimistic-rendering bargain `ListView`
+/// makes for a deleted row, for the same reason — a tab list refreshed by
+/// a 3-second poll would otherwise take up to a full interval to show the
+/// user the result of their own click — but they point in opposite
+/// directions and both edges matter:
+///
+/// - `opened` appends. A tab-open reply carries the new tab's id and
+///   deliberately says NOTHING about ordering (farhelm-proto's
+///   `TabOpened`), so an optimistic tab goes at the END and gets its real
+///   position from the next refresh. That is honest for the common case
+///   (the newest tab is last in creation order) and self-correcting when
+///   another client's concurrent open makes it wrong.
+/// - `closed` suppresses. A DELETE that has already succeeded must not
+///   leave a tab on screen — clicking it would attach a terminal the
+///   supervisor has destroyed — until a poll that was already in flight
+///   before the close finally returns.
+///
+/// Neither set is trusted to be accurate forever: `SessionView`'s poll
+/// prunes an `opened` id once the server lists it and a `closed` id once
+/// the server stops, so a tab another client re-opens (impossible today —
+/// ids are never reused — or a supervisor that answered oddly) cannot be
+/// permanently hidden by a stale entry.
+/// `opened` carries `(id, observed_from)` pairs, but only the ids matter
+/// here — the sequence numbers are the POLL's business (see `SessionView`),
+/// deciding when an entry may be retired, never whether it is shown.
+fn visible_tabs(server: &[Tab], opened: &[(String, u64)], closed: &HashSet<String>) -> Vec<String> {
+    let mut ids: Vec<String> = server.iter().map(|tab| tab.id.clone()).collect();
+    for (id, _) in opened {
+        if !ids.contains(id) {
+            ids.push(id.clone());
+        }
+    }
+    ids.retain(|id| !closed.contains(id));
+    ids
+}
+
+/// The helm WebSocket path one terminal of a session attaches on.
+///
+/// `lease` rides on EVERY terminal of the view, the agent's included
+/// (PLAN_M4.md item 3): the supervisor groups a session's channels by it
+/// to enforce SPEC.md's one-attached-client rule across all of them, so a
+/// view that leased only its tabs would have its own agent terminal
+/// take over — and be taken over by — the tabs sitting beside it.
+///
+/// `tab` is absent for the agent terminal, which is what the pre-M4
+/// (agent-only) reading of this endpoint already means, so the agent's URL
+/// differs from an old build's only by the lease.
+fn terminal_ws_path(session_id: &str, tab_id: Option<&str>, lease: &str) -> String {
+    let session = encode_path_segment(session_id);
+    let lease = encode_query_value(lease);
+    match tab_id {
+        None => format!("/api/sessions/{session}/term?lease={lease}"),
+        Some(tab) => {
+            let tab = encode_query_value(tab);
+            format!("/api/sessions/{session}/term?tab={tab}&lease={lease}")
+        }
+    }
+}
+
+/// The safety-critical half of the inline close-tab confirmation, the
+/// counterpart to `confirm_consequence` for sessions and worded from the
+/// same rule: say what the click actually destroys before naming the
+/// thing.
+///
+/// Unconditional, with no status to branch on — a tab has none. That is
+/// not an omission: SPEC.md makes close "kills that shell and its
+/// processes" whatever the shell is currently doing, and a tab whose shell
+/// already exited still closes (the supervisor's own idempotency), so
+/// there is no state in which a softer wording would be more honest. The
+/// daemonized-child clause is in it because the supervisor's tab-scoped
+/// reap really does go after them, which is exactly the consequence a user
+/// cannot see coming from the word "close".
+const CLOSE_TAB_CONSEQUENCE: &str =
+    "closing kills this terminal's shell and every process it started:";
+
+/// `tab_errors`' entries in a stable display order, newest-agnostic and
+/// purely lexical by key.
+///
+/// A `HashMap` iterates in no defined order, and the error lines sit in a
+/// list the user reads: without this, every unrelated re-render could
+/// reshuffle them, which reads as messages appearing and disappearing
+/// rather than accumulating. The ORDER itself carries no meaning and is not
+/// claimed to — only its stability does.
+fn sorted_tab_errors(errors: &HashMap<String, String>) -> Vec<(String, String)> {
+    let mut entries: Vec<(String, String)> = errors
+        .iter()
+        .map(|(key, message)| (key.clone(), message.clone()))
+        .collect();
+    entries.sort_by(|a, b| a.0.cmp(&b.0));
+    entries
+}
+
+/// One session: a tab strip over one terminal per open terminal, with a
+/// back control above them. Each terminal div is handed to the JS island
+/// on mount; Dioxus never touches its children again — that boundary is
+/// the whole design.
+///
+/// ## Tabs (PLAN_M4.md item 6)
+///
+/// The agent terminal comes first and cannot be closed; every open tab
+/// follows it, labeled positionally. Every one of them is ATTACHED at the
+/// same time, and selecting a tab is a CSS visibility change, never an
+/// attach cutover — attach-on-select was considered and rejected, since
+/// each switch would pay a full replay and exercise the takeover machinery
+/// for no gain. What that costs is one xterm instance, one WebSocket, and
+/// one supervisor-side control client per tab; what it buys is that a
+/// background tab keeps consuming its own stream, which per-terminal flow
+/// control (PLAN_M4.md item 3) makes safe.
+///
+/// Hidden panes are hidden with `visibility`, not `display: none`, and
+/// that is load-bearing rather than stylistic: a `display: none` element
+/// has no layout box, so `FitAddon.fit()` would size every unselected
+/// terminal to zero columns at mount time — and every tab in a session
+/// with more than one mounts while hidden. See app.css's `.terminal-pane`.
+///
+/// A tab whose WINDOW is gone (closed from another client, erased by a
+/// reboot) needs no special case here: its attach fails and the helm
+/// relays the reason as an ordinary detach notice, which is the same
+/// no-terminal explanation the session view has always rendered. A tab
+/// whose SHELL merely exited is a live, viewable dead pane, exactly as the
+/// agent terminal is.
+///
+/// ## The attachment lease (PLAN_M4.md item 3)
+///
+/// One high-entropy lease per VIEW INSTANCE, minted here (see
+/// `mint_lease`) and carried on every terminal WebSocket this view
+/// opens, agent included. The supervisor groups a session's channels by it
+/// to enforce SPEC.md's one-attached-client rule across all of a session's
+/// terminals at once.
+///
+/// This deliberately sharpens what a takeover means: a second view of the
+/// same session now detaches ALL of the first view's terminals, not just
+/// the one they have in common. That is the rule working as specified —
+/// the attached client owns the session's terminals — and each losing
+/// terminal still banners its own detach.
+///
+/// No terminal mounts until the lease exists, and a lease that cannot be
+/// minted is fatal to this view's terminals rather than something to
+/// degrade around. That is not caution copied from `CreateSessionForm`: an
+/// un-leased attach is read as its own one-terminal client, so N un-leased
+/// attachments from ONE view would take each other over in turn and the
+/// session would end up with exactly one live terminal and no explanation.
+/// Refusing loudly beats shipping that.
 ///
 /// ## Mount/unmount lifecycle (PLAN_M2.md step 7)
 ///
@@ -1537,42 +2062,48 @@ fn confirm_consequence(status: &SessionStatus) -> &'static str {
 /// `terminal.js` only ever needed a mount-time guard against a
 /// re-render calling `mount()` twice. Now that `App` can navigate away
 /// and back, this component must clean up on drop — otherwise that
-/// guard (terminal.js's `active`, now the ONLY mount guard — see its
+/// guard (terminal.js's `islands` map, now the ONLY mount guard — see its
 /// own docs) would permanently wedge shut, and reopening ANY session
 /// after the first would silently no-op `mount()` instead of attaching.
-/// `use_drop` fires `farhelmTerm.unmount()` for exactly that reason: it
+/// `use_drop` fires `farhelmTerm.unmountAll()` for exactly that reason: it
 /// is the regression this lifecycle work exists to prevent, not a
 /// hypothetical.
 ///
-/// ## The mount-generation token
+/// Individual mounts are NOT driven from here. This component computes the
+/// full set of terminals it wants and hands it to `farhelmTerm.sync()`,
+/// which reconciles (see terminal.js's header for why the diff belongs on
+/// that side). The effect below is therefore idempotent by construction,
+/// which is what makes it safe for a 3-second poll to re-run it forever.
 ///
-/// `window.__farhelmMountGeneration` guards only the OUTER wait here —
+/// ## The sync-generation token
+///
+/// `window.__farhelmSyncGeneration` guards only the OUTER wait here —
 /// for `window.farhelmTerm` to exist at all, since terminal.js's
 /// `document::Script` is injected asynchronously and this component can
 /// render before it has executed (a real, if rare, race). Bumping the
-/// counter on every mount attempt AND on drop means backing out before
+/// counter on every sync attempt AND on drop means backing out before
 /// that wait resolves reliably cancels it. Once `window.farhelmTerm`
-/// exists, `mountWhenReady`'s OWN wait for xterm's globals is a separate
-/// concern guarded entirely inside terminal.js (its `pending`
+/// exists, `mountWhenReady`'s OWN per-island wait for xterm's globals is a
+/// separate concern guarded entirely inside terminal.js (its `pendings`
 /// replacement-and-clear scheme — see that function's docs); this token
 /// does not reach that far.
 #[component]
 fn SessionView(session: Session, on_back: EventHandler<()>) -> Element {
     let base = use_context::<ApiBase>().0;
-    let session_id = session.id.clone();
     // The session as this view currently understands it. Seeded from the
     // prop and then owned here, because a restart changes it: the reply
     // carries the session's recomputed status and offer, and a REFUSED
     // restart is exactly the case where re-reading the server's current
     // answer matters (a stale offer is what caused the refusal).
     let mut current = use_signal(|| session.clone());
-    // Bumped on every successful restart to force the terminal island to
-    // remount. Both reuse cases need it: a reused pane's attachment was
-    // deliberately torn down by the restart (see the supervisor's
-    // `detach_for_restart`), and a fresh terminal is a different pane
-    // entirely. Remounting also replays the pane's scrollback, which for a
-    // reused terminal is what puts the PRIOR run's output back on screen
-    // above the new one.
+    // Bumped on every successful restart to force the AGENT terminal's
+    // island to remount — and only that one, since restart touches the
+    // agent terminal alone (the supervisor's `detach_for_restart`) and a
+    // tab's attachment survives it untouched. Both reuse cases need it: a
+    // reused pane's attachment was deliberately torn down by the restart,
+    // and a fresh terminal is a different pane entirely. Remounting also
+    // replays the pane's scrollback, which for a reused terminal is what
+    // puts the PRIOR run's output back on screen above the new one.
     let mut mount_generation = use_signal(|| 0_u32);
     // Whether a restart is in flight (disables the control and guards
     // re-entry, mirroring `ListView`'s `pending`), and whether the inline
@@ -1582,37 +2113,165 @@ fn SessionView(session: Session, on_back: EventHandler<()>) -> Element {
     let mut restarting = use_signal(|| false);
     let mut confirming = use_signal(|| false);
     let mut restart_error = use_signal(|| None::<String>);
-
     // Counts restart ATTEMPTS, and versions every read of this session
-    // against them. The mount-time refresh below is one round trip that
-    // can outlive a restart the user starts immediately after opening the
-    // view; without this, its stale answer would land on top of the
-    // restart's own fresher one and the view would go back to describing
-    // the run that no longer exists.
+    // against them. The detail poll below is a round trip that can outlive
+    // a restart the user starts while one of its fetches is in flight;
+    // without this, that stale answer would land on top of the restart's
+    // own fresher one and the view would go back to describing the run
+    // that no longer exists.
     let mut restart_epoch = use_signal(|| 0_u32);
 
-    // One refresh on open, not a poll loop: the `Session` this view is
-    // handed can be a create-time placeholder (`SessionCreated` reports
-    // `Unknown` deliberately — see the supervisor's create docs), and the
-    // restart affordance reads `status` to decide whether to confirm
-    // before killing something. Polling here is deliberately NOT the fix:
-    // PLAN_M2.md's list poll stops while a terminal is open, and the
-    // status this view holds is only ever a UI HINT anyway — the
-    // supervisor rechecks real liveness and refuses a restart that would
-    // kill an agent without consent, which is what makes a hint safe to
-    // act on at all. This fetch just keeps the common case from having to
-    // learn that the hard way.
+    // This view's attachment lease, `None` until minting finishes (it is
+    // an `await` on both renderers) and `lease_error` instead if it never
+    // does. See this component's own docs for why nothing attaches without
+    // it rather than falling back to an un-leased attach.
+    let mut lease = use_signal(|| None::<String>);
+    let mut lease_error = use_signal(|| None::<String>);
+    // Which terminal is on screen: `None` is the agent terminal, `Some(id)`
+    // a tab. Only the SELECTION changes here — every terminal stays
+    // attached regardless of what this holds.
+    let mut selected = use_signal(|| None::<String>);
+    // The optimistic corrections `visible_tabs` applies over the server's
+    // list, so the user sees their own open/close before the next poll
+    // confirms it. Pruned by that poll (below) once the server agrees.
+    //
+    // `opened_tabs` carries a SEQUENCE NUMBER per entry, not just an id,
+    // and that is what keeps a phantom tab from living forever. A reply
+    // that omits an optimistic tab is only evidence of absence if the
+    // request behind it was sent AFTER the open completed; a poll already
+    // in flight when the tab was created legitimately predates it. Without
+    // the number, "absent" could never be distinguished from "too early",
+    // so an entry the server would never list — one another client closed
+    // before this view ever saw it listed — had no way to be retired, and
+    // the strip would show a tab that attaches to nothing until the view
+    // was closed. `poll_sequence` below is the counter both sides read.
+    let mut opened_tabs = use_signal(Vec::<(String, u64)>::new);
+    let mut closed_tabs = use_signal(HashSet::<String>::new);
+    // How many detail polls have been STARTED by this view. Incremented at
+    // each fetch's launch, so a poll's own index is the value it read
+    // before incrementing, and an optimistic open recording the current
+    // value names the first poll that could possibly know about it.
+    let mut poll_sequence = use_signal(|| 0_u64);
+    // In-flight guards, mirroring `ListView`'s `pending`: one flag for the
+    // single add control, a set for closes (which are per tab and can
+    // legitimately overlap).
+    let mut opening_tab = use_signal(|| false);
+    let mut closing_tabs = use_signal(HashSet::<String>::new);
+    // Which tab, if any, is showing the inline close confirmation.
+    let mut confirming_close = use_signal(|| None::<String>);
+    // Set when the detail poll gets a 404 for this session: what is on
+    // screen is the last state that DID arrive, and this says so. See
+    // `fetch_session` for why a 404 cannot be read as "deleted" — the
+    // helm's detail route is listing-backed and inherits its cap — and
+    // therefore why this is a staleness notice rather than an obituary.
+    let mut refresh_stale = use_signal(|| false);
+    // Tab-operation failures, keyed by OPERATION rather than pooled into
+    // one slot — the same discipline `ListView` keeps for its per-session
+    // errors, and for the same reason: with a single slot, closing tab B
+    // successfully would wipe the still-unread failure from closing tab A,
+    // and two concurrent failures would clobber each other so the user
+    // only ever learned about whichever lost the race. The key is
+    // `TAB_OPEN_ERROR_KEY` for the add control and the tab's own id for a
+    // close, so an operation only ever clears its own message.
+    let mut tab_errors = use_signal(HashMap::<String, String>::new);
+
+    // Minted once, on mount, and never re-minted: the lease identifies
+    // THIS view instance for as long as it lives, so a remount of one
+    // terminal (a restart) must keep it — reusing the lease is exactly
+    // what makes that remount an ordinary reconnect of one channel rather
+    // than a takeover of the view's own sibling terminals.
+    use_future(move || async move {
+        match mint_lease().await {
+            Ok(minted) => lease.set(Some(minted)),
+            Err(reason) => lease_error.set(Some(format!(
+                "could not generate this view's terminal lease, so no terminal was attached \
+                 (without one, this session's terminals would take each other over): {reason}"
+            ))),
+        }
+    });
+
+    // Poll the session DETAIL for as long as this view is open, at the
+    // same cadence `ListView` polls the listing (PLAN_M4.md item 6).
+    //
+    // Through M3 this was ONE refresh on open, and its doc said polling
+    // was deliberately not wanted: the `Session` this view is handed can
+    // be a create-time placeholder (`SessionCreated` reports `Unknown`
+    // deliberately — see the supervisor's create docs) and the restart
+    // affordance reads `status`, but that status is only ever a UI HINT —
+    // the supervisor rechecks real liveness and refuses a restart that
+    // would kill an agent without consent — so one fetch was enough. Tabs
+    // change that, and only that: the tab list has no server-side recheck
+    // standing behind it, and SPEC.md's changes-appear-automatically rule
+    // means a tab opened or closed from another client has to show up
+    // without a reload. Polling the detail is the interim mechanism for
+    // exactly that reason M2 chose it for the list; M5's live push
+    // replaces both together. The status refresh comes along for free and
+    // is strictly better than the single shot it replaces.
+    //
+    // Scoped to a `use_future` owned by this component, so it stops for
+    // free when the view unmounts — the same lifecycle `ListView`'s poll
+    // relies on.
     let refresh_base = base.clone();
     let refresh_id = session.id.clone();
     use_future(move || {
         let base = refresh_base.clone();
         let id = refresh_id.clone();
-        let opened_at = restart_epoch.peek().to_owned();
         async move {
-            if let Ok(Some(fresh)) = fetch_session(&base, &id).await
-                && *restart_epoch.peek() == opened_at
-            {
-                current.set(fresh);
+            loop {
+                // Both counters are read per iteration, not once outside
+                // the loop. `started_at` versions THIS fetch against
+                // restarts, so a restart landing mid-flight invalidates
+                // only the request that was in the air when it happened;
+                // `index` is this poll's position in the view's own poll
+                // order, which is what tells an optimistic tab whether
+                // this reply is late enough to be evidence about it.
+                let started_at = restart_epoch.peek().to_owned();
+                let index = poll_sequence.peek().to_owned();
+                poll_sequence += 1;
+                let fetched = fetch_session(&base, &id).await;
+                // A 404 is surfaced rather than absorbed, and deliberately
+                // NOT acted on: the view keeps everything it has —
+                // metadata, tabs, live terminals — and merely stops
+                // claiming to be current. `fetch_session`'s docs carry the
+                // reason this is not "the session was deleted"; a
+                // transport error is left silent because a poll that
+                // failed to reach the helm says nothing about the session
+                // at all, and one dropped request every few seconds is not
+                // worth a banner.
+                if matches!(fetched, Ok(None)) {
+                    refresh_stale.set(true);
+                }
+                if let Ok(Some(fresh)) = fetched
+                    && *restart_epoch.peek() == started_at
+                {
+                    refresh_stale.set(false);
+                    // Prune the optimistic corrections this reply settles.
+                    // Deliberately NOT done on a failed or 404 fetch — an
+                    // error carries no tab list at all, and a transient
+                    // failure is not evidence about what exists
+                    // (`ListView`'s poll makes the same call for the same
+                    // reason).
+                    let live: HashSet<&str> =
+                        fresh.tabs.iter().map(|tab| tab.id.as_str()).collect();
+                    // An optimistic open retires two ways: the server now
+                    // lists it (it graduated to the real list), or this
+                    // poll STARTED after the open and still does not
+                    // mention it (it is genuinely gone — closed from
+                    // another client between creation and this view's
+                    // first sight of it). A poll that predates the open
+                    // says nothing either way and leaves it alone.
+                    opened_tabs.write().retain(|(id, observed_from)| {
+                        !live.contains(id.as_str()) && index < *observed_from
+                    });
+                    closed_tabs.write().retain(|id| live.contains(id.as_str()));
+                    current.set(fresh);
+                }
+                // Same per-target sleep split as `ListView`'s poll — see
+                // its own comment for why each target gets its own idiom.
+                #[cfg(target_arch = "wasm32")]
+                gloo_timers::future::TimeoutFuture::new(POLL_INTERVAL_MS as u32).await;
+                #[cfg(not(target_arch = "wasm32"))]
+                tokio::time::sleep(std::time::Duration::from_millis(POLL_INTERVAL_MS)).await;
             }
         }
     });
@@ -1676,6 +2335,17 @@ fn SessionView(session: Session, on_back: EventHandler<()>) -> Element {
             // perfectly well. Remounting when nothing changed is merely a
             // reattach — the same thing a reload does.
             mount_generation += 1;
+            // A SECOND bump, closing the other half of the staleness this
+            // counter exists for. The first bump (before the request)
+            // invalidates polls that were already in flight; without this
+            // one, a poll that STARTED during the restart shares the new
+            // epoch, passes its own guard, and can land its
+            // mid-restart answer on top of the authoritative refresh above
+            // — putting the view back to describing the run that just
+            // ended. Bumping again means only polls launched after the
+            // restart finished are allowed to commit, which is exactly the
+            // set that can have seen the result.
+            restart_epoch += 1;
             restarting.set(false);
         });
     };
@@ -1685,32 +2355,210 @@ fn SessionView(session: Session, on_back: EventHandler<()>) -> Element {
     let mut confirm_restart = restart.clone();
     let mut fresh_restart = restart;
 
+    // The add-tab control. Unlike `ListView`'s create, navigating away
+    // while this is in flight is deliberately NOT locked out: a stranded
+    // create can cost the user a duplicate AGENT they never see, whereas a
+    // stranded open just means a tab that exists and is listed the next
+    // time this session is opened — nothing is lost and nothing is
+    // duplicated. The in-flight flag here only guards re-entry and
+    // disables the button.
+    let add_base = base.clone();
+    let add_session_id = session.id.clone();
+    let on_add_tab = move |_| {
+        // Signal-level re-entry check, not just the `disabled` attribute:
+        // the attribute's DOM update from a rerender is not synchronous
+        // with a click event, so a second click landing in that gap would
+        // still reach this handler.
+        if opening_tab() {
+            return;
+        }
+        opening_tab.set(true);
+        // Cleared at the START of this operation and keyed to it alone, so
+        // a retry drops its own stale message without touching a close
+        // failure the user has not read yet.
+        tab_errors.write().remove(TAB_OPEN_ERROR_KEY);
+        let base = add_base.clone();
+        let session_id = add_session_id.clone();
+        spawn(async move {
+            match open_tab(&base, &session_id).await {
+                Ok(tab) => {
+                    // Rendered immediately at the END of the strip and
+                    // selected, so the user lands in the terminal they
+                    // just asked for; the next poll gives it its real
+                    // position (see `visible_tabs`).
+                    //
+                    // The sequence number is read AFTER the reply, not
+                    // before the request: it names the first poll that
+                    // could possibly have seen this tab, and a poll
+                    // launched while the POST was still in flight could
+                    // not have.
+                    let observed_from = poll_sequence.peek().to_owned();
+                    opened_tabs.write().push((tab.id.clone(), observed_from));
+                    selected.set(Some(tab.id));
+                }
+                // The supervisor's own words, verbatim: a vanished working
+                // directory and a session needing a restart first are both
+                // refusals SPEC.md requires to name what is wrong.
+                Err(e) => {
+                    tab_errors
+                        .write()
+                        .insert(TAB_OPEN_ERROR_KEY.to_string(), format!("open tab: {e}"));
+                }
+            }
+            opening_tab.set(false);
+        });
+    };
+
+    // The DELETE itself, reached only through the confirmation below.
+    let close_base = base.clone();
+    let close_session_id = session.id.clone();
+    let mut do_close_tab = move |tab_id: String| {
+        // Re-entry guard on the per-tab in-flight set, mirroring
+        // `ListView`'s `pending`: `insert` returning `false` means a close
+        // for this tab is already running.
+        if !closing_tabs.write().insert(tab_id.clone()) {
+            return;
+        }
+        // This tab's own previous failure, cleared at the start of the
+        // retry that supersedes it — never anyone else's (see
+        // `tab_errors`).
+        tab_errors.write().remove(&tab_id);
+        let base = close_base.clone();
+        let session_id = close_session_id.clone();
+        spawn(async move {
+            match close_tab(&base, &session_id, &tab_id).await {
+                Ok(()) => {
+                    // Acting on a response already in hand, not guessing:
+                    // the same deliberate optimism `ListView` applies to a
+                    // deleted row, and for the same reason — leaving the
+                    // tab on screen until the next poll would leave a
+                    // clickable control that attaches a terminal the
+                    // supervisor has already destroyed.
+                    closed_tabs.write().insert(tab_id.clone());
+                    // Retired from the OPTIMISTIC list too, not just
+                    // suppressed by `closed_tabs`. A tab opened and closed
+                    // before any poll observed it would otherwise sit in
+                    // `opened_tabs` forever — `closed_tabs` is itself
+                    // pruned once the server stops listing the id, and for
+                    // a tab the server never listed that is immediately,
+                    // at which point the stale optimistic entry would
+                    // resurrect a tab that does not exist.
+                    opened_tabs.write().retain(|(id, _)| id != &tab_id);
+                    if selected.read().as_deref() == Some(tab_id.as_str()) {
+                        selected.set(None);
+                    }
+                }
+                Err(e) => {
+                    tab_errors
+                        .write()
+                        .insert(tab_id.clone(), format!("close tab: {e}"));
+                }
+            }
+            closing_tabs.write().remove(&tab_id);
+        });
+    };
+
+    // The close affordance's first click: opens the in-page confirmation
+    // and never calls the API. In-page for the reason every confirmation
+    // in this UI is (wry ships no native JS dialogs on macOS's WKWebView,
+    // where a `window.confirm()` silently does nothing), and confirmed
+    // unconditionally rather than only for a busy shell: the UI cannot see
+    // what a tab's shell is running, and close kills it either way.
+    //
+    // Refuses a tab whose close is already in flight, the cross-guard
+    // mirroring `ListView`'s: the button is only disabled once a rerender
+    // following the `closing_tabs` insert lands, so a click queued just
+    // ahead of that could otherwise open a prompt for an operation already
+    // under way.
+    let on_close_tab = move |tab_id: String| {
+        if closing_tabs.read().contains(&tab_id) {
+            return;
+        }
+        confirming_close.set(Some(tab_id));
+    };
+
+    // The confirm button. Proceeds ONLY when this tab is still the one
+    // being confirmed — `Some(id)` matching — which is what stops a
+    // confirm click queued behind a cancel (both fired in the same burst)
+    // from closing a tab the user just told the UI to leave alone.
+    let mut confirm_close_tab = move |tab_id: String| {
+        if confirming_close.read().as_deref() != Some(tab_id.as_str()) {
+            return;
+        }
+        confirming_close.set(None);
+        do_close_tab(tab_id);
+    };
+
+    // What this view currently wants mounted, as the JSON array
+    // `farhelmTerm.sync()` takes — `None` until the lease exists, which is
+    // what keeps any terminal from attaching un-leased.
+    //
+    // A memo rather than computing this inside the effect: the poll above
+    // writes `current` on every tick whether or not the session changed,
+    // and each write marks its subscribers dirty. A memo re-COMPUTES just
+    // as often, but only notifies when the resulting value differs, so the
+    // effect — and with it an eval round trip into the page — runs on real
+    // changes only. Correctness does not depend on that (`sync()` is
+    // idempotent), but a `document::eval` every 3 seconds forever would be
+    // pure waste.
+    let spec_session_id = session.id.clone();
+    let terminal_specs = use_memo(move || {
+        let lease = lease.read().clone()?;
+        let session = current.read();
+        let tabs = visible_tabs(&session.tabs, &opened_tabs.read(), &closed_tabs.read());
+        let active = selected.read().clone().filter(|id| tabs.contains(id));
+        // Only the tabs within the island cap are ever handed to
+        // terminal.js — see `MAX_MOUNTED_TAB_ISLANDS`. The strip still
+        // lists the rest; their panes explain themselves instead.
+        let mountable = tabs.iter().take(MAX_MOUNTED_TAB_ISLANDS);
+        // Every value here goes through serde_json rather than string
+        // interpolation: the session and tab ids come from a supervisor,
+        // which with --ssh is a different machine. A hostile or compromised
+        // host returning an id containing a quote would otherwise get
+        // arbitrary JavaScript running on the helm's origin — turning a
+        // remote-host compromise into control of the local helm API.
+        let mut specs = vec![serde_json::json!({
+            "el": AGENT_TERMINAL_ELEMENT_ID,
+            "banner": AGENT_BANNER_ELEMENT_ID,
+            "path": terminal_ws_path(&spec_session_id, None, &lease),
+            // Only the agent terminal carries the restart generation: a
+            // restart detaches the agent's attachment alone (the
+            // supervisor's `detach_for_restart`), so bumping a tab's would
+            // tear down and replay a terminal the restart never touched.
+            "gen": mount_generation(),
+            // The agent terminal owns terminal.js's legacy singleton test
+            // globals — see that file's `mount()`.
+            "primary": true,
+            "focus": active.is_none(),
+        })];
+        for id in mountable {
+            specs.push(serde_json::json!({
+                "el": tab_terminal_element_id(id),
+                "banner": tab_banner_element_id(id),
+                "path": terminal_ws_path(&spec_session_id, Some(id), &lease),
+                "gen": 0,
+                "primary": false,
+                "focus": active.as_deref() == Some(id.as_str()),
+            }));
+        }
+        Some(serde_json::Value::Array(specs).to_string())
+    });
+
     use_effect(move || {
-        // Read so this effect re-runs on every restart, not only on mount.
-        let _ = mount_generation();
-        // Values are JSON-encoded, never interpolated raw: the session
-        // id comes from a supervisor, which with --ssh is a different
-        // machine. A hostile or compromised host returning an id
-        // containing a quote would otherwise get arbitrary JavaScript
-        // running on the helm's origin — turning a remote-host
-        // compromise into control of the local helm API.
-        let path = serde_json::to_string(&format!("/api/sessions/{session_id}/term"))
-            .expect("string is serializable");
+        // Nothing attaches until the lease is minted; `lease_error` is
+        // what the user sees if it never is.
+        let Some(specs) = terminal_specs() else {
+            return;
+        };
         let base_js = serde_json::to_string(&base).expect("string is serializable");
         let js = format!(
             r#"(function() {{
-                var gen = (window.__farhelmMountGeneration || 0) + 1;
-                window.__farhelmMountGeneration = gen;
+                var gen = (window.__farhelmSyncGeneration || 0) + 1;
+                window.__farhelmSyncGeneration = gen;
                 (function waitForIsland() {{
-                    if (window.__farhelmMountGeneration !== gen) return;
+                    if (window.__farhelmSyncGeneration !== gen) return;
                     if (window.farhelmTerm) {{
-                        // A no-op on first mount, and load-bearing on every
-                        // later one: the island refuses to mount over an
-                        // existing attachment (its own `active` guard), so
-                        // a restart's remount has to tear the previous one
-                        // down first.
-                        farhelmTerm.unmount();
-                        farhelmTerm.mountWhenReady('terminal', {path}, {base_js});
+                        farhelmTerm.sync({base_js}, {specs});
                     }} else {{
                         setTimeout(waitForIsland, 50);
                     }}
@@ -1722,21 +2570,42 @@ fn SessionView(session: Session, on_back: EventHandler<()>) -> Element {
 
     use_drop(|| {
         // Bump the generation FIRST so an in-flight outer wait (see the
-        // module docs above) aborts before `unmount()` below can race
-        // it; `unmount()` itself is what cancels `mountWhenReady`'s own
-        // wait, once the outer one has already handed off to it.
-        // Fire-and-forget: this runs on the way out (navigating back to
-        // the list, or the whole app tearing down), so there is no
-        // reactive state left to update with a result, and the JS side
-        // is already written to be a no-op if nothing is mounted.
+        // component docs above) aborts before `unmountAll()` below can
+        // race it; `unmountAll()` itself is what cancels each island's own
+        // pending `mountWhenReady` wait, once the outer one has already
+        // handed off to it. Fire-and-forget: this runs on the way out
+        // (navigating back to the list, or the whole app tearing down), so
+        // there is no reactive state left to update with a result, and the
+        // JS side is already written to be a no-op if nothing is mounted.
         document::eval(
-            "window.__farhelmMountGeneration = (window.__farhelmMountGeneration || 0) + 1; \
-             if (window.farhelmTerm) { farhelmTerm.unmount(); }",
+            "window.__farhelmSyncGeneration = (window.__farhelmSyncGeneration || 0) + 1; \
+             if (window.farhelmTerm) { farhelmTerm.unmountAll(); }",
         );
     });
 
     let shown = current.read().clone();
     let alive = shown.status == SessionStatus::Alive;
+    let tabs = visible_tabs(&shown.tabs, &opened_tabs.read(), &closed_tabs.read());
+    // Both of these are DERIVED rather than written back to their signals
+    // when they go stale, and that is safe precisely because tab ids are
+    // never reused (farhelm-proto's `TabInfo::id`): an id that has left the
+    // list can never come back, so a signal still holding it can only ever
+    // resolve to "no such tab" and will be overwritten by the user's next
+    // click. Writing during render would be the alternative, and Dioxus
+    // makes that a re-render loop rather than a fix.
+    let active_tab = selected.read().clone().filter(|id| tabs.contains(id));
+    let confirming_tab = confirming_close
+        .read()
+        .clone()
+        .filter(|id| tabs.contains(id));
+    // The prompt names the tab by the SAME positional label the strip
+    // shows, recomputed from the list as it is right now — so a tab that
+    // shifts position under an open prompt (a lower-numbered sibling
+    // closed from another client) is still identified correctly.
+    let confirming_label = confirming_tab
+        .as_ref()
+        .and_then(|id| tabs.iter().position(|candidate| candidate == id))
+        .map(tab_label);
     rsx! {
         div { class: "layout",
             header { class: "titlebar",
@@ -1823,8 +2692,203 @@ fn SessionView(session: Session, on_back: EventHandler<()>) -> Element {
                     div { class: "restart-error", "{err}" }
                 }
             }
-            div { id: "term-banner", class: "banner" }
-            div { id: "terminal", class: "terminal" }
+            // The tab strip: the agent terminal first and unclosable
+            // (SPEC.md gives a session one agent terminal, and closing it
+            // is not one of the operations that exist), then every open
+            // tab in the server's creation order, then the add control.
+            div { class: "tab-strip",
+                button {
+                    r#type: "button",
+                    class: if active_tab.is_none() { "btn tab tab-agent selected" } else { "btn tab tab-agent" },
+                    "data-terminal": "agent",
+                    onclick: move |_| selected.set(None),
+                    "agent"
+                }
+                // `key` is the tab id, not the loop index, and that is
+                // load-bearing rather than a lint: closing a tab shifts
+                // every later sibling's position, and an index key would
+                // make Dioxus reuse each item's DOM for a DIFFERENT tab —
+                // carrying the wrong id into the close handler of a
+                // still-open prompt. The id keys the PANES below for the
+                // same reason, with more at stake: reused pane DOM would
+                // hand one tab's mounted island to another's element.
+                for (index , tab_id) in tabs.iter().enumerate() {
+                    TabStripItem {
+                        key: "{tab_id}",
+                        tab_id: tab_id.clone(),
+                        label: tab_label(index),
+                        selected: active_tab.as_deref() == Some(tab_id.as_str()),
+                        busy: closing_tabs.read().contains(tab_id),
+                        on_select: move |id| selected.set(Some(id)),
+                        on_close: on_close_tab,
+                    }
+                }
+                button {
+                    r#type: "button",
+                    class: "btn tab-add",
+                    disabled: opening_tab(),
+                    onclick: on_add_tab,
+                    "+ terminal"
+                }
+            }
+            // The close confirmation, on its own row under the strip
+            // rather than in place of the tab's own controls: the strip is
+            // a single-line flex row that a prompt would push tabs out of,
+            // and unlike a session row there is no per-row action area for
+            // it to take over. Consequence first, then the label, then the
+            // buttons — the same reading order (and the same untruncatable
+            // consequence / truncatable name split) the delete prompt uses;
+            // see `confirm_consequence`'s docs for why that order is the
+            // safety-critical part.
+            if let Some(tab_id) = confirming_tab {
+                div { class: "tab-confirm",
+                    span { class: "confirm-consequence", "{CLOSE_TAB_CONSEQUENCE}" }
+                    span { class: "confirm-title",
+                        "{confirming_label.clone().unwrap_or_default()}"
+                    }
+                    button {
+                        r#type: "button",
+                        class: "btn confirm-delete confirm-close-tab",
+                        onclick: move |_| confirm_close_tab(tab_id.clone()),
+                        "confirm close"
+                    }
+                    button {
+                        r#type: "button",
+                        class: "btn confirm-cancel",
+                        // Safe default, exactly as the delete prompt does
+                        // it: keyboard focus lands on the way OUT of the
+                        // destructive action, via the plain HTML attribute
+                        // rather than a fallible `set_focus` whose
+                        // discarded `Result` could silently drop the
+                        // safety behavior.
+                        autofocus: true,
+                        onclick: move |_| confirming_close.set(None),
+                        "cancel"
+                    }
+                }
+            }
+            // One line per failed operation, each keyed to the operation
+            // that produced it (see `tab_errors`), so an unrelated success
+            // never clears a message the user has not read. Sorted so the
+            // lines do not reshuffle on every render — a `HashMap` has no
+            // order of its own, and rows jumping around under the strip
+            // would make a second failure look like a replaced one.
+            for (key , err) in sorted_tab_errors(&tab_errors.read()) {
+                div { key: "{key}", class: "tab-error", "data-tab-error": "{key}", "{err}" }
+            }
+            // Fatal to the terminals, not to the view: the metadata, the
+            // restart affordance, and the tab strip all still work, and
+            // saying so beats rendering empty panes with no explanation.
+            if let Some(err) = lease_error.read().clone() {
+                div { class: "lease-error", "{err}" }
+            }
+            // Worded to state the FACT (the helm stopped listing this
+            // session) and the CONSEQUENCE (what is shown may be stale),
+            // then BOTH readings — never a pick between them, because this
+            // view genuinely cannot tell them apart (see `fetch_session`).
+            //
+            // An earlier wording ended "its terminals are unaffected",
+            // which is a claim this line has no standing to make: under
+            // the cap reading it is true, but a session deleted from
+            // another client has had its terminals killed, and they will
+            // say so in their own banners a moment later. Naming the two
+            // possibilities and stopping is the most this can honestly do.
+            if refresh_stale() {
+                div { class: "refresh-stale",
+                    "the helm stopped listing this session, so what is shown here may be out of \
+                     date — it was deleted from another client, or there are more sessions than \
+                     the helm lists at once"
+                }
+            }
+            // Every terminal is mounted at once and stacked; only the
+            // selected one is visible. The agent's pane is a fixed node
+            // rather than part of the loop below so that Dioxus never
+            // recreates its DOM (and with it `#term-banner`, which
+            // long-lived observers in the browser suite hold a reference
+            // to) just because the tab list changed around it.
+            div { class: "terminal-panes",
+                div {
+                    class: if active_tab.is_none() { "terminal-pane selected" } else { "terminal-pane" },
+                    "data-terminal": "agent",
+                    div { id: "{AGENT_BANNER_ELEMENT_ID}", class: "banner" }
+                    div { id: "{AGENT_TERMINAL_ELEMENT_ID}", class: "terminal" }
+                }
+                for (index , tab_id) in tabs.iter().enumerate() {
+                    div {
+                        key: "{tab_id}",
+                        class: if active_tab.as_deref() == Some(tab_id.as_str()) { "terminal-pane selected" } else { "terminal-pane" },
+                        "data-terminal": "{tab_id}",
+                        // Past the island cap this view renders an
+                        // explanation instead of a mount point, and
+                        // deliberately renders no terminal DIV at all: an
+                        // element with the island's id but no island
+                        // behind it is exactly what a later `sync()` would
+                        // mount into.
+                        if index < MAX_MOUNTED_TAB_ISLANDS {
+                            div { id: "{tab_banner_element_id(tab_id)}", class: "banner" }
+                            div { id: "{tab_terminal_element_id(tab_id)}", class: "terminal" }
+                        } else {
+                            div { class: "terminal-not-mounted",
+                                "this session reports more than {MAX_MOUNTED_TAB_ISLANDS} terminal tabs; \
+                                 this one is listed but not attached (close some to attach it)"
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// One tab in the strip: its selection button plus its own close
+/// affordance, as a child component for the same reason `SessionRow` is
+/// one — an rsx `for` body cannot bind locals, and two event handlers in
+/// one iteration each need their own owned copy of the tab id. Props give
+/// both of them one without the loop having to clone by hand.
+///
+/// The close control is a SIBLING button, not nested inside the selection
+/// button: HTML forbids interactive content inside a `<button>`, so the
+/// obvious "× inside the tab" markup would be invalid with undefined
+/// browser behavior — the same constraint that split `SessionRow`'s open
+/// action out of its row wrapper. Being a real button also means Enter and
+/// Space activation, focus styling, and screen-reader semantics come for
+/// free.
+///
+/// There is deliberately no such item for the agent terminal: it is
+/// rendered directly by `SessionView` precisely because it must NOT carry
+/// a close affordance.
+#[component]
+fn TabStripItem(
+    tab_id: String,
+    label: String,
+    selected: bool,
+    busy: bool,
+    on_select: EventHandler<String>,
+    on_close: EventHandler<String>,
+) -> Element {
+    let select_id = tab_id.clone();
+    let close_id = tab_id.clone();
+    rsx! {
+        div { class: "tab-slot", "data-tab-id": "{tab_id}",
+            button {
+                r#type: "button",
+                class: if selected { "btn tab selected" } else { "btn tab" },
+                "data-terminal": "{tab_id}",
+                onclick: move |_| on_select.call(select_id.clone()),
+                "{label}"
+            }
+            button {
+                r#type: "button",
+                class: "tab-close",
+                // The visible glyph is a multiplication sign, which reads
+                // as nothing useful to a screen reader — the accessible
+                // name has to carry the tab's identity instead, or every
+                // tab's close button would announce identically.
+                "aria-label": "close {label}",
+                disabled: busy,
+                onclick: move |_| on_close.call(close_id.clone()),
+                "×"
+            }
         }
     }
 }
@@ -1885,7 +2949,14 @@ mod tests {
             status: SessionStatus::Unknown,
             annotation: None,
             restart_offer: RestartOffer::FreshOnly,
+            tabs: Vec::new(),
         }
+    }
+
+    /// A tab with the given id — the whole of `Tab`, which is why this is
+    /// a one-liner rather than a builder.
+    fn tab(id: &str) -> Tab {
+        Tab { id: id.into() }
     }
 
     /// The list's display order must be stable even though the
@@ -2222,5 +3293,222 @@ mod tests {
         let decoded: SessionListing = serde_json::from_value(json).unwrap();
         assert_eq!(decoded.total, 0);
         assert!(!decoded.truncated);
+    }
+
+    // -----------------------------------------------------------------
+    // Terminal tabs (PLAN_M4.md item 6)
+    // -----------------------------------------------------------------
+
+    /// A `Session` JSON with no `tabs` key — every reply from a helm that
+    /// predates PLAN_M4.md item 5 — must decode as "no tabs known" rather
+    /// than failing the whole view, the same old-peer tolerance `status`
+    /// and `restart_offer` carry. Fabricating tabs in either direction is
+    /// impossible here (there is only one empty value), so the risk this
+    /// pins is purely the decode ERROR that a missing field would
+    /// otherwise be.
+    #[test]
+    fn session_without_tabs_field_decodes_as_no_tabs() {
+        let json = serde_json::json!({
+            "id": "s1",
+            "title": "demo",
+            "cwd": "/tmp",
+            "invocation": "agent",
+        });
+        let decoded: Session = serde_json::from_value(json).unwrap();
+        assert!(decoded.tabs.is_empty());
+
+        let with_tabs = serde_json::json!({
+            "id": "s1",
+            "title": "demo",
+            "cwd": "/tmp",
+            "invocation": "agent",
+            "tabs": [{ "id": "tab-1" }, { "id": "tab-2" }],
+        });
+        let decoded: Session = serde_json::from_value(with_tabs).unwrap();
+        assert_eq!(
+            decoded.tabs,
+            vec![tab("tab-1"), tab("tab-2")],
+            "the server's order is the one the strip's positional labels are derived from, so \
+             decoding must preserve it"
+        );
+    }
+
+    /// The server's list is the spine of the rendered order, and the two
+    /// optimistic corrections ride on top of it: a just-opened tab the
+    /// server has not listed yet appears at the END (a tab-open reply
+    /// carries no ordering — see `visible_tabs`), and a just-closed tab
+    /// disappears immediately even while a poll in flight still lists it.
+    /// Getting either edge wrong is directly visible to the user as a
+    /// click that does nothing or a tab that vanishes and comes back.
+    #[test]
+    fn visible_tabs_applies_the_optimistic_corrections_over_the_server_list() {
+        let server = vec![tab("a"), tab("b")];
+
+        assert_eq!(
+            visible_tabs(&server, &[], &HashSet::new()),
+            vec!["a".to_string(), "b".to_string()],
+            "with nothing pending, the server's list is the whole answer, in its order"
+        );
+
+        assert_eq!(
+            visible_tabs(&server, &[("c".to_string(), 0)], &HashSet::new()),
+            vec!["a".to_string(), "b".to_string(), "c".to_string()],
+            "an optimistic open lands at the end until a refresh places it"
+        );
+
+        let closed: HashSet<String> = ["a".to_string()].into_iter().collect();
+        assert_eq!(
+            visible_tabs(&server, &[], &closed),
+            vec!["b".to_string()],
+            "a closed tab is gone at once, even while the server still lists it"
+        );
+    }
+
+    /// The one case both corrections meet: a poll that has caught up
+    /// already lists the optimistically-added tab, and it must appear
+    /// ONCE, in the server's position — not twice, and not pinned to the
+    /// end. `SessionView`'s poll prunes the optimistic entry, but this
+    /// deduplication is what keeps the render correct in the window before
+    /// that prune runs.
+    #[test]
+    fn visible_tabs_never_duplicates_an_optimistic_tab_the_server_now_lists() {
+        let server = vec![tab("a"), tab("b"), tab("c")];
+        assert_eq!(
+            visible_tabs(&server, &[("b".to_string(), 0)], &HashSet::new()),
+            vec!["a".to_string(), "b".to_string(), "c".to_string()]
+        );
+    }
+
+    /// Labels are positional and one-based, derived from list position
+    /// rather than from anything the tab itself carries — SPEC.md gives
+    /// tabs no names, so this IS the naming rule, not a placeholder for
+    /// one.
+    #[test]
+    fn tab_labels_are_one_based_positions() {
+        assert_eq!(tab_label(0), "Terminal 1");
+        assert_eq!(tab_label(1), "Terminal 2");
+    }
+
+    /// Each terminal gets its own mount point and its own banner, and the
+    /// agent's two ids are exactly the ones the pre-tabs UI used — a
+    /// session with no tabs must render the DOM it always did, and the
+    /// browser suite keys off both names throughout. The per-tab ids must
+    /// be distinct from the agent's and from each other, since terminal.js
+    /// uses them as the identity of an island.
+    #[test]
+    fn terminal_element_ids_are_distinct_per_terminal() {
+        assert_eq!(AGENT_TERMINAL_ELEMENT_ID, "terminal");
+        assert_eq!(AGENT_BANNER_ELEMENT_ID, "term-banner");
+        assert_eq!(tab_terminal_element_id("t1"), "terminal-t1");
+        assert_eq!(tab_banner_element_id("t1"), "term-banner-t1");
+        assert_ne!(tab_terminal_element_id("t1"), tab_terminal_element_id("t2"));
+        assert_ne!(tab_terminal_element_id("t1"), tab_banner_element_id("t1"));
+    }
+
+    /// The lease rides on EVERY terminal, the agent's included: a view
+    /// that leased only its tabs would have its own terminals take each
+    /// other over (PLAN_M4.md item 3). The agent's URL carries no `?tab=`
+    /// at all, which is the pre-M4 reading the helm still honors.
+    #[test]
+    fn every_terminal_path_carries_the_lease_and_only_tabs_carry_a_selector() {
+        assert_eq!(
+            terminal_ws_path("s1", None, "lease-1"),
+            "/api/sessions/s1/term?lease=lease-1"
+        );
+        assert_eq!(
+            terminal_ws_path("s1", Some("t1"), "lease-1"),
+            "/api/sessions/s1/term?tab=t1&lease=lease-1"
+        );
+    }
+
+    /// A tab id or lease containing query syntax must not be able to
+    /// re-split the URL and change which terminal gets attached — the tab
+    /// id in particular comes from a supervisor that, under `--ssh`, is a
+    /// different machine. Percent-encoding is what makes that structural
+    /// rather than a matter of trusting the id's shape.
+    #[test]
+    fn query_values_are_percent_encoded() {
+        assert_eq!(encode_query_value("plain-id_1.0~"), "plain-id_1.0~");
+        assert_eq!(encode_query_value("a&b=c"), "a%26b%3Dc");
+        assert_eq!(encode_query_value("a b"), "a%20b");
+        // Per byte, so multi-byte UTF-8 encodes to several escapes rather
+        // than being mangled into one.
+        assert_eq!(encode_query_value("é"), "%C3%A9");
+        assert_eq!(
+            terminal_ws_path("s1", Some("t&lease=stolen"), "mine"),
+            "/api/sessions/s1/term?tab=t%26lease%3Dstolen&lease=mine",
+            "an injected parameter must stay part of the tab VALUE, never become a second key"
+        );
+    }
+
+    /// Close is destructive in a way the word "close" understates: the
+    /// supervisor's tab-scoped reap goes after the shell's daemonized
+    /// descendants too (SPEC.md: close "kills that shell and its
+    /// processes"). The consequence line is what tells the user that
+    /// before they confirm, so it must promise the kill and mention what
+    /// else goes with it.
+    #[test]
+    fn close_tab_consequence_states_the_kill_and_its_reach() {
+        assert_eq!(
+            CLOSE_TAB_CONSEQUENCE,
+            "closing kills this terminal's shell and every process it started:",
+            "the exact sentence is the contract — it is the last thing a user reads before \
+             destroying a shell and everything under it, so a reworded or softened version is a \
+             change to review, not an implementation detail to drift"
+        );
+    }
+
+    /// A tab id is supervisor-supplied and lands in a URL PATH, so an id
+    /// carrying path syntax must not be able to choose which resource the
+    /// request names. `../../victim` is the concrete attack: unescaped, a
+    /// URL parser resolves the dot segments before the request is ever
+    /// sent, turning a tab close into `DELETE /api/sessions/victim` — a
+    /// remote supervisor deleting a local session. Both offenders are
+    /// pinned, because either alone is enough: `/` ends the segment, and a
+    /// segment that is exactly `..` is resolved away even with no slash in
+    /// it at all.
+    #[test]
+    fn path_segments_cannot_escape_their_segment() {
+        assert_eq!(
+            encode_path_segment("../../victim"),
+            "%2E%2E%2F%2E%2E%2Fvictim",
+            "a traversal must survive as literal text inside one segment"
+        );
+        assert_eq!(
+            encode_path_segment(".."),
+            "%2E%2E",
+            "a bare dot segment resolves away without any slash, so the dots themselves have to go"
+        );
+        assert_eq!(
+            encode_path_segment("9c3d5a71-0000-4000-8000-0000000000ff"),
+            "9c3d5a71-0000-4000-8000-0000000000ff",
+            "the ids this actually carries must pass through untouched"
+        );
+        // The narrower set is the whole difference between the two
+        // encoders, so it is asserted as a difference rather than twice
+        // over: `.` is legal in a query value and not in a segment.
+        assert_eq!(encode_query_value("a.b"), "a.b");
+        assert_eq!(encode_path_segment("a.b"), "a%2Eb");
+    }
+
+    /// Error lines are rendered in a list the user reads, and a `HashMap`
+    /// has no iteration order — without a sort, an unrelated re-render
+    /// could reshuffle them, which reads as messages being replaced rather
+    /// than accumulating. What is pinned is STABILITY (the same set always
+    /// renders the same way), not the particular order.
+    #[test]
+    fn tab_errors_render_in_a_stable_order() {
+        let errors: HashMap<String, String> = [
+            ("tab-b".to_string(), "close tab: boom".to_string()),
+            (TAB_OPEN_ERROR_KEY.to_string(), "open tab: nope".to_string()),
+            ("tab-a".to_string(), "close tab: bang".to_string()),
+        ]
+        .into_iter()
+        .collect();
+        let keys: Vec<String> = sorted_tab_errors(&errors)
+            .into_iter()
+            .map(|(key, _)| key)
+            .collect();
+        assert_eq!(keys, vec!["open", "tab-a", "tab-b"]);
     }
 }

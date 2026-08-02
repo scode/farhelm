@@ -27,10 +27,12 @@ gloo-timers.workspace = true
 # crate merely needs the `time` feature (already enabled workspace-wide)
 # to schedule a sleep on it.
 tokio.workspace = true
-# Mints the create idempotency key on desktop (`mint_intent_key` in
-# src/lib.rs) without going through a JS eval — see that function's docs
-# for why. Target-specific rather than a plain dependency so wasm keeps
-# using `crypto.randomUUID()` instead of pulling in an RNG it doesn't need.
+# Mints the client-side random identifiers on desktop — the create
+# idempotency key and the session view's attachment lease (`mint_intent_key`
+# and `mint_lease` in src/lib.rs) — without going through a JS eval; see
+# `mint_lease`'s docs for why. Target-specific rather than a plain
+# dependency so wasm keeps using `crypto.randomUUID()` instead of pulling in
+# an RNG it doesn't need.
 uuid.workspace = true
 
 [features]

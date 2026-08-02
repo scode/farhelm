@@ -177,7 +177,10 @@ body,
    delete" once a prompt is open — gets the same red: a user
    mid-confirmation should read "confirm delete" as at least as alarming
    as the button that led here, not a plainer, calmer control that
-   undersells what it is about to do. */
+   undersells what it is about to do. The tab strip's "confirm close"
+   borrows `.confirm-delete` rather than inventing a second red: closing a
+   tab kills its shell and everything under it, so it belongs in the same
+   visual class as the other irreversible actions, not a gentler one. */
 .session-row-delete,
 .confirm-delete {
   color: #e08080;
@@ -425,6 +428,165 @@ body,
   color: #fff;
   padding: 4px 10px;
   font-size: 13px;
+}
+
+/* The "take control" button terminal.js paints into a detach banner when
+   this view lost the session to another client (see that file's takeover
+   latch). Styled against the banner's red rather than the page background,
+   since that is what it sits on. */
+.banner-reclaim {
+  margin-left: 10px;
+  font-size: 12px;
+  padding: 1px 8px;
+  border-color: #e0b0b0;
+  color: #fff;
+}
+
+.banner-reclaim:hover:not(:disabled) {
+  background: #964a4a;
+}
+
+/* A tab past the mounted-island cap (`MAX_MOUNTED_TAB_ISLANDS` in
+   lib.rs): the strip still lists it, and its pane says why there is no
+   terminal instead of showing an empty box. Reuses the view's plain
+   explanation styling rather than the red banner — nothing has failed. */
+.terminal-not-mounted {
+  padding: 2em;
+  font-size: 14px;
+  color: #b8c0cc;
+}
+
+/* Terminal tabs (PLAN_M4.md item 6). A plain one-line strip under the
+   restart offer: the agent terminal first, then each open tab with its own
+   close affordance, then the add control. `flex-shrink: 0` on the strip
+   keeps it from being squeezed away by the terminal area below it, and
+   `overflow-x: auto` is what a long-lived session with many tabs degrades
+   into — scrolling the strip rather than shrinking tabs into unreadable
+   slivers. */
+.tab-strip {
+  display: flex;
+  align-items: stretch;
+  gap: 4px;
+  padding: 4px 10px;
+  background: #1d2026;
+  flex-shrink: 0;
+  overflow-x: auto;
+}
+
+/* One tab is TWO sibling buttons in a wrapper (HTML forbids nesting a
+   button inside a button — see `TabStripItem` in lib.rs), visually joined
+   so they still read as one control. */
+.tab-slot {
+  display: flex;
+  flex-shrink: 0;
+}
+
+.tab,
+.tab-add {
+  font-size: 12px;
+  padding: 3px 10px;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+/* The close button deliberately does NOT carry `.btn`: it sits flush
+   against its tab, and a second full border between them would read as
+   two separate controls rather than one tab with an affordance on it. */
+.tab-slot .tab {
+  border-right: none;
+  border-radius: 3px 0 0 3px;
+}
+
+.tab-close {
+  background: none;
+  border: 1px solid #3a3f47;
+  border-radius: 0 3px 3px 0;
+  color: #8a919e;
+  font: inherit;
+  font-size: 12px;
+  padding: 3px 7px;
+  cursor: pointer;
+}
+
+.tab-close:hover:not(:disabled) {
+  background: #3a2a2a;
+  color: #e08080;
+}
+
+.tab-close:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+/* The selected tab is the one whose terminal is visible. Marked by a
+   filled background rather than only a border tint: with several tabs the
+   selection has to be readable at a glance from across the strip. */
+.tab.selected {
+  background: #2f3641;
+  color: #fff;
+  border-color: #4d5666;
+}
+
+/* The close confirmation and the tab-operation error line both sit on
+   their own full-width rows under the strip (see `SessionView`'s rsx for
+   why the prompt cannot live inside the strip itself). The prompt reuses
+   `.confirm-consequence`/`.confirm-title`'s shrink discipline from the
+   delete prompt — the consequence never shrinks, the name does. */
+.tab-confirm {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  padding: 4px 10px;
+  background: #232833;
+}
+
+.tab-error,
+.lease-error {
+  padding: 4px 10px;
+  font-size: 12px;
+  color: #e08080;
+}
+
+/* Amber, not red: the detail poll no longer finding this session is a
+   staleness fact, not a failure — see `refresh_stale` in lib.rs for why
+   the UI cannot tell "deleted elsewhere" from "past the helm's
+   listing-backed cap", and therefore must not dress it as either. */
+.refresh-stale {
+  padding: 4px 10px;
+  font-size: 12px;
+  color: #e0d090;
+}
+
+/* Every terminal is mounted at once and stacked in one positioned box;
+   only the selected pane is visible (PLAN_M4.md item 6: switching tabs is
+   a CSS visibility change, never an attach cutover).
+
+   `visibility`, NOT `display: none`, and that is load-bearing rather than
+   stylistic. A `display: none` element has no layout box, so
+   `FitAddon.fit()` would size an unselected terminal to zero columns — and
+   in a session with more than one terminal, every tab mounts while
+   unselected. `position: absolute; inset: 0` gives every pane the
+   container's full box whether or not it is showing, so a hidden
+   terminal's geometry matches the visible one's and stays correct the
+   moment it is selected. Hiding this way also makes hidden panes
+   non-interactive, which is what keeps keystrokes from reaching a terminal
+   the user cannot see. */
+.terminal-panes {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+}
+
+.terminal-pane {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  visibility: hidden;
+}
+
+.terminal-pane.selected {
+  visibility: visible;
 }
 
 .terminal {
