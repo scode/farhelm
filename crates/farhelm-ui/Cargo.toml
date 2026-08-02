@@ -14,22 +14,23 @@ serde_json.workspace = true
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 web-sys.workspace = true
-# List-view polling sleep (PLAN_M2.md step 7, `ListView` in src/lib.rs):
-# `TimeoutFuture` wraps `setTimeout` for this one-shot sleep — see the
-# workspace `Cargo.toml` entry for why the desktop target instead reuses
-# `tokio::time::sleep`.
+# List-view and session-detail polling sleep (PLAN_M2.md step 7 / PLAN_M4.md
+# item 6; `ListView` in src/list.rs, `SessionView` in src/session_view.rs,
+# both sharing `POLL_INTERVAL_MS` from src/api.rs): `TimeoutFuture` wraps
+# `setTimeout` for this one-shot sleep — see the workspace `Cargo.toml` entry
+# for why the desktop target instead reuses `tokio::time::sleep`.
 gloo-timers.workspace = true
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
-# Non-wasm half of the list-view poll sleep (src/lib.rs). Not a new
-# runtime dependency in practice: `dioxus-desktop` already constructs and
-# drives a multi-thread tokio runtime for the desktop target, so this
-# crate merely needs the `time` feature (already enabled workspace-wide)
-# to schedule a sleep on it.
+# Non-wasm half of the list-view and session-detail poll sleep (src/list.rs,
+# src/session_view.rs). Not a new runtime dependency in practice:
+# `dioxus-desktop` already constructs and drives a multi-thread tokio
+# runtime for the desktop target, so this crate merely needs the `time`
+# feature (already enabled workspace-wide) to schedule a sleep on it.
 tokio.workspace = true
 # Mints the client-side random identifiers on desktop — the create
 # idempotency key and the session view's attachment lease (`mint_intent_key`
-# and `mint_lease` in src/lib.rs) — without going through a JS eval; see
+# and `mint_lease` in src/api.rs) — without going through a JS eval; see
 # `mint_lease`'s docs for why. Target-specific rather than a plain
 # dependency so wasm keeps using `crypto.randomUUID()` instead of pulling in
 # an RNG it doesn't need.
