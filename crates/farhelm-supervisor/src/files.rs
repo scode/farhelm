@@ -101,6 +101,40 @@
 //! to remove, and removing it is exactly what a wrapping/recording test
 //! seam is watching for.
 //!
+//! # Streaming, for content that must never be held in memory
+//!
+//! [`StagedStream`] is the same policy with the bytes arriving over time
+//! instead of all at once (PLAN_M4.md item 4: attachment uploads). It
+//! stages into the identical `.<name>.tmp-<uuid>` file, drives the
+//! identical [`FaultSeam`] stages — write (once per chunk), flush, publish,
+//! cleanup — and differs in exactly two respects, both forced by what it
+//! is for:
+//!
+//! - **Nothing is ever materialized.** The whole-file helpers take a
+//!   `&[u8]` and therefore require the caller to already hold the content;
+//!   an upload has no size cap (SPEC_impl.md), so its content must never
+//!   be a value anything holds. A chunk is written and forgotten.
+//! - **Staging and publication are separate DIRECTORIES.** The whole-file
+//!   tiers stage beside their destination, which is safe only because
+//!   their directories hold names this code chose (UUIDs, which cannot
+//!   contain `.tmp-`). An attachment's published names come from the user,
+//!   so no naming convention can separate debris from content — the
+//!   separation has to be positional. See [`StagedStream::create`].
+//! - **Publication is NO-CLOBBER, and retries under a different name.**
+//!   The whole-file tiers either replace (`rename`) or refuse (`link`) on
+//!   collision. An attachment must do neither: two concurrent uploads that
+//!   both proposed `screenshot.png` must BOTH publish, under distinct
+//!   paths, never one silently replacing the other and never one failing.
+//!   So publication is `link` (atomic, fails `EEXIST`) walked over a
+//!   sequence of candidate names — the collision is resolved by the
+//!   filesystem's own atomicity rather than by a check-then-create the
+//!   other uploader could interleave with.
+//!
+//! Durability sits at the best-effort-atomic tier: the temp file is
+//! fsync'd before publication (so a torn file is never observable at the
+//! published path) and the directory is not (a crash mid-upload simply
+//! loses the upload, which the client already sees as a failed transfer).
+//!
 //! # Orphaned temp files
 //!
 //! Every helper here cleans up its own staged temp file when a write,
@@ -116,8 +150,11 @@
 //! naming convention — `.<destination-file-name>.tmp-<uuid>` — so a
 //! single backstop-sweep pattern ([`is_staged_temp_name`]) covers every
 //! tier: `service.rs`'s narrowed launch-dir sweep, its
-//! `sweep_snapshot_temp_files`, and its tmux-config-temp sweep all key
-//! off it.
+//! `sweep_snapshot_temp_files`, and its tmux-config-temp sweep all key off
+//! it. `crate::attachments` deliberately does NOT: its directories hold
+//! user-chosen filenames, so it separates staging from publication
+//! positionally instead (see [`StagedStream::create`]) and sweeps a
+//! reserved directory rather than a name pattern.
 
 use std::fs::{self, File, OpenOptions};
 use std::io::{self, Write};
@@ -183,6 +220,22 @@ pub trait FaultSeam {
     /// directory-fsync mechanism belongs on that same list, not this one.
     fn fsync_dir(&self, dir: &File) -> io::Result<()> {
         dir.sync_all()
+    }
+
+    /// Remove a staged temp file this call owns, on the failure path (or,
+    /// for [`StagedStream`], on the abort path — an abandoned upload's
+    /// temp is debris the moment the transfer gives up, not at the next
+    /// startup sweep).
+    ///
+    /// Mediated like the other four so a test can prove the CLEANUP half
+    /// of the contract as well as the publish half: that a failed write is
+    /// followed by a removal at all, and that a removal which itself fails
+    /// is folded into the returned error rather than silently dropped.
+    /// Without a seam here the second half is unreachable from a test
+    /// (making `remove_file` fail for real means engineering a permission
+    /// or mount condition around a temp directory).
+    fn remove_temp(&self, path: &Path) -> io::Result<()> {
+        fs::remove_file(path)
     }
 }
 
@@ -284,8 +337,12 @@ fn parent_dir(path: &Path) -> io::Result<PathBuf> {
 /// `original`'s `kind()` is preserved on the combined error (rather than
 /// the cleanup error's own kind) because the write/publish failure is the
 /// causally primary one; the cleanup failure is context layered on top.
-fn remove_temp_after_failure(temp_path: &Path, original: io::Error) -> io::Error {
-    match fs::remove_file(temp_path) {
+fn remove_temp_after_failure(
+    temp_path: &Path,
+    seam: &dyn FaultSeam,
+    original: io::Error,
+) -> io::Error {
+    match seam.remove_temp(temp_path) {
         Ok(()) => original,
         Err(cleanup_error) => io::Error::new(
             original.kind(),
@@ -295,6 +352,35 @@ fn remove_temp_after_failure(temp_path: &Path, original: io::Error) -> io::Error
             ),
         ),
     }
+}
+
+/// Create the 0600 temp file a staged write (whole-file or streaming)
+/// works through, and defend its mode against the process umask.
+///
+/// Shared by [`write_staged`] and [`StagedStream::create`] so the two
+/// cannot drift on the property that matters most here: the file is
+/// created `create_new` (never opening whatever a name collision would
+/// have pointed at) AND `fchmod`'d afterwards, because
+/// `OpenOptions::mode` is masked DOWN by the umask, never up. A
+/// restrictive umask does not stop the CREATING process from writing
+/// (its permission check already happened at `open`) but would leave the
+/// published file unreadable to whoever opens it fresh later — a
+/// restarted supervisor reading a sentinel, the shim reading a spec, or
+/// an agent reading the attachment a user just dropped. `fchmod`, unlike
+/// the creating `open`, is never subject to umask.
+///
+/// An `open` failure is returned RAW, with no cleanup attempt: it means a
+/// collision with some OTHER invocation's in-flight temp file, whose
+/// content this call never wrote and has no right to delete (see
+/// [`remove_temp_after_failure`]).
+fn open_staged_temp(temp_path: &Path, seam: &dyn FaultSeam) -> io::Result<File> {
+    let mut opts = OpenOptions::new();
+    opts.write(true).create_new(true).mode(0o600);
+    let file = opts.open(temp_path)?;
+    if let Err(e) = file.set_permissions(std::fs::Permissions::from_mode(0o600)) {
+        return Err(remove_temp_after_failure(temp_path, seam, e));
+    }
+    Ok(file)
 }
 
 /// The shared engine behind all three tiers: stage a fresh 0600 temp
@@ -307,25 +393,7 @@ fn write_staged(path: &Path, bytes: &[u8], seam: &dyn FaultSeam, tier: Tier) -> 
     let dir = parent_dir(path)?;
     let temp_path = temp_path_for(path, &dir);
 
-    let mut opts = OpenOptions::new();
-    opts.write(true).create_new(true).mode(0o600);
-    // If this fails, it is a collision with some OTHER invocation's temp
-    // file (see this function's own docs and `remove_temp_after_failure`'s):
-    // this call does not own whatever is at `temp_path`, so the raw error
-    // is returned directly, with no cleanup attempt.
-    let mut file = opts.open(&temp_path)?;
-
-    // umask masks `OpenOptions::mode` DOWN, never up — a restrictive umask
-    // can leave this file less than owner-readable, which does not stop
-    // THIS write (permission checks already happened at `open`) but would
-    // make the published file unreadable to whoever opens it fresh later
-    // (a restarted supervisor reading a sentinel, the shim reading a
-    // spec). `fchmod`, unlike the creating `open`, is never subject to
-    // umask, so this reasserts the intended mode unconditionally through
-    // the descriptor already in hand.
-    if let Err(e) = file.set_permissions(std::fs::Permissions::from_mode(0o600)) {
-        return Err(remove_temp_after_failure(&temp_path, e));
-    }
+    let mut file = open_staged_temp(&temp_path, seam)?;
 
     let staged: io::Result<()> = (|| {
         seam.write(&mut file, bytes)?;
@@ -335,13 +403,13 @@ fn write_staged(path: &Path, bytes: &[u8], seam: &dyn FaultSeam, tier: Tier) -> 
         Ok(())
     })();
     if let Err(e) = staged {
-        return Err(remove_temp_after_failure(&temp_path, e));
+        return Err(remove_temp_after_failure(&temp_path, seam, e));
     }
 
     match tier {
         Tier::AtomicPublication => {
             if let Err(e) = seam.link(&temp_path, path) {
-                return Err(remove_temp_after_failure(&temp_path, e));
+                return Err(remove_temp_after_failure(&temp_path, seam, e));
             }
             // The destination already holds the complete content via the
             // hard link, independent of this name's fate: removing the
@@ -352,7 +420,7 @@ fn write_staged(path: &Path, bytes: &[u8], seam: &dyn FaultSeam, tier: Tier) -> 
         }
         Tier::Durable | Tier::BestEffort => {
             if let Err(e) = seam.rename(&temp_path, path) {
-                return Err(remove_temp_after_failure(&temp_path, e));
+                return Err(remove_temp_after_failure(&temp_path, seam, e));
             }
         }
     }
@@ -440,6 +508,226 @@ pub async fn write_private_file(path: &Path, bytes: &[u8]) -> io::Result<()> {
         .unwrap_or_else(|join_err| Err(io::Error::other(join_err)))
 }
 
+/// A staged write whose content arrives over time and is never held in
+/// memory — the attachment-upload tier (PLAN_M4.md item 4; see the module
+/// docs' streaming section for how it differs from the whole-file tiers
+/// and why).
+///
+/// The lifecycle is explicit on purpose: [`create`](Self::create) stages
+/// the temp file, [`write_chunk`](Self::write_chunk) appends, and exactly
+/// one of [`publish_no_clobber`](Self::publish_no_clobber) or
+/// [`abandon`](Self::abandon) ends it. Both consume `self`, so a
+/// half-finished stream is not a value a caller can accidentally keep
+/// using, and both leave nothing staged behind.
+///
+/// ## The temp file's fate is not left to the caller's diligence
+///
+/// Every failing method ATTEMPTS to clean up its own temp file before
+/// returning, and `Drop` attempts the same for a stream that ends any
+/// OTHER way — a panic, a cancelled async task, a caller that simply drops
+/// it. That matters more here than for the whole-file tiers: an upload's
+/// stream is owned by a long-lived task that a client disconnect, a
+/// session delete, or a stall timeout can end at any moment, and "the
+/// staging file goes away when the transfer stops" has to hold on every
+/// one of those paths rather than on the handful somebody remembered to
+/// write cleanup code for.
+///
+/// "Attempts" is the honest word: a removal can itself fail (a read-only
+/// directory, a filesystem error), and no caller can be made to succeed at
+/// it. A failure is always REPORTED — folded into the returned error, or
+/// returned by `abandon` — never swallowed, and the startup sweep of the
+/// staging directory (`crate::attachments::sweep_staging`) is the backstop
+/// both for that and for the case no in-process cleanup can cover at all,
+/// a hard crash (`crate::attachments::reconcile_at_startup`). What never
+/// varies is the other half: nothing partial is ever published.
+pub struct StagedStream {
+    /// `None` once the stream has been finished (published or abandoned)
+    /// or once a failure closed it, which is also what makes the
+    /// post-failure state inert rather than half-usable.
+    file: Option<File>,
+    temp_path: PathBuf,
+    /// Where publication candidates are resolved — a DIFFERENT directory
+    /// from the one holding `temp_path`, and that separation is the whole
+    /// point (see `create`).
+    publish_dir: PathBuf,
+    /// Whether the temp file has already been dealt with — the flag
+    /// `Drop` consults so a published or abandoned stream's destructor
+    /// does not chase a path that is gone (or, worse, one some later
+    /// staging call has since reused).
+    finished: bool,
+}
+
+impl StagedStream {
+    /// Stage a temp file in `staging_dir`, to be published later into
+    /// `publish_dir`.
+    ///
+    /// ## Two directories, not one, and why that is structural
+    ///
+    /// Staged and published files live in DISJOINT namespaces. The
+    /// whole-file tiers can afford to stage beside their destination
+    /// because their sweeps run over directories whose legitimate names
+    /// are UUIDs, so `.tmp-` cannot collide with anything real. An
+    /// attachment's published names come from the USER — `report.tmp-old`
+    /// is a perfectly ordinary filename — so any sweep that recognized
+    /// debris by NAME would eventually delete somebody's file. Putting
+    /// staging in its own directory makes "is this debris?" a question
+    /// about WHERE a file is rather than what it is called, which no
+    /// filename can lie about.
+    ///
+    /// `name` shapes only the temp file's name (the shared
+    /// `.<name>.tmp-<uuid>` convention, kept so a stray staging file is
+    /// still recognizable to a human reading a directory listing); the
+    /// published name is chosen later, at publication, from the candidate
+    /// sequence — collision resolution cannot be decided here, because a
+    /// name free at `create` time can be taken by the time the bytes are
+    /// all in.
+    pub fn create(
+        staging_dir: &Path,
+        publish_dir: &Path,
+        name: &str,
+        seam: &dyn FaultSeam,
+    ) -> io::Result<StagedStream> {
+        let temp_path = temp_path_for(Path::new(name), staging_dir);
+        let file = open_staged_temp(&temp_path, seam)?;
+        Ok(StagedStream {
+            file: Some(file),
+            temp_path,
+            publish_dir: publish_dir.to_path_buf(),
+            finished: false,
+        })
+    }
+
+    /// Where this stream is staging, for a caller that needs to prove the
+    /// temp file's existence (or absence) independently.
+    pub fn temp_path(&self) -> &Path {
+        &self.temp_path
+    }
+
+    /// Append one chunk, seam-mediated exactly like the whole-file tiers'
+    /// single `write`.
+    ///
+    /// A failure here is terminal for the stream: the temp file is
+    /// removed and this stream goes inert, because a partial write means
+    /// the staged content no longer corresponds to anything the sender
+    /// sent, and continuing to append to it would build a file that is
+    /// silently missing a hole in its middle.
+    pub fn write_chunk(&mut self, seam: &dyn FaultSeam, bytes: &[u8]) -> io::Result<()> {
+        let Some(file) = self.file.as_mut() else {
+            return Err(io::Error::other(
+                "this staged stream was already finished or failed",
+            ));
+        };
+        match seam.write(file, bytes) {
+            Ok(()) => Ok(()),
+            Err(e) => Err(self.fail(seam, e)),
+        }
+    }
+
+    /// Flush the staged content and publish it under the FIRST candidate
+    /// name that is not already taken, returning the published path.
+    ///
+    /// Publication is no-clobber by construction: each attempt is a
+    /// `link`, which the kernel fails with `EEXIST` rather than replacing
+    /// an existing file, so two concurrent streams racing the same
+    /// candidate sequence cannot both land on one name and cannot
+    /// overwrite each other — the loser simply walks on to the next
+    /// candidate. This is why the caller supplies a SEQUENCE rather than
+    /// one name and a "does it exist?" check of its own: any such check
+    /// would be a TOCTOU the other uploader can interleave with.
+    ///
+    /// `candidates` running out is a genuine failure (nothing published,
+    /// temp cleaned), not a silent overwrite: the caller's sequence is
+    /// what decides how hard to try.
+    pub fn publish_no_clobber<I>(
+        mut self,
+        seam: &dyn FaultSeam,
+        candidates: I,
+    ) -> io::Result<PathBuf>
+    where
+        I: IntoIterator<Item = String>,
+    {
+        let Some(file) = self.file.take() else {
+            return Err(io::Error::other(
+                "this staged stream was already finished or failed",
+            ));
+        };
+        if let Err(e) = seam.fsync_file(&file) {
+            return Err(self.fail(seam, e));
+        }
+        // The descriptor's job is done once the content is durable; the
+        // publication below works purely on names.
+        drop(file);
+
+        for candidate in candidates {
+            let destination = self.publish_dir.join(&candidate);
+            match seam.link(&self.temp_path, &destination) {
+                Ok(()) => {
+                    self.finished = true;
+                    // The destination already holds the complete content
+                    // through the hard link, so this name's removal is
+                    // cosmetic — its failure is debris for the startup
+                    // sweep, never a reason to report a publish that
+                    // demonstrably happened as a failure.
+                    let _ = seam.remove_temp(&self.temp_path);
+                    return Ok(destination);
+                }
+                Err(e) if e.kind() == io::ErrorKind::AlreadyExists => continue,
+                Err(e) => return Err(self.fail(seam, e)),
+            }
+        }
+        Err(self.fail(
+            seam,
+            io::Error::new(
+                io::ErrorKind::AlreadyExists,
+                format!(
+                    "every candidate name for this upload is already taken in {}",
+                    self.publish_dir.display()
+                ),
+            ),
+        ))
+    }
+
+    /// End the stream without publishing anything: the abort, stall, and
+    /// channel-loss path. Reports a cleanup failure rather than hiding it,
+    /// because a temp file that outlives its transfer is exactly the
+    /// debris the lifecycle exists to prevent.
+    pub fn abandon(mut self, seam: &dyn FaultSeam) -> io::Result<()> {
+        self.file = None;
+        self.finished = true;
+        match seam.remove_temp(&self.temp_path) {
+            Ok(()) => Ok(()),
+            Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(()),
+            Err(e) => Err(e),
+        }
+    }
+
+    /// Shared failure path: close the stream, remove its temp file, and
+    /// return `original` with any cleanup failure folded into it — the
+    /// streaming counterpart of [`remove_temp_after_failure`], which it
+    /// delegates to so both share one wording and one ownership rule.
+    fn fail(&mut self, seam: &dyn FaultSeam, original: io::Error) -> io::Error {
+        self.file = None;
+        self.finished = true;
+        remove_temp_after_failure(&self.temp_path, seam, original)
+    }
+}
+
+impl Drop for StagedStream {
+    /// The catch-all for a stream that ended without `publish_no_clobber`
+    /// or `abandon` — a panic, or an async task cancelled mid-transfer.
+    ///
+    /// Deliberately NOT seam-mediated and deliberately silent: `Drop` has
+    /// nowhere to report to, and the seam exists to let tests fail an
+    /// operation, which here could only mean deliberately leaving debris.
+    /// Every path that CAN report goes through `abandon` or `fail`
+    /// instead.
+    fn drop(&mut self) {
+        if !self.finished {
+            let _ = fs::remove_file(&self.temp_path);
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -458,6 +746,15 @@ mod tests {
     struct TestSeam {
         fail_at: Option<&'static str>,
         log: RefCell<Vec<&'static str>>,
+        /// Whether `remove_temp` is recorded in `log`.
+        ///
+        /// Off by default so the ordering assertions that predate the
+        /// cleanup stage keep reading as the sequence they are about
+        /// ("write, fsync_file, rename"), and on only for the tests that
+        /// are specifically about cleanup. Recording it unconditionally
+        /// would make every existing expectation carry an entry that has
+        /// nothing to do with what it pins.
+        record_cleanup: bool,
     }
 
     impl TestSeam {
@@ -465,6 +762,17 @@ mod tests {
             Self {
                 fail_at: Some(window),
                 log: RefCell::new(Vec::new()),
+                record_cleanup: false,
+            }
+        }
+
+        /// A seam that also records the cleanup stage — see
+        /// [`TestSeam::record_cleanup`] for why that is opt-in.
+        fn recording_cleanup() -> Self {
+            Self {
+                fail_at: None,
+                log: RefCell::new(Vec::new()),
+                record_cleanup: true,
             }
         }
 
@@ -512,6 +820,20 @@ mod tests {
                 return Err(io::Error::other("injected failure at fsync_dir"));
             }
             RealFs.fsync_dir(dir)
+        }
+        fn remove_temp(&self, path: &Path) -> io::Result<()> {
+            // The failure check runs whether or not this seam records the
+            // stage: a test that injects a cleanup failure is asking for
+            // the failure, not for the log entry.
+            let perform = if self.record_cleanup {
+                self.should_perform("remove_temp")
+            } else {
+                self.fail_at != Some("remove_temp")
+            };
+            if !perform {
+                return Err(io::Error::other("injected failure at remove_temp"));
+            }
+            RealFs.remove_temp(path)
         }
     }
 
@@ -949,6 +1271,397 @@ mod tests {
         assert_eq!(
             mode, 0o600,
             "fchmod must defeat a hostile creation-time umask, got {mode:o}"
+        );
+    }
+
+    /// The streaming tier's happy path, pinned as an operation SEQUENCE
+    /// rather than an end state: one seam-mediated `write` per chunk (a
+    /// chunk is never coalesced into a buffer the caller then writes
+    /// once), then exactly one flush, then the publish — and, as with the
+    /// best-effort tier it inherits its durability from, never a directory
+    /// fsync.
+    ///
+    /// The end state alone would be satisfied by an implementation that
+    /// accumulated every chunk in memory and wrote once at commit, which
+    /// is precisely what an upload with no size cap must never do.
+    #[test]
+    fn staged_stream_writes_each_chunk_then_flushes_once_before_publishing() {
+        let tmp = tempfile::tempdir().unwrap();
+        let seam = TestSeam::default();
+
+        let mut stream = StagedStream::create(
+            &staging_under(tmp.path()),
+            tmp.path(),
+            "screenshot.png",
+            &seam,
+        )
+        .unwrap();
+        stream.write_chunk(&seam, b"first-").unwrap();
+        stream.write_chunk(&seam, b"second").unwrap();
+        let published = stream
+            .publish_no_clobber(&seam, ["screenshot.png".to_string()])
+            .unwrap();
+
+        assert_eq!(
+            seam.calls(),
+            vec!["write", "write", "fsync_file", "link"],
+            "a streaming upload must write each chunk as it arrives, flush once, and publish \
+             by link — never buffer, and never fsync the directory"
+        );
+        assert_eq!(published, tmp.path().join("screenshot.png"));
+        assert_eq!(std::fs::read(&published).unwrap(), b"first-second");
+        let mode = std::fs::metadata(&published).unwrap().permissions().mode() & 0o777;
+        assert_eq!(
+            mode, 0o600,
+            "a published attachment must be 0600, got {mode:o}"
+        );
+        assert_staging_empty(tmp.path());
+    }
+
+    /// Publication must NEVER replace an existing file, and must keep
+    /// walking the caller's candidate names until one lands.
+    ///
+    /// This is the property two concurrent uploads of the same filename
+    /// depend on (PLAN_M4.md item 4): the collision is settled by `link`'s
+    /// own `EEXIST`, so there is no window between "is this name free?"
+    /// and "claim it" for the other uploader to interleave with. Pinned
+    /// with a pre-existing file whose content is checked afterwards,
+    /// because a `rename`-based publication would pass every other
+    /// assertion here while silently destroying it.
+    #[test]
+    fn staged_stream_publication_walks_past_taken_names_without_clobbering() {
+        let tmp = tempfile::tempdir().unwrap();
+        let taken = tmp.path().join("shot.png");
+        std::fs::write(&taken, b"somebody else's attachment").unwrap();
+        let seam = TestSeam::default();
+
+        let mut stream =
+            StagedStream::create(&staging_under(tmp.path()), tmp.path(), "shot.png", &seam)
+                .unwrap();
+        stream.write_chunk(&seam, b"mine").unwrap();
+        let published = stream
+            .publish_no_clobber(&seam, ["shot.png".to_string(), "shot-1.png".to_string()])
+            .unwrap();
+
+        assert_eq!(
+            published,
+            tmp.path().join("shot-1.png"),
+            "a taken name must be skipped, not overwritten"
+        );
+        assert_eq!(
+            std::fs::read(&taken).unwrap(),
+            b"somebody else's attachment"
+        );
+        assert_eq!(std::fs::read(&published).unwrap(), b"mine");
+    }
+
+    /// Running out of candidate names is an honest failure with nothing
+    /// published and no temp left behind — never a fallback that
+    /// overwrites the last candidate, which would turn a naming problem
+    /// into silent data loss.
+    #[test]
+    fn staged_stream_publication_that_runs_out_of_names_publishes_nothing() {
+        let tmp = tempfile::tempdir().unwrap();
+        std::fs::write(tmp.path().join("taken"), b"original").unwrap();
+        let seam = TestSeam::default();
+
+        let mut stream =
+            StagedStream::create(&staging_under(tmp.path()), tmp.path(), "taken", &seam).unwrap();
+        stream.write_chunk(&seam, b"replacement").unwrap();
+        stream
+            .publish_no_clobber(&seam, ["taken".to_string()])
+            .expect_err("an exhausted candidate list must fail");
+
+        assert_eq!(
+            std::fs::read(tmp.path().join("taken")).unwrap(),
+            b"original"
+        );
+        assert_staging_empty(tmp.path());
+    }
+
+    /// A failure injected AT a chunk write (the real `write_all` never
+    /// runs) publishes nothing and leaves no temp behind — the streaming
+    /// analogue of the whole-file tiers' write-failure tests, and the
+    /// window a disk filling up mid-upload occupies in real life.
+    #[test]
+    fn staged_stream_failure_at_a_chunk_write_publishes_nothing() {
+        let tmp = tempfile::tempdir().unwrap();
+        let seam = TestSeam::failing_at("write");
+
+        let mut stream =
+            StagedStream::create(&staging_under(tmp.path()), tmp.path(), "shot.png", &seam)
+                .unwrap();
+        stream
+            .write_chunk(&seam, b"never lands")
+            .expect_err("an injected write failure must be reported");
+        stream
+            .publish_no_clobber(&seam, ["shot.png".to_string()])
+            .expect_err("a stream whose write failed must not be publishable");
+
+        assert!(!tmp.path().join("shot.png").exists());
+        assert_staging_empty(tmp.path());
+    }
+
+    /// The torn-file window itself: a failure at the flush, and a failure
+    /// at the publish, must both leave NOTHING at the destination.
+    ///
+    /// Both are crash windows a real upload occupies — content written but
+    /// not yet durable, and durable but not yet named — and the promise
+    /// this tier makes is that neither is ever observable as a partial
+    /// file at the published path.
+    #[test]
+    fn staged_stream_failures_around_publication_never_expose_a_partial_file() {
+        for window in ["fsync_file", "link"] {
+            let tmp = tempfile::tempdir().unwrap();
+            let seam = TestSeam::failing_at(window);
+
+            let mut stream =
+                StagedStream::create(&staging_under(tmp.path()), tmp.path(), "shot.png", &seam)
+                    .unwrap();
+            stream.write_chunk(&seam, b"half an upload").unwrap();
+            let published = stream.publish_no_clobber(&seam, ["shot.png".to_string()]);
+            assert!(
+                published.is_err(),
+                "a failure at {window} must be reported, got {published:?}"
+            );
+
+            assert!(
+                !tmp.path().join("shot.png").exists(),
+                "a failure at {window} published a file"
+            );
+            assert_staging_empty(tmp.path());
+        }
+    }
+
+    /// Abandoning a transfer removes its temp file immediately, and so
+    /// does simply DROPPING one — the paths a client abort, a session
+    /// delete, a stall timeout, and a cancelled task actually take.
+    ///
+    /// The drop half is the one worth pinning: it is the only cleanup that
+    /// no call site has to remember, and a refactor that removed it would
+    /// leave every cancelled upload's temp file on disk until the next
+    /// startup sweep, with nothing else failing.
+    #[test]
+    fn staged_stream_cleans_up_on_abandon_and_on_a_bare_drop() {
+        let tmp = tempfile::tempdir().unwrap();
+        let seam = TestSeam::recording_cleanup();
+
+        let mut abandoned =
+            StagedStream::create(&staging_under(tmp.path()), tmp.path(), "shot.png", &seam)
+                .unwrap();
+        abandoned.write_chunk(&seam, b"partial").unwrap();
+        let abandoned_temp = abandoned.temp_path().to_path_buf();
+        assert!(abandoned_temp.exists());
+        abandoned.abandon(&seam).unwrap();
+        assert!(
+            !abandoned_temp.exists(),
+            "abandon must remove the temp file"
+        );
+        assert_eq!(seam.calls(), vec!["write", "remove_temp"]);
+
+        let mut dropped =
+            StagedStream::create(&staging_under(tmp.path()), tmp.path(), "shot.png", &seam)
+                .unwrap();
+        dropped.write_chunk(&seam, b"partial").unwrap();
+        let dropped_temp = dropped.temp_path().to_path_buf();
+        drop(dropped);
+        assert!(
+            !dropped_temp.exists(),
+            "dropping an unfinished stream must remove its temp file"
+        );
+        assert_staging_empty(tmp.path());
+    }
+
+    /// A cleanup that ITSELF fails must be reported alongside the failure
+    /// that triggered it, not swallowed: the temp file is then still on
+    /// disk, which is exactly the debris the caller needs to know about
+    /// (and the startup sweep's whole reason for existing).
+    #[test]
+    fn staged_stream_folds_a_failed_cleanup_into_the_original_error() {
+        let tmp = tempfile::tempdir().unwrap();
+        let seam = TestSeam {
+            fail_at: Some("remove_temp"),
+            log: RefCell::new(Vec::new()),
+            record_cleanup: false,
+        };
+
+        let mut stream =
+            StagedStream::create(&staging_under(tmp.path()), tmp.path(), "shot.png", &seam)
+                .unwrap();
+        let temp = stream.temp_path().to_path_buf();
+        // A publish onto a name that is already taken, with only that one
+        // candidate: the publish fails, which is what drives cleanup.
+        std::fs::write(tmp.path().join("shot.png"), b"taken").unwrap();
+        stream.write_chunk(&seam, b"content").unwrap();
+        let error = stream
+            .publish_no_clobber(&seam, ["shot.png".to_string()])
+            .expect_err("an exhausted candidate list must fail");
+
+        let rendered = error.to_string();
+        assert!(
+            rendered.contains("already taken") && rendered.contains("could not remove"),
+            "both the original failure and the cleanup failure must be visible, got: {rendered}"
+        );
+        // Left on disk on purpose by the injected failure — the state the
+        // startup sweep exists to clean up after a crash.
+        assert!(temp.exists());
+        std::fs::remove_file(&temp).unwrap();
+    }
+
+    /// The streaming tier must not quietly buffer what it streams.
+    ///
+    /// PLAN_M4.md's testing decisions call for exactly this: attachments
+    /// have no size cap, so the whole no-cap policy rests on a large file
+    /// costing TIME and not MEMORY. Every other assertion in this file is
+    /// about content and ordering, all of which a buffering implementation
+    /// satisfies perfectly right up until a big upload exhausts the host.
+    ///
+    /// Measured as resident-set growth across a file two orders of
+    /// magnitude larger than the chunk: a buffering implementation lands
+    /// at ~64 MiB over baseline, a streaming one at roughly zero (the
+    /// bytes leave the process through `write`, and written page cache is
+    /// not this process's RSS).
+    ///
+    /// Run in a SEPARATE OS process, for the same reason the hostile-umask
+    /// test is: RSS is a property of the whole process, and libtest runs
+    /// this file's tests concurrently — a neighbour allocating a few MiB
+    /// mid-measurement is indistinguishable here from the buffering this
+    /// exists to catch, which would make the test either flaky or (with a
+    /// threshold raised to tolerate the noise) blind. The child re-execs
+    /// this same binary filtered to this test, recognizes itself by an
+    /// environment variable set ONLY on that child's own `Command` (never
+    /// on the running test's environment — repo rule), takes the
+    /// measurement alone, and exits with a bare status code the parent
+    /// turns back into a legible failure.
+    #[test]
+    fn staged_stream_does_not_grow_memory_with_the_size_of_the_upload() {
+        const CHILD_MARKER: &str = "FARHELM_FILES_TEST_STREAM_RSS_CHILD";
+        const CHUNK: usize = 256 * 1024;
+        const CHUNKS: usize = 256; // 64 MiB total.
+        const ALLOWED_GROWTH: u64 = 16 * 1024 * 1024;
+
+        /// Resident bytes of this process, from `/proc/self/statm` (field
+        /// 2 is resident pages) — the same probe the supervisor's
+        /// stalled-viewer memory test uses.
+        fn rss_bytes() -> u64 {
+            let statm = std::fs::read_to_string("/proc/self/statm")
+                .expect("this crate is Linux-only; /proc/self/statm must be readable");
+            let pages: u64 = statm
+                .split_whitespace()
+                .nth(1)
+                .and_then(|field| field.parse().ok())
+                .expect("statm's second field is the resident page count");
+            pages * 4096
+        }
+
+        if std::env::var(CHILD_MARKER).is_ok() {
+            // We ARE the re-exec'd child: this process exists only to
+            // stream one file, with nothing else running inside it.
+            let tmp = tempfile::tempdir().unwrap();
+            let seam = RealFs;
+            let chunk = vec![0x61u8; CHUNK];
+            let mut stream =
+                StagedStream::create(&staging_under(tmp.path()), tmp.path(), "big.bin", &seam)
+                    .unwrap();
+
+            let baseline = rss_bytes();
+            let mut peak = baseline;
+            for _ in 0..CHUNKS {
+                stream.write_chunk(&seam, &chunk).unwrap();
+                peak = peak.max(rss_bytes());
+            }
+            let published = stream
+                .publish_no_clobber(&seam, ["big.bin".to_string()])
+                .unwrap();
+            peak = peak.max(rss_bytes());
+
+            let complete = std::fs::metadata(&published).unwrap().len() == (CHUNK * CHUNKS) as u64;
+            let growth = peak.saturating_sub(baseline);
+            std::process::exit(match (complete, growth < ALLOWED_GROWTH) {
+                (true, true) => 0,
+                (false, _) => 2,
+                (_, false) => 3,
+            });
+        }
+
+        let exe = std::env::current_exe().unwrap();
+        let status = std::process::Command::new(exe)
+            .arg("files::tests::staged_stream_does_not_grow_memory_with_the_size_of_the_upload")
+            .arg("--exact")
+            .env(CHILD_MARKER, "1")
+            .status()
+            .expect("spawning the measurement child process");
+        match status.code() {
+            Some(0) => {}
+            Some(2) => panic!("the whole payload did not reach the published file"),
+            Some(3) => panic!(
+                "streaming {} MiB grew the child process by more than {ALLOWED_GROWTH} bytes — \
+                 the staged stream is buffering the upload instead of writing it through",
+                (CHUNK * CHUNKS) / (1024 * 1024)
+            ),
+            other => panic!("the measurement child process failed: {other:?}"),
+        }
+    }
+
+    /// An `abandon` whose removal fails REPORTS the failure rather than
+    /// swallowing it — the honest half of this tier's cleanup contract.
+    ///
+    /// Cleanup is an attempt, not a guarantee: a read-only directory or a
+    /// filesystem error can defeat it, and nothing in this module can make
+    /// a removal succeed. What it can do is never lie about it, so its
+    /// caller can log the truth (and, in the supervisor's case, retry)
+    /// rather than report a cleanup that did not happen. The staging file
+    /// left behind is exactly what the startup reconciliation exists for.
+    #[test]
+    fn staged_stream_abandon_reports_a_cleanup_it_could_not_perform() {
+        let tmp = tempfile::tempdir().unwrap();
+        let seam = TestSeam::failing_at("remove_temp");
+
+        let mut stream =
+            StagedStream::create(&staging_under(tmp.path()), tmp.path(), "shot.png", &seam)
+                .unwrap();
+        stream.write_chunk(&seam, b"partial").unwrap();
+        let temp = stream.temp_path().to_path_buf();
+
+        let error = stream
+            .abandon(&seam)
+            .expect_err("a removal that failed must be reported");
+        assert!(
+            error.to_string().contains("injected failure"),
+            "the reported error must be the real cause, got: {error}"
+        );
+        assert!(
+            temp.exists(),
+            "the staging file is genuinely still there — which is what makes reporting it \
+             load-bearing"
+        );
+        std::fs::remove_file(&temp).unwrap();
+    }
+
+    /// The staging directory the streaming tests hand [`StagedStream`],
+    /// created on demand under a test's own temp directory.
+    ///
+    /// A helper rather than a fixture field because it makes every call
+    /// site say the thing that matters at a glance: staging and
+    /// publication are DIFFERENT directories here, which is the property
+    /// the no-name-based-sweeping design rests on.
+    fn staging_under(dir: &Path) -> PathBuf {
+        let staging = dir.join(".staging");
+        std::fs::create_dir_all(&staging).expect("staging dir");
+        staging
+    }
+
+    /// Shared assertion for the streaming tier: nothing may be left in the
+    /// staging directory once a transfer has ended, however it ended.
+    fn assert_staging_empty(dir: &Path) {
+        let leftover: Vec<_> = std::fs::read_dir(staging_under(dir))
+            .unwrap()
+            .filter_map(|entry| entry.ok())
+            .map(|entry| entry.file_name())
+            .collect();
+        assert!(
+            leftover.is_empty(),
+            "a finished transfer must leave nothing staged, found: {leftover:?}"
         );
     }
 

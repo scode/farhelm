@@ -25,11 +25,19 @@
 //! exists, each launch also gets its own cgroup, which stop kills BEFORE
 //! (never instead of) the portable sweep.
 //!
+//! M4 adds attachment uploads on top: bytes streamed in over the protocol
+//! land in a per-session directory whose layout, naming rules, and
+//! lifecycle sweeps live in the `attachments` module (PLAN_M4.md item 4),
+//! while the transfer itself — data channels, credit, stall detection,
+//! commit — belongs to `service` and the streaming write atomicity to
+//! `files`.
+//!
 //! Unix-only, unconditionally: the doorway is a unix socket and the
 //! substrate is tmux, so unix APIs are used without cfg gates — a
 //! non-unix port would be a redesign, not a compile flag.
 
 pub mod agent_kind;
+pub mod attachments;
 pub mod files;
 pub mod launch;
 pub mod scope;

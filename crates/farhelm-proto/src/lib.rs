@@ -1273,7 +1273,12 @@ pub enum ControlMsg {
     },
     /// All bytes sent; publish the file. The supervisor verifies the
     /// received count against `BeginUpload`'s declared `size`, fsyncs,
-    /// and renames into place (item 4's atomicity tier), replying
+    /// and publishes atomically WITHOUT CLOBBERING (item 4's atomicity
+    /// tier): the staged file is `link`ed to the first candidate name
+    /// that is not already taken, so two concurrent uploads proposing one
+    /// filename both publish under distinct paths and neither can replace
+    /// an existing attachment. A plain rename would satisfy the atomicity
+    /// requirement and violate that one. The reply is
     /// `UploadCommitted` only for a file that actually published. Every
     /// failure AT commit — size mismatch, a rename or fsync error, the
     /// session's deletion winning the race — is a correlated `Error`,
@@ -1322,8 +1327,17 @@ pub enum ControlMsg {
     /// upload-failure surface, never a coded enum it branches on — every
     /// abort means the same thing to a client (show the reason, insert
     /// nothing), so a classification would be dead weight on the wire.
-    /// The temp file is already cleaned by the time this is sent;
-    /// nothing published.
+    ///
+    /// NOTHING PUBLISHED is unconditional: no client ever has to wonder
+    /// whether an aborted transfer left a file at some path it was not
+    /// told. The receiver's own staging file is a weaker promise, stated
+    /// honestly: its removal is ATTEMPTED (and retried) before this
+    /// message is sent, but a removal can fail for reasons no
+    /// implementation can overrule — a read-only mount, a filesystem
+    /// error — and what survives such a failure is a file in the
+    /// receiver's private staging area, which its next startup
+    /// reconciles. Neither case is visible to the client, and neither
+    /// affects the published path.
     UploadAborted {
         channel: u32,
         reason: String,

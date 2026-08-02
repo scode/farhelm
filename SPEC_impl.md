@@ -336,7 +336,10 @@ by eye; raw binary data channels keep PTY throughput off the JSON path.
   session can always arrange to; the honest claim is that stop reaps what a normal program leaves behind. The macOS
   variant of the sweep (no /proc there) arrives with the Mac supervisor work. See
   lore/2026-07-27-m2-process-tree-stop.md for the alternatives as they looked when this was decided.
-- Attachments land in `~/.local/state/farhelm/attachments/<session-id>/`, deleted with the session.
+- Attachments land in `~/.local/state/farhelm/attachments/<session-id>/`, deleted with the session. There is no size cap
+  in v1: the bytes are the user's, on the user's own machine, and every hop streams them under a credit window, so a
+  large file costs time rather than memory. A disk that fills up is therefore a failed upload with nothing published and
+  a visible error, never a truncated file at the published path.
 - The rest of the state directory: `supervisor.sock` (the unix socket that is the supervisor's only doorway — mode 0600,
   inside a 0700 directory, because reaching it means running commands as the user), `tmux.sock` and `tmux.conf` for the
   private tmux server, and `launch/` holding one 0600 JSON spec per session. A launch spec carries the agent's full

@@ -1730,6 +1730,7 @@ dependencies = [
  "shell-words",
  "tempfile",
  "tokio",
+ "tracing",
  "tracing-subscriber",
 ]
 
