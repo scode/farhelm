@@ -241,13 +241,17 @@ Each step leaves something runnable; later steps only add. Tests ride with their
 
 1. This plan, plus the PLAN.md header update it implies.
 2. Proto: the complete M4 wire vocabulary, one bump to 6.
-3. Supervisor tabs: windows, open/close/list-by-rediscovery, the marker split that keeps stop and restart off tabs, the
-   tab-scoped reap, per-terminal attach generalization under the lease.
-4. Helm tab plumbing: REST open/close, tab list on session detail, terminal WebSocket selector.
-5. UI tabs: the strip, concurrent attachment, close-with-confirm, Playwright coverage.
-6. Supervisor attachments: the storage path, size verification, naming, delete cleanup.
-7. Helm attachment upload: the streaming relay endpoint.
-8. UI interception: classification, upload, path insertion, failure surfacing, Playwright coverage; the wry drop-config
+3. Per-terminal attach generalization under the lease — split out of the tabs step while building it, because it is the
+   riskiest machinery change of the milestone and deserves review in isolation against the existing agent-only behavior
+   (tab selectors refuse with not-found until the next step delivers tabs).
+4. Supervisor tabs: windows, open/close/list-by-rediscovery, the marker split that keeps stop and restart off tabs, the
+   tab-scoped reap; the two-terminal same-session forms of the stall-scope, input-routing, resize-targeting, restart,
+   and delete tests land here, where a second terminal first exists to test against.
+5. Helm tab plumbing: REST open/close, tab list on session detail, terminal WebSocket selector.
+6. UI tabs: the strip, concurrent attachment, close-with-confirm, Playwright coverage.
+7. Supervisor attachments: the storage path, size verification, naming, delete cleanup.
+8. Helm attachment upload: the streaming relay endpoint.
+9. UI interception: classification, upload, path insertion, failure surfacing, Playwright coverage; the wry drop-config
    check rides here.
 
 ## Acceptance

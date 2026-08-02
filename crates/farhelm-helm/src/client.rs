@@ -1008,14 +1008,41 @@ impl SupervisorClient {
         }
     }
 
-    /// Attach to a session's terminal. The returned receiver yields the
-    /// replay (history + mode re-synthesis) followed by live output, and
-    /// finally a `Detached` if the attachment ends server-side.
+    /// Attach to a session's agent terminal under no lease — what every
+    /// attach meant before M4, and what the helm's own request path still
+    /// means until PLAN_M4.md item 5 gives the helm its tab and lease
+    /// plumbing.
+    ///
+    /// The returned receiver yields the replay (history + mode
+    /// re-synthesis) followed by live output, and finally a `Detached` if
+    /// the attachment ends server-side.
     pub async fn attach(
         &self,
         session_id: &str,
         cols: u16,
         rows: u16,
+    ) -> anyhow::Result<(u32, TermStream)> {
+        self.attach_terminal(session_id, cols, rows, TerminalSelector::default(), "")
+            .await
+    }
+
+    /// Attach naming the terminal and the lease explicitly.
+    ///
+    /// Exists ahead of the helm's own use of it so the supervisor's
+    /// session-scoped takeover (PLAN_M4.md item 3) is reachable from the
+    /// integration tests that drive a real supervisor through this
+    /// client — those semantics are only observable to a caller that can
+    /// mint two distinct leases, which [`Self::attach`] deliberately
+    /// cannot. `lease` must be high-entropy and non-empty to group
+    /// several terminals into one client; the empty lease means the
+    /// pre-M4 singleton reading (see `ControlMsg::Attach`).
+    pub async fn attach_terminal(
+        &self,
+        session_id: &str,
+        cols: u16,
+        rows: u16,
+        terminal: TerminalSelector,
+        lease: &str,
     ) -> anyhow::Result<(u32, TermStream)> {
         let channel = allocate_channel(&self.next_channel)?;
         let (events_tx, events_rx) = mpsc::channel(TERM_EVENT_QUEUE);
@@ -1047,13 +1074,8 @@ impl SupervisorClient {
                     channel,
                     cols,
                     rows,
-                    // Vocabulary only for now: this client has no notion of
-                    // tabs or a per-client lease yet (PLAN_M4.md step 4
-                    // gives the helm that plumbing), so every attach means
-                    // exactly what it meant before M4 — the agent terminal,
-                    // owned by no particular lease.
-                    terminal: TerminalSelector::default(),
-                    lease: String::new(),
+                    terminal,
+                    lease: lease.to_string(),
                 },
             )
             .await;

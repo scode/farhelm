@@ -15,7 +15,10 @@
 //! server did not survive a restart, or because just that one session was
 //! killed independently — is still listed (metadata came back from the
 //! DB) but loses its terminal handle — see `SessionEntry`'s `terminal`
-//! field and the `Attach`/`Resize` handlers' handling of `None`.
+//! field and `resolve_terminal`, where that `None` becomes the `NotFound`
+//! an `Attach` is refused with. Nothing else has to re-derive it: a
+//! terminal-less session can never hold an attachment, so `Resize` and
+//! the input path simply find none.
 //! PLAN_M2.md's "restart gap" paragraph is the contract.
 //!
 //! M3 adds the half M2 could not answer (PLAN_M3.md item 2): a durable
@@ -54,7 +57,7 @@ use farhelm_proto::io::{
 };
 use farhelm_proto::{
     AgentKind, ControlMsg, DETACH_REASON_STALLED, ErrorKind, Frame, RestartMode, RestartOffer,
-    SessionInfo, SessionStatus,
+    SessionInfo, SessionStatus, TerminalSelector,
 };
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
@@ -3575,11 +3578,241 @@ impl CaptureState {
     }
 }
 
-/// The one live attachment a session may have (SPEC.md: at most one,
-/// last attach wins). `notify` reaches the owning connection's writer so
-/// a takeover can tell the old client it was detached.
+/// Which of a session's terminals something addresses — the second half
+/// of every [`AttachmentKey`], and the supervisor-side resolution of
+/// [`TerminalSelector`].
+///
+/// Separate from the wire type on purpose: a `TerminalSelector` is what a
+/// CLIENT asked for, while a `TerminalId` is a terminal this supervisor
+/// has resolved against the session (`resolve_terminal`), so nothing past
+/// that resolution can accidentally key state off an unvalidated request.
+/// The two shapes are otherwise deliberately parallel, so the tabs PR
+/// (PLAN_M4.md item 2) only has to teach `resolve_terminal` how to find a
+/// tab's pane — no key, map, or handler here changes shape again.
+///
+/// `Tab` exists today only to be REFUSED: no tab windows are created yet,
+/// so every tab selector resolves to a `NotFound`. It is modelled anyway
+/// because the alternative — keying attachments by session id until tabs
+/// arrive — is exactly the reshaping this PR exists to do once.
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+enum TerminalId {
+    /// The session's agent terminal: the one terminal every session has
+    /// had since M1, and the one every pre-M4 `Attach` meant implicitly.
+    Agent,
+    /// A terminal tab, by the supervisor-minted id `TabInfo::id` carries.
+    Tab(String),
+}
+
+/// Resolve a client's wire-level selector to the terminal identity the
+/// attachment machinery keys on. Total and side-effect-free: whether the
+/// named terminal actually EXISTS is a separate question, answered by
+/// `resolve_terminal` against the session entry.
+///
+/// By value so a tab id MOVES out of the decoded request rather than
+/// being copied — the selector has no other consumer once its terminal is
+/// resolved.
+impl From<TerminalSelector> for TerminalId {
+    fn from(selector: TerminalSelector) -> TerminalId {
+        match selector {
+            TerminalSelector::Agent => TerminalId::Agent,
+            TerminalSelector::Tab { id } => TerminalId::Tab(id),
+        }
+    }
+}
+
+/// What one live attachment is FOR: a session's terminal, not merely a
+/// session.
+///
+/// SPEC.md caps a session's attached CLIENTS at one, never its attached
+/// terminals — a client owning a session owns all of its terminals at
+/// once, each on its own channel with its own control-mode client
+/// (PLAN_M4.md item 3). So the attachment map is keyed per (session,
+/// terminal) and the one-attachment rule is enforced above it, by lease
+/// (see the `Attach` handler). Keying by session id alone — what this was
+/// before M4 — would make a second terminal of the same session look like
+/// a takeover of the first.
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+struct AttachmentKey {
+    session: String,
+    terminal: TerminalId,
+}
+
+impl AttachmentKey {
+    fn new(session: &str, terminal: TerminalId) -> AttachmentKey {
+        AttachmentKey {
+            session: session.to_string(),
+            terminal,
+        }
+    }
+}
+
+/// Find the tmux handles behind one of a session's terminals, or say why
+/// there are none.
+///
+/// The ONE place a resolved [`TerminalId`] becomes something attachable,
+/// so the tabs PR (PLAN_M4.md item 2) has a single function to teach
+/// about tab windows rather than a handler to re-shape. Borrows from the
+/// entry rather than cloning: `SessionEntry` is immutable once published,
+/// so the handles cannot change under a caller holding it.
+///
+/// Both failures are `NotFound`, and neither ever falls back to another
+/// terminal: attaching the WRONG terminal quietly would be worse than
+/// failing (`TerminalSelector`'s own contract), so there is deliberately
+/// no fallback path here at all.
+fn resolve_terminal<'a>(
+    entry: &'a SessionEntry,
+    terminal: &TerminalId,
+) -> Result<&'a Terminal, RequestError> {
+    match terminal {
+        // The restart-gap case (PLAN_M2.md): this entry was reloaded from
+        // SQLite at startup and its tmux session was gone by then.
+        // Reporting `NotFound` — rather than fabricating a dead terminal
+        // to attach to — is the same "do not guess" discipline SPEC.md
+        // applies elsewhere; the session stays visible in the list either
+        // way.
+        TerminalId::Agent => entry.terminal.as_ref().ok_or_else(|| {
+            RequestError::new(
+                ErrorKind::NotFound,
+                format!(
+                    "session {} has no terminal: the supervisor (or its tmux server) restarted \
+                     after the agent ended",
+                    entry.info.id
+                ),
+            )
+        }),
+        // No window is ever marked as a tab yet, so every tab selector
+        // names a terminal that does not exist. The message says which
+        // supervisor-side capability is missing rather than pretending the
+        // tab was closed, because "reopen it" is not yet advice anyone can
+        // follow.
+        TerminalId::Tab(id) => Err(RequestError::new(
+            ErrorKind::NotFound,
+            format!(
+                "session {} has no terminal tab {}: this supervisor does not serve terminal tabs \
+                 yet, so only the agent terminal can be attached",
+                truncate_for_error(&entry.info.id),
+                truncate_for_error(id),
+            ),
+        )),
+    }
+}
+
+/// What one connection remembers about a data channel it has attached:
+/// enough to find that channel's attachment again, and to charge input
+/// against the right session.
+///
+/// Connection-local, and deliberately holding the session ENTRY rather
+/// than just its id: the input path needs the entry anyway (first-input
+/// accounting), and holding the same `Arc` the attach resolved is what
+/// keeps a channel typing into the session it was attached to even if
+/// the map has since been rebuilt around it.
+///
+/// The `key` is built ONCE, at attach time, and every later hop (input,
+/// resize, detach) borrows it. Rebuilding it per frame would allocate a
+/// session id and a terminal id on every keystroke, and — worse — would
+/// leave two places that must agree on how a channel maps to an
+/// attachment.
+struct InputRoute {
+    entry: Arc<SessionEntry>,
+    key: AttachmentKey,
+}
+
+/// Whether an existing attachment is displaced by an incoming attach —
+/// the session-scoped half of SPEC.md's one-attached-client rule
+/// (PLAN_M4.md item 3).
+///
+/// A pure function rather than an inline closure so the rule can be
+/// tested against key shapes the integration tests cannot yet produce (a
+/// session holding both an agent and a tab attachment): it decides how
+/// many of a session's terminals a takeover tears down, which is exactly
+/// the part that only becomes observable once tabs exist.
+///
+/// Two independent conditions: same SESSION (a lease is never
+/// cross-session — one client may hold terminals in many sessions, and
+/// attaching one of them must not disturb the others), and a lease that
+/// does not group with the requester's (see [`same_lease_client`]).
+fn displaced_by_attach(
+    existing: &AttachmentKey,
+    existing_lease: &str,
+    session: &str,
+    lease: &str,
+) -> bool {
+    existing.session == session && !same_lease_client(existing_lease, lease)
+}
+
+/// Whether two attachments belong to the same client, and so whether the
+/// newcomer takes the incumbent over (PLAN_M4.md item 3, and the `lease`
+/// field's own contract in `farhelm-proto`).
+///
+/// Non-empty equality, with the empty lease matching NOTHING — not even
+/// another empty lease. That asymmetry is the whole of the pre-M4
+/// compatibility story: an un-leased attach is its own singleton client,
+/// so it takes over everything on the session and is taken over by
+/// anything, which is exactly what a single-terminal client expected
+/// before leases existed. Treating empty as a shared identity instead
+/// would silently FUSE every legacy client on a session into one lease
+/// and suppress the takeover they depend on.
+fn same_lease_client(incumbent: &str, requester: &str) -> bool {
+    !incumbent.is_empty() && incumbent == requester
+}
+
+/// The reason a client is told it lost its attachment to a DIFFERENT
+/// client (SPEC.md's one-attached-client rule, made visible).
+///
+/// One constant because a session-scoped takeover emits it once per
+/// terminal channel the loser held: the identical string across all of
+/// them is what lets a client coalesce those `Detached`s into a single
+/// banner, which is why the protocol needs no session-scoped takeover
+/// message of its own (see `ControlMsg::Attach`'s docs).
+const DETACH_REASON_TAKEOVER: &str = "another client attached";
+
+/// The reason the SAME client is told its previous attachment to a
+/// terminal was replaced by its own newer one.
+///
+/// Distinct from [`DETACH_REASON_TAKEOVER`] because the wire contract
+/// makes them different events: equal non-empty leases are one client
+/// reconnecting (a reload, a re-mount), and telling that client "another
+/// client attached" is simply false — it would surface a takeover banner
+/// accusing a second user who does not exist, in the one case SPEC.md
+/// treats as an ordinary reconnect. Both reasons are still rendered
+/// generically by clients (`ControlMsg::Detached` takes an open-ended
+/// string), so the split costs nothing but honesty gains everything.
+///
+/// Phrased as a bare cause, one line, no leading "detached:" — clients
+/// paste it into their own detach surface, exactly like
+/// [`DETACH_REASON_STALLED`].
+const DETACH_REASON_REPLACED: &str = "replaced by a newer attachment to this terminal";
+
+/// Byte cap on `ControlMsg::Attach`'s `lease`, enforced before the attach
+/// touches anything.
+///
+/// The lease is a client-minted identifier the supervisor RETAINS for the
+/// life of every attachment made under it, so its size is per-attachment
+/// retained memory, not a one-off parse cost — and control frames are
+/// capped at megabytes (`MAX_FRAME_LEN`), so an unbounded lease turns one
+/// oversized frame into memory held until that client detaches. 128 bytes
+/// is generous for the only legitimate use the wire contract describes:
+/// one high-entropy random id per session-view instance (a UUID is 36).
+/// BYTES rather than characters, because bytes are what is retained and
+/// what a frame carries.
+const MAX_LEASE_BYTES: usize = 128;
+
+/// One live attachment: a session's terminal, streamed to one channel of
+/// one connection. `notify` reaches the owning connection's writer so a
+/// takeover can tell the old client it was detached.
 struct ActiveAttach {
     channel: u32,
+    /// The client identity this attachment was made under
+    /// (`ControlMsg::Attach::lease`), stored verbatim — including the
+    /// empty legacy lease, whose meaning is entirely in
+    /// [`same_lease_client`].
+    ///
+    /// Held per ATTACHMENT rather than in a session-level "current owner"
+    /// slot deliberately: the takeover decision is made by scanning the
+    /// session's live attachments, so there is no owner record to leave
+    /// stale when the last of a lease's channels detaches, and no window
+    /// in which a session claims an owner that holds nothing.
+    lease: String,
     notify: mpsc::Sender<Frame>,
     /// The forwarder task. A `JoinHandle` rather than an `AbortHandle`
     /// because a takeover must be able to *wait* for the old forwarder to
@@ -3624,18 +3857,24 @@ struct ActiveAttach {
 
 /// One host's session authority, shared by every connection.
 ///
-/// Sessions are keyed by session id, attachments by session id too —
-/// separate maps because their lifetimes differ: a session outlives any
-/// number of attach/detach cycles, and SPEC.md caps the attachments at one
-/// per session while placing no such cap on sessions.
+/// Sessions are keyed by session id; attachments by (session, terminal)
+/// — separate maps because their lifetimes differ: a session outlives any
+/// number of attach/detach cycles, and it may have several terminals
+/// attached at once — each with its own channel and its own PAIR of
+/// control-mode clients, one streaming output and one dedicated to input
+/// (PLAN_M4.md item 3) — while SPEC.md caps the attached CLIENTS at one.
+/// That cap lives in the `Attach` handler's lease check, not in the shape
+/// of this map: see [`AttachmentKey`] and [`same_lease_client`].
 ///
 /// Lock discipline: the two mutexes are never held at once, with two
 /// deliberate exceptions (`DeleteSession` and `publish_alt_screen_
 /// snapshot`, below), and no tmux call happens while `sessions` is held
 /// on its own. `attachments` is deliberately the exception for holding it
 /// across tmux calls — the whole attach takeover runs under it, because
-/// that is the only way "at most one attachment, last attach wins"
-/// survives two concurrent attaches (see the `Attach` handler), and the
+/// that is the only way "at most one client, last attach wins" survives
+/// two concurrent attaches — and the only way the lease sweep and the new
+/// attachment's installation are one atomic step, which is what
+/// `ControlMsg::Attach` promises (see the `Attach` handler) — and the
 /// input and `Resize` arms hold it across their tmux calls for the same
 /// reason: an ownership check that releases the lock before acting goes
 /// stale the moment a takeover interleaves. `DeleteSession` is the second
@@ -3670,7 +3909,18 @@ pub struct Supervisor {
     /// module docs above for the split of truth this implements.
     store: SessionStore,
     sessions: Mutex<HashMap<String, Arc<SessionEntry>>>,
-    attachments: Mutex<HashMap<String, ActiveAttach>>,
+    /// Every live attachment in this supervisor, keyed per (session,
+    /// terminal) — see [`AttachmentKey`].
+    ///
+    /// The lock is what makes the session-scoped takeover ATOMIC: an
+    /// attach holds it across both the lease sweep and its own
+    /// installation, so no observer can ever see a session whose
+    /// terminals are split between two leases (`ControlMsg::Attach`'s
+    /// contract). Every other holder — input, resize, pause, delete,
+    /// stall, connection teardown — inherits the same guarantee for free,
+    /// because a takeover cannot interleave inside any of their
+    /// check-then-act pairs.
+    attachments: Mutex<HashMap<AttachmentKey, ActiveAttach>>,
     /// Alt-screen snapshots captured by an IN-FLIGHT `StopSession` call,
     /// keyed by session id, visible to `Attach` before the corresponding
     /// `publish_alt_screen_snapshot` has written anything to disk.
@@ -4571,7 +4821,7 @@ impl Supervisor {
                         // `Resume` at any moment, and a value frozen at
                         // reload would go stale the first time it did.
                         restart_offer,
-                        // Vocabulary only for now (PLAN_M4.md step 3 gives
+                        // Vocabulary only for now (PLAN_M4.md step 4 gives
                         // tabs real rediscovery from tmux); until then this
                         // is the honest "none known" value every reload
                         // reports.
@@ -5342,7 +5592,7 @@ impl Supervisor {
                     invocation: row.invocation,
                     status: SessionStatus::Unknown,
                     annotation: None,
-                    // Vocabulary only for now — see PLAN_M4.md step 3 for
+                    // Vocabulary only for now — see PLAN_M4.md step 4 for
                     // where tabs get real rediscovery.
                     tabs: Vec::new(),
                 })
@@ -5808,7 +6058,7 @@ impl Supervisor {
             // understate what restart could do from the very first reply.
             restart_offer: snapshot.restart_offer(None),
             // A brand-new session has no tabs; real tab creation lands in
-            // PLAN_M4.md step 3.
+            // PLAN_M4.md step 4.
             tabs: Vec::new(),
         };
 
@@ -6832,7 +7082,7 @@ impl Supervisor {
             restart_offer,
             // Vocabulary only for now: restarting the agent must not
             // disturb any tabs a session already has (PLAN_M4.md's
-            // acceptance criteria), but until PLAN_M4.md step 3 gives tabs
+            // acceptance criteria), but until PLAN_M4.md step 4 gives tabs
             // real rediscovery there is nothing to report here either way.
             tabs: Vec::new(),
         };
@@ -6863,14 +7113,27 @@ impl Supervisor {
     /// restart, reattach. The replay a reattach performs is also what puts
     /// the reused pane's scrollback — the prior run's output — back on the
     /// client's screen.
+    ///
+    /// Scoped to the AGENT terminal, and that scope is a contract, not an
+    /// artifact of there being only one terminal today: SPEC.md has
+    /// restart touch the agent terminal alone, so a session's tabs — and
+    /// therefore their attachments — must survive it untouched
+    /// (PLAN_M4.md item 2). A session-wide sweep here would detach a tab
+    /// whose shell the restart never went near.
     async fn detach_for_restart(&self, session_id: &str) {
-        let attachment = self.attachments.lock().await.remove(session_id);
+        let attachment = self
+            .attachments
+            .lock()
+            .await
+            .remove(&AttachmentKey::new(session_id, TerminalId::Agent));
+        // `..` drops this attachment's input client (killing its
+        // control-mode process via `kill_on_drop`) and its pause sender,
+        // which the forwarder being aborted below can no longer observe.
         let Some(ActiveAttach {
             channel,
             notify,
             forwarder,
-            input: _input,
-            pause: _pause,
+            ..
         }) = attachment
         else {
             return;
@@ -7259,10 +7522,10 @@ where
         }
     });
 
-    // Which session each of this connection's data channels types into.
+    // Which terminal each of this connection's data channels types into.
     // Connection-local by necessity: channel ids are unique only within a
     // connection, since every client numbers its channels from 1.
-    let mut input_routes: HashMap<u32, Arc<SessionEntry>> = HashMap::new();
+    let mut input_routes: HashMap<u32, InputRoute> = HashMap::new();
 
     // Tracking (not admission — that is now `sup.admission`, shared
     // across every connection this supervisor serves; see its own docs
@@ -7296,12 +7559,23 @@ where
             };
             match frame.kind {
                 farhelm_proto::FrameKind::Data => {
-                    // Route input only if this channel is still the
-                    // session's live attachment: a client kicked by a
-                    // takeover must not keep typing into a pane it no
-                    // longer owns, and the supervisor enforces that
-                    // rather than trusting clients to stop.
-                    if let Some(entry) = input_routes.get(&frame.channel).cloned() {
+                    // Route input only if this channel is still the live
+                    // attachment of the TERMINAL it attached to: a client
+                    // kicked by a takeover must not keep typing into a
+                    // pane it no longer owns, and the supervisor enforces
+                    // that rather than trusting clients to stop. The
+                    // route's own terminal is what makes the lookup exact
+                    // now that one session can have several attached at
+                    // once — a session-keyed lookup would let a channel
+                    // detached from one terminal match whichever other
+                    // terminal of the same session happened to be found.
+                    //
+                    // The route is BORROWED, not cloned: it is read-only
+                    // here, and a channel that turns out to have lost its
+                    // attachment is dropped from the map after the borrow
+                    // ends (`stale_route` below) rather than mid-arm.
+                    let stale_route = if let Some(route) = input_routes.get(&frame.channel) {
+                        let entry = &route.entry;
                         // The check and the send-keys delivery run under
                         // ONE lock hold, like the Resize arm: releasing
                         // between them is a TOCTOU where a takeover
@@ -7336,7 +7610,7 @@ where
                         // nothing, and a send that failed part-way still
                         // delivered what it confirmed — see
                         // `InputClient::delivered_any_bytes`.
-                        let (send_result, delivered) = match attachments.get_mut(&entry.info.id) {
+                        let (send_result, delivered) = match attachments.get_mut(&route.key) {
                             Some(a) if a.channel == frame.channel && a.notify.same_channel(&tx) => {
                                 let result = a.input.send(&frame.body).await;
                                 (Some(result), a.input.delivered_any_bytes())
@@ -7344,10 +7618,10 @@ where
                             _ => (None, false),
                         };
                         if delivered {
-                            note_first_input(&sup, &entry);
+                            note_first_input(&sup, entry);
                         }
                         match send_result {
-                            Some(Ok(())) => {}
+                            Some(Ok(())) => false,
                             // A failed send is this session's problem,
                             // not the shared connection's. It is still
                             // fatal to this attachment: accepting later
@@ -7355,7 +7629,7 @@ where
                             // a command into a different command.
                             Some(Err(e)) => {
                                 warn!(session = %entry.info.id, error = %e, "input dropped");
-                                if let Some(old) = attachments.remove(&entry.info.id) {
+                                if let Some(old) = attachments.remove(&route.key) {
                                     old.forwarder.abort();
                                     let _ = old.forwarder.await;
                                     notify_detached(
@@ -7364,15 +7638,24 @@ where
                                         format!("terminal input failed: {e:#}"),
                                     );
                                 }
-                                input_routes.remove(&frame.channel);
+                                true
                             }
+                            // This channel is no longer the terminal's
+                            // attachment — a takeover, a detach, or a
+                            // delete got there first.
                             None => {
                                 drop(attachments);
-                                // This channel lost its attachment; stop
-                                // holding the session entry alive for it.
-                                input_routes.remove(&frame.channel);
+                                true
                             }
                         }
+                    } else {
+                        false
+                    };
+                    if stale_route {
+                        // The route outlived its attachment, so stop
+                        // holding the session entry alive for a channel
+                        // that can never type again.
+                        input_routes.remove(&frame.channel);
                     }
                 }
                 farhelm_proto::FrameKind::Control => {
@@ -8710,6 +8993,14 @@ enum ForwarderEnd {
 struct Forwarder {
     sup: Arc<Supervisor>,
     session_id: String,
+    /// Which of the session's terminals this pump belongs to — carried
+    /// only so a stall detach can name its own attachment exactly (see
+    /// [`detach_stalled`]). A stall is a property of ONE terminal's
+    /// client (PLAN_M4.md item 3: `pause-after`/`%pause` are per control
+    /// client), so the teardown it triggers must not reach the session's
+    /// other terminals, and reconstructing the key from the session id
+    /// alone could no longer say which one stalled.
+    terminal: TerminalId,
     /// The tmux pane id, needed by the catch-up replay — the forwarder
     /// cannot go look it up, since consulting `Supervisor::sessions`
     /// would break the no-locks rule above.
@@ -8765,7 +9056,12 @@ impl Forwarder {
                     "attachment paused longer than {:?}; detaching as stalled",
                     self.stall_timeout
                 );
-                detach_stalled(&self.sup, self.session_id, self.channel, self.tx);
+                detach_stalled(
+                    &self.sup,
+                    AttachmentKey::new(&self.session_id, self.terminal),
+                    self.channel,
+                    self.tx,
+                );
             }
         }
     }
@@ -9058,11 +9354,18 @@ async fn stalled_past_deadline(
 /// The identity check is the same two-part one every other ownership
 /// check in this module uses (channel plus owning connection): by the
 /// time this runs, a takeover may already have installed a different
-/// attachment for this session, and tearing THAT one down would detach an
-/// innocent client.
+/// attachment for this terminal, and tearing THAT one down would detach
+/// an innocent client.
+///
+/// Scoped to ONE terminal, deliberately (PLAN_M4.md item 3 settles this):
+/// a client whose agent view is healthy but whose background tab wedged
+/// loses only the tab, while a genuinely wedged client hits every
+/// terminal's stall bound in turn and converges on a whole-client detach
+/// on its own. Detaching the session's other terminals here would punish
+/// exactly the terminal the user is looking at.
 fn detach_stalled(
     sup: &Arc<Supervisor>,
-    session_id: String,
+    key: AttachmentKey,
     channel: u32,
     tx: mpsc::Sender<Frame>,
 ) {
@@ -9070,7 +9373,7 @@ fn detach_stalled(
     tokio::spawn(async move {
         let mut attachments = sup.attachments.lock().await;
         let mine = attachments
-            .get(&session_id)
+            .get(&key)
             .is_some_and(|a| a.channel == channel && a.notify.same_channel(&tx));
         if !mine {
             // A takeover (or a delete, or the connection dying) got here
@@ -9082,7 +9385,7 @@ fn detach_stalled(
             // already sent to the loser.
             return;
         }
-        let removed = attachments.remove(&session_id);
+        let removed = attachments.remove(&key);
         if let Some(old) = removed {
             // Abort-and-await like every other teardown, even though the
             // forwarder is the very task that asked for this: it has
@@ -9172,7 +9475,7 @@ async fn handle_control(
     sup: &Arc<Supervisor>,
     msg: ControlMsg,
     tx: &mpsc::Sender<Frame>,
-    input_routes: &mut HashMap<u32, Arc<SessionEntry>>,
+    input_routes: &mut HashMap<u32, InputRoute>,
     tasks: &mut tokio::task::JoinSet<()>,
 ) {
     match msg {
@@ -10080,32 +10383,45 @@ async fn handle_control(
                 // nothing else ever needs both: `attachments` first,
                 // `sessions` second.
                 let mut attachments = sup.attachments.lock().await;
-                // Abort the forwarder now, before it can race its own natural
-                // "session terminal ended" Detached against whatever truthful
-                // notice this handler sends once the real outcome below is
-                // known — but do not send that notice yet. Destructured
-                // (rather than kept as one `ActiveAttach`) because `forwarder`
-                // is consumed by the await and `channel`/`notify` are needed
-                // again afterwards; `input` is dropped here, which is fine —
-                // dropping it kills its control-mode client via
-                // `kill_on_drop`, exactly like every other teardown path.
-                let notify_detach = match attachments.remove(&session_id) {
-                    Some(ActiveAttach {
-                        channel,
-                        notify,
-                        forwarder,
-                        input: _input,
-                        // Dropped with the rest: the forwarder is being
-                        // aborted anyway, and a dropped sender simply
-                        // makes its pause watch unobservable.
-                        pause: _pause,
-                    }) => {
-                        forwarder.abort();
-                        let _ = forwarder.await;
-                        Some((channel, notify))
-                    }
-                    None => None,
-                };
+                // EVERY terminal of the session, not just the agent's: a
+                // delete takes the whole session down, so every channel it
+                // has attached is about to be streaming something that no
+                // longer exists (PLAN_M4.md item 3's session-scoped
+                // ownership, on the teardown side). Restart is the
+                // deliberate contrast — see `detach_for_restart`.
+                //
+                // Abort the forwarders now, before they can race their own
+                // natural "session terminal ended" Detached against whatever
+                // truthful notice this handler sends once the real outcome
+                // below is known — but do not send that notice yet.
+                //
+                // ALL of them are aborted before ANY is awaited, exactly as
+                // the attach takeover does it: the awaits are sequential, so
+                // aborting inside the same loop would leave the later
+                // forwarders streaming (and able to emit their own detach)
+                // while the earlier ones are already gone.
+                let doomed: Vec<ActiveAttach> = attachments
+                    .extract_if(|key, _| key.session == session_id)
+                    .map(|(_, attachment)| attachment)
+                    .collect();
+                for old in &doomed {
+                    old.forwarder.abort();
+                }
+                let mut notify_detach = Vec::with_capacity(doomed.len());
+                // `..` drops each attachment's input client — killing its
+                // control-mode process via `kill_on_drop`, like every other
+                // teardown path — and its pause sender, which the aborted
+                // forwarder can no longer observe anyway.
+                for ActiveAttach {
+                    channel,
+                    notify,
+                    forwarder,
+                    ..
+                } in doomed
+                {
+                    let _ = forwarder.await;
+                    notify_detach.push((channel, notify));
+                }
 
                 // Fail-closed and sequenced deliberately: artifacts before the
                 // DB row (a leftover launch spec may hold credentials, and
@@ -10163,10 +10479,10 @@ async fn handle_control(
                 .await;
 
                 if let Err(err_msg) = teardown {
-                    if let Some((channel, notify)) = notify_detach {
+                    for (channel, notify) in &notify_detach {
                         notify_detached(
-                            &notify,
-                            channel,
+                            notify,
+                            *channel,
                             format!("detached during a failed delete: {err_msg}"),
                         );
                     }
@@ -10184,8 +10500,8 @@ async fn handle_control(
                 }
                 sup.sessions.lock().await.remove(&session_id);
 
-                if let Some((channel, notify)) = notify_detach {
-                    notify_detached(&notify, channel, "session deleted".to_string());
+                for (channel, notify) in &notify_detach {
+                    notify_detached(notify, *channel, "session deleted".to_string());
                 }
                 drop(attachments);
                 send_reply(&tx, &ControlMsg::SessionDeleted { req_id }).await;
@@ -10198,19 +10514,25 @@ async fn handle_control(
             channel,
             cols,
             rows,
-            // Vocabulary only for now: every attach still means the one
-            // agent terminal, taken over unconditionally, exactly like
-            // before M4. PLAN_M4.md step 3 wires the per-terminal
-            // selector and the session-scoped lease grouping these two
-            // fields exist to carry.
-            terminal: _,
-            lease: _,
+            terminal: selector,
+            lease,
         } => {
-            if channel == 0 || input_routes.contains_key(&channel) {
+            // Every request-shape check the attach can make lives here,
+            // ahead of the first lookup and far ahead of the takeover: a
+            // malformed attach must cost the session's current client
+            // nothing. See [`MAX_LEASE_BYTES`] for why an unbounded lease
+            // is a memory question rather than a parsing one.
+            if channel == 0 || input_routes.contains_key(&channel) || lease.len() > MAX_LEASE_BYTES
+            {
                 let message = if channel == 0 {
                     "attachment channel 0 is reserved".to_string()
-                } else {
+                } else if input_routes.contains_key(&channel) {
                     format!("attachment channel {channel} is already in use")
+                } else {
+                    format!(
+                        "attachment lease is {} bytes, over the {MAX_LEASE_BYTES}-byte cap",
+                        lease.len()
+                    )
                 };
                 send_reply(
                     tx,
@@ -10236,27 +10558,31 @@ async fn handle_control(
                 .await;
                 return;
             };
-            // The restart-gap case (PLAN_M2.md): this entry was reloaded
-            // from SQLite at startup and its tmux session was gone by
-            // then. Reporting `NotFound` here — rather than fabricating a
-            // dead terminal to attach to — is the same "do not guess"
-            // discipline SPEC.md applies elsewhere; the session stays
-            // visible in the list either way.
-            let Some(terminal) = entry.terminal.as_ref() else {
-                send_reply(
-                    tx,
-                    &ControlMsg::Error {
-                        req_id,
-                        message: format!(
-                            "session {session_id} has no terminal: the supervisor (or its tmux \
-                         server) restarted after the agent ended"
-                        ),
-                        kind: ErrorKind::NotFound,
-                    },
-                )
-                .await;
-                return;
+            // Which terminal this attach is FOR, resolved once here and
+            // used for everything below: the tmux handles to drive, and
+            // the second half of the attachment key.
+            //
+            // Resolved BEFORE the takeover below, deliberately: an attach
+            // that cannot be honored must take nothing over, so naming a
+            // terminal that does not exist can never cost this session's
+            // current client its attachments.
+            let terminal_id = TerminalId::from(selector);
+            let terminal = match resolve_terminal(&entry, &terminal_id) {
+                Ok(terminal) => terminal,
+                Err(e) => {
+                    send_reply(
+                        tx,
+                        &ControlMsg::Error {
+                            req_id,
+                            message: e.message,
+                            kind: e.kind,
+                        },
+                    )
+                    .await;
+                    return;
+                }
             };
+            let key = AttachmentKey::new(&session_id, terminal_id);
 
             // Reserve one writer slot BEFORE taking any lock, so this
             // arm's eventual reply — success or failure — can be enqueued
@@ -10272,13 +10598,14 @@ async fn handle_control(
                 return;
             };
 
-            // The whole takeover — kick the old attachment, set up tmux,
-            // install the new one — runs under one lock. Without it, two
-            // concurrent attaches can both pass the kick step and both
-            // install forwarders, leaving two live attachments for a
-            // session SPEC.md says has at most one. It also makes the
-            // winner the *last* attach rather than whichever client's
-            // tmux calls happened to finish last.
+            // The whole takeover — kick every attachment this attach
+            // displaces, set up tmux, install the new one — runs under
+            // ONE lock hold. Without it, two concurrent attaches can both
+            // pass the kick step and both install forwarders, leaving one
+            // terminal with two live attachments (and, worse, a session
+            // whose terminals are split between two clients, which SPEC.md
+            // forbids). It also makes the winner the *last* attach rather
+            // than whichever client's tmux calls happened to finish last.
             let mut attachments = sup.attachments.lock().await;
 
             // Revalidate the entry this attach resolved BEFORE installing
@@ -10305,20 +10632,95 @@ async fn handle_control(
                 return;
             }
 
-            if let Some(old) = attachments.remove(&session_id) {
+            // SPEC.md's one-attached-client rule, enforced across the
+            // WHOLE session (PLAN_M4.md item 3): every channel held under
+            // a different lease loses its attachment, whichever of the
+            // session's terminals it was on. Running inside the same lock
+            // hold as the installation below is what makes the wire
+            // contract's "atomically" true — no observer can see a moment
+            // where the old lease still holds one terminal while the new
+            // one already holds another.
+            //
+            // The empty lease is not a lease (see `same_lease_client`), so
+            // a legacy attach sweeps everything and is itself swept by
+            // anything: exactly the pre-M4 behavior every un-leased client
+            // was written against.
+            //
+            // Nothing here touches the losers' `input_routes`: those are
+            // connection-local, and a connection that swept away its own
+            // earlier channels (a browser reload attaching under a new
+            // lease) simply carries stale routes until their next frame,
+            // which the input arm drops on the same two-part ownership
+            // check that has always guarded it. A stale route can never
+            // deliver to the winner — the channel ids differ, and the
+            // arm compares both.
+            let displaced: Vec<ActiveAttach> = attachments
+                .extract_if(|k, a| displaced_by_attach(k, &a.lease, &session_id, &lease))
+                .map(|(_, attachment)| attachment)
+                .collect();
+            // Same terminal, same lease: an ordinary reconnect, and the
+            // one-attachment-per-terminal enforcement point. It cannot
+            // overlap the sweep above — a same-lease incumbent is never
+            // swept — so removing it separately is not a second takeover,
+            // just the cutover that has always happened here. Which is
+            // exactly why it is told a DIFFERENT reason: see
+            // `DETACH_REASON_REPLACED`.
+            let incumbent = attachments.remove(&key);
+
+            // Abort every doomed forwarder BEFORE awaiting any of them:
+            // the awaits are sequential, so aborting inside the same loop
+            // would leave the not-yet-aborted forwarders free to emit
+            // output — and their own end-of-stream `Detached` — while the
+            // earlier ones are already being torn down.
+            for old in displaced.iter().chain(incumbent.iter()) {
                 old.forwarder.abort();
+            }
+            let mut notices =
+                Vec::with_capacity(displaced.len() + usize::from(incumbent.is_some()));
+            for (old, reason) in displaced
+                .into_iter()
+                .map(|old| (old, DETACH_REASON_TAKEOVER))
+                .chain(
+                    incumbent
+                        .into_iter()
+                        .map(|old| (old, DETACH_REASON_REPLACED)),
+                )
+            {
+                // `..` drops this attachment's input client (killing its
+                // control-mode process via `kill_on_drop`) and its pause
+                // sender, which is what every teardown path does.
+                let ActiveAttach {
+                    channel,
+                    notify,
+                    forwarder,
+                    ..
+                } = old;
                 // Awaiting the abort is what actually makes the old
                 // control-mode client gone: dropping its OutputStream
                 // (and so killing the process) happens when the task is
                 // polled after cancellation, not when abort() returns.
                 // The forwarder never takes this lock, so awaiting it
                 // here cannot deadlock.
-                let _ = old.forwarder.await;
-                notify_detached(
-                    &old.notify,
-                    old.channel,
-                    "another client attached".to_string(),
-                );
+                let _ = forwarder.await;
+                notices.push((channel, notify, reason));
+            }
+            // Every notice is enqueued back to back, after the last
+            // forwarder is gone, so a client that lost several terminals
+            // at once sees them as one event and can coalesce the
+            // identical reasons into a single banner (which is why the
+            // protocol needs no session-scoped takeover message).
+            //
+            // One accepted caveat, stated so nobody "fixes" it: a client
+            // whose own writer queue is completely full has its notice
+            // handed to a spawned sender (`notify_detached`), which can
+            // land after the winner's `Attached`. That is benign — the
+            // losing channel is already dead, and a `Detached` is the
+            // last frame it will ever carry — and the alternative,
+            // awaiting a full queue here, would let one wedged peer
+            // freeze every session's attach behind the `attachments`
+            // mutex.
+            for (channel, notify, reason) in notices {
+                notify_detached(&notify, channel, reason.to_string());
             }
 
             // Size the window now, not during prep: resizing is a
@@ -10345,6 +10747,19 @@ async fn handle_control(
             // safe way to preserve the incumbent while also avoiding
             // control-client overlap, so failure here leaves the session
             // detached and reports only this attach request as failed.
+            //
+            // One replay stream and one input client PER ATTACHED
+            // TERMINAL, which is what makes flow control per terminal:
+            // `pause-after`/`%pause` are properties of a control client,
+            // so a client shared across terminals would let one stalled
+            // viewer pause another terminal's stream (PLAN_M4.md item 3).
+            // The overlap hazard above is per TERMINAL too — it is about
+            // two clients streaming one pane, not about a session having
+            // several. Note for the tabs PR: this stream is opened
+            // against the tmux SESSION, whose control client sees output
+            // from panes beyond the one being replayed, so serving a
+            // second terminal will mean targeting the window (or
+            // filtering by pane) rather than reusing this call as-is.
             let (modes, prefill, stream) = match sup
                 .tmux
                 .open_replay_stream(&terminal.tmux_name, &terminal.pane)
@@ -10410,6 +10825,7 @@ async fn handle_control(
             let forwarder = Forwarder {
                 sup: Arc::clone(sup),
                 session_id: session_id.clone(),
+                terminal: key.terminal.clone(),
                 pane: terminal.pane.clone(),
                 channel,
                 tx: tx.clone(),
@@ -10420,9 +10836,10 @@ async fn handle_control(
             let task = tokio::spawn(forwarder.run(modes, prefill));
 
             attachments.insert(
-                session_id.clone(),
+                key.clone(),
                 ActiveAttach {
                     channel,
+                    lease,
                     notify: tx.clone(),
                     forwarder: task,
                     input,
@@ -10430,7 +10847,10 @@ async fn handle_control(
                 },
             );
             drop(attachments);
-            input_routes.insert(channel, entry);
+            // The route carries the same key the attachment was installed
+            // under, so input, resize, and detach all address this
+            // attachment by lookup rather than by search.
+            input_routes.insert(channel, InputRoute { entry, key });
         }
         ControlMsg::PauseOutput { channel } => {
             set_attachment_paused(sup, tx, channel, true).await;
@@ -10439,14 +10859,26 @@ async fn handle_control(
             set_attachment_paused(sup, tx, channel, false).await;
         }
         ControlMsg::Detach { channel } => {
-            input_routes.remove(&channel);
+            // `Detach` names no session and no terminal, but the route
+            // this connection registered at attach time does — so the
+            // attachment is addressed by key rather than found by
+            // scanning every session's attachments. A channel with no
+            // route was never attached here (or was already detached),
+            // which `Detach` treats as the no-op its idempotence promises.
+            let Some(route) = input_routes.remove(&channel) else {
+                return;
+            };
             let mut attachments = sup.attachments.lock().await;
-            let mine = attachments.iter().find_map(|(id, a)| {
-                (a.channel == channel && a.notify.same_channel(tx)).then(|| id.clone())
-            });
-            if let Some(id) = mine
-                && let Some(a) = attachments.remove(&id)
-            {
+            // The same two-part ownership check the input and resize
+            // paths make, and for the same reason: by now a takeover may
+            // have installed somebody else's attachment under this key,
+            // and a stale `Detach` must never tear that one down. Channel
+            // ids are unique only within a connection, so `same_channel`
+            // is what identifies the owner.
+            let mine = attachments
+                .get(&route.key)
+                .is_some_and(|a| a.channel == channel && a.notify.same_channel(tx));
+            if mine && let Some(a) = attachments.remove(&route.key) {
                 // Abort AND await, mirroring the takeover path: detach
                 // followed by an immediate reattach (a browser reload is
                 // exactly this) finds no incumbent to kick, so the only
@@ -10465,6 +10897,22 @@ async fn handle_control(
             cols,
             rows,
         } => {
+            // The channel's own route is both the lookup key and the
+            // target: it names the (session, terminal) this channel
+            // attached to, so a resize can only ever reflow the terminal
+            // its sender actually holds — a client with two of a
+            // session's terminals cannot reflow the one it did not name
+            // (PLAN_M4.md item 3: resize goes per window, which is why
+            // `Resize` carries no terminal selector at all). A channel
+            // with no route on this connection is not attached here, and
+            // a route naming a different session than the request does is
+            // a client contradicting itself; both are ignored.
+            let Some(route) = input_routes.get(&channel) else {
+                return;
+            };
+            if route.key.session != session_id {
+                return;
+            }
             // Same trust boundary as input, and the same two-part check
             // as the Data arm: `same_channel` identifies the owning
             // connection, and the channel id tells apart clients
@@ -10473,42 +10921,38 @@ async fn handle_control(
             // connection-level check alone would let a tab that just
             // lost a takeover reflow the winner's terminal.
             //
-            // The session entry is fetched first so the two supervisor
-            // locks are never held at once (see the struct docs); the
-            // resize itself then runs UNDER the attachments lock, like
-            // the Attach handler's tmux calls. Checking ownership and
-            // then resizing after releasing the lock is a TOCTOU: a
-            // takeover can interleave in that gap, and the kicked
-            // client's already-authorized resize would land after the
-            // winner's attach-time resize, reflowing the winner's
-            // terminal with nothing to correct it.
-            let entry = sup.sessions.lock().await.get(&session_id).cloned();
-            if let Some(entry) = entry {
-                let attachments = sup.attachments.lock().await;
-                let owns = attachments
-                    .get(&session_id)
-                    .is_some_and(|a| a.channel == channel && a.notify.same_channel(tx));
-                if owns {
-                    // `owns` being true is only possible if a terminal
-                    // exists: the Attach handler never registers an
-                    // attachment for a terminal-less entry (see its
-                    // restart-gap check), so an owned attachment with no
-                    // terminal here means that invariant broke elsewhere —
-                    // worth failing loudly over, not papering past.
-                    let terminal = entry.terminal.as_ref().expect(
-                        "attachments are only ever registered for entries with a terminal — \
-                         see the Attach handler",
-                    );
-                    // Fire-and-forget: a resize has no req_id to answer,
-                    // and a tmux failure here must not take the
-                    // connection (and every other session on it) down.
-                    if let Err(e) = sup
-                        .tmux
-                        .resize_window(&terminal.tmux_name, cols, rows)
-                        .await
-                    {
-                        warn!(session = %session_id, error = %e, "resize failed");
-                    }
+            // The check and the resize run UNDER one hold of the
+            // attachments lock, like the Attach handler's tmux calls.
+            // Checking ownership and then resizing after releasing the
+            // lock is a TOCTOU: a takeover can interleave in that gap,
+            // and the kicked client's already-authorized resize would
+            // land after the winner's attach-time resize, reflowing the
+            // winner's terminal with nothing to correct it.
+            let attachments = sup.attachments.lock().await;
+            let owns = attachments
+                .get(&route.key)
+                .is_some_and(|a| a.channel == channel && a.notify.same_channel(tx));
+            if owns {
+                // The route's entry is the one the attach resolved
+                // against, and it is still the live one: a restart
+                // replaces the entry AND detaches the agent terminal, so
+                // an attachment that is still ours means no restart has
+                // landed since. `SessionEntry` is immutable once
+                // published, so this cannot fail — an attachment is only
+                // ever registered for a terminal that resolved.
+                let terminal = resolve_terminal(&route.entry, &route.key.terminal).expect(
+                    "attachments are only ever registered for terminals that resolve — \
+                     see the Attach handler",
+                );
+                // Fire-and-forget: a resize has no req_id to answer,
+                // and a tmux failure here must not take the
+                // connection (and every other session on it) down.
+                if let Err(e) = sup
+                    .tmux
+                    .resize_window(&terminal.tmux_name, cols, rows)
+                    .await
+                {
+                    warn!(session = %session_id, error = %e, "resize failed");
                 }
             }
         }
@@ -11702,7 +12146,7 @@ mod tests {
     /// `TabClosed`, `UploadStarted`, `UploadCommitted`) joined
     /// `reply_frame`'s req_id correlator alongside `SessionRestarted`
     /// above, and for the identical reason: each is a req_id-bearing
-    /// reply that a not-yet-implemented handler (PLAN_M4.md step 3) will
+    /// reply that a not-yet-implemented handler (PLAN_M4.md step 4) will
     /// eventually build and pass through `reply_frame`, and without an
     /// arm here that call hits the `unreachable!` branch instead of ever
     /// reaching the wire. One table-driven test covers all four rather
@@ -15105,6 +15549,94 @@ mod tests {
             "task must have run to natural completion, not been aborted \
              mid-flight while progress was still arriving"
         );
+    }
+
+    /// The lease grouping rule, as a truth table.
+    ///
+    /// This one predicate decides every takeover the supervisor performs,
+    /// and two of its four cases are unreachable from the integration
+    /// tests today: "same lease, different terminal is NOT a takeover"
+    /// needs a session with two terminals (the tabs PR), and "two empty
+    /// leases are still two clients" is invisible wherever a takeover
+    /// happens to be expected anyway. Pinning the table here is what
+    /// keeps the empty-lease asymmetry — the entire pre-M4 compatibility
+    /// story — from being "simplified" into plain string equality, which
+    /// would fuse every un-leased client on a session into one client and
+    /// silently delete the takeover they depend on.
+    #[test]
+    fn the_empty_lease_groups_with_nothing_while_equal_leases_group() {
+        // (incumbent, requester, same client?)
+        let cases = [
+            ("client-a", "client-a", true),
+            ("client-a", "client-b", false),
+            ("", "client-a", false),
+            ("client-a", "", false),
+            // The case that reads as equality but must not be: two
+            // un-leased clients are two clients.
+            ("", "", false),
+        ];
+        for (incumbent, requester, expected) in cases {
+            assert_eq!(
+                same_lease_client(incumbent, requester),
+                expected,
+                "lease grouping of incumbent {incumbent:?} against requester {requester:?}"
+            );
+        }
+    }
+
+    /// Which attachments an incoming attach displaces, over key shapes
+    /// the integration tests cannot yet build.
+    ///
+    /// The property that matters is quantified over a session's
+    /// TERMINALS — a different lease takes over every one of them, a
+    /// matching lease takes over none — and today a session has exactly
+    /// one terminal, so an end-to-end test can only ever observe the
+    /// single-key case. Asserting it here with an agent key AND a tab key
+    /// in the same session is what keeps the rule from silently
+    /// degrading into "displace the one terminal I know about" before the
+    /// tabs PR can notice.
+    ///
+    /// The unrelated-session case is the other half: a lease is not
+    /// cross-session, so a client attaching one session must never
+    /// disturb the terminals it holds in another.
+    #[test]
+    fn a_different_lease_displaces_every_terminal_of_that_session_alone() {
+        let agent = AttachmentKey::new("session-1", TerminalId::Agent);
+        let tab = AttachmentKey::new("session-1", TerminalId::Tab("tab-1".to_string()));
+        let elsewhere = AttachmentKey::new("session-2", TerminalId::Agent);
+
+        for held in [&agent, &tab] {
+            assert!(
+                displaced_by_attach(held, "lease-a", "session-1", "lease-b"),
+                "a different lease must displace {held:?}"
+            );
+            assert!(
+                !displaced_by_attach(held, "lease-a", "session-1", "lease-a"),
+                "the same lease must displace none of its own terminals ({held:?})"
+            );
+            // The empty lease is its own singleton client in both
+            // directions — see `same_lease_client`.
+            assert!(
+                displaced_by_attach(held, "", "session-1", "lease-a"),
+                "a leased attach must displace an un-leased holder ({held:?})"
+            );
+            assert!(
+                displaced_by_attach(held, "lease-a", "session-1", ""),
+                "an un-leased attach must displace a leased holder ({held:?})"
+            );
+            assert!(
+                displaced_by_attach(held, "", "session-1", ""),
+                "two un-leased attachments are two clients ({held:?})"
+            );
+        }
+
+        for (held_lease, incoming_lease) in [("lease-a", "lease-b"), ("", ""), ("lease-a", "")] {
+            assert!(
+                !displaced_by_attach(&elsewhere, held_lease, "session-1", incoming_lease),
+                "attaching session-1 must never displace an attachment of session-2 \
+                 (held {held_lease:?}, incoming {incoming_lease:?})"
+            );
+        }
     }
 
     /// The lock-held detach notice must never block, and must never be

@@ -873,6 +873,387 @@ async fn second_attach_detaches_first() {
     wait_for(&mut rx2, &mut seen2, "still-alive", 10).await;
 }
 
+/// Wait for an attachment's `Detached` notice and return its reason.
+///
+/// Every takeover test needs this same wait, and the two failure modes it
+/// distinguishes are exactly the ones a bug in the takeover path
+/// produces: a stream that ends without any notice at all (the client was
+/// torn down silently) versus one that simply never hears anything (the
+/// incumbent was never kicked). Panicking with that distinction is the
+/// point — an `Option` return would let a caller blur them.
+async fn expect_detached(rx: &mut TermStream, secs: u64) -> String {
+    tokio::time::timeout(Duration::from_secs(secs), async {
+        while let Some(ev) = rx.recv().await {
+            if let TermEvent::Detached(reason) = ev {
+                return reason;
+            }
+        }
+        panic!("attachment stream ended without a Detached notice");
+    })
+    .await
+    .expect("timed out waiting for a Detached notice")
+}
+
+/// Two DISTINCT leases are two clients, so the second attach takes the
+/// first over — SPEC.md's one-attached-client rule, now enforced by lease
+/// identity rather than by "any second attach wins" (PLAN_M4.md item 3).
+///
+/// The loser must learn about it (the takeover reason on its own channel)
+/// AND stop being able to type: a takeover that detached the stream but
+/// left the input route live would leave a kicked client executing
+/// commands in the winner's agent terminal. Both halves are asserted
+/// because the lease check is what decides the first half and the
+/// per-terminal cutover is what decides the second — a lease sweep that
+/// forgot to remove the attachment would still send the notice.
+#[tokio::test]
+async fn an_attach_under_a_different_lease_takes_over_and_silences_the_loser() {
+    let h = harness().await;
+    let (session, _work) = basic_session(&h).await;
+
+    let (loser_chan, mut rx1) = h
+        .client
+        .attach_terminal(&session.id, 80, 24, TerminalSelector::Agent, "lease-one")
+        .await
+        .expect("attach1");
+    let mut seen1 = Vec::new();
+    wait_for(&mut rx1, &mut seen1, "FAKE-AGENT READY", 20).await;
+
+    let (winner_chan, mut rx2) = h
+        .client
+        .attach_terminal(&session.id, 80, 24, TerminalSelector::Agent, "lease-two")
+        .await
+        .expect("attach2");
+    let reason = expect_detached(&mut rx1, 10).await;
+    assert!(
+        reason.contains("another client"),
+        "the loser must be told it was taken over, got: {reason}"
+    );
+
+    let mut seen2 = Vec::new();
+    wait_for(&mut rx2, &mut seen2, "FAKE-AGENT READY", 15).await;
+    // Ghost then marker on the SAME connection, so the supervisor has
+    // decided the ghost's fate by the time the marker echoes back (the
+    // ordering trick `kicked_client_cannot_still_send_input` uses).
+    h.client
+        .send_input(loser_chan, b"ghost-lease\r".to_vec())
+        .await;
+    h.client
+        .send_input(winner_chan, b"marker-lease\r".to_vec())
+        .await;
+    wait_for(&mut rx2, &mut seen2, "marker-lease", 15).await;
+    let transcript = String::from_utf8_lossy(&seen2);
+    assert!(
+        !transcript.contains("ghost-lease"),
+        "input from a lease that lost the takeover reached the pane:\n{transcript}"
+    );
+}
+
+/// The SAME lease reattaching to the SAME terminal is an ordinary
+/// reconnect: the incumbent channel is still cut over, but it is told a
+/// REPLACED reason rather than a takeover one.
+///
+/// Two failures in one test. The mechanism could plausibly go wrong in
+/// the "helpful" direction — recognizing the incumbent as the same client
+/// and leaving it in place would give one terminal two live forwarders,
+/// the overlapping-control-client state the whole attach path exists to
+/// avoid — so the cutover and its replay must still happen. And the
+/// REASON must not be the takeover string: equal non-empty leases are one
+/// client reconnecting (`ControlMsg::Attach`'s contract), so "another
+/// client attached" would raise a takeover banner accusing a second user
+/// who does not exist. A client that renders detach reasons verbatim
+/// makes that difference visible to the user, which is why it is pinned
+/// here rather than left to the supervisor's internal accounting.
+#[tokio::test]
+async fn a_same_lease_reattach_to_the_same_terminal_is_an_ordinary_cutover() {
+    const LEASE: &str = "one-client-reconnecting";
+    let h = harness().await;
+    let (session, _work) = basic_session(&h).await;
+
+    let (chan1, mut rx1) = h
+        .client
+        .attach_terminal(&session.id, 80, 24, TerminalSelector::Agent, LEASE)
+        .await
+        .expect("attach");
+    let mut seen1 = Vec::new();
+    wait_for(&mut rx1, &mut seen1, "FAKE-AGENT READY", 20).await;
+    h.client
+        .send_input(chan1, b"before-same-lease\r".to_vec())
+        .await;
+    wait_for(&mut rx1, &mut seen1, "before-same-lease", 15).await;
+
+    let (chan2, mut rx2) = h
+        .client
+        .attach_terminal(&session.id, 80, 24, TerminalSelector::Agent, LEASE)
+        .await
+        .expect("reattach");
+    let reason = expect_detached(&mut rx1, 10).await;
+    assert!(
+        reason.contains("replaced by a newer attachment"),
+        "a same-lease reattach must tell the incumbent it was replaced, got: {reason}"
+    );
+    assert!(
+        !reason.contains("another client"),
+        "a client reconnecting under its own lease must never be told another client took \
+         over, got: {reason}"
+    );
+
+    // Replay, then live: exactly what a reconnect promises.
+    let mut seen2 = Vec::new();
+    wait_for(&mut rx2, &mut seen2, "before-same-lease", 20).await;
+    h.client
+        .send_input(chan2, b"after-same-lease\r".to_vec())
+        .await;
+    wait_for(&mut rx2, &mut seen2, "after-same-lease", 15).await;
+}
+
+/// The empty lease is not a lease: an un-leased attach takes over a
+/// leased one, and a leased attach takes over an un-leased one.
+///
+/// Both directions in one test because they are one rule — the empty
+/// lease matches nothing, not even another empty lease — and it is the
+/// entire compatibility story for every pre-M4 client (and for the helm,
+/// which sends no lease until PLAN_M4.md item 5). Get it wrong by
+/// treating empty as a shared identity and two unrelated legacy clients
+/// silently share a session; get it wrong in the other direction and a
+/// legacy client can never reclaim a session a leased client holds.
+#[tokio::test]
+async fn the_empty_lease_takes_over_everything_and_is_taken_over_by_anything() {
+    let h = harness().await;
+    let (session, _work) = basic_session(&h).await;
+
+    // Leased incumbent, un-leased newcomer.
+    let (_leased_chan, mut leased_rx) = h
+        .client
+        .attach_terminal(&session.id, 80, 24, TerminalSelector::Agent, "held-lease")
+        .await
+        .expect("leased attach");
+    let mut leased_seen = Vec::new();
+    wait_for(&mut leased_rx, &mut leased_seen, "FAKE-AGENT READY", 20).await;
+
+    let (_legacy_chan, mut legacy_rx) = h.client.attach(&session.id, 80, 24).await.expect("legacy");
+    let reason = expect_detached(&mut leased_rx, 10).await;
+    assert!(
+        reason.contains("another client"),
+        "an un-leased attach must take over a leased holder, got: {reason}"
+    );
+    let mut legacy_seen = Vec::new();
+    wait_for(&mut legacy_rx, &mut legacy_seen, "FAKE-AGENT READY", 15).await;
+
+    // Un-leased incumbent, leased newcomer.
+    let (_new_chan, mut new_rx) = h
+        .client
+        .attach_terminal(&session.id, 80, 24, TerminalSelector::Agent, "fresh-lease")
+        .await
+        .expect("leased reattach");
+    let reason = expect_detached(&mut legacy_rx, 10).await;
+    assert!(
+        reason.contains("another client"),
+        "a leased attach must take over an un-leased holder, got: {reason}"
+    );
+    let mut new_seen = Vec::new();
+    wait_for(&mut new_rx, &mut new_seen, "FAKE-AGENT READY", 15).await;
+}
+
+/// An over-cap lease is refused as a bad REQUEST, and refused before the
+/// attach has taken anything over.
+///
+/// The lease is retained for the life of every attachment made under it,
+/// so an unbounded one is retained memory a client can mint from a single
+/// oversized control frame — the reason the cap exists at all. Both
+/// halves matter: the refusal itself, and its placement ahead of the
+/// takeover, because a check that ran after the lease sweep would let any
+/// client detach any other by sending garbage it knows will be rejected.
+#[tokio::test]
+async fn an_over_cap_lease_is_refused_without_disturbing_the_incumbent() {
+    let h = harness().await;
+    let (session, _work) = basic_session(&h).await;
+
+    let (holder_chan, mut holder_rx) = h
+        .client
+        .attach_terminal(
+            &session.id,
+            80,
+            24,
+            TerminalSelector::Agent,
+            "holding-lease",
+        )
+        .await
+        .expect("attach the agent terminal");
+    let mut holder_seen = Vec::new();
+    wait_for(&mut holder_rx, &mut holder_seen, "FAKE-AGENT READY", 20).await;
+
+    // One byte over: the cap is 128, and a request that is refused must
+    // be refused for its size alone, not for anything else about it.
+    let over_cap = "x".repeat(129);
+    let err = h
+        .client
+        .attach_terminal(&session.id, 80, 24, TerminalSelector::Agent, &over_cap)
+        .await
+        .expect_err("an over-cap lease must be refused");
+    assert!(
+        err.to_string().contains("lease"),
+        "the error must say which field was too big, got: {err:#}"
+    );
+    assert_eq!(
+        err.downcast_ref::<SupervisorError>()
+            .expect("an over-cap lease must carry a SupervisorError")
+            .kind,
+        ErrorKind::InvalidRequest,
+        "an over-cap lease is a malformed request, not a not-found or a server fault"
+    );
+
+    // The incumbent is untouched: no detach notice, and still typing.
+    let detached = drain_for(&mut holder_rx, &mut holder_seen, Duration::from_secs(1)).await;
+    assert_eq!(
+        detached, None,
+        "a refused over-cap attach detached the session's live attachment"
+    );
+    h.client
+        .send_input(holder_chan, b"survived-the-lease\r".to_vec())
+        .await;
+    wait_for(&mut holder_rx, &mut holder_seen, "survived-the-lease", 15).await;
+}
+
+/// The lease cap counts BYTES, not characters, and admits a lease that
+/// sits exactly on it.
+///
+/// What is bounded is retained memory and frame content, both of which
+/// are byte quantities — so a `chars().count()` cap would let a
+/// multibyte lease carry several times the memory the cap names. The
+/// exact-cap case is the other half of the same boundary: an off-by-one
+/// that refused it would break any client that sizes its ids to the
+/// documented limit.
+#[tokio::test]
+async fn the_lease_cap_counts_bytes_not_characters() {
+    let h = harness().await;
+    let (session, _work) = basic_session(&h).await;
+
+    let exactly_at_cap = "x".repeat(128);
+    let (_chan, mut rx) = h
+        .client
+        .attach_terminal(
+            &session.id,
+            80,
+            24,
+            TerminalSelector::Agent,
+            &exactly_at_cap,
+        )
+        .await
+        .expect("a lease exactly at the cap must be accepted");
+    let mut seen = Vec::new();
+    wait_for(&mut rx, &mut seen, "FAKE-AGENT READY", 20).await;
+
+    // 64 two-byte characters: 128 bytes, right on the cap.
+    let multibyte_at_cap = "é".repeat(64);
+    assert_eq!(multibyte_at_cap.len(), 128, "test fixture is 128 bytes");
+    let (_chan2, mut rx2) = h
+        .client
+        .attach_terminal(
+            &session.id,
+            80,
+            24,
+            TerminalSelector::Agent,
+            &multibyte_at_cap,
+        )
+        .await
+        .expect("a multibyte lease at the byte cap must be accepted");
+    let mut seen2 = Vec::new();
+    wait_for(&mut rx2, &mut seen2, "FAKE-AGENT READY", 15).await;
+
+    // 65 of them: 65 characters — comfortably under any character-count
+    // reading of the cap — but 130 bytes, which is over it.
+    let multibyte_over_cap = "é".repeat(65);
+    assert_eq!(multibyte_over_cap.chars().count(), 65);
+    assert_eq!(multibyte_over_cap.len(), 130);
+    let err = h
+        .client
+        .attach_terminal(
+            &session.id,
+            80,
+            24,
+            TerminalSelector::Agent,
+            &multibyte_over_cap,
+        )
+        .await
+        .expect_err("a lease over the BYTE cap must be refused even when few characters");
+    assert_eq!(
+        err.downcast_ref::<SupervisorError>()
+            .expect("an over-cap lease must carry a SupervisorError")
+            .kind,
+        ErrorKind::InvalidRequest,
+        "the cap must be counted in bytes, not characters"
+    );
+}
+
+/// Attaching a terminal tab is a `NotFound` that names the tab, because
+/// no supervisor serves tabs yet (PLAN_M4.md item 2 is the next PR).
+///
+/// The alternative a selector-shaped attach path could drift into is
+/// silently falling back to the agent terminal, which `TerminalSelector`
+/// explicitly forbids: attaching the WRONG terminal is worse than
+/// failing.
+///
+/// The refusal must also be free of SIDE EFFECTS, which the incumbent
+/// under a different lease pins: terminal resolution happens before the
+/// takeover, so an attach nobody can honor must never cost the session's
+/// current client its attachment. Get that order wrong and any client
+/// could detach any other by naming a tab that does not exist.
+#[tokio::test]
+async fn attaching_a_terminal_tab_is_a_not_found_that_names_the_tab() {
+    let h = harness().await;
+    let (session, _work) = basic_session(&h).await;
+
+    let (holder_chan, mut holder_rx) = h
+        .client
+        .attach_terminal(
+            &session.id,
+            80,
+            24,
+            TerminalSelector::Agent,
+            "holding-lease",
+        )
+        .await
+        .expect("attach the agent terminal");
+    let mut holder_seen = Vec::new();
+    wait_for(&mut holder_rx, &mut holder_seen, "FAKE-AGENT READY", 20).await;
+
+    let err = h
+        .client
+        .attach_terminal(
+            &session.id,
+            80,
+            24,
+            TerminalSelector::Tab {
+                id: "tab-does-not-exist".to_string(),
+            },
+            "intruding-lease",
+        )
+        .await
+        .expect_err("attaching a tab must fail while no tabs exist");
+    assert!(
+        err.to_string().contains("tab-does-not-exist"),
+        "the error must name the tab that could not be found, got: {err:#}"
+    );
+    assert_eq!(
+        err.downcast_ref::<SupervisorError>()
+            .expect("a tab attach must carry a SupervisorError")
+            .kind,
+        ErrorKind::NotFound,
+        "a terminal that does not exist is a not-found, not a bad request or a server fault"
+    );
+
+    // The incumbent is untouched: no detach notice, and still typing.
+    let detached = drain_for(&mut holder_rx, &mut holder_seen, Duration::from_secs(1)).await;
+    assert_eq!(
+        detached, None,
+        "a refused tab attach detached the session's live attachment"
+    );
+    h.client
+        .send_input(holder_chan, b"survived-the-tab\r".to_vec())
+        .await;
+    wait_for(&mut holder_rx, &mut holder_seen, "survived-the-tab", 15).await;
+}
+
 /// Attachment channels are connection-local routing keys, so zero and
 /// reuse are protocol errors rather than harmless client choices.
 ///
@@ -906,7 +1287,7 @@ async fn attachment_channels_must_be_nonzero_and_unique() {
             cols: 80,
             rows: 24,
             // Vocabulary only for now: this test predates tabs/leases
-            // (PLAN_M4.md step 3) and is only exercising the channel-0/
+            // (PLAN_M4.md step 4) and is only exercising the channel-0/
             // channel-reuse rejection paths, so the agent terminal with
             // no lease — today's only meaning — is exactly what belongs
             // here.
@@ -6615,6 +6996,97 @@ async fn a_paused_replay_detaches_relative_to_the_first_pause_despite_pause_spam
         "detached after {elapsed:?}, far past the 3s maximum measured from the first pause — \
          the deadline is being restarted rather than held absolute"
     );
+}
+
+/// A stall detaches exactly ONE attachment, leaving every other
+/// attachment on the same CONNECTION alive (PLAN_M4.md item 3).
+///
+/// The stall bound is a property of one control-mode client — tmux's
+/// `pause-after`/`%pause` are per client — so the teardown it triggers
+/// must be scoped to that client's own attachment key. A teardown that
+/// swept by connection, or by anything wider than the key, would let one
+/// wedged view take down terminals the user is actively watching, which
+/// is exactly the outcome the per-terminal design exists to avoid; a
+/// genuinely wedged client converges on a whole-client detach anyway, one
+/// stall bound at a time.
+///
+/// The two attachments are two SESSIONS rather than two terminals of one
+/// session, because tabs do not exist yet — so this is a
+/// connection-scoped over-detach guard, not a tab-isolation test. Their
+/// leases are deliberately DISTINCT and deliberately irrelevant: takeover
+/// is session-scoped, so two sessions never displace each other whatever
+/// their leases say, and distinct leases keep this test from implying
+/// otherwise. The same-session variant PLAN_M4.md acceptance item 5
+/// describes lands with the tabs PR.
+///
+/// Both sessions run the QUIET fixture on purpose. The survivor sits
+/// undrained for as long as the stall takes to fire, and a chatty fixture
+/// would overflow the client's own per-terminal queue in that window —
+/// which this client answers with a local stall detach of its own
+/// (`SupervisorClient::dispatch`), indistinguishable here from the
+/// supervisor-side over-detach under test. Liveness is asserted by typing
+/// instead: an echo proves both the attachment and its input route
+/// survived.
+#[tokio::test]
+async fn a_stall_detaches_only_its_own_attachment_not_the_connections_others() {
+    let h = harness_with_timeouts(SupervisorTimeouts {
+        stall_detach: Duration::from_secs(2),
+        ..SupervisorTimeouts::default()
+    })
+    .await;
+    let (stalling_session, _stalling_work) = basic_session(&h).await;
+    let (live_session, _live_work) = basic_session(&h).await;
+
+    // Two sessions on one connection, under two different leases: no
+    // takeover is possible between them in either direction, so anything
+    // that detaches the survivor came from the stall teardown.
+    let (stalling_chan, mut stalling_rx) = h
+        .client
+        .attach_terminal(
+            &stalling_session.id,
+            80,
+            24,
+            TerminalSelector::Agent,
+            "lease-of-the-stalled-view",
+        )
+        .await
+        .expect("attach the terminal that will stall");
+    let (live_chan, mut live_rx) = h
+        .client
+        .attach_terminal(
+            &live_session.id,
+            80,
+            24,
+            TerminalSelector::Agent,
+            "lease-of-the-live-view",
+        )
+        .await
+        .expect("attach the terminal that must survive");
+    let mut stalling_seen = Vec::new();
+    let mut live_seen = Vec::new();
+    wait_for(&mut stalling_rx, &mut stalling_seen, "FAKE-AGENT READY", 20).await;
+    wait_for(&mut live_rx, &mut live_seen, "FAKE-AGENT READY", 20).await;
+
+    h.client.pause_output(stalling_chan).await;
+    let reason = expect_detached(&mut stalling_rx, 15).await;
+    assert_eq!(
+        reason,
+        farhelm_proto::DETACH_REASON_STALLED,
+        "the paused attachment must take the stall detach"
+    );
+
+    // The connection's other attachment: no notice of its own, and still
+    // authorized to type — the stall teardown must not have removed its
+    // attachment or its input route along with the stalled one's.
+    let live_detached = drain_for(&mut live_rx, &mut live_seen, Duration::from_secs(2)).await;
+    assert_eq!(
+        live_detached, None,
+        "a stall on one attachment detached another attachment on the same connection"
+    );
+    h.client
+        .send_input(live_chan, b"still-mine\r".to_vec())
+        .await;
+    wait_for(&mut live_rx, &mut live_seen, "still-mine", 15).await;
 }
 
 /// A pause from a client that LOST a takeover must not silence the
