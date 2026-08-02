@@ -6371,11 +6371,15 @@ const FLOOD_RECORDS: u64 = 800_000;
 ///
 /// It needs no test-only seam in the supervisor, which is why it is done
 /// this way: `refresh-client -A` acts on a NAMED client, and the
-/// supervisor's two control clients are distinguishable from outside by
-/// their flags. Input rides a client that keeps `no-output` set forever
-/// (see `InputClient`), while the output client cleared it at its replay
-/// cutover — so "the control client without `no-output`" is exactly the
-/// attachment's own stream.
+/// supervisor's control clients are distinguishable from outside by their
+/// flags. The discriminator is `pause-after`, and it has to be: three
+/// shapes are attached to a session with one live terminal, and only this
+/// one carries that flag. The input client keeps `no-output` set forever
+/// (see `InputClient`); the session sink clears `no-output` exactly as the
+/// output client does but deliberately never takes `pause-after`, because
+/// it is the client that must never be paused (see `tmux::SessionSink`) —
+/// which is what makes the same flag both the sink's defining absence and
+/// this helper's positive match.
 async fn force_tmux_pause(h: &Harness, pane: &str) {
     let sock = h.state.path().join("tmux.sock");
     let listed = tmux_query(
@@ -6392,7 +6396,11 @@ async fn force_tmux_pause(h: &Harness, pane: &str) {
     let target = listed
         .lines()
         .filter_map(|line| line.split_once('\t'))
-        .find(|(_, flags)| !flags.split(',').any(|flag| flag == "no-output"))
+        .find(|(_, flags)| {
+            flags
+                .split(',')
+                .any(|flag| flag.starts_with("pause-after="))
+        })
         .map(|(name, _)| name)
         .unwrap_or_else(|| panic!("no output control client found among tmux clients:\n{listed}"));
     let paused = tmux_query(
@@ -14167,16 +14175,27 @@ async fn input_reaches_only_the_terminal_it_was_sent_to() {
 /// one where tmux's own backstop fires on the stalled client, and a check
 /// that finished before that would miss the very interaction under test.
 ///
-/// Honest scope, because the property is not absolute. tmux answers a
-/// lagging client in one of two ways and picks between them
-/// nondeterministically (see `TMUX_PAUSE_AFTER_SECS`): it either cuts that
-/// client with `%pause`, which is the fully isolated branch this test
-/// usually observes, or it THROTTLES the pane, which can transiently slow
-/// the session's other panes until the stall bound trips. So a pass here
-/// says the supervisor's per-terminal machinery holds under the branch
-/// tmux took on this run — not that both branches are isolation-free. The
-/// residual is documented on `tmux::OutputStream` and is closed by the
-/// session-sink design rather than by anything this test can assert.
+/// Honest scope, because a passing run here does not by itself cover both
+/// of tmux's answers to a lagging client. tmux either cuts the stalled
+/// client with `%pause` or stops reading the pane it is behind on, and it
+/// picks between them nondeterministically (see `TMUX_PAUSE_AFTER_SECS`);
+/// this test observes whichever branch tmux happened to take on this run,
+/// and cannot force the second one. Which branch occurs depends on how far
+/// tmux read ahead, and the audit that reproduced the throttle branch at
+/// all needed a 16 MB/s producer and still only hit it in four runs out of
+/// five (recorded on `SessionSink`); nothing in the control protocol lets
+/// a test choose.
+///
+/// What HAS changed is that the second branch is no longer a residual to
+/// warn about. It used to be one — a stalled tab could stop the AGENT's
+/// pane being read, blocking the agent's own writes for as long as the
+/// stall lasted — and this test's earlier form said so. The session sink
+/// closes it by guaranteeing tmux always has a client it can deliver every
+/// pane to, and the coverage for that guarantee is the mechanism tests
+/// (`only_the_sink_keeps_a_filtered_pane_readable` in `tmux.rs`, and the
+/// `the_session_sink_*` lifecycle tests below), not this one. This test's
+/// own claim stays what it always was: the supervisor's per-terminal
+/// machinery keeps the agent flowing while a tab's viewer is wedged.
 #[tokio::test]
 async fn a_stalled_tab_viewer_does_not_pause_the_agents_stream() {
     let h = harness().await;
@@ -14237,6 +14256,548 @@ async fn a_stalled_tab_viewer_does_not_pause_the_agents_stream() {
     // the other half of the isolation claim.
     h.client.resume_output(tab_chan).await;
     wait_for(&mut tab_rx, &mut tab_seen, "FLOOD-", 30).await;
+}
+
+/// The session sink's lifecycle: the first attachment on a session brings
+/// one up, and the last one to go takes it down.
+///
+/// The sink is what keeps tmux reading every pane of a session whose
+/// terminals are filtered or stalled (`tmux::SessionSink`), and it is
+/// owned by refcount rather than by any teardown path — so both ends of
+/// this are properties nothing else in the suite would notice breaking. A
+/// sink that never started would surface only as the isolation guarantee
+/// quietly not holding; a sink that outlived its last viewer would surface
+/// only as a control client attached to a session nobody is watching,
+/// forever.
+///
+/// Deliberately checks a session that is attached, detached, and attached
+/// AGAIN: the second attach proves the registry's dangling-`Weak` handling
+/// (the entry left behind by the dead sink must be replaced, not upgraded
+/// into a corpse).
+#[tokio::test]
+async fn the_session_sink_lives_exactly_as_long_as_the_sessions_attachments() {
+    let h = harness().await;
+    let (session, _work) = basic_session(&h).await;
+    let _cleanup = MarkerCleanupGuard::new(session.id.clone());
+    let tmux_name = format!("fh-{}", session.id);
+
+    assert_eq!(
+        h.sup.session_sink_pid(&tmux_name).await,
+        None,
+        "a session nobody has attached to must have no sink"
+    );
+
+    // Both terminals attach under ONE lease: the empty legacy lease sweeps
+    // every other attachment on the session (`same_lease_client`), which
+    // would leave this test with one terminal where it means to have two.
+    let (chan, mut rx) = h
+        .client
+        .attach_terminal(&session.id, 80, 24, TerminalSelector::Agent, "one-client")
+        .await
+        .expect("attach");
+    let mut seen = Vec::new();
+    wait_for(&mut rx, &mut seen, "FAKE-AGENT READY", 20).await;
+    let first = h
+        .sup
+        .session_sink_pid(&tmux_name)
+        .await
+        .expect("the first attachment must bring a sink up");
+
+    // A second terminal of the same session SHARES the sink rather than
+    // starting a second one — the sink is per tmux session, not per
+    // attachment, and a per-attachment one would put the drain cost back.
+    let tab = h.client.open_tab(&session.id).await.expect("open a tab");
+    let (tab_chan, mut tab_rx) = h
+        .client
+        .attach_terminal(
+            &session.id,
+            80,
+            24,
+            TerminalSelector::Tab { id: tab.id.clone() },
+            "one-client",
+        )
+        .await
+        .expect("attach the tab");
+    let mut tab_seen = Vec::new();
+    wait_for_shell(&h.client, tab_chan, &mut tab_rx, &mut tab_seen, "READY").await;
+    assert_eq!(
+        h.sup.session_sink_pid(&tmux_name).await,
+        Some(first),
+        "a second terminal on the same session must share its sink"
+    );
+
+    // One of two detaching is not the last: the sink stays. `Detach` has
+    // no reply, so the round trip on the OTHER channel is what makes this
+    // an ordered assertion rather than a race — a connection's frames are
+    // handled in order, so an echo that came back proves the detach ahead
+    // of it was processed.
+    h.client.detach(tab_chan).await;
+    h.client
+        .send_input(chan, b"after-the-tab-detached\r".to_vec())
+        .await;
+    wait_for(&mut rx, &mut seen, "after-the-tab-detached", 20).await;
+    assert_eq!(
+        h.sup.session_sink_pid(&tmux_name).await,
+        Some(first),
+        "a sink must outlive a detach that leaves another terminal attached"
+    );
+
+    // The last detach leaves no channel to round-trip on, so this one is
+    // polled. It is still an assertion about the sink going away, not
+    // about how fast: the deadline is generous and the failure message
+    // names the property.
+    h.client.detach(chan).await;
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(20);
+    while h.sup.session_sink_pid(&tmux_name).await.is_some() {
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "the last detach must take the sink down"
+        );
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    // The registry forgetting is not the claim — the PROCESS being gone
+    // is. A sink whose handle was dropped but whose client survived would
+    // pass every check above while leaving an attached tmux client behind
+    // for the life of the server, which is precisely the leak the refcount
+    // lifecycle exists to prevent.
+    await_process_gone(first, "the last detach must kill the sink's client").await;
+    assert_eq!(
+        attached_control_clients(&h).await,
+        0,
+        "no control client may remain attached once the session has no terminals"
+    );
+
+    let (chan, mut rx) = h
+        .client
+        .attach(&session.id, 80, 24)
+        .await
+        .expect("reattach");
+    let mut seen = Vec::new();
+    wait_for(&mut rx, &mut seen, "FAKE-AGENT READY", 20).await;
+    let second = h
+        .sup
+        .session_sink_pid(&tmux_name)
+        .await
+        .expect("a later attach must bring a fresh sink up");
+    assert_ne!(
+        second, first,
+        "the second sink must be a new process, not the registry handing back a dead one"
+    );
+    h.client.detach(chan).await;
+}
+
+/// Wait for `pid` to be gone, or fail saying what was expected of it.
+///
+/// `/proc/<pid>` rather than `kill -0`: the test never owns these
+/// processes (they are the supervisor's children), so a signal-based probe
+/// would report on a pid it has no right to signal, and on a machine that
+/// recycled the pid it would report on a stranger.
+async fn await_process_gone(pid: u32, what: &str) {
+    let path = format!("/proc/{pid}");
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(20);
+    while std::path::Path::new(&path).exists() {
+        assert!(tokio::time::Instant::now() < deadline, "{what}");
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+}
+
+/// How many control-mode clients are attached to this harness's tmux
+/// server right now.
+///
+/// The sink's contract is about attached CLIENTS, so counting them is the
+/// only way to tell "the supervisor forgot its sink" apart from "the sink
+/// is really gone" — and the only way to catch a duplicate sink, which no
+/// amount of registry inspection would reveal.
+async fn attached_control_clients(h: &Harness) -> usize {
+    count_control_clients(&h.state.path().join("tmux.sock")).await
+}
+
+/// A sink killed out from under a live attachment comes back, and the
+/// terminal it was protecting never notices.
+///
+/// This is the failure the supervising task exists for. A sink is a plain
+/// process: it can be OOM-killed, or swept up by something aiming at a
+/// tmux client. Without self-healing, the session would keep every
+/// appearance of health — terminals attached, output flowing — while
+/// silently having lost the pane-read guarantee for the rest of its life,
+/// which is exactly the class of degradation nobody discovers until a tab
+/// wedges months later.
+///
+/// `kill -9` rather than a graceful signal on purpose: the sink holds no
+/// state worth flushing, and the ungraceful case is the one where the
+/// supervising task's own bookkeeping (its client handle, its pid
+/// publication) is most likely to be left inconsistent.
+///
+/// Killed UNDER LOAD, with a tab flooding throughout, because that is the
+/// only configuration where the respawn window has anything to lose: a
+/// busy pane every terminal client has filtered off is exactly the pane
+/// the sink is keeping readable, so if a respawn left the session without
+/// one for good, this is the shape that would show it — as a tab that
+/// went quiet and never came back.
+#[tokio::test]
+async fn a_killed_session_sink_comes_back_while_its_terminals_stay_attached() {
+    let h = harness().await;
+    let (session, _work) = basic_session(&h).await;
+    let _cleanup = MarkerCleanupGuard::new(session.id.clone());
+    let tmux_name = format!("fh-{}", session.id);
+
+    let (chan, mut rx) = h
+        .client
+        .attach_terminal(&session.id, 80, 24, TerminalSelector::Agent, "one-client")
+        .await
+        .expect("attach");
+    let mut seen = Vec::new();
+    wait_for(&mut rx, &mut seen, "FAKE-AGENT READY", 20).await;
+
+    // A second terminal, kept busy for the whole test: its pane is
+    // filtered off on the agent's client, so it is the sink that keeps
+    // tmux reading it.
+    let tab = h.client.open_tab(&session.id).await.expect("open a tab");
+    let (tab_chan, mut tab_rx) = h
+        .client
+        .attach_terminal(
+            &session.id,
+            80,
+            24,
+            TerminalSelector::Tab { id: tab.id.clone() },
+            "one-client",
+        )
+        .await
+        .expect("attach the tab");
+    let mut tab_seen = Vec::new();
+    wait_for_shell(&h.client, tab_chan, &mut tab_rx, &mut tab_seen, "READY").await;
+    h.client
+        .send_input(
+            tab_chan,
+            b"i=0; while [ $i -lt 200000 ]; do printf 'HEAL-FLOOD-%s\\n' $i; i=$((i+1)); done\r"
+                .to_vec(),
+        )
+        .await;
+    wait_for(&mut tab_rx, &mut tab_seen, "HEAL-FLOOD-", 20).await;
+
+    let doomed = h
+        .sup
+        .session_sink_pid(&tmux_name)
+        .await
+        .expect("an attached session must have a sink");
+    kill_verified_tmux_client(doomed, &h).await;
+
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(20);
+    let healed = loop {
+        if let Some(pid) = h.sup.session_sink_pid(&tmux_name).await
+            && pid != doomed
+        {
+            break pid;
+        }
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "the sink never came back after being killed"
+        );
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    };
+    await_process_gone(doomed, "the killed sink's process must be gone").await;
+    assert!(
+        std::path::Path::new(&format!("/proc/{healed}")).exists(),
+        "the replacement sink must be a live process"
+    );
+
+    // The attachments must have been undisturbed throughout — the sink is
+    // invisible infrastructure, and a self-heal that cost the user their
+    // terminal would be no better than the failure.
+    h.client
+        .send_input(chan, b"after-the-sink-died\r".to_vec())
+        .await;
+    wait_for(&mut rx, &mut seen, "after-the-sink-died", 20).await;
+    // And the busy tab is still being read: its flood kept arriving
+    // across the respawn rather than stopping at the moment the sink died.
+    let before = tab_seen.len();
+    tab_seen.clear();
+    wait_for(&mut tab_rx, &mut tab_seen, "HEAL-FLOOD-", 30).await;
+    assert!(
+        before > 0,
+        "test premise: the tab must have been flooding before the sink was killed"
+    );
+}
+
+/// `kill -9` a pid, having first confirmed it really is a tmux client on
+/// THIS harness's socket.
+///
+/// A bare check-then-kill on a pid read from somewhere else is how a test
+/// eventually kills an unrelated process: the supervisor could replace its
+/// sink between the read and the signal, the pid could be recycled, and on
+/// a loaded machine both are more than theoretical. Reading
+/// `/proc/<pid>/cmdline` and requiring this harness's own socket path in
+/// it makes the signal safe to send — the socket is a per-test temporary
+/// directory, so nothing outside this test can match.
+async fn kill_verified_tmux_client(pid: u32, h: &Harness) {
+    let sock = h.state.path().join("tmux.sock");
+    let cmdline = std::fs::read(format!("/proc/{pid}/cmdline"))
+        .unwrap_or_else(|e| panic!("reading /proc/{pid}/cmdline: {e}"));
+    let cmdline = String::from_utf8_lossy(&cmdline).replace('\0', " ");
+    assert!(
+        cmdline.contains(&sock.to_string_lossy().to_string()),
+        "refusing to kill pid {pid}: its command line ({cmdline:?}) does not name this \
+         harness's tmux socket"
+    );
+    let killed = tokio::process::Command::new("kill")
+        .args(["-9", &pid.to_string()])
+        .status()
+        .await
+        .expect("running kill");
+    assert!(
+        killed.success(),
+        "test setup: killing pid {pid} must succeed"
+    );
+}
+
+/// Two terminals of one session attaching CONCURRENTLY converge on one
+/// sink, and leave no second client behind.
+///
+/// `ensure_session_sink` deliberately does not hold its registry lock
+/// across the client spawn — that would serialize a process spawn against
+/// every other session's first attach — so two first-attaches really can
+/// both reach the spawn. What the design promises instead is that the
+/// loser's client is dropped and killed on the spot rather than left as an
+/// attached tmux client nothing owns, which would be an invisible leak
+/// with a real cost: an extra copy of the session's entire output stream,
+/// forever.
+///
+/// Counting attached CLIENTS is what makes that observable. Per attached
+/// terminal the supervisor runs exactly two (output and input), plus one
+/// sink for the session — so the total is the arithmetic below, and an
+/// orphaned loser shows up as one more.
+#[tokio::test]
+async fn concurrent_first_attaches_share_one_sink_and_orphan_nothing() {
+    let h = harness().await;
+    let (session, _work) = basic_session(&h).await;
+    let _cleanup = MarkerCleanupGuard::new(session.id.clone());
+    let tmux_name = format!("fh-{}", session.id);
+    let tab = h.client.open_tab(&session.id).await.expect("open a tab");
+
+    // Both attaches are in flight before either completes, which is the
+    // only way to reach the double-checked path at all.
+    let agent =
+        h.client
+            .attach_terminal(&session.id, 80, 24, TerminalSelector::Agent, "one-client");
+    let tab_attach = h.client.attach_terminal(
+        &session.id,
+        80,
+        24,
+        TerminalSelector::Tab { id: tab.id.clone() },
+        "one-client",
+    );
+    let (agent, tab_attach) = tokio::join!(agent, tab_attach);
+    let (agent_chan, mut agent_rx) = agent.expect("attach the agent");
+    let (tab_chan, mut tab_rx) = tab_attach.expect("attach the tab");
+    let mut agent_seen = Vec::new();
+    wait_for(&mut agent_rx, &mut agent_seen, "FAKE-AGENT READY", 20).await;
+    let mut tab_seen = Vec::new();
+    wait_for_shell(&h.client, tab_chan, &mut tab_rx, &mut tab_seen, "READY").await;
+
+    let pid = h
+        .sup
+        .session_sink_pid(&tmux_name)
+        .await
+        .expect("the session must have a sink");
+    assert_eq!(
+        attached_control_clients(&h).await,
+        5,
+        "expected two clients per attached terminal plus exactly one sink (pid {pid}); a \
+         different count means a losing first-attach left its client attached"
+    );
+
+    h.client.detach(tab_chan).await;
+    h.client.detach(agent_chan).await;
+}
+
+/// A supervisor killed outright leaves no orphaned sink client behind,
+/// and its replacement brings up exactly one fresh sink.
+///
+/// The sink's teardown is `kill_on_drop`, which a `SIGKILL`ed supervisor
+/// never gets to run — so "the owner dies" is precisely the case that
+/// mechanism cannot cover, and the one where an orphan would be silent
+/// and permanent: an attached control client draining a session's entire
+/// output stream into a dead process's pipe, for as long as the tmux
+/// server lives, invisible to every later supervisor.
+///
+/// What saves it is not a sweep but the protocol: tmux control mode ends
+/// at stdin EOF, and the dead supervisor's end of that pipe closes when
+/// the kernel reaps it. This test is what pins that reasoning to
+/// observed behavior rather than leaving it as an argument — and what
+/// would fail loudly if a future change gave the sink a stdin it holds
+/// open some other way.
+///
+/// Runs the supervisor as a real child process, because an in-process one
+/// cannot be `SIGKILL`ed without taking the test with it.
+#[tokio::test]
+async fn a_killed_supervisor_leaves_no_orphaned_sink_client() {
+    let _slot = SLOTS.acquire().await.expect("semaphore is never closed");
+    let state = tempfile::tempdir().expect("tempdir");
+    let work = tempfile::tempdir().expect("workdir");
+    let sock = state.path().join("tmux.sock");
+    let _tmux = TmuxServerGuard(sock.clone());
+
+    let mut supervisor = tokio::process::Command::new(farhelm_bin())
+        .args(["supervisor", "run", "--state-dir"])
+        .arg(state.path())
+        .kill_on_drop(true)
+        .spawn()
+        .expect("spawn the supervisor process");
+    wait_for_socket(&state.path().join("supervisor.sock")).await;
+
+    let session = {
+        let client = connect_over_socket(state.path()).await;
+        let session = client
+            .create_session(
+                &work.path().to_string_lossy(),
+                &agent_cmd("internal fake-agent --script basic"),
+                None,
+                80,
+                24,
+            )
+            .await
+            .expect("create");
+        let (chan, mut rx) = client.attach(&session.id, 80, 24).await.expect("attach");
+        let mut seen = Vec::new();
+        wait_for(&mut rx, &mut seen, "FAKE-AGENT READY", 20).await;
+        // One attached terminal: its output client, its input client, and
+        // the session's sink.
+        assert_eq!(
+            count_control_clients(&sock).await,
+            3,
+            "test premise: an attached terminal must have brought a sink up"
+        );
+        let _ = chan;
+        session
+    };
+    let _cleanup = MarkerCleanupGuard::new(session.id.clone());
+
+    // The whole point: no graceful shutdown, no `Drop`, no chance to kill
+    // anything it owns.
+    supervisor.start_kill().expect("kill the supervisor");
+    let _ = supervisor.wait().await;
+
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(20);
+    while count_control_clients(&sock).await > 0 {
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "a control client outlived the supervisor that owned it: {} still attached",
+            count_control_clients(&sock).await
+        );
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+
+    // A replacement supervisor adopts the surviving tmux session, and its
+    // first attach must produce exactly one sink — not a second one
+    // alongside something left over.
+    let mut replacement = tokio::process::Command::new(farhelm_bin())
+        .args(["supervisor", "run", "--state-dir"])
+        .arg(state.path())
+        .kill_on_drop(true)
+        .spawn()
+        .expect("spawn the replacement supervisor");
+    wait_for_socket(&state.path().join("supervisor.sock")).await;
+    {
+        let client = connect_over_socket(state.path()).await;
+        let (_chan, mut rx) = client
+            .attach(&session.id, 80, 24)
+            .await
+            .expect("reattach through the replacement supervisor");
+        let mut seen = Vec::new();
+        wait_for(&mut rx, &mut seen, "FAKE-AGENT", 20).await;
+        assert_eq!(
+            count_control_clients(&sock).await,
+            3,
+            "the replacement's attach must leave exactly one sink attached"
+        );
+    }
+    replacement.start_kill().expect("kill the replacement");
+    let _ = replacement.wait().await;
+}
+
+/// A client talking to an out-of-process supervisor over its unix socket,
+/// retrying until it is actually accepting.
+///
+/// The in-process [`connect_client`] cannot be used by tests that need a
+/// supervisor they can kill, which is why this exists rather than being a
+/// second way to do the same thing. Retrying rather than dialling once
+/// because a socket FILE is not a listener: a killed supervisor leaves its
+/// socket path behind, so a replacement's file exists (and
+/// [`wait_for_socket`] is satisfied) well before the replacement has
+/// unlinked it, bound, and begun accepting.
+async fn connect_over_socket(state_dir: &std::path::Path) -> Arc<SupervisorClient> {
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(20);
+    loop {
+        match farhelm_supervisor::service::connect(state_dir).await {
+            Ok(stream) => {
+                let (r, w) = tokio::io::split(stream);
+                return SupervisorClient::start(r, w).await.expect("handshake");
+            }
+            Err(e) => {
+                assert!(
+                    tokio::time::Instant::now() < deadline,
+                    "the supervisor never began accepting: {e:#}"
+                );
+                tokio::time::sleep(Duration::from_millis(50)).await;
+            }
+        }
+    }
+}
+
+/// How many control-mode clients are attached to the tmux server on
+/// `sock` — see [`attached_control_clients`], which is the same question
+/// asked of a [`Harness`].
+async fn count_control_clients(sock: &std::path::Path) -> usize {
+    let listed = tmux_query(sock, &["list-clients", "-F", "#{client_flags}"]).await;
+    if !listed.status.success() {
+        return 0;
+    }
+    String::from_utf8_lossy(&listed.stdout)
+        .lines()
+        .filter(|line| !line.trim().is_empty())
+        .count()
+}
+
+/// The sink registry does not grow with the number of sessions that have
+/// ever been attached to.
+///
+/// Entries are `Weak`, so a dead one is harmless to behavior and invisible
+/// to every other test — which is exactly what makes an unbounded map here
+/// the kind of leak that ships. A supervisor serving short-lived sessions
+/// all day would accumulate one dead key per session id, forever.
+#[tokio::test]
+async fn the_sink_registry_does_not_grow_with_dead_sessions() {
+    let h = harness().await;
+    for _ in 0..4 {
+        let (session, _work) = basic_session(&h).await;
+        let _cleanup = MarkerCleanupGuard::new(session.id.clone());
+        let tmux_name = format!("fh-{}", session.id);
+        let (chan, mut rx) = h.client.attach(&session.id, 80, 24).await.expect("attach");
+        let mut seen = Vec::new();
+        wait_for(&mut rx, &mut seen, "FAKE-AGENT READY", 20).await;
+        h.client.detach(chan).await;
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(20);
+        while h.sup.session_sink_pid(&tmux_name).await.is_some() {
+            assert!(
+                tokio::time::Instant::now() < deadline,
+                "a detached session must lose its sink"
+            );
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+        h.client
+            .delete_session(&session.id)
+            .await
+            .expect("delete the session");
+    }
+    // Pruning is opportunistic, so the bound is "does not accumulate one
+    // per session", not "is exactly zero at every instant": the last
+    // session's entry may still be present until the next lookup sweeps
+    // it.
+    let registered = h.sup.session_sink_registry_len().await;
+    assert!(
+        registered <= 1,
+        "the sink registry kept {registered} entries after four sessions came and went"
+    );
 }
 
 /// A tab's launch evaluates the environment at OPEN time, so an rc-file
@@ -15098,14 +15659,14 @@ async fn a_supervisor_restart_leaves_a_tabs_shell_and_scrollback_untouched() {
 /// pins is the DETACH being scoped to one terminal — a client whose
 /// background tab wedged must not lose the terminal it is looking at.
 ///
-/// Honest scope: this exercises whichever branch tmux happened to take
-/// for the stalled client (it answers a lagging client either by cutting
-/// it with `%pause` or by throttling the pane, nondeterministically — see
-/// `TMUX_PAUSE_AFTER_SECS`), so it pins the SUPERVISOR's per-terminal
-/// teardown rather than both tmux paths. The throttling branch can
-/// transiently slow the session's other panes until this detach fires;
-/// that window is documented on `OutputStream` and closed by the
-/// session-sink design rather than by this test.
+/// Scope: this exercises whichever branch tmux happened to take for the
+/// stalled client (it answers a lagging client either by cutting it with
+/// `%pause` or by not reading the pane it is behind on,
+/// nondeterministically — see `TMUX_PAUSE_AFTER_SECS`), and pins the
+/// SUPERVISOR's per-terminal teardown, which is the same on both. The
+/// second branch used to make the surrounding terminals collateral damage
+/// until this detach fired; the session sink closes that, so what is left
+/// here is genuinely about the detach being scoped to one terminal.
 #[tokio::test]
 async fn a_stalled_tab_takes_the_stall_detach_alone_and_reattaches() {
     let stall = Duration::from_secs(3);

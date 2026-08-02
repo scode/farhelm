@@ -6,7 +6,10 @@
 //! [`OutputStream`] — and input goes in as `send-keys -H` commands carried
 //! by a SECOND, dedicated no-output control-mode client — see
 //! [`InputClient`] for why a second client, rather than the output
-//! client's stdin, is what carries input. Sizing is pinned by explicit
+//! client's stdin, is what carries input. A THIRD shape exists once a
+//! session has any attachment at all: [`SessionSink`], one per tmux
+//! session, which speaks for no terminal and exists purely so tmux always
+//! has a client it can deliver every pane to. Sizing is pinned by explicit
 //! `resize-window` calls, and replay is `capture-pane -e` history plus
 //! re-synthesized pane modes. The motivations — native xterm.js scrolling,
 //! no tmux UI anywhere — are recorded in SPEC_impl.md; this module is that
@@ -55,6 +58,21 @@ pub const HISTORY_LIMIT: u32 = 12_000;
 /// [`OutputStream::resume_paused_with_replay`] is it. Nothing here may
 /// assume which one will happen.
 ///
+/// Two later measurements sharpen that first branch, and both are the
+/// reason [`SessionSink`] exists (audited 2026-08-02 on 3.4 and 3.7b, a
+/// 16 MB/s producer against a client that stops reading; the effect is
+/// rate-dependent — it does not reproduce at 800 KB/s at all, which is
+/// why an audit can honestly report "sometimes"). First, the throttle is
+/// not a property of the stalled client's OWN pane: tmux stops reading
+/// the pane the client is behind on, whichever pane that is, so a stalled
+/// tab viewer takes down the AGENT's pane just as readily. Second, the
+/// throttle is NOT bounded by this constant the way the paragraph above
+/// suggests — 4 of 5 trials per version stopped the pane for the entire
+/// 45-second observation window, well past `pause-after`, ending only
+/// when the stalled client went away. That is the residual [`SessionSink`]
+/// closes by guaranteeing tmux always has one client that can consume
+/// every pane.
+///
 /// Five seconds is long enough that an ordinary watermark pause rarely
 /// trips this — tripping is not an error, but on the second path it costs
 /// a full reset-and-replay catch-up — and short enough that a genuinely
@@ -71,6 +89,11 @@ pub const HISTORY_LIMIT: u32 = 12_000;
 /// the agent's own client, which is keeping up, keeps receiving. That is
 /// what makes one control client per attached terminal sufficient for
 /// stall isolation; sharing one across a session's terminals would not be.
+///
+/// This flag is deliberately NOT set on [`SessionSink`]'s client. The sink
+/// is the one client that must never be the flow-control victim, and a
+/// paused sink is a sink that has stopped holding the session's panes
+/// readable.
 pub const TMUX_PAUSE_AFTER_SECS: u64 = 5;
 
 /// One tmux control-mode notification may expand each terminal byte into
@@ -174,6 +197,102 @@ const PANE_MODE_FORMAT: &str = "#{alternate_on},#{bracket_paste_flag},#{mouse_an
                                 #{cursor_flag},#{keypad_cursor_flag},#{cursor_x},#{cursor_y},\
                                 #{pane_dead}";
 
+/// How long [`OutputStream::foreign_panes`] gives tmux to list a
+/// session's panes, independently of the attach's own budget.
+///
+/// The listing is an optimization's input, not the attach itself, so it
+/// gets a short deadline of its own rather than a share of
+/// [`CONTROL_EXCHANGE_TIMEOUT`]: a tmux slow to answer it must not be able
+/// to consume the budget the replay capture and cutover still need. It is
+/// still clamped to the attach deadline by the caller, so it can never
+/// EXTEND the attach either.
+const PANE_LIST_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(2);
+
+/// The largest number of ` -A <pane>:off` pairs allowed to ride the
+/// attach cutover; the rest follow it as their own commands.
+///
+/// tmux refuses a command line carrying on the order of a thousand
+/// arguments ("command too long" — the same ceiling
+/// [`InputClient::MAX_CHUNK`] is sized against), and each pane here costs
+/// two argv entries on top of the cutover's own flags. A session with
+/// hundreds of tabs is unusual but not forbidden, and the failure mode
+/// would be the worst kind: attach refused outright, for a session whose
+/// only sin was having many terminals. Chunking keeps the cutover a fixed,
+/// safe size and pushes the remainder onto the post-cutover path, which
+/// has no length pressure because it can use as many commands as it likes.
+const MAX_CUTOVER_PANE_FILTERS: usize = 200;
+
+/// Upper bound on [`OutputStream::silenced`], the per-attachment memo of
+/// panes already filtered.
+///
+/// The memo exists only to keep a foreign pane's OUTPUT RATE from driving
+/// a command rate (see that field), so losing it costs at most one extra
+/// idempotent `refresh-client` per pane that speaks again — which is why a
+/// long-lived attachment on a session churning through tabs may simply
+/// forget everything and start over rather than grow without bound. 512 is
+/// far above any real session's simultaneous pane count and still a
+/// trivial amount of memory.
+const MAX_SILENCED_PANES: usize = 512;
+
+/// The command that lists every pane of `session`, one pane id per line,
+/// asked over a control client rather than as a separate `tmux` process.
+///
+/// Used only by [`OutputStream::foreign_panes`], which needs the
+/// answer on the very client it is about to configure — a separate
+/// invocation would cost a process spawn to learn something the client's
+/// own connection can answer inside the attach exchange it is already
+/// having.
+fn list_session_panes_command(session: &str) -> String {
+    format!("list-panes -s -t \"={session}\" -F \"#{{pane_id}}\"")
+}
+
+/// `refresh-client` arguments that turn off a control client's delivery
+/// for panes it does not speak for — one ` -A <pane>:off` per pane, tmux's
+/// documented per-client pane filter.
+///
+/// Arguments rather than a whole command because at attach time the first
+/// [`MAX_CUTOVER_PANE_FILTERS`] of them MUST share an invocation with the
+/// `no-output` flip (see [`attach_cutover_command`]); the overflow and the
+/// late path each wrap them in a `refresh-client` of their own.
+///
+/// # Why this is safe only alongside [`SessionSink`]
+///
+/// tmux stops READING a pane whose every attached client has turned it
+/// off — documented in `refresh-client`'s own man page, and confirmed
+/// empirically (2026-08-02, 3.4 and 3.7b): with this as the only client,
+/// turning a busy pane off froze that pane's producer for the entire
+/// 10-second observation window. It is the sink — an attached client that
+/// never turns any pane off and never falls behind — that keeps this from
+/// being a way to freeze the terminal nobody happens to be looking at.
+/// The same audit confirmed the other half: with the sink attached, the
+/// filtered client received exactly zero notifications for the silenced
+/// pane while its own pane's output kept arriving, and the silenced
+/// pane's producer never stalled.
+fn silence_pane_args(panes: &[String]) -> String {
+    let mut args = String::new();
+    for pane in panes {
+        // Quoted for `continue_pane_command`'s reason: the argument
+        // contains a `:`.
+        let _ = write!(args, " -A \"{pane}:off\"");
+    }
+    args
+}
+
+/// One `refresh-client` command per [`MAX_CUTOVER_PANE_FILTERS`]-sized
+/// chunk of `panes`, for filters that do NOT ride the cutover — the
+/// attach-time overflow and the late-pane path.
+///
+/// Chunked for [`MAX_CUTOVER_PANE_FILTERS`]'s reason rather than any
+/// property of these call sites: the argument ceiling is tmux's, so it
+/// applies to every command carrying these arguments, not only the
+/// cutover.
+fn silence_pane_commands(panes: &[String]) -> Vec<String> {
+    panes
+        .chunks(MAX_CUTOVER_PANE_FILTERS)
+        .map(|chunk| format!("refresh-client{}", silence_pane_args(chunk)))
+        .collect()
+}
+
 /// The command that ends the attach-time replay command group and hands
 /// the client over to live output.
 ///
@@ -192,8 +311,36 @@ const PANE_MODE_FORMAT: &str = "#{alternate_on},#{bracket_paste_flag},#{mouse_an
 /// `%pause`/`%continue` notifications appear (see [`OutputEvent`]).
 /// Verified against tmux 3.7b that the combined flag list is accepted and
 /// does exactly this.
-fn attach_cutover_command() -> String {
-    format!("refresh-client -f !no-output,pause-after={TMUX_PAUSE_AFTER_SECS}")
+///
+/// # Why the pane filter rides HERE rather than being sent beforehand
+///
+/// `silenced` is the session's other panes — at most
+/// [`MAX_CUTOVER_PANE_FILTERS`] of them, the caller having split off any
+/// overflow — and folding them into this one invocation is not tidiness;
+/// it is the only spelling that works.
+/// Clearing `no-output` makes tmux discard the client's per-pane state, so
+/// a `refresh-client -A <pane>:off` sent as its own command during the
+/// attach handshake is wiped by the very cutover that starts the output it
+/// was meant to filter. Audited 2026-08-02 on tmux 3.4 and 3.7b: the
+/// separate-command form let 1840 and 1847 foreign notifications through
+/// in six seconds respectively, while this combined form let through
+/// exactly zero on both, with the client's own pane unaffected. That the
+/// filter is silently lost rather than refused is what makes this worth a
+/// paragraph — the failure mode is a performance regression nobody would
+/// look for.
+///
+/// The overflow does NOT share this hazard, which is why splitting it off
+/// is safe: it is sent after the cutover, when nothing changes the client's
+/// `no-output` flag again and so nothing resets its per-pane state.
+fn attach_cutover_command(silenced: &[String]) -> String {
+    debug_assert!(
+        silenced.len() <= MAX_CUTOVER_PANE_FILTERS,
+        "the caller must split the overflow off; see MAX_CUTOVER_PANE_FILTERS"
+    );
+    format!(
+        "refresh-client{} -f !no-output,pause-after={TMUX_PAUSE_AFTER_SECS}",
+        silence_pane_args(silenced)
+    )
 }
 
 /// The command that lifts a tmux-side pause on `pane` — `refresh-client
@@ -2417,17 +2564,21 @@ impl TmuxDriver {
         let stdout = child.stdout.take().expect("piped stdout");
         let mut stream = OutputStream {
             child,
-            // Exclusively owned: this client carries only its own
-            // one-shot replay-cutover command group (below) and then
-            // never writes again. Input travels on a wholly separate
-            // client — see `open_input_client` — so there is no sharing
-            // concern here.
+            // Exclusively owned: this client carries its own one-shot
+            // replay-cutover command group (below), the attach-time pane
+            // filter, and the occasional late `-A <pane>:off` — all
+            // written from the single task that owns this stream. Input
+            // travels on a wholly separate client — see
+            // `open_input_client` — so there is no sharing concern here.
             stdin,
             reader: BufReader::new(stdout),
             line: Vec::with_capacity(8192),
             passthrough: PassthroughDecoder::default(),
             pane: pane.to_string(),
             session: session.to_string(),
+            silenced: HashSet::new(),
+            pending_filter_replies: 0,
+            foreign_dropped: 0,
         };
         read_command_block(
             &mut stream.reader,
@@ -2437,9 +2588,28 @@ impl TmuxDriver {
             pane,
         )
         .await?;
+        // The session's other panes are learned while output is still off
+        // and then silenced BY the cutover itself — see
+        // `attach_cutover_command` for why they cannot be silenced by an
+        // earlier command, and `OutputStream` for what the filter buys.
+        // Any failure here propagates: this exchange shares the client's
+        // stdout with the positionally-read replay group that follows, so
+        // an exchange that did not complete cleanly leaves a stream nobody
+        // can safely keep reading (see `foreign_panes`).
+        let foreign = stream.foreign_panes(deadline).await?;
+        // Only the first chunk can ride the cutover; the rest follow it
+        // (see `MAX_CUTOVER_PANE_FILTERS`). Splitting BEFORE the cutover
+        // rather than trimming inside it keeps the overflow addressed
+        // rather than silently unfiltered.
+        let split = foreign.len().min(MAX_CUTOVER_PANE_FILTERS);
+        let (riding, overflow) = foreign.split_at(split);
         let (modes, prefill) = stream
-            .snapshot_then_cutover(deadline, &attach_cutover_command())
+            .snapshot_then_cutover(deadline, &attach_cutover_command(riding))
             .await?;
+        for command in silence_pane_commands(overflow) {
+            stream.send_filter_command(&command).await?;
+        }
+        stream.silenced.extend(foreign.iter().cloned());
         Ok((modes, prefill, stream))
     }
 
@@ -2503,6 +2673,219 @@ impl TmuxDriver {
             delivered_any_bytes: false,
         })
     }
+
+    /// Open `session`'s SINK control client: attached, receiving every
+    /// pane, and destined to be drained into nothing. See [`SessionSink`]
+    /// for what it is for; this is only how it is built.
+    ///
+    /// # Attached with output already ON, deliberately
+    ///
+    /// Every other control client here attaches `-f no-output` and flips
+    /// the flag later, so that the attach handshake's reply block — read
+    /// positionally — cannot have pane output racing into it. The sink
+    /// does the opposite, and the difference is the whole point: a client
+    /// that is attached but silent is exactly the shape whose
+    /// pane-holding behavior tmux does not document (see [`SessionSink`]'s
+    /// note on the rejected no-output design), so a sink that spent its
+    /// first moments that way would be relying, for that window, on the
+    /// property it exists to avoid relying on. Attaching output-on makes
+    /// it a client tmux can demonstrably deliver to from the instant it
+    /// registers.
+    ///
+    /// The reason that is safe here and not elsewhere: this client's
+    /// handshake block is read with no own-pane, so a neighbour's output
+    /// arriving around it is ordinary chatter rather than an ordering
+    /// violation, and tmux does not interleave notifications INSIDE a
+    /// command's reply block. Audited 2026-08-02 on tmux 3.4 and 3.7b
+    /// against a 16 MB/s producer: 10 of 10 attaches read a clean
+    /// handshake with no payload trapped inside it, and 10 of 10 were
+    /// receiving pane output immediately after.
+    ///
+    /// Returns only once the client is attached, because the caller's
+    /// ORDERING depends on it: no per-terminal client may turn panes off
+    /// until tmux already has this one (see [`silence_pane_args`]).
+    pub async fn open_session_sink(&self, session: &str) -> anyhow::Result<SessionSink> {
+        let deadline = tokio::time::Instant::now() + CONTROL_EXCHANGE_TIMEOUT;
+        let mut child = self
+            .command()
+            .arg("-C")
+            .arg("attach")
+            .arg("-t")
+            .arg(session)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null())
+            .kill_on_drop(true)
+            .spawn()
+            .context("spawning tmux session-sink client")?;
+        let stdin = child.stdin.take().expect("piped stdin");
+        let stdout = child.stdout.take().expect("piped stdout");
+        let mut sink = SessionSink {
+            child,
+            stdin,
+            reader: BufReader::new(stdout),
+            line: Vec::with_capacity(8192),
+        };
+        sink.read_block(deadline, "session-sink attach").await?;
+        Ok(sink)
+    }
+}
+
+/// The one control client per tmux SESSION that exists purely so tmux
+/// always has somebody it can deliver every pane to.
+///
+/// # Why a session needs one at all
+///
+/// tmux stops reading a pane's PTY when no attached client is able to
+/// consume that pane's output — which blocks the pane's own process on
+/// its next `write`. Two ways into that state matter here, and this type
+/// closes both:
+///
+/// - A per-terminal client that STALLS. Audited 2026-08-02 on tmux 3.4 and
+///   3.7b: against a 16 MB/s producer, a control client that stopped
+///   reading froze that producer's pane in 4 of 5 trials per version, for
+///   the entire 45-second observation window — not for `pause-after` and
+///   not only for the stalled viewer's own pane. With an always-drained
+///   second client attached, 5 of 5 trials per version showed no stall at
+///   all (longest gap 0.20s, against a 0.15s no-client noise floor).
+/// - A per-terminal client that turns foreign panes OFF, which is what
+///   [`silence_pane_args`] does and what tmux's own man page says
+///   stops the pane being read once EVERY client has done it.
+///
+/// The two are why this had to land WITH the pane filter rather than
+/// before or after it: the filter is only safe because the sink is never
+/// one of the clients turning anything off, and the sink is only useful
+/// because it is never the client that falls behind.
+///
+/// # The shape, and why each part of it
+///
+/// Attached to the session with every pane ON (no per-pane filter) and
+/// `pause-after` deliberately UNSET — a paused sink is a sink that has
+/// stopped doing its job, so the one client that must never be the
+/// flow-control victim does not carry the flag that makes clients
+/// victims. It declares no size (no `refresh-client -C`), like every other
+/// control client here, so window geometry still comes only from
+/// `resize-window`. It never writes a command at all — output is on from
+/// the attach itself (see [`TmuxDriver::open_session_sink`]) — and reads
+/// nothing but bytes it throws away.
+///
+/// # The one window that remains
+///
+/// A sink that DIES leaves its session without one until a replacement is
+/// attached: a process spawn plus one round trip, retried with backoff by
+/// its owner. During that window the session's terminals still have their
+/// foreign panes filtered off, so a pane no terminal is watching can stop
+/// being read — the very state the sink prevents. It is bounded (by the
+/// owner's backoff cap) rather than eliminated, and eliminating it would
+/// take a second sink standing by at all times, which trades a permanent
+/// cost for a rare one. The honest statement of the guarantee is therefore
+/// "except across a sink respawn", and SPEC_impl.md says so too.
+///
+/// A cheaper shape was measured and rejected: a client left permanently
+/// `-f no-output` ALSO kept every pane readable in the same audit (6 of 6
+/// trials per version), at zero delivery cost, because tmux treats a
+/// no-output client as one that can never fall behind. That is an
+/// implementation detail of tmux's flow control rather than anything its
+/// documentation promises — the documented rule is about clients being
+/// able to CONSUME — so relying on it would make this module's isolation
+/// guarantee hostage to an unstated behavior. The sink pays one copy of
+/// the session's traffic to rest on the documented rule instead; the pane
+/// filter it enables removes N-1 copies in exchange (see [`OutputStream`]).
+pub struct SessionSink {
+    /// Never read directly: kept alive so dropping this value kills the
+    /// client process (`kill_on_drop`), which is how the sink's lifetime
+    /// is tied to its owner's without any explicit teardown call on any
+    /// path — including a cancelled supervising task.
+    #[allow(dead_code)]
+    child: Child,
+    /// Never written to — the sink issues no commands at all — but held
+    /// open for its whole life, because control mode ends at stdin EOF:
+    /// dropping this handle early would make tmux exit the very client
+    /// this type exists to keep attached. `#[allow(dead_code)]` records
+    /// that "unread" is the intended state rather than an oversight.
+    #[allow(dead_code)]
+    stdin: ChildStdin,
+    reader: BufReader<tokio::process::ChildStdout>,
+    line: Vec<u8>,
+}
+
+impl SessionSink {
+    /// Read one command-reply block during the attach exchange.
+    ///
+    /// The `own_pane` argument of [`read_command_block`] is deliberately
+    /// empty here: that parameter exists so a client can tell "live output
+    /// for MY pane arrived before the cutover" (an ordering violation)
+    /// apart from "a neighbour is busy" (ordinary chatter). The sink
+    /// speaks for no pane and every pane's output is chatter to it, so no
+    /// pane id can be the wrong one to see — and an empty id matches
+    /// nothing tmux can emit, since every pane id starts with `%`.
+    async fn read_block(
+        &mut self,
+        deadline: tokio::time::Instant,
+        purpose: &str,
+    ) -> anyhow::Result<()> {
+        read_command_block(&mut self.reader, &mut self.line, deadline, purpose, "").await?;
+        Ok(())
+    }
+
+    /// The sink client's process id, or `None` once it has been reaped.
+    ///
+    /// Exists for the supervisor's own logging and for the test that kills
+    /// the sink out from under a live attachment to prove it self-heals:
+    /// the pid is the only handle on a process that a test can `kill -9`,
+    /// and a respawn is only observable as the pid changing.
+    pub fn pid(&self) -> Option<u32> {
+        self.child.id()
+    }
+
+    /// A sink backed by an arbitrary child process, for tests that need to
+    /// drive the SUPERVISING LOOP rather than tmux.
+    ///
+    /// `run_session_sink`'s policy — when to retry, how long to wait,
+    /// whether a run counted as healthy — is decided entirely by how long
+    /// `drain` takes to return, and pinning it against a real tmux would
+    /// mean killing real clients and hoping the timing lands. A `cat`
+    /// whose stdin the test holds is the same thing without the hope: it
+    /// drains until the test decides it should end.
+    #[cfg(test)]
+    pub(crate) fn from_child_for_tests(mut child: Child) -> SessionSink {
+        let stdin = child.stdin.take().expect("piped stdin");
+        let stdout = child.stdout.take().expect("piped stdout");
+        SessionSink {
+            child,
+            stdin,
+            reader: BufReader::new(stdout),
+            line: Vec::new(),
+        }
+    }
+
+    /// Read and discard this client's output until it ends.
+    ///
+    /// Returns when the client exits or its stream fails — the sink has no
+    /// other terminal state, and both cases mean the same thing to the
+    /// caller: this session no longer has a sink and needs a new one. The
+    /// bytes are genuinely thrown away; nothing about a session's panes is
+    /// learned here, and the read exists only so tmux never has an unread
+    /// client to apply flow control against.
+    ///
+    /// Reads in fixed-size chunks rather than lines on purpose. A control
+    /// client's output is line-oriented, but the sink parses none of it,
+    /// and a line-based read would make an enormous single notification
+    /// (a pane emitting a megabyte with no newline) an allocation the sink
+    /// has no reason to make.
+    pub async fn drain(&mut self) {
+        let mut scratch = [0u8; 64 * 1024];
+        loop {
+            match self.reader.read(&mut scratch).await {
+                Ok(0) => return,
+                Ok(_) => {}
+                Err(e) => {
+                    warn!(error = %e, "session-sink control client read failed");
+                    return;
+                }
+            }
+        }
+    }
 }
 
 /// A control-mode client streaming ONE PANE's output.
@@ -2515,54 +2898,76 @@ impl TmuxDriver {
 /// kills the client process (`kill_on_drop`), which detaches it; the tmux
 /// server and pane are unaffected.
 ///
-/// # One pane, filtered from a whole session's stream
+/// # One pane, out of a whole session's stream
 ///
 /// tmux control clients attach to a SESSION, not to a window or a pane,
 /// and a control client receives `%output`/`%extended-output` for every
 /// pane in every window of that session — audited empirically against
 /// tmux 3.7b with a second window present, which is the shape terminal
-/// tabs introduce (PLAN_M4.md item 2). There is no attach-time way to
-/// narrow it: `refresh-client -A <pane>:off` exists, but tmux stops
-/// READING a pane whose every attached control client has turned it off,
-/// which would silently freeze an unattached terminal's scrollback — so
-/// this type filters by pane id on the way through instead.
+/// tabs introduce (PLAN_M4.md item 2). Narrowing that down takes BOTH of
+/// the mechanisms below, and neither is redundant.
 ///
-/// The filter runs BEFORE any decoding: [`classify_control_line`] splits
-/// the pane id out of each notification, and a line naming another pane
-/// is dropped there — never fed to [`PassthroughDecoder`], which carries
+/// **tmux-side, and the one that matters.** Every pane of the session
+/// except this stream's own is turned off for this client with
+/// `refresh-client -A <pane>:off` — at attach for the panes that exist
+/// then ([`Self::foreign_panes`], folded into the cutover), and on first
+/// sight for any pane that appears later, such as a tab opened while this
+/// terminal was already attached ([`Self::silence_late_pane`]). This is
+/// what makes a session's control-mode read work O(session traffic)
+/// instead of O(attached terminals × session traffic), and — more
+/// importantly than the arithmetic — it is what stops a busy tab's bytes
+/// from queueing in front of the agent's bytes inside that viewer's own
+/// client. That head-of-line delay was measured at 3.3–3.9s of
+/// agent-output latency under a flooding neighbour, against 0.36–0.38s
+/// with the filter on (2026-08-02, tmux 3.4 and 3.7b).
+///
+/// This is only safe because [`SessionSink`] exists: tmux stops READING a
+/// pane whose every attached client has turned it off, and the sink is the
+/// client that never does. Turning foreign panes off WITHOUT a sink froze
+/// the silenced pane's producer for an entire 10-second observation window
+/// in the same audit. The two mechanisms ship together or not at all.
+///
+/// **Local, as belt and braces.** A notification naming another pane is
+/// still dropped on the way through. tmux's filter is a per-client
+/// setting, so there is always a window — an attach in flight, a pane
+/// created a moment ago — in which a foreign notification can legitimately
+/// arrive, and a stray one must be harmless rather than merely unlikely.
+/// The drop runs BEFORE any decoding: [`classify_control_line`] splits the
+/// pane id out of each notification, and a line naming another pane is
+/// dropped there — never fed to [`PassthroughDecoder`], which carries
 /// wrapper state across notifications and would be corrupted by a
-/// stranger's bytes landing inside a wrapper of ours. Only the escaping
-/// and passthrough decode of the pane's OWN payloads costs anything past
-/// the line split.
+/// stranger's bytes landing inside a wrapper of ours.
 ///
-/// # What this design costs, and what it does not deliver
+/// # Stall isolation, and what it now rests on
 ///
-/// Every attached terminal drains the whole session's traffic through its
-/// own pipe and discards most of it, so a session's total control-mode
-/// read work is O(attached terminals × session traffic) rather than
-/// O(session traffic). With tab counts bounded by the user opening them
-/// by hand this is affordable, but it is a real multiplier and not a
-/// rounding error.
+/// A stalled viewer on one terminal costs that terminal alone. Three
+/// separate properties combine to that, and dropping any one of them
+/// weakens it:
 ///
-/// It also does not deliver COMPLETE stall isolation, and claiming
-/// otherwise would be wrong. `pause-after` is per (client, pane), so a
-/// stalled terminal's client is cut per pane and the healthy terminals'
-/// own clients keep receiving — but tmux answers a lagging client in one
-/// of TWO ways, nondeterministically (see [`TMUX_PAUSE_AFTER_SECS`]), and
-/// on the branch where it THROTTLES the pane instead of cutting the
-/// client, a stalled terminal can transiently slow the other panes of its
-/// session until its `pause-after` bound trips and the stall detach
-/// fires. The window is bounded by those two timeouts; it is not zero.
-/// Removing it means not draining a session's traffic once per terminal
-/// at all — a session-sink design, which is the next PR's subject rather
-/// than something this filter can approximate.
+/// - `pause-after` is per (client, pane), so tmux cuts the stalled
+///   client's stream rather than anybody else's (see
+///   [`TMUX_PAUSE_AFTER_SECS`]).
+/// - The pane filter above means a stalled terminal is only ever behind on
+///   its own pane in the first place.
+/// - [`SessionSink`] guarantees tmux always has a client it can deliver
+///   every pane to, so tmux's OTHER answer to a lagging client — stop
+///   reading the pane, which blocks the pane's process on its next write
+///   and is not bounded by `pause-after` — has no client to take against.
+///
+/// Before the sink this last branch was a real, measured residual, and the
+/// honest qualification that used to live here said so. It is now closed
+/// rather than merely narrowed: with the sink attached, no trial across
+/// tmux 3.4 and 3.7b reproduced a pane stall that stalled-client trials
+/// without it reproduced 4 times in 5.
 pub struct OutputStream {
     child: Child,
-    /// Held open for the lifetime of the client. Carries only the
-    /// one-shot replay-cutover command group written at attach time;
-    /// nothing writes to it afterwards. Input travels on a wholly
-    /// separate [`InputClient`], so this is a plain, exclusively-owned
-    /// handle rather than a shared, lockable one.
+    /// Held open for the lifetime of the client. Carries the attach-time
+    /// exchanges (the pane list, then the replay-cutover command group)
+    /// and, afterwards, the occasional fire-and-forget pane filter for a
+    /// pane that appeared late — never terminal input, which travels on a
+    /// wholly separate [`InputClient`]. So this is a plain,
+    /// exclusively-owned handle rather than a shared, lockable one: only
+    /// the one task driving this stream ever writes to it.
     stdin: ChildStdin,
     reader: BufReader<tokio::process::ChildStdout>,
     line: Vec<u8>,
@@ -2581,6 +2986,52 @@ pub struct OutputStream {
     /// no caller has to carry a second copy of either handle (see
     /// [`Self::pane`]).
     session: String,
+    /// Panes this client has already told tmux to stop delivering (see the
+    /// type's own docs).
+    ///
+    /// Purely a memo against re-sending: the state that matters lives in
+    /// the tmux server, and `refresh-client -A <pane>:off` is idempotent
+    /// there. What this prevents is a pane that manages to speak once more
+    /// before the off takes effect turning into a command per notification
+    /// — an unbounded write rate driven by a foreign pane's output rate,
+    /// which is exactly the coupling the filter exists to remove.
+    ///
+    /// Bounded by [`MAX_SILENCED_PANES`] rather than pruned precisely.
+    /// tmux's control protocol has no pane-close notification to prune on
+    /// (`%window-close` names a window, and a pane can also go without
+    /// one), and reconciling against a live `list-panes` would mean an
+    /// exchange on a client whose replies nothing is positioned to read.
+    /// Forgetting wholesale is sound because every entry is only a memo:
+    /// the worst a cleared set can cost is one redundant, idempotent
+    /// command per pane that speaks again.
+    silenced: HashSet<String>,
+    /// Filter-command reply blocks tmux still owes this client.
+    ///
+    /// Every command written outside a synchronous exchange
+    /// ([`Self::send_filter_command`]) is answered by a `%begin`/`%end`
+    /// pair that arrives on the same stdout the CATCH-UP path reads
+    /// positionally. Left unaccounted, one such reply landing just before
+    /// [`Self::resume_paused_with_replay`] would be mistaken for the
+    /// modes reply and shift the whole four-block group by one — a replay
+    /// that silently returns the wrong capture, which is exactly the class
+    /// of bug positional reads exist to be careful about.
+    ///
+    /// So the count goes up when a command is written and down when
+    /// [`Self::next_output`] passes a block terminator, and the catch-up
+    /// path drains whatever is still outstanding before it begins. Nothing
+    /// else ever writes to this client, so every terminator this stream
+    /// sees while live belongs to one of these.
+    pending_filter_replies: usize,
+    /// How many foreign-pane notifications this stream dropped locally.
+    ///
+    /// Not used in production — it exists so a test can assert the tmux
+    /// filter is doing the work rather than the local drop quietly
+    /// covering for it. "The right bytes came out" is true either way; only
+    /// this number distinguishes a filter that was installed from one that
+    /// was not. Read directly by the tests in this module; deliberately
+    /// without an accessor, so nothing outside can grow a dependency on a
+    /// diagnostic counter.
+    foreign_dropped: u64,
 }
 
 impl OutputStream {
@@ -2594,6 +3045,232 @@ impl OutputStream {
     pub fn pane(&self) -> &str {
         &self.pane
     }
+
+    /// Every pane of this stream's session except its own, asked while
+    /// output is still off so the answer can be folded into the cutover.
+    ///
+    /// # Why a failure here fails the whole attach
+    ///
+    /// What this produces is only an optimization's input — the local
+    /// filter in [`Self::next_output`] drops whatever arrives anyway, and
+    /// [`SessionSink`] keeps every pane readable regardless — so it is
+    /// tempting to swallow errors and attach unfiltered. That would be
+    /// wrong for a reason that has nothing to do with the filter: this
+    /// exchange shares one stdout with the replay group that follows, and
+    /// that group reads its four reply blocks POSITIONALLY. An exchange
+    /// that timed out or hit EOF mid-block may have left an unconsumed
+    /// `%end` behind, and continuing would then pair the modes reply with
+    /// the history capture — a replay that returns the wrong bytes and
+    /// says nothing. There is no way to tell a cleanly-refused command
+    /// from a half-read one at this layer, so every failure is treated as
+    /// the dangerous one and the caller discards the client.
+    ///
+    /// The deadline is [`PANE_LIST_TIMEOUT`], clamped to the attach's own:
+    /// a tmux slow to answer an optimization's question must not eat the
+    /// budget the replay still needs, and must not extend the attach
+    /// either.
+    ///
+    /// The obvious race — a pane closing between this listing and the
+    /// cutover that names it — is benign, and that was worth confirming
+    /// rather than assuming, because the alternative would have been an
+    /// attach that fails whenever a tab happens to close at the wrong
+    /// moment. tmux accepts `-A` for a pane id it cannot find and replies
+    /// `%end`, not `%error` (audited 2026-08-02 on 3.4 and 3.7b), so a
+    /// stale id in the cutover costs nothing at all.
+    async fn foreign_panes(
+        &mut self,
+        attach_deadline: tokio::time::Instant,
+    ) -> anyhow::Result<Vec<String>> {
+        let deadline = attach_deadline.min(tokio::time::Instant::now() + PANE_LIST_TIMEOUT);
+        let command = list_session_panes_command(&self.session);
+        let listing = self
+            .exchange(deadline, &command, "session pane list")
+            .await
+            .context("listing a session's panes for this terminal's pane filter")?;
+        Ok(listing
+            .split(|&byte| byte == b'\n')
+            .map(strip_line_ending)
+            .filter(|pane| is_pane_id_shaped(pane) && *pane != self.pane.as_bytes())
+            .map(|pane| String::from_utf8_lossy(pane).into_owned())
+            .collect())
+    }
+
+    /// Write one pane-filter command and record that tmux owes a reply for
+    /// it — the only way this type writes once output is live.
+    ///
+    /// Fire-and-forget in the sense that nothing waits for the reply HERE:
+    /// the stream's own reader passes it as chatter (and decrements the
+    /// debt), or the catch-up path drains it before its positional reads
+    /// begin. See [`Self::pending_filter_replies`] for why the debt is
+    /// counted rather than assumed to have cleared.
+    ///
+    /// The write is bounded by [`CONTROL_EXCHANGE_TIMEOUT`] and a failure
+    /// is returned rather than logged. Both matter and neither is
+    /// theoretical: this runs from inside [`Self::next_output`], so an
+    /// unbounded `write_all` on a pipe whose reader has wedged would park
+    /// the forwarder — a terminal that stops updating with nothing
+    /// anywhere reporting a fault — and a swallowed error would leave the
+    /// stream believing a filter is installed that never was.
+    async fn send_filter_command(&mut self, command: &str) -> anyhow::Result<()> {
+        let line = format!("{command}\n");
+        tokio::time::timeout(CONTROL_EXCHANGE_TIMEOUT, async {
+            self.stdin
+                .write_all(line.as_bytes())
+                .await
+                .context("writing a tmux pane-filter command")?;
+            self.stdin
+                .flush()
+                .await
+                .context("flushing a tmux pane-filter command")
+        })
+        .await
+        .context("timed out writing a tmux pane-filter command")??;
+        self.pending_filter_replies += 1;
+        Ok(())
+    }
+
+    /// Consume every filter-command reply block tmux still owes, so a
+    /// positional read can start from a known boundary.
+    ///
+    /// Called only by [`Self::resume_paused_with_replay`], and only ever
+    /// with this stream's own pane already paused — which is what makes
+    /// [`read_command_block`]'s own-pane guard the right one to pass:
+    /// live output for our pane arriving here really would mean the
+    /// ordering assumption had broken.
+    async fn settle_filter_replies(
+        &mut self,
+        deadline: tokio::time::Instant,
+    ) -> anyhow::Result<()> {
+        while self.pending_filter_replies > 0 {
+            let pane = self.pane.clone();
+            read_command_block(
+                &mut self.reader,
+                &mut self.line,
+                deadline,
+                "pane filter reply",
+                &pane,
+            )
+            .await?;
+            self.pending_filter_replies -= 1;
+        }
+        Ok(())
+    }
+
+    /// Stop delivery of a pane this stream had never heard from before —
+    /// the tab opened, or the pane split, after this terminal attached.
+    ///
+    /// tmux's pane filter names panes one at a time and has no wildcard
+    /// (`refresh-client -A` takes a pane id; only `-B` accepts `%*`), and a
+    /// pane that did not exist at attach time is delivered ON by default.
+    /// Reacting to the pane's first notification is what covers that
+    /// without any plumbing from the tab-open path down into every
+    /// attached terminal's forwarder: the notification IS the discovery.
+    /// The cost is at most one command per pane per attachment, since
+    /// [`Self::silenced`] remembers.
+    ///
+    /// The command goes out through [`Self::send_filter_command`], so its
+    /// reply is accounted for rather than merely expected to be harmless,
+    /// and a write failure ends the stream instead of being logged: a
+    /// terminal whose control client cannot be written to is not a
+    /// terminal that should keep pretending.
+    ///
+    /// Unlike the attach-time filter this CAN be its own command: nothing
+    /// changes the client's `no-output` flag after the cutover, so there is
+    /// no per-pane state reset to lose it to (see
+    /// [`attach_cutover_command`]).
+    ///
+    /// A pane id that is not shaped like one, or one already remembered,
+    /// is a no-op — the first because nothing unvalidated reaches a
+    /// command line, the second because [`Self::silenced`] exists exactly
+    /// to keep a chatty foreign pane from driving a command per line.
+    async fn silence_late_pane(&mut self, pane: &[u8]) -> anyhow::Result<()> {
+        if !is_pane_id_shaped(pane) {
+            return Ok(());
+        }
+        let pane = String::from_utf8_lossy(pane).into_owned();
+        if self.silenced.contains(&pane) {
+            return Ok(());
+        }
+        // Forget everything rather than grow without bound; see
+        // `MAX_SILENCED_PANES` for why that is sound and what it costs.
+        if self.silenced.len() >= MAX_SILENCED_PANES {
+            self.silenced.clear();
+        }
+        self.silenced.insert(pane.clone());
+        let command = format!(
+            "refresh-client{}",
+            silence_pane_args(std::slice::from_ref(&pane))
+        );
+        self.send_filter_command(&command).await
+    }
+
+    /// Send one command on this client and read back its reply block.
+    ///
+    /// Only usable while output is off (the attach exchange): once pane
+    /// bytes flow, replies have to be read by whatever is draining the
+    /// stream, which is why every later command goes through
+    /// [`Self::send_filter_command`] instead.
+    async fn exchange(
+        &mut self,
+        deadline: tokio::time::Instant,
+        command: &str,
+        purpose: &str,
+    ) -> anyhow::Result<Vec<u8>> {
+        let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
+        let pane = self.pane.clone();
+        tokio::time::timeout(remaining, async {
+            self.stdin
+                .write_all(format!("{command}\n").as_bytes())
+                .await
+                .with_context(|| format!("writing the tmux {purpose} command"))?;
+            self.stdin
+                .flush()
+                .await
+                .with_context(|| format!("flushing the tmux {purpose} command"))
+        })
+        .await
+        .with_context(|| format!("timed out writing the tmux {purpose} command"))??;
+        read_command_block(&mut self.reader, &mut self.line, deadline, purpose, &pane).await
+    }
+}
+
+/// What one classified control line means to [`OutputStream::next_output`],
+/// in a form that outlives the borrow of the line buffer it was read from.
+///
+/// Exists purely so the read loop can act on a line after releasing that
+/// borrow — the foreign-pane arm writes a command through `&mut self`, and
+/// the terminator arm touches the reply-debt counter, neither of which can
+/// happen while a classified slice of `self.line` is still alive.
+enum Decision {
+    /// Hand this to the caller and stop reading.
+    Event(OutputEvent),
+    /// The client is gone.
+    Exit,
+    /// Our pane's bytes ended mid-passthrough-wrapper: nothing to hand
+    /// back yet, keep reading.
+    Incomplete,
+    /// A foreign pane already filtered — count it, do nothing else.
+    ForeignKnown,
+    /// A foreign pane heard from for the first time, carrying its id.
+    ForeignNew(Vec<u8>),
+    /// Anything else tmux says. Only a block terminator is acted on; see
+    /// the read loop.
+    Chatter,
+}
+
+/// Whether `candidate` has the shape of a tmux pane id (`%` followed by at
+/// least one digit, nothing else).
+///
+/// Every id this module puts into a `refresh-client -A` argument passes
+/// through here first. Pane ids reach this process from tmux itself, but
+/// they arrive as bytes on a stream shared with pane CONTENT — a
+/// notification's shape is the only thing separating the two — so a value
+/// that is about to be interpolated into a command line is shape-checked
+/// rather than trusted, the same defensive reading `scope::is_uuid_shaped`
+/// applies to tmux user options.
+fn is_pane_id_shaped(candidate: &[u8]) -> bool {
+    matches!(candidate.split_first(), Some((b'%', digits))
+        if !digits.is_empty() && digits.iter().all(u8::is_ascii_digit))
 }
 
 /// One thing read off a control client's stream that the forwarder cares
@@ -2725,57 +3402,107 @@ impl OutputStream {
     /// file — and one such byte would kill the terminal for good.
     ///
     /// NOT cancel-safe: a cancelled call can leave a partially-read line
-    /// behind, which the next call discards. Callers may only abandon this
-    /// future on a path that tears the whole stream down (the stall detach
-    /// does exactly that), never to resume reading afterwards.
+    /// behind, which the next call discards — and, since the foreign-pane
+    /// path below writes, a half-written filter command on the client's
+    /// stdin, which would desynchronize any later command on it. Callers
+    /// may only abandon this future on a path that tears the whole stream
+    /// down (the stall detach does exactly that), never to resume reading
+    /// afterwards. That was already the rule; the write only widens what
+    /// breaking it would cost.
     ///
     /// Notifications about ANOTHER pane are chatter here, discarded with
-    /// the same indifference as a `%layout-change`. That filter is what
-    /// makes this stream a TERMINAL's stream rather than a session's (see
-    /// the type's own docs): without it, opening a tab would start
-    /// spraying the tab's shell output into every already-attached
-    /// terminal of that session, and a foreign pane's `%pause` would send
-    /// this terminal through a reset-and-replay catch-up for bytes it was
-    /// never carrying.
+    /// the same indifference as a `%layout-change`. That drop is the
+    /// belt-and-braces half of the pane filter (see the type's own docs):
+    /// without it, opening a tab would start spraying the tab's shell
+    /// output into every already-attached terminal of that session, and a
+    /// foreign pane's `%pause` would send this terminal through a
+    /// reset-and-replay catch-up for bytes it was never carrying. Seeing
+    /// one is also the trigger for asking tmux to stop sending that pane
+    /// at all ([`Self::silence_late_pane`]), which is how a tab opened
+    /// after this terminal attached ends up filtered server-side like
+    /// every other.
     pub async fn next_output(&mut self) -> anyhow::Result<Option<OutputEvent>> {
-        // Fields are destructured up front so the borrow checker can see
-        // that the scratch line buffer, the reader, and the passthrough
-        // decoder are disjoint — which is what lets a classified borrow OF
-        // the line coexist with the mutable borrow of the decoder, without
-        // moving the buffer out and back on every call.
-        let OutputStream {
-            reader,
-            line,
-            passthrough,
-            pane,
-            ..
-        } = self;
-        let own_pane = pane.as_bytes();
         loop {
-            line.clear();
-            let n = read_control_line(reader, line).await?;
+            self.line.clear();
+            let n = read_control_line(&mut self.reader, &mut self.line).await?;
             if n == 0 {
                 return Ok(None);
             }
-            match classify_control_line(strip_line_ending(line)) {
-                Some(ControlLine::Payload { pane, escaped }) if pane == own_pane => {
-                    let bytes = decode_output_payload(passthrough, escaped);
-                    if !bytes.is_empty() {
-                        return Ok(Some(OutputEvent::Bytes(bytes)));
+            // Classify under a borrow of the line buffer, then ACT on an
+            // owned decision. The split exists because acting can need
+            // `&mut self` (writing a filter command), which cannot coexist
+            // with a classified borrow of one of self's own fields.
+            let decision = {
+                let OutputStream {
+                    line,
+                    pane,
+                    passthrough,
+                    silenced,
+                    ..
+                } = &mut *self;
+                let own_pane = pane.as_bytes();
+                match classify_control_line(strip_line_ending(line)) {
+                    Some(ControlLine::Payload { pane, escaped }) if pane == own_pane => {
+                        let bytes = decode_output_payload(passthrough, escaped);
+                        if bytes.is_empty() {
+                            // A chunk that ended mid-wrapper: not an event,
+                            // and not chatter either — keep reading.
+                            Decision::Incomplete
+                        } else {
+                            Decision::Event(OutputEvent::Bytes(bytes))
+                        }
+                    }
+                    Some(ControlLine::Paused { pane }) if pane == own_pane => {
+                        Decision::Event(OutputEvent::Paused)
+                    }
+                    // Another window's pane, on the same session-attached
+                    // control client. Deliberately NOT fed to the
+                    // passthrough decoder: that decoder carries wrapper
+                    // state across notifications, and mixing a stranger's
+                    // bytes into it would corrupt a wrapper of ours that
+                    // happened to be open at the time.
+                    Some(
+                        ControlLine::Payload { pane: other, .. }
+                        | ControlLine::Paused { pane: other },
+                    ) => {
+                        // Copied only when this pane is new. A pane already
+                        // filtered can still be mid-flight for a moment, and
+                        // allocating per notification for one we have
+                        // nothing left to do about would put the allocation
+                        // rate back under a foreign pane's control.
+                        if std::str::from_utf8(other).is_ok_and(|id| silenced.contains(id)) {
+                            Decision::ForeignKnown
+                        } else {
+                            Decision::ForeignNew(other.to_vec())
+                        }
+                    }
+                    Some(ControlLine::Exit) => Decision::Exit,
+                    None => Decision::Chatter,
+                }
+            };
+            match decision {
+                Decision::Event(event) => return Ok(Some(event)),
+                Decision::Exit => return Ok(None),
+                Decision::Incomplete => {}
+                Decision::ForeignKnown => self.foreign_dropped += 1,
+                Decision::ForeignNew(pane) => {
+                    self.foreign_dropped += 1;
+                    self.silence_late_pane(&pane).await?;
+                }
+                Decision::Chatter => {
+                    // The one piece of chatter that is not ignorable: a
+                    // block terminator settles part of the filter-reply
+                    // debt the catch-up path would otherwise mistake for
+                    // its own first reply (see `pending_filter_replies`).
+                    if self.pending_filter_replies > 0
+                        && matches!(
+                            parse_control_marker(strip_line_ending(&self.line)),
+                            Some(ControlMarker::End(_) | ControlMarker::Error(_))
+                        )
+                    {
+                        self.pending_filter_replies -= 1;
                     }
                 }
-                Some(ControlLine::Paused { pane }) if pane == own_pane => {
-                    return Ok(Some(OutputEvent::Paused));
-                }
-                // Another window's pane, on the same session-attached
-                // control client. Deliberately NOT fed to the passthrough
-                // decoder: that decoder carries wrapper state across
-                // notifications, and mixing a stranger's bytes into it
-                // would corrupt a wrapper of ours that happened to be
-                // open at the time.
-                Some(ControlLine::Payload { .. } | ControlLine::Paused { .. }) => {}
-                Some(ControlLine::Exit) => return Ok(None),
-                None => {}
             }
         }
     }
@@ -2812,6 +3539,14 @@ impl OutputStream {
         // never contains a wrapper, so nothing is lost by clearing here.
         self.passthrough = PassthroughDecoder::default();
         let deadline = tokio::time::Instant::now() + CONTROL_EXCHANGE_TIMEOUT;
+        // Start the positional reads from a known boundary. A pane filter
+        // written moments before the `%pause` can still have its reply in
+        // flight, and this group would otherwise read that reply as its
+        // modes block and shift every block after it (see
+        // `pending_filter_replies`). The pause is what makes this safe to
+        // wait for: our own pane is quiet, so the only thing that can
+        // arrive is the debt being settled.
+        self.settle_filter_replies(deadline).await?;
         let cutover = continue_pane_command(&self.pane);
         self.snapshot_then_cutover(deadline, &cutover).await
     }
@@ -5192,21 +5927,22 @@ mod tests {
     /// - A foreign `%pause` produces no event at all. Surfacing it would
     ///   send this terminal through a full reset-and-replay catch-up for
     ///   bytes it never carried.
-    #[tokio::test]
-    async fn next_output_emits_only_its_own_panes_events_through_a_split_wrapper() {
-        let transcript: &[u8] = b"%output %0 before\\033Ptmux;\\033\\033]52;c;\n\
-                                  %output %7 foreign-one\n\
-                                  %extended-output %7 0 : foreign-two\n\
-                                  %pause %7\n\
-                                  %window-renamed @3 something\n\
-                                  %extended-output %0 0 : aGk=\\007\\033\\134after\n\
-                                  %pause %0\n\
-                                  %exit\n";
-        // A real `ChildStdout` is what `OutputStream` reads, so the
-        // transcript is fed through an actual child rather than an
-        // in-memory pipe: `cat` echoes it back and then EOFs when its
-        // stdin is dropped, which is exactly the shape a tmux control
-        // client's exit has.
+    ///
+    /// An [`OutputStream`] over a canned transcript, plus the process
+    /// standing in for tmux on its WRITE half.
+    ///
+    /// Both halves are real child processes rather than in-memory pipes,
+    /// and both for reasons: the read half must be a `ChildStdout` because
+    /// that is what the production type reads and what EOFs the way a
+    /// control client's exit does, and the write half must be a pipe
+    /// somebody is emptying because `next_output` now WRITES (the late
+    /// pane filter). A write half nothing drained would fill at 64 KiB and
+    /// park the stream under test — a hang, not an assertion failure.
+    ///
+    /// The returned `Child` is the write half's holder: dropping it kills
+    /// that process and closes the pipe, so callers must keep it alive for
+    /// as long as they drive the stream.
+    fn stream_over_transcript(transcript: &'static [u8]) -> (OutputStream, Child) {
         let mut feeder = Command::new("cat")
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
@@ -5218,27 +5954,39 @@ mod tests {
         tokio::spawn(async move {
             let _ = feeder_stdin.write_all(transcript).await;
         });
-        // The stream's own `stdin` is never written to on this path (it
-        // carries only the one-shot replay group, which this test does
-        // not exercise), so it gets a throwaway handle rather than a
-        // second meaning for the feeder's.
-        let mut unused = Command::new("cat")
+        let mut command_sink = Command::new("cat")
             .stdin(Stdio::piped())
             .stdout(Stdio::null())
             .kill_on_drop(true)
             .spawn()
-            .expect("spawning the unused-stdin holder");
-        let unused_stdin = unused.stdin.take().expect("piped stdin");
-
-        let mut stream = OutputStream {
+            .expect("spawning the command sink");
+        let stdin = command_sink.stdin.take().expect("piped stdin");
+        let stream = OutputStream {
             child: feeder,
-            stdin: unused_stdin,
+            stdin,
             reader: BufReader::new(feeder_stdout),
             line: Vec::new(),
             passthrough: PassthroughDecoder::default(),
             pane: "%0".to_string(),
             session: "fh-s".to_string(),
+            silenced: HashSet::new(),
+            pending_filter_replies: 0,
+            foreign_dropped: 0,
         };
+        (stream, command_sink)
+    }
+
+    #[tokio::test]
+    async fn next_output_emits_only_its_own_panes_events_through_a_split_wrapper() {
+        let transcript: &[u8] = b"%output %0 before\\033Ptmux;\\033\\033]52;c;\n\
+                                  %output %7 foreign-one\n\
+                                  %extended-output %7 0 : foreign-two\n\
+                                  %pause %7\n\
+                                  %window-renamed @3 something\n\
+                                  %extended-output %0 0 : aGk=\\007\\033\\134after\n\
+                                  %pause %0\n\
+                                  %exit\n";
+        let (mut stream, _command_sink) = stream_over_transcript(transcript);
         let mut events = Vec::new();
         while let Some(event) = stream.next_output().await.expect("stream must not fail") {
             events.push(event);
@@ -5267,12 +6015,142 @@ mod tests {
     /// than setting a flag by that name — get either detail wrong and the
     /// client silently either never receives output or never gets the
     /// `pause-after` backstop, neither of which fails loudly.
+    ///
+    /// The filtered form is pinned in the SAME test because the two must
+    /// stay one invocation: splitting the `-A` arguments into a command of
+    /// their own is exactly the mistake that loses the filter to tmux's
+    /// per-pane state reset (see [`attach_cutover_command`]), and it would
+    /// still read perfectly well at the call site.
     #[test]
     fn attach_cutover_sets_pause_after_while_clearing_no_output() {
         assert_eq!(
-            attach_cutover_command(),
+            attach_cutover_command(&[]),
             format!("refresh-client -f !no-output,pause-after={TMUX_PAUSE_AFTER_SECS}")
         );
+        assert_eq!(
+            attach_cutover_command(&["%1".to_string(), "%12".to_string()]),
+            format!(
+                "refresh-client -A \"%1:off\" -A \"%12:off\" \
+                 -f !no-output,pause-after={TMUX_PAUSE_AFTER_SECS}"
+            )
+        );
+    }
+
+    /// The pane filter's exact arguments: one ` -A <pane>:off` per pane,
+    /// quoted for the `:`, and nothing at all for an empty list.
+    ///
+    /// The empty case is not pedantry — it is what keeps a session with no
+    /// other panes from turning its cutover into a differently-spelled
+    /// command than the one the test above pins.
+    #[test]
+    fn the_pane_filter_names_every_foreign_pane_once() {
+        assert_eq!(
+            silence_pane_args(&["%1".to_string(), "%12".to_string()]),
+            " -A \"%1:off\" -A \"%12:off\""
+        );
+        assert_eq!(silence_pane_args(&[]), "");
+    }
+
+    /// No `refresh-client` this module builds may carry more than
+    /// [`MAX_CUTOVER_PANE_FILTERS`] panes, however many a session has.
+    ///
+    /// tmux refuses a command line of roughly a thousand arguments, and
+    /// each pane costs two — so without chunking, a session with enough
+    /// tabs would make every attach on it fail outright, at a threshold
+    /// nobody would connect to tab count. The boundary is checked exactly
+    /// at the cap and one past it, because "splits when it must" and
+    /// "does not split when it need not" are different bugs and an
+    /// off-by-one hides in the gap.
+    #[test]
+    fn pane_filters_are_chunked_below_tmuxs_argument_ceiling() {
+        let panes = |n: usize| (0..n).map(|i| format!("%{i}")).collect::<Vec<_>>();
+
+        let at_cap = panes(MAX_CUTOVER_PANE_FILTERS);
+        let commands = silence_pane_commands(&at_cap);
+        assert_eq!(commands.len(), 1, "the cap itself must be one command");
+
+        let over_cap = panes(MAX_CUTOVER_PANE_FILTERS + 1);
+        let commands = silence_pane_commands(&over_cap);
+        assert_eq!(commands.len(), 2, "one past the cap must split");
+        for command in &commands {
+            assert!(
+                command.matches(" -A ").count() <= MAX_CUTOVER_PANE_FILTERS,
+                "a chunk exceeded the cap: {command}"
+            );
+        }
+        // Every pane must appear exactly once across the chunks: a split
+        // that dropped its remainder would leave panes unfiltered, which
+        // is silent by construction.
+        let rendered = commands.join(" ");
+        for pane in &over_cap {
+            assert_eq!(
+                rendered.matches(&format!("\"{pane}:off\"")).count(),
+                1,
+                "{pane} must be filtered exactly once"
+            );
+        }
+        assert!(silence_pane_commands(&[]).is_empty());
+    }
+
+    /// The per-attachment memo of already-filtered panes stays bounded
+    /// however many distinct panes speak to one terminal.
+    ///
+    /// A session can churn through tabs indefinitely — open, close, open —
+    /// and every one of them that ever emits a byte lands in this set.
+    /// Unbounded, that is a slow leak keyed by a number the user controls,
+    /// on a struct that lives as long as an attachment does. The memo is
+    /// only an optimization (see [`MAX_SILENCED_PANES`]), so forgetting is
+    /// free; what this pins is that it forgets rather than grows.
+    #[tokio::test]
+    async fn the_filtered_pane_memo_stays_bounded_under_pane_churn() {
+        // One line per pane, more of them than the cap, so a set that
+        // never forgot would end up strictly larger than it.
+        static TRANSCRIPT: std::sync::LazyLock<Vec<u8>> = std::sync::LazyLock::new(|| {
+            let mut transcript = Vec::new();
+            for pane in 1..=(MAX_SILENCED_PANES + 50) {
+                transcript.extend_from_slice(format!("%output %{pane} x\n").as_bytes());
+            }
+            transcript.extend_from_slice(b"%exit\n");
+            transcript
+        });
+        let (mut stream, _command_sink) = stream_over_transcript(&TRANSCRIPT);
+        while stream
+            .next_output()
+            .await
+            .expect("the stream must not fail")
+            .is_some()
+        {}
+        assert!(
+            stream.silenced.len() <= MAX_SILENCED_PANES,
+            "the filtered-pane memo grew to {} entries",
+            stream.silenced.len()
+        );
+        assert_eq!(
+            stream.foreign_dropped,
+            (MAX_SILENCED_PANES + 50) as u64,
+            "every foreign notification must still have been counted and dropped"
+        );
+    }
+
+    /// Pane ids are shape-checked before they are interpolated into a
+    /// `refresh-client` command line.
+    ///
+    /// They arrive on the same stream as pane CONTENT — the notification
+    /// grammar is the only thing separating the two — so this is a trust
+    /// boundary, not a formatting nicety: without it a crafted
+    /// notification could put arbitrary text into a command this process
+    /// sends to its own tmux server.
+    #[test]
+    fn only_real_pane_ids_reach_the_pane_filter() {
+        for good in ["%0", "%7", "%1234"] {
+            assert!(is_pane_id_shaped(good.as_bytes()), "{good} is a pane id");
+        }
+        for bad in ["", "%", "0", "@1", "%1a", "%1 -A", "%1\"", " %1"] {
+            assert!(
+                !is_pane_id_shaped(bad.as_bytes()),
+                "{bad:?} must not reach a command line"
+            );
+        }
     }
 
     /// The exact continue text. `-A <pane>:continue` is tmux's pane-state
@@ -5295,7 +6173,7 @@ mod tests {
     /// history capture — cannot pass.
     #[test]
     fn replay_command_group_differs_only_in_its_cutover() {
-        let attach = replay_command_group("fh-s", "%1", &attach_cutover_command());
+        let attach = replay_command_group("fh-s", "%1", &attach_cutover_command(&[]));
         let resume = replay_command_group("fh-s", "%1", &continue_pane_command("%1"));
         // Every pane target is the QUOTED session-paired form: a bare
         // `%1` would resolve server-wide, and a pane id that went stale
@@ -5311,7 +6189,7 @@ mod tests {
             )
         );
         let common = attach
-            .strip_suffix(&format!("{}\n", attach_cutover_command()))
+            .strip_suffix(&format!("{}\n", attach_cutover_command(&[])))
             .expect("attach group ends with its cutover");
         assert_eq!(
             resume,
@@ -5392,7 +6270,11 @@ mod tests {
     /// leaked tmux servers accumulate across runs.
     struct ScratchServer {
         driver: TmuxDriver,
-        _dir: tempfile::TempDir,
+        /// Also the scratch space tests put out-of-band fixtures in — the
+        /// progress files a filtered pane writes so its liveness is
+        /// observable when its output reaches nobody (see
+        /// [`read_progress`]). It outlives the server by drop order.
+        dir: tempfile::TempDir,
     }
 
     impl Drop for ScratchServer {
@@ -5412,7 +6294,7 @@ mod tests {
             let dir = tempfile::tempdir().expect("tempdir");
             let driver = TmuxDriver::new(dir.path());
             driver.ensure_server().await.expect("tmux server");
-            ScratchServer { driver, _dir: dir }
+            ScratchServer { driver, dir }
         }
     }
 
@@ -5540,6 +6422,461 @@ mod tests {
             matches!(event, OutputEvent::Bytes(bytes) if bytes.windows(10).any(|w| w == b"PAUSETEST-"))
         })
         .await;
+        stream.shutdown().await;
+    }
+
+    /// Read this stream continuously until `ticks` of its OWN pane's
+    /// heartbeat have arrived, failing on anything that is not a clean
+    /// read.
+    ///
+    /// Every loop here drives [`OutputStream::next_output`] to completion
+    /// rather than racing it against a timer. That is not style: that
+    /// future is documented as NOT cancel-safe, so a `timeout(_,
+    /// next_output())` loop — the obvious way to "read for a while" —
+    /// abandons a partially-read line on every tick and, now that the
+    /// foreign-pane path writes, can abandon a partially-written command
+    /// too. A test built that way exercises a state production never
+    /// reaches and can pass or fail for reasons unrelated to its subject.
+    /// Own-pane ticks are the clock instead, which also makes the
+    /// observation window a number of PROVEN round trips rather than a
+    /// duration that a loaded machine can turn into nothing.
+    ///
+    /// An `Err` or an EOF fails outright. Both mean the control client is
+    /// gone, and a loop that swallowed them would keep counting an empty
+    /// stream as "no foreign notifications arrived" — the exact reading
+    /// these tests are trying to earn.
+    async fn pump_own_pane_ticks(stream: &mut OutputStream, ticks: usize, secs: u64) {
+        let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(secs);
+        let mut seen = 0;
+        while seen < ticks {
+            let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
+            let event = tokio::time::timeout(remaining, stream.next_output())
+                .await
+                .unwrap_or_else(|_| {
+                    panic!("only {seen} of {ticks} own-pane ticks arrived within {secs}s")
+                })
+                .expect("the control stream must not fail")
+                .expect("the control client must not exit mid-test");
+            if let OutputEvent::Bytes(bytes) = event
+                && contains(&bytes, b"AGENT-TICK")
+            {
+                seen += 1;
+            }
+        }
+    }
+
+    /// A session whose OTHER window is flooding must deliver none of that
+    /// flood to a terminal's control client — the tmux-side pane filter
+    /// doing its job, against a real tmux.
+    ///
+    /// The local drop in `next_output` makes the terminal's BYTES correct
+    /// whether or not the filter was ever installed, so "the right output
+    /// arrived" proves nothing here. `foreign_dropped` is the only
+    /// observable that distinguishes the two: a filter that silently
+    /// stopped being applied would show up as a number climbing with the
+    /// neighbour's output rate, and as nothing else at all until a busy
+    /// tab started delaying somebody's agent.
+    ///
+    /// Two things beyond the count are asserted, because without them a
+    /// PASS would be ambiguous. The sink's drain task must still be
+    /// running: if it had ended, the filter's safety net would be gone and
+    /// the reason no foreign notifications arrived might be that tmux had
+    /// stopped reading the neighbour entirely. And the neighbour itself
+    /// must still be making progress, observed outside tmux through a file
+    /// it writes — the difference between "filtered" and "frozen", which
+    /// is invisible from this client's stream by construction.
+    #[tokio::test]
+    async fn a_flooding_neighbour_reaches_a_terminals_control_client_not_at_all() {
+        let server = ScratchServer::start().await;
+        let progress = server.dir.path().join("neighbour-progress");
+        let agent = server
+            .driver
+            .create_session("fh-filter-test", "/", 80, 24, &[], &ticking_pane("AGENT"))
+            .await
+            .expect("session");
+        let (_window, flooder) = server
+            .driver
+            .new_window(
+                "fh-filter-test",
+                "/",
+                &[],
+                &bursting_pane("NEIGHBOUR", &progress),
+            )
+            .await
+            .expect("a second window to flood from");
+        assert_ne!(agent, flooder, "test premise: two distinct panes");
+
+        // The sink first, exactly as the attach handler orders it: without
+        // one, the filter this test is about would stop tmux reading the
+        // neighbour's pane instead of merely not forwarding it.
+        let mut sink = server
+            .driver
+            .open_session_sink("fh-filter-test")
+            .await
+            .expect("session sink");
+        let sink_task = tokio::spawn(async move { sink.drain().await });
+
+        let (_modes, _prefill, mut stream) = server
+            .driver
+            .open_replay_stream("fh-filter-test", &agent)
+            .await
+            .expect("replay stream");
+        // Settle first: the neighbour can legitimately speak between the
+        // pane listing and the cutover that filters it, so the count taken
+        // over a FRESH window afterwards is the one that means anything.
+        pump_own_pane_ticks(&mut stream, 5, 30).await;
+        let settled = stream.foreign_dropped;
+        let before = read_progress(&progress);
+
+        // Long enough to span several of the neighbour's bursts.
+        pump_own_pane_ticks(&mut stream, 15, 30).await;
+
+        assert_eq!(
+            stream.foreign_dropped,
+            settled,
+            "a flooding neighbour reached this terminal's control client {} more times after \
+             the filter should have been in force; tmux's own pane filter is not being applied",
+            stream.foreign_dropped - settled
+        );
+        assert!(
+            !sink_task.is_finished(),
+            "the sink stopped draining during the test, so a quiet stream proves nothing"
+        );
+        assert!(
+            read_progress(&progress) > before,
+            "the filtered neighbour stopped making progress — it was frozen, not filtered"
+        );
+        stream.shutdown().await;
+    }
+
+    /// The sink is what keeps a pane every terminal has filtered off from
+    /// being frozen by tmux — asserted as a MECHANISM, both directions.
+    ///
+    /// Every other test here would pass if the filter quietly stopped
+    /// being installed. This one fails in that case and in the opposite
+    /// one, because it checks the thing the filter is dangerous without: a
+    /// pane no attached control client wants is a pane tmux stops reading,
+    /// which blocks its process on its next write. The busy pane is turned
+    /// off on the ONLY terminal client, and its progress is watched from
+    /// outside tmux.
+    ///
+    /// The negative half runs first and is what gives the positive half
+    /// its meaning: with the sink killed, the same configuration must
+    /// freeze the pane. Without that control, "the pane kept running"
+    /// could just mean the filter never took effect.
+    #[tokio::test]
+    async fn only_the_sink_keeps_a_filtered_pane_readable() {
+        let server = ScratchServer::start().await;
+        let progress = server.dir.path().join("busy-progress");
+        let agent = server
+            .driver
+            .create_session("fh-sink-mech", "/", 80, 24, &[], &ticking_pane("AGENT"))
+            .await
+            .expect("session");
+        server
+            .driver
+            .new_window("fh-sink-mech", "/", &[], &bursting_pane("BUSY", &progress))
+            .await
+            .expect("a busy window");
+
+        // NO sink: the terminal client's filter is the only opinion tmux
+        // has about the busy pane, and the man page says that stops the
+        // read. Measured, not assumed.
+        let (_modes, _prefill, mut stream) = server
+            .driver
+            .open_replay_stream("fh-sink-mech", &agent)
+            .await
+            .expect("replay stream");
+        pump_own_pane_ticks(&mut stream, 5, 30).await;
+        let before = read_progress(&progress);
+        pump_own_pane_ticks(&mut stream, 25, 60).await;
+        // At most ONE, not zero. The producer writes its counter and THEN
+        // starts the burst that fills the pty, so a pane frozen by this
+        // filter can still be one step past where it was when the filter
+        // landed — it gets to announce the cycle it then blocks inside.
+        // What it cannot do is keep cycling, which is what the sinked half
+        // below shows it doing.
+        let frozen_at = read_progress(&progress);
+        assert!(
+            frozen_at <= before + 1,
+            "test premise: with no sink, a pane filtered off by every client must freeze — it \
+             advanced from {before} to {frozen_at}. If this ever stops holding, the sink's \
+             whole justification needs re-auditing"
+        );
+
+        // Now the sink, on the same already-frozen pane: attaching a
+        // client that wants everything must set it running again.
+        let mut sink = server
+            .driver
+            .open_session_sink("fh-sink-mech")
+            .await
+            .expect("session sink");
+        let sink_task = tokio::spawn(async move { sink.drain().await });
+        pump_own_pane_ticks(&mut stream, 25, 60).await;
+        let running_at = read_progress(&progress);
+        assert!(
+            running_at >= frozen_at + 2,
+            "the sink did not restart the filtered pane's reads: {frozen_at} -> {running_at} \
+             over a window in which an unblocked producer completes several cycles"
+        );
+        assert!(
+            !sink_task.is_finished(),
+            "the sink stopped draining, so the recovery above proves nothing"
+        );
+        stream.shutdown().await;
+    }
+
+    /// The counter a [`bursting_pane`] keeps outside tmux, or 0 before it
+    /// has written one.
+    ///
+    /// Read from a file rather than from the pane's own output because the
+    /// whole question is what happens when that output is NOT being
+    /// delivered to anyone the test can see. A frozen pane and a filtered
+    /// pane look identical on a control client; they differ only here.
+    fn read_progress(path: &std::path::Path) -> u64 {
+        std::fs::read_to_string(path)
+            .ok()
+            .and_then(|text| text.trim().parse().ok())
+            .unwrap_or(0)
+    }
+
+    /// A pane command that prints `<label>-TICK` five times a second,
+    /// forever — a terminal whose liveness a test can keep re-checking
+    /// instead of racing one echo.
+    fn ticking_pane(label: &str) -> Vec<String> {
+        vec![
+            "sh".to_string(),
+            "-c".to_string(),
+            format!("while :; do echo {label}-TICK; sleep 0.2; done"),
+        ]
+    }
+
+    /// A pane command that emits bursts of 5000 lines a second apart, and
+    /// records how many bursts it has completed in `progress`.
+    ///
+    /// Bursty rather than free-running on purpose. An unpaced `echo` loop
+    /// pins one tmux server at 100% CPU for as long as the test runs, and
+    /// with this suite's parallelism that starved unrelated panes badly
+    /// enough to make a quiet terminal's own output arrive seconds late —
+    /// the test's producer becoming the test's flakiness. A burst is just
+    /// as unmistakable to a filter that is not working (thousands of
+    /// notifications per second while it lasts) at a fraction of the
+    /// average cost.
+    ///
+    /// The counter is written BEFORE each burst rather than after, so it
+    /// advances as soon as the pane is running again, and it is the only
+    /// evidence a test has that the pane is alive at all once its output
+    /// is filtered away from every client (see [`read_progress`]). A pane
+    /// tmux has stopped reading blocks inside the burst, mid-`echo`, and
+    /// so simply stops updating it.
+    fn bursting_pane(label: &str, progress: &std::path::Path) -> Vec<String> {
+        let progress = progress.display();
+        vec![
+            "sh".to_string(),
+            "-c".to_string(),
+            format!(
+                "n=0; while :; do n=$((n+1)); echo $n > {progress}; \
+                 i=0; while [ $i -lt 5000 ]; do echo {label}-$i; i=$((i+1)); done; \
+                 sleep 1; done"
+            ),
+        ]
+    }
+
+    /// Whether `haystack` contains `needle`, for assertions over decoded
+    /// pane bytes.
+    fn contains(haystack: &[u8], needle: &[u8]) -> bool {
+        haystack
+            .windows(needle.len())
+            .any(|window| window == needle)
+    }
+
+    /// A pane created AFTER a terminal attached is silenced on its first
+    /// notification, not left streaming for the life of the attachment.
+    ///
+    /// `refresh-client -A` names one pane and has no wildcard, so the
+    /// attach-time filter can only cover panes that already exist — which
+    /// makes "the user opens a tab while watching the agent" precisely the
+    /// case the attach-time pass cannot reach. Without the late path, that
+    /// tab's entire output would be delivered to, and discarded by, every
+    /// other terminal of the session for as long as it stayed open.
+    ///
+    /// Asserts on the count STOPPING rather than on it being small: some
+    /// notifications necessarily arrive before the filter can be sent (the
+    /// first one is what triggers it), so the property is that the stream
+    /// converges to exactly zero new ones, and a late filter that never
+    /// took effect would keep climbing with the producer.
+    #[tokio::test]
+    async fn a_pane_created_after_attach_is_silenced_when_it_first_speaks() {
+        let server = ScratchServer::start().await;
+        let progress = server.dir.path().join("late-progress");
+        let agent = server
+            .driver
+            .create_session("fh-late-filter", "/", 80, 24, &[], &ticking_pane("AGENT"))
+            .await
+            .expect("session");
+        let mut sink = server
+            .driver
+            .open_session_sink("fh-late-filter")
+            .await
+            .expect("session sink");
+        let sink_task = tokio::spawn(async move { sink.drain().await });
+        let (_modes, _prefill, mut stream) = server
+            .driver
+            .open_replay_stream("fh-late-filter", &agent)
+            .await
+            .expect("replay stream");
+
+        // Only now does the neighbour exist — the shape the attach-time
+        // filter provably cannot have covered.
+        server
+            .driver
+            .new_window(
+                "fh-late-filter",
+                "/",
+                &[],
+                &bursting_pane("LATE", &progress),
+            )
+            .await
+            .expect("a late window to flood from");
+
+        // Settle: the first notifications from the new pane are what
+        // TRIGGER the filter, so they are expected and are not what this
+        // measures.
+        pump_own_pane_ticks(&mut stream, 10, 30).await;
+        let settled = stream.foreign_dropped;
+        assert!(
+            settled > 0,
+            "test premise: the late pane must have reached this client at least once, or the \
+             late path was never exercised"
+        );
+        let before = read_progress(&progress);
+
+        pump_own_pane_ticks(&mut stream, 15, 30).await;
+        assert_eq!(
+            stream.foreign_dropped,
+            settled,
+            "a pane created after attach kept streaming to this terminal ({} more notifications \
+             after it should have been silenced)",
+            stream.foreign_dropped - settled
+        );
+        assert!(
+            !sink_task.is_finished(),
+            "the sink stopped draining during the test, so a quiet stream proves nothing"
+        );
+        assert!(
+            read_progress(&progress) > before,
+            "the late pane stopped making progress — it was frozen, not filtered"
+        );
+        stream.shutdown().await;
+    }
+
+    /// A filter command written while output is live must not desynchronize
+    /// the catch-up replay that may follow it immediately.
+    ///
+    /// The two share one stdout and read it differently: the filter's reply
+    /// arrives as chatter whenever it happens to arrive, while
+    /// `resume_paused_with_replay` reads four blocks POSITIONALLY. A filter
+    /// reply still in flight when the catch-up starts would be taken for the
+    /// modes block, shifting every block after it — a replay that returns
+    /// the history capture as its mode string and the visible screen as its
+    /// history, silently. This is the interleaving that actually orders
+    /// them, and the reason `pending_filter_replies` is counted rather than
+    /// assumed to have cleared.
+    ///
+    /// # Why the debt is created directly rather than raced for
+    ///
+    /// The natural setup — let a late pane speak, then pause — cannot
+    /// reach the state under test against a real tmux, and that is worth
+    /// recording so nobody "fixes" this into a race. `next_output` keeps
+    /// reading until it has an event for its OWN pane, so the filter it
+    /// writes for a late pane and the reply to that filter are both
+    /// consumed inside the same call, hundreds of milliseconds before the
+    /// call returns and the test regains control. The debt is real, and it
+    /// is settled correctly; there is simply no instant a test can observe
+    /// it from outside. Writing the command directly puts the stream in
+    /// exactly the state a filter written moments before a `%pause` leaves
+    /// it in, which is the state the catch-up path has to survive.
+    #[tokio::test]
+    async fn a_late_pane_filter_does_not_desynchronize_the_catch_up_replay() {
+        let server = ScratchServer::start().await;
+        let progress = server.dir.path().join("racing-progress");
+        let agent = server
+            .driver
+            .create_session(
+                "fh-filter-race",
+                "/",
+                80,
+                24,
+                &[],
+                // A distinctive, continuous marker so the replay's content
+                // can be recognized in the capture below.
+                &ticking_pane("AGENT"),
+            )
+            .await
+            .expect("session");
+        let mut sink = server
+            .driver
+            .open_session_sink("fh-filter-race")
+            .await
+            .expect("session sink");
+        let sink_task = tokio::spawn(async move { sink.drain().await });
+        let (_window, neighbour) = server
+            .driver
+            .new_window(
+                "fh-filter-race",
+                "/",
+                &[],
+                &bursting_pane("RACER", &progress),
+            )
+            .await
+            .expect("a neighbour window");
+        let (_modes, _prefill, mut stream) = server
+            .driver
+            .open_replay_stream("fh-filter-race", &agent)
+            .await
+            .expect("replay stream");
+        pump_own_pane_ticks(&mut stream, 3, 30).await;
+
+        // A real filter command, left with its reply outstanding.
+        stream
+            .send_filter_command(&format!("refresh-client -A \"{neighbour}:off\""))
+            .await
+            .expect("writing a pane filter");
+        assert_eq!(
+            stream.pending_filter_replies, 1,
+            "a written filter command must be recorded as owed a reply"
+        );
+
+        stream
+            .send_raw_command(&format!("refresh-client -A \"{agent}:pause\""))
+            .await
+            .expect("pause command");
+        pump_until(&mut stream, 30, |event| *event == OutputEvent::Paused).await;
+        stream
+            .drain_command_reply()
+            .await
+            .expect("pause command reply");
+
+        // The catch-up must settle the filter debt first; if it did not,
+        // this returns the wrong block for every field it parses.
+        let (modes, content) = stream
+            .resume_paused_with_replay()
+            .await
+            .expect("catch-up replay");
+        assert!(
+            contains(&content, b"AGENT-TICK"),
+            "the catch-up replay returned something other than this pane's history — the \
+             positional block reads were shifted by an unconsumed filter reply"
+        );
+        assert!(
+            !modes.pane_dead,
+            "test premise: the ticking pane must still be alive"
+        );
+        assert_eq!(
+            stream.pending_filter_replies, 0,
+            "the catch-up must have settled the filter debt, not merely worked around it"
+        );
+        assert!(!sink_task.is_finished(), "the sink must still be draining");
         stream.shutdown().await;
     }
 

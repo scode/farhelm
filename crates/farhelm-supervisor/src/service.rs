@@ -51,7 +51,7 @@ use crate::store::{
     Settlement, StoredSession, Transition,
 };
 use crate::tmux::{
-    AGENT_WINDOW_OPTION, InputClient, OutputEvent, OutputStream, PaneModes, PaneState,
+    AGENT_WINDOW_OPTION, InputClient, OutputEvent, OutputStream, PaneModes, PaneState, SessionSink,
     TAB_WINDOW_OPTION, TmuxDriver,
 };
 use anyhow::Context;
@@ -4308,6 +4308,201 @@ const DETACH_REASON_REPLACED: &str = "replaced by a newer attachment to this ter
 /// what a frame carries.
 const MAX_LEASE_BYTES: usize = 128;
 
+/// How long a sink client must survive before its death is treated as an
+/// isolated incident rather than one of a run of them.
+///
+/// A sink dies for two very different reasons and the supervisor cannot
+/// ask which: something killed the client (a one-off, retry immediately),
+/// or the tmux session it attaches to is unavailable (retrying will fail
+/// again for a while). This threshold is what tells them apart in
+/// practice — a client that attached and then lived a while was healthy,
+/// while one that exited at once never really attached — and all it
+/// decides is how fast to retry, never whether to.
+const SINK_HEALTHY_RUN: Duration = Duration::from_secs(2);
+
+/// First delay before replacing a dead sink, and the unit the backoff
+/// doubles from.
+///
+/// Short enough that an ordinary `kill -9` is invisible to the panes the
+/// sink protects: the guarantee lapses only for this long, and only if a
+/// per-terminal client happens to be stalled at that exact moment.
+const SINK_RETRY_BASE: Duration = Duration::from_millis(200);
+
+/// Ceiling on the respawn backoff.
+///
+/// This is what bounds the window in which a session has no sink, and so
+/// what makes the honest qualification on the isolation guarantee a
+/// BOUNDED one rather than an open-ended "eventually" (see
+/// [`crate::tmux::SessionSink`], and SPEC_impl.md's respawn note). Chosen
+/// low for that reason rather than to be gentle on the machine: the thing
+/// being retried is one process spawn against a local socket, so even the
+/// pathological case — a session whose tmux server is wedged — costs one
+/// short-lived process every five seconds, against a supervisor that is
+/// already failing every attach on that session.
+const SINK_RETRY_MAX: Duration = Duration::from_secs(5);
+
+/// How long [`Supervisor::ensure_session_sink`] waits for a sink that is
+/// between incarnations before failing the attach.
+///
+/// An attach must not proceed on a handle whose client is mid-respawn: the
+/// pane filters it is about to install are safe only while a sink is
+/// actually attached, so "there is a handle" is the wrong question and
+/// "there is an attached client right now" is the right one. Generous
+/// against the backoff above (several retries fit inside it) and still far
+/// short of leaving a user's attach hanging with no explanation.
+const SINK_READY_TIMEOUT: Duration = Duration::from_secs(15);
+
+/// The delay before the `n`th consecutive replacement attempt: exponential
+/// from [`SINK_RETRY_BASE`], capped at [`SINK_RETRY_MAX`].
+///
+/// A free function so the policy is testable without a tmux server, and
+/// because "how long until the next try" is exactly the kind of arithmetic
+/// that is easy to get subtly wrong (an off-by-one in the shift, an
+/// overflow at large `n`) and impossible to notice in production, where
+/// the difference between correct backoff and a tight loop shows up only
+/// as machine load during an outage.
+fn sink_retry_delay(consecutive_failures: u32) -> Duration {
+    // Saturating rather than wrapping: a session that has been failing for
+    // hours must land on the cap, not wrap around to no delay at all.
+    let factor = 1u32.checked_shl(consecutive_failures.min(31)).unwrap_or(0);
+    if factor == 0 {
+        return SINK_RETRY_MAX;
+    }
+    SINK_RETRY_BASE.saturating_mul(factor).min(SINK_RETRY_MAX)
+}
+
+/// A session's live sink client, owned jointly by every attachment on that
+/// session (PLAN_M4.md order-of-work step 5).
+///
+/// # Lifetime by refcount, deliberately
+///
+/// Every [`ActiveAttach`] holds an `Arc` of this, and [`Supervisor::sinks`]
+/// holds only a `Weak`. That is what implements "the sink starts when a
+/// session gains its first attachment and stops when the last one goes"
+/// without a single explicit teardown call: attachments are removed on a
+/// dozen paths — takeover, replace, detach, stall, connection loss,
+/// restart, tab close, delete — and a scheme that had to be invoked on
+/// each of them would eventually be forgotten on the next one added. The
+/// last `Arc` to drop aborts the supervising task, whose cancellation
+/// drops the client and kills the process through `kill_on_drop`.
+///
+/// # Self-healing, without an exit
+///
+/// The task outlives any individual client process: if the sink dies while
+/// attachments are still live — a stray `kill -9`, an OOM kill, a tmux
+/// server restarting under it — it reattaches, backing off exponentially
+/// to [`SINK_RETRY_MAX`] and NEVER giving up. That last part is the whole
+/// policy: as long as some attachment holds this handle, a terminal is on
+/// screen whose isolation guarantee depends on a sink existing, and a
+/// supervisor that had quietly stopped trying would leave that terminal
+/// looking perfectly healthy while the guarantee was gone for good.
+/// Stopping is the owner's decision, expressed by dropping the last `Arc`,
+/// and it needs no cooperation from this task.
+///
+/// Nothing persists across a supervisor restart: sinks are a property of
+/// live attachments, and the next attach builds one.
+struct SessionSinkHandle {
+    /// The task that keeps a client attached, drains it, and replaces it
+    /// when it dies. Aborted by [`Drop`], which is the whole teardown.
+    task: tokio::task::JoinHandle<()>,
+    /// The live client's process id, or `None` while there is none —
+    /// which doubles as this handle's READINESS signal.
+    ///
+    /// One channel for both because they are one fact: a sink is ready
+    /// exactly when it has an attached client, and that client's pid is
+    /// what identifies it. A `watch` rather than a plain atomic because
+    /// [`Supervisor::ensure_session_sink`] must be able to WAIT for the
+    /// transition (an attach that installed pane filters against a handle
+    /// whose client was mid-respawn would be filtering with no sink
+    /// attached, the one combination that stops tmux reading a pane), and
+    /// polling an atomic for that would be a busy-wait with a made-up
+    /// interval.
+    state: watch::Sender<Option<u32>>,
+}
+
+impl Drop for SessionSinkHandle {
+    fn drop(&mut self) {
+        self.task.abort();
+    }
+}
+
+/// Keep `session` sinked until this task is cancelled.
+///
+/// Takes an already-attached `client` rather than opening its own, because
+/// the FIRST attach must be synchronous with the attaching request: a
+/// terminal may not turn foreign panes off until tmux already has a client
+/// that keeps them readable (see [`crate::tmux::SessionSink`]). Every
+/// LATER attach is this task's own business, announced through `state` for
+/// whoever is waiting on readiness.
+///
+/// Runs until cancelled, with no exit of its own — see
+/// [`SessionSinkHandle`] for why "give up" is not a state this is allowed
+/// to reach.
+///
+/// `open` is how a replacement is obtained, injected rather than called
+/// through the driver directly so the RETRY POLICY is testable without a
+/// tmux server: what this loop does is decided entirely by how long a
+/// client's `drain` takes to return and whether the next open succeeds,
+/// and reproducing "the tmux server is unreachable for ten seconds" with a
+/// real server means breaking one and hoping.
+async fn run_session_sink<O, F>(
+    session: String,
+    first: SessionSink,
+    state: watch::Sender<Option<u32>>,
+    open: O,
+) where
+    O: Fn(String) -> F,
+    F: Future<Output = anyhow::Result<SessionSink>>,
+{
+    let mut client = first;
+    // Counts CONSECUTIVE unhealthy outcomes — a client that died young, or
+    // a spawn that failed — and drives nothing but the delay. A client
+    // that lived a healthy while resets it, so a session that loses its
+    // sink once an hour retries instantly every time, while one whose tmux
+    // server is unreachable settles onto the cap.
+    let mut consecutive_failures = 0u32;
+    loop {
+        let started = tokio::time::Instant::now();
+        client.drain().await;
+        // Announce the gap BEFORE anything else: from here until a
+        // replacement is attached, this session has no sink, and an attach
+        // that arrives meanwhile must wait rather than install filters.
+        //
+        // `send_replace`, never `send`: a `watch` sender with no live
+        // receivers refuses `send` AND leaves the stored value untouched,
+        // and this channel spends most of its life with none — readers
+        // subscribe on demand. An earlier draft used `send` here and the
+        // published pid simply never changed, so a killed sink looked
+        // healthy forever to anything that asked.
+        state.send_replace(None);
+        // Kill the corpse before sleeping. `drain` returning means the
+        // stream ended, which is very nearly always the process exiting —
+        // but "very nearly" is not good enough here: a client whose stdout
+        // closed while the process lived on would be an ATTACHED tmux
+        // client that nothing is reading, i.e. precisely the flow-control
+        // victim this whole mechanism exists to guarantee does not exist.
+        drop(client);
+        if started.elapsed() >= SINK_HEALTHY_RUN {
+            consecutive_failures = 0;
+        } else {
+            consecutive_failures = consecutive_failures.saturating_add(1);
+        }
+        client = loop {
+            tokio::time::sleep(sink_retry_delay(consecutive_failures)).await;
+            match open(session.clone()).await {
+                Ok(next) => break next,
+                Err(e) => {
+                    consecutive_failures = consecutive_failures.saturating_add(1);
+                    warn!(session = %session, error = %format!("{e:#}"),
+                          "could not reattach the session sink; retrying");
+                }
+            }
+        };
+        state.send_replace(client.pid());
+        warn!(session = %session, "the session sink died and was reattached");
+    }
+}
+
 /// One live attachment: a session's terminal, streamed to one channel of
 /// one connection. `notify` reaches the owning connection's writer so a
 /// takeover can tell the old client it was detached.
@@ -4364,6 +4559,18 @@ struct ActiveAttach {
     /// `set_attachment_paused`), for the same reason: pause spam would
     /// otherwise restart the hard maximum indefinitely.
     pause: watch::Sender<Option<tokio::time::Instant>>,
+    /// This attachment's share of its SESSION's sink client.
+    ///
+    /// Never read. Holding it IS the effect: the sink lives exactly as long
+    /// as some attachment on the session holds one of these, which is how
+    /// the "first attach starts it, last detach stops it" lifecycle needs
+    /// no code on any of the many teardown paths (see
+    /// [`SessionSinkHandle`]). Placed here rather than beside the session
+    /// entry deliberately — a session with no attachment needs no sink, and
+    /// a sink outliving its last viewer would be a control client attached
+    /// to a session nobody is watching.
+    #[allow(dead_code)]
+    sink: Arc<SessionSinkHandle>,
 }
 
 /// One host's session authority, shared by every connection.
@@ -4380,7 +4587,9 @@ struct ActiveAttach {
 /// Lock discipline: the two mutexes are never held at once, with two
 /// deliberate exceptions (`DeleteSession` and `publish_alt_screen_
 /// snapshot`, below), and no tmux call happens while `sessions` is held
-/// on its own. `attachments` is deliberately the exception for holding it
+/// on its own. ("The two" means `sessions` and `attachments` throughout
+/// this discussion; `sinks` arrived later and is never held alongside
+/// either — see its own docs — so it adds no case to the rules below.) `attachments` is deliberately the exception for holding it
 /// across tmux calls — the whole attach takeover runs under it, because
 /// that is the only way "at most one client, last attach wins" survives
 /// two concurrent attaches — and the only way the lease sweep and the new
@@ -4432,6 +4641,30 @@ pub struct Supervisor {
     /// because a takeover cannot interleave inside any of their
     /// check-then-act pairs.
     attachments: Mutex<HashMap<AttachmentKey, ActiveAttach>>,
+    /// The live sink client of every tmux session that currently has an
+    /// attachment, keyed by tmux session name (PLAN_M4.md order-of-work
+    /// step 5, and [`SessionSinkHandle`] for what one is).
+    ///
+    /// `Weak`, deliberately: this map is a REGISTRY, not an owner. The
+    /// owners are the attachments, so a sink cannot outlive the last
+    /// terminal watching its session no matter which teardown path removed
+    /// that terminal. A dangling entry left behind by the last attachment
+    /// is simply replaced by the next attach's own upgrade attempt, so
+    /// nothing has to sweep this map.
+    ///
+    /// Keyed by TMUX session name rather than farhelm session id because
+    /// the name is what a client attaches to, and because it makes the
+    /// restart path fall out correctly: a restart that rebuilds the tmux
+    /// session under the same name kills the sink attached to the old one,
+    /// and the supervising task reattaches to the new one by name.
+    ///
+    /// LOCK ORDER: this one has no ordering rule to obey, because it is
+    /// never held alongside either of the others. The attach handler takes
+    /// it and releases it BEFORE taking `attachments` — deliberately, see
+    /// `ensure_session_sink` — and dropping a sink takes no lock at all
+    /// (it aborts a task), which is what keeps the many attachment
+    /// teardown paths free of any obligation here.
+    sinks: Mutex<HashMap<String, std::sync::Weak<SessionSinkHandle>>>,
     /// Alt-screen snapshots captured by an IN-FLIGHT `StopSession` call,
     /// keyed by session id, visible to `Attach` before the corresponding
     /// `publish_alt_screen_snapshot` has written anything to disk.
@@ -4700,6 +4933,7 @@ impl Supervisor {
             store,
             sessions: Mutex::new(sessions),
             attachments: Mutex::new(HashMap::new()),
+            sinks: Mutex::new(HashMap::new()),
             pending_snapshots: Mutex::new(HashMap::new()),
             farhelm_exe,
             admission: Arc::new(tokio::sync::Semaphore::new(HANDLER_ADMISSION_PERMITS)),
@@ -7696,6 +7930,155 @@ impl Supervisor {
             .await
             .insert(entry.info.id.clone(), published);
         info
+    }
+
+    /// The sink client for `tmux_name`, attaching one if this is the
+    /// session's first attachment (see [`SessionSinkHandle`]).
+    ///
+    /// The caller must hold this `Arc` for as long as its attachment
+    /// lives, and must call this BEFORE opening any per-terminal client
+    /// for the session: the pane filter those clients install is only safe
+    /// while a sink is already attached (see [`crate::tmux::SessionSink`]).
+    ///
+    /// # What "ensure" promises
+    ///
+    /// Not merely that a handle exists — that a client is ATTACHED RIGHT
+    /// NOW. A handle whose sink is mid-respawn is the one state in which
+    /// installing pane filters is actively harmful (filters on, sink off,
+    /// and tmux stops reading a pane nobody is watching), so this waits
+    /// out that window rather than handing back a handle that is only
+    /// nominally healthy. The wait is bounded by [`SINK_READY_TIMEOUT`]
+    /// and its expiry fails the attach loudly; it is not a state a healthy
+    /// host reaches, and pretending otherwise would mean attaching into
+    /// exactly the configuration the wait exists to avoid.
+    ///
+    /// # Locking
+    ///
+    /// Takes no lock but its own, must not be called while `attachments`
+    /// is held (see the attach handler's cost note), and — deliberately —
+    /// does NOT hold `sinks` across the spawn: that would serialize a
+    /// process spawn plus a control-mode round trip against every other
+    /// session's first attach. The cost of releasing it is a race two
+    /// first-attaches can both enter; the second insertion loses, and its
+    /// client is dropped and killed on the spot rather than being left as
+    /// an unowned attached client.
+    ///
+    /// # Failure
+    ///
+    /// Failing here fails the attach, which is a deliberate choice over
+    /// degrading silently. Everything that can make this fail — a vanished
+    /// tmux session, a server that will not answer, exhausted process
+    /// limits — is about to fail the two control clients the attach opens
+    /// next anyway, so a sink failure is early news of a broken attach
+    /// rather than a separate, tolerable condition.
+    async fn ensure_session_sink(&self, tmux_name: &str) -> anyhow::Result<Arc<SessionSinkHandle>> {
+        let existing = {
+            let mut sinks = self.sinks.lock().await;
+            Self::prune_dead_sinks(&mut sinks);
+            sinks.get(tmux_name).and_then(std::sync::Weak::upgrade)
+        };
+        let handle = match existing {
+            Some(live) => live,
+            None => {
+                let client = self.tmux.open_session_sink(tmux_name).await?;
+                let (state, _) = watch::channel(client.pid());
+                let tmux = self.tmux.clone();
+                let handle = Arc::new(SessionSinkHandle {
+                    task: tokio::spawn(run_session_sink(
+                        tmux_name.to_string(),
+                        client,
+                        state.clone(),
+                        move |name| {
+                            let tmux = tmux.clone();
+                            async move { tmux.open_session_sink(&name).await }
+                        },
+                    )),
+                    state,
+                });
+                let mut sinks = self.sinks.lock().await;
+                Self::prune_dead_sinks(&mut sinks);
+                // Re-check under the lock: another first-attach may have
+                // finished while this one was spawning. Whoever is already
+                // registered wins, and `handle` — with its task and its
+                // client — is dropped here, which aborts and kills it.
+                match sinks.get(tmux_name).and_then(std::sync::Weak::upgrade) {
+                    Some(winner) => winner,
+                    None => {
+                        sinks.insert(tmux_name.to_string(), Arc::downgrade(&handle));
+                        handle
+                    }
+                }
+            }
+        };
+        // Readiness, whether the handle is new (already attached, so this
+        // returns at once) or adopted (possibly mid-respawn).
+        let mut state = handle.state.subscribe();
+        if state.borrow().is_none() {
+            let ready = tokio::time::timeout(SINK_READY_TIMEOUT, async {
+                while state.changed().await.is_ok() {
+                    if state.borrow().is_some() {
+                        return true;
+                    }
+                }
+                false
+            })
+            .await;
+            match ready {
+                Ok(true) => {}
+                Ok(false) => anyhow::bail!(
+                    "the session sink for {tmux_name} stopped being supervised while this \
+                     attach waited for it; attach again"
+                ),
+                Err(_) => anyhow::bail!(
+                    "the session sink for {tmux_name} did not come back within \
+                     {SINK_READY_TIMEOUT:?}; the tmux server is not answering"
+                ),
+            }
+        }
+        Ok(handle)
+    }
+
+    /// Drop registry entries whose handle is gone.
+    ///
+    /// The registry holds `Weak`s, so a dead entry is harmless to
+    /// correctness — every lookup already treats a failed upgrade as
+    /// absence. What it is not harmless to is SIZE: without this, a
+    /// supervisor that has served a thousand short-lived sessions carries
+    /// a thousand dead keys forever, which is a slow leak keyed by session
+    /// id. Opportunistic rather than scheduled, because every path that
+    /// could grow this map passes through here anyway.
+    fn prune_dead_sinks(sinks: &mut HashMap<String, std::sync::Weak<SessionSinkHandle>>) {
+        sinks.retain(|_, handle| handle.strong_count() > 0);
+    }
+
+    /// The process id of `tmux_name`'s live sink client, or `None` when
+    /// that session has no sink (no attachments) or its sink is between
+    /// incarnations.
+    ///
+    /// A test seam with no production caller: the sink's whole contract is
+    /// about a PROCESS being attached, and neither its presence, its
+    /// absence, nor its replacement after a `kill -9` is observable from
+    /// the wire protocol. Reads the registry rather than a live tmux query
+    /// so a test can tell "the supervisor believes it has a sink" apart
+    /// from "some client happens to be attached".
+    pub async fn session_sink_pid(&self, tmux_name: &str) -> Option<u32> {
+        let handle = self
+            .sinks
+            .lock()
+            .await
+            .get(tmux_name)
+            .and_then(std::sync::Weak::upgrade)?;
+        *handle.state.borrow()
+    }
+
+    /// How many entries the sink registry is holding, live or dead.
+    ///
+    /// A test seam for the churn test that pins [`Self::prune_dead_sinks`]
+    /// doing its job: "the map stays bounded" is not observable in any
+    /// other way, and a leak here would be invisible until a long-lived
+    /// supervisor's memory made it obvious.
+    pub async fn session_sink_registry_len(&self) -> usize {
+        self.sinks.lock().await.len()
     }
 
     /// Tear down whatever is attached to a session being relaunched,
@@ -12024,6 +12407,43 @@ async fn handle_control(
                 return;
             };
 
+            // The session's sink client, acquired BEFORE the attachments
+            // lock and held across everything below. Three orderings ride
+            // on this one line.
+            //
+            // It must precede the per-terminal clients opened further
+            // down, because those turn the session's other panes off for
+            // themselves and tmux answers by not reading a pane no client
+            // wants (see `tmux::SessionSink`).
+            //
+            // It must precede the takeover sweep, so that a reattach —
+            // where the incumbent holds the session's only other reference
+            // — hands this attachment the SAME live sink instead of
+            // letting the last reference drop and immediately spawning a
+            // replacement.
+            //
+            // And it deliberately happens OUTSIDE the lock, unlike the
+            // other tmux work here. Bringing a sink up costs a process
+            // spawn and two control-mode round trips, and this mutex
+            // serializes attach and input for EVERY session in this
+            // supervisor (see the `Supervisor` struct's own note on that
+            // coarseness) — so paying for it under the lock would make one
+            // session's first attach measurably slow every other session's
+            // traffic. Nothing about the sink needs the lock: the registry
+            // has its own, and it is this `Arc` rather than any map entry
+            // that keeps the sink alive.
+            let sink = match sup.ensure_session_sink(&terminal.tmux_name).await {
+                Ok(sink) => sink,
+                Err(e) => {
+                    permit.send(reply_frame(&ControlMsg::Error {
+                        req_id,
+                        message: format!("{e:#}"),
+                        kind: error_kind(&e),
+                    }));
+                    return;
+                }
+            };
+
             // The whole takeover — kick every attachment this attach
             // displaces, set up tmux, install the new one — runs under
             // ONE lock hold. Without it, two concurrent attaches can both
@@ -12273,6 +12693,7 @@ async fn handle_control(
                     forwarder: task,
                     input,
                     pause: pause_tx,
+                    sink,
                 },
             );
             drop(attachments);
@@ -13968,6 +14389,263 @@ mod tests {
             channel: 1,
             reason: "x".into(),
         });
+    }
+
+    /// The sink respawn backoff grows and then stops growing.
+    ///
+    /// Both halves matter and neither is visible in production. Without
+    /// growth, a session whose tmux server is unreachable is retried in a
+    /// tight loop, spawning processes as fast as they can fail; without a
+    /// cap, the delay doubles past any useful bound and the "the gap is
+    /// bounded" qualification this design puts on its own isolation
+    /// guarantee (see `crate::tmux::SessionSink`) stops being true.
+    #[test]
+    fn the_sink_backoff_grows_to_a_cap_and_stays_there() {
+        assert_eq!(sink_retry_delay(0), SINK_RETRY_BASE);
+        assert_eq!(sink_retry_delay(1), SINK_RETRY_BASE * 2);
+        assert_eq!(sink_retry_delay(2), SINK_RETRY_BASE * 4);
+        assert_eq!(sink_retry_delay(1000), SINK_RETRY_MAX);
+        // Monotonic and never past the cap, at every step in between — a
+        // shift that overflowed would show up here as a delay collapsing
+        // back to nothing, which is precisely the tight loop the backoff
+        // exists to prevent.
+        let mut previous = Duration::ZERO;
+        for failures in 0..64 {
+            let delay = sink_retry_delay(failures);
+            assert!(delay >= previous, "backoff went backwards at {failures}");
+            assert!(delay <= SINK_RETRY_MAX, "backoff exceeded its cap");
+            assert!(!delay.is_zero(), "backoff reached zero at {failures}");
+            previous = delay;
+        }
+    }
+
+    /// A stand-in sink client that exits at once, so the supervising loop
+    /// sees a client that "died young".
+    ///
+    /// `true` rather than a killed `cat`: a process that has already
+    /// exited by the time anyone reads its stdout is the cleanest way to
+    /// reach the loop's death branch with no timing to arrange.
+    fn dying_fake_sink() -> SessionSink {
+        let child = tokio::process::Command::new("true")
+            .stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::piped())
+            .kill_on_drop(true)
+            .spawn()
+            .expect("spawning a fake sink client");
+        SessionSink::from_child_for_tests(child)
+    }
+
+    /// A stand-in sink client that lives until something kills it.
+    ///
+    /// `cat` blocking on a stdin the sink holds and never writes to: its
+    /// stdout stays open, so `drain` blocks exactly as it does on a
+    /// healthy tmux client with nothing to say.
+    fn living_fake_sink() -> SessionSink {
+        let child = tokio::process::Command::new("cat")
+            .stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::piped())
+            .kill_on_drop(true)
+            .spawn()
+            .expect("spawning a fake sink client");
+        SessionSink::from_child_for_tests(child)
+    }
+
+    /// Let the supervising task make progress while the virtual clock
+    /// advances, until `done` holds or a REAL deadline passes.
+    ///
+    /// Virtual time is what makes these tests instant, but the fake
+    /// clients are real processes whose exits happen in real time, so
+    /// neither clock alone is enough: the loop advances only when both
+    /// have moved. Hence the interleave, and hence the real-time bound —
+    /// a virtual-time bound would spin forever if the process side never
+    /// progressed.
+    async fn advance_until(mut done: impl FnMut() -> bool, what: &str) {
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+        while !done() {
+            assert!(std::time::Instant::now() < deadline, "timed out {what}");
+            tokio::time::advance(Duration::from_millis(500)).await;
+            tokio::task::yield_now().await;
+        }
+    }
+
+    /// The supervising loop never stops retrying, however long the
+    /// failures run.
+    ///
+    /// This is the headline property of the whole mechanism and the one an
+    /// earlier draft got wrong: it had a bounded attempt count, so a
+    /// session whose tmux server was briefly unreachable would come back
+    /// with its sink permanently gone — every terminal on it still
+    /// attached, still streaming, and silently without the pane-read
+    /// guarantee its own documentation promises. Nothing in the product
+    /// would ever have reported that. So this asserts the loop is still
+    /// trying well past any plausible bound, rather than asserting some
+    /// particular number of attempts.
+    #[tokio::test(start_paused = true)]
+    async fn the_sink_supervisor_keeps_retrying_indefinitely() {
+        let attempts = Arc::new(AtomicU64::new(0));
+        let (state, _rx) = watch::channel(Some(1));
+        let counter = Arc::clone(&attempts);
+        let task = tokio::spawn(run_session_sink(
+            "fh-test".to_string(),
+            dying_fake_sink(),
+            state.clone(),
+            move |_| {
+                let counter = Arc::clone(&counter);
+                async move {
+                    counter.fetch_add(1, Ordering::Relaxed);
+                    anyhow::bail!("the tmux server is unreachable")
+                }
+            },
+        ));
+        // Far past the five-attempt bound the earlier draft stopped at.
+        advance_until(
+            || attempts.load(Ordering::Relaxed) > 20,
+            "waiting for the sink supervisor to keep retrying",
+        )
+        .await;
+        assert!(
+            !task.is_finished(),
+            "the supervising task exited on its own; only its owner may end it"
+        );
+        assert_eq!(
+            *state.borrow(),
+            None,
+            "a session with no attached sink must not report one as ready"
+        );
+
+        // ...and the owner's abort is what ends it, which is the only exit
+        // this task has.
+        task.abort();
+        assert!(
+            task.await.is_err_and(|e| e.is_cancelled()),
+            "the task must end by cancellation, not by returning"
+        );
+    }
+
+    /// Dropping the last handle is what stops the supervising task — the
+    /// other half of "never gives up".
+    ///
+    /// The retry loop has no exit of its own by design, so the ONLY thing
+    /// standing between it and a task that outlives its session is this
+    /// `Drop`. A handle whose `Drop` stopped aborting (a field reorder, a
+    /// `mem::forget`, a clone held somewhere unnoticed) would leave a
+    /// supervisor respawning sink clients for sessions nobody is attached
+    /// to, forever, and nothing else in the system would object.
+    #[tokio::test(start_paused = true)]
+    async fn dropping_the_last_sink_handle_stops_its_supervisor() {
+        let (state, _rx) = watch::channel(Some(1));
+        let handle = Arc::new(SessionSinkHandle {
+            task: tokio::spawn(run_session_sink(
+                "fh-test".to_string(),
+                living_fake_sink(),
+                state,
+                |_| async { anyhow::bail!("never called") },
+            )),
+            state: watch::channel(None).0,
+        });
+        let second = Arc::clone(&handle);
+        drop(handle);
+        tokio::task::yield_now().await;
+        assert!(
+            !second.task.is_finished(),
+            "a handle still held by another owner must not stop the sink"
+        );
+        // The task handle is inside the Arc, so its state has to be
+        // sampled through a clone taken before the last drop.
+        let task = second.task.abort_handle();
+        drop(second);
+        tokio::task::yield_now().await;
+        assert!(
+            task.is_finished(),
+            "dropping the last handle must stop the supervising task"
+        );
+    }
+
+    /// A sink that lived a healthy while resets the backoff, so the next
+    /// death is retried promptly rather than at whatever delay the last
+    /// outage had climbed to.
+    ///
+    /// Without the reset, a session that hit one bad patch would carry a
+    /// five-second replacement delay for the rest of its life — every
+    /// later sink death, however isolated, leaving the pane-read guarantee
+    /// down for the full cap instead of a fifth of a second. That is
+    /// invisible in production and invisible to every other test here,
+    /// because both look like "the sink came back".
+    ///
+    /// Discriminating on the DELAY rather than on any internal counter:
+    /// after a run of failures the backoff is seconds, so an attempt
+    /// landing inside a 250 ms window can only mean it was reset.
+    #[tokio::test(start_paused = true)]
+    async fn a_healthy_sink_run_resets_the_respawn_backoff() {
+        let attempts = Arc::new(AtomicU64::new(0));
+        // Published by the opener so the test can kill the one client it
+        // hands out, which is how the "healthy run" is ended on cue.
+        let live_pid = Arc::new(AtomicU64::new(0));
+        let (state, _rx) = watch::channel(Some(1));
+        let counter = Arc::clone(&attempts);
+        let pid_slot = Arc::clone(&live_pid);
+        let task = tokio::spawn(run_session_sink(
+            "fh-test".to_string(),
+            dying_fake_sink(),
+            state.clone(),
+            move |_| {
+                let counter = Arc::clone(&counter);
+                let pid_slot = Arc::clone(&pid_slot);
+                async move {
+                    // Fail three times (so the backoff climbs), then hand
+                    // out one long-lived client, then fail forever.
+                    let attempt = counter.fetch_add(1, Ordering::Relaxed);
+                    if attempt == 3 {
+                        let sink = living_fake_sink();
+                        pid_slot.store(u64::from(sink.pid().unwrap_or(0)), Ordering::Relaxed);
+                        return Ok(sink);
+                    }
+                    anyhow::bail!("the tmux server is unreachable")
+                }
+            },
+        ));
+
+        advance_until(
+            || live_pid.load(Ordering::Relaxed) != 0,
+            "waiting for the supervisor to accept a healthy sink",
+        )
+        .await;
+        assert_eq!(
+            attempts.load(Ordering::Relaxed),
+            4,
+            "test premise: three failures must precede the healthy client"
+        );
+
+        // Let it be healthy for longer than the threshold, then kill it.
+        tokio::time::advance(SINK_HEALTHY_RUN + Duration::from_secs(1)).await;
+        tokio::task::yield_now().await;
+        let pid = live_pid.load(Ordering::Relaxed);
+        let killed = tokio::process::Command::new("kill")
+            .args(["-9", &pid.to_string()])
+            .status()
+            .await
+            .expect("running kill");
+        assert!(killed.success(), "test setup: killing the fake sink");
+
+        // The death must be NOTICED before the delay is measured;
+        // otherwise this would time the kill, not the backoff.
+        advance_until(
+            || state.borrow().is_none(),
+            "waiting for the supervisor to notice the healthy sink died",
+        )
+        .await;
+        let before = attempts.load(Ordering::Relaxed);
+        tokio::time::advance(SINK_RETRY_BASE + Duration::from_millis(50)).await;
+        tokio::task::yield_now().await;
+        assert!(
+            attempts.load(Ordering::Relaxed) > before,
+            "no replacement was attempted within {:?} of a healthy sink dying; the backoff was \
+             not reset and is still at the previous outage's delay",
+            SINK_RETRY_BASE
+        );
+
+        task.abort();
+        let _ = task.await;
     }
 
     /// A dummy launch-shim path for tests that never create a session:

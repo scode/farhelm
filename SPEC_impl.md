@@ -85,9 +85,11 @@ when the original sentence met tmux's actual flow-control mechanics): no code Fa
 — every Farhelm-side bound is backpressure or a visible detach, never discard.
 
 What "degrade to slow" is allowed to slow includes, on one of the two tmux behaviors below, the AGENT's own writes for
-the duration of a viewer's pause. SPEC.md's stall bullet now states that bounded-slowdown contract directly, and this
+the duration of a viewer's pause. SPEC.md's stall bullet states that bounded-slowdown contract directly, and this
 document's job is only to record the mechanism: nothing here throttles the agent deliberately, and the block is bounded
-by the flow-control window and ultimately by the stall detach.
+by the flow-control window and ultimately by the stall detach. The permission is deliberately left standing even though
+the supervisor no longer takes it up (see the session sink, below) — it is what keeps the layers above free of any
+assumption about which way tmux answered.
 
 The producer-side bound is tmux's, and tmux implements it in one of two ways. With `pause-after` set on the supervisor's
 control client, a client that stops reading gets EITHER of these (audited 2026-07-29 on 3.3a, 3.4, and 3.7b, both with a
@@ -107,6 +109,30 @@ deciding factor is how far tmux happens to have read ahead of the client at the 
 on how fast that client was consuming beforehand. Both paths satisfy the contract, so nothing above this layer may
 depend on which one occurs, and the supervisor implements both (it honors `%pause` whenever it arrives and simply keeps
 reading when it does not).
+
+The first path is nonetheless one the supervisor now prevents from arising against a Farhelm session, and the reason is
+the multi-terminal shape tabs introduced rather than any change of heart about degrading to slow. tmux stops reading a
+pane when no attached client is able to consume it, and that judgement is about the PANE, not about the stalled client's
+own terminal — so once a session has several terminals, a stalled viewer on a background tab could block the agent's
+writes, which is a very different bargain from a viewer slowing the terminal it is itself looking at. Two further
+measurements sharpened it (2026-08-02, tmux 3.4 and 3.7b): the block is not bounded by `pause-after` at all (observed
+persisting for a full 45-second window, ending only when the stalled client went away), and it reproduces only at high
+output rates, which is why an audit can honestly report it as intermittent. So every session with a live attachment now
+also carries one always-drained control client of its own — a session sink — whose only job is to be somebody tmux can
+always deliver to. With it attached, only the second path remains reachable, and the per-terminal clients additionally
+turn the session's other panes off for themselves (`refresh-client -A <pane>:off`), which is safe only because the sink
+is there to keep those panes readable. Nothing above this layer changes: `%pause` is still honored whenever it arrives,
+and code may still never assume which path tmux took.
+
+One qualification belongs with that claim rather than in a footnote, because it is the only hole left in it: a sink is a
+process, and a process can die. From the moment one does until its replacement has attached — a process spawn and one
+control-mode round trip, retried with exponential backoff capped at a few seconds, forever, for as long as any terminal
+of that session is attached — the session's terminals still have their foreign panes filtered off with nothing holding
+those panes readable, so a pane nobody is watching can stop being read for that window. The window is bounded by the
+backoff cap and is not otherwise defended against: closing it entirely would mean keeping a second sink permanently
+attached to every session, paying a certain cost against an uncertain one. An attach that arrives during such a window
+waits for the sink to come back rather than installing filters into it, which is the one case where the gap must not be
+allowed to widen.
 
 The xterm.js scrollback capacity is therefore sized to at most the tmux history floor (both currently 12,000 lines) — an
 invariant tests must pin — which makes the replay-based catch-up's end state observably equivalent to lossless slow
