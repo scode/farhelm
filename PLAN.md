@@ -51,6 +51,10 @@ Consequences of that stance:
   planning M3 in detail), and durable session metadata is exactly this milestone's ground.
 - **M4 — attachments and terminal tabs.** Paste/drop to path-at-cursor; tabs in the session cwd. Planned in detail in
   PLAN_M4.md.
+- **M4.5 — structural refactor pass.** Functional no-ops only, recommended by the post-M4 architecture assessment and
+  kept out of the functional stack deliberately: named per-message handlers replacing handle_control's giant match arms,
+  a service/ module directory split, a directory-style e2e test layout, and a present-tense refresh of module headers
+  that still narrate in milestone diffs. Each ships as its own refactor PR checked by the existing suite.
 - **M5 — status and profiles.** Running/waiting/idle heuristics with per-agent sharpening, list filtering, profile CRUD
   and starter profiles. Also live push of session-list changes to connected clients, replacing M2's polling — placed
   here because status transitions are what make polling genuinely painful, and the push channel serves both. Also
