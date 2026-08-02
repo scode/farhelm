@@ -45,10 +45,47 @@ fn main() {
     // everything). `Config::with_window` replaces the default builder
     // wholesale, which discards that always-on-top default along with the
     // "Dioxus App" placeholder title.
+    // `with_disable_drag_drop_handler(true)` is the attachments feature's
+    // half of this (PLAN_M4.md item 7, SPEC_impl.md's "one concrete thing
+    // to check early rather than debug late: wry's own file-drop handling
+    // swallows DOM drop events unless configured not to"). Dropping a file
+    // into a terminal is intercepted in the PAGE — assets/terminal.js —
+    // so the DOM `drop` event has to reach it, and anything that consumes
+    // the drag first breaks the headline feature on the desktop build
+    // alone, where nothing in CI would notice.
+    //
+    // The audit trail behind this call, against dioxus-desktop 0.7.9 and
+    // wry 0.53.5, since "configured not to" means different things per
+    // platform:
+    //
+    // - Without this, dioxus installs its own `wry` drag-drop handler
+    //   (`webview.rs`, gated on `cfg.disable_file_drop_handler`) to feed
+    //   its native file-drop support. That handler returns `false`, which
+    //   wry reads as "not handled" and answers by invoking the OS default
+    //   — so on macOS (`wkwebview/drag_drop.rs` calling `super`) and on
+    //   GTK the DOM events do still fire. On Windows they do not: dioxus's
+    //   own comment says the WebView2 host blocks HTML-native drag events
+    //   whenever a drop handler is present, and its config doc says the
+    //   handler must be disabled for the HTML drag and drop APIs to work.
+    // - So the setting is not load-bearing on the two platforms Farhelm
+    //   targets today, and it is set anyway: it is the difference between
+    //   "the DOM path works because a handler we do not want happens to
+    //   decline every event" and "nothing is competing for the drag". The
+    //   cost is dioxus's native file-drop support, which this UI does not
+    //   use — no `ondrop` handler exists anywhere in the component tree,
+    //   and the attachment path deliberately reads `File` objects in JS
+    //   rather than paths in Rust (see src/attachments.rs).
+    //
+    // Verifying the CAPABILITY rather than the configuration is the
+    // manual desktop pass PLAN_M4.md acceptance 9 records; this call is
+    // what that pass is checking the effect of. The checklist that pass
+    // has to work through — including the one risk it is most likely to
+    // trip over — is written out in `attachments`' module header.
     #[cfg(feature = "desktop")]
     let builder = builder.with_cfg(
         dioxus::desktop::Config::new()
-            .with_window(dioxus::desktop::WindowBuilder::new().with_title("farhelm")),
+            .with_window(dioxus::desktop::WindowBuilder::new().with_title("farhelm"))
+            .with_disable_drag_drop_handler(true),
     );
 
     builder.launch(App);

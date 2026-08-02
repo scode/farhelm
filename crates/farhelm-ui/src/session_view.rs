@@ -16,6 +16,7 @@ use crate::api::{
     POLL_INTERVAL_MS, close_tab, fetch_session, mint_lease, open_tab, restart_mode_for,
     restart_session,
 };
+use crate::attachments::{attachment_policy, attachment_status_element_id};
 use crate::tabs::{
     AGENT_BANNER_ELEMENT_ID, AGENT_TERMINAL_ELEMENT_ID, CLOSE_TAB_CONSEQUENCE,
     MAX_MOUNTED_TAB_ISLANDS, TAB_OPEN_ERROR_KEY, TabStripItem, sorted_tab_errors,
@@ -52,6 +53,18 @@ use crate::{ApiBase, RestartOffer, Session, SessionStatus};
 /// no-terminal explanation the session view has always rendered. A tab
 /// whose SHELL merely exited is a live, viewable dead pane, exactly as the
 /// agent terminal is.
+///
+/// ## Paste and drop interception (PLAN_M4.md item 7)
+///
+/// Every terminal this view mounts also intercepts pastes and drops, and
+/// this component's whole part in that is declarative: each pane renders
+/// an empty status line whose id comes from `attachments`, and each
+/// terminal spec carries that id alongside the shared policy the same
+/// module builds. The interception itself — classifying the payload,
+/// uploading, inserting the host path at the cursor — is terminal.js's,
+/// registered per island inside `mount()`, because a `File` on a DOM event
+/// is not something either renderer can hand to Rust (see the
+/// `attachments` module header).
 ///
 /// ## The attachment lease (PLAN_M4.md item 3)
 ///
@@ -539,6 +552,13 @@ pub(crate) fn SessionView(session: Session, on_back: EventHandler<()>) -> Elemen
         let mut specs = vec![serde_json::json!({
             "el": AGENT_TERMINAL_ELEMENT_ID,
             "banner": AGENT_BANNER_ELEMENT_ID,
+            // Where this terminal's own upload indicator and upload
+            // failures are written (PLAN_M4.md item 7). Per island, like
+            // the banner and for the same reason: a transfer belongs to
+            // the terminal that received the paste, and reporting it
+            // anywhere else would leave the user reading about a file
+            // they dropped somewhere they cannot see.
+            "status": attachment_status_element_id(AGENT_TERMINAL_ELEMENT_ID),
             "path": terminal_ws_path(&spec_session_id, None, &lease),
             // Only the agent terminal carries the restart generation: a
             // restart detaches the agent's attachment alone (the
@@ -554,6 +574,7 @@ pub(crate) fn SessionView(session: Session, on_back: EventHandler<()>) -> Elemen
             specs.push(serde_json::json!({
                 "el": tab_terminal_element_id(id),
                 "banner": tab_banner_element_id(id),
+                "status": attachment_status_element_id(&tab_terminal_element_id(id)),
                 "path": terminal_ws_path(&spec_session_id, Some(id), &lease),
                 "gen": 0,
                 "primary": false,
@@ -563,12 +584,23 @@ pub(crate) fn SessionView(session: Session, on_back: EventHandler<()>) -> Elemen
         Some(serde_json::Value::Array(specs).to_string())
     });
 
+    // The paste/drop rules this view's terminals run on (PLAN_M4.md item
+    // 7), as one object for the whole view rather than one per island —
+    // see `attachment_policy`.
+    //
+    // Memoized rather than rebuilt in the component body: it depends on
+    // the session id alone, so a poll can never change it, and the body
+    // re-runs on every one of those three-second polls. Without the memo
+    // this would serialize the same ~1KB of JSON forever, for nothing.
+    let policy_session_id = session.id.clone();
+    let attach_policy = use_memo(move || attachment_policy(&policy_session_id).to_string());
     use_effect(move || {
         // Nothing attaches until the lease is minted; `lease_error` is
         // what the user sees if it never is.
         let Some(specs) = terminal_specs() else {
             return;
         };
+        let attach_policy = attach_policy();
         let base_js = serde_json::to_string(&base).expect("string is serializable");
         let js = format!(
             r#"(function() {{
@@ -577,7 +609,7 @@ pub(crate) fn SessionView(session: Session, on_back: EventHandler<()>) -> Elemen
                 (function waitForIsland() {{
                     if (window.__farhelmSyncGeneration !== gen) return;
                     if (window.farhelmTerm) {{
-                        farhelmTerm.sync({base_js}, {specs});
+                        farhelmTerm.sync({base_js}, {specs}, {attach_policy});
                     }} else {{
                         setTimeout(waitForIsland, 50);
                     }}
@@ -831,6 +863,22 @@ pub(crate) fn SessionView(session: Session, on_back: EventHandler<()>) -> Elemen
                     "data-terminal": "agent",
                     div { id: "{AGENT_BANNER_ELEMENT_ID}", class: "banner" }
                     div { id: "{AGENT_TERMINAL_ELEMENT_ID}", class: "terminal" }
+                    // Empty, hidden, and never touched by Dioxus again —
+                    // terminal.js owns its content for the same reason it
+                    // owns the banner's: an upload's progress and failures
+                    // are events on the island's own DOM path, not
+                    // reactive state, and routing them back through the
+                    // eval channel would put the one message a failed
+                    // attachment gets on the channel that is dead on wry's
+                    // WKWebView (MT-5).
+                    //
+                    // Last in the pane, because it OVERLAYS the terminal
+                    // (app.css explains why it must not take layout space)
+                    // and paint order is what puts it on top.
+                    div {
+                        id: "{attachment_status_element_id(AGENT_TERMINAL_ELEMENT_ID)}",
+                        class: "attach-status",
+                    }
                 }
                 for (index , tab_id) in tabs.iter().enumerate() {
                     div {
@@ -846,6 +894,12 @@ pub(crate) fn SessionView(session: Session, on_back: EventHandler<()>) -> Elemen
                         if index < MAX_MOUNTED_TAB_ISLANDS {
                             div { id: "{tab_banner_element_id(tab_id)}", class: "banner" }
                             div { id: "{tab_terminal_element_id(tab_id)}", class: "terminal" }
+                            // Last, and overlaid — see the agent pane's
+                            // own status element above.
+                            div {
+                                id: "{attachment_status_element_id(&tab_terminal_element_id(tab_id))}",
+                                class: "attach-status",
+                            }
                         } else {
                             div { class: "terminal-not-mounted",
                                 "this session reports more than {MAX_MOUNTED_TAB_ISLANDS} terminal tabs; \

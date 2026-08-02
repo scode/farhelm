@@ -41,11 +41,17 @@
 //!   the renderer-free derivations (which tabs to show, their labels and
 //!   DOM ids, the WebSocket path) plus the strip's one presentational
 //!   piece, `TabStripItem`, and the close-confirmation wording.
+//! - `attachments`: the attachment domain of paste/drop interception
+//!   (PLAN_M4.md item 7) — the classification rule, the naming rule, the
+//!   upload endpoint, and the wording of every message a transfer can put
+//!   on screen, serialized into the page for terminal.js to apply (see
+//!   that module's header for why the runtime path cannot live in Rust).
 //! - `session_view`: [`SessionView`] itself, the stateful component that
 //!   owns one session's terminals, restart affordance, and tab lifecycle,
-//!   calling into `api` for I/O and `tabs` for the pure derivations.
+//!   calling into `api` for I/O and `tabs`/`attachments` for the pure
+//!   derivations.
 //!
-//! All four are private modules with `pub(crate)` entry points: nothing
+//! All five are private modules with `pub(crate)` entry points: nothing
 //! outside this crate has a legitimate reason to reach into any of them,
 //! so `main.rs` only ever sees `App`/`ApiBase`, both defined and exported
 //! here.
@@ -54,6 +60,7 @@ use dioxus::prelude::*;
 use serde::Deserialize;
 
 mod api;
+mod attachments;
 mod list;
 mod session_view;
 mod tabs;

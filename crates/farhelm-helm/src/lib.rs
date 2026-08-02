@@ -135,7 +135,14 @@ fn build_router(
             // other route (small JSON bodies) keeps the default's
             // protection against a runaway control-message body.
             axum::routing::post(upload_attachment)
-                .layer(axum::extract::DefaultBodyLimit::disable()),
+                .options(attachment_preflight)
+                .layer(axum::extract::DefaultBodyLimit::disable())
+                // Scoped to this ONE route rather than the router: it is
+                // the only endpoint a cross-origin caller has any reason
+                // to reach (see `attachment_cors`), and a CORS header on
+                // the session list or the delete route would widen what a
+                // custom-scheme page can read for no benefit.
+                .layer(axum::middleware::from_fn(attachment_cors)),
         )
         .route("/api/sessions/{id}/term", get(term_ws))
         .with_state(Arc::new(AppState { client }));
@@ -303,12 +310,119 @@ fn origin_is_allowed(headers: &axum::http::HeaderMap, port: u16) -> bool {
     // custom-scheme Origin, which is why this is safe to allow; `null`
     // (sandboxed iframes, data: documents) deliberately is not.
     let origin_ok = headers.get(axum::http::header::ORIGIN).is_none_or(|v| {
-        v.to_str().is_ok_and(|o| {
-            is_loopback_authority(o) || o.starts_with("dioxus://") || o.starts_with("wry://")
-        })
+        v.to_str()
+            .is_ok_and(|o| is_loopback_authority(o) || is_desktop_webview_origin(o))
     });
 
     host_ok && origin_ok
+}
+
+/// Whether an `Origin` is one of the desktop build's own webview schemes.
+///
+/// The single definition of "the desktop app is calling", shared by
+/// [`origin_is_allowed`] (which decides whether the request is answered at
+/// all) and [`attachment_cors`] (which decides whether the ANSWER may be
+/// read). Two lists would be a way for those to disagree, and disagreeing
+/// means either the desktop build breaks or a web page gets CORS access it
+/// was never meant to have.
+///
+/// Safe to allow because a web page cannot forge a custom-scheme `Origin`:
+/// only a native webview serving the app from that scheme produces one.
+fn is_desktop_webview_origin(origin: &str) -> bool {
+    origin.starts_with("dioxus://") || origin.starts_with("wry://")
+}
+
+/// The CORS headers the attachment upload route answers desktop callers
+/// with — and the reason SPEC.md's "the two client forms have the same
+/// capabilities" survives contact with the desktop build.
+///
+/// The web build has no CORS problem: the helm serves the page, so its
+/// uploads are same-origin. The desktop build does. Its page is served by
+/// wry from a custom scheme while the helm answers on
+/// `http://127.0.0.1:<port>`, so every `fetch` from it is cross-origin —
+/// and unlike the terminal WebSocket (upgrades are not CORS-gated, which
+/// is why terminals have always worked there), an upload is a plain
+/// request the WEBVIEW will refuse to hand back unless the response says
+/// the caller may read it. Without this the desktop attachment flow fails
+/// in the worst way available: the bytes reach the supervisor and publish,
+/// the reply carrying the path is withheld from the page, and the user is
+/// told their attachment failed while a copy of it sits on the host.
+///
+/// Deliberately narrow in every direction:
+///
+/// - Only [`is_desktop_webview_origin`] origins get headers at all — the
+///   same origins the loopback guard already lets through, echoed back
+///   rather than answered with `*`, with `Vary: Origin` so nothing caches
+///   one origin's answer for another.
+/// - Only this route carries it (see `build_router`). The session list and
+///   the delete route have no cross-origin caller, so they get no
+///   cross-origin readability.
+/// - Only the methods and header this route actually needs: `POST` (plus
+///   the `OPTIONS` preflight itself), and `content-type`, which is what
+///   makes the browser preflight in the first place — `fetch(url, {body:
+///   file})` sets it from the blob, and an image type is not one of the
+///   three CORS-simple values.
+///
+/// Applied as a middleware rather than inside the handler because the
+/// headers have to be on EVERY answer, error ones included: a 500 the page
+/// cannot read is a failure with no message, which is precisely the
+/// silent-failure mode SPEC.md's "upload failures must be visible" rules
+/// out. The one response it deliberately does not reach is the loopback
+/// guard's own 403, which is outside this layer — an origin that was
+/// refused must not be handed the means to read the refusal.
+async fn attachment_cors(
+    req: axum::extract::Request,
+    next: axum::middleware::Next,
+) -> axum::response::Response {
+    let origin = req
+        .headers()
+        .get(axum::http::header::ORIGIN)
+        .and_then(|value| value.to_str().ok())
+        .filter(|origin| is_desktop_webview_origin(origin))
+        .map(|origin| origin.to_string());
+    let mut response = next.run(req).await;
+    let Some(origin) = origin else {
+        return response;
+    };
+    // A header value that cannot be built from an origin this guard
+    // already accepted would mean the origin contained control bytes; the
+    // honest answer is then no CORS headers rather than a mangled one.
+    let Ok(origin) = axum::http::HeaderValue::from_str(&origin) else {
+        return response;
+    };
+    let headers = response.headers_mut();
+    headers.insert(axum::http::header::ACCESS_CONTROL_ALLOW_ORIGIN, origin);
+    headers.insert(
+        axum::http::header::VARY,
+        axum::http::HeaderValue::from_static("Origin"),
+    );
+    headers.insert(
+        axum::http::header::ACCESS_CONTROL_ALLOW_METHODS,
+        axum::http::HeaderValue::from_static("POST, OPTIONS"),
+    );
+    headers.insert(
+        axum::http::header::ACCESS_CONTROL_ALLOW_HEADERS,
+        axum::http::HeaderValue::from_static("content-type"),
+    );
+    // Ten minutes: long enough that a burst of pastes does not preflight
+    // every time, short enough that a helm restarted with different rules
+    // is not shadowed by a stale permission for the rest of the day.
+    headers.insert(
+        axum::http::header::ACCESS_CONTROL_MAX_AGE,
+        axum::http::HeaderValue::from_static("600"),
+    );
+    response
+}
+
+/// The upload route's CORS preflight. Answers nothing itself — the body is
+/// empty and the meaning is entirely in the headers [`attachment_cors`]
+/// attaches on the way out.
+///
+/// Present as a real route because a preflight is a real request: without
+/// it, `OPTIONS /api/sessions/{id}/attachments` is a 405 the browser reads
+/// as "not allowed", and the desktop build's upload never leaves the page.
+async fn attachment_preflight() -> axum::response::Response {
+    axum::http::StatusCode::NO_CONTENT.into_response()
 }
 
 /// The ssh argv for reaching a remote supervisor, as a pure function so
@@ -3705,6 +3819,242 @@ mod tests {
         let response = app.oneshot(request).await.unwrap();
         assert_eq!(response.status(), axum::http::StatusCode::OK);
         peer.await.unwrap();
+    }
+
+    /// A supervisor connection that completes the handshake and then says
+    /// nothing, for the CORS tests whose requests never reach a handler.
+    ///
+    /// `build_router` needs a live `SupervisorClient`, but a preflight is
+    /// answered by the route itself and a refused origin never gets past
+    /// the middleware — so scripting upload frames for either would be
+    /// scenery.
+    async fn idle_supervisor_client() -> Arc<super::SupervisorClient> {
+        use farhelm_proto::io::{FrameReader, FrameWriter, handshake};
+
+        let (client_side, peer_side) = tokio::io::duplex(64 * 1024);
+        tokio::spawn(async move {
+            let (r, w) = tokio::io::split(peer_side);
+            let mut reader = FrameReader::new(r);
+            let mut writer = FrameWriter::new(w);
+            handshake(&mut reader, &mut writer, "supervisor")
+                .await
+                .unwrap();
+            // Held open: dropping the peer would close the client and turn
+            // every later request into a transport error.
+            std::future::pending::<()>().await;
+        });
+        let (r, w) = tokio::io::split(client_side);
+        super::SupervisorClient::start(r, w).await.unwrap()
+    }
+
+    /// The desktop build's `fetch` preflights before it may upload
+    /// anything, because `fetch(url, {body: file})` sets a content type
+    /// the CORS-simple rules do not cover. Without an `OPTIONS` route that
+    /// answers with the allowed method and header, the browser stops
+    /// there and the desktop attachment flow never sends a byte.
+    ///
+    /// Pinned per header rather than "some CORS headers exist": each one
+    /// is separately load-bearing, and a preflight missing any of them
+    /// fails in a way whose only symptom is an upload that never happens.
+    #[tokio::test]
+    async fn attachment_preflight_answers_the_desktop_webview_origin() {
+        use tower::ServiceExt;
+
+        let app = build_router(idle_supervisor_client().await, None, 7433);
+        let request = axum::http::Request::builder()
+            .method("OPTIONS")
+            .uri("/api/sessions/sess-1/attachments?filename=shot.png")
+            .header("host", "127.0.0.1:7433")
+            .header("origin", "dioxus://index.html")
+            .header("access-control-request-method", "POST")
+            .header("access-control-request-headers", "content-type")
+            .body(axum::body::Body::empty())
+            .unwrap();
+
+        let response = app.oneshot(request).await.unwrap();
+        assert_eq!(response.status(), axum::http::StatusCode::NO_CONTENT);
+        let headers = response.headers();
+        assert_eq!(
+            headers["access-control-allow-origin"], "dioxus://index.html",
+            "the origin is echoed, not answered with a wildcard"
+        );
+        assert_eq!(headers["access-control-allow-methods"], "POST, OPTIONS");
+        assert_eq!(headers["access-control-allow-headers"], "content-type");
+        assert_eq!(
+            headers["vary"], "Origin",
+            "one origin's answer must not be cached for another"
+        );
+        assert!(headers.contains_key("access-control-max-age"));
+    }
+
+    /// The upload itself: a successful POST from the desktop webview's
+    /// origin must come back READABLE, or the page is told nothing while
+    /// the file sits published on the host — the worst available failure,
+    /// since the user is shown an error for an attachment that exists.
+    #[tokio::test]
+    async fn a_successful_upload_is_readable_by_the_desktop_webview() {
+        use farhelm_proto::ControlMsg;
+        use farhelm_proto::io::{FrameReader, FrameWriter, handshake, parse_control};
+        use tower::ServiceExt;
+
+        let content = b"desktop-upload".to_vec();
+        let (client_side, peer_side) = tokio::io::duplex(64 * 1024);
+        let peer = tokio::spawn({
+            let len = content.len();
+            async move {
+                let (r, w) = tokio::io::split(peer_side);
+                let mut reader = FrameReader::new(r);
+                let mut writer = FrameWriter::new(w);
+                handshake(&mut reader, &mut writer, "supervisor")
+                    .await
+                    .unwrap();
+                let request = parse_control(&reader.read_frame().await.unwrap().unwrap()).unwrap();
+                let ControlMsg::BeginUpload {
+                    req_id, channel, ..
+                } = request
+                else {
+                    panic!("expected BeginUpload, got {request:?}");
+                };
+                writer
+                    .write_control(&ControlMsg::UploadStarted { req_id, channel })
+                    .await
+                    .unwrap();
+                let mut received = 0;
+                while received < len {
+                    received += reader.read_frame().await.unwrap().unwrap().body.len();
+                }
+                let request = parse_control(&reader.read_frame().await.unwrap().unwrap()).unwrap();
+                let ControlMsg::CommitUpload { req_id, .. } = request else {
+                    panic!("expected CommitUpload, got {request:?}");
+                };
+                writer
+                    .write_control(&ControlMsg::UploadCommitted {
+                        req_id,
+                        path: "/state/attachments/sess-1/shot.png".to_string(),
+                    })
+                    .await
+                    .unwrap();
+            }
+        });
+
+        let (r, w) = tokio::io::split(client_side);
+        let client = super::SupervisorClient::start(r, w).await.unwrap();
+        let app = build_router(client, None, 7433);
+        let request = axum::http::Request::builder()
+            .method("POST")
+            .uri("/api/sessions/sess-1/attachments?filename=shot.png")
+            .header("host", "127.0.0.1:7433")
+            .header("origin", "wry://localhost")
+            .header("content-length", content.len().to_string())
+            .body(axum::body::Body::from(content))
+            .unwrap();
+
+        let response = app.oneshot(request).await.unwrap();
+        assert_eq!(response.status(), axum::http::StatusCode::OK);
+        assert_eq!(
+            response.headers()["access-control-allow-origin"],
+            "wry://localhost"
+        );
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let value: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(value["path"], "/state/attachments/sess-1/shot.png");
+        peer.await.unwrap();
+    }
+
+    /// The half that a handler-level CORS implementation gets wrong: an
+    /// ERROR response has to be readable too.
+    ///
+    /// SPEC.md requires upload failures to be visible, and a response the
+    /// webview refuses to hand back is a failure with no message at all —
+    /// the browser reports a generic network error and the supervisor's
+    /// own words (the whole point of the pinned contract's verbatim error
+    /// body) never reach the user.
+    #[tokio::test]
+    async fn a_refused_upload_is_readable_by_the_desktop_webview_too() {
+        use farhelm_proto::io::{FrameReader, FrameWriter, handshake, parse_control};
+        use farhelm_proto::{ControlMsg, ErrorKind};
+        use tower::ServiceExt;
+
+        const SENTINEL: &str = "no such session: sess-gone";
+        let (client_side, peer_side) = tokio::io::duplex(64 * 1024);
+        let peer = tokio::spawn(async move {
+            let (r, w) = tokio::io::split(peer_side);
+            let mut reader = FrameReader::new(r);
+            let mut writer = FrameWriter::new(w);
+            handshake(&mut reader, &mut writer, "supervisor")
+                .await
+                .unwrap();
+            let request = parse_control(&reader.read_frame().await.unwrap().unwrap()).unwrap();
+            let ControlMsg::BeginUpload { req_id, .. } = request else {
+                panic!("expected BeginUpload, got {request:?}");
+            };
+            writer
+                .write_control(&ControlMsg::Error {
+                    req_id,
+                    message: SENTINEL.to_string(),
+                    kind: ErrorKind::NotFound,
+                })
+                .await
+                .unwrap();
+        });
+
+        let (r, w) = tokio::io::split(client_side);
+        let client = super::SupervisorClient::start(r, w).await.unwrap();
+        let app = build_router(client, None, 7433);
+        let request = axum::http::Request::builder()
+            .method("POST")
+            .uri("/api/sessions/sess-gone/attachments?filename=shot.png")
+            .header("host", "127.0.0.1:7433")
+            .header("origin", "dioxus://index.html")
+            .header("content-length", "4")
+            .body(axum::body::Body::from("data"))
+            .unwrap();
+
+        let response = app.oneshot(request).await.unwrap();
+        assert_eq!(response.status(), axum::http::StatusCode::NOT_FOUND);
+        assert_eq!(
+            response.headers()["access-control-allow-origin"],
+            "dioxus://index.html",
+            "an error the page cannot read is a failure with no message"
+        );
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        assert!(String::from_utf8_lossy(&body).contains(SENTINEL));
+        peer.await.unwrap();
+    }
+
+    /// The CORS headers must not widen what the loopback guard allows.
+    ///
+    /// A page on another origin is refused before it reaches the route at
+    /// all, and — the part worth pinning — the refusal carries NO
+    /// `Access-Control-Allow-Origin`, so the attacker's page cannot even
+    /// read the 403. Handing one back would turn a refusal into a probe
+    /// that confirms a helm is listening.
+    #[tokio::test]
+    async fn a_foreign_origin_is_refused_without_cors_headers() {
+        use tower::ServiceExt;
+
+        let app = build_router(idle_supervisor_client().await, None, 7433);
+        let request = axum::http::Request::builder()
+            .method("POST")
+            .uri("/api/sessions/sess-1/attachments?filename=shot.png")
+            .header("host", "127.0.0.1:7433")
+            .header("origin", "https://attacker.example")
+            .header("content-length", "4")
+            .body(axum::body::Body::from("data"))
+            .unwrap();
+
+        let response = app.oneshot(request).await.unwrap();
+        assert_eq!(response.status(), axum::http::StatusCode::FORBIDDEN);
+        assert!(
+            !response
+                .headers()
+                .contains_key("access-control-allow-origin"),
+            "a refused origin must not be handed the means to read the refusal"
+        );
     }
 
     /// A zero-byte attachment is an ordinary upload, not a refusal: the

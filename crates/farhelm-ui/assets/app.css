@@ -430,6 +430,56 @@ body,
   font-size: 13px;
 }
 
+/* One terminal's attachment status line (PLAN_M4.md item 7), written by
+   terminal.js and hidden — like `.banner` — until it has something to
+   say.
+
+   OVERLAID on the pane's bottom-right corner rather than placed in the
+   pane's flex column, and that is load-bearing rather than cosmetic. An
+   in-flow line would take height from the terminal, which the per-island
+   ResizeObserver would answer with a real `resize-window` — so every
+   single attachment would resize the pty twice (once when the indicator
+   appears, once when it goes), reflowing the scrollback and making a
+   full-screen agent redraw itself. Overlaying costs a covered corner for
+   as long as there is something to say; resizing costs a visible redraw
+   on the terminal's whole content every time anyone pastes a file.
+
+   Bottom-RIGHT and content-width for the same reason: the bottom row is
+   where the cursor is, and a full-width strip there would cover the line
+   the user is typing on. The right end of that line is almost always
+   empty.
+
+   Two looks, because the two states are not the same kind of message. An
+   upload in flight is deliberately unobtrusive — PLAN_M4.md item 7 asks
+   for an indicator, not a meter, and a transfer that is going fine should
+   not shout. A failure uses the same red the view's other error lines use
+   and stays until the next attachment starts, because SPEC.md's rule is
+   that an upload failure is visible and an attachment never disappears
+   silently. */
+.attach-status {
+  display: none;
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  max-width: 80%;
+  z-index: 2;
+  /* Nothing here is interactive, and the terminal underneath it is: a
+     mouse selection dragged into this corner must reach xterm rather than
+     stopping at a status message. */
+  pointer-events: none;
+  padding: 2px 10px;
+  font-size: 12px;
+  background: #232833;
+}
+
+.attach-busy {
+  color: #b8c0cc;
+}
+
+.attach-error {
+  color: #e08080;
+}
+
 /* The "take control" button terminal.js paints into a detach banner when
    this view lost the session to another client (see that file's takeover
    latch). Styled against the banner's red rather than the page background,

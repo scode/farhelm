@@ -54,6 +54,32 @@
 // set under the same lease, displacing whoever holds it now. That is the
 // same visible, deliberate takeover the other client performed, not an
 // accident.
+//
+// ## Paste and drop interception (PLAN_M4.md item 7)
+//
+// SPEC.md's attachments contract quantifies over "any of a session's
+// terminals", so the hooks are registered PER ISLAND, inside `mount()`,
+// on the island's own element: the file lands in the terminal that
+// received it, which is the only reading of "at the cursor" that means
+// anything once a session has several terminals.
+//
+// This file owns the DOM half only. The rules — which flavor of a payload
+// wins, what a pasted image is named, what separates two inserted paths,
+// and the exact wording of every message an upload puts on screen — are
+// computed in Rust and handed here as the `attach` policy `sync()` takes
+// (farhelm-ui/src/attachments.rs, whose header explains why the runtime
+// path cannot be Rust's: a `File` on a DOM event is not something either
+// renderer can pass across, and on wry's WKWebView the channel that would
+// carry it is dead). What is left here is genuinely thin: read the
+// payload, look the answer up, upload, insert.
+//
+// Insertion goes through `term.paste()` — the same call xterm's own paste
+// handler makes — so bracketed paste, application cursor keys, and every
+// other mode the pane is in are handled by the code that already handles
+// them, and the path lands at whatever cursor position is current when the
+// transfer finishes. Nothing here ever calls `focus()`: an upload
+// completing must not steal the caret from wherever the user has since put
+// it.
 
 (function () {
   "use strict";
@@ -165,6 +191,604 @@
     if (window.__farhelmIslands) delete window.__farhelmIslands[el];
   }
 
+
+  // The counter behind a pasted image's `pasted-<n>.<ext>` name, per PAGE
+  // rather than per island: two terminals of one session share a
+  // supervisor-side attachments directory, so a per-island counter would
+  // have them both minting `pasted-1.png` and relying on collision
+  // suffixing to tell the results apart. The supervisor handles that
+  // correctly either way (its `name_candidates`), but the paths the user
+  // reads are nicer when the client does not manufacture the collision.
+  let pastedSequence = 0;
+
+  // How long the one-byte readability probe may take before it is
+  // abandoned (see `probe` inside `installAttachments`). A mechanism
+  // bound, not a policy: reading a single byte off a local file is
+  // microseconds, and anything that has not answered in five seconds is a
+  // stuck filesystem — a network mount that went away mid-drag, a device
+  // that stopped responding. Waiting forever would leave an upload the
+  // user was told about pending with nothing to show for it.
+  const PROBE_TIMEOUT_MS = 5000;
+
+  /**
+   * Substitute `{key}` placeholders in one of the policy's message
+   * templates, in ONE pass.
+   *
+   * Both properties matter and both were bugs at some point. A
+   * replacement FUNCTION is used rather than a string, because
+   * `String.replace` interprets `$&`, `$1` and friends in a string
+   * replacement — and one of the values substituted here is the helm's own
+   * error text, arbitrary prose from a supervisor that under `--ssh` is
+   * another machine, which could rewrite the message around it. And the
+   * substitution is single-pass, because a sequence of per-key replaces
+   * re-scans what earlier keys already inserted: a file named
+   * `{reason}.txt` would otherwise have the error message spliced into its
+   * own name.
+   *
+   * A `{key}` with no value keeps its braces rather than vanishing, which
+   * makes a policy/JS mismatch visible instead of silently dropping the
+   * one word that carried the meaning.
+   */
+  function fillTemplate(template, values) {
+    return String(template == null ? "" : template).replace(
+      /\{(\w+)\}/g,
+      (whole, key) =>
+        Object.prototype.hasOwnProperty.call(values, key) ? String(values[key]) : whole,
+    );
+  }
+
+  /**
+   * A MIME type reduced to the form the extension rule matches on:
+   * parameters dropped, trimmed, lowercased. Mirrors `normalized_mime` in
+   * farhelm-ui/src/attachments.rs.
+   */
+  function normalizeMime(mime) {
+    return String(mime || "").split(";")[0].trim().toLowerCase();
+  }
+
+  /**
+   * Register one island's paste/drop interception on its own element and
+   * return the handle `unmount()` uses to take it all back down, or `null`
+   * when there is nothing to install (no policy, or the element is gone).
+   *
+   * `spec.status` names the DOM node this writes progress and failures
+   * into; `policy` is `attachments::attachment_policy`'s JSON;
+   * `isConnected` reports whether this island's socket is open right now.
+   * Everything below is scoped to this one island: its own listeners, its
+   * own in-flight set, its own `AbortController`, its own readers, its own
+   * error list.
+   *
+   * ## What is deliberate here
+   *
+   * - A DROP is always `preventDefault`ed, whatever it carried. An
+   *   unhandled drop is acted on by the ENGINE — most usefully for us, by
+   *   navigating to the dropped file — which would replace the page and
+   *   take every terminal on it down. Text that reaches a drop is inserted
+   *   as terminal input, which is SPEC.md's own reading ("plain text
+   *   passes through as ordinary terminal input") and, unlike a paste, has
+   *   no existing handler to fall through to.
+   * - A PASTE is intercepted only when a file or an image wins. Plain text
+   *   is left entirely alone — no `preventDefault`, no `stopPropagation`
+   *   — so xterm's own paste handler runs exactly as it did before this
+   *   existed. That is what makes "pasted text that looks like a path is
+   *   still text" true by construction rather than by a heuristic that
+   *   could misfire.
+   * - The listeners are CAPTURE-phase, for the reason the selection
+   *   listener above already documents: xterm registers its paste handler
+   *   on its hidden helper textarea and calls `stopPropagation()`, so a
+   *   bubble-phase listener on any ancestor never runs.
+   * - Uploads within one payload run SEQUENTIALLY. The contract is paths
+   *   inserted in completion order, which sequential satisfies while also
+   *   bounding what one drop can do — dropping fifty files must not open
+   *   fifty concurrent uploads.
+   * - Nothing is uploaded into a terminal that cannot receive the path.
+   *   The whole point of an attachment is the path that lands at the
+   *   cursor, and `term.paste()` on a closed socket drops it silently, so
+   *   a payload offered to a detached terminal is refused with a visible
+   *   message and an upload that OUTLIVES its socket reports the published
+   *   path instead of pasting into the void.
+   */
+  function installAttachments(spec, baseUrl, policy, term, dismissSelectionSoon, isConnected) {
+    // No policy at all means no interception rather than an exception:
+    // `sync()` is called from Rust, and a caller that predates item 7
+    // (or a future one that turns this off) must still get a working
+    // terminal.
+    if (!policy || !policy.upload) return null;
+    const el = document.getElementById(spec.el);
+    if (!el) return null;
+    // Defaulted rather than assumed present. Every message below is read
+    // out of this object inside a DOM event handler, and an exception
+    // thrown there would take the whole paste down — including the plain
+    // text path, which has nothing to do with the policy. The Rust side
+    // always sends a full set (its own tests pin the keys); this is the
+    // blast radius, not a second opinion about the contract.
+    const messages = policy.text || {};
+    const safeChars = policy.safePathChars || "";
+
+    // Aborts every in-flight upload when the island goes away, so a
+    // transfer cannot outlive the terminal it was meant to land in and
+    // then try to paste into a disposed xterm instance.
+    const controller = typeof AbortController === "function" ? new AbortController() : null;
+    // The uploads this island has in flight, keyed by a token minted per
+    // FILE rather than counted.
+    //
+    // A count plus a "most recent name" cannot describe the indicator
+    // correctly: finish the second of two uploads and the count says one
+    // while the remembered name is the finished file's, so the line reads
+    // "attaching <the one that just landed>…" for as long as the other
+    // one runs. Holding the set means the sole-remaining name is a fact
+    // about what is left, not a memory of what started last.
+    const active = new Map();
+    let nextToken = 0;
+    // The readability probes in flight, so disposal can abort them: a
+    // `FileReader` is not covered by the fetch `AbortController` and would
+    // otherwise keep a stuck read (and its timer) alive past the island.
+    const readers = new Set();
+    let errors = [];
+    let disposed = false;
+
+    /**
+     * Repaint the status line from the state above.
+     *
+     * `textContent` on every line, never `innerHTML`: the strings here
+     * carry a filename from the user's own filesystem and an error message
+     * from a supervisor that may be a different machine, and neither is
+     * markup this page has any reason to parse.
+     */
+    function render() {
+      if (disposed) return;
+      const node = document.getElementById(spec.status);
+      if (!node) return;
+      node.textContent = "";
+      const lines = [];
+      if (active.size === 1) {
+        const [name] = active.values();
+        lines.push(["attach-busy", fillTemplate(messages.busyOne, { name })]);
+      } else if (active.size > 1) {
+        lines.push(["attach-busy", fillTemplate(messages.busyMany, { count: active.size })]);
+      }
+      for (const message of errors) lines.push(["attach-error", message]);
+      for (const [className, message] of lines) {
+        const line = document.createElement("div");
+        line.className = className;
+        line.textContent = message;
+        node.appendChild(line);
+      }
+      // Cleared back to the stylesheet's own `display: none` when there is
+      // nothing to say, so a finished upload leaves no empty strip behind.
+      node.style.display = lines.length ? "block" : "";
+    }
+
+    function fail(message) {
+      errors.push(message);
+      render();
+    }
+
+    /**
+     * Insert text into this terminal through the same call xterm's own
+     * paste handler makes, so bracketed paste and the pane's other modes
+     * are handled by the code that already handles them.
+     *
+     * The selection sweep rides along because an intercepted paste never
+     * reaches the listener that normally does it (this island's own
+     * capture handler stopped the event), and MT-6's stale highlight would
+     * otherwise be painted over the text this just inserted.
+     */
+    function insert(text) {
+      if (disposed || !text) return;
+      term.paste(text);
+      dismissSelectionSoon();
+    }
+
+    /**
+     * A host path as it can safely be typed at a shell: bare when every
+     * character is in the policy's safe set, POSIX single-quoted when it
+     * is not.
+     *
+     * The supervisor sanitizes the FILENAME, but the path's parents come
+     * from the user's own `--state-dir` — `~/Library/Application
+     * Support/…` is a perfectly ordinary place to keep state, and an
+     * unquoted path from there reaches the agent as two nonexistent
+     * files. A `$(…)` in one would be worse than useless. See
+     * `SHELL_SAFE_PATH_CHARS` in farhelm-ui/src/attachments.rs for why the
+     * safe set is the conservative one.
+     *
+     * The escape is the standard POSIX one: single quotes cannot be
+     * escaped inside single quotes, so an embedded `'` closes the string,
+     * contributes an escaped quote, and reopens it.
+     */
+    function shellSafePath(path) {
+      let safe = path.length > 0;
+      for (const character of path) {
+        if (safeChars.indexOf(character) < 0) {
+          safe = false;
+          break;
+        }
+      }
+      if (safe) return path;
+      return "'" + path.split("'").join("'\\''") + "'";
+    }
+
+    /**
+     * The extension a generated name gets for this MIME type — the JS half
+     * of `image_extension_for` in farhelm-ui/src/attachments.rs, whose
+     * docs carry the reasoning for each step.
+     *
+     * Derived rather than looked up because PLAN_M4.md item 7 says the
+     * extension comes from the MIME type, and no shipped list can cover
+     * every `image/*` a clipboard might carry. Only the corrections live
+     * in the policy (`extensionAliases`).
+     */
+    function extensionFor(mime) {
+      const normalized = normalizeMime(mime);
+      const fallback = policy.fallbackExtension || "bin";
+      if (normalized.indexOf("image/") !== 0) return fallback;
+      let token = normalized.slice("image/".length).split("+")[0];
+      token = token.slice(token.lastIndexOf(".") + 1);
+      if (token.indexOf("x-") === 0) token = token.slice(2);
+      token = token.replace(/[^a-z0-9]/g, "");
+      if (!token || token.length > (policy.maxExtensionLength || 12)) return fallback;
+      return (policy.extensionAliases || {})[token] || token;
+    }
+
+    /**
+     * Whether this entry is raw image DATA rather than a file reference —
+     * the narrow rule `classify`'s docs in
+     * farhelm-ui/src/attachments.rs spell out, and the only thing that
+     * decides whether an upload keeps its name.
+     *
+     * Nameless image bytes are unambiguous. A name is treated as
+     * engine-synthesized only when it is EXACTLY the placeholder for this
+     * payload's own type and the `File` was stamped just now, which is
+     * what keeps a copied `holiday.png` — and even a copied `image.png`
+     * from last week — under its own name.
+     */
+    function isRawClipboardImage(source, file) {
+      if (source !== "clipboard") return false;
+      const mime = normalizeMime(file.type);
+      if (mime.indexOf("image/") !== 0) return false;
+      const name = String(file.name || "");
+      if (name === "") return true;
+      const placeholder = (policy.placeholderStem || "image") + "." + extensionFor(mime);
+      if (name.toLowerCase() !== placeholder) return false;
+      const stamped = typeof file.lastModified === "number" ? file.lastModified : 0;
+      return Math.abs(Date.now() - stamped) <= (policy.placeholderMaxAgeMs || 0);
+    }
+
+    /**
+     * The name one entry is uploaded under: its own filename, or a
+     * generated `pasted-<n>.<ext>` when there is no name a user chose —
+     * raw clipboard image data, and the occasional engine that hands over
+     * a nameless `File`.
+     */
+    function attachmentName(file, generated) {
+      if (!generated && file.name) return file.name;
+      pastedSequence += 1;
+      return policy.namePrefix + pastedSequence + "." + extensionFor(file.type);
+    }
+
+    /**
+     * Sort one payload's contents into the buckets the policy's
+     * classification table is indexed by, plus the directories that have
+     * to be rejected.
+     *
+     * `items` is preferred over `files` because it is the only place the
+     * drag-entry API lives (`webkitGetAsEntry`), which is how a dropped
+     * directory is caught before anything is read. `files` is the fallback
+     * for a payload that has no item list at all — some engines expose
+     * only that, and the result has to be identical.
+     *
+     * Every entry lands in exactly one bucket and carries the name it will
+     * be uploaded under, decided here so that nothing downstream has to
+     * re-derive it: `files` holds file references (each keeping its own
+     * name) and `images` holds raw clipboard data (each getting a
+     * generated one).
+     */
+    function payloadFrom(source, data) {
+      const files = [];
+      const images = [];
+      const directories = [];
+      let text = "";
+      if (!data) return { files, images, directories, text };
+      const place = (file) => {
+        const generated = isRawClipboardImage(source, file);
+        const entry = { file, name: attachmentName(file, generated) };
+        (generated ? images : files).push(entry);
+      };
+      const items = data.items ? Array.prototype.slice.call(data.items) : [];
+      let sawFileItem = false;
+      for (const item of items) {
+        if (item.kind !== "file") continue;
+        sawFileItem = true;
+        const entry = item.webkitGetAsEntry ? item.webkitGetAsEntry() : null;
+        const file = item.getAsFile ? item.getAsFile() : null;
+        if (entry && entry.isDirectory) {
+          directories.push(entry.name || (file && file.name) || "the dropped item");
+          continue;
+        }
+        if (file) place(file);
+      }
+      if (!sawFileItem && data.files) {
+        for (const file of Array.prototype.slice.call(data.files)) place(file);
+      }
+      // Guarded because `getData` is only legal during the event itself on
+      // some engines, and a throw here would take the whole drop down.
+      try {
+        text = (data.getData && data.getData("text/plain")) || "";
+      } catch (err) {
+        text = "";
+      }
+      return { files, images, directories, text };
+    }
+
+    /**
+     * The winning flavor for this payload, read out of the policy's
+     * precomputed table rather than decided here — the precedence rule
+     * lives in Rust and is not implemented twice (see this file's header).
+     *
+     * The bit order matches `payload_index` in
+     * farhelm-ui/src/attachments.rs. A directory counts toward the FILE
+     * bit: a dragged folder is a file-system object, so it has to outrank
+     * the `text/plain` copy of its own path that the same drag carries,
+     * and it is then rejected instead of uploaded.
+     */
+    function interpret(payload) {
+      const index = (payload.files.length || payload.directories.length ? 4 : 0)
+        | (payload.images.length ? 2 : 0)
+        | (payload.text ? 1 : 0);
+      return policy.classify[index] || "none";
+    }
+
+    /**
+     * Read one byte before uploading, so that a directory masquerading as
+     * a `File` fails HERE — visibly, with nothing sent — rather than as a
+     * truncated upload the supervisor rejects for its size (PLAN_M4.md
+     * item 7's fallback for engines with no drag-entry API).
+     *
+     * A `FileReader` rather than `Blob.arrayBuffer()`, because this read
+     * has to be CANCELLABLE: the fetch `AbortController` cannot touch a
+     * blob read, so an island torn down while a read is stuck on a dead
+     * network mount would leave the read (and the promise chain behind it)
+     * running with nowhere to report. The reader is registered for
+     * disposal and carries its own progress timeout.
+     *
+     * A zero-byte file is not a failure: slicing past the end of a `Blob`
+     * yields an empty one, and reading that succeeds. Skipped entirely on
+     * anything without `FileReader` or `slice`, where the check is
+     * unavailable and the truncated-upload path is the remaining backstop.
+     */
+    function probe(file) {
+      return new Promise((resolve, reject) => {
+        if (!file.slice || typeof FileReader !== "function") {
+          resolve();
+          return;
+        }
+        const reader = new FileReader();
+        readers.add(reader);
+        let timer = null;
+        const finish = (problem) => {
+          if (timer !== null) clearTimeout(timer);
+          timer = null;
+          readers.delete(reader);
+          if (!problem) {
+            resolve();
+            return;
+          }
+          const unreadable = new Error(String(problem));
+          unreadable.unreadable = true;
+          reject(unreadable);
+        };
+        reader.onload = () => finish(null);
+        reader.onerror = () => finish(reader.error || "read failed");
+        reader.onabort = () => finish("read cancelled");
+        timer = setTimeout(() => {
+          try {
+            reader.abort();
+          } catch (err) {
+            finish(err);
+          }
+        }, PROBE_TIMEOUT_MS);
+        try {
+          reader.readAsArrayBuffer(file.slice(0, 1));
+        } catch (err) {
+          finish(err);
+        }
+      });
+    }
+
+    /**
+     * POST one file to the helm and return the host-side path it
+     * published (the pinned attachment REST contract: raw body, the
+     * proposed name in `?filename=`, `{"path"}` back).
+     *
+     * The `File` is handed to `fetch` directly rather than read into
+     * memory: the browser streams it and sets `Content-Length` from the
+     * blob, which is exactly the declared size the helm forwards to the
+     * supervisor. A failure carries the response body — the supervisor's
+     * own words, trimmed — because that is what makes the error
+     * actionable; a body-less refusal falls back to the policy's own
+     * status wording, and a 200 that is not the contract's shape is a
+     * failure rather than a silent no-op.
+     */
+    async function upload(file, name) {
+      const url = baseUrl + policy.upload + "?filename=" + encodeURIComponent(name);
+      const init = { method: "POST", body: file };
+      if (controller) init.signal = controller.signal;
+      const response = await fetch(url, init);
+      if (!response.ok) {
+        let detail = "";
+        try {
+          detail = (await response.text()).trim();
+        } catch (err) {
+          detail = "";
+        }
+        throw new Error(
+          detail || fillTemplate(messages.httpStatus, { status: response.status }),
+        );
+      }
+      let body = null;
+      try {
+        body = await response.json();
+      } catch (err) {
+        body = null;
+      }
+      if (!body || typeof body.path !== "string" || body.path === "") {
+        throw new Error(fillTemplate(messages.noPath, {}));
+      }
+      return body.path;
+    }
+
+    /**
+     * Run one payload's uploads to completion, inserting each path as it
+     * lands and reporting each failure where the user cannot miss it.
+     *
+     * A failure never stops the rest of the queue and never inserts
+     * anything, which are the two halves of SPEC.md's "upload failures
+     * must be visible; an attachment must never disappear silently" — one
+     * bad file in a drop of five must not cost the user the other four,
+     * and a path that was never published must never appear. An upload
+     * that lands after the SOCKET died reports its path rather than
+     * pasting it, for the same reason: `term.paste()` would drop it.
+     */
+    async function send(queue) {
+      for (const item of queue) {
+        const token = nextToken++;
+        active.set(token, item.name);
+        render();
+        try {
+          await probe(item.file);
+          const path = await upload(item.file, item.name);
+          if (disposed) return;
+          if (isConnected()) {
+            insert(shellSafePath(path) + policy.separator);
+          } else {
+            fail(fillTemplate(messages.landed, { name: item.name, path }));
+          }
+        } catch (err) {
+          if (disposed) return;
+          const reason = err && err.message ? err.message : String(err);
+          fail(
+            err && err.unreadable
+              ? fillTemplate(messages.unreadable, { name: item.name })
+              : fillTemplate(messages.failed, { name: item.name, reason }),
+          );
+        } finally {
+          active.delete(token);
+          render();
+        }
+      }
+    }
+
+    /**
+     * Act on one classified payload: refuse it outright if this terminal
+     * cannot receive a path, reject its directories, and queue the
+     * uploads of the winning flavor.
+     *
+     * Clearing the previous payload's failures is deliberately the ONLY
+     * thing that clears them, and only a payload this island will actually
+     * ACT on gets to do it — an error stays on screen until the user does
+     * something that supersedes it, rather than until a timer they were
+     * not watching expires or an empty drag wipes it.
+     */
+    function accept(payload, flavor) {
+      if (!isConnected()) {
+        errors = [];
+        fail(fillTemplate(messages.detached, {}));
+        return;
+      }
+      errors = [];
+      for (const name of payload.directories) {
+        fail(fillTemplate(messages.directory, { name }));
+      }
+      // Every entry of the winning bucket, never a subset: two files in
+      // one payload are two attachments, and dropping either would be the
+      // silent loss SPEC.md forbids. Image data loses to a file reference
+      // because they are two representations of one thing, which is what
+      // the precedence order is FOR (see `classify`).
+      const queue = flavor === "file" ? payload.files : flavor === "image" ? payload.images : [];
+      render();
+      if (queue.length) send(queue);
+    }
+
+    const onPaste = (ev) => {
+      const payload = payloadFrom("clipboard", ev.clipboardData);
+      const flavor = interpret(payload);
+      // Text and empty payloads are none of this handler's business:
+      // returning without touching the event leaves xterm's own paste
+      // path exactly as it was.
+      if (flavor !== "file" && flavor !== "image") return;
+      ev.preventDefault();
+      ev.stopPropagation();
+      accept(payload, flavor);
+    };
+
+    const onDrop = (ev) => {
+      ev.preventDefault();
+      const payload = payloadFrom("drag", ev.dataTransfer);
+      const flavor = interpret(payload);
+      // Nothing this island knows how to act on. Returning before
+      // `accept()` is what keeps an empty or unsupported drag from
+      // clearing a failure the user has not read yet — the default is
+      // still prevented, because the engine's own handling of an
+      // unrecognized drop is what would navigate the page away.
+      if (flavor === "none") return;
+      if (flavor === "text") {
+        if (!isConnected()) {
+          errors = [];
+          fail(fillTemplate(messages.detached, {}));
+          return;
+        }
+        insert(payload.text);
+        return;
+      }
+      accept(payload, flavor);
+    };
+
+    // Without a `dragover` that prevents the default, the element is not a
+    // drop target at all and `drop` never fires — the single most common
+    // way HTML drag and drop is wired up wrong.
+    const onDragOver = (ev) => {
+      ev.preventDefault();
+      if (ev.dataTransfer) ev.dataTransfer.dropEffect = "copy";
+    };
+
+    el.addEventListener("paste", onPaste, true);
+    el.addEventListener("drop", onDrop, true);
+    el.addEventListener("dragover", onDragOver, true);
+
+    return {
+      dispose() {
+        disposed = true;
+        el.removeEventListener("paste", onPaste, true);
+        el.removeEventListener("drop", onDrop, true);
+        el.removeEventListener("dragover", onDragOver, true);
+        if (controller) controller.abort();
+        // Blob reads are not covered by the fetch abort above, and a read
+        // stuck on an unresponsive filesystem would otherwise outlive
+        // everything else here.
+        for (const reader of readers) {
+          try {
+            reader.abort();
+          } catch (err) {
+            // An already-finished reader throws nothing useful; the point
+            // is that no reader is left running.
+          }
+        }
+        readers.clear();
+        // The status element belongs to the PANE, which for the agent
+        // terminal outlives every remount and for a tab lives until that
+        // tab leaves the strip — so a stale "attaching…" or a failure from
+        // the attachment that just went away has to be cleared here or it
+        // would sit over the next one.
+        const node = document.getElementById(spec.status);
+        if (node) {
+          node.textContent = "";
+          node.style.display = "";
+        }
+      },
+    };
+  }
+
   /**
    * Paint one terminal's banner, optionally with the "take control" button
    * that reclaims a session this view lost.
@@ -201,11 +825,17 @@
      * session view currently wants (see this file's header for why the
      * diff is computed here rather than in Rust).
      *
-     * Each spec is `{el, banner, path, gen, primary, focus}`: the DOM
-     * element to mount into, the element its detach/error banner writes
-     * to, the helm WebSocket path (already carrying `?tab=`/`?lease=`),
-     * a remount counter, whether this island owns the legacy singleton
+     * Each spec is `{el, banner, status, path, gen, primary, focus}`: the
+     * DOM element to mount into, the element its detach/error banner
+     * writes to, the element its attachment progress and failures write
+     * to, the helm WebSocket path (already carrying `?tab=`/`?lease=`), a
+     * remount counter, whether this island owns the legacy singleton
      * globals, and whether it should hold keyboard focus.
+     *
+     * `attach` is the paste/drop policy every island of this view shares
+     * (farhelm-ui/src/attachments.rs) — one object rather than a copy per
+     * spec, since only `status` differs between terminals. Omitting it
+     * leaves interception off and changes nothing else.
      *
      * `path` and `gen` together are the island's IDENTITY. A still-wanted
      * island whose path changed is a different attachment and is rebuilt;
@@ -232,8 +862,8 @@
      * rides along here; anything that starts issuing syncs concurrently
      * would have to add one.
      */
-    sync(baseUrl, specs) {
-      lastSync = { baseUrl, specs };
+    sync(baseUrl, specs, attach) {
+      lastSync = { baseUrl, specs, attach };
       const wanted = new Map(specs.map((spec) => [spec.el, spec]));
 
       // Tear down first, over the UNION of both maps (an element id is in
@@ -298,7 +928,7 @@
         // harmless for the same reason, since the failing island has
         // already rolled itself back and bannered before rethrowing.
         try {
-          farhelmTerm.mountWhenReady(spec, baseUrl);
+          farhelmTerm.mountWhenReady(spec, baseUrl, attach);
         } catch (err) {
           console.error("farhelm: mounting terminal", spec.el, "failed", err);
         }
@@ -344,7 +974,7 @@
       for (const el of new Set([...islands.keys(), ...pendings.keys()])) {
         farhelmTerm.unmount(el);
       }
-      if (lastSync) farhelmTerm.sync(lastSync.baseUrl, lastSync.specs);
+      if (lastSync) farhelmTerm.sync(lastSync.baseUrl, lastSync.specs, lastSync.attach);
     },
 
     /**
@@ -381,7 +1011,7 @@
      * across session views, still gives the cross-session cancellation
      * above exactly the same key it had when there was only one island.
      */
-    mountWhenReady(spec, baseUrl) {
+    mountWhenReady(spec, baseUrl, attach) {
       const previous = pendings.get(spec.el);
       if (previous) clearTimeout(previous.timer);
       const attempt = { timer: null, path: spec.path, gen: spec.gen };
@@ -390,7 +1020,7 @@
         if (pendings.get(spec.el) !== attempt) return;
         if (window.Terminal && window.FitAddon && document.getElementById(spec.el)) {
           pendings.delete(spec.el);
-          farhelmTerm.mount(spec, baseUrl);
+          farhelmTerm.mount(spec, baseUrl, attach);
         } else {
           attempt.timer = setTimeout(tryMount, 50);
         }
@@ -414,7 +1044,7 @@
      * to the current page's host, which only happens if origin lookup
      * failed.
      */
-    mount(spec, baseUrl) {
+    mount(spec, baseUrl, attach) {
       // Re-renders may call mount again; one island per element id.
       // `islands` (see its declaration above) IS the guard; `unmount()`
       // drops the key on the way out, so a session reopened after
@@ -438,6 +1068,11 @@
       // once per failed attempt, each still firing forever.
       let onWindowResize = null;
       let paneObserver = null;
+      // Same reasoning as the two above: the attachment hooks register
+      // three listeners on an element Dioxus owns and outlives this
+      // mount, so a mount that throws after installing them must be able
+      // to reach them from the catch block.
+      let attachments = null;
       let bannered = false;
       function showBanner(text, reclaimable) {
         // Sticky by design: the first banner wins for the life of the
@@ -721,6 +1356,27 @@
         };
         term.onKey(dismissSelectionSoon);
         term.element.addEventListener("paste", dismissSelectionSoon, true);
+        // Registered after the selection sweep exists, because an
+        // intercepted paste has to run it by hand — the interception
+        // stops the event before it can reach the listener just above
+        // (see `installAttachments`).
+        // `baseUrl`, not the `base` the socket was built from: uploads are
+        // ordinary HTTP to the same origin the rest of this UI's API calls
+        // go to, and an empty base (origin lookup failed) leaves a
+        // relative URL, which resolves against the page itself.
+        // The liveness callback closes over THIS mount's socket, which is
+        // what makes it honest: an island whose socket the supervisor
+        // detached (a takeover, a stall, a dead terminal) still has a live
+        // xterm instance, and `term.paste()` into it would swallow the
+        // path with nothing to show for it.
+        attachments = installAttachments(
+          spec,
+          baseUrl,
+          attach,
+          term,
+          dismissSelectionSoon,
+          () => ws.readyState === WebSocket.OPEN,
+        );
         // onBinary carries mouse reports and other non-UTF8 input as a
         // binary string; encode byte-for-byte.
         term.onBinary((d) => {
@@ -838,6 +1494,7 @@
           term,
           onWindowResize,
           paneObserver,
+          attachments,
           testHook,
           path: spec.path,
           gen: spec.gen,
@@ -858,6 +1515,7 @@
         // mount never started.
         if (onWindowResize) window.removeEventListener("resize", onWindowResize);
         if (paneObserver) paneObserver.disconnect();
+        if (attachments) attachments.dispose();
         if (ws) ws.close();
         if (term) term.dispose();
         showBanner(`Failed to start terminal: ${err}`);
@@ -892,6 +1550,12 @@
       // `fit()` on a dead instance every time the (still-present, since
       // Dioxus may keep the pane) element changed size.
       if (island.paneObserver) island.paneObserver.disconnect();
+      // Same class of leak, plus a live one: the paste/drop listeners sit
+      // on an element Dioxus keeps, so a remount would stack a second set
+      // on top of the first and upload every dropped file twice. Disposing
+      // also aborts any upload still in flight, which is what stops a
+      // transfer from completing into a terminal that no longer exists.
+      if (island.attachments) island.attachments.dispose();
       // Null out every WS callback BEFORE closing: close() starts an
       // asynchronous close handshake with the helm, and a stale
       // `onclose` in particular would otherwise fire later and paint

@@ -4,7 +4,7 @@ Run coding agents (Claude Code, Codex, other terminal agents) on machines you co
 interface, through their real TUIs. See SPEC.md for what this is and is not, SPEC_impl.md for how it is built and why,
 and PLAN.md for where the build currently stands.
 
-NOTE: This is milestone-3 software: several sessions at once, one host, argv-driven setup. Sessions survive a supervisor
+NOTE: This is milestone-4 software: several sessions at once, one host, argv-driven setup. Sessions survive a supervisor
 restart (persisted metadata, and a still-viewable terminal whenever the private tmux server survived too), a host reboot
 classifies previously-running sessions as interrupted rather than guessing, and a user-stopped session keeps its
 "stopped by user" qualifier durably. Restart is live too: an interrupted (or exited, or errored) session relaunches its
@@ -17,7 +17,7 @@ milestone), so any local account on the helm's machine can drive your sessions �
 every agent invocation (the startup one below, or one entered through the GUI's create dialog) is ordinary argv, visible
 to every local user via `ps`, so credentials do not belong in it.
 
-## Trying it (M3)
+## Trying it (M4)
 
 Prerequisites: Rust with the `wasm32-unknown-unknown` target (`rustup target add wasm32-unknown-unknown`), tmux on every
 host involved, and `cargo binstall dioxus-cli@0.7.9` (or `cargo install dioxus-cli@0.7.9` — match the workspace's dioxus
@@ -85,6 +85,13 @@ Ubuntu 24.04 ships 3.4.
 - Opening a second view of the same session takes over ALL of the first view's terminals at once, each saying so where
   it was. The displaced view then stops attaching anything — including tabs the new owner opens while it watches — until
   you press "take control" in its banner, which takes the session back the same visible way.
+- Drop a file onto any of a session's terminals, or paste a screenshot into one, and it is transferred to the session's
+  host and the resulting path typed in at the cursor — so the agent can read it without you copying anything by hand.
+  Files keep their own names; a pasted screenshot gets a generated one (`pasted-1.png`). Several files at once insert
+  several paths, each quoted when the path itself needs it. Plain text still pastes as text, including text that looks
+  like a path, and a dropped folder is refused where you can see it. Transfers never block typing: keep working, and the
+  path lands wherever the cursor is when the upload finishes. Attachments live beside the session's own state and go
+  when it is deleted.
 - Sustained heavy output (piping a huge file through the pane, say) is flow-controlled end to end rather than freezing
   the tab or silently dropping bytes. A viewer that stops consuming entirely — a wedged tab, a laptop asleep past its
   connection timeout — is detached, with a visible reason, after a bounded stall; the session keeps running unaffected,
