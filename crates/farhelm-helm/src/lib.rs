@@ -20,8 +20,8 @@ use axum::{
     routing::get,
 };
 use clap::Args;
-use farhelm_proto::ErrorKind;
 use farhelm_proto::io::ClosedBeforeHello;
+use farhelm_proto::{ErrorKind, TerminalSelector};
 use serde::Deserialize;
 use std::net::{Ipv4Addr, SocketAddr};
 use std::path::PathBuf;
@@ -120,6 +120,11 @@ fn build_router(
         .route(
             "/api/sessions/{id}",
             get(get_session).delete(delete_session),
+        )
+        .route("/api/sessions/{id}/tabs", axum::routing::post(open_tab))
+        .route(
+            "/api/sessions/{id}/tabs/{tab_id}",
+            axum::routing::delete(close_tab),
         )
         .route("/api/sessions/{id}/term", get(term_ws))
         .with_state(Arc::new(AppState { client }));
@@ -706,6 +711,45 @@ async fn delete_session(
     }
 }
 
+/// `POST /api/sessions/{id}/tabs` — open a terminal tab: a plain shell in
+/// the session's working directory (PLAN_M4.md item 2, plumbed through by
+/// item 5). No request body: unlike `create_session`, a tab has nothing
+/// for a caller to specify.
+///
+/// The success body is `{"tab": TabInfo}` rather than the bare object
+/// `stop`/`delete` use, because there is something to hand back — the
+/// minted tab id a client needs before it can attach
+/// (`?tab=<id>` on `term_ws`). Every refusal the supervisor can give
+/// (vanished working directory, no tmux session to open a window on, a
+/// shell dead by reply time) reaches the browser through the same
+/// `http_error` mapping every other endpoint uses, verbatim.
+async fn open_tab(
+    State(state): State<Arc<AppState>>,
+    AxPath(id): AxPath<String>,
+) -> impl IntoResponse {
+    match state.client.open_tab(&id).await {
+        Ok(tab) => axum::Json(serde_json::json!({ "tab": tab })).into_response(),
+        Err(e) => http_error(e),
+    }
+}
+
+/// `DELETE /api/sessions/{id}/tabs/{tab_id}` — close a terminal tab: kill
+/// its shell and everything it left behind, then drop the window
+/// (PLAN_M4.md item 2). Same empty-object success body as `stop_session`/
+/// `delete_session`; an unknown `tab_id` maps to 404 like any other
+/// unknown identifier, and a tab whose shell had already exited still
+/// closes successfully — `close_tab`'s own idempotency, passed straight
+/// through.
+async fn close_tab(
+    State(state): State<Arc<AppState>>,
+    AxPath((id, tab_id)): AxPath<(String, String)>,
+) -> impl IntoResponse {
+    match state.client.close_tab(&id, &tab_id).await {
+        Ok(()) => axum::Json(serde_json::json!({})).into_response(),
+        Err(e) => http_error(e),
+    }
+}
+
 /// Render an error as an HTTP response whose body is the error chain in
 /// full and whose status reflects what the supervisor actually classified.
 ///
@@ -760,18 +804,128 @@ fn http_error(e: anyhow::Error) -> axum::response::Response {
 /// at a different size replays content laid out at the previous
 /// geometry. Full-screen apps repaint on the SIGWINCH that follows;
 /// normal-screen sessions wear the reflow until the next output.
+///
+/// `tab` and `lease` are PLAN_M4.md item 5's terminal-selector plumbing,
+/// and BOTH are additive by construction, not just by `Option`: a request
+/// carrying neither must reach the supervisor as the exact pre-M4 `Attach`
+/// shape — `TerminalSelector::Agent` and an empty lease — because every
+/// caller that predates tabs (an older UI build, a bookmarked URL, a
+/// script) still means "attach the agent terminal as my one and only
+/// terminal" when it says nothing. `resolve_attach_request` below is
+/// where that legacy-absent reading and the new query-parsing both live,
+/// deliberately as one function, so the two cannot silently diverge.
 #[derive(Deserialize)]
 struct TermQuery {
     #[serde(default = "default_cols")]
     cols: u16,
     #[serde(default = "default_rows")]
     rows: u16,
+    /// The tab to attach, echoing a `TabInfo::id` this session's
+    /// `SessionInfo.tabs` already handed the client. Absent means the
+    /// agent terminal — see this struct's own docs. Deliberately NOT
+    /// validated for shape (contrast `lease` below): every value,
+    /// including an empty string, has an unambiguous supervisor-side
+    /// reading, so there is nothing for the helm to reject here.
+    tab: Option<String>,
+    /// This client's session-scoped attach identity (PLAN_M4.md item 3),
+    /// forwarded verbatim to `attach_terminal`. Absent means the empty,
+    /// un-leased pre-M4 reading — see this struct's own docs. Kept as
+    /// `Option<String>` rather than defaulted straight to `String`
+    /// (`#[serde(default)]`) specifically so a PRESENT empty value stays
+    /// distinguishable from an ABSENT one at the type level:
+    /// `resolve_attach_request` needs to refuse the former while still
+    /// reading the latter as empty, and collapsing them early would
+    /// destroy exactly the distinction that refusal depends on.
+    lease: Option<String>,
+}
+
+/// Turn a `?tab=`/`?lease=` query pair into what `attach_terminal` wants,
+/// rejecting only the one shape neither the wire nor the supervisor CAN
+/// reject on the helm's behalf.
+///
+/// `tab` needs no local validation at all (PLAN_M4.md item 5): an ABSENT
+/// value is the agent terminal (the legacy reading `TermQuery` documents),
+/// and every PRESENT value — including an empty string — becomes
+/// `TerminalSelector::Tab { id }` and is left entirely to the supervisor's
+/// own attach handling, which answers `NotFound` for an id no `TabInfo`
+/// ever carried. That is the same visible failure every other unknown tab
+/// produces, so there is no separate "shape" rejection to keep in sync
+/// with it — one canonical path instead of two.
+///
+/// `lease` is asymmetric, and deliberately so. An ABSENT lease is the
+/// pre-M4 un-leased singleton reading (`ControlMsg::Attach::lease`'s own
+/// docs) — which IS the empty string on the wire, because that is what
+/// every caller written before leases existed sends. A PRESENT but
+/// EXPLICITLY EMPTY `?lease=` cannot be forwarded as that same empty
+/// string: once it reaches the supervisor there is no way to tell "this
+/// caller said nothing" apart from "this caller said lease is empty" —
+/// the wire has only one empty-string value, not two — and the supervisor
+/// already treats an empty lease as legal legacy content, so it has no
+/// hook to refuse it either. Collapsing the two would let a client that
+/// explicitly opted into the un-leased singleton reading (a stale
+/// bookmark, a hand-written URL) silently join — and be joined by —
+/// every OTHER un-leased attachment on the session: the one outcome
+/// PLAN_M4.md item 3's per-session takeover exists to prevent. So this is
+/// refused HERE, before it becomes indistinguishable from absence, which
+/// is the only point in the whole path where the distinction still
+/// exists to check.
+fn resolve_attach_request(q: &TermQuery) -> anyhow::Result<(TerminalSelector, &str)> {
+    let terminal = match &q.tab {
+        None => TerminalSelector::Agent,
+        Some(id) => TerminalSelector::Tab { id: id.clone() },
+    };
+    let lease = match q.lease.as_deref() {
+        None => "",
+        Some("") => {
+            return Err(anyhow::anyhow!(
+                "terminal websocket's ?lease= must not be empty"
+            ));
+        }
+        Some(lease) => lease,
+    };
+    Ok((terminal, lease))
+}
+
+/// Resolve `q` and attach, as one `Result` (PLAN_M4.md item 5).
+///
+/// Folding the local query-shape check and the supervisor round trip into
+/// a single function is what lets `serve_term` report both kinds of
+/// failure through one notice-then-close arm instead of two copies of the
+/// same three lines: a caller here cannot tell (and does not need to)
+/// whether an `Err` came from `resolve_attach_request` refusing the shape
+/// or from the supervisor refusing the attach itself — both are, from the
+/// browser's perspective, "this attach did not happen," and both deserve
+/// the identical visible treatment.
+async fn attach_from_query(
+    state: &AppState,
+    session_id: &str,
+    q: &TermQuery,
+) -> anyhow::Result<(u32, TermStream)> {
+    let (terminal, lease) = resolve_attach_request(q)?;
+    state
+        .client
+        .attach_terminal(session_id, q.cols, q.rows, terminal, lease)
+        .await
 }
 
 /// Terminal WebSocket: binary frames are terminal bytes in both
 /// directions; text frames are small JSON control messages (client →
 /// resize/pause/resume; server → detached notice). This is the
 /// browser-facing twin of the proto data channel, kept equally dumb.
+///
+/// `?cols=`/`?rows=` set the initial size (see `TermQuery`'s docs).
+/// `?tab=<id>` and `?lease=<id>` (PLAN_M4.md item 5) select which of the
+/// session's terminals this socket attaches and under which client
+/// identity; BOTH default to the exact pre-M4 behavior when absent —
+/// the agent terminal, un-leased — so a caller that predates tabs sees no
+/// change at all. `resolve_attach_request` owns the one shape check the
+/// helm makes locally (an explicitly empty `?lease=`, never `?tab=` —
+/// see that function's own docs for why the two are asymmetric);
+/// everything else, including an unknown tab id, is the supervisor's own
+/// `NotFound` and reaches this socket exactly like any other attach
+/// failure — a `{"type":"detached",...}` notice, then close, never a bare
+/// disconnect the browser would blame on the network instead of the
+/// session (see `serve_term`'s single attach-failure arm).
 ///
 /// The client → server text messages, all `{"type": ...}`:
 /// - `{"type":"resize","cols":N,"rows":N}` — the pane's new geometry.
@@ -878,10 +1032,17 @@ async fn serve_term(
     use futures_util::{SinkExt, StreamExt};
 
     let (mut ws_tx, mut ws_rx) = socket.split();
-    // Attach failures (unknown session, tmux trouble) must reach the
-    // user, not just the helm's log: without this the browser sees a
-    // bare socket close and shows a generic "connection closed".
-    let (channel, mut events) = match state.client.attach(&session_id, q.cols, q.rows).await {
+
+    // One arm covers both failure sources `attach_from_query` can produce
+    // — a locally-refused query shape (an explicit empty `?lease=`) and a
+    // supervisor-side attach refusal (unknown session, unknown tab, tmux
+    // trouble) — because both must reach the user identically: a
+    // `{"type":"detached",...}` notice, then a closed socket, never a bare
+    // disconnect the browser would blame on the network instead of the
+    // request it just made. See `attach_from_query`'s own docs for why
+    // folding them into one `Result` is what keeps this a single arm
+    // instead of two copies of the same three lines.
+    let (channel, mut events) = match attach_from_query(&state, &session_id, &q).await {
         Ok(parts) => parts,
         Err(e) => {
             let notice = serde_json::json!({"type": "detached", "reason": format!("{e:#}")});
@@ -2294,6 +2455,80 @@ mod tests {
         peer.await.unwrap();
     }
 
+    /// `GET /api/sessions/{id}` — the session-detail route a session view
+    /// actually fetches — must pass a NON-EMPTY `tabs` list through
+    /// intact. `farhelm-proto`'s own tests already pin `SessionInfo`'s
+    /// JSON shape exhaustively (order, nesting, everything); what the helm
+    /// still owes is exactly one HTTP-boundary check that THIS route does
+    /// not drop or mangle the field on its way from the supervisor's
+    /// `ListSessions` reply to the JSON body a browser decodes — this
+    /// replaces an earlier version of the same check aimed at the bulk
+    /// LISTING route, which no session view reads tabs from.
+    #[tokio::test]
+    async fn get_session_passes_a_non_empty_tabs_list_through() {
+        use farhelm_proto::ControlMsg;
+        use farhelm_proto::io::{FrameReader, FrameWriter, handshake, parse_control};
+
+        let (client_side, peer_side) = tokio::io::duplex(64 * 1024);
+        let peer = tokio::spawn(async move {
+            let (r, w) = tokio::io::split(peer_side);
+            let mut reader = FrameReader::new(r);
+            let mut writer = FrameWriter::new(w);
+            handshake(&mut reader, &mut writer, "supervisor")
+                .await
+                .unwrap();
+            let request = parse_control(&reader.read_frame().await.unwrap().unwrap()).unwrap();
+            let ControlMsg::ListSessions { req_id } = request else {
+                panic!("expected ListSessions, got {request:?}");
+            };
+            writer
+                .write_control(&ControlMsg::SessionList {
+                    req_id,
+                    sessions: vec![farhelm_proto::SessionInfo {
+                        id: "sess-1".into(),
+                        title: "sess-1".into(),
+                        cwd: "/sess-1".into(),
+                        invocation: "agent".into(),
+                        status: farhelm_proto::SessionStatus::Alive,
+                        annotation: None,
+                        restart_offer: farhelm_proto::RestartOffer::default(),
+                        tabs: vec![
+                            farhelm_proto::TabInfo { id: "tab-1".into() },
+                            farhelm_proto::TabInfo { id: "tab-2".into() },
+                        ],
+                    }],
+                    total: 1,
+                    truncated: false,
+                })
+                .await
+                .unwrap();
+        });
+
+        let (r, w) = tokio::io::split(client_side);
+        let client = super::SupervisorClient::start(r, w).await.unwrap();
+        let app = build_router(client, None, 7433);
+
+        let request = axum::http::Request::builder()
+            .method("GET")
+            .uri("/api/sessions/sess-1")
+            .header("host", "127.0.0.1:7433")
+            .body(axum::body::Body::empty())
+            .unwrap();
+
+        let response = tower::ServiceExt::oneshot(app, request).await.unwrap();
+        assert_eq!(response.status(), axum::http::StatusCode::OK);
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let value: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(
+            value["tabs"],
+            serde_json::json!([{"id": "tab-1"}, {"id": "tab-2"}])
+        );
+
+        peer.await.unwrap();
+    }
+
     /// The helm is a passthrough for classification, and PLAN_M3.md item 2
     /// is the first change that makes that claim testable with something
     /// the helm could plausibly get wrong: `interrupted` is a status
@@ -2709,5 +2944,514 @@ mod tests {
         assert_eq!(String::from_utf8_lossy(&body).trim(), SENTINEL);
 
         peer.await.unwrap();
+    }
+
+    /// `POST /api/sessions/{id}/tabs` happy path (PLAN_M4.md item 5): the
+    /// scripted `TabOpened` reply's `TabInfo` must round-trip through the
+    /// success body under a `tab` key — the shape a client needs before it
+    /// can attach the new tab via `?tab=<id>` on `term_ws`.
+    #[tokio::test]
+    async fn open_tab_happy_path_returns_200_with_tab() {
+        use farhelm_proto::io::{FrameReader, FrameWriter, handshake, parse_control};
+        use farhelm_proto::{ControlMsg, TabInfo};
+        use tower::ServiceExt;
+
+        let (client_side, peer_side) = tokio::io::duplex(64 * 1024);
+        let peer = tokio::spawn(async move {
+            let (r, w) = tokio::io::split(peer_side);
+            let mut reader = FrameReader::new(r);
+            let mut writer = FrameWriter::new(w);
+            handshake(&mut reader, &mut writer, "supervisor")
+                .await
+                .unwrap();
+            let request = parse_control(&reader.read_frame().await.unwrap().unwrap()).unwrap();
+            let ControlMsg::OpenTab { req_id, session_id } = request else {
+                panic!("expected OpenTab, got {request:?}");
+            };
+            assert_eq!(session_id, "sess-1");
+            writer
+                .write_control(&ControlMsg::TabOpened {
+                    req_id,
+                    tab: TabInfo { id: "tab-1".into() },
+                })
+                .await
+                .unwrap();
+        });
+
+        let (r, w) = tokio::io::split(client_side);
+        let client = super::SupervisorClient::start(r, w).await.unwrap();
+        let app = build_router(client, None, 7433);
+
+        let request = axum::http::Request::builder()
+            .method("POST")
+            .uri("/api/sessions/sess-1/tabs")
+            .header("host", "127.0.0.1:7433")
+            .body(axum::body::Body::empty())
+            .unwrap();
+
+        let response = app.oneshot(request).await.unwrap();
+        assert_eq!(response.status(), axum::http::StatusCode::OK);
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let value: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(value["tab"]["id"], "tab-1");
+
+        peer.await.unwrap();
+    }
+
+    /// `DELETE /api/sessions/{id}/tabs/{tab_id}` happy path, mirroring
+    /// `stop_session_happy_path_returns_200_with_empty_object_body`: a
+    /// scripted `TabClosed` reply must reach the caller as 200 with the
+    /// same empty-object body every no-payload success shares. The peer
+    /// asserts both path segments landed in the right `CloseTab` fields —
+    /// a route that swapped `id`/`tab_id` would still 200 here, just
+    /// against the wrong tab.
+    #[tokio::test]
+    async fn close_tab_happy_path_returns_200_with_empty_object_body() {
+        use farhelm_proto::ControlMsg;
+        use farhelm_proto::io::{FrameReader, FrameWriter, handshake, parse_control};
+        use tower::ServiceExt;
+
+        let (client_side, peer_side) = tokio::io::duplex(64 * 1024);
+        let peer = tokio::spawn(async move {
+            let (r, w) = tokio::io::split(peer_side);
+            let mut reader = FrameReader::new(r);
+            let mut writer = FrameWriter::new(w);
+            handshake(&mut reader, &mut writer, "supervisor")
+                .await
+                .unwrap();
+            let request = parse_control(&reader.read_frame().await.unwrap().unwrap()).unwrap();
+            let ControlMsg::CloseTab {
+                req_id,
+                session_id,
+                tab_id,
+            } = request
+            else {
+                panic!("expected CloseTab, got {request:?}");
+            };
+            assert_eq!(session_id, "sess-1");
+            assert_eq!(tab_id, "tab-1");
+            writer
+                .write_control(&ControlMsg::TabClosed { req_id })
+                .await
+                .unwrap();
+        });
+
+        let (r, w) = tokio::io::split(client_side);
+        let client = super::SupervisorClient::start(r, w).await.unwrap();
+        let app = build_router(client, None, 7433);
+
+        let request = axum::http::Request::builder()
+            .method("DELETE")
+            .uri("/api/sessions/sess-1/tabs/tab-1")
+            .header("host", "127.0.0.1:7433")
+            .body(axum::body::Body::empty())
+            .unwrap();
+
+        let response = app.oneshot(request).await.unwrap();
+        assert_eq!(response.status(), axum::http::StatusCode::OK);
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let value: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(value, serde_json::json!({}));
+
+        peer.await.unwrap();
+    }
+
+    /// `POST /api/sessions/{id}/tabs` must map a supervisor `Error` reply
+    /// to the right HTTP status AND carry its message through verbatim.
+    /// `http_error`'s own unit tests already pin the full four-`ErrorKind`
+    /// table exhaustively, so this route owes only ONE representative
+    /// case through the real handler — `NotFound`, the same choice
+    /// `stop_session_unknown_id_returns_404_with_supervisor_message` made
+    /// for the same reason. The body assertion is the COMPLETE sentinel,
+    /// not a substring: a handler that truncated or rewrapped the
+    /// supervisor's message would still pass a status-only check here,
+    /// which is exactly the gap an exact-body assertion closes.
+    #[tokio::test]
+    async fn open_tab_error_reply_maps_to_404_with_the_supervisors_message() {
+        use farhelm_proto::io::{FrameReader, FrameWriter, handshake, parse_control};
+        use farhelm_proto::{ControlMsg, ErrorKind};
+        use tower::ServiceExt;
+
+        const SENTINEL: &str = "SENTINEL-open-tab-3f1a2c: no such session";
+
+        let (client_side, peer_side) = tokio::io::duplex(64 * 1024);
+        let peer = tokio::spawn(async move {
+            let (r, w) = tokio::io::split(peer_side);
+            let mut reader = FrameReader::new(r);
+            let mut writer = FrameWriter::new(w);
+            handshake(&mut reader, &mut writer, "supervisor")
+                .await
+                .unwrap();
+            let request = parse_control(&reader.read_frame().await.unwrap().unwrap()).unwrap();
+            let ControlMsg::OpenTab { req_id, .. } = request else {
+                panic!("expected OpenTab, got {request:?}");
+            };
+            writer
+                .write_control(&ControlMsg::Error {
+                    req_id,
+                    message: SENTINEL.to_string(),
+                    kind: ErrorKind::NotFound,
+                })
+                .await
+                .unwrap();
+        });
+
+        let (r, w) = tokio::io::split(client_side);
+        let client = super::SupervisorClient::start(r, w).await.unwrap();
+        let app = build_router(client, None, 7433);
+
+        let request = axum::http::Request::builder()
+            .method("POST")
+            .uri("/api/sessions/sess-1/tabs")
+            .header("host", "127.0.0.1:7433")
+            .body(axum::body::Body::empty())
+            .unwrap();
+
+        let response = app.oneshot(request).await.unwrap();
+        assert_eq!(response.status(), axum::http::StatusCode::NOT_FOUND);
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        assert_eq!(
+            String::from_utf8_lossy(&body),
+            SENTINEL,
+            "body must carry the supervisor's own message verbatim, not a substring of it"
+        );
+
+        peer.await.unwrap();
+    }
+
+    /// `DELETE /api/sessions/{id}/tabs/{tab_id}`'s twin of
+    /// `open_tab_error_reply_maps_to_404_with_the_supervisors_message` —
+    /// same reasoning (one representative `ErrorKind`, exact-body
+    /// assertion), aimed at `close_tab` instead so a route wired to the
+    /// wrong client method (or dropping `http_error` entirely) cannot hide
+    /// behind the open-tab coverage above.
+    #[tokio::test]
+    async fn close_tab_error_reply_maps_to_404_with_the_supervisors_message() {
+        use farhelm_proto::io::{FrameReader, FrameWriter, handshake, parse_control};
+        use farhelm_proto::{ControlMsg, ErrorKind};
+        use tower::ServiceExt;
+
+        const SENTINEL: &str = "SENTINEL-close-tab-9d4e17: no such tab";
+
+        let (client_side, peer_side) = tokio::io::duplex(64 * 1024);
+        let peer = tokio::spawn(async move {
+            let (r, w) = tokio::io::split(peer_side);
+            let mut reader = FrameReader::new(r);
+            let mut writer = FrameWriter::new(w);
+            handshake(&mut reader, &mut writer, "supervisor")
+                .await
+                .unwrap();
+            let request = parse_control(&reader.read_frame().await.unwrap().unwrap()).unwrap();
+            let ControlMsg::CloseTab { req_id, .. } = request else {
+                panic!("expected CloseTab, got {request:?}");
+            };
+            writer
+                .write_control(&ControlMsg::Error {
+                    req_id,
+                    message: SENTINEL.to_string(),
+                    kind: ErrorKind::NotFound,
+                })
+                .await
+                .unwrap();
+        });
+
+        let (r, w) = tokio::io::split(client_side);
+        let client = super::SupervisorClient::start(r, w).await.unwrap();
+        let app = build_router(client, None, 7433);
+
+        let request = axum::http::Request::builder()
+            .method("DELETE")
+            .uri("/api/sessions/sess-1/tabs/tab-1")
+            .header("host", "127.0.0.1:7433")
+            .body(axum::body::Body::empty())
+            .unwrap();
+
+        let response = app.oneshot(request).await.unwrap();
+        assert_eq!(response.status(), axum::http::StatusCode::NOT_FOUND);
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        assert_eq!(
+            String::from_utf8_lossy(&body),
+            SENTINEL,
+            "body must carry the supervisor's own message verbatim, not a substring of it"
+        );
+
+        peer.await.unwrap();
+    }
+
+    /// The three ways a WS attach's selector/lease resolve to an `Attach`
+    /// frame — neither param (the legacy pre-M4 reading), `?tab=` alone,
+    /// `?lease=` alone — share one assertion shape (the resolved
+    /// `terminal`/`lease` pair reaching the supervisor's `Attach`) and
+    /// differ only in the query string and the expected pair, so one
+    /// parameterized test replaces three near-identical ones.
+    /// `term_ws_with_tab_and_lease_together_carries_both_on_one_attach`
+    /// below is deliberately NOT folded in here: it is the one case whose
+    /// entire point is that two fields combine on the SAME frame, which a
+    /// shared loop body would only obscure.
+    #[tokio::test]
+    async fn term_ws_selector_and_lease_reach_the_attach_frame() {
+        use farhelm_proto::io::{FrameReader, FrameWriter, handshake, parse_control};
+        use farhelm_proto::{ControlMsg, TerminalSelector};
+
+        let cases: [(&str, TerminalSelector, &str); 3] = [
+            ("", TerminalSelector::Agent, ""),
+            (
+                "?tab=tab-1",
+                TerminalSelector::Tab { id: "tab-1".into() },
+                "",
+            ),
+            ("?lease=client-abc", TerminalSelector::Agent, "client-abc"),
+        ];
+
+        for (query, expected_terminal, expected_lease) in cases {
+            let (client_side, peer_side) = tokio::io::duplex(64 * 1024);
+            let peer = tokio::spawn(async move {
+                let (r, w) = tokio::io::split(peer_side);
+                let mut reader = FrameReader::new(r);
+                let mut writer = FrameWriter::new(w);
+                handshake(&mut reader, &mut writer, "supervisor")
+                    .await
+                    .unwrap();
+                let request = parse_control(&reader.read_frame().await.unwrap().unwrap()).unwrap();
+                let ControlMsg::Attach {
+                    req_id,
+                    channel,
+                    terminal,
+                    lease,
+                    ..
+                } = request
+                else {
+                    panic!("expected Attach, got {request:?}");
+                };
+                assert_eq!(terminal, expected_terminal, "for query {query:?}");
+                assert_eq!(lease, expected_lease, "for query {query:?}");
+                writer
+                    .write_control(&ControlMsg::Attached { req_id, channel })
+                    .await
+                    .unwrap();
+            });
+
+            let (r, w) = tokio::io::split(client_side);
+            let client = super::SupervisorClient::start(r, w).await.unwrap();
+            let addr = serve_helm(client).await;
+            let path = format!("/api/sessions/sess-1/term{query}");
+            let (_ws, peer) = tokio::join!(WsTestClient::connect(addr, &path), peer);
+            peer.unwrap();
+        }
+    }
+
+    /// `?tab=<id>&lease=<id>` together must carry BOTH fields onto the
+    /// SAME `Attach` — the parameterized selector test above deliberately
+    /// covers each field in isolation, which would not catch a
+    /// regression where handling one query param clobbers the other
+    /// (e.g. an extractor path that overwrites `terminal` and forgets to
+    /// also thread `lease`, or vice versa).
+    #[tokio::test]
+    async fn term_ws_with_tab_and_lease_together_carries_both_on_one_attach() {
+        use farhelm_proto::io::{FrameReader, FrameWriter, handshake, parse_control};
+        use farhelm_proto::{ControlMsg, TerminalSelector};
+
+        let (client_side, peer_side) = tokio::io::duplex(64 * 1024);
+        let peer = tokio::spawn(async move {
+            let (r, w) = tokio::io::split(peer_side);
+            let mut reader = FrameReader::new(r);
+            let mut writer = FrameWriter::new(w);
+            handshake(&mut reader, &mut writer, "supervisor")
+                .await
+                .unwrap();
+            let request = parse_control(&reader.read_frame().await.unwrap().unwrap()).unwrap();
+            let ControlMsg::Attach {
+                req_id,
+                channel,
+                terminal,
+                lease,
+                ..
+            } = request
+            else {
+                panic!("expected Attach, got {request:?}");
+            };
+            assert_eq!(terminal, TerminalSelector::Tab { id: "tab-1".into() });
+            assert_eq!(lease, "client-abc");
+            writer
+                .write_control(&ControlMsg::Attached { req_id, channel })
+                .await
+                .unwrap();
+        });
+
+        let (r, w) = tokio::io::split(client_side);
+        let client = super::SupervisorClient::start(r, w).await.unwrap();
+        let addr = serve_helm(client).await;
+        let (_ws, peer) = tokio::join!(
+            WsTestClient::connect(addr, "/api/sessions/sess-1/term?tab=tab-1&lease=client-abc"),
+            peer
+        );
+        peer.unwrap();
+    }
+
+    /// An unknown `?tab=` id must surface on the WebSocket exactly like
+    /// any other attach failure (PLAN_M4.md item 5): a
+    /// `{"type":"detached",...}` notice carrying the supervisor's own
+    /// `NotFound` message, then the socket closes — never a bare
+    /// disconnect a browser would blame on the network instead of the
+    /// session. The supervisor owns the real "does this tab exist" check
+    /// (see `resolve_attach_request`'s docs, including for why `?tab=`
+    /// gets no local shape check at all); this test is what proves its
+    /// `NotFound` reaches the client rather than being swallowed
+    /// somewhere in the WS plumbing this PR adds. Both the notice recv
+    /// AND the close recv are wrapped in a bounded timeout: a regression
+    /// that left either one pending must fail this test, not hang it.
+    #[tokio::test]
+    async fn term_ws_with_unknown_tab_id_surfaces_the_supervisors_not_found_error() {
+        use farhelm_proto::io::{FrameReader, FrameWriter, handshake, parse_control};
+        use farhelm_proto::{ControlMsg, ErrorKind, TerminalSelector};
+
+        const SENTINEL: &str = "SENTINEL-tab-attach-6e21: no such tab";
+
+        let (client_side, peer_side) = tokio::io::duplex(64 * 1024);
+        let peer = tokio::spawn(async move {
+            let (r, w) = tokio::io::split(peer_side);
+            let mut reader = FrameReader::new(r);
+            let mut writer = FrameWriter::new(w);
+            handshake(&mut reader, &mut writer, "supervisor")
+                .await
+                .unwrap();
+            let request = parse_control(&reader.read_frame().await.unwrap().unwrap()).unwrap();
+            let ControlMsg::Attach {
+                req_id, terminal, ..
+            } = request
+            else {
+                panic!("expected Attach, got {request:?}");
+            };
+            assert_eq!(
+                terminal,
+                TerminalSelector::Tab {
+                    id: "no-such-tab".into()
+                }
+            );
+            writer
+                .write_control(&ControlMsg::Error {
+                    req_id,
+                    message: SENTINEL.to_string(),
+                    kind: ErrorKind::NotFound,
+                })
+                .await
+                .unwrap();
+        });
+
+        let (r, w) = tokio::io::split(client_side);
+        let client = super::SupervisorClient::start(r, w).await.unwrap();
+        let addr = serve_helm(client).await;
+        let (mut ws, peer) = tokio::join!(
+            WsTestClient::connect(addr, "/api/sessions/sess-1/term?tab=no-such-tab"),
+            peer
+        );
+        peer.unwrap();
+
+        let (opcode, payload) = tokio::time::timeout(Duration::from_secs(5), ws.recv())
+            .await
+            .expect("no detach notice arrived")
+            .expect("socket closed before sending a notice");
+        assert_eq!(opcode, 1, "the detach notice is a text frame");
+        let notice: serde_json::Value = serde_json::from_slice(&payload).unwrap();
+        assert_eq!(notice["type"], "detached");
+        assert!(
+            notice["reason"].as_str().unwrap().contains(SENTINEL),
+            "reason must carry the supervisor's own message: {notice}"
+        );
+
+        assert!(
+            tokio::time::timeout(Duration::from_secs(5), ws.recv())
+                .await
+                .expect("socket never closed after the failed attach's notice")
+                .is_none(),
+            "the socket must close once the failed attach's notice is sent"
+        );
+    }
+
+    /// An explicit, empty `?lease=` (as opposed to no `?lease=` at all)
+    /// must be REJECTED helm-side (`resolve_attach_request`'s asymmetry,
+    /// item 5's own docs): the wire's empty lease IS the legal legacy
+    /// meaning, so the supervisor cannot refuse it — accepting `?lease=`
+    /// here would silently fold "this client explicitly opted into the
+    /// un-leased singleton reading" back into "this client said nothing",
+    /// which would make one session view's own terminal sockets take
+    /// each other over. The failure path is the same detach-notice-then-
+    /// close every other refusal in this file uses, and the scripted peer
+    /// proves NO `Attach` ever left the helm for it.
+    ///
+    /// The no-`Attach` check runs AFTER the WS client has already
+    /// observed both the notice and the socket's close — not a fixed
+    /// timer racing the request (a flaw an earlier version of this class
+    /// of test had for `?tab=`): by the time the client sees the close,
+    /// `serve_term` has already returned, so anything it was ever going
+    /// to send to the supervisor has already been sent, and checking for
+    /// it needs no guess at how long "long enough" is.
+    #[tokio::test]
+    async fn term_ws_with_empty_lease_is_refused_locally_without_contacting_the_supervisor() {
+        use farhelm_proto::io::{FrameReader, FrameWriter, handshake};
+
+        let (client_side, peer_side) = tokio::io::duplex(64 * 1024);
+        let peer = tokio::spawn(async move {
+            let (r, w) = tokio::io::split(peer_side);
+            let mut reader = FrameReader::new(r);
+            let mut writer = FrameWriter::new(w);
+            handshake(&mut reader, &mut writer, "supervisor")
+                .await
+                .unwrap();
+            reader
+        });
+
+        let (r, w) = tokio::io::split(client_side);
+        let client = super::SupervisorClient::start(r, w).await.unwrap();
+        let addr = serve_helm(client).await;
+        let mut ws = WsTestClient::connect(addr, "/api/sessions/sess-1/term?lease=").await;
+
+        let (opcode, payload) = tokio::time::timeout(Duration::from_secs(5), ws.recv())
+            .await
+            .expect("no detach notice arrived")
+            .expect("socket closed before sending a notice");
+        assert_eq!(opcode, 1, "the detach notice is a text frame");
+        let notice: serde_json::Value = serde_json::from_slice(&payload).unwrap();
+        assert_eq!(notice["type"], "detached");
+        assert!(
+            notice["reason"]
+                .as_str()
+                .unwrap()
+                .contains("must not be empty"),
+            "reason must name the empty-lease shape problem: {notice}"
+        );
+
+        // Bounded, not indefinite: a regression that left the socket open
+        // must fail this test rather than hang it.
+        assert!(
+            tokio::time::timeout(Duration::from_secs(5), ws.recv())
+                .await
+                .expect("socket never closed after the local refusal's notice")
+                .is_none(),
+            "the socket must close once the locally-refused attach's notice is sent"
+        );
+
+        // Only NOW — after both the notice and the close are observed, so
+        // `serve_term` has already returned and anything it would ever
+        // send has already been sent — check that no `Attach` reached the
+        // peer. A short timeout suffices: nothing further can arrive at
+        // this point, so this is not a race against the request, only a
+        // way to turn "nothing queued" into an assertion without blocking
+        // forever on a connection this test keeps open indefinitely.
+        let mut reader = peer.await.unwrap();
+        let got = tokio::time::timeout(Duration::from_millis(200), reader.read_frame()).await;
+        assert!(
+            got.is_err(),
+            "an Attach reached the supervisor for an explicitly empty ?lease=, which must be \
+             refused locally instead"
+        );
     }
 }
