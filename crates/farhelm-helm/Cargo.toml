@@ -22,4 +22,8 @@ tower-http.workspace = true
 tracing.workspace = true
 
 [dev-dependencies]
+# test-util enables tokio's virtual clock (`#[tokio::test(start_paused =
+# true)]`), used by the upload-relay stall tests so a sixty-second
+# no-progress bound is asserted exactly instead of waited out.
+tokio = { workspace = true, features = ["test-util"] }
 tower.workspace = true

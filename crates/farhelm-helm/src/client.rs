@@ -13,14 +13,15 @@ use farhelm_proto::io::{
 };
 use farhelm_proto::{
     AgentKind, ControlMsg, ErrorKind, Frame, FrameKind, RestartMode, SessionInfo, TabInfo,
-    TerminalSelector,
+    TerminalSelector, UPLOAD_CHUNK_BYTES, UPLOAD_WINDOW_BYTES,
 };
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 use tokio::io::{AsyncRead, AsyncWrite};
-use tokio::sync::{Mutex, mpsc, oneshot, watch};
+use tokio::sync::{Mutex, OwnedSemaphorePermit, Semaphore, mpsc, oneshot, watch};
+use tokio::time::Instant;
 use tracing::warn;
 
 /// Input chunk size. Well under `MAX_FRAME_LEN`, and matched to the
@@ -74,16 +75,21 @@ const TERM_EVENT_QUEUE: usize = 256;
 
 /// Depth of the single outbound queue to the supervisor.
 ///
-/// Deliberately small: this direction carries only terminal INPUT
+/// Deliberately small: this direction is dominated by terminal INPUT
 /// (keystrokes and pastes, already chunked at [`INPUT_CHUNK`]) and
-/// control messages (requests, resizes, pause/resume). There is no
-/// high-volume producer on this side — SPEC_impl.md keeps input off the
-/// flow-control path entirely, since keystrokes are tiny and
-/// latency-critical — so a deep queue would buy nothing but a longer
-/// window in which a dead supervisor still looks alive. Like every
-/// `mpsc` bound here this counts MESSAGES, not bytes; a single paste
-/// chunk is up to `INPUT_CHUNK`, so the ceiling is 64 of those and the
-/// typical occupancy is a keystroke or two.
+/// control messages (requests, resizes, pause/resume), all of them tiny
+/// and latency-critical — SPEC_impl.md keeps input off the flow-control
+/// path entirely — so a deep queue would buy nothing but a longer window
+/// in which a dead supervisor still looks alive. Like every `mpsc` bound
+/// here this counts MESSAGES, not bytes; a single paste chunk is up to
+/// `INPUT_CHUNK`, so the ceiling is 64 of those.
+///
+/// Attachment uploads are the one BULK producer sharing this queue, and
+/// they are rationed rather than accommodated: [`UPLOAD_ENQUEUE_FRAMES`]
+/// caps how much of it upload data may occupy at once. That is what lets
+/// this bound stay sized for the interactive traffic it exists to serve
+/// instead of growing to fit a megabyte-scale producer that would then
+/// sit in front of every keystroke.
 const SUPERVISOR_WRITER_QUEUE: usize = 64;
 
 /// How long the writer task may make NO byte progress before declaring
@@ -97,6 +103,51 @@ const SUPERVISOR_WRITER_QUEUE: usize = 64;
 /// is only that a transport accepting not one byte for a full minute is
 /// called gone, which is indistinguishable from gone at this layer.
 const WRITER_STALL_TIMEOUT: Duration = Duration::from_secs(60);
+
+/// How long an upload may sit on a closed credit window without the
+/// supervisor's cumulative `UploadAck` ADVANCING before the sender gives
+/// the transfer up as stalled.
+///
+/// This is the supervisor-facing leg of PLAN_M4.md item 4's per-hop
+/// progress timeout, and the proto names the evidence it watches for us:
+/// `ControlMsg::UploadAck`'s docs make an advancing ack the receiver's
+/// obligation and "a window that stays open with no advancing ack" the
+/// definition of a stalled transfer. Without it a peer that keeps the
+/// connection open but stops writing bytes parks the relay — and the HTTP
+/// handler behind it — forever, because the browser-facing body timeout
+/// is not running while this hop is the one that is blocked.
+///
+/// Only a STRICTLY advancing ack rearms it. A receiver repeating its last
+/// cumulative count is reporting no progress, so treating a duplicate as
+/// liveness would let a peer hold a transfer open indefinitely with acks
+/// that never move. Sixty seconds matches [`WRITER_STALL_TIMEOUT`] and the
+/// helm's browser-facing body timeout, so every hop of one transfer is
+/// declared stalled on the same generous timescale.
+const UPLOAD_ACK_STALL_TIMEOUT: Duration = Duration::from_secs(60);
+
+/// How many upload data frames this connection may have sitting in the
+/// shared writer queue at once, across every concurrent upload.
+///
+/// The credit window is not enough on its own, and `UPLOAD_CHUNK_BYTES`'s
+/// own docs say why: "the credit window bounds transit, the sender bounds
+/// queue occupancy". A sender that only respected the window could hand
+/// the writer a full 4 MiB — sixteen back-to-back bulk frames — and every
+/// keystroke, resize and control reply enqueued after that would wait
+/// behind megabytes of attachment data on a queue that carries them all.
+///
+/// The bound is global rather than per-upload so that concurrent uploads
+/// cannot multiply their way back to the same problem, and it is enforced
+/// with a semaphore whose permit rides the queued frame (see [`Outbound`]),
+/// so an allowance is returned only once the writer has actually WRITTEN
+/// that frame — occupancy of the shared queue, not merely bytes accepted
+/// by this client. `tokio::sync::Semaphore` hands out permits in FIFO
+/// order, which is what keeps several uploads sharing the allowance fairly
+/// instead of one starving the rest.
+///
+/// Four is small on purpose: one frame in the writer's hands plus a few
+/// queued keeps the transport busy on a fast link, while capping how much
+/// bulk data an input frame can ever find ahead of it at about a megabyte.
+const UPLOAD_ENQUEUE_FRAMES: usize = 4;
 
 /// A supervisor-side request failure, carried through as a distinct type
 /// (rather than a bare string `anyhow` error) so callers above this client
@@ -280,6 +331,87 @@ impl TermDetachSignal {
     }
 }
 
+/// One item on its way to the shared writer: the frame, plus whatever
+/// queue allowance its producer had to take out to enqueue it.
+///
+/// The permit exists to be DROPPED at the right moment. It is released
+/// when the writer task drops this item, which happens only after the
+/// frame has been written — so an upload's allowance measures occupancy
+/// of the shared queue rather than "frames this client accepted", which
+/// is the distinction [`UPLOAD_ENQUEUE_FRAMES`] exists to enforce.
+/// Everything else on this connection (input, control, replies) converts
+/// from a bare `Frame` and carries no permit: only bulk upload data is
+/// rationed, because it is the only producer that can put megabytes
+/// ahead of a keystroke.
+struct Outbound {
+    frame: Frame,
+    _allowance: Option<OwnedSemaphorePermit>,
+}
+
+impl From<Frame> for Outbound {
+    fn from(frame: Frame) -> Self {
+        Self {
+            frame,
+            _allowance: None,
+        }
+    }
+}
+
+/// One attachment upload's flow-control and outcome state, shared between
+/// the demultiplexer (which publishes acks and terminal outcomes) and the
+/// single task relaying that upload (PLAN_M4.md item 5). Carried over a
+/// `watch` exactly like [`TerminalHandle`]'s detach signal, and for the
+/// identical reason: a sender only ever cares about the LATEST cumulative
+/// ack and whether the transfer has ended, never the individual events
+/// that produced them, and `watch::Sender::send_modify` never blocks —
+/// essential since [`SupervisorClient::dispatch`] is the only writer and
+/// must never park on one upload's consumer.
+///
+/// `declared` and `sent` live here rather than in the relaying task's own
+/// stack because ack VALIDATION happens on the demux side: `UploadAck`'s
+/// contract ("monotonic, never exceeds the bytes actually sent, never
+/// exceeds `BeginUpload`'s declared `size`") can only be checked against
+/// numbers the demultiplexer can see.
+#[derive(Debug, Clone)]
+struct UploadProgress {
+    /// `BeginUpload`'s declared size — the ceiling any valid ack must
+    /// respect, fixed for the upload's lifetime.
+    declared: u64,
+    /// Bytes this side has handed to the writer for this channel.
+    /// Recorded BEFORE the frame is enqueued, so it is always at least
+    /// what the supervisor could possibly have received; an ack past it
+    /// is a protocol violation rather than a benign race.
+    sent: u64,
+    /// Highest cumulative byte count the supervisor has acknowledged
+    /// (`ControlMsg::UploadAck::received`), after validation. Outstanding
+    /// bytes are `sent - received`, which is what the credit window
+    /// bounds.
+    received: u64,
+    /// Why this upload is over, once it is: the supervisor's verbatim
+    /// `UploadAborted` reason, this connection's death, or a local
+    /// give-up (stall, protocol violation) whose `AbortUpload` has
+    /// already been handed to an independent task.
+    ///
+    /// `Some` is terminal — the first reason wins and is never rewritten,
+    /// because the user is shown the cause that actually ended the
+    /// transfer, not whatever happened next.
+    ///
+    /// What makes the reason survivable is that [`UploadGuard`] holds a
+    /// `watch::Receiver` for the upload's whole life: an abort landing
+    /// while the relay is parked on its HTTP body (the common case — no
+    /// credit wait is subscribed then) is still readable at the next send
+    /// or at commit. A design that published the reason only to whoever
+    /// happened to be listening at that instant would degrade a precise
+    /// supervisor message into a generic "no longer active", which is
+    /// exactly the failure this field's lifetime is shaped to avoid.
+    ///
+    /// It also doubles as the "an abort is already accounted for" flag:
+    /// every local path sets it only after arranging delivery, so
+    /// `UploadGuard`'s drop can tell an upload that still owes the
+    /// supervisor an `AbortUpload` from one that does not.
+    ended: Option<String>,
+}
+
 /// The optional fields a `CreateSession` may carry beyond the four that
 /// describe the session itself.
 ///
@@ -314,9 +446,31 @@ pub struct CreateExtras {
 /// fast rather than queueing onto a corpse. Reconnection with bounded
 /// retries (SPEC.md's Errors section) arrives with the host registry.
 pub struct SupervisorClient {
-    writer_tx: mpsc::Sender<Frame>,
+    writer_tx: mpsc::Sender<Outbound>,
     pending: Mutex<Pending>,
     terminals: Mutex<HashMap<u32, TerminalHandle>>,
+    /// In-flight attachment uploads, keyed by the same connection-unique
+    /// data-channel ids `terminals` uses — the two maps share
+    /// `next_channel`'s allocator (an upload and a terminal can never
+    /// collide on one id) but not their entries, since an upload is a
+    /// send-direction attachment while a terminal is receive-direction.
+    ///
+    /// An entry outlives the transfer it describes: it is created before
+    /// `BeginUpload` goes out and removed only by the [`UploadGuard`] that
+    /// owns it, never by the demultiplexer. Single ownership of the
+    /// removal is what keeps the two sides from having to agree about
+    /// timing — the demux only ever publishes into an entry it knows is
+    /// there, including the terminal outcome, and the owner decides when
+    /// the upload is finished with.
+    uploads: Mutex<HashMap<u32, watch::Sender<UploadProgress>>>,
+    /// The connection-wide ration of upload frames allowed to occupy the
+    /// shared writer queue at once — see [`UPLOAD_ENQUEUE_FRAMES`].
+    upload_enqueue: Arc<Semaphore>,
+    /// How long a credit wait may go without an advancing ack before the
+    /// transfer is declared stalled ([`UPLOAD_ACK_STALL_TIMEOUT`]),
+    /// injectable so tests can observe the give-up without waiting out a
+    /// production minute.
+    upload_stall: Duration,
     next_req: AtomicU64,
     /// Wider than the wire's u32 on purpose: ids are never recycled (see
     /// `allocate_channel`), so the counter must be able to walk past the
@@ -394,6 +548,29 @@ fn signal_detached(handle: &TerminalHandle, reason: String) {
     });
 }
 
+/// Publish one upload's terminal outcome, without ever blocking and
+/// without removing the entry that carries it.
+///
+/// `signal_detached`'s upload twin, down to the first-reason-wins rule and
+/// the reason it exists: the callers are the shared demux path and
+/// `fail_all`, where blocking on anything one relay owns would stall every
+/// other transfer, terminal and reply on the connection.
+///
+/// The first reason wins because it is the one that actually ended the
+/// transfer — a connection death arriving after the supervisor already
+/// explained itself must not overwrite "disk full" with "connection lost".
+/// The retained entry (see `UploadProgress::ended`) is what lets a relay
+/// that was not watching at this instant still read the reason later.
+fn end_upload(progress: &watch::Sender<UploadProgress>, reason: String) {
+    progress.send_if_modified(|p| {
+        if p.ended.is_some() {
+            return false;
+        }
+        p.ended = Some(reason);
+        true
+    });
+}
+
 impl SupervisorClient {
     /// Perform the hello handshake and start the demux loop. Fails fast
     /// on protocol-version mismatch — the SPEC.md skew rule fires here,
@@ -418,6 +595,29 @@ impl SupervisorClient {
         R: AsyncRead + Unpin + Send + 'static,
         W: AsyncWrite + Unpin + Send + 'static,
     {
+        Self::start_with_stall_timeouts(r, w, writer_stall, UPLOAD_ACK_STALL_TIMEOUT).await
+    }
+
+    /// Like [`Self::start_with_stall_timeout`], but also overriding the
+    /// upload credit wait's no-progress window
+    /// ([`UPLOAD_ACK_STALL_TIMEOUT`]).
+    ///
+    /// The two bounds are separate parameters because they catch different
+    /// peers: `writer_stall` catches a transport that accepts no bytes at
+    /// all, `upload_stall` a supervisor that is reading happily and simply
+    /// never acknowledges an upload. A test for one wants the other left
+    /// at its production value, so that a bug in the bound under test
+    /// cannot be masked by the other firing first.
+    pub async fn start_with_stall_timeouts<R, W>(
+        r: R,
+        w: W,
+        writer_stall: Duration,
+        upload_stall: Duration,
+    ) -> anyhow::Result<Arc<SupervisorClient>>
+    where
+        R: AsyncRead + Unpin + Send + 'static,
+        W: AsyncWrite + Unpin + Send + 'static,
+    {
         // Byte-level write progress, so the writer task below can tell a
         // slow supervisor from one that has stopped consuming.
         let (w, bytes_written) = ProgressWrite::new(w);
@@ -425,13 +625,16 @@ impl SupervisorClient {
         let mut writer = FrameWriter::new(w);
         handshake(&mut reader, &mut writer, "helm").await?;
 
-        let (writer_tx, mut writer_rx) = mpsc::channel::<Frame>(SUPERVISOR_WRITER_QUEUE);
+        let (writer_tx, mut writer_rx) = mpsc::channel::<Outbound>(SUPERVISOR_WRITER_QUEUE);
         let (connection_done, _) = watch::channel(false);
 
         let client = Arc::new(SupervisorClient {
             writer_tx,
             pending: Mutex::new(Pending::default()),
             terminals: Mutex::new(HashMap::new()),
+            uploads: Mutex::new(HashMap::new()),
+            upload_enqueue: Arc::new(Semaphore::new(UPLOAD_ENQUEUE_FRAMES)),
+            upload_stall,
             next_req: AtomicU64::new(1),
             // Channel 0 is the control channel; attachments start at 1.
             next_channel: AtomicU64::new(1),
@@ -450,13 +653,18 @@ impl SupervisorClient {
         let mut writer_cancel = connection_done.subscribe();
         tokio::spawn(async move {
             loop {
-                let frame = tokio::select! {
+                let item = tokio::select! {
                     _ = writer_cancel.changed() => break,
-                    frame = writer_rx.recv() => frame,
+                    item = writer_rx.recv() => item,
                 };
-                let Some(frame) = frame else {
+                // Held across the write, not just up to it: an upload's
+                // queue allowance is returned when this value drops, and
+                // returning it early would let the next bulk frame take
+                // the slot while this one is still occupying the writer.
+                let Some(item) = item else {
                     break;
                 };
+                let frame = &item.frame;
                 // Logged, not swallowed: a write failure here (broken
                 // ssh pipe, dead socket) is the one diagnostic that
                 // explains why every later request starts failing. A
@@ -467,8 +675,7 @@ impl SupervisorClient {
                 // the outbound queue would let a wedged peer park this
                 // task and every producer behind it forever.
                 if let Err(e) =
-                    write_frame_before_stall(&mut writer, &bytes_written, &frame, writer_stall)
-                        .await
+                    write_frame_before_stall(&mut writer, &bytes_written, frame, writer_stall).await
                 {
                     warn!(error = %e, "frame write to supervisor failed");
                     // The write half dying must fail waiters too: a
@@ -540,21 +747,37 @@ impl SupervisorClient {
         Ok(client)
     }
 
-    /// Declare the connection dead: detach every terminal, fail every
-    /// pending request, and make later requests fail fast. Idempotent, and
-    /// called from BOTH halves — the demux loop on read EOF/error, the
-    /// writer task on write failure — because either half dying alone
-    /// (a half-broken ssh pipe) leaves the other alive and waiters hung.
+    /// Declare the connection dead: detach every terminal, abort every
+    /// in-flight upload, fail every pending request, and make later
+    /// requests fail fast. Idempotent, and called from BOTH halves — the
+    /// demux loop on read EOF/error, the writer task on write failure —
+    /// because either half dying alone (a half-broken ssh pipe) leaves
+    /// the other alive and waiters hung.
     ///
-    /// Terminals get an explicit event; pending requests are failed by
-    /// dropping their oneshot senders, which makes `request()` return the
-    /// "connection closed" error instead of hanging an HTTP handler.
+    /// Terminals and uploads each get an explicit out-of-band notice
+    /// (`signal_detached`, `end_upload` on the upload's watch); pending
+    /// requests are failed by dropping their oneshot senders, which makes
+    /// `request()` return the "connection closed" error instead of
+    /// hanging an HTTP handler.
+    ///
+    /// Terminals are DRAINED here while uploads are only marked: a
+    /// terminal's consumer owns its receiver and learns the reason from
+    /// it, whereas an upload's reason lives in the map entry until the
+    /// [`UploadGuard`] that owns the transfer retires it. Draining
+    /// uploads would throw that reason away in exactly the case it is
+    /// most needed — a relay parked between body chunks when the
+    /// supervisor died.
     async fn fail_all(&self, reason: &str) {
         let mut terms = self.terminals.lock().await;
         for (_, handle) in terms.drain() {
             signal_detached(&handle, reason.to_string());
         }
         drop(terms);
+        let uploads = self.uploads.lock().await;
+        for progress in uploads.values() {
+            end_upload(progress, reason.to_string());
+        }
+        drop(uploads);
         // Flag and drain in one lock hold; see `Pending` for why.
         let mut pending = self.pending.lock().await;
         pending.closed = true;
@@ -563,7 +786,10 @@ impl SupervisorClient {
 
     /// Route one inbound frame to whoever is waiting for it: data frames
     /// to their terminal, replies to the request that carries their
-    /// `req_id`, `Detached` to the terminal it names.
+    /// `req_id`, `Detached` to the terminal it names, and — PLAN_M4.md
+    /// item 5's upload vocabulary — `UploadAck`/`UploadAborted` to the
+    /// upload it names by `channel`, the same channel-correlated,
+    /// no-`req_id` shape `Detached` already uses.
     ///
     /// A frame for a channel or request that no longer exists is dropped:
     /// that is the normal outcome of a detach racing in-flight output.
@@ -675,6 +901,85 @@ impl SupervisorClient {
                             self.release_upstream(*channel);
                         }
                     }
+                    // Unsolicited progress: extends the sender's credit
+                    // window (see `UploadGuard::wait_for_credit`), and is
+                    // the liveness evidence its stall deadline watches. A
+                    // channel this client no longer knows about is a
+                    // normal race (the relay already retired the upload)
+                    // and is silently dropped, exactly like a stray data
+                    // frame for a dead terminal above.
+                    //
+                    // Validation is the protocol's, not this client's
+                    // invention: `UploadAck`'s docs make `received`
+                    // monotonic, bounded by the bytes actually sent and by
+                    // the declared size, and make a violating ack an abort
+                    // — so a peer cannot manufacture credit it was never
+                    // owed, nor push the window arithmetic anywhere it
+                    // could overflow.
+                    ControlMsg::UploadAck { channel, received } => {
+                        let mut violation = None;
+                        if let Some(progress) = self.uploads.lock().await.get(channel) {
+                            progress.send_if_modified(|p| {
+                                if p.ended.is_some() {
+                                    return false;
+                                }
+                                if *received < p.received {
+                                    violation = Some(format!(
+                                        "supervisor upload ack regressed from {} to {received}",
+                                        p.received
+                                    ));
+                                } else if *received > p.sent {
+                                    violation = Some(format!(
+                                        "supervisor acknowledged {received} upload bytes but only \
+                                         {} were sent",
+                                        p.sent
+                                    ));
+                                } else if *received > p.declared {
+                                    violation = Some(format!(
+                                        "supervisor acknowledged {received} upload bytes past the \
+                                         declared size {}",
+                                        p.declared
+                                    ));
+                                }
+                                if let Some(reason) = &violation {
+                                    p.ended = Some(reason.clone());
+                                    return true;
+                                }
+                                // A repeat of the current count is legal
+                                // but reports no progress, so it must not
+                                // wake the credit wait: doing so would let
+                                // a peer hold a transfer open forever with
+                                // acks that never move (see
+                                // `UPLOAD_ACK_STALL_TIMEOUT`).
+                                if *received == p.received {
+                                    return false;
+                                }
+                                p.received = *received;
+                                true
+                            });
+                        }
+                        // Outside the map lock, and fire-and-forget: the
+                        // demux loop must never park on the writer queue.
+                        if let Some(reason) = violation {
+                            warn!(channel, %reason, "aborting upload on an invalid ack");
+                            self.enqueue_abort(*channel);
+                        }
+                    }
+                    // Unsolicited: the supervisor gave up on this upload.
+                    // Unlike `Detached` above, this does NOT remove the
+                    // entry — the guard that owns the upload does that,
+                    // once it has acted on the outcome. The reason itself
+                    // reaches the relay whether or not it is watching
+                    // right now, because the guard holds a receiver for
+                    // the transfer's whole life (see
+                    // `UploadProgress::ended`); leaving the entry in place
+                    // keeps the "only the owner retires it" rule intact
+                    // rather than making removal a race between two sides.
+                    ControlMsg::UploadAborted { channel, reason } => {
+                        if let Some(progress) = self.uploads.lock().await.get(channel) {
+                            end_upload(progress, reason.clone());
+                        }
+                    }
                     other => warn!(?other, "unexpected control message at helm"),
                 }
             }
@@ -700,7 +1005,32 @@ impl SupervisorClient {
         let writer_tx = self.writer_tx.clone();
         tokio::spawn(async move {
             let _ = writer_tx
-                .send(Frame::control(&ControlMsg::Detach { channel }))
+                .send(Frame::control(&ControlMsg::Detach { channel }).into())
+                .await;
+        });
+    }
+
+    /// Enqueue an `AbortUpload` for `channel` from a task this caller does
+    /// not own, and never wait for it.
+    ///
+    /// Every abort in this client goes out this way, and the ownership is
+    /// the point. The writer queue is bounded, so enqueueing can park; an
+    /// abort awaited inline would be lost exactly when it matters most —
+    /// a cancelled relay (its handler's future dropped mid-send) or the
+    /// demux loop, which must never block on one upload at all. A task
+    /// holding its own sender clone cannot be cancelled by whatever
+    /// happened upstream, so the supervisor learns to drop the transfer
+    /// and clean its temp file even when nothing is left here to care.
+    ///
+    /// Delivering an abort more than once, or for a channel the supervisor
+    /// never accepted, is harmless by `ControlMsg::AbortUpload`'s own
+    /// idempotence contract — which is what lets every teardown path call
+    /// this without first proving who won a race.
+    fn enqueue_abort(&self, channel: u32) {
+        let writer_tx = self.writer_tx.clone();
+        tokio::spawn(async move {
+            let _ = writer_tx
+                .send(Frame::control(&ControlMsg::AbortUpload { channel }).into())
                 .await;
         });
     }
@@ -743,7 +1073,7 @@ impl SupervisorClient {
             }
             pending.map.insert(req_id, tx);
         }
-        permit.send(Frame::control(&msg));
+        permit.send(Frame::control(&msg).into());
         let reply = rx.await.context("supervisor connection closed")?;
         // Matched by value, not `if let ... = &reply`: an owned `message`
         // moves straight into `SupervisorError` instead of a borrow forcing
@@ -1169,7 +1499,7 @@ impl SupervisorClient {
         self.terminals.lock().await.remove(&channel);
         let _ = self
             .writer_tx
-            .send(Frame::control(&ControlMsg::Detach { channel }))
+            .send(Frame::control(&ControlMsg::Detach { channel }).into())
             .await;
     }
 
@@ -1189,7 +1519,7 @@ impl SupervisorClient {
         for chunk in bytes.chunks(INPUT_CHUNK) {
             if self
                 .writer_tx
-                .send(Frame::data(channel, chunk.to_vec()))
+                .send(Frame::data(channel, chunk.to_vec()).into())
                 .await
                 .is_err()
             {
@@ -1207,12 +1537,15 @@ impl SupervisorClient {
     pub async fn resize(&self, session_id: &str, channel: u32, cols: u16, rows: u16) {
         let _ = self
             .writer_tx
-            .send(Frame::control(&ControlMsg::Resize {
-                session_id: session_id.to_string(),
-                channel,
-                cols,
-                rows,
-            }))
+            .send(
+                Frame::control(&ControlMsg::Resize {
+                    session_id: session_id.to_string(),
+                    channel,
+                    cols,
+                    rows,
+                })
+                .into(),
+            )
             .await;
     }
 
@@ -1233,7 +1566,7 @@ impl SupervisorClient {
     pub async fn pause_output(&self, channel: u32) {
         let _ = self
             .writer_tx
-            .send(Frame::control(&ControlMsg::PauseOutput { channel }))
+            .send(Frame::control(&ControlMsg::PauseOutput { channel }).into())
             .await;
     }
 
@@ -1242,8 +1575,443 @@ impl SupervisorClient {
     pub async fn resume_output(&self, channel: u32) {
         let _ = self
             .writer_tx
-            .send(Frame::control(&ControlMsg::ResumeOutput { channel }))
+            .send(Frame::control(&ControlMsg::ResumeOutput { channel }).into())
             .await;
+    }
+
+    /// Start an attachment upload into a session's attachments directory
+    /// (PLAN_M4.md item 5 — the helm's half of the pinned attachment REST
+    /// contract), returning the [`UploadGuard`] that owns the transfer
+    /// from here on.
+    ///
+    /// The guard, not a bare channel number, is what callers get, because
+    /// an accepted upload is an OBLIGATION: the supervisor is holding a
+    /// temp file and admission capacity until this side either commits or
+    /// aborts, and "the relay's future was dropped" is a perfectly
+    /// ordinary way for that side to end (a browser resetting the
+    /// connection mid-body cancels the axum handler outright, running no
+    /// error branch of any kind). Ownership makes the abort structural:
+    /// dropping the guard enqueues one, whatever the reason for the drop.
+    ///
+    /// The guard exists BEFORE the request goes out — it is created
+    /// alongside the `uploads` entry and covers this method's own await —
+    /// so a cancellation between registering and hearing `UploadStarted`
+    /// cleans up and aborts too, rather than leaking an entry for a
+    /// transfer the supervisor may well have accepted.
+    ///
+    /// # Errors
+    ///
+    /// Two distinguishable shapes, and callers that map to HTTP care about
+    /// the difference:
+    ///
+    /// - The supervisor REFUSED the begin — an unknown session, channel 0,
+    ///   a channel in use, its admission cap — which arrives as a
+    ///   [`SupervisorError`] carrying the message verbatim and a `kind` to
+    ///   map to a status. Nothing exists on disk (`ControlMsg::
+    ///   UploadStarted`'s own words), so nothing is aborted.
+    /// - The exchange never completed: a dead connection, or a reply that
+    ///   is not an `UploadStarted` for this channel. These are plain
+    ///   `anyhow` errors with no `kind` to recover, and map to a 500.
+    ///
+    /// A filename is never in either set: per `ControlMsg::BeginUpload`,
+    /// a proposed name is only ever sanitized or replaced.
+    pub async fn begin_upload(
+        self: &Arc<Self>,
+        session_id: &str,
+        filename: &str,
+        size: u64,
+    ) -> anyhow::Result<UploadGuard> {
+        let channel = allocate_channel(&self.next_channel)?;
+        let (progress_tx, progress_rx) = watch::channel(UploadProgress {
+            declared: size,
+            sent: 0,
+            received: 0,
+            ended: None,
+        });
+        self.uploads.lock().await.insert(channel, progress_tx);
+        // Armed from this line on: every exit below either disarms the
+        // guard explicitly or lets it drop, and a drop is an abort.
+        let mut guard = UploadGuard {
+            client: Arc::clone(self),
+            channel,
+            progress: progress_rx,
+            retired: false,
+        };
+
+        let req_id = self.req_id();
+        let result = self
+            .request(
+                req_id,
+                ControlMsg::BeginUpload {
+                    req_id,
+                    session_id: session_id.to_string(),
+                    channel,
+                    filename: filename.to_string(),
+                    size,
+                },
+            )
+            .await;
+        let reply = match result {
+            Ok(reply) => reply,
+            // A refusal created nothing upstream, and a transport failure
+            // leaves nothing an abort could reach, so both retire quietly
+            // instead of enqueueing an abort for a transfer that does not
+            // exist.
+            Err(e) => {
+                guard.retire().await;
+                return Err(e);
+            }
+        };
+        match reply {
+            // The echoed channel is checked, not assumed: it is what
+            // `UploadStarted` grants credit for, so a mismatch would have
+            // this side streaming bytes onto a channel the supervisor
+            // never opened while the transfer it DID open sat idle. The
+            // guard's drop aborts the channel this side asked for, and no
+            // data has been sent.
+            ControlMsg::UploadStarted {
+                channel: started, ..
+            } if started == channel => Ok(guard),
+            ControlMsg::UploadStarted {
+                channel: started, ..
+            } => {
+                bail!("supervisor started upload on channel {started}, not the requested {channel}")
+            }
+            other => bail!("unexpected reply to begin_upload: {other:?}"),
+        }
+    }
+}
+
+/// One in-flight attachment upload, owned by the single task relaying it.
+///
+/// The send-direction counterpart of `TermStream`, with one extra job that
+/// shapes the whole type: it is the upload's CANCELLATION-SAFE owner. Every
+/// way this transfer can end — commit, an explicit abort, a supervisor-side
+/// abort, a stall, or simply the owning future being dropped — retires the
+/// local bookkeeping, and every ending that leaves the supervisor still
+/// holding a temp file sends an `AbortUpload`. That is why the relay holds
+/// this value rather than a channel id: a channel id has no destructor.
+///
+/// Terminal state is read through a persistent `watch::Receiver` held for
+/// the upload's whole life, which is what lets an abort that arrived while
+/// the relay was parked somewhere else (awaiting the next body chunk, or a
+/// commit reply) still be reported with the supervisor's own words.
+pub struct UploadGuard {
+    client: Arc<SupervisorClient>,
+    channel: u32,
+    progress: watch::Receiver<UploadProgress>,
+    /// Set once the local entry has been removed by an owner-driven path,
+    /// so `Drop` knows there is nothing left to clean up or abort.
+    retired: bool,
+}
+
+/// Hand-written because the client behind an upload is not `Debug` and
+/// would be noise anyway: what identifies a guard is its channel and how
+/// far the transfer has got.
+impl std::fmt::Debug for UploadGuard {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("UploadGuard")
+            .field("channel", &self.channel)
+            .field("progress", &*self.progress.borrow())
+            .field("retired", &self.retired)
+            .finish()
+    }
+}
+
+impl UploadGuard {
+    /// The data channel this upload streams on — for the relay's own
+    /// logging; the guard's methods never need it passed back.
+    pub fn channel(&self) -> u32 {
+        self.channel
+    }
+
+    /// The upload's terminal reason if one has already been published,
+    /// without awaiting. Synchronous because `watch::Receiver::borrow`
+    /// is, which is what lets `Drop` consult it.
+    fn terminal_reason(&self) -> Option<String> {
+        self.progress.borrow().ended.clone()
+    }
+
+    /// Resolve once this upload has ended for any reason, with the reason
+    /// verbatim; never resolves while the transfer is healthy.
+    ///
+    /// The relay selects on this while reading its HTTP body so a
+    /// supervisor-side abort ends the request promptly instead of after
+    /// the browser's next chunk (or, for a browser that has gone quiet,
+    /// after the body stall timeout). Cancel-safe: dropping the returned
+    /// future loses nothing, since the watch's version counter, not this
+    /// call, is what tracks what has been observed.
+    pub async fn ended(&mut self) -> String {
+        wait_ended(&mut self.progress).await
+    }
+
+    /// Wait until `additional` more bytes fit inside the credit window,
+    /// or until the transfer ends.
+    ///
+    /// Two independent ways out besides success: a terminal outcome
+    /// (reported verbatim), and the per-hop stall deadline
+    /// ([`UPLOAD_ACK_STALL_TIMEOUT`]) that fires when the window stays
+    /// shut with no ADVANCING ack. Only a strictly advancing ack rearms
+    /// the deadline — the demultiplexer does not even wake this wait for a
+    /// repeated count — so a peer cannot keep a transfer alive by
+    /// restating progress it already reported.
+    ///
+    /// The arithmetic is deliberately subtractive: `sent - received` is
+    /// the outstanding count, which cannot overflow because ack validation
+    /// keeps `received <= sent`, whereas the equivalent `received +
+    /// window` comparison would put peer-supplied numbers on the growing
+    /// side of an addition.
+    async fn wait_for_credit(&mut self, additional: u64) -> Result<(), String> {
+        let mut deadline = Instant::now() + self.client.upload_stall;
+        let mut last_received = self.progress.borrow().received;
+        loop {
+            let snapshot = self.progress.borrow_and_update().clone();
+            if let Some(reason) = snapshot.ended {
+                return Err(reason);
+            }
+            let outstanding = snapshot.sent.saturating_sub(snapshot.received);
+            if outstanding.saturating_add(additional) <= UPLOAD_WINDOW_BYTES {
+                return Ok(());
+            }
+            // The select's value is taken out before anything acts on it:
+            // its arms hold a borrow of `self.progress`, and the stall
+            // path needs `&mut self` back to abort.
+            let woke = tokio::select! {
+                _ = tokio::time::sleep_until(deadline) => None,
+                changed = self.progress.changed() => Some(changed),
+            };
+            match woke {
+                None => {
+                    let stalled = farhelm_proto::UPLOAD_ABORT_REASON_STALLED.to_string();
+                    warn!(
+                        channel = self.channel,
+                        "upload stalled: no advancing supervisor ack"
+                    );
+                    self.abort(stalled.clone()).await;
+                    return Err(stalled);
+                }
+                Some(Err(_)) => return Err("supervisor connection lost".to_string()),
+                Some(Ok(())) => {
+                    let received = self.progress.borrow().received;
+                    if received > last_received {
+                        last_received = received;
+                        deadline = Instant::now() + self.client.upload_stall;
+                    }
+                }
+            }
+        }
+    }
+
+    /// Forward attachment bytes, rechunked to at most
+    /// [`UPLOAD_CHUNK_BYTES`] regardless of the caller's own chunk
+    /// boundaries — rechunking is the PROTOCOL-FRAME SENDER's job
+    /// (`UPLOAD_CHUNK_BYTES`'s own docs), so the helm relay must split at
+    /// this size no matter how its HTTP body stream happened to arrive.
+    ///
+    /// Two bounds apply per chunk, and they are not the same bound. The
+    /// credit window caps unacknowledged bytes in TRANSIT
+    /// ([`UPLOAD_WINDOW_BYTES`]); the connection-wide enqueue allowance
+    /// ([`UPLOAD_ENQUEUE_FRAMES`]) caps how many upload frames may sit in
+    /// the shared writer queue, which is what actually keeps a keystroke
+    /// from queueing behind megabytes of attachment data. The window is
+    /// waited on first so an allowance is never held while parked on
+    /// credit.
+    ///
+    /// The running byte count lives in the upload's shared state rather
+    /// than a caller-threaded total, because ack validation on the demux
+    /// side has to see it; callers just hand over bytes. On `Ok` every
+    /// byte has been enqueued; on `Err` the reason is user-legible (the
+    /// supervisor's abort verbatim, a stall, or this connection's death)
+    /// and the transfer is over — it never partially succeeds silently.
+    pub async fn send_upload_chunk(&mut self, bytes: &[u8]) -> Result<(), String> {
+        for chunk in bytes.chunks(UPLOAD_CHUNK_BYTES) {
+            self.wait_for_credit(chunk.len() as u64).await?;
+            let allowance = Arc::clone(&self.client.upload_enqueue)
+                .acquire_owned()
+                .await
+                .map_err(|_| "supervisor connection lost".to_string())?;
+            // Counted before the frame is enqueued, so `sent` is never
+            // behind what the supervisor could already have acknowledged
+            // — an ack past it has to stay a genuine protocol violation
+            // rather than a race this side loses.
+            self.publish(|p| p.sent += chunk.len() as u64).await;
+            let frame = Outbound {
+                frame: Frame::data(self.channel, chunk.to_vec()),
+                _allowance: Some(allowance),
+            };
+            if self.client.writer_tx.send(frame).await.is_err() {
+                return Err("supervisor connection lost".to_string());
+            }
+        }
+        Ok(())
+    }
+
+    /// All bytes sent; ask the supervisor to publish the file, returning
+    /// the raw absolute host path `ControlMsg::UploadCommitted::path`
+    /// carries.
+    ///
+    /// Consumes the guard, which is what makes the commit itself
+    /// cancellation-safe: if the awaiting future is dropped before the
+    /// reply lands, the guard drops with it and the supervisor gets its
+    /// `AbortUpload` — rather than a permanently pending transfer and a
+    /// local entry nothing would ever remove.
+    ///
+    /// An abort takes precedence over the commit exchange, before it and
+    /// during it. A supervisor that gave up mid-transfer has already
+    /// explained why, and that reason is what the user must see; the
+    /// correlated commit error for a channel that no longer carries an
+    /// upload would say only that the commit failed. Any ANSWERED commit
+    /// — published, or refused for a size mismatch or storage failure —
+    /// is terminal by `ControlMsg::CommitUpload`'s docs, so the guard
+    /// retires either way.
+    pub async fn commit(mut self) -> anyhow::Result<String> {
+        if let Some(reason) = self.terminal_reason() {
+            self.retire().await;
+            return Err(anyhow::Error::new(SupervisorError {
+                kind: ErrorKind::Internal,
+                message: reason,
+            }));
+        }
+        let client = Arc::clone(&self.client);
+        let channel = self.channel;
+        let req_id = client.req_id();
+        // A cloned receiver rather than `self.progress`, so the select
+        // below borrows nothing that the retire/abort calls in its arms
+        // need back.
+        let mut progress = self.progress.clone();
+        // The reply is polled FIRST, and the ordering matters in one
+        // specific race: a supervisor that answers the commit and then
+        // closes the connection publishes a terminal "connection lost" on
+        // the way down, and preferring that over a reply already sitting
+        // in hand would turn a published upload into a spurious failure.
+        // An abort still wins whenever it is the reason the commit has no
+        // answer, which is the case this arm exists for — it reached the
+        // demultiplexer before any reply could.
+        let reply = tokio::select! {
+            biased;
+            reply = client.request(req_id, ControlMsg::CommitUpload { req_id, channel }) => reply,
+            reason = wait_ended(&mut progress) => {
+                self.retire().await;
+                return Err(anyhow::Error::new(SupervisorError {
+                    kind: ErrorKind::Internal,
+                    message: reason,
+                }));
+            }
+        };
+        self.retire().await;
+        match reply? {
+            ControlMsg::UploadCommitted { path, .. } => Ok(path),
+            other => bail!("unexpected reply to commit_upload: {other:?}"),
+        }
+    }
+
+    /// Give the transfer up from this side, telling the supervisor to drop
+    /// it and clean its temp file.
+    ///
+    /// `reason` never reaches the wire — `ControlMsg::AbortUpload` carries
+    /// no reason field, since the abandoning side has nothing to explain
+    /// to the receiver — but it is recorded locally so any later look at
+    /// this upload reports why it ended rather than that it merely
+    /// vanished.
+    ///
+    /// Delivery is handed to an independent task (see
+    /// [`SupervisorClient::enqueue_abort`]) rather than awaited here, so
+    /// an abort cannot be lost to the cancellation that prompted it.
+    pub async fn abort(&mut self, reason: String) {
+        self.publish(|p| {
+            if p.ended.is_none() {
+                p.ended = Some(reason);
+            }
+        })
+        .await;
+        self.client.enqueue_abort(self.channel);
+        self.retire().await;
+    }
+
+    /// Mutate this upload's shared state, if the entry is still there.
+    ///
+    /// A retired upload has no entry, which is not an error: the
+    /// bookkeeping only exists to be observed by this guard and the
+    /// demultiplexer, and both are done with it by then.
+    async fn publish(&self, update: impl FnOnce(&mut UploadProgress)) {
+        if let Some(progress) = self.client.uploads.lock().await.get(&self.channel) {
+            progress.send_modify(update);
+        }
+    }
+
+    /// Retire the local bookkeeping and disarm the drop-time abort.
+    ///
+    /// Called only from paths that have established the supervisor needs
+    /// nothing further: a published or refused commit, a refused begin, or
+    /// an abort already handed to its own task.
+    async fn retire(&mut self) {
+        self.client.uploads.lock().await.remove(&self.channel);
+        self.retired = true;
+    }
+}
+
+/// Wait for an upload's terminal reason on a receiver the caller holds.
+///
+/// A free function rather than only a method because [`UploadGuard::commit`]
+/// needs to watch for the outcome on a CLONED receiver: its other select arm
+/// wants the guard back, and borrowing `self.progress` there would pin it for
+/// the whole race. [`UploadGuard::ended`] is the same wait for callers that
+/// can borrow the guard.
+///
+/// Cancel-safe: dropping the returned future loses nothing, since the
+/// watch's version counter — not this call — is what tracks what has been
+/// observed. A sender dropped without publishing an outcome is only
+/// reachable if the whole client went away (the guard's `Arc` normally
+/// prevents it), and is reported as the connection loss it is rather than
+/// hanging forever.
+async fn wait_ended(progress: &mut watch::Receiver<UploadProgress>) -> String {
+    loop {
+        if let Some(reason) = progress.borrow_and_update().ended.clone() {
+            return reason;
+        }
+        if progress.changed().await.is_err() {
+            return progress
+                .borrow()
+                .ended
+                .clone()
+                .unwrap_or_else(|| "supervisor connection lost".to_string());
+        }
+    }
+}
+
+impl Drop for UploadGuard {
+    /// The whole reason this type exists: an upload whose owner went away
+    /// without saying so still gets torn down at both ends.
+    ///
+    /// The cleanup runs on a spawned task because a destructor cannot
+    /// await — and because the abort MUST NOT be tied to whatever is being
+    /// dropped, which by definition may already have been cancelled. An
+    /// upload that already ended (the supervisor aborted it, this side
+    /// aborted it, the connection died) owes no further message; anything
+    /// else does, and `AbortUpload` is idempotent, so sending one for a
+    /// transfer the supervisor never accepted is harmless.
+    fn drop(&mut self) {
+        if self.retired {
+            return;
+        }
+        let needs_abort = self.terminal_reason().is_none();
+        let client = Arc::clone(&self.client);
+        let channel = self.channel;
+        // Guards normally drop inside a task, but a destructor can run
+        // anywhere; without a runtime there is nothing to clean up on
+        // either — the connection is going away with the process.
+        let Ok(handle) = tokio::runtime::Handle::try_current() else {
+            return;
+        };
+        handle.spawn(async move {
+            if needs_abort {
+                let _ = client
+                    .writer_tx
+                    .send(Frame::control(&ControlMsg::AbortUpload { channel }).into())
+                    .await;
+            }
+            client.uploads.lock().await.remove(&channel);
+        });
     }
 }
 
@@ -1319,6 +2087,57 @@ mod tests {
             detach: detach_rx,
             ended: false,
         }
+    }
+
+    /// Register an upload on `client` directly, returning the same
+    /// [`UploadGuard`] a real `begin_upload` would have handed back.
+    ///
+    /// Bypasses `begin_upload`'s own `BeginUpload`/`UploadStarted`
+    /// exchange — the send-side sibling of `register_terminal`, for the
+    /// same reason: the tests that use this are about rechunking,
+    /// credit-window, stall, ack-validation and teardown behavior, not
+    /// about the begin handshake, so scripting that handshake in every one
+    /// of them would only obscure what each test is actually pinning.
+    ///
+    /// `declared` is `BeginUpload`'s size, which ack validation checks
+    /// against, so a test that means to send N bytes must declare at least
+    /// N or its own acks become protocol violations.
+    async fn register_upload(
+        client: &Arc<SupervisorClient>,
+        channel: u32,
+        declared: u64,
+    ) -> UploadGuard {
+        let (progress_tx, progress_rx) = watch::channel(UploadProgress {
+            declared,
+            sent: 0,
+            received: 0,
+            ended: None,
+        });
+        client.uploads.lock().await.insert(channel, progress_tx);
+        UploadGuard {
+            client: Arc::clone(client),
+            channel,
+            progress: progress_rx,
+            retired: false,
+        }
+    }
+
+    /// Wait for `client` to have no upload bookkeeping left, or fail.
+    ///
+    /// Teardown after a cancellation is deliberately asynchronous — an
+    /// `UploadGuard`'s destructor hands the work to its own task so the
+    /// abort cannot be lost with whatever was cancelled — so "the entry is
+    /// gone" is a property that becomes true shortly after the drop, not
+    /// at it. Polling with a bound turns that into an assertion that fails
+    /// loudly instead of a sleep long enough to be flaky.
+    async fn await_no_uploads(client: &SupervisorClient) {
+        timeout(Duration::from_secs(5), async {
+            while !client.uploads.lock().await.is_empty() {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("upload bookkeeping was never retired");
     }
 
     fn session(id: &str) -> SessionInfo {
@@ -2246,5 +3065,1029 @@ mod tests {
             ControlMsg::UploadCommitted { req_id: 23, ref path } if path == "/tmp/a.txt"
         ));
         peer.await.unwrap();
+    }
+
+    /// `begin_upload` sends the caller's fields verbatim and, on a
+    /// successful `UploadStarted`, hands back a guard whose channel is
+    /// registered in `uploads` for the rest of the transfer to use — the
+    /// register-before-request half of its own doc comment.
+    ///
+    /// The scripted peer returns its reader/writer instead of letting them
+    /// drop at the end of its async block: dropping them here would close
+    /// this side of the duplex right after the reply, which can race the
+    /// demux loop into observing EOF and calling `fail_all` — clearing
+    /// EVERY upload, including the one just registered — before this
+    /// test's own assertion runs. Keeping the peer's halves alive (held,
+    /// unused, in the joined result) until after the assertion is what
+    /// makes the test observe begin_upload's OWN postcondition rather than
+    /// an unrelated connection-teardown race.
+    #[tokio::test]
+    async fn begin_upload_sends_the_declared_fields_and_registers_the_channel() {
+        let (client_side, peer_side) = tokio::io::duplex(64 * 1024);
+        let peer = tokio::spawn(async move {
+            let (r, w) = tokio::io::split(peer_side);
+            let mut reader = FrameReader::new(r);
+            let mut writer = FrameWriter::new(w);
+            handshake(&mut reader, &mut writer, "supervisor")
+                .await
+                .unwrap();
+            let request = parse_control(&reader.read_frame().await.unwrap().unwrap()).unwrap();
+            let ControlMsg::BeginUpload {
+                req_id,
+                session_id,
+                channel,
+                filename,
+                size,
+            } = request
+            else {
+                panic!("expected BeginUpload, got {request:?}");
+            };
+            assert_eq!(session_id, "s1");
+            assert_eq!(filename, "screenshot.png");
+            assert_eq!(size, 999);
+            writer
+                .write_control(&ControlMsg::UploadStarted { req_id, channel })
+                .await
+                .unwrap();
+            (reader, writer)
+        });
+        let (r, w) = tokio::io::split(client_side);
+        let client = SupervisorClient::start(r, w).await.unwrap();
+
+        let upload = client
+            .begin_upload("s1", "screenshot.png", 999)
+            .await
+            .unwrap();
+        assert!(
+            client.uploads.lock().await.contains_key(&upload.channel()),
+            "a successful begin_upload must leave the channel registered for later calls"
+        );
+        let _peer = peer.await.unwrap();
+    }
+
+    /// `send_upload_chunk` must rechunk a single caller-supplied buffer at
+    /// exactly [`UPLOAD_CHUNK_BYTES`], never at whatever size the caller
+    /// happened to pass in — the "one big body chunk => multiple
+    /// UPLOAD_CHUNK_BYTES frames" contract the helm's HTTP relay depends
+    /// on, since an HTTP body stream's own chunk boundaries have nothing
+    /// to do with the protocol's frame-size discipline. The content itself
+    /// (a byte pattern derived from position) is checked too, not just the
+    /// lengths, so a rechunking bug that reordered or duplicated bytes
+    /// would also fail this.
+    #[tokio::test]
+    async fn send_upload_chunk_rechunks_a_single_buffer_at_upload_chunk_bytes() {
+        let (client_side, peer_side) = tokio::io::duplex(4 * 1024 * 1024);
+        let peer = tokio::spawn(async move {
+            let (r, w) = tokio::io::split(peer_side);
+            let mut reader = FrameReader::new(r);
+            let mut writer = FrameWriter::new(w);
+            handshake(&mut reader, &mut writer, "supervisor")
+                .await
+                .unwrap();
+            reader
+        });
+        let (r, w) = tokio::io::split(client_side);
+        let client = SupervisorClient::start(r, w).await.unwrap();
+        let channel = 5;
+
+        // Two full chunks plus a remainder — comfortably inside the
+        // credit window, so this test is purely about rechunking, not
+        // flow control.
+        let remainder = 777usize;
+        let total = UPLOAD_CHUNK_BYTES * 2 + remainder;
+        let mut upload = register_upload(&client, channel, total as u64).await;
+        let bytes: Vec<u8> = (0..total).map(|i| (i % 256) as u8).collect();
+        upload.send_upload_chunk(&bytes).await.unwrap();
+
+        let mut peer_reader = peer.await.unwrap();
+        let mut reassembled = Vec::new();
+        let mut got_lens = Vec::new();
+        loop {
+            let frame = timeout(Duration::from_secs(5), peer_reader.read_frame())
+                .await
+                .expect("timed out reading a rechunked upload frame")
+                .unwrap();
+            let Some(frame) = frame else { break };
+            assert_eq!(frame.channel, channel);
+            assert!(matches!(frame.kind, FrameKind::Data));
+            got_lens.push(frame.body.len());
+            reassembled.extend_from_slice(&frame.body);
+            if reassembled.len() == total {
+                break;
+            }
+        }
+        assert_eq!(
+            got_lens,
+            vec![UPLOAD_CHUNK_BYTES, UPLOAD_CHUNK_BYTES, remainder],
+            "rechunking must split at exactly UPLOAD_CHUNK_BYTES regardless of the caller's own \
+             buffer size, with only the final piece short"
+        );
+        assert_eq!(
+            reassembled, bytes,
+            "rechunked frames must reassemble to exactly the original bytes, in order"
+        );
+    }
+
+    /// The credit window bounds outstanding (unacknowledged) bytes at
+    /// [`UPLOAD_WINDOW_BYTES`] — PLAN_M4.md item 1's flow control for the
+    /// upload direction. A sender offered more than the window must stall
+    /// after putting exactly the window's worth on the wire, and resume
+    /// only once an `UploadAck` extends the credit baseline.
+    #[tokio::test]
+    async fn send_upload_chunk_stalls_at_the_credit_window_then_progresses_after_an_ack() {
+        let (client_side, peer_side) = tokio::io::duplex(16 * 1024 * 1024);
+        let peer = tokio::spawn(async move {
+            let (r, w) = tokio::io::split(peer_side);
+            let mut reader = FrameReader::new(r);
+            let mut writer = FrameWriter::new(w);
+            handshake(&mut reader, &mut writer, "supervisor")
+                .await
+                .unwrap();
+            (reader, writer)
+        });
+        let (r, w) = tokio::io::split(client_side);
+        let client = SupervisorClient::start(r, w).await.unwrap();
+        let (mut peer_reader, mut peer_writer) = peer.await.unwrap();
+        let channel = 9;
+
+        // UPLOAD_WINDOW_BYTES is an exact multiple of UPLOAD_CHUNK_BYTES
+        // (4 MiB / 256 KiB = 16), so "one chunk past the window" lands on
+        // a clean chunk boundary and the assertions below need no
+        // rounding.
+        let total = UPLOAD_WINDOW_BYTES as usize + UPLOAD_CHUNK_BYTES;
+        let mut upload = register_upload(&client, channel, total as u64).await;
+        let bytes = vec![7u8; total];
+        let send = tokio::spawn(async move {
+            let result = upload.send_upload_chunk(&bytes).await;
+            // The guard is kept alive until the send is observed: dropping
+            // it here would abort the very transfer the test is waiting to
+            // see finish.
+            (result, upload)
+        });
+
+        // Drain exactly the window's worth. The sender must not put more
+        // than this on the wire before any ack — the property under test.
+        let mut received = 0u64;
+        while received < UPLOAD_WINDOW_BYTES {
+            let frame = timeout(Duration::from_secs(5), peer_reader.read_frame())
+                .await
+                .expect("timed out waiting for the sender's initial window")
+                .unwrap()
+                .expect("connection closed mid-window");
+            received += frame.body.len() as u64;
+        }
+        assert_eq!(received, UPLOAD_WINDOW_BYTES);
+
+        // Now genuinely stalled: neither another frame nor the send's own
+        // completion arrives within a short, generous bound.
+        assert!(
+            timeout(Duration::from_millis(300), peer_reader.read_frame())
+                .await
+                .is_err(),
+            "the sender put more than UPLOAD_WINDOW_BYTES on the wire before any ack"
+        );
+        assert!(
+            !send.is_finished(),
+            "the send must still be parked on credit, not finished"
+        );
+
+        // Ack the whole window; credit reopens and the final chunk must
+        // now arrive.
+        peer_writer
+            .write_control(&ControlMsg::UploadAck {
+                channel,
+                received: UPLOAD_WINDOW_BYTES,
+            })
+            .await
+            .unwrap();
+
+        let frame = timeout(Duration::from_secs(5), peer_reader.read_frame())
+            .await
+            .expect("the final chunk never arrived after the ack")
+            .unwrap()
+            .expect("connection closed after the ack");
+        assert_eq!(frame.body.len(), UPLOAD_CHUNK_BYTES);
+        let (result, _upload) = send.await.expect("send task panicked");
+        result.expect("send_upload_chunk must succeed once every chunk is delivered");
+    }
+
+    /// An `UploadAborted` arriving while a sender is parked waiting for
+    /// credit must wake it immediately with the reason, rather than
+    /// leaving it waiting for an ack that will now never come.
+    #[tokio::test]
+    async fn send_upload_chunk_reports_the_reason_when_aborted_while_waiting_for_credit() {
+        let (client_side, peer_side) = tokio::io::duplex(16 * 1024 * 1024);
+        let peer = tokio::spawn(async move {
+            let (r, w) = tokio::io::split(peer_side);
+            let mut reader = FrameReader::new(r);
+            let mut writer = FrameWriter::new(w);
+            handshake(&mut reader, &mut writer, "supervisor")
+                .await
+                .unwrap();
+            (reader, writer)
+        });
+        let (r, w) = tokio::io::split(client_side);
+        let client = SupervisorClient::start(r, w).await.unwrap();
+        let (mut peer_reader, mut peer_writer) = peer.await.unwrap();
+        let channel = 11;
+
+        let total = UPLOAD_WINDOW_BYTES as usize + 10;
+        let mut upload = register_upload(&client, channel, total as u64).await;
+        let bytes = vec![1u8; total];
+        let send = tokio::spawn(async move { upload.send_upload_chunk(&bytes).await });
+
+        let mut received = 0u64;
+        while received < UPLOAD_WINDOW_BYTES {
+            let frame = timeout(Duration::from_secs(5), peer_reader.read_frame())
+                .await
+                .expect("timed out waiting for the sender's initial window")
+                .unwrap()
+                .expect("connection closed mid-window");
+            received += frame.body.len() as u64;
+        }
+
+        const SENTINEL: &str = "SENTINEL-abort-mid-wait";
+        peer_writer
+            .write_control(&ControlMsg::UploadAborted {
+                channel,
+                reason: SENTINEL.to_string(),
+            })
+            .await
+            .unwrap();
+
+        let result = timeout(Duration::from_secs(5), send)
+            .await
+            .expect("send_upload_chunk hung after an UploadAborted arrived")
+            .expect("send task panicked");
+        assert_eq!(result, Err(SENTINEL.to_string()));
+    }
+
+    /// The connection dying while a sender is parked on credit must also
+    /// wake it — `fail_all`'s upload half, mirroring how it already wakes
+    /// a parked terminal detach. Without this an upload whose supervisor
+    /// vanished mid-transfer would hang its HTTP handler forever.
+    #[tokio::test]
+    async fn a_dead_connection_wakes_a_sender_parked_on_credit() {
+        let (client_side, peer_side) = tokio::io::duplex(16 * 1024 * 1024);
+        let peer = tokio::spawn(async move {
+            let (r, w) = tokio::io::split(peer_side);
+            let mut reader = FrameReader::new(r);
+            let mut writer = FrameWriter::new(w);
+            handshake(&mut reader, &mut writer, "supervisor")
+                .await
+                .unwrap();
+            (reader, writer)
+        });
+        let (r, w) = tokio::io::split(client_side);
+        let client = SupervisorClient::start(r, w).await.unwrap();
+        let (mut peer_reader, mut peer_writer) = peer.await.unwrap();
+        let channel = 13;
+
+        let total = UPLOAD_WINDOW_BYTES as usize + UPLOAD_CHUNK_BYTES;
+        let mut upload = register_upload(&client, channel, total as u64).await;
+        let bytes = vec![2u8; total];
+        let send = tokio::spawn(async move { upload.send_upload_chunk(&bytes).await });
+
+        let mut received = 0u64;
+        while received < UPLOAD_WINDOW_BYTES {
+            let frame = timeout(Duration::from_secs(5), peer_reader.read_frame())
+                .await
+                .expect("timed out waiting for the sender's initial window")
+                .unwrap()
+                .expect("connection closed mid-window");
+            received += frame.body.len() as u64;
+        }
+
+        // Kill the connection instead of acking: shutting down the peer's
+        // write half is what the reader-EOF tests elsewhere in this file
+        // use to trigger `fail_all` from the demux side.
+        peer_writer.shutdown().await.unwrap();
+
+        let result = timeout(Duration::from_secs(5), send)
+            .await
+            .expect("send_upload_chunk hung after the connection died")
+            .expect("send task panicked");
+        assert!(
+            result.is_err(),
+            "a dead connection must fail a sender parked on credit, not hang it forever"
+        );
+    }
+
+    /// `commit` clears the upload's local bookkeeping whichever way the
+    /// supervisor answers — `channel` is spent once a commit has been
+    /// ANSWERED, and both answers are terminal by `ControlMsg::
+    /// CommitUpload`'s docs — and passes each outcome through unchanged:
+    /// the published path on success, the supervisor's own
+    /// [`SupervisorError`] (message AND kind) on a refusal, since a size
+    /// mismatch has to reach the browser as a 400 with the supervisor's
+    /// words rather than a locally invented failure.
+    ///
+    /// Both arms keep the scripted peer's halves ALIVE past the
+    /// assertions. Dropping them would close the connection, and
+    /// `fail_all` clearing everything would make a leaked entry look
+    /// cleaned up — the failure this test exists to catch.
+    #[tokio::test]
+    async fn commit_upload_passes_the_outcome_through_and_clears_bookkeeping_either_way() {
+        const SENTINEL: &str = "SENTINEL-commit-mismatch-4f1b: declared 10 bytes, received 7";
+        // (channel, what the peer answers, what the caller must see)
+        enum Answer {
+            Committed,
+            Refused,
+        }
+        for (channel, answer) in [(6u32, Answer::Committed), (8u32, Answer::Refused)] {
+            let (client_side, peer_side) = tokio::io::duplex(64 * 1024);
+            let peer = tokio::spawn(async move {
+                let (r, w) = tokio::io::split(peer_side);
+                let mut reader = FrameReader::new(r);
+                let mut writer = FrameWriter::new(w);
+                handshake(&mut reader, &mut writer, "supervisor")
+                    .await
+                    .unwrap();
+                let request = parse_control(&reader.read_frame().await.unwrap().unwrap()).unwrap();
+                let ControlMsg::CommitUpload {
+                    req_id,
+                    channel: committed,
+                } = request
+                else {
+                    panic!("expected CommitUpload, got {request:?}");
+                };
+                assert_eq!(committed, channel);
+                let reply = match answer {
+                    Answer::Committed => ControlMsg::UploadCommitted {
+                        req_id,
+                        path: "/tmp/pub.png".to_string(),
+                    },
+                    Answer::Refused => ControlMsg::Error {
+                        req_id,
+                        message: SENTINEL.to_string(),
+                        kind: ErrorKind::InvalidRequest,
+                    },
+                };
+                writer.write_control(&reply).await.unwrap();
+                (reader, writer)
+            });
+            let (r, w) = tokio::io::split(client_side);
+            let client = SupervisorClient::start(r, w).await.unwrap();
+            let upload = register_upload(&client, channel, 10).await;
+
+            match upload.commit().await {
+                Ok(path) => assert_eq!(path, "/tmp/pub.png"),
+                Err(e) => {
+                    let supervisor = e
+                        .downcast_ref::<SupervisorError>()
+                        .expect("a commit refusal must stay a SupervisorError, kind and all");
+                    assert_eq!(supervisor.message, SENTINEL);
+                    assert_eq!(supervisor.kind, ErrorKind::InvalidRequest);
+                }
+            }
+            assert!(
+                !client.uploads.lock().await.contains_key(&channel),
+                "commit must clear the upload's local bookkeeping on every answered outcome"
+            );
+            let _peer = peer.await.unwrap();
+        }
+    }
+
+    /// `UploadGuard::abort` is fire-and-forget like `detach`: the local
+    /// entry goes away and an `AbortUpload` reaches the supervisor.
+    #[tokio::test]
+    async fn abort_upload_sends_the_control_message_and_clears_local_bookkeeping() {
+        let (client_side, peer_side) = tokio::io::duplex(64 * 1024);
+        let peer = tokio::spawn(async move {
+            let (r, w) = tokio::io::split(peer_side);
+            let mut reader = FrameReader::new(r);
+            let mut writer = FrameWriter::new(w);
+            handshake(&mut reader, &mut writer, "supervisor")
+                .await
+                .unwrap();
+            reader
+        });
+        let (r, w) = tokio::io::split(client_side);
+        let client = SupervisorClient::start(r, w).await.unwrap();
+        let mut upload = register_upload(&client, 7, 100).await;
+
+        upload.abort("gave up".to_string()).await;
+        assert!(!client.uploads.lock().await.contains_key(&7));
+
+        let mut peer_reader = peer.await.unwrap();
+        let frame = timeout(Duration::from_secs(2), peer_reader.read_frame())
+            .await
+            .expect("no AbortUpload reached the supervisor")
+            .unwrap()
+            .expect("connection closed before AbortUpload arrived");
+        assert!(matches!(
+            parse_control(&frame).unwrap(),
+            ControlMsg::AbortUpload { channel: 7 }
+        ));
+    }
+
+    /// A `BeginUpload` the supervisor REFUSES must leave nothing behind —
+    /// no `uploads` entry, and the refusal preserved as a
+    /// [`SupervisorError`] with its kind intact.
+    ///
+    /// The peer is kept ALIVE past the assertions, which is the whole
+    /// point of this test existing separately from the route-level
+    /// refusal coverage: a peer dropped after replying closes the
+    /// connection, and `fail_all` then clears every upload — so a leaked
+    /// entry would look cleaned up and the test would pass over the bug.
+    ///
+    /// No `AbortUpload` may follow either. `UploadStarted`'s docs say a
+    /// refused begin created nothing on disk, so aborting would name a
+    /// transfer that never existed.
+    #[tokio::test]
+    async fn begin_upload_refusal_leaves_no_bookkeeping_and_sends_no_abort() {
+        const SENTINEL: &str = "SENTINEL-begin-refused-91cd: no such session";
+
+        let (client_side, peer_side) = tokio::io::duplex(64 * 1024);
+        let peer = tokio::spawn(async move {
+            let (r, w) = tokio::io::split(peer_side);
+            let mut reader = FrameReader::new(r);
+            let mut writer = FrameWriter::new(w);
+            handshake(&mut reader, &mut writer, "supervisor")
+                .await
+                .unwrap();
+            let request = parse_control(&reader.read_frame().await.unwrap().unwrap()).unwrap();
+            let ControlMsg::BeginUpload { req_id, .. } = request else {
+                panic!("expected BeginUpload, got {request:?}");
+            };
+            writer
+                .write_control(&ControlMsg::Error {
+                    req_id,
+                    message: SENTINEL.to_string(),
+                    kind: ErrorKind::NotFound,
+                })
+                .await
+                .unwrap();
+            (reader, writer)
+        });
+        let (r, w) = tokio::io::split(client_side);
+        let client = SupervisorClient::start(r, w).await.unwrap();
+
+        let error = client
+            .begin_upload("missing", "x.png", 5)
+            .await
+            .expect_err("a refused begin must not yield an upload");
+        let supervisor = error
+            .downcast_ref::<SupervisorError>()
+            .expect("a begin refusal must stay a SupervisorError");
+        assert_eq!(supervisor.message, SENTINEL);
+        assert_eq!(supervisor.kind, ErrorKind::NotFound);
+        assert!(
+            client.uploads.lock().await.is_empty(),
+            "a refused begin must leave no upload bookkeeping behind"
+        );
+
+        let (mut peer_reader, _peer_writer) = peer.await.unwrap();
+        assert!(
+            timeout(Duration::from_millis(200), peer_reader.read_frame())
+                .await
+                .is_err(),
+            "a refused begin must send nothing further, least of all an AbortUpload for a \
+             transfer that was never accepted"
+        );
+    }
+
+    /// An `UploadStarted` naming a DIFFERENT channel than the one
+    /// `BeginUpload` asked for is a protocol error, not a channel
+    /// reassignment: `UploadStarted` grants credit for the channel it
+    /// names, so streaming onto the requested one would push bytes at a
+    /// channel the supervisor never opened while the transfer it did open
+    /// sat idle. The begin must fail, send no data, and leave no local
+    /// bookkeeping — with an `AbortUpload` released for the channel this
+    /// side asked for, since the supervisor did accept SOMETHING.
+    #[tokio::test]
+    async fn begin_upload_rejects_an_upload_started_for_another_channel() {
+        let (client_side, peer_side) = tokio::io::duplex(64 * 1024);
+        let peer = tokio::spawn(async move {
+            let (r, w) = tokio::io::split(peer_side);
+            let mut reader = FrameReader::new(r);
+            let mut writer = FrameWriter::new(w);
+            handshake(&mut reader, &mut writer, "supervisor")
+                .await
+                .unwrap();
+            let request = parse_control(&reader.read_frame().await.unwrap().unwrap()).unwrap();
+            let ControlMsg::BeginUpload {
+                req_id, channel, ..
+            } = request
+            else {
+                panic!("expected BeginUpload, got {request:?}");
+            };
+            writer
+                .write_control(&ControlMsg::UploadStarted {
+                    req_id,
+                    channel: channel + 100,
+                })
+                .await
+                .unwrap();
+            (reader, writer)
+        });
+        let (r, w) = tokio::io::split(client_side);
+        let client = SupervisorClient::start(r, w).await.unwrap();
+
+        let error = client
+            .begin_upload("s1", "x.png", 5)
+            .await
+            .expect_err("a mismatched UploadStarted channel must fail the begin");
+        assert!(
+            error.to_string().contains("not the requested"),
+            "the error must name the mismatch: {error}"
+        );
+        await_no_uploads(&client).await;
+
+        let (mut peer_reader, _peer_writer) = peer.await.unwrap();
+        let frame = timeout(Duration::from_secs(2), peer_reader.read_frame())
+            .await
+            .expect("no frame followed the mismatched UploadStarted")
+            .unwrap()
+            .expect("connection closed before the abort arrived");
+        assert!(
+            matches!(
+                parse_control(&frame).unwrap(),
+                ControlMsg::AbortUpload { .. }
+            ),
+            "the only frame after a mismatch must be the abort — never upload data"
+        );
+    }
+
+    /// Dropping the future that owns an upload — an HTTP handler cancelled
+    /// by a client that reset its connection — must still release the
+    /// supervisor's half. This is the failure no explicit branch can
+    /// cover: a cancelled future runs none of them, so without ownership
+    /// the supervisor holds a temp file and admission capacity until its
+    /// own timeout fires.
+    ///
+    /// Cancelled at the hardest moment, parked on credit with the window
+    /// closed, and both halves of the contract are asserted: EXACTLY one
+    /// `AbortUpload` (a second would mean two teardown paths fired), and
+    /// no local bookkeeping left behind.
+    #[tokio::test]
+    async fn dropping_an_upload_parked_on_credit_aborts_it_exactly_once() {
+        let (client_side, peer_side) = tokio::io::duplex(16 * 1024 * 1024);
+        let peer = tokio::spawn(async move {
+            let (r, w) = tokio::io::split(peer_side);
+            let mut reader = FrameReader::new(r);
+            let mut writer = FrameWriter::new(w);
+            handshake(&mut reader, &mut writer, "supervisor")
+                .await
+                .unwrap();
+            (reader, writer)
+        });
+        let (r, w) = tokio::io::split(client_side);
+        let client = SupervisorClient::start(r, w).await.unwrap();
+        let (mut peer_reader, _peer_writer) = peer.await.unwrap();
+        let channel = 21;
+
+        let total = UPLOAD_WINDOW_BYTES as usize + UPLOAD_CHUNK_BYTES;
+        let mut upload = register_upload(&client, channel, total as u64).await;
+        let bytes = vec![8u8; total];
+        let send = tokio::spawn(async move { upload.send_upload_chunk(&bytes).await });
+
+        // Let the whole window reach the wire, so the task is genuinely
+        // parked on credit rather than merely started.
+        let mut received = 0u64;
+        while received < UPLOAD_WINDOW_BYTES {
+            let frame = timeout(Duration::from_secs(5), peer_reader.read_frame())
+                .await
+                .expect("timed out waiting for the sender's initial window")
+                .unwrap()
+                .expect("connection closed mid-window");
+            received += frame.body.len() as u64;
+        }
+
+        send.abort();
+        await_no_uploads(&client).await;
+
+        let frame = timeout(Duration::from_secs(5), peer_reader.read_frame())
+            .await
+            .expect("a cancelled upload never released the supervisor's half")
+            .unwrap()
+            .expect("connection closed before the abort arrived");
+        assert!(matches!(
+            parse_control(&frame).unwrap(),
+            ControlMsg::AbortUpload { channel: c } if c == channel
+        ));
+        assert!(
+            timeout(Duration::from_millis(200), peer_reader.read_frame())
+                .await
+                .is_err(),
+            "a cancelled upload must abort exactly once"
+        );
+    }
+
+    /// The same cancellation, one step later: dropped while awaiting the
+    /// commit reply. `commit` consumes its guard precisely so this case
+    /// behaves — the guard dies with the future, so the supervisor still
+    /// hears about it and the local entry is still retired, instead of
+    /// both sides waiting on a caller that no longer exists.
+    #[tokio::test]
+    async fn dropping_an_upload_awaiting_its_commit_reply_aborts_and_retires_it() {
+        let (client_side, peer_side) = tokio::io::duplex(64 * 1024);
+        let peer = tokio::spawn(async move {
+            let (r, w) = tokio::io::split(peer_side);
+            let mut reader = FrameReader::new(r);
+            let mut writer = FrameWriter::new(w);
+            handshake(&mut reader, &mut writer, "supervisor")
+                .await
+                .unwrap();
+            (reader, writer)
+        });
+        let (r, w) = tokio::io::split(client_side);
+        let client = SupervisorClient::start(r, w).await.unwrap();
+        let (mut peer_reader, _peer_writer) = peer.await.unwrap();
+        let channel = 23;
+        let upload = register_upload(&client, channel, 0).await;
+
+        // Never answered: the commit request is left pending on purpose,
+        // which is exactly the window this test cancels inside.
+        let commit = tokio::spawn(async move { upload.commit().await });
+        let frame = timeout(Duration::from_secs(5), peer_reader.read_frame())
+            .await
+            .expect("the commit never reached the supervisor")
+            .unwrap()
+            .unwrap();
+        assert!(matches!(
+            parse_control(&frame).unwrap(),
+            ControlMsg::CommitUpload { channel: c, .. } if c == channel
+        ));
+
+        commit.abort();
+        await_no_uploads(&client).await;
+
+        let frame = timeout(Duration::from_secs(5), peer_reader.read_frame())
+            .await
+            .expect("a cancelled commit never released the supervisor's half")
+            .unwrap()
+            .expect("connection closed before the abort arrived");
+        assert!(matches!(
+            parse_control(&frame).unwrap(),
+            ControlMsg::AbortUpload { channel: c } if c == channel
+        ));
+    }
+
+    /// A supervisor that keeps the connection open but stops
+    /// ACKNOWLEDGING must not park an upload forever: the credit wait has
+    /// its own per-hop progress deadline (`UPLOAD_ACK_STALL_TIMEOUT`),
+    /// whose expiry aborts the transfer and reports the shared
+    /// `UPLOAD_ABORT_REASON_STALLED` string.
+    ///
+    /// The duplicate ack in the middle is the sharp edge, not decoration:
+    /// a receiver repeating its last cumulative count reports NO progress,
+    /// so an implementation that rearmed the deadline on any ack — or that
+    /// woke the wait for one — would let a peer hold a transfer open
+    /// indefinitely. The injected timeout is short so the give-up is
+    /// observable, while the writer's own stall bound stays at its
+    /// production value so it cannot be what fires.
+    #[tokio::test]
+    async fn a_supervisor_that_stops_acking_stalls_the_upload_and_aborts_it() {
+        let (client_side, peer_side) = tokio::io::duplex(16 * 1024 * 1024);
+        let peer = tokio::spawn(async move {
+            let (r, w) = tokio::io::split(peer_side);
+            let mut reader = FrameReader::new(r);
+            let mut writer = FrameWriter::new(w);
+            handshake(&mut reader, &mut writer, "supervisor")
+                .await
+                .unwrap();
+            (reader, writer)
+        });
+        let (r, w) = tokio::io::split(client_side);
+        let client = SupervisorClient::start_with_stall_timeouts(
+            r,
+            w,
+            WRITER_STALL_TIMEOUT,
+            Duration::from_millis(300),
+        )
+        .await
+        .unwrap();
+        let (mut peer_reader, mut peer_writer) = peer.await.unwrap();
+        let channel = 25;
+
+        let total = UPLOAD_WINDOW_BYTES as usize + UPLOAD_CHUNK_BYTES;
+        let mut upload = register_upload(&client, channel, total as u64).await;
+        let bytes = vec![6u8; total];
+        let send = tokio::spawn(async move { upload.send_upload_chunk(&bytes).await });
+
+        let mut received = 0u64;
+        while received < UPLOAD_WINDOW_BYTES {
+            let frame = timeout(Duration::from_secs(5), peer_reader.read_frame())
+                .await
+                .expect("timed out waiting for the sender's initial window")
+                .unwrap()
+                .expect("connection closed mid-window");
+            received += frame.body.len() as u64;
+        }
+
+        // A cumulative count of zero: perfectly valid, and by definition
+        // no progress. These keep coming for far longer than the deadline
+        // — an implementation that rearmed on any ack, rather than only
+        // on an advancing one, would therefore never give up at all and
+        // fail this test by timing out rather than by asserting.
+        let acker = tokio::spawn(async move {
+            loop {
+                if peer_writer
+                    .write_control(&ControlMsg::UploadAck {
+                        channel,
+                        received: 0,
+                    })
+                    .await
+                    .is_err()
+                {
+                    return;
+                }
+                tokio::time::sleep(Duration::from_millis(50)).await;
+            }
+        });
+
+        let result = timeout(Duration::from_secs(5), send)
+            .await
+            .expect("the sender never gave up on a peer that stopped acking")
+            .expect("send task panicked");
+        assert_eq!(
+            result,
+            Err(farhelm_proto::UPLOAD_ABORT_REASON_STALLED.to_string())
+        );
+
+        let frame = timeout(Duration::from_secs(5), peer_reader.read_frame())
+            .await
+            .expect("a stalled upload never released the supervisor's half")
+            .unwrap()
+            .expect("connection closed before the abort arrived");
+        assert!(matches!(
+            parse_control(&frame).unwrap(),
+            ControlMsg::AbortUpload { channel: c } if c == channel
+        ));
+        acker.abort();
+    }
+
+    /// `UploadAck`'s validity rules are the protocol's, and a violation
+    /// aborts the transfer rather than being clamped away: an ack that
+    /// regresses, one past the bytes actually sent, or one past the
+    /// declared size all mean the peer is not describing this transfer.
+    /// Silently tolerating any of them would hand out credit that was
+    /// never earned — the sender's only defence against a receiver
+    /// claiming progress it did not make.
+    ///
+    /// The `u64::MAX` case additionally pins the arithmetic: the window
+    /// comparison must not be reachable with a value that would overflow
+    /// it, which is why the check is subtractive rather than
+    /// `received + UPLOAD_WINDOW_BYTES`.
+    #[tokio::test]
+    async fn an_invalid_upload_ack_aborts_the_transfer() {
+        // (label, declared size, the ack the peer sends after 1 KiB was sent)
+        let cases: [(&str, u64, u64); 4] = [
+            ("regressing", 4096, 0),
+            ("ahead of sent", 4096, 2048),
+            ("ahead of declared", 4096, 8192),
+            ("near u64::MAX", u64::MAX, u64::MAX),
+        ];
+        for (label, declared, bad_ack) in cases {
+            let (client_side, peer_side) = tokio::io::duplex(64 * 1024);
+            let peer = tokio::spawn(async move {
+                let (r, w) = tokio::io::split(peer_side);
+                let mut reader = FrameReader::new(r);
+                let mut writer = FrameWriter::new(w);
+                handshake(&mut reader, &mut writer, "supervisor")
+                    .await
+                    .unwrap();
+                (reader, writer)
+            });
+            let (r, w) = tokio::io::split(client_side);
+            let client = SupervisorClient::start(r, w).await.unwrap();
+            let (mut peer_reader, mut peer_writer) = peer.await.unwrap();
+            let channel = 31;
+            let mut upload = register_upload(&client, channel, declared).await;
+
+            // 1 KiB sent, then acked in full — so the regressing case has
+            // something to regress FROM and the others have a sent
+            // frontier to exceed.
+            upload.send_upload_chunk(&vec![1u8; 1024]).await.unwrap();
+            let frame = timeout(Duration::from_secs(5), peer_reader.read_frame())
+                .await
+                .unwrap()
+                .unwrap()
+                .unwrap();
+            assert_eq!(frame.body.len(), 1024, "{label}");
+            peer_writer
+                .write_control(&ControlMsg::UploadAck {
+                    channel,
+                    received: 1024,
+                })
+                .await
+                .unwrap();
+
+            peer_writer
+                .write_control(&ControlMsg::UploadAck {
+                    channel,
+                    received: bad_ack,
+                })
+                .await
+                .unwrap();
+
+            let ended = timeout(Duration::from_secs(5), upload.ended())
+                .await
+                .unwrap_or_else(|_| panic!("an invalid ack ({label}) did not end the transfer"));
+            assert!(
+                ended.contains("acknowledged") || ended.contains("regressed"),
+                "the recorded reason must name the ack violation ({label}): {ended}"
+            );
+            assert_eq!(
+                upload.send_upload_chunk(&[9u8; 8]).await,
+                Err(ended),
+                "a transfer aborted for a protocol violation must not keep sending ({label})"
+            );
+
+            let frame = timeout(Duration::from_secs(5), peer_reader.read_frame())
+                .await
+                .unwrap_or_else(|_| panic!("no abort followed an invalid ack ({label})"))
+                .unwrap()
+                .unwrap();
+            assert!(
+                matches!(
+                    parse_control(&frame).unwrap(),
+                    ControlMsg::AbortUpload { channel: c } if c == channel
+                ),
+                "an invalid ack ({label}) must abort the transfer",
+            );
+        }
+    }
+
+    /// An `UploadAborted` that arrives while NOBODY is watching must still
+    /// be reported verbatim later.
+    ///
+    /// This is the normal case, not an exotic one: the relay spends most
+    /// of a transfer awaiting its next HTTP body chunk, with no credit
+    /// wait subscribed at all. An implementation that dropped the upload's
+    /// entry when the abort landed would answer the next send with a
+    /// generic "no longer active" and lose the supervisor's actual reason
+    /// — the one thing the user needed to see.
+    #[tokio::test]
+    async fn an_abort_arriving_between_sends_is_retained_for_the_next_one() {
+        const SENTINEL: &str = "SENTINEL-abort-between-sends: disk full";
+
+        let (client_side, peer_side) = tokio::io::duplex(64 * 1024);
+        let peer = tokio::spawn(async move {
+            let (r, w) = tokio::io::split(peer_side);
+            let mut reader = FrameReader::new(r);
+            let mut writer = FrameWriter::new(w);
+            handshake(&mut reader, &mut writer, "supervisor")
+                .await
+                .unwrap();
+            (reader, writer)
+        });
+        let (r, w) = tokio::io::split(client_side);
+        let client = SupervisorClient::start(r, w).await.unwrap();
+        let (mut peer_reader, mut peer_writer) = peer.await.unwrap();
+        let channel = 33;
+        let mut upload = register_upload(&client, channel, 4096).await;
+
+        upload.send_upload_chunk(&[1u8; 512]).await.unwrap();
+        timeout(Duration::from_secs(5), peer_reader.read_frame())
+            .await
+            .unwrap()
+            .unwrap()
+            .unwrap();
+
+        peer_writer
+            .write_control(&ControlMsg::UploadAborted {
+                channel,
+                reason: SENTINEL.to_string(),
+            })
+            .await
+            .unwrap();
+        // Observed through `ended()` first, which is how the relay learns
+        // of an abort while parked on its body stream.
+        let reason = timeout(Duration::from_secs(5), upload.ended())
+            .await
+            .expect("the abort was never observable");
+        assert_eq!(reason, SENTINEL);
+
+        assert_eq!(
+            upload.send_upload_chunk(&[2u8; 512]).await,
+            Err(SENTINEL.to_string()),
+            "a send after an abort must report the supervisor's reason, not a generic failure"
+        );
+    }
+
+    /// The same retention, at the other end of the transfer: an abort that
+    /// lands just before `commit` must surface as the abort's reason, not
+    /// as whatever correlated error the commit would collect for a channel
+    /// the supervisor has already torn down. The user needs the cause
+    /// ("disk full"), not the symptom ("commit failed").
+    #[tokio::test]
+    async fn an_abort_just_before_commit_surfaces_its_reason() {
+        const SENTINEL: &str = "SENTINEL-abort-before-commit: session deleted mid-transfer";
+
+        let (client_side, peer_side) = tokio::io::duplex(64 * 1024);
+        let peer = tokio::spawn(async move {
+            let (r, w) = tokio::io::split(peer_side);
+            let mut reader = FrameReader::new(r);
+            let mut writer = FrameWriter::new(w);
+            handshake(&mut reader, &mut writer, "supervisor")
+                .await
+                .unwrap();
+            (reader, writer)
+        });
+        let (r, w) = tokio::io::split(client_side);
+        let client = SupervisorClient::start(r, w).await.unwrap();
+        let (peer_reader, mut peer_writer) = peer.await.unwrap();
+        let channel = 35;
+        let mut upload = register_upload(&client, channel, 0).await;
+
+        peer_writer
+            .write_control(&ControlMsg::UploadAborted {
+                channel,
+                reason: SENTINEL.to_string(),
+            })
+            .await
+            .unwrap();
+        timeout(Duration::from_secs(5), upload.ended())
+            .await
+            .expect("the abort was never observable");
+
+        let error = upload
+            .commit()
+            .await
+            .expect_err("committing an aborted transfer must fail");
+        let supervisor = error
+            .downcast_ref::<SupervisorError>()
+            .expect("an abort must reach the caller as a mappable SupervisorError");
+        assert_eq!(supervisor.message, SENTINEL);
+        let _peer = (peer_reader, peer_writer);
+    }
+
+    /// A bulk upload must not push latency-sensitive traffic to the back
+    /// of the shared writer queue.
+    ///
+    /// `UPLOAD_CHUNK_BYTES`'s docs are explicit that the credit window
+    /// alone does not deliver this: a sender obeying only the window may
+    /// hand the writer a whole 4 MiB — sixteen frames — and everything
+    /// enqueued afterwards waits behind all of it. With the enqueue
+    /// allowance in place, a control frame sent DURING an upload burst
+    /// finds at most [`UPLOAD_ENQUEUE_FRAMES`] of bulk data ahead of it.
+    ///
+    /// The peer is deliberately slow: a small duplex buffer parks the
+    /// writer, which is what lets the queue fill at all. Reading one frame
+    /// first proves the burst is genuinely underway before the control
+    /// frame is sent, so the measured position is contention and not a
+    /// race with a transfer that had not started.
+    #[tokio::test]
+    async fn a_control_frame_does_not_queue_behind_a_whole_upload_burst() {
+        let (client_side, peer_side) = tokio::io::duplex(16 * 1024);
+        let peer = tokio::spawn(async move {
+            let (r, w) = tokio::io::split(peer_side);
+            let mut reader = FrameReader::new(r);
+            let mut writer = FrameWriter::new(w);
+            handshake(&mut reader, &mut writer, "supervisor")
+                .await
+                .unwrap();
+            (reader, writer)
+        });
+        let (r, w) = tokio::io::split(client_side);
+        let client = SupervisorClient::start(r, w).await.unwrap();
+        let (mut peer_reader, _peer_writer) = peer.await.unwrap();
+        let channel = 41;
+
+        // A full window's worth: enough to fill the writer queue with bulk
+        // frames if nothing bounded how many may be enqueued at once.
+        let total = UPLOAD_WINDOW_BYTES as usize;
+        let mut upload = register_upload(&client, channel, total as u64).await;
+        let bytes = vec![4u8; total];
+        let send = tokio::spawn(async move { upload.send_upload_chunk(&bytes).await });
+
+        let first = timeout(Duration::from_secs(5), peer_reader.read_frame())
+            .await
+            .expect("the upload burst never started")
+            .unwrap()
+            .unwrap();
+        assert!(matches!(first.kind, FrameKind::Data));
+
+        timeout(Duration::from_secs(5), client.pause_output(7))
+            .await
+            .expect("a control frame could not even be enqueued during an upload burst");
+
+        let mut bulk_ahead = 0usize;
+        loop {
+            let frame = timeout(Duration::from_secs(5), peer_reader.read_frame())
+                .await
+                .expect("the control frame never arrived")
+                .unwrap()
+                .expect("connection closed before the control frame arrived");
+            if matches!(frame.kind, FrameKind::Control) {
+                break;
+            }
+            bulk_ahead += 1;
+        }
+        // Two ceilings, deliberately. The first says the allowance was
+        // honored; the second is an absolute number the allowance cannot
+        // move, so raising `UPLOAD_ENQUEUE_FRAMES` to something that no
+        // longer protects interactive traffic fails this test instead of
+        // relaxing it along with the constant.
+        let window_frames = (UPLOAD_WINDOW_BYTES as usize) / UPLOAD_CHUNK_BYTES;
+        assert!(
+            bulk_ahead <= UPLOAD_ENQUEUE_FRAMES + 2 && bulk_ahead < window_frames / 2,
+            "a control frame waited behind {bulk_ahead} upload frames; the enqueue allowance is \
+             {UPLOAD_ENQUEUE_FRAMES}, and with no bound at all a whole {window_frames}-frame \
+             window sits ahead of it"
+        );
+        send.abort();
     }
 }
