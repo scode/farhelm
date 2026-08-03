@@ -752,41 +752,100 @@ pub(crate) async fn wait_for_pid_file(path: &std::path::Path, secs: u64) -> u32 
     }
 }
 
-/// Whether the cgroup path can be exercised here — and, when it cannot,
-/// say so LOUDLY before the caller returns.
+/// Probe once for a usable systemd user manager, and hand back the
+/// ALREADY-PROBED manager for the caller to inject via
+/// `SupervisorSeams::scopes` — or `None`, with the existing loud skip,
+/// when this host has none.
 ///
-/// One helper rather than a predicate plus a separate announce call,
-/// because the two must never come apart: a test that checked availability
-/// and forgot to announce would look like a pass while proving nothing,
-/// which is the exact failure the loud skip exists to prevent.
+/// This used to be `cgroup_path_available`, a bare predicate backed by its
+/// own throwaway `ScopeManager`. That meant every scope-gated test ran TWO
+/// independent probes of the same host property: this one, and a second
+/// one the supervisor under test would lazily run on ITS OWN manager at
+/// first launch (`core.rs`'s `scope_selected`, via
+/// `scope::ScopeManager::available`). Each probe retries a real
+/// `systemd-run`/`systemctl` round trip inside a shared 15s budget and then
+/// caches whatever verdict it saw FOREVER in a `OnceCell` — cheap
+/// insurance against repeating the experiment, but it also means two
+/// probes racing a loaded user manager can durably disagree: one sees the
+/// manager answer in time, the other times out and caches "unavailable"
+/// forever. A test whose setup assertion required "this launch was
+/// scoped" would then flake — not because scoping was broken, but because
+/// the test's own precondition check and the supervisor's lazy probe asked
+/// the same question twice and kept two different answers. (Flaked for
+/// real in CI on 2026-08-03.)
 ///
-/// Asked through the production probe rather than a hand-rolled
-/// `which systemd-run`, so this answers the same question the supervisor
-/// answers, by the same experiment. It is a SEPARATE probe, not a shared
-/// verdict: a manager that dies between this call and the supervisor's own
-/// could still leave the two disagreeing. That residual is the same one the
-/// product has (`scope::ScopeManager`'s cached verdict), and its worst case
-/// here is a test that runs the fallback while announcing the scope path —
-/// which shows up as the test's own assertions failing, not as a false pass.
+/// Handing back the same `Arc<ScopeManager>` this function already probed,
+/// for injection into a supervisor's seams, collapses the two probes into
+/// one verdict: whichever supervisor is built with THIS `Arc` gets an
+/// `OnceCell` that arrives pre-populated, so any of its calls that reach
+/// the manager — `available` (which `scope_selected` reads at launch),
+/// but equally `exists`/`kill` (which the stop path's `kill_scope` reads,
+/// see sweep.rs) — can only ever agree with what this function saw, never
+/// re-probe and never re-race. The one probe still runs through the
+/// production entry point (`ScopeManager::systemd().available()`) rather
+/// than a hand-rolled `which systemd-run`, so it keeps asking the same
+/// question the supervisor asks, by the same experiment.
+///
+/// The guarantee is per-`Arc`, not per-test: a test that builds a SECOND
+/// supervisor (a restart) and does not thread this same `Arc` into ITS
+/// seams gets a fresh, unprobed `ScopeManager` for that supervisor, and
+/// the two-probe race reopens there instead — `exists`/`kill` trigger
+/// their own first-touch probe exactly as `available` does, independent
+/// of whether some OTHER `ScopeManager` already answered the same
+/// question. Callers that restart a supervisor mid-test must reuse the
+/// probed manager on every construction, not just the first.
+///
+/// The residual this does NOT close: a manager that dies AFTER this probe
+/// succeeds but before the launch's own `systemd-run` runs. That is the
+/// product's own documented residual (`scope::ScopeManager`'s doc comment
+/// on the cached verdict), not a test-harness gap — production has the
+/// identical exposure between a supervisor's first launch and its Nth, and
+/// engineering the test around it would mean proving a stronger guarantee
+/// here than the code under test actually makes.
 ///
 /// `#[ignore]` would be the obvious alternative and is the wrong one
 /// (PLAN_M3.md item 10 says so explicitly): an ignored test is ignored
 /// everywhere, including on the development hosts where the scope path is
 /// the whole point. The message reaches CI's transcript because the test
 /// step runs with `--show-output` (see `.github/workflows/ci.yml`).
-pub(crate) async fn cgroup_path_available(test: &str) -> bool {
-    if farhelm_supervisor::scope::ScopeManager::systemd()
-        .available()
-        .await
-    {
-        return true;
+pub(crate) async fn probed_scope_manager(
+    test: &str,
+) -> Option<Arc<farhelm_supervisor::scope::ScopeManager>> {
+    let scopes = Arc::new(farhelm_supervisor::scope::ScopeManager::systemd());
+    if scopes.available().await {
+        return Some(scopes);
     }
     eprintln!(
         "SKIPPED {test}: this host has no usable systemd user manager, so the cgroup path \
          (PLAN_M3.md item 10) cannot be exercised here; the fallback path is what runs and \
          is proved by the rest of this suite"
     );
-    false
+    None
+}
+
+/// [`probed_scope_manager`] plus the harness built from its verdict — the
+/// entry point every scope-gated test wants EXCEPT one that goes on to
+/// build a second supervisor (a restart) of its own, which needs the raw
+/// `Arc` back to inject into that construction too. Bundling the common
+/// case here (rather than making every caller repeat the probe-then-seam
+/// plumbing) keeps that plumbing in one place while still handing back the
+/// `Arc` for the one caller that needs it twice.
+///
+/// Returns `None`, after the existing loud skip, on a host with no usable
+/// systemd user manager.
+pub(crate) async fn scope_gated_harness(
+    test: &str,
+) -> Option<(Harness, Arc<farhelm_supervisor::scope::ScopeManager>)> {
+    let scopes = probed_scope_manager(test).await?;
+    let h = harness_with_seams(
+        SupervisorTimeouts::default(),
+        SupervisorSeams {
+            scopes: scopes.clone(),
+            ..SupervisorSeams::default()
+        },
+    )
+    .await;
+    Some((h, scopes))
 }
 
 /// SIGKILLs a pid on drop — failure-safe cleanup for the one fixture

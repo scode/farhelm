@@ -572,14 +572,13 @@ async fn pane_pid_of(h: &Harness, pane: &str) -> u32 {
 /// created, from the session id and the tab id alone.
 #[tokio::test]
 async fn closing_a_tab_kills_an_environment_scrubbed_double_fork_through_its_scope() {
-    if !cgroup_path_available(
+    let Some((h, _scopes)) = scope_gated_harness(
         "closing_a_tab_kills_an_environment_scrubbed_double_fork_through_its_scope",
     )
     .await
-    {
+    else {
         return;
-    }
-    let h = harness().await;
+    };
     let (session, work) = basic_session(&h).await;
     let _cleanup = MarkerCleanupGuard::new(session.id.clone());
 

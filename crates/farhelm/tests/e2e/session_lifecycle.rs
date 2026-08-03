@@ -4593,14 +4593,13 @@ async fn stop_kills_an_unmarked_child_of_a_reparented_daemon_via_closure_seeding
 /// rather than a puzzling one.
 #[tokio::test]
 async fn a_scope_launched_stop_kills_through_the_cgroup_and_still_runs_the_sweep() {
-    if !cgroup_path_available(
+    let Some((h, _scopes)) = scope_gated_harness(
         "a_scope_launched_stop_kills_through_the_cgroup_and_still_runs_the_sweep",
     )
     .await
-    {
+    else {
         return;
-    }
-    let h = harness().await;
+    };
     let work = tempfile::tempdir().unwrap();
     let session = h
         .client
@@ -4677,14 +4676,25 @@ async fn a_scope_launched_stop_kills_through_the_cgroup_and_still_runs_the_sweep
 /// column were dropped — or the name derived from anything the restart
 /// changes — the cloaked daemon would survive, since nothing else in the
 /// system can reach it.
+///
+/// The restarted supervisor below is deliberately seamed with the SAME
+/// probed `ScopeManager` the first one used, rather than left to build its
+/// own — a test-only choice, not a claim about production. In production a
+/// restart genuinely re-probes (a real reboot can gain or lose a user
+/// manager between runs, and re-probing is the correct answer to that).
+/// Here it would just be a second independent probe of a manager that
+/// has not gone anywhere, and `exists`/`kill` — which the stop below
+/// reaches — touch that probe on their own first call exactly as
+/// `available` does. Leaving the restart unseamed would reopen, on the
+/// SECOND supervisor, the exact divergence this file's `scope_gated_harness`
+/// exists to close on the first.
 #[tokio::test]
 async fn a_recorded_scope_survives_a_supervisor_restart_and_still_kills() {
-    if !cgroup_path_available("a_recorded_scope_survives_a_supervisor_restart_and_still_kills")
-        .await
-    {
+    let Some((h, scopes)) =
+        scope_gated_harness("a_recorded_scope_survives_a_supervisor_restart_and_still_kills").await
+    else {
         return;
-    }
-    let h = harness().await;
+    };
     let work = tempfile::tempdir().unwrap();
     let session = h
         .client
@@ -4733,9 +4743,26 @@ async fn a_recorded_scope_survives_a_supervisor_restart_and_still_kills() {
     }
     drop(sup);
 
-    let restarted = Supervisor::new_with_exe(state.path(), farhelm_bin().into())
-        .await
-        .expect("second supervisor construction on the same state dir");
+    // The SAME probed manager, not a fresh `ScopeManager::systemd()`: the
+    // stop below reaches `exists`/`kill` (sweep.rs's `kill_scope`), and
+    // those touch the manager's `OnceCell` on their own first call exactly
+    // as `available` does — independent of the FIRST supervisor's verdict.
+    // A restarted supervisor built with default seams would re-probe right
+    // here, under the same load that can make any probe lose, and this
+    // test's assertion that the restart still kills through the cgroup
+    // would flake for the identical reason `scope_gated_harness` exists to
+    // prevent on the first supervisor. See `probed_scope_manager`'s docs.
+    let restarted = Supervisor::new_with_seams(
+        state.path(),
+        farhelm_bin().into(),
+        SupervisorTimeouts::default(),
+        SupervisorSeams {
+            scopes,
+            ..SupervisorSeams::default()
+        },
+    )
+    .await
+    .expect("second supervisor construction on the same state dir");
     assert!(
         restarted.owns_state_dir(),
         "the predecessor must be gone, or this proves nothing about a restart"
@@ -4774,12 +4801,12 @@ async fn a_recorded_scope_survives_a_supervisor_restart_and_still_kills() {
 /// selection under it is the real one this host's real probe made.
 #[tokio::test]
 async fn a_failed_scope_wrapper_classifies_as_error_rather_than_a_plain_exit() {
-    if !cgroup_path_available("a_failed_scope_wrapper_classifies_as_error_rather_than_a_plain_exit")
-        .await
-    {
+    let Some((h, _scopes)) =
+        scope_gated_harness("a_failed_scope_wrapper_classifies_as_error_rather_than_a_plain_exit")
+            .await
+    else {
         return;
-    }
-    let h = harness().await;
+    };
     let (session, _work) = basic_session(&h).await;
     assert!(
         launch_scope_of(&h, &session.id).await.is_some(),

@@ -418,14 +418,13 @@ async fn a_second_lease_takes_over_both_terminals_of_one_session_only() {
 /// point of the fixture.
 #[tokio::test]
 async fn deleting_a_session_detaches_every_channel_and_reaps_scrubbed_tab_daemons() {
-    if !cgroup_path_available(
+    let Some((h, _scopes)) = scope_gated_harness(
         "deleting_a_session_detaches_every_channel_and_reaps_scrubbed_tab_daemons",
     )
     .await
-    {
+    else {
         return;
-    }
-    let h = harness().await;
+    };
     let (session, work) = basic_session(&h).await;
     let _cleanup = MarkerCleanupGuard::new(session.id.clone());
 
