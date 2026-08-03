@@ -1048,12 +1048,29 @@ mod tests {
         tokio::time::advance(SINK_HEALTHY_RUN + Duration::from_secs(1)).await;
         tokio::task::yield_now().await;
         let pid = live_pid.load(Ordering::Relaxed);
-        let killed = tokio::process::Command::new("kill")
-            .args(["-9", &pid.to_string()])
-            .status()
-            .await
-            .expect("running kill");
-        assert!(killed.success(), "test setup: killing the fake sink");
+        // The kill is SYNCHRONOUS deliberately, and it must stay that way.
+        // With an AWAITED kill the sequence under `start_paused` is: the
+        // test task parks on the child's exit; the supervisor task may
+        // observe the sink's EOF first and run its respawn loop up to the
+        // backoff sleep, registering the timer; if no task is then ready,
+        // tokio's time driver auto-advances the frozen clock straight to
+        // that timer — the very delay this test measures — and can do so
+        // repeatedly, burning backoff iterations in virtual time before
+        // the test task ever wakes. One stolen iteration doubles the
+        // delay past the 250ms window below and fails the assertion.
+        // Which side won came down to scheduling order (the sink's EOF
+        // versus the kill child's exit), which is why this one-offed only
+        // on loaded CI runners. The blocking libc call occupies the
+        // runtime thread without yielding, so the driver never reaches
+        // its park-and-auto-advance logic while the kill runs.
+        //
+        // SAFETY: the call has no Rust memory-safety preconditions — any
+        // pid value yields a normal errno-style result, never a memory
+        // access. Pid VALIDITY is a separate behavioral concern (a stale
+        // pid could in principle signal an unrelated recycled process),
+        // not a safety one.
+        let killed = unsafe { libc::kill(pid as libc::pid_t, libc::SIGKILL) };
+        assert_eq!(killed, 0, "test setup: killing the fake sink");
 
         // The death must be NOTICED before the delay is measured;
         // otherwise this would time the kill, not the backoff.
