@@ -3603,8 +3603,20 @@ impl OutputStream {
                         // The stored copy rather than the local, so this
                         // field has a production reader and cannot drift
                         // from what the tests later report.
+                        // Debug-formatted, and that is a security choice
+                        // rather than a style one: tmux names the SESSION
+                        // in several of its exit reasons, a pane inherits
+                        // `$TMUX` and can rename its own session to
+                        // anything at all — control characters included —
+                        // so this string is pane-influenced text arriving
+                        // at a log an operator reads in a terminal.
+                        // `Display` would replay those bytes verbatim;
+                        // `Debug` escapes them. `session` beside it is
+                        // safe under `Display` because it is the
+                        // supervisor's own stored name, never read back
+                        // from tmux.
                         session = %self.session,
-                        reason = %self.exit_reason.as_deref().unwrap_or("(no reason given)"),
+                        reason = ?self.exit_reason,
                         "tmux control client exited"
                     );
                     return Ok(None);
