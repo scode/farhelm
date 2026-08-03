@@ -701,19 +701,144 @@ async fn probe_systemd() -> Option<Tools> {
             expand_environment_flag,
         }),
         Ok(Err(e)) => {
-            tracing::debug!(
+            // warn!, not debug!: this is production silently losing cgroup
+            // containment and falling back to the sweep alone, which is
+            // exactly the kind of degradation that must not be invisible.
+            // The named shape tells an operator what to do about it — a
+            // "timeout" points at an overloaded manager, a "retry_failed"
+            // at both attempts failing (read the attached error for which
+            // step; a healthy old systemd rejects the flag and then
+            // SUCCEEDS unflagged, producing no warning at all), and a
+            // bare "error" at something this module did not anticipate.
+            tracing::warn!(
                 error = %format!("{e:#}"),
+                shape = describe_probe_failure(&e),
                 "the systemd user-manager probe failed; selecting the process-tree sweep alone"
             );
             None
         }
         Err(_) => {
-            tracing::debug!(
+            tracing::warn!(
+                shape = "timeout",
                 "the systemd user-manager probe did not finish within {PROBE_TIMEOUT:?}; \
                  selecting the process-tree sweep alone"
             );
             None
         }
+    }
+}
+
+/// Marks a [`run_with_timeout`] failure whose cause was its own
+/// [`SYSTEMCTL_TIMEOUT`] elapsing, as distinct from the query completing and
+/// reporting a real failure (a non-zero exit, a rejected flag).
+///
+/// Carried purely as an entry in the `anyhow::Error` cause chain so
+/// [`classify_probe_failure`] can downcast for it: "the manager is slow" and
+/// "the manager said no" are the two shapes [`should_retry_without_flag`]
+/// must tell apart, and a chain-walk is the only way to find this cause
+/// again after [`probe_once`] has wrapped it in several layers of
+/// `.context(...)`.
+#[derive(Debug)]
+struct QueryTimedOut;
+
+impl std::fmt::Display for QueryTimedOut {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "the systemd user manager did not answer within {SYSTEMCTL_TIMEOUT:?}"
+        )
+    }
+}
+
+impl std::error::Error for QueryTimedOut {}
+
+/// Wraps a `probe_once` failure that happened on the RETRIED (unflagged)
+/// attempt, once the flagged attempt had ALSO already failed — i.e. the
+/// fallback the flag retry exists for was actually exercised and still came
+/// up empty, rather than the flagged attempt failing without ever being
+/// retried (see [`ProbeFailureShape::Timeout`]).
+///
+/// A plain `.context(...)` cannot be used for this marker the way
+/// [`QueryTimedOut`] is used: `Context::context`'s argument only supplies
+/// `Display` text for the NEW wrapping error, it is not itself pushed onto
+/// the cause chain as a distinct, downcastable link. Wrapping the retried
+/// error directly and forwarding `source()` to it is what keeps this type
+/// visible to [`describe_probe_failure`]'s chain walk while leaving the
+/// original message intact for humans (`Display` just forwards to it).
+#[derive(Debug)]
+struct BothProbeAttemptsFailed(anyhow::Error);
+
+impl std::fmt::Display for BothProbeAttemptsFailed {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        std::fmt::Display::fmt(&self.0, f)
+    }
+}
+
+impl std::error::Error for BothProbeAttemptsFailed {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        Some(&*self.0 as &(dyn std::error::Error + 'static))
+    }
+}
+
+/// Why one `probe_once` attempt failed, coarse enough to be exactly what
+/// [`should_retry_without_flag`] needs and no more.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ProbeFailureShape {
+    /// A per-query [`SYSTEMCTL_TIMEOUT`] elapsed: the manager is slow to
+    /// answer, which says nothing about whether it would have accepted
+    /// `--expand-environment=no`.
+    Timeout,
+    /// Any other failure — a non-zero exit, a spawn error, or the flag
+    /// rejection the retry in [`probe_round_trip`] exists to route around.
+    Error,
+}
+
+/// Classify a `probe_once` failure by walking its cause chain for the
+/// [`QueryTimedOut`] marker, so callers can react to "the manager is slow"
+/// differently from every other failure shape.
+fn classify_probe_failure(err: &anyhow::Error) -> ProbeFailureShape {
+    if err.chain().any(|cause| cause.is::<QueryTimedOut>()) {
+        ProbeFailureShape::Timeout
+    } else {
+        ProbeFailureShape::Error
+    }
+}
+
+/// Whether [`probe_round_trip`] should retry `probe_once` without
+/// `--expand-environment=no`, given that the flagged attempt failed with
+/// `shape`.
+///
+/// Pulled out as a pure function because this decision is the crux of the
+/// fix: a flag rejection is exactly the case the retry exists for, but a
+/// [`ProbeFailureShape::Timeout`] means the manager just proved itself slow
+/// — retrying would spend what is left of [`PROBE_TIMEOUT`] on a second
+/// attempt against that SAME overloaded manager, for strictly worse odds
+/// (less budget) and no new information. Letting the probe fail fast there
+/// is more honest than a doomed second round trip.
+fn should_retry_without_flag(shape: ProbeFailureShape) -> bool {
+    !matches!(shape, ProbeFailureShape::Timeout)
+}
+
+/// Label a failed probe for the operator log, distinguishing the shapes
+/// that call for different reactions:
+///
+/// - `"timeout"` — the manager is slow, possibly just under load; a retry
+///   would not have helped (see [`should_retry_without_flag`]).
+/// - `"retry_failed"` — both the flagged and unflagged attempts failed, the
+///   scenario the flag's fallback exists to catch (a systemd too old for
+///   `--expand-environment=no`, or a manager broken outright).
+/// - `"error"` — the sole attempt failed for some other reason without a
+///   retry. Not reachable under today's always-retry-on-non-timeout policy;
+///   kept so this function stays correct if that policy ever narrows.
+fn describe_probe_failure(err: &anyhow::Error) -> &'static str {
+    let timed_out = err.chain().any(|cause| cause.is::<QueryTimedOut>());
+    let retried = err
+        .chain()
+        .any(|cause| cause.is::<BothProbeAttemptsFailed>());
+    match (timed_out, retried) {
+        (true, _) => "timeout",
+        (false, true) => "retry_failed",
+        (false, false) => "error",
     }
 }
 
@@ -725,15 +850,30 @@ async fn probe_systemd() -> Option<Tools> {
 /// flag" and "does this manager work" are the same experiment, and a systemd
 /// too old for the flag is also too old to expand argv by default (see
 /// [`Tools::expand_environment_flag`]), so dropping it there is safe.
+///
+/// The retry is skipped for a [`ProbeFailureShape::Timeout`]
+/// ([`should_retry_without_flag`]): a manager that just took longer than
+/// [`SYSTEMCTL_TIMEOUT`] to answer has not told us anything about the flag,
+/// and a second attempt against it would only spend down [`PROBE_TIMEOUT`]
+/// for nothing.
 async fn probe_round_trip(systemd_run: &Path, systemctl: &Path) -> anyhow::Result<bool> {
-    match probe_once(systemd_run, systemctl, true).await {
-        Ok(()) => Ok(true),
-        Err(with_flag) => match probe_once(systemd_run, systemctl, false).await {
-            Ok(()) => Ok(false),
-            Err(without_flag) => Err(without_flag.context(format!(
+    let with_flag = match probe_once(systemd_run, systemctl, true).await {
+        Ok(()) => return Ok(true),
+        Err(e) => e,
+    };
+    if !should_retry_without_flag(classify_probe_failure(&with_flag)) {
+        return Err(with_flag);
+    }
+    match probe_once(systemd_run, systemctl, false).await {
+        Ok(()) => Ok(false),
+        // Wrapped in `BothProbeAttemptsFailed` (see its doc comment for why
+        // a plain `.context(...)` will not do) purely so
+        // `describe_probe_failure` can name this "retry_failed" rather than a
+        // less informative "error"; the message text is unchanged.
+        Err(without_flag) => Err(anyhow::Error::new(BothProbeAttemptsFailed(without_flag))
+            .context(format!(
                 "and the same probe with --expand-environment=no failed too ({with_flag:#})"
             ))),
-        },
     }
 }
 
@@ -840,6 +980,11 @@ async fn wait_for_unit(systemctl: &Path, unit: &str, want: bool) -> anyhow::Resu
 /// not be able to hang a stop, and `Command::output` on its own has no bound
 /// at all. The launch wrapper deliberately does not (see
 /// [`SYSTEMCTL_TIMEOUT`]).
+///
+/// The timeout branch's error carries the [`QueryTimedOut`] marker rather
+/// than being an anonymous string: [`probe_round_trip`] needs to tell "this
+/// query merely took too long" apart from every other failure shape, and it
+/// can only do that by downcasting for something more specific than text.
 async fn run_with_timeout(
     cmd: &mut tokio::process::Command,
 ) -> anyhow::Result<std::process::Output> {
@@ -851,12 +996,11 @@ async fn run_with_timeout(
         .output();
     tokio::time::timeout(SYSTEMCTL_TIMEOUT, child)
         .await
-        .map_err(|_| {
-            anyhow::anyhow!(
-                "the systemd user manager did not answer within {:?}",
-                SYSTEMCTL_TIMEOUT
-            )
-        })?
+        // `QueryTimedOut` rather than a bare `anyhow::anyhow!`: its identity
+        // (not just its text) is what lets `classify_probe_failure` tell a
+        // timeout apart from every other failure shape further up the call
+        // chain.
+        .map_err(|_| anyhow::Error::new(QueryTimedOut))?
         .context("running a systemd user-manager command")
 }
 
@@ -1055,5 +1199,68 @@ mod tests {
             "/tmp/lit$HOME/x",
             "the wrapper must not expand a literal $ in an argument"
         );
+    }
+
+    /// The whole point of this fix: a per-query timeout must not trigger
+    /// the `--expand-environment=no` fallback retry, because retrying
+    /// spends what is left of `PROBE_TIMEOUT` against a manager that JUST
+    /// proved itself slow, for strictly worse odds. Every other failure
+    /// shape keeps retrying, unchanged from before this fix.
+    #[test]
+    fn only_a_timeout_shape_skips_the_flag_retry() {
+        assert!(
+            !should_retry_without_flag(ProbeFailureShape::Timeout),
+            "a timeout must not spend remaining budget on a doomed retry"
+        );
+        assert!(
+            should_retry_without_flag(ProbeFailureShape::Error),
+            "a non-timeout failure must still get the flag-rejection retry"
+        );
+    }
+
+    /// `classify_probe_failure` is what `probe_round_trip` actually calls to
+    /// make the retry decision above, so its downcast has to survive being
+    /// buried under the layers of `.context(...)` every real probe error
+    /// picks up on the way out (`probe_once`'s "the probe scope never became
+    /// visible..." and friends). A chain walk rather than a top-level check
+    /// is what makes that survive.
+    #[test]
+    fn classifies_a_wrapped_timeout_marker_regardless_of_context_depth() {
+        let bare = anyhow::Error::new(QueryTimedOut);
+        assert_eq!(classify_probe_failure(&bare), ProbeFailureShape::Timeout);
+
+        let wrapped = anyhow::Error::new(QueryTimedOut)
+            .context("killing the probe scope")
+            .context("the outer probe_once call");
+        assert_eq!(
+            classify_probe_failure(&wrapped),
+            ProbeFailureShape::Timeout,
+            "a timeout buried under unrelated context must still classify as Timeout"
+        );
+
+        let ordinary = anyhow::anyhow!("systemctl --user kill exited 1: unit not loaded")
+            .context("killing the probe scope");
+        assert_eq!(classify_probe_failure(&ordinary), ProbeFailureShape::Error);
+    }
+
+    /// `describe_probe_failure` drives the operator-facing log field, so its
+    /// three labels each need their own pinned case: a lone timeout must
+    /// read "timeout" even without a retry ever having been attempted, two
+    /// failed attempts must read "retry_failed" (the scenario the flag retry
+    /// exists for), and a single non-timeout failure defaults to "error".
+    #[test]
+    fn describes_each_probe_failure_shape_by_its_own_marker() {
+        let lone_timeout =
+            anyhow::Error::new(QueryTimedOut).context("the probe scope never became visible");
+        assert_eq!(describe_probe_failure(&lone_timeout), "timeout");
+
+        let both_failed = anyhow::Error::new(BothProbeAttemptsFailed(anyhow::anyhow!(
+            "systemctl --user kill exited 1"
+        )))
+        .context("and the same probe with --expand-environment=no failed too (...)");
+        assert_eq!(describe_probe_failure(&both_failed), "retry_failed");
+
+        let lone_error = anyhow::anyhow!("running /usr/bin/systemd-run: permission denied");
+        assert_eq!(describe_probe_failure(&lone_error), "error");
     }
 }
