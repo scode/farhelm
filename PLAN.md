@@ -1,7 +1,7 @@
 # Farhelm plan
 
 NOTE: This is the overall build plan: the motivation for how the work is ordered, and the coarse milestone ladder. Only
-the current milestone is ever planned in detail — see PLAN_M4.md (PLAN_M0.md through PLAN_M3.md are history). Later
+the current milestone is ever planned in detail — see PLAN_M5.md (PLAN_M0.md through PLAN_M4.md are history). Later
 milestones get their own PLAN_M*.md when their turn comes; pre-emptive detail would just be fiction that dogfooding
 invalidates.
 
@@ -67,7 +67,7 @@ Consequences of that stance:
   selection over the DOM rows, and only the second one stayed painted through paste, typing, and a forced repaint; the
   fix that drops both is verified headlessly in Chromium and Playwright's WebKit but was still painting on the macOS
   desktop app when the manual round ran out of time, so the remaining suspect — WKWebView holding the selection layer
-  after its ranges are gone — is unconfirmed either way.
+  after its ranges are gone — is unconfirmed either way. Planned in detail in PLAN_M5.md.
 - **M6 — multi-host.** Registry and host management, local-host supervisor, stale-cache semantics — including the
   helm-side persistent last-known session cache (helm.db) that SPEC.md's stale-list behavior needs, deferred out of M2
   where a single always-connected supervisor made it dead weight. Version-skew refusal. Real cursor pagination of the
