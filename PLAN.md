@@ -78,15 +78,22 @@ Consequences of that stance:
   only that socket, and today recovery is a manual back-and-reopen): SPEC.md's Errors section already assigns
   reconnection with bounded retries to the connection-state model this milestone builds, so a client-side quick fix
   beforehand would preempt the designed behavior.
-- **M6.5 — test-coverage backfill.** Coverage debt deliberately parked while the focus was end-to-end progress, tracked
-  here so it cannot be quietly forgotten. Known entries: unit coverage for terminal.js's `onBinary` byte conversion,
-  which needs a JS test-harness decision first (the repo has only Playwright today, and adopting a JS unit runner for
-  one small function was judged premature during the M1 review); a fake-agent script that enables mouse modes on cue
-  plus an e2e test pinning mouse-mode restoration on reattach (the restoration code shipped in M1 untested — PaneModes
-  captures the modes, but nothing exercises them end to end); and a reusable drive-a-real-agent Playwright helper that
-  bakes in the lessons from the first agent-driven smoke test (Claude Code's trust dialog, its fast-typing paste
-  heuristic swallowing Enter, reply-marker detection). Placed late because the parked items are small, stable code with
-  low regression risk; anything that starts changing often should be pulled forward instead of waiting here.
+- **M6.5 — test-suite backfill.** Test debt deliberately parked while the focus was end-to-end progress, tracked here so
+  it cannot be quietly forgotten. Known entries: unit coverage for terminal.js's `onBinary` byte conversion, which needs
+  a JS test-harness decision first (the repo has only Playwright today, and adopting a JS unit runner for one small
+  function was judged premature during the M1 review); a fake-agent script that enables mouse modes on cue plus an e2e
+  test pinning mouse-mode restoration on reattach (the restoration code shipped in M1 untested — PaneModes captures the
+  modes, but nothing exercises them end to end); and a reusable drive-a-real-agent Playwright helper that bakes in the
+  lessons from the first agent-driven smoke test (Claude Code's trust dialog, its fast-typing paste heuristic swallowing
+  Enter, reply-marker detection). Placed late because the parked items are small, stable code with low regression risk;
+  anything that starts changing often should be pulled forward instead of waiting here. Also the CI tmux-timing flake
+  class observed while closing M4 (2026-08-03): six DIFFERENT Rust e2e tests each failed exactly once on loaded CI
+  runners over one day (pause-spam detach, alt-screen reattach, scrolled-off replay, sink-backoff reset, agent+tab
+  conformance, list-through-stop annotation), every one passing on rerun and in isolation. The one-off-per-test
+  signature suggests runner load pushing real tmux operations past the suite's waits rather than any single test being
+  wrong — the leading hypothesis to investigate here, not a settled diagnosis. Candidate fixes if it holds: state-based
+  tmux readiness waits where tests currently rely on elapsed time, and a lower CI setting for the harness's existing
+  `SLOTS` concurrency cap. Belongs here unless the rerun rate becomes painful sooner.
 - **M7 — the outer ring.** Web-token auth and device sessions, `farhelm spawn` and agent-spawned sessions (deliberately
   late as well), archive, provisioning, Mac app bundling. Two items absorbed from M4's manual desktop pass (2026-08-03):
   an image FILE copied in Finder and pasted on macOS/WKWebView publishes under a generated `pasted-<n>.png` name instead
