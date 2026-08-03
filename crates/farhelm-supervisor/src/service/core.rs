@@ -7,8 +7,7 @@
 //! *how* a session's state changes on disk or in tmux, but the map of
 //! what sessions exist, their durable outcome, and their conversation-
 //! capture identity lives here. See the crate-root `service` module doc
-//! (`mod.rs`) for the milestone-by-milestone history of why the split
-//! looks like this.
+//! (`mod.rs`) for the state model and the shape of the split.
 
 use super::connection::{handle_connection, notify_detached};
 use super::launch_artifacts::{

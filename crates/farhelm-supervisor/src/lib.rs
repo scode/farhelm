@@ -12,25 +12,24 @@
 //!
 //! State model: SQLite (`store` module) is the truth that a session
 //! exists and what its metadata is; tmux remains the truth for whether
-//! its terminal is currently alive. M3 adds a third fact to the store —
+//! its terminal is currently alive. The store carries a third fact —
 //! the last outcome the supervisor WITNESSED, plus the boot id it last
 //! saw — which is what makes interrupted-vs-exited a classification
 //! rather than a guess once tmux is gone (PLAN_M3.md item 2, `service`
-//! and `store` module docs). M3 also adds the per-session integration
-//! snapshot and conversation-identity capture behind the `AgentKind` seam
+//! and `store` module docs). The per-session integration snapshot and
+//! conversation-identity capture live behind the `AgentKind` seam
 //! (`agent_kind` module, PLAN_M3.md items 7 and 8): which agent a session
 //! runs, how a resume would be invoked, and — read purely by observing the
-//! agents' own on-disk records — which conversation it belongs to. The
-//! `scope` module adds M3's last piece: where a systemd user manager
-//! exists, each launch also gets its own cgroup, which stop kills BEFORE
-//! (never instead of) the portable sweep.
+//! agents' own on-disk records — which conversation it belongs to. Where
+//! a systemd user manager exists (`scope` module), each launch also gets
+//! its own cgroup, which stop kills BEFORE (never instead of) the
+//! portable sweep.
 //!
-//! M4 adds attachment uploads on top: bytes streamed in over the protocol
-//! land in a per-session directory whose layout, naming rules, and
-//! lifecycle sweeps live in the `attachments` module (PLAN_M4.md item 4),
-//! while the transfer itself — data channels, credit, stall detection,
-//! commit — belongs to `service` and the streaming write atomicity to
-//! `files`.
+//! Attachment uploads (PLAN_M4.md item 4): bytes streamed in over the
+//! protocol land in a per-session directory whose layout, naming rules,
+//! and lifecycle sweeps live in the `attachments` module, while the
+//! transfer itself — data channels, credit, stall detection, commit —
+//! belongs to `service` and the streaming write atomicity to `files`.
 //!
 //! Unix-only, unconditionally: the doorway is a unix socket and the
 //! substrate is tmux, so unix APIs are used without cfg gates — a

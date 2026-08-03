@@ -4,8 +4,9 @@
 //! base is the page's own origin. Desktop (wry webview): the webview's
 //! origin is not the helm, so the base comes from FARHELM_URL (default
 //! http://127.0.0.1:7433) and the window is chrome around the same
-//! components. M1's desktop is deliberately a thin client — see
-//! lore/2026-07-26-m1-desktop-is-a-thin-client.md.
+//! components. The desktop is, for now, deliberately a thin client
+//! (SPEC.md's packaged native app — embedded helm and supervisor — is
+//! still to come); see lore/2026-07-26-m1-desktop-is-a-thin-client.md.
 //!
 //! A renderer feature (`web` or `desktop`) selects the target. Plain
 //! `cargo build`/`clippy` compile with neither so the workspace checks

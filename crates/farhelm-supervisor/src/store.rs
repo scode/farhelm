@@ -13,9 +13,9 @@
 //! "which table records that the version table exists"), and — unlike a
 //! table — cannot itself be missing from an otherwise-valid database.
 //!
-//! M3 adds the one thing the module docs above say is NOT persisted —
-//! and the distinction matters, because it is easy to read as a
-//! contradiction. Liveness is still never persisted: tmux remains the
+//! One more durable fact sits beside the metadata, and it is easy to
+//! read as a contradiction of the paragraph above — the distinction
+//! matters. Liveness is still never persisted: tmux remains the
 //! only truth for "is this agent running right now". What [`LastOutcome`]
 //! records is the supervisor's own last WITNESSED transition (PLAN_M3.md
 //! item 2), which is a different kind of fact: it is what lets a reboot —
@@ -29,8 +29,8 @@
 //! command that ran and finished (`service::session_status` spells the
 //! full precedence out).
 //!
-//! M3 also adds a second kind of durable fact, with a lifetime that is
-//! not a session's at all: [`Reservation`] (PLAN_M3.md item 6) records
+//! A second kind of durable fact has a lifetime that is not a
+//! session's at all: [`Reservation`] (PLAN_M3.md item 6) records
 //! that a client-supplied create INTENT was claimed, so a create retried
 //! after an ambiguous failure replays its original outcome instead of
 //! launching a second agent. A reservation and its launching row are
@@ -42,8 +42,9 @@
 //! the session as a tombstone — so a replay for a deleted session can say
 //! so instead of duplicating it.
 //!
-//! M3's third addition is the per-session integration snapshot and the
-//! conversation identity captured against it (PLAN_M3.md items 7 and 8).
+//! The per-session integration snapshot and the conversation identity
+//! captured against it form the capture half of the schema (PLAN_M3.md
+//! items 7 and 8).
 //! The snapshot columns — [`StoredSession::agent_kind`] and
 //! [`StoredSession::resume_template`] — are IMMUTABLE: they are written by
 //! the insert that creates the row and there is deliberately no update path
@@ -56,8 +57,12 @@
 //! backwards or overwrite what a concurrent observer already established.
 //!
 //! Journal mode and synchronous pragmas are left at SQLite's defaults.
-//! M3 is where PLAN.md places the explicit crash-safety/atomicity policy
-//! for the state store; this module does not invent one ahead of that.
+//! The recorded crash-safety/atomicity policy (PLAN_M3.md item 5,
+//! implemented in `crate::files`) governs the directly written state
+//! FILES; the database's durability settings stay stock (the one
+//! deliberate knob is `BUSY_TIMEOUT`, which is about handoff overlap,
+//! not durability), and this module does not invent a stricter policy
+//! than the plan records.
 
 use anyhow::Context;
 use rusqlite::{Connection, OpenFlags, OptionalExtension};

@@ -7,7 +7,7 @@
 //! port (SPEC.md): the unix socket plus ssh exec is the entire reachable
 //! surface.
 //!
-//! M2 scope: SQLite (`crate::store`) is the truth that a session exists
+//! State model: SQLite (`crate::store`) is the truth that a session exists
 //! and what its metadata is, written at creation and reloaded at startup
 //! so sessions survive a supervisor restart. tmux stays the truth for
 //! whether a session's terminal is currently alive; a session whose own
@@ -21,17 +21,18 @@
 //! the input path simply find none.
 //! PLAN_M2.md's "restart gap" paragraph is the contract.
 //!
-//! M3 adds the half M2 could not answer (PLAN_M3.md item 2): a durable
-//! last-known outcome per session, written wherever this process actually
-//! WITNESSES a transition, plus the host's boot id. Together they turn "the
-//! terminal is gone" into two distinguishable answers — the agent exited
+//! The restart gap still cannot say how a vanished session ENDED. A
+//! durable last-known outcome per session — written wherever this process
+//! actually WITNESSES a transition — plus the host's boot id turn "the
+//! terminal is gone" into two distinguishable answers (PLAN_M3.md item
+//! 2) — the agent exited
 //! (with the code, when something still holds it) versus the host rebooted
 //! and took every terminal with it, which is **interrupted**. The
 //! classification precedence lives on `core::session_status`, the recording
 //! rules on `Supervisor::record_outcome`/`record_stop`, and the boot
 //! comparison on `Supervisor::reload_sessions`.
 //!
-//! M3 also gives every session an integration snapshot and, for the two
+//! Every session carries an integration snapshot and, for the two
 //! integrated kinds, a captured conversation identity (PLAN_M3.md items 7
 //! and 8; the per-kind knowledge itself lives in `crate::agent_kind`).
 //! What this module owns is the plumbing around it: resolving the snapshot
@@ -42,8 +43,8 @@
 //! `core::capture_pass` for the cost envelope and why polling is sufficient
 //! here), so nothing new has to be started, supervised, or torn down.
 //!
-//! M4 gives a data channel a second meaning: attachment bytes flowing
-//! client-toward-supervisor (PLAN_M4.md item 4). Each accepted
+//! A data channel has a second meaning beyond terminal bytes: attachment
+//! bytes flowing client-toward-supervisor (PLAN_M4.md item 4). Each accepted
 //! `BeginUpload` gets a task that owns the transfer end to end — staging,
 //! credit acks, the progress timeout, and the commit that publishes —
 //! because every one of a transfer's endings (a client disconnecting, a
@@ -53,8 +54,8 @@
 //! and the write atomicity in `crate::files`; what belongs here is the
 //! protocol, the lifecycle, and the serialization against delete.
 //!
-//! M4.5 splits what used to be one ~20k-line `service.rs` into this
-//! directory (functional no-op — see PLAN.md's milestone ladder): each
+//! This directory is the M4.5 split of what used to be one ~20k-line
+//! `service.rs` (a functional no-op — see PLAN.md's milestone ladder): each
 //! submodule below owns one cohesive slice, `core` holds the `Supervisor`
 //! struct/impl and the session-status/list-building logic that reads its
 //! state back out, and this file is a re-export shell so nothing outside

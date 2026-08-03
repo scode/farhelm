@@ -4,8 +4,8 @@
 //! the hidden `internal` namespace — because provisioning copies exactly
 //! one binary to a host and the launch shim must exist inside every
 //! session without separate installation (SPEC_impl.md, "CLI").
-//! `farhelm spawn` is a later milestone; the grammar here is the M1
-//! subset of SPEC_impl.md's CLI section.
+//! `farhelm spawn` is a later milestone; the grammar here is the subset
+//! of SPEC_impl.md's CLI section that exists so far.
 
 use clap::{Parser, Subcommand};
 use std::path::PathBuf;

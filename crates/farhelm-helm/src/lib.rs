@@ -6,9 +6,9 @@
 //! and serves the UI and API over loopback HTTP/WS. It holds no
 //! authoritative session state — supervisors are the authority.
 //!
-//! M1 scope: exactly one supervisor connection (local or one ssh host),
-//! chosen by CLI flags; the host registry and multi-host aggregation are
-//! M6 (PLAN.md). The loopback-only bind is enforced here — SPEC.md's
+//! Current scope: exactly one supervisor connection (local or one ssh
+//! host), chosen by CLI flags; the host registry and multi-host
+//! aggregation arrive with M6 (PLAN.md). The loopback-only bind is enforced here — SPEC.md's
 //! security posture says the helm refuses non-loopback addresses in v1,
 //! and this code simply never binds anything else.
 

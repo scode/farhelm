@@ -4,10 +4,10 @@
 //! by the helm at loopback) and the desktop app (wry webview). The
 //! terminals themselves are xterm.js islands (assets/terminal.js) whose
 //! byte paths bypass Dioxus entirely — Dioxus owns the chrome around a
-//! terminal, never its content (SPEC_impl.md, "Terminal widget"). Since
-//! M4's terminal tabs a session view holds SEVERAL of those islands at
-//! once, all attached concurrently; the boundary is unchanged, only its
-//! multiplicity (see [`SessionView`]).
+//! terminal, never its content (SPEC_impl.md, "Terminal widget"). A
+//! session view holds SEVERAL of those islands at once, all attached
+//! concurrently (terminal tabs, PLAN_M4.md); tabs multiply the
+//! boundary's instances, never the boundary itself (see [`SessionView`]).
 //!
 //! Data fetching uses reqwest, which works on both native (desktop) and
 //! wasm (browser fetch) — one code path, no per-target HTTP client.
@@ -17,12 +17,11 @@
 //! `App` holds `Signal<Option<Session>>` rather than pulling in a router
 //! crate: `None` renders [`ListView`], `Some(session)` renders
 //! [`SessionView`] plus a back control that clears the signal.
-//! PLAN_M2.md names a premature router as a risk this milestone
-//! deliberately avoids — two states and one signal cover everything M2
-//! needs, and a router can still be introduced later if M4's terminal
-//! tabs (or something else) actually demands one. M4's tabs came and went
-//! without demanding one: a tab selection is view-local state, not a
-//! location, and nothing links to a specific tab.
+//! PLAN_M2.md named a premature router as a risk to avoid — two states
+//! and one signal cover everything needed so far, and a router can still
+//! be introduced when something actually demands one. Terminal tabs did
+//! not: a tab selection is view-local state, not a location, and nothing
+//! links to a specific tab.
 //!
 //! ## Module layout
 //!
