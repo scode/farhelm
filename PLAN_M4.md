@@ -240,6 +240,11 @@ typical screenshot this is imperceptible", which no local Playwright run can vou
 promise honest without inventing a CI gate for a subjective bar. SPEC.md's Mac-screenshot acceptance walkthrough itself
 still lands with M7's Mac app bundling; this pass covers the desktop build on the platform we have.
 
+Deferral record (2026-08-03, user decision at the manual pass): the remote-latency measurement and the detailed
+clipboard-engine observations (File name, `lastModified`, item order for the copied-image-file case) were deferred to M7
+— PLAN.md's M7 entry carries both. The pass itself ran and the rest of this paragraph's contract was met; the
+copied-image-file case confirmed the documented generated-name cost on WKWebView for real.
+
 ## Order of work
 
 Each step leaves something runnable; later steps only add. Tests ride with their step.
@@ -296,6 +301,8 @@ M4 is done when all of the following hold, pinned by automated tests except wher
    file and no directory behind.
 9. The desktop-build manual pass is recorded: a real file drop and a real image paste both land and insert, the wry
    file-drop configuration is verified as part of it, and the remote-screenshot paste latency is noted in the record.
+   (Run 2026-08-03; the latency note and the copied-image-file clipboard observations were deferred to M7 by user
+   decision — see the deferral record in Testing decisions.)
 10. The full CI gate is green on every PR.
 
 ## Risks retired by this milestone

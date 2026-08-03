@@ -88,4 +88,9 @@ Consequences of that stance:
   heuristic swallowing Enter, reply-marker detection). Placed late because the parked items are small, stable code with
   low regression risk; anything that starts changing often should be pulled forward instead of waiting here.
 - **M7 — the outer ring.** Web-token auth and device sessions, `farhelm spawn` and agent-spawned sessions (deliberately
-  late as well), archive, provisioning, Mac app bundling.
+  late as well), archive, provisioning, Mac app bundling. Two items absorbed from M4's manual desktop pass (2026-08-03):
+  an image FILE copied in Finder and pasted on macOS/WKWebView publishes under a generated `pasted-<n>.png` name instead
+  of its own — the documented cost of `classify`'s origin heuristic, observed for real; revisit the heuristic (or
+  wry-native clipboard hooks) here, and capture the WKWebView clipboard facts (File name, `lastModified`, item order) as
+  part of that work. And the remote-screenshot paste-latency measurement (PLAN_M4.md acceptance 9's `--ssh` step) was
+  deferred to daily use — record a number here if dogfooding has not already surfaced one.
