@@ -111,6 +111,13 @@ pub(crate) async fn drain_for(
         }
         match tokio::time::timeout(remaining, rx.recv()).await {
             Ok(Some(TermEvent::Data(bytes))) => seen.extend_from_slice(&bytes),
+            // The replay-complete marker (PLAN_M5.md item 4) is
+            // presentation metadata this backpressure suite does not
+            // assert on — it is about pause/resume byte delivery, not
+            // the catch-up boundary, which has its own coverage in
+            // replay_marker.rs and, helm-side, in farhelm-helm's
+            // client.rs/lib.rs.
+            Ok(Some(TermEvent::ReplayComplete)) => {}
             Ok(Some(TermEvent::Detached(reason))) => return Some(reason),
             Ok(None) => return Some("closed".to_string()),
             Err(_) => return None,
@@ -146,6 +153,9 @@ async fn wait_for_bytes(rx: &mut TermStream, seen: &mut Vec<u8>, needle: &[u8], 
         let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
         match tokio::time::timeout(remaining, rx.recv()).await {
             Ok(Some(TermEvent::Data(bytes))) => seen.extend_from_slice(&bytes),
+            // See `drain_for`'s twin arm above: presentation-only, not
+            // asserted on by this needle scan.
+            Ok(Some(TermEvent::ReplayComplete)) => {}
             Ok(Some(TermEvent::Detached(reason))) => {
                 panic!(
                     "stream ended ({reason}) without {needle:?} in {} bytes",

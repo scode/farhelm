@@ -141,6 +141,13 @@ async fn collect_counter_through(rx: &mut TermStream, target: u64) -> Vec<u8> {
         let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
         match tokio::time::timeout(remaining, rx.recv()).await {
             Ok(Some(TermEvent::Data(bytes))) => transcript.extend_from_slice(&bytes),
+            // The replay-complete marker (PLAN_M5.md item 4) is
+            // presentation metadata, not a counter record — nothing for
+            // this accumulator to add. Its own ordering contract is
+            // pinned at the protocol level in replay_marker.rs and,
+            // helm-side, in farhelm-helm's client.rs/lib.rs; this test is
+            // about the counter reaching `target`, not about the marker.
+            Ok(Some(TermEvent::ReplayComplete)) => {}
             Ok(Some(TermEvent::Detached(reason))) => {
                 panic!("counter attachment ended before {target}: {reason}")
             }
@@ -1739,7 +1746,12 @@ async fn connection_loss_detaches_terminals_and_fails_requests() {
         loop {
             match rx.recv().await {
                 Some(TermEvent::Detached(reason)) => return reason,
-                Some(TermEvent::Data(_)) => continue,
+                // The replay-complete marker (PLAN_M5.md item 4) is
+                // presentation metadata this loop is only waiting past,
+                // exactly like ordinary data — its ordering contract has
+                // its own coverage in replay_marker.rs and, helm-side, in
+                // farhelm-helm's client.rs/lib.rs.
+                Some(TermEvent::Data(_)) | Some(TermEvent::ReplayComplete) => continue,
                 None => panic!("terminal stream closed without a Detached event"),
             }
         }
@@ -3369,11 +3381,18 @@ async fn stop_does_not_disturb_the_existing_attachment() {
 
     // Give stop a moment, then require that nothing unexpected arrived on
     // the existing attachment: no Detached (stop must not touch it) and
-    // no closed stream. Trailing pre-stop output racing the agent's death
-    // is fine and not itself asserted on.
+    // no closed stream. The three arms below are all ordinary: trailing
+    // pre-stop output racing the agent's death; a still-open connection
+    // with nothing new; and a catch-up marker (PLAN_M5.md item 4) queued
+    // right behind the replay that contained "FAKE-AGENT READY" — `wait_for`
+    // above returns the instant its needle appears, without necessarily
+    // having drained everything already queued behind it, so finding the
+    // marker here is the ordinary shape of a healthy attach, not a race.
+    // The marker's own ordering contract has its coverage elsewhere
+    // (replay_marker.rs; farhelm-helm's client.rs/lib.rs) — this test's
+    // only concern is that stop does not itself disturb the attachment.
     match tokio::time::timeout(Duration::from_millis(500), rx1.recv()).await {
-        Err(_) => {}                       // nothing arrived — expected
-        Ok(Some(TermEvent::Data(_))) => {} // trailing pre-death output
+        Err(_) | Ok(Some(TermEvent::Data(_))) | Ok(Some(TermEvent::ReplayComplete)) => {}
         Ok(Some(TermEvent::Detached(reason))) => {
             panic!("stop must not detach the existing attachment: {reason}")
         }
@@ -5128,7 +5147,12 @@ async fn attach_during_delete_race_ends_in_a_consistent_state() {
                     loop {
                         match rx.recv().await {
                             Some(TermEvent::Detached(reason)) => return reason,
-                            Some(TermEvent::Data(_)) => continue,
+                            // Presentation metadata this loop is only
+                            // waiting past — see the identical treatment
+                            // (and its rationale) in
+                            // `connection_loss_detaches_terminals_and_fails_requests`
+                            // above.
+                            Some(TermEvent::Data(_)) | Some(TermEvent::ReplayComplete) => continue,
                             None => panic!(
                                 "an attachment that raced a delete closed without a Detached \
                                  notice — the client learned nothing about why"

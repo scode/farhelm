@@ -118,6 +118,10 @@ fn build_router(
             axum::routing::post(restart_session),
         )
         .route(
+            "/api/sessions/{id}/rename",
+            axum::routing::post(rename_session),
+        )
+        .route(
             "/api/sessions/{id}",
             get(get_session).delete(delete_session),
         )
@@ -818,6 +822,53 @@ async fn restart_session(
     }
 }
 
+/// The body of `POST /api/sessions/{id}/rename`: the verb-POST convention
+/// `/stop` and `/restart` already use (PLAN_M5.md item 4), rather than a
+/// PATCH with a partial `SessionInfo` — there is exactly one field to
+/// change, and a verb route says so without inventing a partial-update
+/// shape this API has nowhere else.
+///
+/// `title` has no default and no client-side shape check: an absent field
+/// is a 422 from axum's `Json` extractor (a body that parses as JSON but
+/// fails to deserialize into this struct — axum 0.8's
+/// `JsonRejection::JsonDataError` status, distinct from the 400 a body
+/// that is not even valid JSON gets) before this handler ever runs, and
+/// every value that DOES parse — including control characters and the
+/// empty string — is forwarded as-is (see `rename_session`'s docs for why
+/// this handler does not pre-filter what only the supervisor is
+/// authoritative over).
+#[derive(Deserialize)]
+struct RenameReq {
+    title: String,
+}
+
+/// `POST /api/sessions/{id}/rename` — SPEC.md's rename verb (PLAN_M5.md
+/// item 4), closing one of the two v1 client-surface operations
+/// unimplemented since M1 (archive is the other, deliberately M7's).
+///
+/// Pure passthrough, deliberately: `req.title` reaches
+/// `SupervisorClient::rename_session` VERBATIM, with no trimming and no
+/// local validation. The supervisor is the sole authority on what title is
+/// acceptable — control characters are refused, and a title over the 64
+/// KiB field cap is refused, but every value that clears both (including
+/// an explicit empty title) is accepted — so a helm-side check would only
+/// be a second copy of that rule with its own chance to drift; a refused
+/// title comes back through the same `ErrorKind`→status table every other
+/// route uses (`InvalidRequest` 400, `NotFound` 404 for an unknown
+/// session), and the accepted case answers with the session's freshly
+/// recomputed `SessionInfo`, matching `get_session`'s and `restart_session`'s
+/// success shape so a caller can re-render the row without listing again.
+async fn rename_session(
+    State(state): State<Arc<AppState>>,
+    AxPath(id): AxPath<String>,
+    axum::Json(req): axum::Json<RenameReq>,
+) -> impl IntoResponse {
+    match state.client.rename_session(&id, &req.title).await {
+        Ok(session) => axum::Json(session).into_response(),
+        Err(e) => http_error(e),
+    }
+}
+
 /// `DELETE /api/sessions/{id}` — remove a session and all its stored state
 /// (SPEC.md's "delete"). This handler enforces nothing about liveness: it
 /// deletes unconditionally, in any state. SPEC.md's confirm-when-alive
@@ -1320,8 +1371,9 @@ async fn attach_from_query(
 
 /// Terminal WebSocket: binary frames are terminal bytes in both
 /// directions; text frames are small JSON control messages (client →
-/// resize/pause/resume; server → detached notice). This is the
-/// browser-facing twin of the proto data channel, kept equally dumb.
+/// resize/pause/resume; server → detached notice, replay-complete marker).
+/// This is the browser-facing twin of the proto data channel, kept equally
+/// dumb.
 ///
 /// `?cols=`/`?rows=` set the initial size (see `TermQuery`'s docs).
 /// `?tab=<id>` and `?lease=<id>` (PLAN_M4.md item 5) select which of the
@@ -1352,7 +1404,24 @@ async fn attach_from_query(
 /// The browser side that SENDS them lands with the UI work in
 /// PLAN_M2_5.md step 4; the server accepts them now.
 ///
-/// Server → client stays one message: `{"type":"detached","reason":...}`.
+/// Server → client, both text: `{"type":"detached","reason":...}` and, as
+/// of PLAN_M5.md item 4, `{"type":"replay_complete"}` — the attach's
+/// catch-up boundary, forwarded on this SAME socket after the binary
+/// replay bytes it follows and before any binary live bytes, because
+/// [`TermEvent::ReplayComplete`] rides the terminal's data queue rather
+/// than jumping ahead of it (see that variant's own docs for why the
+/// ordering is the whole point). Consumers must treat it as pure
+/// presentation, never as a signal for session or lifecycle behavior —
+/// the same restriction `ControlMsg::ReplayComplete`'s docs place on every
+/// consumer of the wire message it forwards.
+/// The fixed wire text for the replay-complete marker (PLAN_M5.md item 4;
+/// see `term_ws`'s docs for where it sits in the server→client message
+/// set). A plain constant rather than a `serde_json::json!` value built
+/// fresh per marker: the shape never varies — no fields, ever — so there
+/// is nothing for a JSON builder to add over a literal, and every marker
+/// this socket ever sends is this exact string.
+const REPLAY_COMPLETE_TEXT_MESSAGE: &str = r#"{"type":"replay_complete"}"#;
+
 async fn term_ws(
     State(state): State<Arc<AppState>>,
     AxPath(id): AxPath<String>,
@@ -1478,6 +1547,15 @@ async fn serve_term(
             };
             let message = match event {
                 TermEvent::Data(bytes) => ws::Message::Binary(bytes.into()),
+                // The catch-up boundary (PLAN_M5.md item 4). Built as an
+                // ordinary outbound `Message` rather than sent inline like
+                // `Detached` below, deliberately: it must go through the
+                // SAME `select!` — racing the browser's detach signal —
+                // as a `Data` message would, so a viewer that vanished
+                // between the marker and this send abandons it exactly
+                // like abandoned data, instead of the marker getting a
+                // priority path data never had.
+                TermEvent::ReplayComplete => ws::Message::Text(REPLAY_COMPLETE_TEXT_MESSAGE.into()),
                 TermEvent::Detached(reason) => {
                     let notice = serde_json::json!({"type": "detached", "reason": reason});
                     // Best-effort and last: the socket closes right after,
@@ -1849,6 +1927,79 @@ mod tests {
                 "the browser's message must reach the supervisor unchanged, for its own channel"
             );
         }
+    }
+
+    /// For a completed initial attach catch-up, the marker's ordering
+    /// property is: it must reach the browser AFTER the binary replay
+    /// bytes it describes and BEFORE any binary live byte, on the exact
+    /// same socket (PLAN_M5.md item 4) — not the marker's whole contract,
+    /// which also covers attaches a takeover/detach/stall ends before a
+    /// marker is owed, and the markerless `%pause` recovery replay (see
+    /// `TermEvent::ReplayComplete`'s own docs); neither is this test's
+    /// concern. This is the real-socket complement to
+    /// `client::tests::replay_complete_marker_is_ordered_between_replay_and_live_data_in_the_queue`
+    /// — that test pins the ordering inside `SupervisorClient`'s queue;
+    /// this one pins that `serve_term`'s WS forwarding does not reorder or
+    /// drop the marker on the way to a real `WsTestClient`, and that it
+    /// arrives as the documented `{"type":"replay_complete"}` text frame
+    /// rather than, say, folded into the binary stream.
+    #[tokio::test]
+    async fn term_ws_delivers_the_replay_complete_marker_between_replay_and_live_bytes() {
+        use farhelm_proto::ControlMsg;
+
+        let (client_side, peer_side) = tokio::io::duplex(64 * 1024);
+        let peer = tokio::spawn(scripted_supervisor_attach(peer_side));
+        let (r, w) = tokio::io::split(client_side);
+        let client = super::SupervisorClient::start(r, w).await.unwrap();
+        let addr = serve_helm(client).await;
+        let (mut ws, peer) = tokio::join!(
+            WsTestClient::connect(addr, "/api/sessions/sess-1/term"),
+            peer
+        );
+        let (_reader, mut writer, channel) = peer.unwrap();
+
+        writer
+            .write_frame(&farhelm_proto::Frame::data(channel, b"replay".to_vec()))
+            .await
+            .unwrap();
+        writer
+            .write_control(&ControlMsg::ReplayComplete { channel })
+            .await
+            .unwrap();
+        writer
+            .write_frame(&farhelm_proto::Frame::data(channel, b"live".to_vec()))
+            .await
+            .unwrap();
+
+        let (opcode, payload) = tokio::time::timeout(Duration::from_secs(5), ws.recv())
+            .await
+            .expect("no replay data arrived")
+            .expect("socket closed before the replay data");
+        assert_eq!(opcode, 2, "replay bytes are a binary frame");
+        assert_eq!(payload, b"replay");
+
+        let (opcode, payload) = tokio::time::timeout(Duration::from_secs(5), ws.recv())
+            .await
+            .expect("no replay-complete marker arrived")
+            .expect("socket closed before the marker");
+        assert_eq!(opcode, 1, "the marker is a text frame");
+        let notice: serde_json::Value = serde_json::from_slice(&payload).unwrap();
+        assert_eq!(
+            notice,
+            serde_json::json!({"type": "replay_complete"}),
+            "the marker must be exactly this fixed object — no stray fields (a channel, say, \
+             which the socket has no need to name since it IS the channel) and no missing ones"
+        );
+
+        let (opcode, payload) = tokio::time::timeout(Duration::from_secs(5), ws.recv())
+            .await
+            .expect("no live data arrived")
+            .expect("socket closed before the live data");
+        assert_eq!(opcode, 2, "live bytes are a binary frame");
+        assert_eq!(
+            payload, b"live",
+            "live output must follow the marker, not race ahead of it"
+        );
     }
 
     /// A browser that stops reading must not pin the WebSocket handler:
@@ -3352,6 +3503,382 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(String::from_utf8_lossy(&body).trim(), SENTINEL);
+
+        peer.await.unwrap();
+    }
+
+    /// `POST /api/sessions/{id}/rename` end to end (PLAN_M5.md item 4), for
+    /// every shape a title can take: an ordinary title, the empty string
+    /// (an explicit empty title is a legal rename, symmetric with an
+    /// explicit empty title on create — PLAN_M5.md item 3), leading/
+    /// trailing whitespace, and embedded control characters (the very
+    /// thing the supervisor's own validation refuses, so this helm-level
+    /// hop must not pre-filter or normalize it away before the refusal can
+    /// even run). One route, four shapes, because the property under
+    /// test — "no trimming, no validation, no rewriting" — is the same
+    /// claim for each and a shared body keeps the cases from drifting
+    /// into subtly different assertions.
+    ///
+    /// The success body is checked as a FULL `SessionInfo`, field for
+    /// field against the scripted reply, not just `id`/`title`: a route
+    /// that echoed a stale or partially-rebuilt session (the bug
+    /// `SessionRenamed`'s own docs warn against — see
+    /// `ControlMsg::SessionRenamed`) would still pass an id/title-only
+    /// check while failing every other field.
+    #[tokio::test]
+    async fn rename_session_forwards_the_title_verbatim() {
+        use farhelm_proto::io::{FrameReader, FrameWriter, handshake, parse_control};
+        use farhelm_proto::{ControlMsg, RestartOffer, SessionInfo, SessionStatus, TabInfo};
+        use tower::ServiceExt;
+
+        let cases = [
+            "an ordinary title",
+            "",
+            "  leading and trailing spaces  ",
+            "bell\u{7}esc\u{1b}nl\ntab\t",
+        ];
+
+        for title in cases {
+            let (client_side, peer_side) = tokio::io::duplex(64 * 1024);
+            let expected_title = title.to_string();
+            // Distinctive on every field, not just `title`: a handler
+            // that echoed back a stale or default-filled `SessionInfo`
+            // must fail the full-struct comparison below even if the
+            // title alone looked right.
+            let expected_session = SessionInfo {
+                id: "sess-1".into(),
+                title: expected_title.clone(),
+                cwd: "/distinctive/dir".into(),
+                invocation: "distinctive-agent --flag".into(),
+                status: SessionStatus::Alive,
+                annotation: None,
+                restart_offer: RestartOffer::Resume,
+                tabs: vec![TabInfo { id: "tab-1".into() }],
+            };
+            let reply_session = expected_session.clone();
+            let peer = tokio::spawn(async move {
+                let (r, w) = tokio::io::split(peer_side);
+                let mut reader = FrameReader::new(r);
+                let mut writer = FrameWriter::new(w);
+                handshake(&mut reader, &mut writer, "supervisor")
+                    .await
+                    .unwrap();
+                let request = parse_control(&reader.read_frame().await.unwrap().unwrap()).unwrap();
+                let ControlMsg::RenameSession {
+                    req_id, title: got, ..
+                } = request
+                else {
+                    panic!("expected RenameSession, got {request:?}");
+                };
+                assert_eq!(
+                    got, expected_title,
+                    "the title must reach the supervisor byte-for-byte unchanged"
+                );
+                writer
+                    .write_control(&ControlMsg::SessionRenamed {
+                        req_id,
+                        session: reply_session,
+                    })
+                    .await
+                    .unwrap();
+            });
+
+            let (r, w) = tokio::io::split(client_side);
+            let client = super::SupervisorClient::start(r, w).await.unwrap();
+            let app = build_router(client, None, 7433);
+            let request = axum::http::Request::builder()
+                .method("POST")
+                .uri("/api/sessions/sess-1/rename")
+                .header("host", "127.0.0.1:7433")
+                .header("content-type", "application/json")
+                .body(axum::body::Body::from(
+                    serde_json::json!({ "title": title }).to_string(),
+                ))
+                .unwrap();
+
+            let response = app.oneshot(request).await.unwrap();
+            assert_eq!(
+                response.status(),
+                axum::http::StatusCode::OK,
+                "for title {title:?}"
+            );
+            let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+                .await
+                .unwrap();
+            let got_session: SessionInfo = serde_json::from_slice(&body).unwrap();
+            assert_eq!(
+                got_session, expected_session,
+                "the success body must be the supervisor's FULL SessionInfo, not a partial \
+                 echo, for title {title:?}"
+            );
+
+            peer.await.unwrap();
+        }
+    }
+
+    /// A body whose `title` field is MISSING entirely must be refused
+    /// before this route's handler ever runs — 422 from axum 0.8's `Json`
+    /// extractor rejecting a body that parses as JSON but fails to
+    /// deserialize into `RenameReq` (a missing required field), distinct
+    /// from the 400 a body that is not valid JSON at all would get
+    /// (`RenameReq`'s own docs name the same distinction) — and
+    /// distinctly from a body whose `title` is PRESENT but explicitly
+    /// empty, which must reach the supervisor and be accepted (SPEC.md
+    /// names control characters, not absence of content, as rename's
+    /// refusal — PLAN_M5.md item 3; `rename_session_forwards_the_title_verbatim`
+    /// also carries the empty-string case among its shapes). Both halves
+    /// live in this one test, rather than as two that could quietly drift
+    /// apart, because "missing" and "explicit empty" are exactly the pair
+    /// a route that collapsed `Option<String>` handling could confuse.
+    #[tokio::test]
+    async fn rename_session_missing_title_is_422_but_an_explicit_empty_title_is_accepted() {
+        use tower::ServiceExt;
+
+        // Half 1: `title` absent. No frame may reach the supervisor at
+        // all — a rejected extractor never calls `rename_session`'s body.
+        {
+            let (client_side, peer_side) = tokio::io::duplex(64 * 1024);
+            let peer = tokio::spawn(async move {
+                let (r, w) = tokio::io::split(peer_side);
+                let mut reader = farhelm_proto::io::FrameReader::new(r);
+                let mut writer = farhelm_proto::io::FrameWriter::new(w);
+                farhelm_proto::io::handshake(&mut reader, &mut writer, "supervisor")
+                    .await
+                    .unwrap();
+                reader
+            });
+
+            let (r, w) = tokio::io::split(client_side);
+            let client = super::SupervisorClient::start(r, w).await.unwrap();
+            let app = build_router(client, None, 7433);
+            let request = axum::http::Request::builder()
+                .method("POST")
+                .uri("/api/sessions/sess-1/rename")
+                .header("host", "127.0.0.1:7433")
+                .header("content-type", "application/json")
+                .body(axum::body::Body::from(serde_json::json!({}).to_string()))
+                .unwrap();
+
+            let response = app.oneshot(request).await.unwrap();
+            assert_eq!(
+                response.status(),
+                axum::http::StatusCode::UNPROCESSABLE_ENTITY,
+                "a body missing the required `title` field must be a 422 from the JSON extractor"
+            );
+
+            // Dropping `app`/`response` above already dropped this
+            // block's only `SupervisorClient` handle, which closes the
+            // transport — so the peer seeing EOF proves nothing about
+            // whether a frame was sent first; only the SHAPE of what (if
+            // anything) arrives does. A still-open connection with
+            // nothing to read, or a clean EOF with nothing read, are both
+            // consistent with "no frame was ever sent"; an actual frame
+            // is the one outcome that is not.
+            let mut reader = peer.await.unwrap();
+            match tokio::time::timeout(Duration::from_millis(200), reader.read_frame()).await {
+                Err(_) | Ok(Ok(None)) => {}
+                Ok(Ok(Some(frame))) => panic!(
+                    "a rejected extractor must never let a RenameSession reach the \
+                     supervisor, but this frame arrived: {frame:?}"
+                ),
+                Ok(Err(e)) => {
+                    panic!("unexpected transport error while checking for a stray frame: {e}")
+                }
+            }
+        }
+
+        // Half 2: `title` present and explicitly empty. Must reach the
+        // supervisor (not be treated as if it were absent) and succeed.
+        {
+            use farhelm_proto::ControlMsg;
+            use farhelm_proto::io::{FrameReader, FrameWriter, handshake, parse_control};
+
+            let (client_side, peer_side) = tokio::io::duplex(64 * 1024);
+            let peer = tokio::spawn(async move {
+                let (r, w) = tokio::io::split(peer_side);
+                let mut reader = FrameReader::new(r);
+                let mut writer = FrameWriter::new(w);
+                handshake(&mut reader, &mut writer, "supervisor")
+                    .await
+                    .unwrap();
+                let request = parse_control(&reader.read_frame().await.unwrap().unwrap()).unwrap();
+                let ControlMsg::RenameSession { req_id, title, .. } = request else {
+                    panic!("expected RenameSession, got {request:?}");
+                };
+                assert_eq!(
+                    title, "",
+                    "an explicit empty title must reach the supervisor, not be treated as \
+                     though it were absent"
+                );
+                writer
+                    .write_control(&ControlMsg::SessionRenamed {
+                        req_id,
+                        session: farhelm_proto::SessionInfo {
+                            id: "sess-1".into(),
+                            title: String::new(),
+                            cwd: "/some/dir".into(),
+                            invocation: "some-agent".into(),
+                            status: farhelm_proto::SessionStatus::Unknown,
+                            annotation: None,
+                            restart_offer: farhelm_proto::RestartOffer::default(),
+                            tabs: Vec::new(),
+                        },
+                    })
+                    .await
+                    .unwrap();
+            });
+
+            let (r, w) = tokio::io::split(client_side);
+            let client = super::SupervisorClient::start(r, w).await.unwrap();
+            let app = build_router(client, None, 7433);
+            let request = axum::http::Request::builder()
+                .method("POST")
+                .uri("/api/sessions/sess-1/rename")
+                .header("host", "127.0.0.1:7433")
+                .header("content-type", "application/json")
+                .body(axum::body::Body::from(
+                    serde_json::json!({ "title": "" }).to_string(),
+                ))
+                .unwrap();
+
+            let response = app.oneshot(request).await.unwrap();
+            assert_eq!(
+                response.status(),
+                axum::http::StatusCode::OK,
+                "an explicit empty title must be ACCEPTED, distinctly from the missing-field \
+                 case in the first half of this test"
+            );
+
+            peer.await.unwrap();
+        }
+    }
+
+    /// Renaming an unknown session must surface as a 404 carrying the
+    /// supervisor's own message verbatim, exactly the same `SupervisorError`
+    /// downcast every other route's 404 uses — exercised here for the
+    /// rename route specifically rather than assumed from `stop`'s coverage.
+    #[tokio::test]
+    async fn rename_session_unknown_id_returns_404_with_supervisor_message() {
+        use farhelm_proto::io::{FrameReader, FrameWriter, handshake, parse_control};
+        use farhelm_proto::{ControlMsg, ErrorKind};
+        use tower::ServiceExt;
+
+        const SENTINEL: &str = "SENTINEL-rename-7c2a: no such session";
+
+        let (client_side, peer_side) = tokio::io::duplex(64 * 1024);
+        let peer = tokio::spawn(async move {
+            let (r, w) = tokio::io::split(peer_side);
+            let mut reader = FrameReader::new(r);
+            let mut writer = FrameWriter::new(w);
+            handshake(&mut reader, &mut writer, "supervisor")
+                .await
+                .unwrap();
+            let request = parse_control(&reader.read_frame().await.unwrap().unwrap()).unwrap();
+            let ControlMsg::RenameSession {
+                req_id, session_id, ..
+            } = request
+            else {
+                panic!("expected RenameSession, got {request:?}");
+            };
+            assert_eq!(
+                session_id, "sess-missing",
+                "the route must forward the id from the URL path, not some other session"
+            );
+            writer
+                .write_control(&ControlMsg::Error {
+                    req_id,
+                    message: SENTINEL.to_string(),
+                    kind: ErrorKind::NotFound,
+                })
+                .await
+                .unwrap();
+        });
+
+        let (r, w) = tokio::io::split(client_side);
+        let client = super::SupervisorClient::start(r, w).await.unwrap();
+        let app = build_router(client, None, 7433);
+        let request = axum::http::Request::builder()
+            .method("POST")
+            .uri("/api/sessions/sess-missing/rename")
+            .header("host", "127.0.0.1:7433")
+            .header("content-type", "application/json")
+            .body(axum::body::Body::from(
+                serde_json::json!({ "title": "doesn't matter" }).to_string(),
+            ))
+            .unwrap();
+
+        let response = app.oneshot(request).await.unwrap();
+        assert_eq!(response.status(), axum::http::StatusCode::NOT_FOUND);
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        assert_eq!(
+            String::from_utf8_lossy(&body),
+            SENTINEL,
+            "body must carry the supervisor's own message verbatim, not a substring of it"
+        );
+
+        peer.await.unwrap();
+    }
+
+    /// A title the supervisor refuses (control characters, per PLAN_M5.md
+    /// item 3's validation) must surface as a 400 carrying the
+    /// supervisor's own refusal text — the UI's only source for that
+    /// message, since this route performs no local validation of its own
+    /// to phrase a redundant one from.
+    #[tokio::test]
+    async fn rename_session_invalid_title_returns_400_with_supervisor_message() {
+        use farhelm_proto::io::{FrameReader, FrameWriter, handshake, parse_control};
+        use farhelm_proto::{ControlMsg, ErrorKind};
+        use tower::ServiceExt;
+
+        const SENTINEL: &str = "SENTINEL-rename-e91f: title must not contain control characters";
+
+        let (client_side, peer_side) = tokio::io::duplex(64 * 1024);
+        let peer = tokio::spawn(async move {
+            let (r, w) = tokio::io::split(peer_side);
+            let mut reader = FrameReader::new(r);
+            let mut writer = FrameWriter::new(w);
+            handshake(&mut reader, &mut writer, "supervisor")
+                .await
+                .unwrap();
+            let request = parse_control(&reader.read_frame().await.unwrap().unwrap()).unwrap();
+            let ControlMsg::RenameSession { req_id, .. } = request else {
+                panic!("expected RenameSession, got {request:?}");
+            };
+            writer
+                .write_control(&ControlMsg::Error {
+                    req_id,
+                    message: SENTINEL.to_string(),
+                    kind: ErrorKind::InvalidRequest,
+                })
+                .await
+                .unwrap();
+        });
+
+        let (r, w) = tokio::io::split(client_side);
+        let client = super::SupervisorClient::start(r, w).await.unwrap();
+        let app = build_router(client, None, 7433);
+        let request = axum::http::Request::builder()
+            .method("POST")
+            .uri("/api/sessions/sess-1/rename")
+            .header("host", "127.0.0.1:7433")
+            .header("content-type", "application/json")
+            .body(axum::body::Body::from(
+                serde_json::json!({ "title": "bad\u{7}title" }).to_string(),
+            ))
+            .unwrap();
+
+        let response = app.oneshot(request).await.unwrap();
+        assert_eq!(response.status(), axum::http::StatusCode::BAD_REQUEST);
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        assert_eq!(
+            String::from_utf8_lossy(&body),
+            SENTINEL,
+            "body must carry the supervisor's own refusal text verbatim"
+        );
 
         peer.await.unwrap();
     }

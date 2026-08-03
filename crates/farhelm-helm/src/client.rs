@@ -48,7 +48,10 @@ const INPUT_CHUNK: usize = 32 * 1024;
 ///   full replay is ≈ 96 frames.
 ///
 /// 256 leaves ~2.5× headroom over that for unusually wide or heavily
-/// styled panes. Item ordering matters as much as the number: the
+/// styled panes — comfortably enough to also absorb the one extra event
+/// PLAN_M5.md item 4's `ReplayComplete` marker adds to a replay's count,
+/// without a dedicated slot of its own. Item ordering matters as much as
+/// the number: the
 /// supervisor now enqueues `Attached` BEFORE spawning the forwarder, so
 /// `attach()` returns and the consumer starts draining while the replay is
 /// still being written — without that, no queue depth is safe, because
@@ -199,16 +202,42 @@ pub struct SessionListing {
 pub enum TermEvent {
     /// Raw terminal bytes (replay first, then live output).
     Data(Vec<u8>),
+    /// This attach's INITIAL catch-up is over: every byte the supervisor
+    /// replays for THIS attach's own catch-up phase precedes this event in
+    /// the queue, and live output follows (PLAN_M5.md item 4;
+    /// `farhelm_proto::ControlMsg::ReplayComplete`'s docs carry the full
+    /// contract — exactly once per attach that completes its catch-up,
+    /// never owed to an attach a takeover/detach/stall ended early). The
+    /// qualifier is load-bearing, mirroring that same doc's own boundary:
+    /// M2.5's flow-control recovery after a tmux `%pause` can replay
+    /// retained history into this SAME attachment LATER, mid-stream, with
+    /// no marker of its own — so "live output follows" describes what
+    /// comes after THIS marker, not a promise that history can never
+    /// reappear on the channel again.
+    ///
+    /// Deliberately rides the SAME bounded queue as `Data`, unlike
+    /// `Detached`'s out-of-band watch (see [`TerminalHandle`]'s docs for
+    /// why detach needs the opposite treatment). A detach must be
+    /// deliverable even when the queue is full — that is precisely the
+    /// stalled-viewer case — but this marker means nothing except its
+    /// POSITION between the replay bytes before it and the live bytes
+    /// after: pulling it out of order onto its own channel would let it
+    /// race ahead of data it is supposed to follow, which would make the
+    /// marker actively wrong instead of merely late. If the queue is
+    /// backed up, the marker waits behind the very data it describes —
+    /// that wait is the feature, not a cost of reusing the queue.
+    ReplayComplete,
     /// The attachment ended: taken over by another client, or the
     /// session's terminal went away.
     Detached(String),
 }
 
-/// One attached terminal, as the client holds it: the bounded data queue
-/// plus an out-of-band detach signal.
+/// One attached terminal, as the client holds it: the bounded event queue
+/// (`Data` and, as of PLAN_M5.md item 4, `ReplayComplete`) plus an
+/// out-of-band detach signal.
 ///
 /// The detach reason travels on its own `watch` rather than through the
-/// data queue, and that separation is what makes teardown always possible.
+/// event queue, and that separation is what makes teardown always possible.
 /// The queue can be full at exactly the moment a terminal must be told it
 /// is finished — that is, definitionally, the stalled-terminal case — so a
 /// notice that needed queue capacity could not be delivered to the one
@@ -786,10 +815,13 @@ impl SupervisorClient {
 
     /// Route one inbound frame to whoever is waiting for it: data frames
     /// to their terminal, replies to the request that carries their
-    /// `req_id`, `Detached` to the terminal it names, and — PLAN_M4.md
-    /// item 5's upload vocabulary — `UploadAck`/`UploadAborted` to the
-    /// upload it names by `channel`, the same channel-correlated,
-    /// no-`req_id` shape `Detached` already uses.
+    /// `req_id`, `Detached` to the terminal it names, `ReplayComplete`
+    /// (PLAN_M5.md item 4) into that SAME terminal's data queue rather
+    /// than its detach watch (see [`TermEvent::ReplayComplete`]'s docs for
+    /// why), and — PLAN_M4.md item 5's upload vocabulary —
+    /// `UploadAck`/`UploadAborted` to the upload it names by `channel`,
+    /// the same channel-correlated, no-`req_id` shape `Detached` already
+    /// uses.
     ///
     /// A frame for a channel or request that no longer exists is dropped:
     /// that is the normal outcome of a detach racing in-flight output.
@@ -829,39 +861,8 @@ impl SupervisorClient {
     async fn dispatch(&self, frame: Frame) -> anyhow::Result<()> {
         match frame.kind {
             FrameKind::Data => {
-                let mut terms = self.terminals.lock().await;
-                // `entry` rather than get-then-remove so the overflow arm
-                // below removes the very entry it just observed, under the
-                // SAME lock hold: releasing first would let a concurrent
-                // `detach`/`attach` interleave and leave this tearing down
-                // a channel that is no longer the one that overflowed.
-                if let std::collections::hash_map::Entry::Occupied(entry) =
-                    terms.entry(frame.channel)
-                {
-                    match entry.get().events.try_send(TermEvent::Data(frame.body)) {
-                        Ok(()) => {}
-                        Err(mpsc::error::TrySendError::Full(_)) => {
-                            let handle = entry.remove();
-                            signal_detached(
-                                &handle,
-                                farhelm_proto::DETACH_REASON_STALLED.to_string(),
-                            );
-                            self.release_upstream(frame.channel);
-                        }
-                        Err(mpsc::error::TrySendError::Closed(_)) => {
-                            // The consumer dropped its receiver without
-                            // detaching (a task cancelled mid-flight, say).
-                            // Nobody is listening, so there is no local
-                            // notice to deliver — but the SUPERVISOR still
-                            // holds an attachment for this channel, and
-                            // leaving it there would pin a control client,
-                            // an input client, and a forwarder for the life
-                            // of the connection.
-                            entry.remove();
-                            self.release_upstream(frame.channel);
-                        }
-                    }
-                }
+                self.route_terminal_event(frame.channel, TermEvent::Data(frame.body))
+                    .await;
             }
             FrameKind::Control => {
                 let msg = parse_control(&frame)?;
@@ -871,6 +872,7 @@ impl SupervisorClient {
                     | ControlMsg::SessionStopped { req_id, .. }
                     | ControlMsg::SessionDeleted { req_id, .. }
                     | ControlMsg::SessionRestarted { req_id, .. }
+                    | ControlMsg::SessionRenamed { req_id, .. }
                     | ControlMsg::Attached { req_id, .. }
                     | ControlMsg::TabOpened { req_id, .. }
                     | ControlMsg::TabClosed { req_id, .. }
@@ -900,6 +902,18 @@ impl SupervisorClient {
                             // dropped, which is exactly what this is.
                             self.release_upstream(*channel);
                         }
+                    }
+                    // Unsolicited, channel-correlated like `Detached`
+                    // above but routed into the DATA queue instead of the
+                    // detach watch (PLAN_M5.md item 4) — see
+                    // [`TermEvent::ReplayComplete`]'s docs for why. An
+                    // unknown channel (the attachment already ended, or
+                    // this connection never knew about it) is discarded
+                    // exactly like a stray data frame: `route_terminal_event`
+                    // is a no-op when the channel is not in `terminals`.
+                    ControlMsg::ReplayComplete { channel } => {
+                        self.route_terminal_event(*channel, TermEvent::ReplayComplete)
+                            .await;
                     }
                     // Unsolicited progress: extends the sender's credit
                     // window (see `UploadGuard::wait_for_credit`), and is
@@ -985,6 +999,44 @@ impl SupervisorClient {
             }
         }
         Ok(())
+    }
+
+    /// Push one event onto `channel`'s bounded queue, applying `dispatch`'s
+    /// overflow-is-stall-detach rule uniformly for both queue producers:
+    /// raw `Data` off the wire and the `ReplayComplete` marker synthesized
+    /// from a `ControlMsg` (PLAN_M5.md item 4). A channel `dispatch` does
+    /// not know about — the attachment already ended, or never existed on
+    /// this connection — is a silent no-op, the same normal race a stray
+    /// data frame for a dead terminal already tolerates.
+    ///
+    /// `entry` rather than get-then-remove so the overflow arm removes the
+    /// very entry it just observed, under the SAME lock hold: releasing
+    /// first would let a concurrent `detach`/`attach` interleave and leave
+    /// this tearing down a channel that is no longer the one that
+    /// overflowed.
+    async fn route_terminal_event(&self, channel: u32, event: TermEvent) {
+        let mut terms = self.terminals.lock().await;
+        if let std::collections::hash_map::Entry::Occupied(entry) = terms.entry(channel) {
+            match entry.get().events.try_send(event) {
+                Ok(()) => {}
+                Err(mpsc::error::TrySendError::Full(_)) => {
+                    let handle = entry.remove();
+                    signal_detached(&handle, farhelm_proto::DETACH_REASON_STALLED.to_string());
+                    self.release_upstream(channel);
+                }
+                Err(mpsc::error::TrySendError::Closed(_)) => {
+                    // The consumer dropped its receiver without detaching
+                    // (a task cancelled mid-flight, say). Nobody is
+                    // listening, so there is no local notice to deliver —
+                    // but the SUPERVISOR still holds an attachment for
+                    // this channel, and leaving it there would pin a
+                    // control client, an input client, and a forwarder
+                    // for the life of the connection.
+                    entry.remove();
+                    self.release_upstream(channel);
+                }
+            }
+        }
     }
 
     /// Enqueue a `Detach` for `channel` upstream WITHOUT awaiting.
@@ -1304,6 +1356,38 @@ impl SupervisorClient {
         {
             ControlMsg::SessionRestarted { session, .. } => Ok(session),
             other => bail!("unexpected reply to restart_session: {other:?}"),
+        }
+    }
+
+    /// Rename a session (PLAN_M5.md item 4; SPEC.md's v1 rename verb),
+    /// returning the session's freshly recomputed `SessionInfo` — built the
+    /// way `list_sessions` builds one, not a stale row with the title
+    /// spliced in (see `ControlMsg::SessionRenamed`'s docs).
+    ///
+    /// `title` travels to the supervisor VERBATIM: this method neither
+    /// trims nor validates it. The supervisor is the sole authority on
+    /// what title is acceptable (`ControlMsg::RenameSession`'s
+    /// control-character refusal and size cap), and duplicating that rule
+    /// here would only give it a second place to drift from the real one.
+    /// A refusal — an unknown `id`, or a title the supervisor rejects —
+    /// arrives as a [`SupervisorError`] the caller can downcast for its
+    /// `ErrorKind` and message, exactly like every other request on this
+    /// client.
+    pub async fn rename_session(&self, id: &str, title: &str) -> anyhow::Result<SessionInfo> {
+        let req_id = self.req_id();
+        match self
+            .request(
+                req_id,
+                ControlMsg::RenameSession {
+                    req_id,
+                    session_id: id.to_string(),
+                    title: title.to_string(),
+                },
+            )
+            .await?
+        {
+            ControlMsg::SessionRenamed { session, .. } => Ok(session),
+            other => bail!("unexpected reply to rename_session: {other:?}"),
         }
     }
 
@@ -2563,6 +2647,270 @@ mod tests {
             "the stalled terminal must be told why it stopped, using the same reason string \
              the supervisor's own stall detach emits"
         );
+    }
+
+    /// The marker shares `Data`'s bounded-queue pressure rule rather than
+    /// a separate one (PLAN_M5.md item 4, `route_terminal_event`'s whole
+    /// point): with the queue already at EXACT capacity from plain data,
+    /// a `ReplayComplete` — not a `Data` frame — is what trips the
+    /// overflow here, and it must produce the identical stall-detach/
+    /// release contract the test above pins for `Data`, without
+    /// disturbing a healthy terminal sharing the connection. A refactor
+    /// that split the marker onto its own path — awaiting queue capacity,
+    /// dropping it silently outside the detach rule, or bypassing the
+    /// bound entirely — would still pass every OTHER marker test in this
+    /// file (none of them fill the queue) and would only be caught here.
+    #[tokio::test]
+    async fn a_replay_complete_marker_against_a_full_queue_gets_the_same_stall_detach_as_data() {
+        let (client_side, peer_side) = tokio::io::duplex(64 * 1024);
+        let peer = tokio::spawn(async move {
+            let (r, w) = tokio::io::split(peer_side);
+            let mut reader = FrameReader::new(r);
+            let mut writer = FrameWriter::new(w);
+            handshake(&mut reader, &mut writer, "supervisor")
+                .await
+                .unwrap();
+            (reader, writer)
+        });
+        let (r, w) = tokio::io::split(client_side);
+        let client = SupervisorClient::start(r, w).await.unwrap();
+        let (mut peer_reader, mut peer_writer) = peer.await.unwrap();
+
+        let mut stalled_rx = register_terminal(&client, 1, TERM_EVENT_QUEUE).await;
+        let mut healthy_rx = register_terminal(&client, 2, TERM_EVENT_QUEUE).await;
+
+        // Fill the stalled channel's queue to EXACTLY capacity with plain
+        // data — every one of these must be accepted, unlike the flood
+        // test above which overshoots deliberately. The marker sent next
+        // is then the one event that finds no capacity left, so it (and
+        // not a `Data` frame) is what must trip the overflow.
+        for _ in 0..TERM_EVENT_QUEUE {
+            peer_writer
+                .write_frame(&Frame::data(1, b"x".to_vec()))
+                .await
+                .unwrap();
+        }
+        peer_writer
+            .write_control(&ControlMsg::ReplayComplete { channel: 1 })
+            .await
+            .unwrap();
+        // Sent after the marker, on a different channel: it can only
+        // arrive if the reader loop got past the marker's overflow
+        // without ever waiting on the full queue's capacity.
+        peer_writer
+            .write_frame(&Frame::data(2, b"healthy".to_vec()))
+            .await
+            .unwrap();
+
+        let detach = timeout(Duration::from_secs(5), peer_reader.read_frame())
+            .await
+            .expect("the overflowing marker never sent a Detach upstream")
+            .unwrap()
+            .expect("connection closed before the Detach arrived");
+        assert!(
+            matches!(
+                parse_control(&detach).unwrap(),
+                ControlMsg::Detach { channel: 1 }
+            ),
+            "a marker against a full queue must release the attachment upstream, not merely \
+             drop it locally: {detach:?}"
+        );
+
+        assert!(
+            matches!(
+                timeout(Duration::from_secs(5), healthy_rx.recv()).await,
+                Ok(Some(TermEvent::Data(bytes))) if bytes == b"healthy"
+            ),
+            "a healthy terminal sharing the connection must keep receiving even while another \
+             one's marker is overflowing — the marker must never await queue capacity"
+        );
+
+        // Drain the capacity-filled backlog; the final event must be the
+        // stall detach, delivered on its own task precisely so it
+        // survives the queue having been full.
+        let final_event = timeout(Duration::from_secs(5), async {
+            loop {
+                match stalled_rx.recv().await {
+                    Some(TermEvent::Data(_)) => {}
+                    other => return other,
+                }
+            }
+        })
+        .await
+        .expect("the stalled terminal never received its detach notice");
+        assert!(
+            matches!(final_event, Some(TermEvent::Detached(reason))
+                if reason == farhelm_proto::DETACH_REASON_STALLED),
+            "a marker overflow must detach with the same shared reason a Data overflow uses, \
+             not a different one that would let a client distinguish the two causes"
+        );
+    }
+
+    /// The whole point of putting the marker on the DATA queue instead of
+    /// the detach watch (PLAN_M5.md item 4, `TermEvent::ReplayComplete`'s
+    /// own docs): a scripted peer plays out replay bytes, the marker, then
+    /// live bytes, and the client must yield them back in that exact
+    /// order. A marker delivered on its own out-of-band channel — the
+    /// `Detached` shape — could race ahead of queued data and land before
+    /// the replay it is supposed to follow; only sharing the queue rules
+    /// that out structurally.
+    #[tokio::test]
+    async fn replay_complete_marker_is_ordered_between_replay_and_live_data_in_the_queue() {
+        let (client_side, peer_side) = tokio::io::duplex(64 * 1024);
+        let peer = tokio::spawn(async move {
+            let (r, w) = tokio::io::split(peer_side);
+            let mut reader = FrameReader::new(r);
+            let mut writer = FrameWriter::new(w);
+            handshake(&mut reader, &mut writer, "supervisor")
+                .await
+                .unwrap();
+            (reader, writer)
+        });
+        let (r, w) = tokio::io::split(client_side);
+        let client = SupervisorClient::start(r, w).await.unwrap();
+        let (_peer_reader, mut peer_writer) = peer.await.unwrap();
+
+        let mut term_rx = register_terminal(&client, 5, TERM_EVENT_QUEUE).await;
+
+        peer_writer
+            .write_frame(&Frame::data(5, b"replay".to_vec()))
+            .await
+            .unwrap();
+        peer_writer
+            .write_control(&ControlMsg::ReplayComplete { channel: 5 })
+            .await
+            .unwrap();
+        peer_writer
+            .write_frame(&Frame::data(5, b"live".to_vec()))
+            .await
+            .unwrap();
+
+        let replay = timeout(Duration::from_secs(5), term_rx.recv())
+            .await
+            .expect("never received the replay data");
+        assert!(matches!(replay, Some(TermEvent::Data(bytes)) if bytes == b"replay"));
+
+        let marker = timeout(Duration::from_secs(5), term_rx.recv())
+            .await
+            .expect("never received the marker");
+        assert!(matches!(marker, Some(TermEvent::ReplayComplete)));
+
+        let live = timeout(Duration::from_secs(5), term_rx.recv())
+            .await
+            .expect("never received the live data");
+        assert!(
+            matches!(live, Some(TermEvent::Data(bytes)) if bytes == b"live"),
+            "live output must follow the marker, not race ahead of it"
+        );
+    }
+
+    /// A marker for a channel this connection no longer knows about — the
+    /// attachment already ended, or this was always a stale/foreign id —
+    /// must be silently discarded, exactly like a stray `Data` frame for a
+    /// dead terminal, and must not disturb any OTHER terminal multiplexed
+    /// over the same connection. Pins `route_terminal_event`'s no-op path
+    /// for `ReplayComplete` specifically, since it shares the helper with
+    /// `Data` but is reached through a different `dispatch` arm
+    /// (`ControlMsg::ReplayComplete`, not `FrameKind::Data`).
+    #[tokio::test]
+    async fn replay_complete_for_an_unknown_channel_is_discarded_without_disturbing_others() {
+        let (client_side, peer_side) = tokio::io::duplex(64 * 1024);
+        let peer = tokio::spawn(async move {
+            let (r, w) = tokio::io::split(peer_side);
+            let mut reader = FrameReader::new(r);
+            let mut writer = FrameWriter::new(w);
+            handshake(&mut reader, &mut writer, "supervisor")
+                .await
+                .unwrap();
+            (reader, writer)
+        });
+        let (r, w) = tokio::io::split(client_side);
+        let client = SupervisorClient::start(r, w).await.unwrap();
+        let (_peer_reader, mut peer_writer) = peer.await.unwrap();
+
+        // Channel 9 is never registered, standing in for a marker that
+        // arrived for an attachment already torn down locally.
+        let mut healthy_rx = register_terminal(&client, 2, TERM_EVENT_QUEUE).await;
+
+        peer_writer
+            .write_control(&ControlMsg::ReplayComplete { channel: 9 })
+            .await
+            .unwrap();
+        peer_writer
+            .write_frame(&Frame::data(2, b"still healthy".to_vec()))
+            .await
+            .unwrap();
+
+        assert!(
+            matches!(
+                timeout(Duration::from_secs(5), healthy_rx.recv()).await,
+                Ok(Some(TermEvent::Data(bytes))) if bytes == b"still healthy"
+            ),
+            "a stray marker for an unknown channel must not disturb a healthy terminal sharing \
+             the connection"
+        );
+    }
+
+    /// `rename_session` must forward `title` VERBATIM — control characters,
+    /// leading/trailing whitespace, all of it — because the supervisor is
+    /// the sole authority on what a title may contain (PLAN_M5.md item 4)
+    /// and any local trimming or rewriting would silently alter caller
+    /// data the supervisor never asked this client to launder. The
+    /// scripted peer asserts the exact bytes it received, not merely that
+    /// SOME title arrived.
+    ///
+    /// This also pins `SessionRenamed`'s demux classification — the same
+    /// concern `session_restarted_reply_resolves_the_pending_request` and
+    /// `tab_opened_reply_resolves_the_pending_request` pin for their own
+    /// messages: PLAN_M5.md item 1 added this variant to `ControlMsg`
+    /// without adding it to `dispatch`'s req_id-classification match,
+    /// exactly the miss the `TabOpened`/`TabClosed` precedent documents
+    /// (PLAN_M4.md) — an unclassified reply falls into the `other =>
+    /// warn!(...)` arm, leaving the pending caller's oneshot unresolved
+    /// and this call hanging forever. Folded into this test rather than
+    /// kept as its own low-level `.request()`-driven check: a missing arm
+    /// hangs THIS public-method call exactly as it would a bare
+    /// `.request()`, so a separate test pinned nothing this one does not.
+    #[tokio::test]
+    async fn rename_session_forwards_the_title_verbatim() {
+        const TITLE: &str = "  weird \u{7}title\twith\ncontrol chars  ";
+
+        let (client_side, peer_side) = tokio::io::duplex(64 * 1024);
+        let peer = tokio::spawn(async move {
+            let (r, w) = tokio::io::split(peer_side);
+            let mut reader = FrameReader::new(r);
+            let mut writer = FrameWriter::new(w);
+            handshake(&mut reader, &mut writer, "supervisor")
+                .await
+                .unwrap();
+            let request = parse_control(&reader.read_frame().await.unwrap().unwrap()).unwrap();
+            let ControlMsg::RenameSession {
+                req_id,
+                session_id,
+                title,
+            } = request
+            else {
+                panic!("expected RenameSession, got {request:?}");
+            };
+            assert_eq!(session_id, "sess-1");
+            assert_eq!(
+                title, TITLE,
+                "the title must reach the supervisor byte-for-byte unchanged"
+            );
+            writer
+                .write_control(&ControlMsg::SessionRenamed {
+                    req_id,
+                    session: session("sess-1"),
+                })
+                .await
+                .unwrap();
+        });
+        let (r, w) = tokio::io::split(client_side);
+        let client = SupervisorClient::start(r, w).await.unwrap();
+
+        let session = client.rename_session("sess-1", TITLE).await.unwrap();
+        assert_eq!(session.id, "sess-1");
+        peer.await.unwrap();
     }
 
     /// Push fire-and-forget messages until one blocks, returning the

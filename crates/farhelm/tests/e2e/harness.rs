@@ -456,6 +456,14 @@ pub(crate) async fn wait_for(rx: &mut TermStream, seen: &mut Vec<u8>, needle: &s
         let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
         match tokio::time::timeout(remaining, rx.recv()).await {
             Ok(Some(TermEvent::Data(bytes))) => seen.extend_from_slice(&bytes),
+            // The replay-complete marker (PLAN_M5.md item 4) is
+            // presentation metadata — it carries no bytes and this helper
+            // is a plain text scan, so there is nothing for it to add to
+            // `seen`. Its own ordering contract is pinned at the protocol
+            // level in replay_marker.rs and, helm-side, in
+            // farhelm-helm's client.rs/lib.rs; these supervisor-facing
+            // tests deliberately do not re-assert it here.
+            Ok(Some(TermEvent::ReplayComplete)) => {}
             // Drain whatever is already queued behind the notice before
             // deciding the needle never arrived.
             Ok(Some(TermEvent::Detached(reason))) => {
@@ -511,6 +519,9 @@ pub(crate) async fn wait_for_after(
         let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
         match tokio::time::timeout(remaining, rx.recv()).await {
             Ok(Some(TermEvent::Data(bytes))) => seen.extend_from_slice(&bytes),
+            // See `wait_for`'s twin arm just above: presentation-only, not
+            // asserted on by this transcript scan.
+            Ok(Some(TermEvent::ReplayComplete)) => {}
             Ok(Some(TermEvent::Detached(reason))) => {
                 while let Ok(TermEvent::Data(bytes)) = rx.try_recv() {
                     seen.extend_from_slice(&bytes);
