@@ -92,7 +92,14 @@ Consequences of that stance:
   signature suggests runner load pushing real tmux operations past the suite's waits rather than any single test being
   wrong — the leading hypothesis to investigate here, not a settled diagnosis. Candidate fixes if it holds: state-based
   tmux readiness waits where tests currently rely on elapsed time, and a lower CI setting for the harness's existing
-  `SLOTS` concurrency cap. Belongs here unless the rerun rate becomes painful sooner.
+  `SLOTS` concurrency cap. Belongs here unless the rerun rate becomes painful sooner. Also the M5 review round's
+  seam-gapped tests (2026-08-03) — assertions the reviewers wanted that need test seams the code deliberately does not
+  have yet, parked rather than invented mid-PR: a deterministic attach-races-rename interleaving; a
+  takeover-before-marker forcing (needs a held-replay seam); a rename-commit cancellation test (needs a seam between the
+  durable write and the map install); a claim-released-before-reply-probe test (needs a pausable tmux probe); proving
+  the supervisor — not just the client — is mid-replay in the marker boundary test; and forcing an outcome-transition
+  failure during a rename's reply build (the capture-store fault seam covers capture writes only, and an unwritable
+  database fails the title write first, a different path).
 - **M6.75 — status and profiles.** Running/waiting/idle heuristics with per-agent sharpening, list filtering, profile
   CRUD and starter profiles. Also live push replacing BOTH of the UI's polls — M2's session-list poll and M4's
   session-detail/tab-list poll — status transitions are what make polling genuinely painful, and the push channel serves

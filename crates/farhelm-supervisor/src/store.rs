@@ -56,6 +56,13 @@
 //! conditioned on the column still being NULL, so neither can ever move
 //! backwards or overwrite what a concurrent observer already established.
 //!
+//! The `title` is the one piece of metadata a USER can change after
+//! creation (PLAN_M5.md item 3), and its writer —
+//! [`SessionStore::set_session_title`] — is deliberately unlike those two:
+//! unconditional, because a rename is a deliberate overwrite of a label
+//! whose previous value carries no authority, which is what makes
+//! concurrent renames last-write-wins rather than write-once.
+//!
 //! Journal mode and synchronous pragmas are left at SQLite's defaults.
 //! The recorded crash-safety/atomicity policy (PLAN_M3.md item 5,
 //! implemented in `crate::files`) governs the directly written state
@@ -2351,6 +2358,47 @@ impl SessionStore {
         })
         .await
         .context("outcome transition task panicked")?
+    }
+
+    /// Set a session's title (PLAN_M5.md item 3's durable half), reporting
+    /// whether a row was there to update.
+    ///
+    /// The title is the one piece of session metadata a user may change
+    /// after creation, which is why this is the store's only unconditional
+    /// metadata UPDATE: the capture columns beside it are write-once by SQL
+    /// predicate (see [`SessionStore::record_captured_conversation`]) and
+    /// the snapshot columns have no update path at all, but a rename is a
+    /// deliberate overwrite of a label whose previous value carries no
+    /// authority. Concurrent renames are therefore last-write-wins, with no
+    /// version token to make one of them fail — `ControlMsg::RenameSession`
+    /// argues that choice out.
+    ///
+    /// Deliberately NOT fenced by `generation`, unlike every capture and
+    /// outcome write: those record something witnessed about ONE launch, so
+    /// a write from a pass that straddled a restart would attach the
+    /// previous run's conclusion to the new one. A title belongs to the
+    /// SESSION across all of its launches, so fencing it would make a
+    /// rename issued moments before a restart silently vanish.
+    ///
+    /// `false` means no such row — a session deleted out from under the
+    /// caller. Reported rather than swallowed so the handler can answer
+    /// `NotFound` instead of confirming a rename that changed nothing.
+    pub async fn set_session_title(&self, id: &str, title: &str) -> anyhow::Result<bool> {
+        let conn = Arc::clone(&self.conn);
+        let id = id.to_string();
+        let title = title.to_string();
+        tokio::task::spawn_blocking(move || -> anyhow::Result<bool> {
+            let conn = conn.lock().expect("session db mutex poisoned");
+            Ok(conn
+                .execute(
+                    "UPDATE sessions SET title = ?2 WHERE id = ?1",
+                    rusqlite::params![id, title],
+                )
+                .context("renaming a session")?
+                > 0)
+        })
+        .await
+        .context("session rename task panicked")?
     }
 
     /// Record when this session first had input forwarded to it
@@ -5075,6 +5123,53 @@ mod tests {
             .record_first_input("s1", 0, 3_000)
             .await
             .expect("a vanished row is not a failure");
+    }
+
+    /// The title is the one metadata column a caller may overwrite, and
+    /// the write reports whether there was a row to overwrite.
+    ///
+    /// Both halves are contract. Unconditional overwriting is what makes
+    /// concurrent renames last-write-wins (PLAN_M5.md item 3) instead of
+    /// silently write-once like the capture columns beside it — an easy
+    /// thing to "fix" by pattern-matching the neighbouring predicates. And
+    /// the `false` answer is the only way the handler can tell a rename
+    /// that raced a delete from one that worked, which no integration test
+    /// can reach: the in-memory entry is removed by the same delete, so
+    /// the request never gets this far. Without it a caller could be told
+    /// its rename succeeded against a session that no longer exists.
+    #[tokio::test]
+    async fn a_title_write_overwrites_and_reports_a_missing_row() {
+        let (_dir, store) = fresh_store().await;
+        insert_running(&store, "s1").await;
+
+        assert!(
+            store
+                .set_session_title("s1", "first")
+                .await
+                .expect("rename"),
+            "renaming a session that exists must report the row it updated"
+        );
+        assert!(
+            store
+                .set_session_title("s1", "second")
+                .await
+                .expect("rename again"),
+            "a second rename must not be refused the way the write-once columns are"
+        );
+        assert_eq!(
+            store.session("s1").await.expect("read").unwrap().title,
+            "second",
+            "the later write wins"
+        );
+
+        store.delete_session("s1", None).await.expect("delete");
+        assert!(
+            !store
+                .set_session_title("s1", "too late")
+                .await
+                .expect("a vanished row is not a failure"),
+            "renaming a deleted session must report that nothing was updated"
+        );
     }
 
     /// A database written before item 7 has no snapshot at all, and the

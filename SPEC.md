@@ -144,7 +144,10 @@ Session creation is one action, not a wizard. Only the working directory is fund
 - Title: optional; auto-generated when omitted. Renameable later. A title is a single-line label, so a title you supply
   is refused if it contains control characters (escape sequences, newlines, tabs); an auto-generated one has any such
   character replaced with U+FFFD rather than being refused, since the directory it comes from is legitimate and you did
-  not choose the label.
+  not choose the label. A supplied title is bounded in size too, and by the same rule for both verbs: the text you send
+  on creation — working directory, invocation, title, and any invocation override — must fit in 64 KiB between them, and
+  a rename's title alone is held to that same bound. Renaming has no conflict detection: two renames of one session both
+  succeed, and the later write is the title that sticks.
 - Agent profile: defaults to the last-used profile on the target host; if that profile no longer exists, the client asks
   instead of guessing.
 - Host: defaults to the host of the currently open session, else the helm's own host.

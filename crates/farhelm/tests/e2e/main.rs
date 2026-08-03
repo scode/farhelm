@@ -52,3 +52,6 @@ mod tab_lifecycle_edges;
 mod terminal_tabs;
 
 mod attachment_uploads;
+
+mod replay_marker;
+mod session_rename;

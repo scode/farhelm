@@ -1121,6 +1121,48 @@ impl RelaunchFailure {
     }
 }
 
+/// Build the entry that describes the SAME launch under a new title
+/// (PLAN_M5.md item 3) — everything but `info.title` carried over.
+///
+/// A rebuild rather than a mutation because [`SessionEntry`] is
+/// immutable-once-created behind an `Arc` (see its own docs); this is the
+/// in-memory half of rename's two-part write, and the half that makes a
+/// renamed title show up in the very next `ListSessions` reply. The
+/// durable row alone would not: the supervisor serves list replies from
+/// these entries and never re-reads SQLite mid-process, so a store-only
+/// rename would stay invisible until a restart.
+///
+/// Generation, scope and terminal carry over unchanged, which is the
+/// difference from [`relaunched_entry`]: a rename is not a new run, so
+/// nothing about the run may be reset.
+///
+/// The three mutable cells are SHARED — the `Arc`s are cloned, not their
+/// values — and that is the whole reason [`SessionEntry`] wraps them in
+/// `Arc` at all. A title-only replacement does not end anything, so every
+/// holder of the old entry is still a legitimate writer about the SAME
+/// run: the input path writes the first-input anchor through whatever
+/// entry its `InputRoute` pinned at attach time, a capture pass advances
+/// state it gathered before the rename, and a list pass commits an
+/// outcome it observed a moment ago. Snapshotting instead would strand
+/// every one of those writes in a cell nothing reads again — silently, and
+/// most damagingly for capture, whose window would never open (see the
+/// struct's own docs).
+fn renamed_entry(entry: &SessionEntry, title: String) -> Arc<SessionEntry> {
+    let mut info = entry.info.clone();
+    info.title = title;
+    Arc::new(SessionEntry {
+        info,
+        terminal: entry.terminal.clone(),
+        outcome: Arc::clone(&entry.outcome),
+        snapshot: entry.snapshot.clone(),
+        canonical_cwd: entry.canonical_cwd.clone(),
+        first_input: Arc::clone(&entry.first_input),
+        capture: Arc::clone(&entry.capture),
+        generation: entry.generation,
+        scope: entry.scope.clone(),
+    })
+}
+
 /// Build the entry that describes a session's NEW launch generation,
 /// carrying over exactly what describes the CONVERSATION rather than the
 /// run.
@@ -1135,6 +1177,14 @@ impl RelaunchFailure {
 /// capture window must not carry the previous run's first-input anchor or
 /// verdict in memory either, or the very next capture pass would correlate
 /// the new run against a window that closed long ago.
+///
+/// Every mutable cell is FRESH here — new `Arc`s, never the previous
+/// entry's — even where the VALUE is carried over. That isolation is the
+/// in-memory half of the generation fence: a list or capture pass still
+/// holding the old entry is describing a run that has ended, and its late
+/// write must land in the abandoned run's cell rather than on the launch
+/// that replaced it. It is the exact opposite of what [`renamed_entry`]
+/// needs, which is why the two build their cells differently.
 fn relaunched_entry(
     entry: &SessionEntry,
     info: SessionInfo,
@@ -1168,11 +1218,11 @@ fn relaunched_entry(
     Arc::new(SessionEntry {
         info,
         terminal,
-        outcome: std::sync::Mutex::new(outcome),
+        outcome: Arc::new(std::sync::Mutex::new(outcome)),
         snapshot: entry.snapshot.clone(),
         canonical_cwd: entry.canonical_cwd.clone(),
-        first_input: std::sync::Mutex::new(first_input),
-        capture: std::sync::Mutex::new(capture),
+        first_input: Arc::new(std::sync::Mutex::new(first_input)),
+        capture: Arc::new(std::sync::Mutex::new(capture)),
         generation,
         scope,
     })
@@ -1448,6 +1498,31 @@ async fn ensure_cwd_usable(cwd: &str) -> anyhow::Result<()> {
     }
 }
 
+/// Refuse a CALLER-SUPPLIED title that could not survive being printed as
+/// a one-line label — the rule `validate_create`'s explicit-title arm
+/// states in full, shared here so create and rename cannot drift apart.
+///
+/// Sharing is the point rather than a convenience: PLAN_M5.md item 3 makes
+/// rename's validation "`validate_create`'s explicit-title arm, no more and
+/// no less", and a client's whole contract for a refused title is the
+/// supervisor's own words — two copies of this message would eventually
+/// become two different answers to the same question depending on which
+/// verb the user reached for.
+///
+/// An empty title passes, deliberately: SPEC.md names control characters as
+/// THE refusal for a supplied title, and neither verb invents a stricter
+/// rule. Server-DERIVED titles do not come here at all — they are sanitized
+/// instead of refused, for the asymmetry `validate_create` argues out.
+pub(crate) fn ensure_title_printable(title: &str) -> Result<(), RequestError> {
+    if title.chars().any(char::is_control) {
+        return Err(RequestError::new(
+            ErrorKind::InvalidRequest,
+            "title must not contain control characters",
+        ));
+    }
+    Ok(())
+}
+
 /// Cap on a caller-supplied session id echoed into an error message
 /// (`NotFound` replies, chiefly). 128 bytes is far beyond any real
 /// session id (a UUID is 36 characters) while still bounding a hostile or
@@ -1554,7 +1629,34 @@ async fn sweep_tmux_config_temp_files(state_dir: &Path) {
 /// which is M3's interrupted-classification job, not this PR's. Entries
 /// are otherwise immutable once created — shared as `Arc` and never
 /// mutated in place — so nothing has to hold the session map while
-/// talking to tmux.
+/// talking to tmux. Changing one therefore means PUBLISHING A REPLACEMENT
+/// into the map: [`relaunched_entry`] for a new launch generation,
+/// [`renamed_entry`] for the title (the only field a user can change after
+/// creation).
+///
+/// ## Two kinds of replacement, and why the mutable cells are `Arc`ed
+///
+/// The three interior-mutable cells below (`outcome`, `first_input`,
+/// `capture`) are `Arc<Mutex<..>>` rather than plain `Mutex<..>` because
+/// the two replacement paths need OPPOSITE things from them, and the
+/// wrapper is what lets one type express both.
+///
+/// A RELAUNCH must isolate: the new generation gets fresh cells, so a
+/// list pass or capture scan still holding the previous entry writes its
+/// late conclusion into the abandoned run's cells and cannot contaminate
+/// the new one (the generation fence does the same job durably; this is
+/// its in-memory half).
+///
+/// A RENAME must share: it describes the SAME run, so its replacement
+/// clones the Arcs. Anything still holding the pre-rename entry — an
+/// `InputRoute` pinned at attach time, a list pass mid-flight, a capture
+/// pass mid-scan — keeps writing into the very cells the published entry
+/// reads. Snapshotting the values instead silently split the session in
+/// two: a rename before first input would leave `note_first_input`
+/// writing an anchor nobody would ever read, and the capture pass would
+/// scan forever against a window that never opened — SPEC.md's resume
+/// promise broken by renaming a session at the wrong moment, with nothing
+/// anywhere reporting it.
 pub(crate) struct SessionEntry {
     pub(crate) info: SessionInfo,
     pub(crate) terminal: Option<Terminal>,
@@ -1580,7 +1682,10 @@ pub(crate) struct SessionEntry {
     /// writer's result must be what lands here too. A failed write leaves
     /// both sides on the old value and the next observation retries — the
     /// conservative direction, matching the crash-ordering rule.
-    pub(crate) outcome: std::sync::Mutex<LastOutcome>,
+    ///
+    /// Shared with any title-only replacement of this entry; see the
+    /// struct's own docs for why sharing and isolation are both needed.
+    pub(crate) outcome: Arc<std::sync::Mutex<LastOutcome>>,
     /// This session's integration snapshot (PLAN_M3.md item 7), resolved
     /// at create and immutable for the session's life — hence a plain
     /// field rather than another mutex. Read by the capture pass (to know
@@ -1596,10 +1701,16 @@ pub(crate) struct SessionEntry {
     /// When this supervisor first confirmed delivery of input to this
     /// session (PLAN_M3.md item 8's correlator), and whether that fact has
     /// reached the database yet. See [`FirstInput`] and `note_first_input`.
-    pub(crate) first_input: std::sync::Mutex<FirstInput>,
+    ///
+    /// The cell most exposed to the sharing rule above: its writer is the
+    /// INPUT path, which holds whatever entry its `InputRoute` pinned at
+    /// attach time and is never handed a newer one.
+    pub(crate) first_input: Arc<std::sync::Mutex<FirstInput>>,
     /// Where this session stands on conversation-identity capture. See
-    /// [`CaptureState`].
-    pub(crate) capture: std::sync::Mutex<CaptureState>,
+    /// [`CaptureState`]. Shared across title-only replacements like the
+    /// two cells above — a capture pass mid-scan must be advancing the
+    /// same state the published entry is read from.
+    pub(crate) capture: Arc<std::sync::Mutex<CaptureState>>,
     /// Which LAUNCH of this session this entry describes
     /// (`store::StoredSession::generation`).
     ///
@@ -2005,7 +2116,13 @@ pub struct Supervisor {
     intent_locks: Arc<KeyedLocks>,
     /// One claim per SESSION, held for the whole of any operation that
     /// changes what is running under it: restart, stop, delete, and — since
-    /// PLAN_M4.md item 2 — opening and closing a terminal tab.
+    /// PLAN_M4.md item 2 — opening and closing a terminal tab. Rename
+    /// (PLAN_M5.md item 3) joins them for a related but distinct reason: it
+    /// runs nothing, but it is the one operation that changes a session's
+    /// stored metadata, and the claim is what keeps its
+    /// durable-then-in-memory write from interleaving with an operation
+    /// that republishes or removes the same entry (see
+    /// [`Supervisor::rename_session`]).
     ///
     /// The map-wide `sessions` mutex cannot do this job — it is released
     /// the moment an entry is cloned out of it, and every one of these
@@ -2828,16 +2945,16 @@ impl Supervisor {
                         tabs: Vec::new(),
                     },
                     terminal,
-                    outcome: std::sync::Mutex::new(outcome),
+                    outcome: Arc::new(std::sync::Mutex::new(outcome)),
                     snapshot,
                     canonical_cwd: row.canonical_cwd,
-                    first_input: std::sync::Mutex::new(FirstInput {
+                    first_input: Arc::new(std::sync::Mutex::new(FirstInput {
                         at: row.first_input_at,
                         // Loaded FROM the database, so by definition
                         // already there.
                         durable: row.first_input_at.is_some(),
-                    }),
-                    capture: std::sync::Mutex::new(capture),
+                    })),
+                    capture: Arc::new(std::sync::Mutex::new(capture)),
                     generation: row.generation,
                     // The SELECTION comes straight back out of the row
                     // rather than from this supervisor's own probe: the
@@ -3276,7 +3393,9 @@ impl Supervisor {
         // protocol edge is also what keeps a keyed create honest — every
         // refusal from this function is recorded against the intent key by
         // `record_refused_create`, so the retry replays this answer instead
-        // of a fresh one.
+        // of a fresh one. The check itself is [`ensure_title_printable`],
+        // shared with rename (PLAN_M5.md item 3) so the two verbs cannot
+        // grow different rules — or different words — for one contract.
         //
         // A DERIVED title is SANITIZED instead. It is server-generated from
         // a directory the caller never chose as a label, and a control
@@ -3292,13 +3411,7 @@ impl Supervisor {
         // data by something that already has to accept arbitrary bytes.
         let title = match title {
             Some(explicit) => {
-                if explicit.chars().any(char::is_control) {
-                    return Err(RequestError::new(
-                        ErrorKind::InvalidRequest,
-                        "title must not contain control characters",
-                    )
-                    .into());
-                }
+                ensure_title_printable(&explicit)?;
                 explicit
             }
             // `cwd` arrived as a `String` over the protocol — farhelm-proto's
@@ -4218,17 +4331,17 @@ impl Supervisor {
             Arc::new(SessionEntry {
                 info: info.clone(),
                 terminal: Some(Terminal { tmux_name, pane }),
-                outcome: std::sync::Mutex::new(LastOutcome::Running),
+                outcome: Arc::new(std::sync::Mutex::new(LastOutcome::Running)),
                 snapshot,
                 canonical_cwd: Some(canonical_cwd.clone()),
                 // Nothing has been typed into this session yet, so capture
                 // has no correlator to key on and correctly stays idle
                 // until the input path supplies one.
-                first_input: std::sync::Mutex::new(FirstInput {
+                first_input: Arc::new(std::sync::Mutex::new(FirstInput {
                     at: None,
                     durable: true,
-                }),
-                capture: std::sync::Mutex::new(CaptureState::Unclaimed),
+                })),
+                capture: Arc::new(std::sync::Mutex::new(CaptureState::Unclaimed)),
                 // A create is a session's FIRST launch by definition
                 // (`store::StoredSession::generation`); only a restart ever
                 // moves this off zero.
@@ -5422,6 +5535,199 @@ impl Supervisor {
             .into_iter()
             .map(|tab| TabInfo { id: tab.id })
             .collect())
+    }
+
+    /// Rename a session: the durable row and the in-memory entry that must
+    /// land with it, returning the entry now published (PLAN_M5.md item 3).
+    ///
+    /// The caller builds the reply from what comes back, and deliberately
+    /// OUTSIDE this call — see `session_info_now`, which needs a tmux round
+    /// trip this function must not still be holding a claim across.
+    ///
+    /// ## Why the write is two-part
+    ///
+    /// Not a belt-and-braces duplication — the durable row alone would be
+    /// INVISIBLE. `ListSessions` is served from in-memory `SessionEntry`
+    /// values that are immutable once created and never re-read from SQLite
+    /// mid-process, so a store-only rename would keep showing the old title
+    /// in every list reply until the supervisor restarted. See
+    /// [`renamed_entry`] for the rebuild, which is the half that makes the
+    /// new title visible immediately — and for why it SHARES the entry's
+    /// mutable cells rather than copying their values.
+    ///
+    /// ## Why the lifecycle claim, and why it is released here
+    ///
+    /// Rename is the first operation that changes a session's stored
+    /// METADATA, and its two halves — the row and the republished entry —
+    /// cannot be made atomic by either mutex: the `sessions` guard is
+    /// released the moment the entry is cloned out of it, and the store
+    /// write is an await that must happen between the two. Held under the
+    /// session's claim ([`Supervisor::lifecycle_locks`]) the three
+    /// interleavings that matter all resolve: two concurrent renames become
+    /// last-write-wins with the store and the map agreeing on the SAME
+    /// winner (rather than each ending up with a different one), and
+    /// neither a delete nor a restart can slip between the row update and
+    /// the map install.
+    ///
+    /// The claim ends WITH THE COMMIT, before any reply is built. A claim
+    /// is exclusive against stop, delete and restart, so holding one across
+    /// the reply's tmux probe would let a wedged tmux block this session's
+    /// teardown for as long as it stayed wedged — and the reply needs
+    /// nothing the claim protects.
+    ///
+    /// ## Why the commit runs on a supervisor-owned task, and why it takes
+    /// the permit with it
+    ///
+    /// A client that disconnects mid-request cancels this future. Between
+    /// the committed row and the map install that is exactly the window
+    /// that must not be interrupted: the durable title would be the new one
+    /// while every list reply from this still-running process served the
+    /// old, until a restart. The two-part write therefore runs on a task
+    /// this supervisor owns and this function merely awaits — dropping the
+    /// awaiting future abandons the `JoinHandle`, never the work. The reply
+    /// build afterwards is deliberately left cancellable: it changes
+    /// nothing.
+    ///
+    /// `permit` is the request's ONE admission slot, and it is a parameter
+    /// rather than something acquired here because ownership is the whole
+    /// point. The task outlives its awaiter by construction, so a permit
+    /// released when the awaiter is cancelled would be capacity handed back
+    /// while the work still holds a lifecycle claim and a database write —
+    /// and, since nothing else tracks these tasks, a client that
+    /// disconnected after every rename could otherwise accumulate them
+    /// without bound, each pinning a title and an `Arc<Supervisor>`. Moving
+    /// the permit in makes the bound structural instead: at most
+    /// `HANDLER_ADMISSION_PERMITS` commits can be in flight at once.
+    ///
+    /// The commit hands the permit back with its outcome — SUCCEEDED OR
+    /// FAILED — so the caller holds the same slot through whichever reply
+    /// it sends. Two separate reasons, and both matter.
+    ///
+    /// One slot per request, rather than a second one for the reply, is
+    /// what keeps this from deadlocking: a rename that acquired one permit
+    /// and then waited for another would wedge outright once
+    /// `HANDLER_ADMISSION_PERMITS` renames were in flight, every one of
+    /// them holding a slot nothing can release while waiting for a slot
+    /// nobody will free.
+    ///
+    /// And the slot has to span the FAILURE reply too, not just the
+    /// success one. Every reply here awaits the connection's bounded
+    /// writer queue, so a client that is not reading parks whichever task
+    /// is sending — which is precisely what admission bounds for every
+    /// other handler. Freeing the slot at a failed commit would let a peer
+    /// flooding refusable renames (a nonexistent session id, say) reclaim
+    /// capacity per request while its error-reply tasks piled up against
+    /// the queue it is not draining: the same unbounded accumulation this
+    /// design closes, reintroduced through the error path. The permit is
+    /// therefore returned in both arms and dropped only when the reply has
+    /// been handed over.
+    ///
+    /// `None` comes back only when the task itself died (a panic), which
+    /// took its permit with it.
+    ///
+    /// Everything outside the title is left alone, which SPEC.md's rename
+    /// is: tmux session names are internal identifiers no user sees, and
+    /// the create-idempotency fingerprint records the CREATE request as it
+    /// was sent, so a later rename must not disturb an intent key's replay.
+    /// Attachments are untouched for the same reason — nothing about a
+    /// terminal stream depends on the session's label — and the run's own
+    /// state (outcome, first input, capture progress) is not copied but
+    /// SHARED with the entry this replaces, so an attachment's input path
+    /// and an in-flight capture pass keep writing where the published entry
+    /// reads.
+    pub(crate) async fn rename_session(
+        self: &Arc<Self>,
+        session_id: &str,
+        title: String,
+        permit: tokio::sync::OwnedSemaphorePermit,
+    ) -> (
+        Result<Arc<SessionEntry>, RequestError>,
+        Option<tokio::sync::OwnedSemaphorePermit>,
+    ) {
+        let sup = Arc::clone(self);
+        let id = session_id.to_string();
+        let commit = tokio::spawn(async move {
+            // The admission slot belongs to this task while the commit
+            // runs and then travels onward with the OUTCOME, whichever it
+            // is; the lifecycle claim belongs to the inner block and is
+            // released when it ends. See this function's docs for why the
+            // awaiter's cancellation may release neither early, and why
+            // the slot has to span the failure reply too.
+            let outcome = async {
+                let _lifecycle = sup.lifecycle_locks.claim(&id).await;
+                let not_found = || {
+                    RequestError::new(
+                        ErrorKind::NotFound,
+                        format!("no such session: {}", truncate_for_error(&id)),
+                    )
+                };
+                let Some(entry) = sup.sessions.lock().await.get(&id).cloned() else {
+                    return Err(not_found());
+                };
+                // Durable first, in-memory second — the same crash ordering
+                // every other write in this file takes: a crash between the
+                // two leaves a renamed row that the next reload reads, while
+                // the reverse order would leave a title that exists only
+                // until the process ends.
+                let updated = sup
+                    .store
+                    .set_session_title(&id, &title)
+                    .await
+                    .map_err(|e| {
+                        RequestError::new(
+                            error_kind(&e),
+                            format!("renaming session {}: {e:#}", truncate_for_error(&id)),
+                        )
+                    })?;
+                if !updated {
+                    // The map had an entry but the row is gone. A delete
+                    // cannot have done it under this claim, so what remains
+                    // is a row removed by something that takes no claim — a
+                    // create rollback for an id this map should no longer be
+                    // holding, or a database edited underneath a running
+                    // supervisor. Either way the durable truth is that there
+                    // is no session here, and `NotFound` reports it rather
+                    // than confirming a rename of nothing.
+                    return Err(not_found());
+                }
+                let renamed = renamed_entry(&entry, title);
+                {
+                    let mut sessions = sup.sessions.lock().await;
+                    // Identity-checked rather than a blind insert. Under the
+                    // claim no other writer should be able to have replaced
+                    // this entry, so the check is defensive: if that ever
+                    // stops holding, losing the in-memory half is
+                    // recoverable — the durable title is committed and the
+                    // next reload picks it up — while overwriting whatever a
+                    // claim-less writer published in the meantime would not
+                    // be.
+                    if let Some(slot) = sessions.get_mut(&id)
+                        && Arc::ptr_eq(slot, &entry)
+                    {
+                        *slot = Arc::clone(&renamed);
+                    }
+                }
+                Ok(renamed)
+            }
+            .await;
+            (outcome, permit)
+        });
+        // The commit task panicking is reported rather than propagated:
+        // letting the panic through here would amount to a connection with
+        // no reply on it. Its permit died with it, hence `None`.
+        match commit.await {
+            Ok((outcome, permit)) => (outcome, Some(permit)),
+            Err(e) => (
+                Err(RequestError::new(
+                    ErrorKind::Internal,
+                    format!(
+                        "renaming session {} failed unexpectedly: {e}",
+                        truncate_for_error(session_id)
+                    ),
+                )),
+                None,
+            ),
+        }
     }
 
     /// Open a terminal tab: a new tmux window on the session's tmux
@@ -6680,6 +6986,65 @@ pub(crate) fn session_restart_offer(entry: &SessionEntry) -> RestartOffer {
         .restart_offer(capture.committed_conversation())
 }
 
+/// One entry as a reply must describe it: the stored metadata plus the
+/// three fields that are NEVER stored and are therefore recomputed on
+/// every reply — live-probed `status` (with its annotation), rediscovered
+/// `tabs`, and a freshly derived `restart_offer`.
+///
+/// The single place that shape is defined, shared by `ListSessions` and by
+/// the single-session replies that must match it (`SessionRenamed`, whose
+/// own protocol docs promise a `SessionInfo` "built the same way
+/// `ListSessions` builds one"). Two copies would drift, and the drift
+/// would be invisible: both would still be `SessionInfo`s, differing only
+/// in which fields told the truth.
+///
+/// `sentinel` is a launch-sentinel (or wrapper-failure) detail the CALLER
+/// found for this entry in the pass it is replying from, and it OUTRANKS
+/// `session_status` — that is the whole point of PLAN_M3.md item 3's
+/// write-inability note: a failed exec is not something a pane can show,
+/// so a reply must surface it whether or not the transition could also be
+/// committed durably this pass. Callers that have not looked pass `None`.
+///
+/// `pane_states` must be the map the caller's own liveness probe returned;
+/// an empty map is correct only for an entry with no terminal (the restart
+/// gap), whose status comes entirely from its recorded outcome.
+pub(crate) fn entry_info(
+    entry: &SessionEntry,
+    pane_states: &HashMap<String, PaneState>,
+    sentinel: Option<&str>,
+) -> SessionInfo {
+    let mut info = entry.info.clone();
+    info.restart_offer = session_restart_offer(entry);
+    // Tabs are not stored anywhere at all (`SessionInfo::tabs`), so this
+    // rediscovery IS the tab list. A terminal-less entry has no tmux
+    // session and therefore no tabs, which the empty default states
+    // honestly.
+    info.tabs = entry
+        .terminal
+        .as_ref()
+        .map(|terminal| {
+            tabs_from_pane_states(pane_states, &terminal.tmux_name)
+                .into_iter()
+                .map(|tab| TabInfo { id: tab.id })
+                .collect()
+        })
+        .unwrap_or_default();
+    match sentinel {
+        Some(detail) => {
+            info.status = SessionStatus::Error {
+                detail: detail.to_string(),
+            };
+            info.annotation = None;
+        }
+        None => {
+            let (status, annotation) = session_status(entry, pane_states);
+            info.status = status;
+            info.annotation = annotation;
+        }
+    }
+    info
+}
+
 /// One conversation-capture rescan across every session this supervisor
 /// holds (PLAN_M3.md item 8).
 ///
@@ -7871,20 +8236,118 @@ pub(crate) mod tests {
                 tabs: Vec::new(),
             },
             terminal,
-            outcome: std::sync::Mutex::new(outcome),
+            outcome: Arc::new(std::sync::Mutex::new(outcome)),
             snapshot: IntegrationSnapshot {
                 kind: AgentKind::Generic,
                 resume_template: None,
             },
             canonical_cwd: None,
-            first_input: std::sync::Mutex::new(FirstInput {
+            first_input: Arc::new(std::sync::Mutex::new(FirstInput {
                 at: None,
                 durable: true,
-            }),
-            capture: std::sync::Mutex::new(CaptureState::Unclaimed),
+            })),
+            capture: Arc::new(std::sync::Mutex::new(CaptureState::Unclaimed)),
             generation: 0,
             scope: None,
         }
+    }
+
+    /// A title-only replacement SHARES the run's mutable cells with the
+    /// entry it replaces, rather than copying their values.
+    ///
+    /// The property every writer that resolved an entry BEFORE the rename
+    /// depends on: an attachment's input path writes the first-input
+    /// anchor through the entry its route pinned, a capture pass advances
+    /// state it gathered earlier, and a list pass commits an outcome it
+    /// observed a moment ago. With copies, each of those lands in an
+    /// object nothing reads again — silently, and for capture
+    /// permanently, since a window that never opens never closes.
+    ///
+    /// Asserted by mutating the OLD entry and observing the published one,
+    /// which is the direction the bug actually takes: the writers hold the
+    /// old entry and the readers use the new.
+    #[test]
+    fn a_renamed_entry_shares_the_runs_cells_with_the_entry_it_replaces() {
+        let old = entry_with(Some(a_terminal()), LastOutcome::Running);
+        let renamed = renamed_entry(&old, "new title".to_string());
+        assert_eq!(renamed.info.title, "new title");
+        assert_eq!(old.info.title, "t", "the replaced entry is left untouched");
+
+        *old.outcome.lock().unwrap() = LastOutcome::Interrupted;
+        assert_eq!(
+            *renamed.outcome.lock().unwrap(),
+            LastOutcome::Interrupted,
+            "an outcome recorded through the old entry must be what the published one reports"
+        );
+
+        old.first_input.lock().unwrap().at = Some(1_700_000_000);
+        assert_eq!(
+            renamed.first_input.lock().unwrap().at,
+            Some(1_700_000_000),
+            "the first-input anchor is written through whichever entry the input path pinned"
+        );
+
+        *old.capture.lock().unwrap() = CaptureState::Provisional {
+            conversation: "conv-x".to_string(),
+        };
+        assert!(
+            matches!(
+                &*renamed.capture.lock().unwrap(),
+                CaptureState::Provisional { conversation } if conversation == "conv-x"
+            ),
+            "capture progress must not be split in two by a rename"
+        );
+    }
+
+    /// A RELAUNCH does the opposite, and must keep doing it: the new
+    /// generation gets fresh cells, so a pass still holding the previous
+    /// entry cannot write its late conclusion onto the launch that
+    /// replaced it.
+    ///
+    /// The mirror image of the test above, and the reason those cells are
+    /// `Arc`ed rather than simply shared everywhere: the two replacement
+    /// paths need opposite things, and a "simplification" that made both
+    /// share would reintroduce exactly the cross-generation contamination
+    /// the generation fence exists to prevent. Carried-over VALUES are not
+    /// the same as a shared cell — this asserts the value came across and
+    /// the identity did not.
+    #[test]
+    fn a_relaunched_entry_gets_fresh_cells_even_when_it_carries_the_values_over() {
+        let old = entry_with(Some(a_terminal()), LastOutcome::Running);
+        old.first_input.lock().unwrap().at = Some(1_700_000_000);
+        *old.capture.lock().unwrap() = CaptureState::Provisional {
+            conversation: "conv-old".to_string(),
+        };
+
+        let relaunched = relaunched_entry(
+            &old,
+            old.info.clone(),
+            old.terminal.clone(),
+            old.generation + 1,
+            None,
+            LastOutcome::Launching,
+            false,
+        );
+        assert_eq!(
+            relaunched.first_input.lock().unwrap().at,
+            Some(1_700_000_000),
+            "test premise: a relaunch that keeps its capture window carries the anchor over"
+        );
+
+        // The previous run's observers write on: none of it may reach the
+        // entry describing the new one.
+        *old.outcome.lock().unwrap() = LastOutcome::Interrupted;
+        old.first_input.lock().unwrap().at = Some(1_800_000_000);
+        *old.capture.lock().unwrap() = CaptureState::UncapturedFinal;
+        assert_eq!(*relaunched.outcome.lock().unwrap(), LastOutcome::Launching);
+        assert_eq!(
+            relaunched.first_input.lock().unwrap().at,
+            Some(1_700_000_000)
+        );
+        assert!(matches!(
+            &*relaunched.capture.lock().unwrap(),
+            CaptureState::Provisional { conversation } if conversation == "conv-old"
+        ));
     }
 
     /// The one terminal the classification tests below use.

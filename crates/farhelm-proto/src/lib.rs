@@ -1253,18 +1253,38 @@ pub enum ControlMsg {
     /// Unsolicited: this attach's initial catch-up is over — every byte
     /// the supervisor is going to replay from history FOR THE ATTACH has
     /// been written to `channel`, and the live stream follows
-    /// (PLAN_M5.md item 1). The supervisor emits it exactly once per
-    /// attach: after the pane-mode re-synthesis and snapshot prefill for
-    /// that attach, before forwarding any live output, which makes
-    /// "exactly once, after every attach-replay byte, before any live
-    /// byte" a consequence of the attach-cutover contract (PLAN_M5.md
-    /// item 2) rather than a best-effort claim. A dead-pane attach emits
-    /// it right after its own snapshot; a fresh terminal with nothing to
-    /// replay emits it immediately. There is deliberately no marker
-    /// outside an attach — it describes the catch-up phase of ONE
-    /// attachment, not a property of the session, so a second attach to
-    /// the same terminal gets its own marker and a takeover's incumbent
-    /// never sees the replacement's.
+    /// (PLAN_M5.md item 1).
+    ///
+    /// The contract in one sentence: **exactly once per attach that
+    /// completes its catch-up**, after the pane-mode re-synthesis and
+    /// snapshot prefill for that attach and before any live output. That
+    /// is a consequence of the attach-cutover contract (PLAN_M5.md item
+    /// 2) rather than a best-effort claim — one task writes the replay,
+    /// this marker, and then the live stream into one ordered pipe. A
+    /// dead-pane attach emits it right after its own snapshot; a fresh
+    /// terminal with nothing to replay emits it immediately.
+    ///
+    /// The qualifier is load-bearing: an attach whose catch-up is ENDED
+    /// early never receives one. The attachment can be torn down wherever
+    /// it happens to be, including between the `Attached` reply and the
+    /// marker, and nothing is sent on a channel that no longer exists.
+    /// There are two such endings and they look different to a client:
+    ///
+    /// - **Someone else ended it** — a takeover, a delete, a stall, the
+    ///   terminal's own end. A [`ControlMsg::Detached`] for the channel
+    ///   reports it, and that notice ends the catch-up phase whether or
+    ///   not a marker preceded it.
+    /// - **This client ended it** with [`ControlMsg::Detach`]. Nothing
+    ///   comes back at all — the initiator already knows — so a client
+    ///   must stop expecting a marker on a channel it detached itself.
+    ///
+    /// Either way, a presentation that waits for the marker ALONE hides a
+    /// terminal forever on exactly these paths.
+    ///
+    /// There is deliberately no marker outside an attach: it describes the
+    /// catch-up phase of ONE attachment, not a property of the session, so
+    /// a second attach to the same terminal gets its own marker and a
+    /// takeover's incumbent never sees the replacement's.
     ///
     /// One boundary is drawn deliberately narrow: "the live stream
     /// follows" does not promise history can never appear on this
@@ -1279,11 +1299,9 @@ pub enum ControlMsg {
     /// all-bytes-after-marker-are-fresh would misrender exactly that
     /// recovery path.
     ///
-    /// Like `DETACH_REASON_STALLED` when it landed, this bump reserves
-    /// the vocabulary only: nothing emits the marker yet. The
-    /// supervisor's emission is PLAN_M5.md item 2's PR; the sentences
-    /// above are that PR's contract, stated here because the wire
-    /// vocabulary is where every implementation and test will point.
+    /// The emitting side is the supervisor's attach cutover (PLAN_M5.md
+    /// item 2). The contract is stated HERE because the wire vocabulary is
+    /// where every implementation and test points.
     ///
     /// ## Why a control message, not an in-band byte sentinel
     ///

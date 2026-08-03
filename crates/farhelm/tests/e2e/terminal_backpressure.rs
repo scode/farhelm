@@ -195,7 +195,7 @@ const FLOOD_RECORDS: u64 = 800_000;
 /// it is the client that must never be paused (see `tmux::SessionSink`) —
 /// which is what makes the same flag both the sink's defining absence and
 /// this helper's positive match.
-async fn force_tmux_pause(h: &Harness, pane: &str) {
+pub(crate) async fn force_tmux_pause(h: &Harness, pane: &str) {
     let sock = h.state.path().join("tmux.sock");
     let listed = tmux_query(
         &sock,

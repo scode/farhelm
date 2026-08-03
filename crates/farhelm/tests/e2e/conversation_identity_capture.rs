@@ -30,8 +30,8 @@ use crate::boot_id_durable_outcome::listed;
 /// value would put minutes on the clock. `BEFORE` only absorbs clock
 /// granularity between the supervisor's reading and the agent's.
 const TEST_CAPTURE_BEFORE: Duration = Duration::from_secs(1);
-const TEST_CAPTURE_AFTER: Duration = Duration::from_secs(2);
-const TEST_CAPTURE_GRACE: Duration = Duration::from_secs(1);
+pub(crate) const TEST_CAPTURE_AFTER: Duration = Duration::from_secs(2);
+pub(crate) const TEST_CAPTURE_GRACE: Duration = Duration::from_secs(1);
 
 /// The bounds every capture harness injects.
 pub(crate) fn test_capture_bounds() -> CaptureWindowBounds {
@@ -246,7 +246,7 @@ fn assert_windows_overlap(first: i64, second: i64) {
 /// store — a test that read the store alone would hang forever waiting for
 /// a pass nothing triggered. The wait has to outlast the publication grace,
 /// since nothing is committed until the horizon closes.
-async fn wait_for_capture(h: &Harness, session_id: &str, secs: u64) -> String {
+pub(crate) async fn wait_for_capture(h: &Harness, session_id: &str, secs: u64) -> String {
     let deadline = tokio::time::Instant::now() + Duration::from_secs(secs);
     loop {
         h.client.list_sessions().await.expect("list drives capture");

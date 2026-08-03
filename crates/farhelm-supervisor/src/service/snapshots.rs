@@ -458,17 +458,17 @@ mod tests {
                     tabs: Vec::new(),
                 },
                 terminal: None,
-                outcome: std::sync::Mutex::new(LastOutcome::Running),
+                outcome: Arc::new(std::sync::Mutex::new(LastOutcome::Running)),
                 snapshot: IntegrationSnapshot {
                     kind: AgentKind::Generic,
                     resume_template: None,
                 },
                 canonical_cwd: None,
-                first_input: std::sync::Mutex::new(FirstInput {
+                first_input: Arc::new(std::sync::Mutex::new(FirstInput {
                     at: None,
                     durable: true,
-                }),
-                capture: std::sync::Mutex::new(CaptureState::Unclaimed),
+                })),
+                capture: Arc::new(std::sync::Mutex::new(CaptureState::Unclaimed)),
                 generation: 0,
                 scope: None,
             }),

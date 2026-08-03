@@ -583,6 +583,7 @@ pub(crate) fn reply_frame(msg: &ControlMsg) -> Frame {
         | ControlMsg::SessionStopped { req_id, .. }
         | ControlMsg::SessionDeleted { req_id, .. }
         | ControlMsg::SessionRestarted { req_id, .. }
+        | ControlMsg::SessionRenamed { req_id, .. }
         | ControlMsg::Attached { req_id, .. }
         | ControlMsg::TabOpened { req_id, .. }
         | ControlMsg::TabClosed { req_id, .. }
@@ -777,18 +778,27 @@ pub(crate) struct Forwarder {
 }
 
 impl Forwarder {
-    /// Write the attach replay, then pump live output until something
-    /// ends it.
+    /// Write the attach replay, mark its end, then pump live output until
+    /// something ends it.
     ///
     /// The whole task body, so the teardown obligations live in exactly
     /// one place: the control client is always shut down, and a stall
     /// additionally removes the attachment (via `detach_stalled`, which
     /// must run on its own task — see there).
+    ///
+    /// The three phases are in this order because the marker's whole
+    /// meaning is its POSITION between them (PLAN_M5.md item 2): it is
+    /// emitted once the initial replay has been enqueued in full and
+    /// before `pump` can enqueue a single live byte. Nothing else in this
+    /// task may be inserted between the second and third steps.
     pub(crate) async fn run(mut self, modes: PaneModes, prefill: Vec<u8>) {
         // The attach replay never resets: the client's terminal is brand
         // new. Only the catch-up path passes `true` — see `send_replay`.
         let end = match self.send_replay(modes, prefill, false).await {
-            Ok(()) => self.pump().await,
+            Ok(()) => match self.send_replay_complete().await {
+                Ok(()) => self.pump().await,
+                Err(end) => end,
+            },
             Err(end) => end,
         };
         // Ordered: kill the control client BEFORE announcing the detach,
@@ -897,6 +907,50 @@ impl Forwarder {
             .await?;
         self.send_bytes(bytes).await?;
         self.send_bytes(b"\r\n".to_vec()).await
+    }
+
+    /// Tell the client its attach's catch-up is over: every byte this
+    /// forwarder will replay from history has been enqueued, and the live
+    /// stream follows (`ControlMsg::ReplayComplete`, PLAN_M5.md item 2).
+    ///
+    /// Called from exactly one place — between the initial replay and the
+    /// live pump in [`Self::run`] — and deliberately NOT from
+    /// [`Self::catch_up_after_tmux_pause`]: M2.5's flow-control recovery
+    /// replays history into an attachment that is already live, and the
+    /// marker bounds the ATTACH's catch-up, not every catch-up the
+    /// attachment will ever perform. A marker there would tell a consumer
+    /// a second catch-up phase had just ended when none had begun, and
+    /// the pause recovery's presentation is explicitly out of M5's scope.
+    ///
+    /// Ordering needs no machinery of its own, which is the design: the
+    /// marker is enqueued onto the SAME per-connection writer queue as
+    /// this channel's data frames (see [`CONNECTION_WRITER_QUEUE`]), and
+    /// this task is the only producer of that channel's replay, marker and
+    /// live data — so "after every replay byte, before any live byte"
+    /// follows from the two calls around this one rather than from a
+    /// promise anybody has to keep. (It is not the only producer on the
+    /// channel at all: a teardown elsewhere can enqueue a channel-
+    /// correlated `Detached`, which by construction is the last frame the
+    /// channel carries and so orders against nothing that still matters.)
+    ///
+    /// Unlike [`Self::send_bytes`] this does not park on a client pause.
+    /// The pause contract is about not pushing terminal OUTPUT at a
+    /// client that asked for silence; the marker carries none, is already
+    /// queued behind every replay frame it describes, and holding it back
+    /// would leave a paused client's catch-up unbounded from its own
+    /// point of view. It is still raced against the same absolute stall
+    /// deadline, because a client that has stopped draining can otherwise
+    /// pin this task on a full queue forever.
+    async fn send_replay_complete(&mut self) -> Result<(), ForwarderEnd> {
+        let frame = Frame::control(&ControlMsg::ReplayComplete {
+            channel: self.channel,
+        });
+        tokio::select! {
+            result = self.tx.send(frame) => result.map_err(|_| ForwarderEnd::ClientGone),
+            () = stalled_past_deadline(self.pause_rx.clone(), self.stall_timeout) => {
+                Err(ForwarderEnd::Stalled)
+            }
+        }
     }
 
     /// Park while the client has output paused, returning `Err(Stalled)`
@@ -1045,6 +1099,14 @@ impl Forwarder {
     /// pane left paused delivers nothing ever again, so pretending
     /// otherwise would leave a live-looking terminal that has silently
     /// stopped.
+    ///
+    /// This replay is deliberately MARKERLESS: no `ReplayComplete` is
+    /// emitted here, and none may be added (PLAN_M5.md item 2 draws the
+    /// boundary, and a test pins it). The marker means "this attach's
+    /// initial catch-up ended"; this catch-up happens mid-stream on an
+    /// attachment that already finished one, so history reappearing on
+    /// the channel after the marker is a documented possibility rather
+    /// than a contradiction — see [`Self::send_replay_complete`].
     async fn catch_up_after_tmux_pause(&mut self) -> Result<(), ForwarderEnd> {
         info!(
             channel = self.channel,

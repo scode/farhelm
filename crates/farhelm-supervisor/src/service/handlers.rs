@@ -12,8 +12,8 @@ use super::connection::{
 };
 use super::core::{
     CreateInputs, LIST_BYTE_BUDGET, LIST_SESSION_CAP, SessionEntry, Supervisor, build_list_reply,
-    create_fingerprint, dead_pane_exit_code, error_kind, observation, session_restart_offer,
-    session_status, truncate_for_error,
+    create_fingerprint, dead_pane_exit_code, ensure_title_printable, entry_info, error_kind,
+    observation, truncate_for_error,
 };
 use super::launch_artifacts::{
     cleanup_launch_artifacts, read_launch_sentinel, remove_fail_closed,
@@ -25,7 +25,7 @@ use super::snapshots::{
 use super::sweep::{StopFailure, SweepTarget, reap_process_tree, stop_live_agent};
 use super::terminals::{
     ActiveAttach, AttachmentKey, DETACH_REASON_REPLACED, DETACH_REASON_TAKEOVER, InputRoute,
-    MAX_LEASE_BYTES, TerminalId, displaced_by_attach, resolve_terminal, tabs_from_pane_states,
+    MAX_LEASE_BYTES, Terminal, TerminalId, displaced_by_attach, resolve_terminal,
 };
 use super::uploads::{
     MAX_UPLOADS_PER_CONNECTION, UPLOAD_CHUNK_QUEUE, UPLOAD_SIGNAL_QUEUE, UploadCommand,
@@ -33,9 +33,10 @@ use super::uploads::{
     commit_without_upload, run_upload,
 };
 use crate::store::{IntentClaim, LastOutcome, Transition};
+use crate::tmux::PaneState;
+use anyhow::Context;
 use farhelm_proto::{
-    AgentKind, ControlMsg, ErrorKind, Frame, RestartMode, SessionInfo, SessionStatus, TabInfo,
-    TerminalSelector,
+    AgentKind, ControlMsg, ErrorKind, Frame, RestartMode, SessionInfo, TerminalSelector,
 };
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -207,6 +208,222 @@ async fn handle_create_session(
     }
 }
 
+/// What one pre-reply observation of a session concluded — the
+/// per-entry half of a `ListSessions` pass, hoisted out so a
+/// single-session reply can reach the same conclusions (PLAN_M5.md
+/// item 3's `SessionRenamed`, whose `SessionInfo` must be built the
+/// way a list builds one).
+struct EntryObservation {
+    /// A launch-sentinel or wrapper-failure detail found for this
+    /// entry NOW. Outranks whatever `session_status` would compute,
+    /// whether or not the matching transition also commits — see
+    /// [`entry_info`]'s `sentinel` parameter.
+    sentinel: Option<String>,
+    /// The transition this observation wants committed, or `None`
+    /// when nothing changed or this supervisor may not record.
+    transition: Option<Transition>,
+    /// This entry is ALREADY durably `Error`: there is nothing left to
+    /// witness, and its launch artifacts are due for the idempotent
+    /// cleanup a crash between an earlier commit and its cleanup can
+    /// leave behind.
+    settled_error: bool,
+}
+
+/// Look at one entry the way a `ListSessions` pass looks at it:
+/// classify what its pane and launch artifacts say, without
+/// committing anything.
+///
+/// Extracted from that pass rather than reimplemented, and shared
+/// with it, because the precedence here is subtle and duplicating it
+/// would eventually mean two different answers to "what happened to
+/// this session" depending on which request asked. The order is
+/// itself the contract (PLAN_M3.md items 2, 3 and 4): an entry
+/// already durably `Error` is settled; otherwise a launch sentinel —
+/// or the wrapper-failure shape that stands in for one — outranks
+/// every inference, because a failed exec leaves an ordinary dead
+/// pane that no probe can tell from a command that ran and finished;
+/// only then does the plain pane observation apply.
+///
+/// Deliberately does NOT commit: the list pass batches every entry's
+/// transition into ONE transaction, and taking that apart per entry
+/// would turn one poll into a write per session. Callers commit what
+/// they collect (`SessionStore::transition_many`) and then mirror
+/// what it reports.
+///
+/// An unreadable sentinel is an `Err`, never a fall-through: basing a
+/// reply on an inference the unreadable file might contradict is
+/// exactly the silent-wrong-answer this refuses to give. The error
+/// already names the session, so callers report it verbatim.
+async fn observe_entry(
+    sup: &Arc<Supervisor>,
+    entry: &Arc<SessionEntry>,
+    pane_states: &HashMap<String, PaneState>,
+) -> anyhow::Result<EntryObservation> {
+    let recorded = entry
+        .outcome
+        .lock()
+        .expect("outcome mutex poisoned")
+        .clone();
+    // Borrowed out of the caller's map rather than cloned: this runs once
+    // per entry on the polling path, and the pane state is only ever read.
+    let live: Option<&PaneState> = entry.terminal.as_ref().and_then(|terminal| {
+        pane_states
+            .get(&terminal.pane)
+            .filter(|state| state.session_name == terminal.tmux_name)
+    });
+    // Two different questions, deliberately not one: "no live
+    // process" (which a sentinel check needs) and "a pane that
+    // EXISTS and is dead" (which the wrapper-failure classifier
+    // needs — see its docs for why an absent pane must not qualify).
+    let dead_or_absent = live.is_none_or(|state| state.dead);
+    let pane_dead = live.is_some_and(|state| state.dead);
+
+    if matches!(recorded, LastOutcome::Error { .. }) {
+        return Ok(EntryObservation {
+            sentinel: None,
+            transition: None,
+            settled_error: true,
+        });
+    }
+
+    // A sentinel is READ regardless of whether this supervisor
+    // `may_record()` (item 2 of the review-swarm fix batch): a
+    // degraded supervisor still has standing to REPORT what it can
+    // read, even though it must not WRITE a conclusion it has no
+    // standing to store — which is why `sentinel` and `transition`
+    // below are set independently.
+    if sentinel_could_still_apply(&recorded) && dead_or_absent {
+        let found = read_launch_sentinel(&sup.state_dir, &entry.info.id, entry.generation)
+            .await
+            .with_context(|| {
+                format!("could not read session {}'s launch sentinel", entry.info.id)
+            })?;
+        let detail = match found {
+            Some(detail) => Some(detail),
+            // The wrapper-failure shape: no sentinel, a pane that is
+            // present and dead, and a launch spec nothing consumed.
+            None => {
+                wrapper_failure_detail(
+                    &sup.state_dir,
+                    &entry.info.id,
+                    entry.generation,
+                    entry.scope.is_some(),
+                    pane_dead,
+                )
+                .await
+            }
+        };
+        if let Some(detail) = detail {
+            // No pane to rediscover here (unlike `reload_sessions`'s
+            // by-name search): callers only visit sessions this
+            // process already tracks a `Terminal` for or explicitly
+            // does not, so there is nothing new for this transition
+            // to record beyond the outcome itself.
+            let transition = sup.may_record().then(|| Transition::SentinelError {
+                detail: detail.clone(),
+                pane: None,
+            });
+            return Ok(EntryObservation {
+                sentinel: Some(detail),
+                transition,
+                settled_error: false,
+            });
+        }
+    }
+
+    let transition = if sup.may_record() {
+        observation(&recorded, live)
+    } else {
+        None
+    };
+    Ok(EntryObservation {
+        sentinel: None,
+        transition,
+        settled_error: false,
+    })
+}
+
+/// One session's `SessionInfo` for a single-session reply, observed
+/// and recorded exactly as a `ListSessions` pass would (PLAN_M5.md
+/// item 3).
+///
+/// The alternative — reading the entry's stored fields and probing
+/// only liveness — was the first shape of this and is wrong in a way
+/// that is easy to miss: a session whose agent never execed lists as
+/// **error** through the sentinel path alone, so a reply that skipped
+/// it would report `Exited` for a session every list reply calls
+/// `Error`, and a rename issued moments after a conversation became
+/// capturable would report `FreshOnly` where the list says `Resume`.
+/// `SessionRenamed`'s protocol contract is that its `SessionInfo` is
+/// built the way `ListSessions` builds one; this is that promise
+/// being kept rather than approximated.
+///
+/// The capture pass runs first for the same reason the list runs it
+/// there: an identity claimed on this very pass belongs in the
+/// `restart_offer` this reply carries, not only in the next poll's.
+/// It is single-flight and cheap in the steady state (see
+/// `Supervisor::capture_now`).
+///
+/// The tmux round trip is skipped for a terminal-less entry (the
+/// restart gap): its status comes entirely from its recorded outcome
+/// and it has no tmux session to hold tabs, so asking would be
+/// pointless and would let an unrelated tmux failure break a reply
+/// that needs nothing from it.
+///
+/// Every failure here is the caller's to report, including the durable
+/// write's — see the transition below for why this is stricter than the
+/// list path it otherwise mirrors.
+async fn session_info_now(
+    sup: &Arc<Supervisor>,
+    entry: &Arc<SessionEntry>,
+) -> anyhow::Result<SessionInfo> {
+    sup.capture_now().await;
+    let pane_states = match entry.terminal {
+        Some(_) => sup.tmux.pane_states().await?,
+        None => HashMap::new(),
+    };
+    let observed = observe_entry(sup, entry, &pane_states).await?;
+    if observed.settled_error {
+        cleanup_launch_artifacts(&sup.state_dir, &entry.info.id, entry.generation).await;
+    }
+    if let Some(transition) = observed.transition {
+        // One entry's transition through the same batching API the
+        // list uses, so the store arbitrates it identically.
+        //
+        // A failed write PROPAGATES here, unlike on the list path where
+        // it is logged and the reply goes out anyway. The difference is
+        // what the two requests are: a list is a poll that retries in a
+        // second, so serving it from what was observed costs nothing,
+        // while this reply is the authoritative answer to a mutation and
+        // its caller has no reason to poll again. Silently returning a
+        // `SessionInfo` whose status this process could not record would
+        // hand that caller a success built on a write that did not
+        // happen; the handler above reports it as a failure that says
+        // the rename itself landed.
+        let committed = sup
+            .store
+            .transition_many(vec![(entry.info.id.clone(), entry.generation, transition)])
+            .await
+            .with_context(|| format!("recording session {}'s observed outcome", entry.info.id))?;
+        let committed = committed.get(&entry.info.id);
+        if let Some(outcome) = committed {
+            *entry.outcome.lock().expect("outcome mutex poisoned") = outcome.clone();
+        }
+        // Both files are cosmetic once the durable outcome says what
+        // happened, and a write that did NOT land must leave them for a
+        // later pass to retry against — hence gating on what committed
+        // rather than on the sentinel find alone.
+        if observed.sentinel.is_some() && matches!(committed, Some(LastOutcome::Error { .. })) {
+            cleanup_launch_artifacts(&sup.state_dir, &entry.info.id, entry.generation).await;
+        }
+    }
+    Ok(entry_info(
+        entry,
+        &pane_states,
+        observed.sentinel.as_deref(),
+    ))
+}
+
 /// Spawned onto its own task rather than awaited inline: this
 /// handler is reached from `handle_connection`'s single serial read
 /// loop, and `TmuxDriver::pane_states` is a real subprocess
@@ -347,122 +564,37 @@ async fn handle_list_sessions(
         // itself regress to a stale `Exited` in the meantime.
         let mut sentinel_hits: HashMap<String, String> = HashMap::new();
         for entry in &entries {
-            let (recorded, dead_or_absent, pane_dead) = {
-                let recorded = entry
-                    .outcome
-                    .lock()
-                    .expect("outcome mutex poisoned")
-                    .clone();
-                let live = entry.terminal.as_ref().and_then(|terminal| {
-                    pane_states
-                        .get(&terminal.pane)
-                        .filter(|state| state.session_name == terminal.tmux_name)
-                });
-                // Two different questions, deliberately not one:
-                // "no live process" (which a sentinel check needs)
-                // and "a pane that EXISTS and is dead" (which the
-                // wrapper-failure classifier needs — see its docs
-                // for why an absent pane must not qualify).
-                (
-                    recorded,
-                    live.is_none_or(|state| state.dead),
-                    live.is_some_and(|state| state.dead),
-                )
+            let observed = match observe_entry(&sup, entry, &pane_states).await {
+                Ok(observed) => observed,
+                // Loud propagation, not fall-through (item 1): the
+                // WHOLE request fails rather than silently basing
+                // this — or any other — entry's reply on an
+                // inference the unreadable sentinel might
+                // contradict. Nothing gathered so far this pass is
+                // committed: this `return` happens before
+                // `transition_many` is ever called.
+                Err(e) => {
+                    send_reply(
+                        &tx,
+                        &ControlMsg::Error {
+                            req_id,
+                            message: format!("{e:#}"),
+                            kind: ErrorKind::Internal,
+                        },
+                    )
+                    .await;
+                    return;
+                }
             };
-
-            // Idempotent cleanup (item 4): an entry already durably
-            // `Error` may still have a lingering sentinel/spec file
-            // from a crash between an earlier pass's commit and the
-            // cleanup that should have followed it. Harmless no-op
-            // once both files are gone.
-            if matches!(recorded, LastOutcome::Error { .. }) {
+            if observed.settled_error {
                 cleanup_launch_artifacts(&sup.state_dir, &entry.info.id, entry.generation).await;
                 continue;
             }
-
-            if sentinel_could_still_apply(&recorded) && dead_or_absent {
-                match read_launch_sentinel(&sup.state_dir, &entry.info.id, entry.generation).await {
-                    Ok(Some(detail)) => {
-                        sentinel_hits.insert(entry.info.id.clone(), detail.clone());
-                        // No pane to rediscover here (unlike
-                        // `reload_sessions`'s by-name search): this
-                        // loop only ever visits sessions this
-                        // process already tracks a `Terminal` for
-                        // or explicitly does not, so there is
-                        // nothing new for this transition to
-                        // record beyond the outcome itself.
-                        if sup.may_record() {
-                            observations.push((
-                                entry.info.id.clone(),
-                                entry.generation,
-                                Transition::SentinelError { detail, pane: None },
-                            ));
-                        }
-                        continue;
-                    }
-                    Ok(None) => {
-                        // The wrapper-failure shape: no sentinel, a
-                        // pane that is present and dead, and a
-                        // launch spec nothing ever consumed.
-                        if let Some(detail) = wrapper_failure_detail(
-                            &sup.state_dir,
-                            &entry.info.id,
-                            entry.generation,
-                            entry.scope.is_some(),
-                            pane_dead,
-                        )
-                        .await
-                        {
-                            sentinel_hits.insert(entry.info.id.clone(), detail.clone());
-                            if sup.may_record() {
-                                observations.push((
-                                    entry.info.id.clone(),
-                                    entry.generation,
-                                    Transition::SentinelError { detail, pane: None },
-                                ));
-                            }
-                            continue;
-                        }
-                    }
-                    Err(e) => {
-                        // Loud propagation, not fall-through (item
-                        // 1): the WHOLE request fails rather than
-                        // silently basing this — or any other —
-                        // entry's reply on an inference the
-                        // unreadable sentinel might contradict.
-                        // Nothing gathered so far this pass is
-                        // committed: this `return` happens before
-                        // `transition_many` is ever called.
-                        send_reply(
-                            &tx,
-                            &ControlMsg::Error {
-                                req_id,
-                                message: format!(
-                                    "could not read session {}'s launch sentinel: {e:#}",
-                                    entry.info.id
-                                ),
-                                kind: ErrorKind::Internal,
-                            },
-                        )
-                        .await;
-                        return;
-                    }
-                }
+            if let Some(detail) = observed.sentinel {
+                sentinel_hits.insert(entry.info.id.clone(), detail);
             }
-
-            if sup.may_record() {
-                // The guard is held for the closure body only,
-                // with no await inside it, so nothing has to be
-                // cloned to be read.
-                let recorded = entry.outcome.lock().expect("outcome mutex poisoned");
-                let live = entry.terminal.as_ref().and_then(|terminal| {
-                    pane_states
-                        .get(&terminal.pane)
-                        .filter(|state| state.session_name == terminal.tmux_name)
-                });
-                if let Some(transition) = observation(&recorded, live) {
-                    observations.push((entry.info.id.clone(), entry.generation, transition));
-                }
+            if let Some(transition) = observed.transition {
+                observations.push((entry.info.id.clone(), entry.generation, transition));
             }
         }
         if !observations.is_empty() {
@@ -513,45 +645,11 @@ async fn handle_list_sessions(
         let sessions: Vec<SessionInfo> = entries
             .iter()
             .map(|entry| {
-                // A sentinel this pass found overrides whatever
-                // `session_status` would otherwise compute for
-                // THIS reply, whether or not it also got committed
-                // durably above — see `sentinel_hits`'s own docs.
-                let mut info = entry.info.clone();
-                // Recomputed on every reply, like `status`: a
-                // capture (possibly the one this very pass just
-                // made) can upgrade a session from `FreshOnly` to
-                // `Resume`, and the value frozen at create or
-                // reload would go stale the moment it did.
-                info.restart_offer = session_restart_offer(entry);
-                // Tabs likewise, and for a stronger reason: they
-                // are not stored anywhere at all
-                // (`SessionInfo::tabs`), so this rediscovery from
-                // the pane-state map this pass already fetched IS
-                // the tab list. A terminal-less entry has no tmux
-                // session and therefore no tabs, which the empty
-                // default states honestly.
-                info.tabs = entry
-                    .terminal
-                    .as_ref()
-                    .map(|terminal| {
-                        tabs_from_pane_states(&pane_states, &terminal.tmux_name)
-                            .into_iter()
-                            .map(|tab| TabInfo { id: tab.id })
-                            .collect()
-                    })
-                    .unwrap_or_default();
-                if let Some(detail) = sentinel_hits.get(&entry.info.id) {
-                    info.status = SessionStatus::Error {
-                        detail: detail.clone(),
-                    };
-                    info.annotation = None;
-                } else {
-                    let (status, annotation) = session_status(entry, &pane_states);
-                    info.status = status;
-                    info.annotation = annotation;
-                }
-                info
+                entry_info(
+                    entry,
+                    &pane_states,
+                    sentinel_hits.get(&entry.info.id).map(String::as_str),
+                )
             })
             .collect();
         send_reply(
@@ -1452,23 +1550,50 @@ async fn handle_attach(
     // replaces the entry (and respawns, or replaces, its pane) —
     // so an attachment installed from the stale entry would be
     // wired to the NEW run's terminal while nothing in this handler
-    // ever checked that the user may drive it. Comparing the entry
-    // POINTER (not just the generation) also covers the case where
-    // the session was deleted and something else took its id.
+    // ever checked that the user may drive it.
+    //
+    // A changed POINTER is not by itself a changed run, though, and
+    // treating it as one made a rename racing an attach fail with a
+    // spurious `Conflict` (PLAN_M5.md item 3 publishes a rebuilt
+    // entry for a title change — same run, same pane, same
+    // generation). So a replacement is accepted when it still
+    // describes what this attach resolved: same generation, same
+    // terminal identity. Everything else is refused exactly as
+    // before — a changed generation is a restart, a vanished entry
+    // is a delete (or an id something else took), and a changed
+    // terminal is a substrate this attach never validated.
+    //
+    // The accepted entry — not the one resolved earlier — is what
+    // gets installed below, so the route pins the CURRENT title and
+    // the shared cells behind it.
+    let same_terminal = |a: Option<&Terminal>, b: Option<&Terminal>| match (a, b) {
+        (Some(a), Some(b)) => a.tmux_name == b.tmux_name && a.pane == b.pane,
+        (None, None) => true,
+        _ => false,
+    };
     let current = sup.sessions.lock().await.get(&session_id).cloned();
-    if !current.is_some_and(|current| Arc::ptr_eq(&current, &entry)) {
-        drop(attachments);
-        permit.send(reply_frame(&ControlMsg::Error {
-            req_id,
-            message: format!(
-                "session {} changed while this attach was being set up (it was \
-                 restarted or deleted); attach again",
-                truncate_for_error(&session_id)
-            ),
-            kind: ErrorKind::Conflict,
-        }));
-        return;
-    }
+    let entry = match current {
+        Some(current)
+            if Arc::ptr_eq(&current, &entry)
+                || (current.generation == entry.generation
+                    && same_terminal(current.terminal.as_ref(), entry.terminal.as_ref())) =>
+        {
+            current
+        }
+        _ => {
+            drop(attachments);
+            permit.send(reply_frame(&ControlMsg::Error {
+                req_id,
+                message: format!(
+                    "session {} changed while this attach was being set up (it was \
+                     restarted or deleted); attach again",
+                    truncate_for_error(&session_id)
+                ),
+                kind: ErrorKind::Conflict,
+            }));
+            return;
+        }
+    };
 
     // SPEC.md's one-attached-client rule, enforced across the
     // WHOLE session (PLAN_M4.md item 3): every channel held under
@@ -1873,6 +1998,150 @@ async fn handle_restart_session(
         }
     })
     .await;
+}
+
+/// Every request-shape check a rename can make lives here, ahead
+/// of the lookup and the write, and it is deliberately
+/// `validate_create`'s explicit-title rule and nothing more
+/// (PLAN_M5.md item 3): [`ensure_title_printable`] is the shared
+/// refusal, and the cap is create's own [`CREATE_FIELD_CAP`],
+/// applied to the title alone because it is the only field this
+/// request carries into the reply that echoes it back. An empty
+/// title is ACCEPTED, exactly as an explicit empty title on
+/// create is — rename inventing a stricter rule than create
+/// would be an asymmetry SPEC.md nowhere asks for.
+///
+/// Validation precedes the session lookup, so a malformed rename
+/// of a session that does not exist reports what the CALLER can
+/// fix. Everything after it is [`Supervisor::rename_session`]'s.
+///
+/// Spawned like the other slow handlers: the commit takes the
+/// session's lifecycle claim, so it can legitimately wait out a
+/// multi-second stop or delete, and the reply makes a tmux round
+/// trip of its own for the live status. Awaiting either inline
+/// would stall every other request on this connection. It touches
+/// neither `input_routes` (connection-local) nor `attachments`.
+///
+/// ## One admission slot, moved along the phases
+///
+/// A rename is the one request whose halves have different
+/// cancellation rules — the commit must outlive its connection,
+/// the reply must not — so it cannot simply wrap the whole thing
+/// in [`spawn_admitted`]. What it does instead is acquire ONE
+/// owned permit here (this read loop waits for capacity, exactly
+/// as `spawn_admitted` would) and then move it: into
+/// [`Supervisor::rename_session`]'s supervisor-owned commit task,
+/// which hands it back with a successful result, and from there
+/// into the reply build.
+///
+/// Exactly one acquisition per request is not a tidiness point.
+/// An earlier shape took a second permit for the reply phase via
+/// `spawn_admitted`, which deadlocks: with
+/// `HANDLER_ADMISSION_PERMITS` renames in flight, each holds a
+/// slot while waiting for another, and no commit task exists yet
+/// to release one. Moving a single slot along the phases makes
+/// that unrepresentable, and keeps both phases bounded by the same
+/// semaphore every other slow handler answers to.
+///
+/// The slot is held until the reply has been HANDED OVER, on both
+/// the success and the failure path — the same parity every other
+/// handler has, since each of their replies awaits the bounded
+/// writer queue under admission. A refused rename that freed its
+/// slot before sending would let a peer that never reads reclaim
+/// capacity per request while its error replies piled up.
+///
+/// The task itself is therefore tracked in this connection's
+/// `JoinSet` WITHOUT going through `spawn_admitted` — it is
+/// carrying admission it already holds.
+async fn handle_rename_session(
+    sup: &Arc<Supervisor>,
+    tx: &mpsc::Sender<Frame>,
+    tasks: &mut tokio::task::JoinSet<()>,
+    req_id: u64,
+    session_id: String,
+    title: String,
+) {
+    let refusal = if title.len() > CREATE_FIELD_CAP {
+        Some(format!(
+            "title is {} bytes, exceeding the {CREATE_FIELD_CAP}-byte limit",
+            title.len()
+        ))
+    } else {
+        ensure_title_printable(&title).err().map(|e| e.message)
+    };
+    if let Some(message) = refusal {
+        send_reply(
+            tx,
+            &ControlMsg::Error {
+                req_id,
+                message,
+                kind: ErrorKind::InvalidRequest,
+            },
+        )
+        .await;
+        return;
+    }
+    // THE request's admission slot — acquired here, in the read loop, so
+    // that is what waits for capacity, and moved through both phases
+    // afterwards. See this function's docs for why there is exactly one.
+    let permit = Arc::clone(&sup.admission)
+        .acquire_owned()
+        .await
+        .expect("admission semaphore is never closed");
+    let sup2 = Arc::clone(sup);
+    let tx = tx.clone();
+    // Tracked like every other spawned handler (so this connection's
+    // shutdown drains or reaps it) but NOT re-admitted: the slot it needs
+    // is already in hand.
+    tasks.spawn(async move {
+        let sup = sup2;
+        // The slot comes back with the outcome whatever it is, and is held
+        // for the rest of this task — through the reply's tmux round trip
+        // on the success path, and through the error reply's wait on the
+        // bounded writer queue on the other. Dropping it at either reply's
+        // send is what keeps a peer that never reads from reclaiming
+        // capacity per request (see `Supervisor::rename_session`).
+        let (outcome, _permit) = sup.rename_session(&session_id, title, permit).await;
+        let renamed = match outcome {
+            Ok(renamed) => renamed,
+            Err(e) => {
+                send_reply(
+                    &tx,
+                    &ControlMsg::Error {
+                        req_id,
+                        message: e.message,
+                        kind: e.kind,
+                    },
+                )
+                .await;
+                return;
+            }
+        };
+        // Built after the commit, and reported as a failure if it cannot be
+        // built even though the rename itself has already landed — with a
+        // message that says exactly that. The alternative is fabricating the
+        // dynamic fields this reply promises to have probed. The caller's
+        // next list corrects the title on its own, so the honest error costs
+        // a poll interval rather than the rename.
+        match session_info_now(&sup, &renamed).await {
+            Ok(session) => send_reply(&tx, &ControlMsg::SessionRenamed { req_id, session }).await,
+            Err(e) => {
+                send_reply(
+                    &tx,
+                    &ControlMsg::Error {
+                        req_id,
+                        message: format!(
+                            "session {} was renamed, but reading back its current state \
+                             failed: {e:#}",
+                            truncate_for_error(&session_id)
+                        ),
+                        kind: error_kind(&e),
+                    },
+                )
+                .await;
+            }
+        }
+    });
 }
 
 /// Spawned for the same reason the other slow handlers are: an
@@ -2291,6 +2560,11 @@ pub(crate) async fn handle_control(
         } => {
             handle_restart_session(sup, tx, tasks, req_id, session_id, mode, stop_if_running).await
         }
+        ControlMsg::RenameSession {
+            req_id,
+            session_id,
+            title,
+        } => handle_rename_session(sup, tx, tasks, req_id, session_id, title).await,
         ControlMsg::OpenTab { req_id, session_id } => {
             handle_open_tab(sup, tx, tasks, req_id, session_id).await
         }
@@ -2338,7 +2612,7 @@ mod tests {
     use super::super::terminals::Terminal;
     use super::*;
     use crate::agent_kind::IntegrationSnapshot;
-    use farhelm_proto::RestartOffer;
+    use farhelm_proto::{RestartOffer, SessionStatus};
     use std::time::Duration;
 
     /// `RestartSession` carries a `req_id` a caller genuinely blocks on
@@ -2692,17 +2966,17 @@ mod tests {
                     tmux_name: "fh-fake".to_string(),
                     pane: "%0".to_string(),
                 }),
-                outcome: std::sync::Mutex::new(LastOutcome::Running),
+                outcome: Arc::new(std::sync::Mutex::new(LastOutcome::Running)),
                 snapshot: IntegrationSnapshot {
                     kind: AgentKind::Generic,
                     resume_template: None,
                 },
                 canonical_cwd: None,
-                first_input: std::sync::Mutex::new(FirstInput {
+                first_input: Arc::new(std::sync::Mutex::new(FirstInput {
                     at: None,
                     durable: true,
-                }),
-                capture: std::sync::Mutex::new(CaptureState::Unclaimed),
+                })),
+                capture: Arc::new(std::sync::Mutex::new(CaptureState::Unclaimed)),
                 generation: 0,
                 scope: None,
             }),
@@ -2829,17 +3103,17 @@ mod tests {
                             tabs: Vec::new(),
                         },
                         terminal: None,
-                        outcome: std::sync::Mutex::new(LastOutcome::Running),
+                        outcome: Arc::new(std::sync::Mutex::new(LastOutcome::Running)),
                         snapshot: IntegrationSnapshot {
                             kind: AgentKind::Generic,
                             resume_template: None,
                         },
                         canonical_cwd: None,
-                        first_input: std::sync::Mutex::new(FirstInput {
+                        first_input: Arc::new(std::sync::Mutex::new(FirstInput {
                             at: None,
                             durable: true,
-                        }),
-                        capture: std::sync::Mutex::new(CaptureState::Unclaimed),
+                        })),
+                        capture: Arc::new(std::sync::Mutex::new(CaptureState::Unclaimed)),
                         generation: 0,
                         scope: None,
                     }),
@@ -2933,17 +3207,17 @@ mod tests {
                     tabs: Vec::new(),
                 },
                 terminal: None,
-                outcome: std::sync::Mutex::new(LastOutcome::Running),
+                outcome: Arc::new(std::sync::Mutex::new(LastOutcome::Running)),
                 snapshot: IntegrationSnapshot {
                     kind: AgentKind::Generic,
                     resume_template: None,
                 },
                 canonical_cwd: None,
-                first_input: std::sync::Mutex::new(FirstInput {
+                first_input: Arc::new(std::sync::Mutex::new(FirstInput {
                     at: None,
                     durable: true,
-                }),
-                capture: std::sync::Mutex::new(CaptureState::Unclaimed),
+                })),
+                capture: Arc::new(std::sync::Mutex::new(CaptureState::Unclaimed)),
                 generation: 0,
                 scope: None,
             }),
