@@ -13,14 +13,16 @@ use std::collections::{HashMap, HashSet};
 use dioxus::prelude::*;
 
 use crate::api::{
-    POLL_INTERVAL_MS, close_tab, fetch_session, mint_lease, open_tab, restart_mode_for,
-    restart_session,
+    POLL_INTERVAL_MS, close_tab, fetch_session, mint_lease, open_tab, rename_session,
+    restart_mode_for, restart_session,
 };
 use crate::attachments::{attachment_policy, attachment_status_element_id};
+use crate::rename::RenameForm;
 use crate::tabs::{
-    AGENT_BANNER_ELEMENT_ID, AGENT_TERMINAL_ELEMENT_ID, CLOSE_TAB_CONSEQUENCE,
-    MAX_MOUNTED_TAB_ISLANDS, TAB_OPEN_ERROR_KEY, TabStripItem, sorted_tab_errors,
-    tab_banner_element_id, tab_label, tab_terminal_element_id, terminal_ws_path, visible_tabs,
+    AGENT_BANNER_ELEMENT_ID, AGENT_CONNECTING_ELEMENT_ID, AGENT_TERMINAL_ELEMENT_ID,
+    CLOSE_TAB_CONSEQUENCE, MAX_MOUNTED_TAB_ISLANDS, TAB_OPEN_ERROR_KEY, TabStripItem,
+    sorted_tab_errors, tab_banner_element_id, tab_connecting_element_id, tab_label,
+    tab_terminal_element_id, terminal_ws_path, visible_tabs,
 };
 use crate::{ApiBase, RestartOffer, Session, SessionStatus};
 
@@ -65,6 +67,27 @@ use crate::{ApiBase, RestartOffer, Session, SessionStatus};
 /// registered per island inside `mount()`, because a `File` on a DOM event
 /// is not something either renderer can hand to Rust (see the
 /// `attachments` module header).
+///
+/// ## Catch-up presentation (PLAN_M5.md item 5)
+///
+/// Every pane renders one more empty, terminal.js-owned element: the
+/// connecting placeholder that stands in front of a terminal while its
+/// attach replays what the user missed. This component's whole part in
+/// that is declarative — render the element, name it in the terminal's
+/// spec — because the reveal happens inside a `term.write()` completion
+/// callback, a moment the reactive layer has no way to observe.
+///
+/// ## Rename (PLAN_M5.md item 6)
+///
+/// The header carries the rename surface: clicking `rename` opens
+/// `rename::RenameForm` NEXT TO the title (never in place of it — a
+/// refusal has to leave the old name on screen), and what is typed is sent
+/// verbatim. Only the reply's TITLE is taken; the poll owns every dynamic
+/// field, so a slow rename can never roll status or tabs backwards. A
+/// refusal is shown under the header while the title stays what it was.
+/// The list has the same affordance on every row (`list::SessionRow`), and
+/// both are optimistic-then-poll-corrected in the same way — see `renamed`
+/// below.
 ///
 /// ## The attachment lease (PLAN_M4.md item 3)
 ///
@@ -145,6 +168,28 @@ pub(crate) fn SessionView(session: Session, on_back: EventHandler<()>) -> Elemen
     let mut restarting = use_signal(|| false);
     let mut confirming = use_signal(|| false);
     let mut restart_error = use_signal(|| None::<String>);
+    // The rename affordance (PLAN_M5.md item 6): whether the field is
+    // open, whether its request is in flight, the supervisor's own words
+    // if it refused, and this view's optimistic correction over `current`.
+    //
+    // The correction is the tab strip's `(value, observed_from)` scheme
+    // applied to a title, and it earns its keep for the same reason: the
+    // detail poll below can have a fetch in the air from before the rename
+    // landed, and committing that reply's older title would flip the
+    // header back for up to a full poll interval. Pairing the new title
+    // with the index of the first poll GUARANTEED to start after the
+    // rename's response is what tells "this reply cannot have carried it
+    // yet" apart from "the server disagrees".
+    //
+    // The draft is a signal here rather than inside `RenameForm` for the
+    // reason that component's docs give: a re-render can unmount the form
+    // for reasons the user did not cause, and a draft that died with it
+    // would silently discard what they had typed.
+    let mut renaming = use_signal(|| false);
+    let mut renaming_pending = use_signal(|| false);
+    let mut rename_error = use_signal(|| None::<String>);
+    let mut renamed = use_signal(|| None::<(String, u64)>);
+    let mut rename_draft = use_signal(String::new);
     // Counts restart ATTEMPTS, and versions every read of this session
     // against them. The detail poll below is a round trip that can outlive
     // a restart the user starts while one of its fetches is in flight;
@@ -296,6 +341,25 @@ pub(crate) fn SessionView(session: Session, on_back: EventHandler<()>) -> Elemen
                         !live.contains(id.as_str()) && index < *observed_from
                     });
                     closed_tabs.write().retain(|id| live.contains(id.as_str()));
+                    // The optimistic rename retires on exactly the two
+                    // reads that settle it — the server now reports this
+                    // title (it graduated), or a reply GUARANTEED to have
+                    // started after the rename's response completed
+                    // reports a different one (another client renamed it
+                    // afterwards, and the server wins). A reply that may
+                    // predate it says nothing either way and leaves it
+                    // alone; that bound is conservative rather than exact
+                    // (see `on_rename_submit`), which can only hold a
+                    // correction a little longer than needed.
+                    let settled = renamed
+                        .peek()
+                        .as_ref()
+                        .is_some_and(|(title, observed_from)| {
+                            &fresh.title == title || index >= *observed_from
+                        });
+                    if settled {
+                        renamed.set(None);
+                    }
                     current.set(fresh);
                 }
                 // Same per-target sleep split as `ListView`'s poll — see
@@ -386,6 +450,55 @@ pub(crate) fn SessionView(session: Session, on_back: EventHandler<()>) -> Elemen
     // same request shape and share the same in-flight guard.
     let mut confirm_restart = restart.clone();
     let mut fresh_restart = restart;
+
+    // The rename field's submit (PLAN_M5.md item 6). What the user typed
+    // goes to the supervisor verbatim (`api::rename_session`); what is
+    // decided here is only what to do with the answer.
+    //
+    // A success takes the reply's TITLE and nothing else, as the
+    // optimistic correction the poll then settles. Taking the whole
+    // `SessionInfo` would be the obvious move and is wrong: the reply is a
+    // snapshot from when the rename was handled, so a slow rename landing
+    // after a fresher poll would roll `status` and `tabs` BACKWARDS until
+    // the next tick — a rename silently reverting a status change is
+    // exactly the staleness `restart_epoch` exists to prevent elsewhere.
+    // The dynamic fields belong to the poll; a rename only ever knows
+    // about a label.
+    //
+    // A refusal leaves the field open with what the user typed still in it
+    // and puts the supervisor's own words on screen, while the title
+    // everywhere stays what it was; a control-character refusal is the
+    // case SPEC.md names, and its message is the contract.
+    let rename_base = base.clone();
+    let on_rename_submit = move |title: String| {
+        if renaming_pending() {
+            return;
+        }
+        renaming_pending.set(true);
+        rename_error.set(None);
+        let base = rename_base.clone();
+        let id = current.read().id.clone();
+        spawn(async move {
+            match rename_session(&base, &id, &title).await {
+                Ok(session) => {
+                    // Read AFTER the reply, never before the request: the
+                    // index names the first poll GUARANTEED to have started
+                    // after this response completed. A poll launched while
+                    // the POST was still in flight MAY also carry the new
+                    // title — the write lands before the reply is read — so
+                    // this is a conservative bound, and conservative in the
+                    // only safe direction (it can hold the correction a
+                    // little longer, never retire it on a reply that could
+                    // not have seen the rename).
+                    let observed_from = poll_sequence.peek().to_owned();
+                    renamed.set(Some((session.title, observed_from)));
+                    renaming.set(false);
+                }
+                Err(e) => rename_error.set(Some(e)),
+            }
+            renaming_pending.set(false);
+        });
+    };
 
     // The add-tab control. Unlike `ListView`'s create, navigating away
     // while this is in flight is deliberately NOT locked out: a stranded
@@ -552,6 +665,11 @@ pub(crate) fn SessionView(session: Session, on_back: EventHandler<()>) -> Elemen
         let mut specs = vec![serde_json::json!({
             "el": AGENT_TERMINAL_ELEMENT_ID,
             "banner": AGENT_BANNER_ELEMENT_ID,
+            // Where this terminal's connecting placeholder is written
+            // while its attach catches up (PLAN_M5.md item 5). Per island
+            // like the two above, because each terminal has its own socket
+            // and therefore its own catch-up phase.
+            "connecting": AGENT_CONNECTING_ELEMENT_ID,
             // Where this terminal's own upload indicator and upload
             // failures are written (PLAN_M4.md item 7). Per island, like
             // the banner and for the same reason: a transfer belongs to
@@ -574,6 +692,7 @@ pub(crate) fn SessionView(session: Session, on_back: EventHandler<()>) -> Elemen
             specs.push(serde_json::json!({
                 "el": tab_terminal_element_id(id),
                 "banner": tab_banner_element_id(id),
+                "connecting": tab_connecting_element_id(id),
                 "status": attachment_status_element_id(&tab_terminal_element_id(id)),
                 "path": terminal_ws_path(&spec_session_id, Some(id), &lease),
                 "gen": 0,
@@ -657,16 +776,92 @@ pub(crate) fn SessionView(session: Session, on_back: EventHandler<()>) -> Elemen
         .as_ref()
         .and_then(|id| tabs.iter().position(|candidate| candidate == id))
         .map(tab_label);
+    // The title as this view should show it: the server's, unless a rename
+    // this view performed has not been settled by a poll yet (see
+    // `renamed`). Derived per render rather than written back into
+    // `current`, so the correction can only ever be as long-lived as the
+    // poll takes to confirm it.
+    let shown_title = renamed
+        .read()
+        .as_ref()
+        .map(|(title, _)| title.clone())
+        .unwrap_or_else(|| shown.title.clone());
     rsx! {
         div { class: "layout",
             header { class: "titlebar",
                 button {
                     class: "btn back-button",
-                    onclick: move |_| on_back.call(()),
+                    // Refused while a rename is in flight, the same
+                    // ownership rule `ListView`'s `nav_locked` enforces for
+                    // its own in-flight operations: leaving unmounts this
+                    // component, and with it the task that would have shown
+                    // the supervisor's refusal — so a rename could fail
+                    // with nothing said about it anywhere, which SPEC.md's
+                    // visible-failure rule does not allow.
+                    disabled: renaming_pending(),
+                    onclick: move |_| {
+                        if renaming_pending() {
+                            return;
+                        }
+                        on_back.call(());
+                    },
                     "← back",
                 }
-                span { class: "title", "{shown.title}" }
+                // SPEC.md puts rename on both surfaces, and here it sits
+                // where the title already is. The title STAYS while the
+                // field is open rather than being replaced by it, and that
+                // is a requirement rather than a layout preference: a
+                // refused rename must leave the old title on screen (the
+                // draft in the field is precisely what the supervisor
+                // rejected), so replacing it would make the only visible
+                // name the one that does not exist.
+                span { class: "title", "{shown_title}" }
+                if renaming() {
+                    RenameForm {
+                        draft: rename_draft,
+                        busy: renaming_pending(),
+                        on_submit: on_rename_submit,
+                        on_cancel: move |_| {
+                            renaming.set(false);
+                            // The refusal goes with the field that
+                            // produced it: leaving it on screen after the
+                            // user backed out would describe an edit that
+                            // no longer exists.
+                            rename_error.set(None);
+                        },
+                    }
+                } else {
+                    button {
+                        r#type: "button",
+                        class: "btn session-rename",
+                        onclick: move |_| {
+                            // Seeded from the title on screen right now, so
+                            // reopening the field starts from what the
+                            // session is currently called; the draft
+                            // deliberately outlives a cancel, since the
+                            // next open reseeds it anyway.
+                            rename_draft.set(shown_title.clone());
+                            // Cleared on OPEN as well as on cancel: a
+                            // refusal survives until something supersedes
+                            // it, and reopening the field to try again is
+                            // exactly that — leaving the old message over
+                            // a fresh attempt would make it look like the
+                            // new one had already failed.
+                            rename_error.set(None);
+                            renaming.set(true);
+                        },
+                        "rename"
+                    }
+                }
                 span { class: "meta", "{shown.cwd} — {shown.invocation}" }
+            }
+            // The supervisor's own words on its own row under the header,
+            // for the reason `.restart-error` sits below its controls: a
+            // refusal names what is wrong with the title, and squeezing it
+            // into the titlebar's one non-wrapping line would truncate the
+            // sentence that says what to fix.
+            if let Some(err) = rename_error.read().clone() {
+                div { class: "rename-error", "{err}" }
             }
             // SPEC.md: "Opening an interrupted session offers
             // restart-with-resume" — which is why this leads the view
@@ -863,6 +1058,25 @@ pub(crate) fn SessionView(session: Session, on_back: EventHandler<()>) -> Elemen
                     "data-terminal": "agent",
                     div { id: "{AGENT_BANNER_ELEMENT_ID}", class: "banner" }
                     div { id: "{AGENT_TERMINAL_ELEMENT_ID}", class: "terminal" }
+                    // Empty, hidden, and owned by terminal.js exactly like
+                    // the banner beside it: the reveal it performs happens
+                    // inside a `term.write()` completion callback
+                    // (PLAN_M5.md item 5), which is not a moment the
+                    // reactive layer can be driven from — and routing it
+                    // through the eval channel would put the one surface a
+                    // catching-up terminal shows on the channel that is
+                    // dead on wry's WKWebView (MT-5).
+                    //
+                    // Overlaid rather than in flow, for the reason the
+                    // attachment status line below documents: an in-flow
+                    // element would take height from the terminal, and the
+                    // per-island ResizeObserver would answer with a real
+                    // pty resize — so every single attach would reflow the
+                    // pane twice.
+                    div {
+                        id: "{AGENT_CONNECTING_ELEMENT_ID}",
+                        class: "terminal-connecting",
+                    }
                     // Empty, hidden, and never touched by Dioxus again —
                     // terminal.js owns its content for the same reason it
                     // owns the banner's: an upload's progress and failures
@@ -894,6 +1108,13 @@ pub(crate) fn SessionView(session: Session, on_back: EventHandler<()>) -> Elemen
                         if index < MAX_MOUNTED_TAB_ISLANDS {
                             div { id: "{tab_banner_element_id(tab_id)}", class: "banner" }
                             div { id: "{tab_terminal_element_id(tab_id)}", class: "terminal" }
+                            // This tab's own catch-up surface — see the
+                            // agent pane's for why it is overlaid and why
+                            // terminal.js owns its content.
+                            div {
+                                id: "{tab_connecting_element_id(tab_id)}",
+                                class: "terminal-connecting",
+                            }
                             // Last, and overlaid — see the agent pane's
                             // own status element above.
                             div {

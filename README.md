@@ -4,20 +4,23 @@ Run coding agents (Claude Code, Codex, other terminal agents) on machines you co
 interface, through their real TUIs. See SPEC.md for what this is and is not, SPEC_impl.md for how it is built and why,
 and PLAN.md for where the build currently stands.
 
-NOTE: This is milestone-4 software: several sessions at once, one host, argv-driven setup. Sessions survive a supervisor
-restart (persisted metadata, and a still-viewable terminal whenever the private tmux server survived too), a host reboot
-classifies previously-running sessions as interrupted rather than guessing, and a user-stopped session keeps its
-"stopped by user" qualifier durably. Restart is live too: an interrupted (or exited, or errored) session relaunches its
-agent — resuming its own Claude Code or Codex conversation where that conversation was captured, and saying plainly that
-it is launching fresh where it was not. On Linux hosts with a systemd user manager, stopping a session also kills its
-launch's own cgroup before the portable process sweep, which catches descendants that daemonized away from both (see
-SPEC_impl.md for what that does and does not promise). Usable for real work, minimal in everything else. Two caveats
-worth knowing before that real work: the helm's loopback API carries no authentication yet (the web token is a later
-milestone), so any local account on the helm's machine can drive your sessions — treat multi-user hosts accordingly; and
-every agent invocation (the startup one below, or one entered through the GUI's create dialog) is ordinary argv, visible
-to every local user via `ps`, so credentials do not belong in it.
+NOTE: This is milestone-5 software: several sessions at once, one host, argv-driven setup. Reopening a session lands at
+the tail of its history instead of replaying it as a scroll animation — for any replay within the client's buffering
+bounds, which is every ordinary one; an unusually large replay, or one that stalls part-way, falls back to showing the
+catch-up as it arrives instead of hiding it. A session can be renamed from either the list or its own view. Sessions
+survive a supervisor restart (persisted metadata, and a still-viewable terminal whenever the private tmux server
+survived too), a host reboot classifies previously-running sessions as interrupted rather than guessing, and a
+user-stopped session keeps its "stopped by user" qualifier durably. Restart is live too: an interrupted (or exited, or
+errored) session relaunches its agent — resuming its own Claude Code or Codex conversation where that conversation was
+captured, and saying plainly that it is launching fresh where it was not. On Linux hosts with a systemd user manager,
+stopping a session also kills its launch's own cgroup before the portable process sweep, which catches descendants that
+daemonized away from both (see SPEC_impl.md for what that does and does not promise). Usable for real work, minimal in
+everything else. Two caveats worth knowing before that real work: the helm's loopback API carries no authentication yet
+(the web token is a later milestone), so any local account on the helm's machine can drive your sessions — treat
+multi-user hosts accordingly; and every agent invocation (the startup one below, or one entered through the GUI's create
+dialog) is ordinary argv, visible to every local user via `ps`, so credentials do not belong in it.
 
-## Trying it (M4)
+## Trying it (M5)
 
 Prerequisites: Rust with the `wasm32-unknown-unknown` target (`rustup target add wasm32-unknown-unknown`), tmux on every
 host involved, and `cargo binstall dioxus-cli@0.7.9` (or `cargo install dioxus-cli@0.7.9` — match the workspace's dioxus
@@ -47,7 +50,10 @@ Ubuntu 24.04 ships 3.4.
   alive; exited with the code when known, qualified "stopped by user" when you stopped it; interrupted after a host
   reboot; error, with the reason, when the agent's own command could not start at all), refreshing on its own every few
   seconds. Click a row to open its terminal; a back control returns to the list. Close the tab, reopen it later: same
-  session, scrollback intact, the agent never noticed.
+  session, scrollback intact, the agent never noticed. Reopening shows a brief "connecting — catching up" line instead
+  of the history flying past: the terminal appears once, already at the end of what you missed. A replay that outgrows
+  the client's buffer, or that goes quiet part-way, degrades to showing the rest as it arrives — visible catch-up rather
+  than a hidden terminal, and never dropped output.
 - "new session" opens an inline form (working directory and agent command required, title optional); submitting launches
   the agent and takes you straight into its terminal. A bad working directory fails the create in place, with the
   supervisor's own error shown next to the form and nothing created. A bad EXECUTABLE (a typo'd command, a path that
@@ -62,9 +68,11 @@ Ubuntu 24.04 ships 3.4.
   the form says so rather than quietly recreating it. The create API additionally accepts explicit agent-kind and
   resume-template overrides for invocations that basename recognition cannot classify (a wrapper script, `env claude`),
   which the form does not expose.
-- Each row also has stop and delete. Stop kills the agent and its whole process tree; the session stays listed, its
-  terminal still viewable. Delete removes the session and its stored state — with an inline confirmation first whenever
-  the agent might still be alive.
+- Each row also has rename, stop and delete. Rename opens a field in place — the same control the session view's header
+  has — and what you type is sent exactly as typed; a title the supervisor refuses (control characters in it) comes back
+  with the supervisor's own words while the old name stays. Stop kills the agent and its whole process tree; the session
+  stays listed, its terminal still viewable. Delete removes the session and its stored state — with an inline
+  confirmation first whenever the agent might still be alive.
 - Opening a session leads with what restarting it would do to the conversation, and the control says which: "resume
   conversation" when this session's own agent conversation was captured, "restart (fresh launch)" when it was not. A
   restart reuses the session's terminal when it still exists — the previous run stays above the new one in scrollback —

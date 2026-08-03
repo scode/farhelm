@@ -1,5 +1,5 @@
 //! The helm's HTTP contract, as this UI speaks it: one `async fn` per
-//! endpoint (fetch/create/stop/restart/delete/tab-open/tab-close), each
+//! endpoint (fetch/create/stop/restart/rename/delete/tab-open/tab-close), each
 //! flattening every failure — transport, status, or body-read — into a
 //! single displayable `String` rather than a typed error. That flattening
 //! is deliberate, not laziness: every caller (`list::ListView`,
@@ -489,6 +489,50 @@ pub(crate) async fn restart_session(
 ) -> Result<Session, String> {
     let url = format!("{base}/api/sessions/{}/restart", encode_path_segment(id));
     let body = serde_json::json!({ "mode": mode, "stop_if_running": stop_if_running });
+    let resp = reqwest::Client::new()
+        .post(&url)
+        .json(&body)
+        .send()
+        .await
+        .map_err(|e| e.to_string())?;
+    if !resp.status().is_success() {
+        let status = resp.status();
+        let detail = resp
+            .text()
+            .await
+            .map_err(|error| format!("POST {url}: {status}: reading error response: {error}"))?;
+        let detail = detail.trim();
+        return Err(if detail.is_empty() {
+            format!("POST {url}: {status}")
+        } else {
+            detail.to_string()
+        });
+    }
+    resp.json::<Session>().await.map_err(|e| e.to_string())
+}
+
+/// POST the rename endpoint for one session, returning the session as the
+/// supervisor now describes it (SPEC.md's rename verb; PLAN_M5.md item 6).
+///
+/// `title` goes on the wire EXACTLY as the user typed it — no trimming, no
+/// emptiness check, no control-character screening, deliberately unlike
+/// `create_session` above (which trims only to decide between "auto-
+/// generate" and an explicit title, a distinction rename does not have:
+/// there is no "un-name this session", and an explicit empty title is a
+/// legal rename). Three reasons, all pointing the same way: the
+/// supervisor's refusal text is the contract a user acts on, a second copy
+/// of its rules here would drift from it, and rewriting caller data before
+/// sending it is the exact move the supervisor itself refuses to make.
+///
+/// The reply is the session's freshly recomputed state, not an ack — the
+/// supervisor re-probes status and rediscovers tabs while building it — so
+/// a caller can paint the new title from this answer instead of waiting for
+/// its next poll. Same error-surfacing shape as `restart_session`: the
+/// supervisor's own words, which for the control-character refusal is the
+/// whole point of the feature.
+pub(crate) async fn rename_session(base: &str, id: &str, title: &str) -> Result<Session, String> {
+    let url = format!("{base}/api/sessions/{}/rename", encode_path_segment(id));
+    let body = serde_json::json!({ "title": title });
     let resp = reqwest::Client::new()
         .post(&url)
         .json(&body)

@@ -40,6 +40,10 @@
 //!   the renderer-free derivations (which tabs to show, their labels and
 //!   DOM ids, the WebSocket path) plus the strip's one presentational
 //!   piece, `TabStripItem`, and the close-confirmation wording.
+//! - `rename`: `RenameForm`, the one control both rename surfaces share
+//!   (PLAN_M5.md item 6) — a single-line field that sends what the user
+//!   typed verbatim, with the request, the optimistic paint, and the
+//!   refusal text left to whichever surface mounted it.
 //! - `attachments`: the attachment domain of paste/drop interception
 //!   (PLAN_M4.md item 7) — the classification rule, the naming rule, the
 //!   upload endpoint, and the wording of every message a transfer can put
@@ -50,7 +54,7 @@
 //!   calling into `api` for I/O and `tabs`/`attachments` for the pure
 //!   derivations.
 //!
-//! All five are private modules with `pub(crate)` entry points: nothing
+//! All six are private modules with `pub(crate)` entry points: nothing
 //! outside this crate has a legitimate reason to reach into any of them,
 //! so `main.rs` only ever sees `App`/`ApiBase`, both defined and exported
 //! here.
@@ -61,6 +65,7 @@ use serde::Deserialize;
 mod api;
 mod attachments;
 mod list;
+mod rename;
 mod session_view;
 mod tabs;
 

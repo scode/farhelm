@@ -31,6 +31,19 @@ use crate::api::{encode_path_segment, encode_query_value};
 pub(crate) const AGENT_TERMINAL_ELEMENT_ID: &str = "terminal";
 pub(crate) const AGENT_BANNER_ELEMENT_ID: &str = "term-banner";
 
+/// The DOM id of the agent terminal's connecting placeholder — the surface
+/// that stands in front of a terminal while its attach catches up
+/// (PLAN_M5.md item 5).
+///
+/// New in M5, unlike the two ids above: an empty xterm used to mount
+/// visible and the only overlay a pane had was its detach banner, so there
+/// was nothing standing in front of the catch-up to reuse. Rendered empty
+/// by `SessionView`; terminal.js owns its content, for the same reason it
+/// owns the banner's — the reveal happens inside a `term.write()`
+/// completion callback, which nothing on the Dioxus side can be driven
+/// from.
+pub(crate) const AGENT_CONNECTING_ELEMENT_ID: &str = "term-connecting";
+
 /// How many TAB terminals this view will ever mount at once. The agent
 /// terminal is always mounted and is not counted against it.
 ///
@@ -89,6 +102,16 @@ pub(crate) fn tab_terminal_element_id(tab_id: &str) -> String {
 /// why both are derived from the id rather than the position.
 pub(crate) fn tab_banner_element_id(tab_id: &str) -> String {
     format!("term-banner-{tab_id}")
+}
+
+/// A tab's connecting placeholder (PLAN_M5.md item 5), derived from the tab
+/// id for the same reason its two siblings are.
+///
+/// Every terminal needs its own: each has its own socket and therefore its
+/// own catch-up phase, so a session view can legitimately hold one terminal
+/// still catching up next to another that went live minutes ago.
+pub(crate) fn tab_connecting_element_id(tab_id: &str) -> String {
+    format!("term-connecting-{tab_id}")
 }
 
 /// A tab's display label: purely positional, one-based (PLAN_M4.md item
@@ -334,6 +357,30 @@ mod tests {
         assert_eq!(tab_banner_element_id("t1"), "term-banner-t1");
         assert_ne!(tab_terminal_element_id("t1"), tab_terminal_element_id("t2"));
         assert_ne!(tab_terminal_element_id("t1"), tab_banner_element_id("t1"));
+    }
+
+    /// Each terminal's connecting placeholder (PLAN_M5.md item 5) is its
+    /// own element, distinct from every other id the same pane carries.
+    /// This is what keeps one terminal's catch-up from painting over a
+    /// sibling that is already live — panes are stacked and every tab
+    /// attaches concurrently, so the ids are the only thing separating
+    /// them. The agent's is asserted as a literal because terminal.js and
+    /// the browser suite both name it.
+    #[test]
+    fn connecting_placeholder_ids_are_distinct_per_terminal() {
+        assert_eq!(AGENT_CONNECTING_ELEMENT_ID, "term-connecting");
+        assert_eq!(tab_connecting_element_id("t1"), "term-connecting-t1");
+        assert_ne!(
+            tab_connecting_element_id("t1"),
+            tab_connecting_element_id("t2")
+        );
+        for id in [
+            tab_terminal_element_id("t1"),
+            tab_banner_element_id("t1"),
+            AGENT_CONNECTING_ELEMENT_ID.to_string(),
+        ] {
+            assert_ne!(tab_connecting_element_id("t1"), id);
+        }
     }
 
     /// The lease rides on EVERY terminal, the agent's included: a view

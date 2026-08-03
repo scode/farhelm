@@ -55,6 +55,62 @@
 // same visible, deliberate takeover the other client performed, not an
 // accident.
 //
+// ## The catch-up buffer (PLAN_M5.md item 5)
+//
+// An attach starts with a REPLAY: every byte the supervisor retained for
+// this terminal, written before the live stream begins. Through M4 those
+// bytes went into xterm.js as they arrived, so reopening a session made
+// the user watch their whole history scroll past — the cost that grows
+// with retained size and that M5 exists to remove.
+//
+// So the bytes of the catch-up phase are BUFFERED here instead, the
+// terminal element is hidden behind a connecting placeholder, and the
+// whole buffer lands as ONE `term.write()` whose completion callback is
+// what reveals the terminal — at the tail, with no intermediate frame
+// ever painted. That is the entire feature: the marker is a PRESENTATION
+// signal and nothing in this file (or anywhere else) may branch anything
+// else on it (`ControlMsg::ReplayComplete`'s own docs).
+//
+// The phase ends on whichever of these comes first, and every one of them
+// WRITES the buffer rather than dropping it:
+//
+// - `{"type":"replay_complete"}`, the normal end.
+// - A detach notice, or the socket closing or erroring: the catch-up was
+//   ENDED, and the supervisor owes no marker to an attach it tore down
+//   mid-replay (again `ControlMsg::ReplayComplete`'s docs — a
+//   presentation that waits for the marker alone hides those terminals
+//   forever).
+// - Any of the three graceful-degradation bounds below
+//   (`REPLAY_BUFFER_LIMIT`, `REPLAY_CHUNK_LIMIT`,
+//   `REPLAY_IDLE_TIMEOUT_MS`), which fall back to today's
+//   batched-but-visible catch-up rather than to an error — with ONE
+//   exception, the socket that never finished connecting, which ends the
+//   phase into the detach banner instead of into a terminal that cannot
+//   carry what the user types (see `armIdleTimer`).
+//
+// The bounds are also a TRUST boundary, not only a robustness one. Under
+// `--ssh` the supervisor is a different machine, and this phase is the one
+// place this file accumulates its bytes instead of handing them straight
+// to xterm.js — so "hold until the peer says stop" has to be bounded in
+// bytes, in frames, AND in time, or a hostile or broken peer decides how
+// much memory this page uses and how long its terminal stays hidden.
+//
+// One catch-up phase per ATTACH, never re-entered: a tmux `%pause`
+// recovery replays retained history into the SAME attachment mid-stream
+// with no marker of its own, and treating that as a second catch-up would
+// hide a live terminal for as long as the recovery took. A reconnect is a
+// new socket and therefore a new mount, which buffers again by
+// construction.
+//
+// Nothing this phase schedules may outlive its mount. `term.write()`'s
+// completion callback still runs after `dispose()` (probed directly
+// against the vendored xterm.js), and the idle timer is a plain
+// `setTimeout`, so both can fire into a torn-down island whose DOM nodes
+// a REPLACEMENT mount is already using — revealing a terminal that is
+// mid-catch-up, or throwing inside a callback nobody is watching. Every
+// deferred path therefore checks this mount's own `alive` token, which
+// `unmount()` clears before it disposes anything.
+//
 // ## Paste and drop interception (PLAN_M4.md item 7)
 //
 // SPEC.md's attachments contract quantifies over "any of a session's
@@ -113,6 +169,123 @@
   // edit to one mark must not silently un-derive the ratio this comment
   // describes.
   const LOW_WATER = HIGH_WATER / 4;
+
+  // How many buffered replay bytes this file will hold before giving up on
+  // the no-intermediate-paint presentation and going live (PLAN_M5.md item
+  // 5's first graceful-degradation bound).
+  //
+  // The number is the helm's own worst-case-replay arithmetic, not a round
+  // guess (`TERM_EVENT_QUEUE` in farhelm-helm/src/client.rs, which sizes
+  // its queue from the same two constants): tmux retains at most
+  // `HISTORY_LIMIT` = 12,000 lines, and a captured line is a terminal row
+  // plus its `capture-pane -e` escapes, generously bounded at 256 bytes —
+  // 12,000 × 256 B ≈ 3 MiB. A legitimately wide or heavily styled history
+  // CAN exceed that, which is exactly why crossing it degrades to a
+  // batched-but-visible catch-up instead of erroring; the buffer is
+  // written, never dropped, so no byte is ever lost to this bound.
+  //
+  // It also sits below HIGH_WATER by design: the single flush write can
+  // therefore never, on its own, push the unwritten-byte counter past the
+  // pause mark, so buffering cannot manufacture a flow-control pause that
+  // the same bytes arriving live would not have caused.
+  const REPLAY_BUFFER_LIMIT = 3 * 1024 * 1024;
+
+  // How many buffered FRAMES a catch-up may hold, alongside the byte bound
+  // above.
+  //
+  // Bytes alone do not bound this: each frame is kept as its own
+  // `Uint8Array` until the flush, and a peer sending millions of one-byte
+  // frames stays far below 3 MiB of payload while costing a per-object
+  // overhead this page has no bound on at all. The supervisor chunks a
+  // replay at 32 KiB, so even a full 3 MiB history is ~96 frames — 1024
+  // leaves an order of magnitude for a peer that chunks differently while
+  // still refusing the pathological case.
+  const REPLAY_CHUNK_LIMIT = 1024;
+
+  // How long a catch-up may go with NO bytes and NO marker before the same
+  // degradation applies (PLAN_M5.md item 5's second bound).
+  //
+  // Idle-based rather than total-duration, deliberately: a slow but
+  // PROGRESSING replay — a deep history over `--ssh`, a loaded host — is
+  // the case the buffering exists for, and a total-duration cap would
+  // abandon it precisely when it is working. What must not persist is a
+  // stream that has gone quiet without a marker. A lost marker is a
+  // protocol violation, but the containment cannot be allowed to depend on
+  // never having one, because the failure it would otherwise produce is a
+  // terminal hidden forever.
+  //
+  // Five seconds is far longer than any gap inside a chunked replay (the
+  // supervisor writes 32 KiB frames back to back) or than an attach
+  // cutover, and short enough that a lost marker costs a blink of
+  // "connecting…" rather than a wedged view.
+  //
+  // Armed at socket CONSTRUCTION rather than at `onopen`, which is the
+  // only placement that also covers a socket stuck in CONNECTING: a
+  // handshake that never completes produces no bytes, no marker, and no
+  // close, so an open-triggered watchdog would never start and the
+  // terminal would stay hidden past every other bound.
+  //
+  // That coverage comes with an obligation, discharged where the timer
+  // fires: the two states it can expire in are NOT the same outcome. A
+  // socket that opened and went quiet degrades to a visible, live catch-up;
+  // a socket still CONNECTING has no path for input at all, and revealing
+  // a live-looking terminal for it would make typing silently go nowhere —
+  // exactly the failure SPEC.md requires be reported rather than inferred.
+  const REPLAY_IDLE_TIMEOUT_MS = 5000;
+
+  // What stands in front of a terminal for the duration of its catch-up.
+  // Deliberately plain and unalarming: nothing has gone wrong, and this is
+  // the state EVERY reattach passes through. In-page DOM, like every other
+  // notice this file paints, because wry's WKWebView has no native dialogs
+  // at all (MT-5).
+  const CONNECTING_TEXT = "connecting — catching up on this terminal's history…";
+
+  // What the banner says when the watchdog expires on a socket that never
+  // finished connecting.
+  //
+  // It names the CONSEQUENCE, not the mechanism: what matters to the user
+  // is that this terminal cannot carry input, which they would otherwise
+  // discover by typing into it and watching nothing happen. It rides the
+  // detach banner because that is this file's established surface for "this
+  // terminal is not carrying your session anymore", and it says how to get
+  // back, because unlike a detach there is no reclaim control for it.
+  const UNCONNECTED_TEXT =
+    "Not connected: this terminal never finished connecting, so nothing typed here would "
+    + "reach the session — reopen the session to try again.";
+
+  /**
+   * This mount's catch-up controls, seeded from the three constants above
+   * and then overridden by `window.__farhelmTestReplay` if the page
+   * defines one.
+   *
+   * TEST-ONLY, and the one place in this file where a test hook feeds
+   * PRODUCTION behavior rather than only observing it — so the reason has
+   * to be good. It is: the contracts this phase exists for are exactly the
+   * ones a real supervisor will not produce on demand. It always sends its
+   * marker, promptly; it never withholds one; and no fixture in the suite
+   * can make it replay 3 MiB or go quiet for five seconds mid-catch-up.
+   * `holdMarker` keeps the phase open so a test can assert what is on
+   * screen DURING it, and the three limits let the degradation bounds be
+   * crossed in milliseconds instead of not at all.
+   *
+   * A production page never defines the global, so the constants above are
+   * the operative values everywhere but the browser suite. Read once per
+   * mount into that mount's own object: nothing here is shared between
+   * islands, and a test that forgets to clear the global still only
+   * affects the page it set it on.
+   */
+  function replayControls() {
+    const overrides = window.__farhelmTestReplay || {};
+    return {
+      holdMarker: !!overrides.holdMarker,
+      heldReason: null,
+      limits: {
+        bufferBytes: overrides.bufferBytes || REPLAY_BUFFER_LIMIT,
+        bufferChunks: overrides.bufferChunks || REPLAY_CHUNK_LIMIT,
+        idleMs: overrides.idleMs || REPLAY_IDLE_TIMEOUT_MS,
+      },
+    };
+  }
 
   // Every mounted terminal, keyed by the DOM element id it was mounted
   // into. Doubles as the mount guard it replaced: `mount()` refuses to run
@@ -790,6 +963,53 @@
   }
 
   /**
+   * Show or hide one terminal's connecting placeholder — the surface that
+   * stands in front of a terminal for its whole catch-up phase.
+   *
+   * NEW surface as of PLAN_M5.md item 5, not a reuse of the banner: a
+   * banner reports that something went wrong and stays until the
+   * attachment is rebuilt, while this says the ordinary thing every
+   * reattach does and disappears on its own. The element itself is
+   * rendered (empty) by Dioxus, like the banner and the attachment status
+   * line, and its CONTENT is this file's — the reveal has to happen from
+   * inside a `term.write()` completion callback, which is not something
+   * the reactive layer can be driven from.
+   *
+   * Tolerates a missing element rather than throwing: a caller that
+   * predates the field (or a future one that renders no placeholder) must
+   * still get a working, buffered terminal — the no-intermediate-paint
+   * contract is carried by hiding the TERMINAL, and this is what explains
+   * that state to the user.
+   */
+  function paintConnecting(connectingId, connecting) {
+    if (!connectingId) return;
+    const node = document.getElementById(connectingId);
+    if (!node) return;
+    node.textContent = connecting ? CONNECTING_TEXT : "";
+    // Cleared back to the stylesheet's own `display: none`, the same way
+    // the attachment status line hides itself when it has nothing to say.
+    node.style.display = connecting ? "block" : "";
+  }
+
+  /**
+   * Hand one terminal element back to the stylesheet and take its
+   * connecting placeholder down — the exit from the catch-up presentation,
+   * whether it is reached by revealing (the normal end), by a mount that
+   * failed and rolled itself back, or by an unmount.
+   *
+   * The visibility style is REMOVED rather than set to `visible`, and that
+   * is load-bearing: `visibility` inherits, and an unselected pane hides
+   * its whole subtree with it (app.css's `.terminal-pane`), so an explicit
+   * `visible` here would override the pane and paint a background tab's
+   * terminal over the selected one. Removing the declaration restores
+   * inheritance instead of arguing with it.
+   */
+  function showTerminal(el, connectingId) {
+    if (el) el.style.visibility = "";
+    paintConnecting(connectingId, false);
+  }
+
+  /**
    * Paint one terminal's banner, optionally with the "take control" button
    * that reclaims a session this view lost.
    *
@@ -825,12 +1045,14 @@
      * session view currently wants (see this file's header for why the
      * diff is computed here rather than in Rust).
      *
-     * Each spec is `{el, banner, status, path, gen, primary, focus}`: the
-     * DOM element to mount into, the element its detach/error banner
-     * writes to, the element its attachment progress and failures write
-     * to, the helm WebSocket path (already carrying `?tab=`/`?lease=`), a
-     * remount counter, whether this island owns the legacy singleton
-     * globals, and whether it should hold keyboard focus.
+     * Each spec is `{el, banner, status, connecting, path, gen, primary,
+     * focus}`: the DOM element to mount into, the element its detach/error
+     * banner writes to, the element its attachment progress and failures
+     * write to, the element its connecting placeholder writes to while it
+     * catches up (PLAN_M5.md item 5), the helm WebSocket path (already
+     * carrying `?tab=`/`?lease=`), a remount counter, whether this island
+     * owns the legacy singleton globals, and whether it should hold
+     * keyboard focus.
      *
      * `attach` is the paste/drop policy every island of this view shares
      * (farhelm-ui/src/attachments.rs) — one object rather than a copy per
@@ -1073,6 +1295,21 @@
       // mount, so a mount that throws after installing them must be able
       // to reach them from the catch block.
       let attachments = null;
+      // The mount point itself, hoisted for the same reason: this mount
+      // HIDES it behind the connecting placeholder (PLAN_M5.md item 5),
+      // and the element belongs to Dioxus and outlives a failed mount — so
+      // a mount that throws after hiding it must be able to hand it back
+      // from the catch. Without that, a tab whose mount failed would sit
+      // behind "connecting…" forever, with its own failure banner painted
+      // over an invisible terminal.
+      let el = null;
+      // Invalidates this mount's catch-up state (its `alive` token and its
+      // idle timer), once that state exists. Hoisted for the same
+      // catch-block reason as everything above, and for a sharper version
+      // of it: a throw AFTER the timer is armed would otherwise leave it
+      // running with nothing to stop it, and it would then flush a replay
+      // into the terminal this catch block just disposed.
+      let disposeCatchUp = null;
       let bannered = false;
       function showBanner(text, reclaimable) {
         // Sticky by design: the first banner wins for the life of the
@@ -1085,7 +1322,20 @@
       }
 
       try {
-        const el = document.getElementById(spec.el);
+        el = document.getElementById(spec.el);
+        // Hidden from before xterm is even constructed, and revealed only
+        // once this attach's catch-up has landed (PLAN_M5.md item 5).
+        // Today an empty xterm mounts VISIBLE and the replay scrolls
+        // through it, which is the intermediate state this milestone
+        // removes — so the hiding has to precede `term.open()` rather than
+        // follow it, or the empty grid is itself a frame the user sees.
+        //
+        // `visibility`, not `display`, for the reason `.terminal-pane`
+        // documents in app.css: a `display: none` element has no layout
+        // box, so `fit()` would size this terminal to zero columns and the
+        // pty would be told about it.
+        el.style.visibility = "hidden";
+        paintConnecting(spec.connecting, true);
         term = new Terminal({
           // At most the tmux history floor (`HISTORY_LIMIT`,
           // farhelm-supervisor/src/tmux.rs), never more: PLAN_M2_5.md
@@ -1120,6 +1370,10 @@
           `${base}${spec.path}${sep}cols=${term.cols}&rows=${term.rows}`,
         );
         ws.binaryType = "arraybuffer";
+        // The catch-up's idle watchdog is armed further down, the moment
+        // the state it guards exists — at CONSTRUCTION rather than at
+        // `onopen`, since a socket that never finishes connecting
+        // produces no bytes, no marker, and no close to end the phase on.
 
         // Watermark state for THIS attachment only. Declared inside
         // mount() (not module scope) so every fresh WS — a reload, a
@@ -1154,6 +1408,53 @@
           paused: false,
           pauseCount: 0,
           resumeCount: 0,
+          // The catch-up phase's own observability (PLAN_M5.md's testing
+          // decisions). The acceptance is deliberately NOT "sample the
+          // scroll position and hope" — sampling can miss frames between
+          // observations and proves nothing about paint — so the facts a
+          // test needs are RECORDED here as they happen, by the code that
+          // is the only witness to them:
+          //
+          // - `buffering`: still holding bytes back.
+          // - `bufferedBytes`/`bufferedChunks`: how much is held RIGHT
+          //   NOW, in each of the two currencies the bounds are counted
+          //   in. Both drop back to zero at the flush, since they describe
+          //   current holdings rather than running totals — and a test
+          //   crossing either bound needs the baseline a REAL replay
+          //   already put there, which is not a number this suite can
+          //   predict.
+          // - `writesWhileHidden`: how many `term.write()` calls this
+          //   island made before the terminal was revealed. The whole
+          //   milestone is that this is ONE for a replay of any depth.
+          // - `revealReason`: which of the phase's EIGHT endings fired —
+          //   `marker`, `detached`, `closed`, `error`, `size`, `chunks`,
+          //   `idle`, `unconnected` — and `null` until one does. The last
+          //   one is the odd one out: it ends the phase WITHOUT presenting
+          //   a usable terminal (see `armIdleTimer`).
+          // - `revealed`: set INSIDE the reveal, so a test that waits on
+          //   it is guaranteed the two fields below have been written.
+          //   `revealReason` is not that signal: it is recorded when the
+          //   phase ends, which is one asynchronous write-completion
+          //   ahead of the reveal itself.
+          // - `revealedInWriteCallback`: whether the reveal came from the
+          //   flush write's completion callback, i.e. after xterm.js had
+          //   consumed the whole replay, rather than optimistically.
+          // - `viewportAtTailOnReveal`: whether the FIRST VISIBLE FRAME
+          //   was at the tail, captured at the instant of the reveal.
+          //
+          // `holdMarker`/`heldReason`/`limits` come from `replayControls`
+          // — test CONTROLS rather than observations; see that function.
+          replay: {
+            buffering: true,
+            bufferedBytes: 0,
+            bufferedChunks: 0,
+            writesWhileHidden: 0,
+            revealReason: null,
+            revealed: false,
+            revealedInWriteCallback: false,
+            viewportAtTailOnReveal: null,
+            ...replayControls(),
+          },
         };
 
         function sendControl(type) {
@@ -1163,40 +1464,200 @@
         }
 
         // Sanity backstop, NOT part of the flow-control contract itself:
-        // pause/resume above should keep the backlog within a few MiB of
-        // HIGH_WATER. Landing here means flow control is not doing its
-        // job (a pause message that never reached the supervisor, a
-        // socket the browser thinks is open but isn't) and the backlog is
-        // now within striking distance of term.write()'s ~50MB silent-
-        // discard cliff (this file's own docs, above) — worth one log
-        // line, not a spammy one per byte past the mark.
+        // pause/resume in `writeBytes` below should keep the backlog
+        // within a few MiB of HIGH_WATER. Landing here means flow control
+        // is not doing its job (a pause message that never reached the
+        // supervisor, a socket the browser thinks is open but isn't) and
+        // the backlog is now within striking distance of term.write()'s
+        // ~50MB silent-discard cliff (this file's own docs, above) —
+        // worth one log line, not a spammy one per byte past the mark.
         const BACKLOG_SANITY_BOUND = 32 * 1024 * 1024;
         let sanityWarned = false;
 
-        ws.onmessage = (ev) => {
-          if (typeof ev.data === "string") {
-            // Text frames are control JSON from the helm; today that is
-            // only the detach notice (SPEC.md: takeover must be visible).
-            // A session-scoped takeover arrives as one such notice per
-            // terminal the losing client held (PLAN_M4.md item 3 —
-            // there is deliberately no session-wide takeover message), so
-            // each island banners its own, independently.
-            const msg = JSON.parse(ev.data);
-            if (msg.type === "detached") {
-              // The latch goes up BEFORE the banner so the banner it
-              // paints can already carry the reclaim control (see this
-              // file's header). Only a session-scoped takeover latches;
-              // every other reason is a detach this view caused or
-              // recovers from on its own.
-              const lost = msg.reason === TAKEOVER_DETACH_REASON;
-              if (lost) farhelmTerm.latchTakeover(msg.reason);
-              showBanner(`Detached: ${msg.reason}`, lost);
+        // ------------------------------------------------------------
+        // Catch-up buffering (PLAN_M5.md item 5; this file's header
+        // carries the design). State for THIS attachment only, in
+        // `mount()`'s closure with the watermark counters above and for
+        // the same reason: a reconnect is a new mount, and a new mount
+        // buffers its own replay from scratch.
+        // ------------------------------------------------------------
+        //
+        // `catchingUp` is one-way. It turns false at the end of the
+        // phase and never comes back, which is what keeps a `%pause`
+        // flow-control recovery — history replayed into the SAME
+        // attachment, deliberately markerless — flowing straight to the
+        // screen as ordinary live output.
+        let catchingUp = true;
+        let revealed = false;
+        let replayChunks = [];
+        let replayBytes = 0;
+        let idleTimer = null;
+        // Whether the reveal may place keyboard focus at all. Cleared on
+        // the never-connected path (see `armIdleTimer`): focusing a
+        // terminal that cannot carry input is how "typing goes nowhere"
+        // becomes invisible again, one line under the banner that just
+        // said so.
+        let focusOnReveal = true;
+        // This mount's liveness token, cleared by `unmount()` (and by the
+        // rollback below) BEFORE anything is disposed. Every deferred path
+        // here — write-completion callbacks, the idle timer — checks it,
+        // because both outlive their island: xterm.js runs a queued write
+        // callback even after `dispose()`, and a stale reveal would then
+        // scroll a disposed terminal, clear a placeholder element by id,
+        // and un-hide a DOM node a REPLACEMENT mount is already using for
+        // its own catch-up.
+        let alive = true;
+
+        function clearIdleTimer() {
+          if (idleTimer !== null) clearTimeout(idleTimer);
+          idleTimer = null;
+        }
+
+        // Re-armed on every buffered chunk, so the window measures
+        // SILENCE rather than elapsed time (see REPLAY_IDLE_TIMEOUT_MS).
+        // The interval is read at ARM time, not captured once, so a test
+        // that retunes `limits.idleMs` mid-attach is honored by the next
+        // arm rather than by the next mount.
+        //
+        // The two ways it can expire are two different OUTCOMES, decided
+        // here rather than by whoever reads the reason afterwards:
+        //
+        // - The socket opened and the stream went quiet. This is the
+        //   graceful degradation the bound exists for: flush, reveal, go
+        //   live. Input works, because the socket is there to carry it.
+        // - The socket is still CONNECTING. Nothing has been received
+        //   because nothing has been connected, and `term.onData` drops
+        //   keystrokes on a socket that is not OPEN — so revealing a
+        //   normal-looking terminal would leave the user typing into a
+        //   void with nothing on screen to explain it, which is precisely
+        //   the silent failure SPEC.md forbids. The catch-up ends into the
+        //   detach banner instead, and the socket is CLOSED: an attach
+        //   abandoned this way must not silently resurrect if its
+        //   handshake completes minutes later, behind a banner saying it
+        //   never connected. Reattaching is the user's move, through the
+        //   same path any other detached terminal takes.
+        function armIdleTimer() {
+          if (!catchingUp || !alive) return;
+          clearIdleTimer();
+          idleTimer = setTimeout(() => {
+            idleTimer = null;
+            // `unmount()` clears this timer before disposing anything, so
+            // this is the redundant second check the rest of this file's
+            // deferred paths also carry: a timer already queued when the
+            // clear ran must not banner (or close a socket) on behalf of
+            // an island that no longer exists.
+            if (!alive) return;
+            if (ws.readyState === WebSocket.CONNECTING) {
+              focusOnReveal = false;
+              endCatchUp("unconnected");
+              showBanner(UNCONNECTED_TEXT);
+              ws.close();
+              return;
             }
-            return;
-          }
-          const bytes = new Uint8Array(ev.data);
+            endCatchUp("idle");
+          }, testHook.replay.limits.idleMs);
+        }
+
+        /**
+         * Reveal the terminal, at the tail, and take the placeholder
+         * down. Idempotent, because several endings can race (a detach
+         * notice immediately followed by the socket closing), and inert
+         * on a torn-down mount — see `alive`, whose whole purpose is this
+         * function not running late.
+         *
+         * `fromWriteCallback` is true when this ran inside the flush
+         * write's completion callback — the only path on which xterm.js
+         * has provably consumed the whole replay before anything became
+         * visible.
+         *
+         * `scrollToBottom()` makes "lands at the tail" a guarantee
+         * rather than a dependency on xterm's auto-scroll heuristics:
+         * nothing could have scrolled this buffer (it has been hidden
+         * since mount), but the contract is worth stating in code.
+         *
+         * Focus is (re)placed here rather than only at mount, and that is
+         * a fix rather than a belt: both engines refuse `focus()` on an
+         * element with `visibility: hidden`, which every island now is
+         * for its whole catch-up — so the mount-time placement silently
+         * did nothing and nothing retried it, leaving a freshly opened
+         * session needing a click before it would accept typing.
+         * `focusedEl` is read NOW, so a selection change during the
+         * catch-up wins over what was wanted at mount.
+         *
+         * See `takesFocus` for why it is conditional: a reveal lands at a
+         * time the user did not choose, and by then they may be typing
+         * somewhere else entirely.
+         */
+        function reveal(fromWriteCallback) {
+          if (revealed || !alive) return;
+          revealed = true;
+          term.scrollToBottom();
+          const buffer = term.buffer.active;
+          testHook.replay.revealed = true;
+          testHook.replay.revealedInWriteCallback = !!fromWriteCallback;
+          testHook.replay.viewportAtTailOnReveal = buffer.viewportY === buffer.baseY;
+          showTerminal(el, spec.connecting);
+          if (takesFocus()) term.focus();
+        }
+
+        /**
+         * Whether this reveal may take keyboard focus.
+         *
+         * The island being the one `sync()` named as focused is necessary
+         * but NOT sufficient, and the difference is a real bug rather than
+         * a courtesy: a reveal happens whenever the replay lands, which is
+         * a moment the user did not pick and can be seconds after they
+         * moved on. The concrete victim is the rename field — open it
+         * while a terminal is still catching up, start typing, and an
+         * unconditional `focus()` here would pull the caret into the pty
+         * mid-word, sending the rest of the title to the agent.
+         *
+         * So focus is only taken from somewhere that is not a deliberate
+         * choice. The line is drawn at TYPING TARGETS, not at focus per
+         * se: an editable control (the rename field is the motivating
+         * case) or another island's terminal keeps focus, because pulling
+         * keystrokes out from under active typing is the theft this guard
+         * exists to prevent. A focused BUTTON does not hold the reveal
+         * back — the tab-strip selector is the concrete case: selecting a
+         * tab leaves focus on its button, and the whole point of the
+         * selection was to type into that tab once it is ready. Stealing
+         * from a button costs nothing (buttons consume no keystrokes
+         * beyond activation), while refusing would strand every
+         * select-then-type flow.
+         */
+        function takesFocus() {
+          if (!focusOnReveal || focusedEl !== spec.el) return false;
+          const active = document.activeElement;
+          if (!active || active === document.body) return true;
+          if (el && el.contains(active)) return true;
+          const editable =
+            active.matches("input, textarea, select, [contenteditable]") ||
+            active.isContentEditable;
+          if (editable) return false;
+          // Another island's terminal (its helper textarea is editable and
+          // caught above, but guard the container too for safety).
+          const otherIsland = active.closest(".terminal");
+          return !(otherIsland && otherIsland !== el);
+        }
+
+        /**
+         * Write one chunk of terminal bytes, carrying the watermark
+         * accounting that used to live inline in `ws.onmessage`.
+         *
+         * Shared by the live path and by the catch-up flush precisely so
+         * the flush is not a second, unaccounted write path: a 3 MiB
+         * batched write moves the unwritten-byte counter exactly as the
+         * same bytes arriving live would have.
+         */
+        function writeBytes(bytes, onWritten) {
           pendingWrite += bytes.length;
+          if (!revealed) testHook.replay.writesWhileHidden++;
           term.write(bytes, () => {
+            // xterm.js runs this even after `dispose()`, so a mount torn
+            // down with writes in flight lands here on a dead island: no
+            // flow control to answer for (the socket is closed), and no
+            // reveal to perform (see `alive`).
+            if (!alive) return;
             pendingWrite -= bytes.length;
             // Resume only out of an ACTUAL prior pause: this is the other
             // half of exactly-once semantics (see the pause check below)
@@ -1209,6 +1670,7 @@
               testHook.resumeCount++;
               sendControl("resume");
             }
+            if (onWritten) onWritten();
           });
           // Exactly once per crossing: `paused` blocks every repeat check
           // while the backlog stays above HIGH_WATER, so one crossing
@@ -1226,14 +1688,179 @@
               pendingWrite,
             );
           }
+        }
+
+        /**
+         * End the catch-up phase: write everything held back as ONE
+         * write, reveal at its completion, and let every later byte go
+         * straight to the screen.
+         *
+         * Every ending comes through here — the marker, a detach, the
+         * socket closing, and all three degradation bounds — because the
+         * one thing none of them may do is drop the buffer. A terminal
+         * that lost its attachment mid-replay still shows what it had
+         * received, under whatever banner explains the loss.
+         *
+         * A no-op after the first call, since the endings can race, and
+         * a straight reveal when there is nothing buffered (a fresh
+         * terminal's marker arrives immediately, with no history at all)
+         * — there is no write to hang the reveal on in that case.
+         *
+         * The buffer is joined into ONE `Uint8Array` for one
+         * `term.write()`: writing the chunks back to back would restore
+         * exactly the progressive rendering this whole feature removes,
+         * since xterm.js renders between them.
+         */
+        function endCatchUp(reason) {
+          if (!catchingUp || !alive) return;
+          // A held marker keeps the phase open instead of ending it, so a
+          // test can assert what is on screen DURING a catch-up (see
+          // `replayControls`). Only the marker is holdable: the other six
+          // endings are what the degradation and teardown specs exist to
+          // exercise, and holding those would make the seam able to hide
+          // the very behavior it is there to observe.
+          if (reason === "marker" && testHook.replay.holdMarker) {
+            testHook.replay.heldReason = reason;
+            return;
+          }
+          catchingUp = false;
+          clearIdleTimer();
+          testHook.replay.buffering = false;
+          testHook.replay.revealReason = reason;
+          const chunks = replayChunks;
+          const total = replayBytes;
+          replayChunks = [];
+          replayBytes = 0;
+          // Current holdings, not running totals: nothing is held once
+          // the flush below has taken them.
+          testHook.replay.bufferedBytes = 0;
+          testHook.replay.bufferedChunks = 0;
+          if (total === 0) {
+            reveal(false);
+            return;
+          }
+          const joined = new Uint8Array(total);
+          let offset = 0;
+          for (const chunk of chunks) {
+            joined.set(chunk, offset);
+            offset += chunk.length;
+          }
+          writeBytes(joined, () => reveal(true));
+        }
+
+        // Armed now, not at `onopen`: the watchdog's job is to bound how
+        // long this terminal can stay hidden, and the socket failing to
+        // connect at all is one of the ways that can happen (see
+        // REPLAY_IDLE_TIMEOUT_MS). Every buffered chunk re-arms it, so
+        // once bytes are flowing the window only ever expires on genuine
+        // silence.
+        armIdleTimer();
+
+        // From here on this mount can be invalidated — by `unmount()`, or
+        // by this function's own rollback if something below throws. Both
+        // must run BEFORE the terminal is disposed, since the point is to
+        // stop deferred work from reaching a disposed instance.
+        disposeCatchUp = () => {
+          alive = false;
+          clearIdleTimer();
+        };
+        // Test-only (e2e/tests/terminal.spec.ts): resume a catch-up phase
+        // held open by `replayControls`'s `holdMarker`, applying whatever
+        // ending was deferred. Published on the hook rather than inside
+        // `replay` so that object stays plain data — the suite reads it
+        // across the page boundary, where a function property would not
+        // survive serialization.
+        testHook.releaseCatchUp = () => {
+          testHook.replay.holdMarker = false;
+          if (testHook.replay.heldReason) endCatchUp(testHook.replay.heldReason);
+        };
+
+        ws.onmessage = (ev) => {
+          if (typeof ev.data === "string") {
+            // Text frames are control JSON from the helm: the detach
+            // notice (SPEC.md: takeover must be visible) and, since
+            // PLAN_M5.md item 4, the replay-complete marker. A
+            // session-scoped takeover arrives as one detach notice per
+            // terminal the losing client held (PLAN_M4.md item 3 — there
+            // is deliberately no session-wide takeover message), so each
+            // island banners its own, independently.
+            const msg = JSON.parse(ev.data);
+            if (msg.type === "replay_complete") {
+              // The ONLY thing this message does, here or anywhere: end
+              // one terminal's catch-up phase. Nothing about the session,
+              // its lifecycle, or any other client behavior may key off it
+              // (`ControlMsg::ReplayComplete`'s own docs).
+              endCatchUp("marker");
+              return;
+            }
+            if (msg.type === "detached") {
+              // The buffer is flushed BEFORE the banner, so a terminal
+              // detached mid-replay shows what it did receive underneath
+              // the notice explaining the loss — this attach will never
+              // get a marker (the supervisor owes none to a catch-up
+              // something else ended), and waiting for one would hide the
+              // terminal forever.
+              endCatchUp("detached");
+              // The latch goes up BEFORE the banner so the banner it
+              // paints can already carry the reclaim control (see this
+              // file's header). Only a session-scoped takeover latches;
+              // every other reason is a detach this view caused or
+              // recovers from on its own.
+              const lost = msg.reason === TAKEOVER_DETACH_REASON;
+              if (lost) farhelmTerm.latchTakeover(msg.reason);
+              showBanner(`Detached: ${msg.reason}`, lost);
+            }
+            return;
+          }
+          const bytes = new Uint8Array(ev.data);
+          // An empty frame is nothing to write and, during a catch-up,
+          // nothing to count: letting one re-arm the idle watchdog would
+          // hand a hostile or broken peer a way to keep this terminal
+          // hidden indefinitely at no cost — silence it cannot be caught
+          // out on, because the stream never actually goes quiet.
+          if (bytes.length === 0) return;
+          if (catchingUp) {
+            // Held, not written: this is the whole no-visible-re-scroll
+            // feature (see this file's header). Both bounds are checked
+            // AFTER appending, so the chunk that crosses one is flushed
+            // WITH the rest rather than left behind — and the buffer is
+            // bounded in frames as well as bytes, because each frame
+            // costs an object regardless of how little it carries.
+            replayChunks.push(bytes);
+            replayBytes += bytes.length;
+            testHook.replay.bufferedBytes = replayBytes;
+            testHook.replay.bufferedChunks = replayChunks.length;
+            const limits = testHook.replay.limits;
+            if (replayBytes > limits.bufferBytes) {
+              endCatchUp("size");
+            } else if (replayChunks.length > limits.bufferChunks) {
+              endCatchUp("chunks");
+            } else {
+              armIdleTimer();
+            }
+            return;
+          }
+          writeBytes(bytes);
         };
         // A detach notice is immediately followed by the server closing
         // the socket; the close handler must not clobber the more
         // specific banner (the takeover message is the one SPEC.md
         // requires the user to see) — `showBanner`'s own stickiness
         // handles that.
-        ws.onclose = () => showBanner("Connection closed");
-        ws.onerror = () => showBanner("Connection error");
+        //
+        // Both endings also end the catch-up phase, and that is not
+        // belt-and-braces: a client-initiated detach gets no notice at
+        // all, and an attach that fails server-side closes the socket —
+        // so the socket dying is, on those paths, the only signal this
+        // island will ever get that no more bytes are coming.
+        ws.onclose = () => {
+          endCatchUp("closed");
+          showBanner("Connection closed");
+        };
+        ws.onerror = () => {
+          endCatchUp("error");
+          showBanner("Connection error");
+        };
 
         const enc = new TextEncoder();
         // Swallow DECRQM mode queries (CSI Pm $ p and CSI ? Pm $ p, e.g.
@@ -1460,12 +2087,16 @@
           : null;
         if (paneObserver) paneObserver.observe(el);
 
-        // Focus is a per-PAGE resource, so it goes to the island `sync()`
-        // last named as focused rather than unconditionally to whichever
-        // island mounted most recently — several terminals mount together
-        // when a session view with open tabs is first rendered, and the
-        // last one to finish is not the one the user selected.
-        if (focusedEl === spec.el) term.focus();
+        // Focus is deliberately NOT placed here. It is a per-PAGE resource
+        // that belongs to the island `sync()` last named as focused —
+        // several terminals mount together when a session view with open
+        // tabs is first rendered, and the last one to finish is not the
+        // one the user selected — but an island is `visibility: hidden`
+        // for its whole catch-up now, and both engines refuse `focus()` on
+        // a hidden element. So the placement moved to `reveal()`, which is
+        // the first moment it can take effect and also reads the
+        // then-current selection rather than the mount-time one.
+        //
         // Test hooks: tests wait on the flag instead of sleeping, read
         // terminal content through the buffer API — the DOM renderer
         // only materializes viewport rows, so DOM text misses
@@ -1496,6 +2127,12 @@
           paneObserver,
           attachments,
           testHook,
+          // Everything `unmount()` needs to leave the catch-up
+          // presentation behind: the invalidation that stops deferred work
+          // from reaching a disposed terminal, and the placeholder element
+          // this mount may still be holding open.
+          disposeCatchUp,
+          connecting: spec.connecting,
           path: spec.path,
           gen: spec.gen,
           primary: !!spec.primary,
@@ -1516,8 +2153,16 @@
         if (onWindowResize) window.removeEventListener("resize", onWindowResize);
         if (paneObserver) paneObserver.disconnect();
         if (attachments) attachments.dispose();
+        // Before the disposal below, not after: a still-armed idle timer
+        // would otherwise flush this attach's buffer into the terminal
+        // this line is about to destroy.
+        if (disposeCatchUp) disposeCatchUp();
         if (ws) ws.close();
         if (term) term.dispose();
+        // The catch-up presentation goes back too, so the pane shows the
+        // banner below over an empty terminal rather than over a
+        // "connecting…" line that will never resolve.
+        showTerminal(el, spec.connecting);
         showBanner(`Failed to start terminal: ${err}`);
         throw err;
       }
@@ -1556,6 +2201,21 @@
       // also aborts any upload still in flight, which is what stops a
       // transfer from completing into a terminal that no longer exists.
       if (island.attachments) island.attachments.dispose();
+      // The catch-up's deferred work is the same class of hazard one step
+      // further along, and it has to be invalidated BEFORE the disposal
+      // below rather than merely alongside it. Two things outlive this
+      // island otherwise: the idle timer, which would flush a buffered
+      // replay into a disposed terminal, and any `term.write()` completion
+      // callback still queued — xterm.js runs those after `dispose()`, so
+      // a stale reveal would un-hide a DOM node the NEXT mount is already
+      // using for its own catch-up, showing a half-replayed terminal.
+      island.disposeCatchUp();
+      // And the presentation itself, for the reason the attachment status
+      // node is cleared above: both elements belong to the PANE, which for
+      // the agent terminal outlives every remount, so a teardown during
+      // catch-up would leave "connecting…" painted over an element that
+      // nothing is going to reveal.
+      showTerminal(document.getElementById(el), island.connecting);
       // Null out every WS callback BEFORE closing: close() starts an
       // asynchronous close handshake with the helm, and a stale
       // `onclose` in particular would otherwise fire later and paint
