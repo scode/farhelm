@@ -174,6 +174,23 @@ pub struct SupervisorTimeouts {
     pub upload_progress: Duration,
     /// See [`UPLOAD_DISK_STAGE_TIMEOUT`].
     pub upload_disk_stage: Duration,
+    /// The budget for one tmux control-mode exchange — see
+    /// [`crate::tmux::CONTROL_EXCHANGE_TIMEOUT`], whose docs cover why
+    /// PRODUCTION keeps this tight (it bounds how long a wedged tmux can
+    /// hold the supervisor-wide attachments mutex).
+    ///
+    /// Grouped with the other "gone, not slow" timeouts above for the same
+    /// reason they are: a test scenario that drives real tmux traffic on a
+    /// loaded CI runner needs this loosened too, or a merely-busy tmux
+    /// reads as wedged and the test fails for a reason that has nothing to
+    /// do with what it is testing. Threaded into the [`TmuxDriver`] this
+    /// supervisor constructs — see `new_with_seams` — because that driver,
+    /// not the supervisor itself, is what actually reads it.
+    pub tmux_exchange: Duration,
+    /// The budget for the attach-time pane-listing step — see
+    /// [`crate::tmux::PANE_LIST_TIMEOUT`]. Threaded the same way and for
+    /// the same CI-load reason as `tmux_exchange`.
+    pub tmux_pane_list: Duration,
 }
 
 impl Default for SupervisorTimeouts {
@@ -183,6 +200,8 @@ impl Default for SupervisorTimeouts {
             writer_stall: WRITER_STALL_TIMEOUT,
             upload_progress: UPLOAD_PROGRESS_TIMEOUT,
             upload_disk_stage: UPLOAD_DISK_STAGE_TIMEOUT,
+            tmux_exchange: crate::tmux::CONTROL_EXCHANGE_TIMEOUT,
+            tmux_pane_list: crate::tmux::PANE_LIST_TIMEOUT,
         }
     }
 }
@@ -2270,7 +2289,15 @@ impl Supervisor {
         // behind a constructor that then failed on the database.
         let store =
             SessionStore::open(&state_dir.join("supervisor.db"), ownership.is_some()).await?;
-        let tmux = TmuxDriver::new(state_dir);
+        // Threaded from `timeouts` rather than `TmuxDriver::new`'s
+        // production default so an integration test's loosened budgets
+        // (see `SupervisorTimeouts::tmux_exchange`) actually reach the
+        // driver every attach and send-keys call goes through.
+        let tmux = TmuxDriver::new_with_timeouts(
+            state_dir,
+            timeouts.tmux_exchange,
+            timeouts.tmux_pane_list,
+        );
         tmux.ensure_server().await?;
 
         // Resolved before the first reload, because that reload already

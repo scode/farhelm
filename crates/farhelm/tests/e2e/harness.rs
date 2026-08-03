@@ -406,15 +406,49 @@ pub(crate) async fn harness_with_timeouts(timeouts: SupervisorTimeouts) -> Harne
     harness_with_seams(timeouts, SupervisorSeams::default()).await
 }
 
+/// Floor for the supervisor's tmux control-exchange budget
+/// (`SupervisorTimeouts::tmux_exchange`) under every harness in this suite,
+/// regardless of what a test supplies for the OTHER timeout fields.
+///
+/// Production keeps `CONTROL_EXCHANGE_TIMEOUT` at 10s deliberately: it
+/// bounds how long a wedged tmux can hold the supervisor-wide attachments
+/// mutex, and that bound has to stay tight for a real deployment. A CI
+/// runner sharing a box with other jobs is a different animal — tmux
+/// itself is healthy, just slow to be scheduled and to answer a
+/// control-mode command — and 10s is not always enough headroom to tell
+/// "busy" apart from "wedged". Loosening it here, rather than in
+/// `SupervisorTimeouts::default()`, is what keeps the production constant
+/// honest while still giving every e2e attach the room a loaded box needs.
+const SUITE_TMUX_EXCHANGE_TIMEOUT: Duration = Duration::from_secs(30);
+
+/// Floor for `SupervisorTimeouts::tmux_pane_list` under every harness; see
+/// [`SUITE_TMUX_EXCHANGE_TIMEOUT`] for the rationale. Production's 2s
+/// budget is deliberately much shorter than the exchange timeout (it must
+/// not eat the replay budget an attach still needs), so its CI floor
+/// keeps the same proportion rather than matching the exchange floor.
+const SUITE_TMUX_PANE_LIST_TIMEOUT: Duration = Duration::from_secs(10);
+
 /// Like [`harness_with_timeouts`], but with the supervisor's injection
 /// points supplied too — the conversation-capture tests' entry point,
 /// since they need both a private agent home and a capture window short
 /// enough to prove two sessions in one directory do NOT overlap without
 /// waiting out a production minute.
+///
+/// Every entry point above funnels through here, which is where the two
+/// tmux control-mode budgets are floored to [`SUITE_TMUX_EXCHANGE_TIMEOUT`]
+/// / [`SUITE_TMUX_PANE_LIST_TIMEOUT`] — unconditionally, overriding
+/// whatever `timeouts` carries for those two fields. A per-test override
+/// would have to be repeated at every one of this suite's call sites (most
+/// of which only care about `stall_detach` or an upload timeout and reach
+/// the tmux fields only through `..Default::default()`), and a single
+/// missed site would silently reintroduce the loaded-CI flake this exists
+/// to remove.
 pub(crate) async fn harness_with_seams(
-    timeouts: SupervisorTimeouts,
+    mut timeouts: SupervisorTimeouts,
     seams: SupervisorSeams,
 ) -> Harness {
+    timeouts.tmux_exchange = SUITE_TMUX_EXCHANGE_TIMEOUT;
+    timeouts.tmux_pane_list = SUITE_TMUX_PANE_LIST_TIMEOUT;
     let slot = SLOTS.acquire().await.expect("semaphore is never closed");
     let state = tempfile::tempdir().expect("tempdir");
     let sup = Supervisor::new_with_seams(state.path(), farhelm_bin().into(), timeouts, seams)

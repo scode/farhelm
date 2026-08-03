@@ -179,7 +179,17 @@ pub const AGENT_WINDOW_OPTION: &str = "@farhelm-agent";
 /// snapshot, and enabling live output. A wedged tmux command must fail
 /// the attach request instead of leaving it holding the global
 /// attachment lock forever.
-const CONTROL_EXCHANGE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
+///
+/// This is the PRODUCTION value and must stay tight: it bounds how long a
+/// wedged tmux can hold the supervisor-wide attachments mutex, and every
+/// [`TmuxDriver`] defaults to it. Integration tests that run on a loaded
+/// CI box need a longer budget — a busy-but-healthy tmux can take seconds
+/// to answer under load, and this constant must not be the thing that
+/// makes CI mistake "busy" for "wedged" — so the value actually in effect
+/// is [`TmuxDriver`]'s `exchange_timeout` field, injected at construction
+/// (see [`TmuxDriver::new_with_timeouts`]) rather than read from here
+/// directly.
+pub(crate) const CONTROL_EXCHANGE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
 
 /// The format is deliberately comma-separated. See [`PaneModes::parse`].
 ///
@@ -206,7 +216,11 @@ const PANE_MODE_FORMAT: &str = "#{alternate_on},#{bracket_paste_flag},#{mouse_an
 /// to consume the budget the replay capture and cutover still need. It is
 /// still clamped to the attach deadline by the caller, so it can never
 /// EXTEND the attach either.
-const PANE_LIST_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(2);
+///
+/// Like [`CONTROL_EXCHANGE_TIMEOUT`], this is the production value only —
+/// [`TmuxDriver::pane_list_timeout`] is what callers actually consult, and
+/// it defaults to this constant.
+pub(crate) const PANE_LIST_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(2);
 
 /// The largest number of ` -A <pane>:off` pairs allowed to ride the
 /// attach cutover; the rest follow it as their own commands.
@@ -390,6 +404,18 @@ fn replay_command_group(session: &str, pane: &str, cutover: &str) -> String {
 pub struct TmuxDriver {
     socket: PathBuf,
     config: PathBuf,
+    /// The budget for one control-mode exchange (attach, send-keys,
+    /// filter command). See [`CONTROL_EXCHANGE_TIMEOUT`] for what this
+    /// bounds and why production keeps it tight; carried per-instance
+    /// (rather than read from the constant directly) so
+    /// [`Self::new_with_timeouts`] can hand a test-only supervisor a
+    /// longer budget without touching the value every real supervisor
+    /// runs with.
+    exchange_timeout: std::time::Duration,
+    /// The budget for [`OutputStream::foreign_panes`]'s pane listing. See
+    /// [`PANE_LIST_TIMEOUT`]; injectable for the same reason as
+    /// `exchange_timeout`.
+    pane_list_timeout: std::time::Duration,
 }
 
 /// Enforce the control-mode floor before starting or adopting a server.
@@ -1286,10 +1312,33 @@ impl TmuxDriver {
     /// is rewritten whenever the driver starts, while a server already
     /// running on the private socket retains its live option values until
     /// explicitly changed or restarted.
+    ///
+    /// Uses the production control-mode budgets ([`CONTROL_EXCHANGE_TIMEOUT`],
+    /// [`PANE_LIST_TIMEOUT`]); callers that need different ones (integration
+    /// tests running on a loaded CI box) go through
+    /// [`Self::new_with_timeouts`] instead.
     pub fn new(state_dir: &Path) -> TmuxDriver {
+        Self::new_with_timeouts(state_dir, CONTROL_EXCHANGE_TIMEOUT, PANE_LIST_TIMEOUT)
+    }
+
+    /// Like [`Self::new`], with the two control-mode budgets supplied
+    /// explicitly.
+    ///
+    /// The production constants remain the only values real supervisors
+    /// use (see [`Self::new`]); this constructor exists purely as the
+    /// injection seam a test harness uses to lengthen them past what a
+    /// loaded CI runner's tmux can be slow to answer without that slowness
+    /// being mistaken for a wedge.
+    pub fn new_with_timeouts(
+        state_dir: &Path,
+        exchange_timeout: std::time::Duration,
+        pane_list_timeout: std::time::Duration,
+    ) -> TmuxDriver {
         TmuxDriver {
             socket: state_dir.join("tmux.sock"),
             config: state_dir.join("tmux.conf"),
+            exchange_timeout,
+            pane_list_timeout,
         }
     }
 
@@ -2545,7 +2594,7 @@ impl TmuxDriver {
         session: &str,
         pane: &str,
     ) -> anyhow::Result<(PaneModes, Vec<u8>, OutputStream)> {
-        let deadline = tokio::time::Instant::now() + CONTROL_EXCHANGE_TIMEOUT;
+        let deadline = tokio::time::Instant::now() + self.exchange_timeout;
         let mut child = self
             .command()
             .arg("-C")
@@ -2579,6 +2628,8 @@ impl TmuxDriver {
             silenced: HashSet::new(),
             pending_filter_replies: 0,
             foreign_dropped: 0,
+            exchange_timeout: self.exchange_timeout,
+            pane_list_timeout: self.pane_list_timeout,
         };
         read_command_block(
             &mut stream.reader,
@@ -2629,7 +2680,7 @@ impl TmuxDriver {
         session: &str,
         pane: &str,
     ) -> anyhow::Result<InputClient> {
-        let deadline = tokio::time::Instant::now() + CONTROL_EXCHANGE_TIMEOUT;
+        let deadline = tokio::time::Instant::now() + self.exchange_timeout;
         let mut child = self
             .command()
             .arg("-C")
@@ -2671,6 +2722,7 @@ impl TmuxDriver {
             // session's pane through a stale id any more than replay can.
             target: format!("\"{}\"", pane_in_session(session, pane)),
             delivered_any_bytes: false,
+            exchange_timeout: self.exchange_timeout,
         })
     }
 
@@ -2705,7 +2757,7 @@ impl TmuxDriver {
     /// ORDERING depends on it: no per-terminal client may turn panes off
     /// until tmux already has this one (see [`silence_pane_args`]).
     pub async fn open_session_sink(&self, session: &str) -> anyhow::Result<SessionSink> {
-        let deadline = tokio::time::Instant::now() + CONTROL_EXCHANGE_TIMEOUT;
+        let deadline = tokio::time::Instant::now() + self.exchange_timeout;
         let mut child = self
             .command()
             .arg("-C")
@@ -3032,6 +3084,17 @@ pub struct OutputStream {
     /// without an accessor, so nothing outside can grow a dependency on a
     /// diagnostic counter.
     foreign_dropped: u64,
+    /// This stream's copy of [`TmuxDriver::exchange_timeout`], carried
+    /// here because [`Self::send_filter_command`] and
+    /// [`Self::resume_paused_with_replay`] compute their own fresh
+    /// deadlines well after the attach that created this stream — they
+    /// have no deadline handed to them by a caller, so the budget has to
+    /// live on the stream itself.
+    exchange_timeout: std::time::Duration,
+    /// This stream's copy of [`TmuxDriver::pane_list_timeout`], consulted
+    /// by [`Self::foreign_panes`] for the same reason as
+    /// `exchange_timeout`.
+    pane_list_timeout: std::time::Duration,
 }
 
 impl OutputStream {
@@ -3081,7 +3144,7 @@ impl OutputStream {
         &mut self,
         attach_deadline: tokio::time::Instant,
     ) -> anyhow::Result<Vec<String>> {
-        let deadline = attach_deadline.min(tokio::time::Instant::now() + PANE_LIST_TIMEOUT);
+        let deadline = attach_deadline.min(tokio::time::Instant::now() + self.pane_list_timeout);
         let command = list_session_panes_command(&self.session);
         let listing = self
             .exchange(deadline, &command, "session pane list")
@@ -3113,7 +3176,7 @@ impl OutputStream {
     /// stream believing a filter is installed that never was.
     async fn send_filter_command(&mut self, command: &str) -> anyhow::Result<()> {
         let line = format!("{command}\n");
-        tokio::time::timeout(CONTROL_EXCHANGE_TIMEOUT, async {
+        tokio::time::timeout(self.exchange_timeout, async {
             self.stdin
                 .write_all(line.as_bytes())
                 .await
@@ -3538,7 +3601,7 @@ impl OutputStream {
         // mangle them. The replay itself is capture-pane output, which
         // never contains a wrapper, so nothing is lost by clearing here.
         self.passthrough = PassthroughDecoder::default();
-        let deadline = tokio::time::Instant::now() + CONTROL_EXCHANGE_TIMEOUT;
+        let deadline = tokio::time::Instant::now() + self.exchange_timeout;
         // Start the positional reads from a known boundary. A pane filter
         // written moments before the `%pause` can still have its reply in
         // flight, and this group would otherwise read that reply as its
@@ -3591,7 +3654,7 @@ impl OutputStream {
     /// documents as not cancel-safe.
     #[cfg(test)]
     async fn drain_command_reply(&mut self) -> anyhow::Result<()> {
-        let deadline = tokio::time::Instant::now() + CONTROL_EXCHANGE_TIMEOUT;
+        let deadline = tokio::time::Instant::now() + self.exchange_timeout;
         loop {
             self.line.clear();
             let read = read_control_line_before(
@@ -3713,6 +3776,12 @@ pub struct InputClient {
     /// Deliberately never reset. It answers "has anything ever landed",
     /// and the correlator it feeds is itself write-once.
     delivered_any_bytes: bool,
+    /// This client's copy of [`TmuxDriver::exchange_timeout`], consulted by
+    /// [`Self::send`] for every chunk write, flush, and reply read. Stored
+    /// rather than passed in per call because `send` computes a fresh
+    /// per-reply deadline of its own well after this client was opened —
+    /// the same reason `OutputStream` carries its own copy.
+    exchange_timeout: std::time::Duration,
 }
 
 impl InputClient {
@@ -3770,15 +3839,12 @@ impl InputClient {
                     write!(line, " {byte:02x}").expect("String write is infallible");
                 }
                 line.push('\n');
-                tokio::time::timeout(
-                    CONTROL_EXCHANGE_TIMEOUT,
-                    self.stdin.write_all(line.as_bytes()),
-                )
-                .await
-                .context("timed out writing tmux send-keys command")?
-                .context("writing tmux send-keys command")?;
+                tokio::time::timeout(self.exchange_timeout, self.stdin.write_all(line.as_bytes()))
+                    .await
+                    .context("timed out writing tmux send-keys command")?
+                    .context("writing tmux send-keys command")?;
             }
-            tokio::time::timeout(CONTROL_EXCHANGE_TIMEOUT, self.stdin.flush())
+            tokio::time::timeout(self.exchange_timeout, self.stdin.flush())
                 .await
                 .context("timed out flushing tmux send-keys commands")?
                 .context("flushing tmux send-keys commands")?;
@@ -3786,7 +3852,7 @@ impl InputClient {
                 // One deadline per reply, not one for the whole batch: a
                 // wedged tmux on one reply must not inherit the unspent
                 // budget of every reply before it.
-                let deadline = tokio::time::Instant::now() + CONTROL_EXCHANGE_TIMEOUT;
+                let deadline = tokio::time::Instant::now() + self.exchange_timeout;
                 read_command_block(
                     &mut self.reader,
                     &mut self.line,
@@ -5972,6 +6038,12 @@ mod tests {
             silenced: HashSet::new(),
             pending_filter_replies: 0,
             foreign_dropped: 0,
+            // This helper drives `next_output` directly against a canned
+            // transcript, never a real tmux, so neither budget is ever
+            // consulted — production defaults are just the least
+            // surprising filler.
+            exchange_timeout: CONTROL_EXCHANGE_TIMEOUT,
+            pane_list_timeout: PANE_LIST_TIMEOUT,
         };
         (stream, command_sink)
     }

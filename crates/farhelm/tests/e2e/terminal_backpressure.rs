@@ -777,8 +777,14 @@ async fn repeated_short_pauses_never_accumulate_into_a_stall_detach() {
 /// never detaches at all.
 #[tokio::test]
 async fn a_paused_replay_detaches_relative_to_the_first_pause_despite_pause_spam() {
+    // Named so the honest bound at the end of this test is computed from
+    // the SAME two numbers the setup and spam loop use, rather than
+    // duplicating them as a second, driftable set of magic numbers.
+    const STALL_DETACH: Duration = Duration::from_secs(3);
+    const SPAM_PERIOD: Duration = Duration::from_millis(300);
+
     let h = harness_with_timeouts(SupervisorTimeouts {
-        stall_detach: Duration::from_secs(3),
+        stall_detach: STALL_DETACH,
         ..SupervisorTimeouts::default()
     })
     .await;
@@ -806,9 +812,7 @@ async fn a_paused_replay_detaches_relative_to_the_first_pause_despite_pause_spam
     // 3s maximum, so only an absolute deadline detaches at all.
     for _ in 0..20 {
         h.client.pause_output(chan2).await;
-        if let Some(seen_reason) =
-            drain_for(&mut rx2, &mut replay, Duration::from_millis(300)).await
-        {
+        if let Some(seen_reason) = drain_for(&mut rx2, &mut replay, SPAM_PERIOD).await {
             reason = Some(seen_reason);
             break;
         }
@@ -824,10 +828,28 @@ async fn a_paused_replay_detaches_relative_to_the_first_pause_despite_pause_spam
         "the detach must be the stall detach"
     );
     let elapsed = paused_at.elapsed();
+    // A deadline that gets RESTARTED by every spammed `PauseOutput` (the
+    // bug this test's first assertion above already catches) would need
+    // 3s of silence after the LAST spam before it could ever fire — which,
+    // spammed every 300ms for 20 iterations, never happens inside this
+    // loop's own 6s budget, so that bug already panics at `reason.expect`
+    // and never reaches this line. What this bound catches is a subtler
+    // variant: an ABSOLUTE deadline computed from the wrong instant (say,
+    // the most recent spam rather than the first pause), which still
+    // fires, just later than it should. The previous 9s ceiling could
+    // never distinguish that from correct behavior — the spam loop itself
+    // caps elapsed time near 6-7s, so `reason.expect` above fails first on
+    // any run slow enough to approach 9s regardless of which instant the
+    // deadline was measured from. One stall window past the honest
+    // ceiling — the stall timeout, plus one spam period for the polling
+    // granularity in the loop above, plus a second of schedule slack for a
+    // loaded runner — is tight enough to actually fail on the wrong-instant
+    // bug while staying clear of that granularity.
+    let bound = STALL_DETACH + SPAM_PERIOD + Duration::from_secs(1);
     assert!(
-        elapsed < Duration::from_secs(9),
-        "detached after {elapsed:?}, far past the 3s maximum measured from the first pause — \
-         the deadline is being restarted rather than held absolute"
+        elapsed < bound,
+        "detached after {elapsed:?}, past {bound:?} measured from the first pause — the \
+         deadline is being computed from something other than the first pause"
     );
 }
 
