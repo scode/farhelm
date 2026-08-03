@@ -85,21 +85,33 @@ Consequences of that stance:
   modes, but nothing exercises them end to end); and a reusable drive-a-real-agent Playwright helper that bakes in the
   lessons from the first agent-driven smoke test (Claude Code's trust dialog, its fast-typing paste heuristic swallowing
   Enter, reply-marker detection). Placed late because the parked items are small, stable code with low regression risk;
-  anything that starts changing often should be pulled forward instead of waiting here. Also the CI tmux-timing flake
-  class observed while closing M4 (2026-08-03): six DIFFERENT Rust e2e tests each failed exactly once on loaded CI
-  runners over one day (pause-spam detach, alt-screen reattach, scrolled-off replay, sink-backoff reset, agent+tab
-  conformance, list-through-stop annotation), every one passing on rerun and in isolation. The one-off-per-test
-  signature suggests runner load pushing real tmux operations past the suite's waits rather than any single test being
-  wrong — the leading hypothesis to investigate here, not a settled diagnosis. Candidate fixes if it holds: state-based
-  tmux readiness waits where tests currently rely on elapsed time, and a lower CI setting for the harness's existing
-  `SLOTS` concurrency cap. Belongs here unless the rerun rate becomes painful sooner. Also the M5 review round's
-  seam-gapped tests (2026-08-03) — assertions the reviewers wanted that need test seams the code deliberately does not
-  have yet, parked rather than invented mid-PR: a deterministic attach-races-rename interleaving; a
-  takeover-before-marker forcing (needs a held-replay seam); a rename-commit cancellation test (needs a seam between the
-  durable write and the map install); a claim-released-before-reply-probe test (needs a pausable tmux probe); proving
-  the supervisor — not just the client — is mid-replay in the marker boundary test; and forcing an outcome-transition
-  failure during a rename's reply build (the capture-store fault seam covers capture writes only, and an unwritable
-  database fails the title write first, a different path).
+  anything that starts changing often should be pulled forward instead of waiting here. Also what remains of the CI
+  one-off flake class first observed while closing M4 (2026-08-03) and investigated during the flake-fix series
+  (2026-08-03): single distinct tests failing once per loaded run, passing on rerun and in isolation. The original "tmux
+  timing" framing proved too narrow — the honest predicate is load-sensitive coupling between real-world events and a
+  test's notion of time, with three sub-classes found and fixed differently: real tmux operations outrunning fixed
+  budgets (fixed by making the supervisor's exchange budgets injectable and floored suite-wide, plus readiness waits
+  that poll state rather than files or wall time); tokio paused-clock auto-advance burning virtual time while a test
+  awaits a real-world event (fixed by keeping blocking calls off the runtime); and probe-verdict divergence between a
+  test's precondition and the supervisor's own forever-cached probe (fixed by injecting the probed manager through the
+  seam). Individually root-caused and fixed in that series: pause-spam detach, sink-backoff reset,
+  scope-survives-restart, exited-agent-viewable, ack-ahead-of-backlog, orphaned-sink-client (alt-screen reattach fell
+  earlier, during M5). Pane-silenced was diagnosis-hardened rather than closed: tmux's %exit reason now survives to the
+  panic message, and its disappearance mechanism stays open — server-death-under-load is the leading hypothesis and the
+  new diagnostics are the instrument for the next occurrence. Connect-names-socket was proven to have no internal
+  failure mechanism (no timing constructs at all); its one-off must be extrinsic (resource exhaustion or process-level
+  death on the runner), so it stays unchanged with a discriminator table in the flake log — capture the full panic text
+  on the next occurrence. Both suites now carry concurrency caps (e2e `SLOTS`, the supervisor unit binary's real-tmux
+  semaphore); lower them further only on evidence. Remaining parked test debt from the M5 and flake-fix review rounds —
+  assertions that need seams the code deliberately does not have yet: a deterministic attach-races-rename interleaving;
+  a takeover-before-marker forcing (needs a held-replay seam); a rename-commit cancellation test (needs a seam between
+  the durable write and the map install); a claim-released-before-reply-probe test (needs a pausable tmux probe);
+  proving the supervisor — not just the client — is mid-replay in the marker boundary test; forcing an
+  outcome-transition failure during a rename's reply build (the capture-store fault seam covers capture writes only, and
+  an unwritable database fails the title write first, a different path); a deterministic ack-enqueued observation for
+  the upload-priority test (today a settle window with documented margins); and a component test of the scope probe's
+  timeout-versus-retry path (needs injectable tool paths or timeouts — the probe deliberately has no fake-tools seam, so
+  today the retry decision is pinned as a pure function only).
 - **M6.75 — status and profiles.** Running/waiting/idle heuristics with per-agent sharpening, list filtering, profile
   CRUD and starter profiles. Also live push replacing BOTH of the UI's polls — M2's session-list poll and M4's
   session-detail/tab-list poll — status transitions are what make polling genuinely painful, and the push channel serves
