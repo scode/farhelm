@@ -236,7 +236,7 @@ pub(crate) fn SessionView(session: Session, on_back: EventHandler<()>) -> Elemen
     // standing behind it, and SPEC.md's changes-appear-automatically rule
     // means a tab opened or closed from another client has to show up
     // without a reload. Polling the detail is the interim mechanism for
-    // exactly that reason M2 chose it for the list; M5's live push
+    // exactly that reason M2 chose it for the list; M6.75's live push
     // replaces both together. The status refresh comes along for free and
     // is strictly better than the single shot it replaces.
     //

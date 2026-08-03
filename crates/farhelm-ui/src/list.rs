@@ -275,7 +275,7 @@ pub(crate) fn ListView(on_open: EventHandler<Session>) -> Element {
             // after the fact — so there is nothing concrete to report
             // here, and always confirming "just in case" would make
             // deleting routine, already-finished sessions needlessly
-            // noisy. Revisit if M5's status work ever gives the UI a
+            // noisy. Revisit if M6.75's status work ever gives the UI a
             // basis for a sharper answer.
             // `Interrupted` joins `Exited` here for a stronger version of
             // the same argument: a host reboot is what produced this
@@ -352,7 +352,7 @@ pub(crate) fn ListView(on_open: EventHandler<Session>) -> Element {
     // equally unsafe while ANYTHING is in flight, not just the row whose
     // own operation is running. A finer-grained rule (only the busy row's
     // own open button disabled, say) would need operations to be owned by
-    // something that outlives this component instead, which is what M5's
+    // something that outlives this component instead, which is what M6.75's
     // live-push channel could plausibly provide; M2 has nothing of the
     // kind, so the global lock is what today's ownership model can
     // actually promise.

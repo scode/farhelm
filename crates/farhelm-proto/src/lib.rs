@@ -829,7 +829,7 @@ pub enum ControlMsg {
         /// docs for why that direction needs an explicit value rather
         /// than reusing absence. No UI surface sends this yet — the UI
         /// sends `None` and lets derivation run; this field exists for
-        /// the API and for M5's future profile system to feed richer
+        /// the API and for M6.75's future profile system to feed richer
         /// values through the same slot.
         agent_kind: Option<AgentKind>,
         /// Explicit override of the resume invocation template PLAN_M3.md

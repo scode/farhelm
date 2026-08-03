@@ -1165,7 +1165,7 @@ impl SupervisorClient {
     /// snapshot overrides as well as item 6's idempotency key.
     ///
     /// The overrides have no UI caller and are not expected to gain one
-    /// before M5's profiles: the UI sends nothing and lets the supervisor
+    /// before M6.75's profiles: the UI sends nothing and lets the supervisor
     /// derive the kind from the invocation's basename. This entry point
     /// exists because the API and the tests ARE the consumers in the
     /// meantime — a wrapper script or `env claude` classifies as generic

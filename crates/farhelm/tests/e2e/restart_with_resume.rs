@@ -1003,7 +1003,7 @@ async fn an_rc_file_change_between_launches_reaches_the_relaunched_agent() {
 /// file that produced it.
 ///
 /// The session is created with an invocation that cannot exec plus a
-/// configured resume command that can, which is the only way (before M5's
+/// configured resume command that can, which is the only way (before M6.75's
 /// profiles) to give one session both a failing launch and a working
 /// relaunch. What that combination really exercises is the per-launch
 /// sentinel lifecycle: the failed launch's sentinel sits at the very path

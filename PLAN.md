@@ -31,7 +31,7 @@ Consequences of that stance:
 - **M2 — sessions as a managed thing.** Multiple sessions, the flat list, create/open/stop/delete from the GUI,
   supervisor SQLite. Also the protocol growth the list forces: a hard cap with total count and truncated flag on the
   session-list response (today it is one frame, defused to a per-request error when oversize), and widening the protocol
-  error taxonomy as the GUI's error surfacing demands it. The list is poll-refreshed in M2; live push is M5's. Real
+  error taxonomy as the GUI's error surfacing demands it. The list is poll-refreshed in M2; live push is M6.75's. Real
   cursor pagination of the list is deferred to M6 with the cap standing in. Dogfooding starts here. Planned in detail in
   PLAN_M2.md.
 - **M2.5 — terminal-path backpressure.** The end-to-end flow control SPEC_impl.md already specifies: `term.write()`
@@ -55,20 +55,19 @@ Consequences of that stance:
   kept out of the functional stack deliberately: named per-message handlers replacing handle_control's giant match arms,
   a service/ module directory split, a directory-style e2e test layout, and a present-tense refresh of module headers
   that still narrate in milestone diffs. Each ships as its own refactor PR checked by the existing suite.
-- **M5 — status and profiles.** Running/waiting/idle heuristics with per-agent sharpening, list filtering, profile CRUD
-  and starter profiles. Also live push of session-list changes to connected clients, replacing M2's polling — placed
-  here because status transitions are what make polling genuinely painful, and the push channel serves both. Also
-  session rename: PLAN_M2.md deferred it as "M3+" and no entry ever claimed it (a ladder gap found while planning M3);
-  it lands here because it is a metadata-CRUD-plus-list-UX change of exactly this milestone's shape, not durability
-  work. Also reattach replay presentation (found in post-M3 manual testing): reopening a session visibly re-scrolls the
-  whole retained history, and the reattach cost grows with scrollback size; doing this right needs a replay-complete
-  marker in the protocol so the client can batch or hide the prefill and land at the tail, and that protocol change
-  belongs with this milestone's push-channel work, not as a client-side idle-timer heuristic. Carried in with it: a
-  confirmation pass for terminal selection dismissal on real WKWebView. A select-and-copy leaves BOTH an xterm selection
-  and a native document selection over the DOM rows, and only the second one stayed painted through paste, typing, and a
-  forced repaint; the fix that drops both is verified headlessly in Chromium and Playwright's WebKit but was still
-  painting on the macOS desktop app when the manual round ran out of time, so the remaining suspect — WKWebView holding
-  the selection layer after its ranges are gone — is unconfirmed either way.
+- **M5 — daily-driver polish.** The reordered ladder's fast path to primary use (2026-08-03: status/profiles moved to
+  M6.75 so persistent multi-host use starts sooner — the user wants to daily-drive and let dogfooding find the bugs).
+  Reattach replay presentation (found in post-M3 manual testing): reopening a session visibly re-scrolls the whole
+  retained history, and the reattach cost grows with scrollback size; doing this right needs a replay-complete marker in
+  the protocol so the client can batch or hide the prefill and land at the tail. The marker rides the terminal stream,
+  so it does not need M6.75's list-push channel — the old ladder bundled them purely for protocol-work batching. Also
+  session rename: PLAN_M2.md deferred it as "M3+" and no entry ever claimed it (a ladder gap found while planning M3); a
+  small metadata-CRUD-plus-list-UX change that daily use will want early. Carried in with it: a confirmation pass for
+  terminal selection dismissal on real WKWebView. A select-and-copy leaves BOTH an xterm selection and a native document
+  selection over the DOM rows, and only the second one stayed painted through paste, typing, and a forced repaint; the
+  fix that drops both is verified headlessly in Chromium and Playwright's WebKit but was still painting on the macOS
+  desktop app when the manual round ran out of time, so the remaining suspect — WKWebView holding the selection layer
+  after its ranges are gone — is unconfirmed either way.
 - **M6 — multi-host.** Registry and host management, local-host supervisor, stale-cache semantics — including the
   helm-side persistent last-known session cache (helm.db) that SPEC.md's stale-list behavior needs, deferred out of M2
   where a single always-connected supervisor made it dead weight. Version-skew refusal. Real cursor pagination of the
@@ -94,6 +93,14 @@ Consequences of that stance:
   wrong — the leading hypothesis to investigate here, not a settled diagnosis. Candidate fixes if it holds: state-based
   tmux readiness waits where tests currently rely on elapsed time, and a lower CI setting for the harness's existing
   `SLOTS` concurrency cap. Belongs here unless the rerun rate becomes painful sooner.
+- **M6.75 — status and profiles.** Running/waiting/idle heuristics with per-agent sharpening, list filtering, profile
+  CRUD and starter profiles. Also live push replacing BOTH of the UI's polls — M2's session-list poll and M4's
+  session-detail/tab-list poll — status transitions are what make polling genuinely painful, and the push channel serves
+  all of it. Moved from the old M5 slot to after multi-host (2026-08-03) deliberately, and not only for daily-driver
+  sequencing: built here, the push channel is designed ONCE against its real shape — multi-host aggregation, the
+  stale-view transitions the helm synthesizes from host connectivity plus helm.db's last-known cache, and cursor
+  pagination all exist by now — where the old order built it single-host in M5 and reworked it in M6. Polling stays
+  adequate in the gap precisely because the statuses that make it painful do not exist yet.
 - **M7 — the outer ring.** Web-token auth and device sessions, `farhelm spawn` and agent-spawned sessions (deliberately
   late as well), archive, provisioning, Mac app bundling. Two items absorbed from M4's manual desktop pass (2026-08-03):
   an image FILE copied in Finder and pasted on macOS/WKWebView publishes under a generated `pasted-<n>.png` name instead

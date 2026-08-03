@@ -406,7 +406,7 @@ pub enum CaptureVerdict {
 /// with the session, and what remains here is pure per-KIND knowledge.
 ///
 /// Status heuristics — the other half SPEC_impl.md assigns this trait —
-/// are deliberately absent: they belong to M5's status work, and adding a
+/// are deliberately absent: they belong to M6.75's status work, and adding a
 /// method with no caller would only invite a stub implementation to be
 /// mistaken for a contract.
 pub trait AgentIntegration: Send + Sync {

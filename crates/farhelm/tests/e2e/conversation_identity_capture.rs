@@ -1120,7 +1120,7 @@ async fn capture_considers_sessions_beyond_the_list_reply_cap() {
 ///
 /// All three are asserted here because they are the same override slot, and
 /// because none has a UI caller — the API and these tests are the only
-/// consumers until M5's profiles, so an untested override is an unexercised
+/// consumers until M6.75's profiles, so an untested override is an unexercised
 /// one.
 #[tokio::test]
 async fn an_overridden_kind_captures_and_a_generic_fallback_template_is_offered() {

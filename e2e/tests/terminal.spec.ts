@@ -3594,8 +3594,9 @@ test("truncation banner shows when the listing reports truncated", async ({
   );
 });
 
-// Polling is M2's whole live-update mechanism (PLAN_M2.md: "Out" defers
-// live push to M5), so it needs its own direct test: with the list
+// Polling is M2's whole live-update mechanism (PLAN_M2.md's "Out" defers
+// live push out of M2; current PLAN.md places it in M6.75), so it needs
+// its own direct test: with the list
 // already open, a session created from elsewhere (the HTTP API, standing
 // in for "any other client") must appear without a reload. Bounded at
 // ~10s — comfortably above the 3s poll interval — so a regression to

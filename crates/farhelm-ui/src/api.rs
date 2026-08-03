@@ -183,12 +183,12 @@ fn sort_sessions(mut sessions: Vec<Session>) -> Vec<Session> {
 }
 
 /// How often the views refetch (PLAN_M2.md: "Polling for list freshness"
-/// is the M2 mechanism; live push is out of scope until M5).
+/// is the M2 mechanism; current PLAN.md schedules live push for M6.75).
 ///
 /// Shared by both polls, deliberately one constant rather than two:
 /// `list::ListView` polls the listing and `session_view::SessionView`
 /// polls its own session's detail for tab-list changes (PLAN_M4.md item 6
-/// asks for "the same polling M2 settled for the session list"), and M5
+/// asks for "the same polling M2 settled for the session list"), and M6.75
 /// replaces both with live push together, so a divergence here would be a
 /// difference no one chose and no one would maintain.
 pub(crate) const POLL_INTERVAL_MS: u64 = 3_000;
