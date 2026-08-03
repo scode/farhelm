@@ -21,30 +21,20 @@ use crate::conversation_identity_capture::{
 
 /// Poll `list_sessions` until `session_id` reports `Alive`.
 ///
-/// The mirror image of [`wait_for_non_alive_status`], and needed for the
-/// same reason: a restart's reply says the pane exists, not that the agent
-/// inside it has execed yet, so "the relaunch is running" is only
+/// Needed because a restart's reply says the pane exists, not that the
+/// agent inside it has execed yet, so "the relaunch is running" is only
 /// observable by asking tmux — which `ListSessions` does, freshly, on every
 /// call.
+///
+/// Kept as a named wrapper over the general [`wait_for_status`] purely for
+/// the restart tests' readability: this module's call sites read as "wait
+/// for the relaunch to be running", which is the fact they are about.
 pub(crate) async fn wait_for_alive_status(
     client: &SupervisorClient,
     session_id: &str,
     secs: u64,
 ) -> SessionInfo {
-    let deadline = tokio::time::Instant::now() + Duration::from_secs(secs);
-    loop {
-        let listed = client.list_sessions().await.expect("list while polling");
-        if let Some(found) = listed.sessions.iter().find(|s| s.id == session_id)
-            && found.status == SessionStatus::Alive
-        {
-            return found.clone();
-        }
-        assert!(
-            tokio::time::Instant::now() < deadline,
-            "session {session_id} never became Alive within {secs}s"
-        );
-        tokio::time::sleep(Duration::from_millis(100)).await;
-    }
+    wait_for_status(client, session_id, SessionStatus::Alive, secs).await
 }
 
 /// The whole visible content of a session's pane, scrollback included —

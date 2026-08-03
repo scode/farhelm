@@ -2630,6 +2630,7 @@ impl TmuxDriver {
             foreign_dropped: 0,
             exchange_timeout: self.exchange_timeout,
             pane_list_timeout: self.pane_list_timeout,
+            exit_reason: None,
         };
         read_command_block(
             &mut stream.reader,
@@ -3095,6 +3096,10 @@ pub struct OutputStream {
     /// by [`Self::foreign_panes`] for the same reason as
     /// `exchange_timeout`.
     pane_list_timeout: std::time::Duration,
+    /// Why tmux said this control client was going away, if it said so at
+    /// all — see [`Self::exit_reason`], which is the only thing that ever
+    /// reads it.
+    exit_reason: Option<String>,
 }
 
 impl OutputStream {
@@ -3107,6 +3112,23 @@ impl OutputStream {
     /// history would look like a plain terminal glitch.
     pub fn pane(&self) -> &str {
         &self.pane
+    }
+
+    /// Why tmux said this client was going away, once
+    /// [`Self::next_output`] has returned `Ok(None)`.
+    ///
+    /// `None` means no `%exit` was ever seen — the stream simply hit EOF,
+    /// which is what a tmux process killed outright looks like from here.
+    /// An empty string means tmux announced a bare `%exit` with no reason.
+    ///
+    /// Purely diagnostic, and deliberately so: nothing in production
+    /// branches on it, because `Ok(None)` already means everything the
+    /// forwarder needs to act on. It exists because that collapse used to
+    /// be total — three CI failures on a vanished control client yielded
+    /// zero evidence of what had happened to it — and because the reason
+    /// is gone for good the moment this line is discarded.
+    pub fn exit_reason(&self) -> Option<&str> {
+        self.exit_reason.as_deref()
     }
 
     /// Every pane of this stream's session except its own, asked while
@@ -3307,8 +3329,9 @@ impl OutputStream {
 enum Decision {
     /// Hand this to the caller and stop reading.
     Event(OutputEvent),
-    /// The client is gone.
-    Exit,
+    /// The client is gone, carrying whatever reason tmux gave for it
+    /// (empty for a bare `%exit`) — see [`ControlLine::Exit`].
+    Exit(String),
     /// Our pane's bytes ended mid-passthrough-wrapper: nothing to hand
     /// back yet, keep reading.
     Incomplete,
@@ -3539,13 +3562,30 @@ impl OutputStream {
                             Decision::ForeignNew(other.to_vec())
                         }
                     }
-                    Some(ControlLine::Exit) => Decision::Exit,
+                    Some(ControlLine::Exit { reason }) => {
+                        Decision::Exit(String::from_utf8_lossy(reason).into_owned())
+                    }
                     None => Decision::Chatter,
                 }
             };
             match decision {
                 Decision::Event(event) => return Ok(Some(event)),
-                Decision::Exit => return Ok(None),
+                Decision::Exit(reason) => {
+                    // Diagnostics only: the `Ok(None)` below is unchanged,
+                    // and every caller still reads it as "this stream
+                    // ended". What the reason buys is the difference
+                    // between a tmux server that was killed and one that
+                    // died on its own, which is otherwise erased here and
+                    // unrecoverable afterwards.
+                    warn!(
+                        pane = %self.pane,
+                        session = %self.session,
+                        reason = %reason,
+                        "tmux control client exited"
+                    );
+                    self.exit_reason = Some(reason);
+                    return Ok(None);
+                }
                 Decision::Incomplete => {}
                 Decision::ForeignKnown => self.foreign_dropped += 1,
                 Decision::ForeignNew(pane) => {
@@ -4572,7 +4612,15 @@ enum ControlLine<'a> {
     /// `%exit`: this control client is going away. Carries no pane —
     /// unlike the two above it is a statement about the CLIENT, so it
     /// applies whichever pane this stream is filtering for.
-    Exit,
+    ///
+    /// It does carry tmux's own REASON, which is the whole of the
+    /// diagnostic that survives this event: everything downstream
+    /// collapses to "the stream ended", and a client that vanished on a
+    /// loaded CI machine is otherwise indistinguishable from one whose
+    /// session was deliberately killed. tmux writes either a bare `%exit`
+    /// or `%exit <reason>` (`server exited`, `no server running`, and
+    /// friends), so this is empty for the bare form rather than absent.
+    Exit { reason: &'a [u8] },
 }
 
 /// Classify one already-terminator-stripped notification line. See
@@ -4591,7 +4639,18 @@ fn classify_control_line(line: &[u8]) -> Option<ControlLine<'_>> {
         // taken verbatim and simply fails to match any stream's pane.
         Some(ControlLine::Paused { pane })
     } else if line.starts_with(b"%exit") {
-        Some(ControlLine::Exit)
+        // Both documented forms in one arm: a bare `%exit` leaves nothing
+        // after the marker, `%exit <reason>` leaves a space then the
+        // reason. The separator is stripped so the reason reads cleanly in
+        // a log line; anything else trailing the marker is carried through
+        // verbatim rather than rejected, since this is diagnostics. A
+        // `starts_with` test rather than a `strip_prefix` binding keeps
+        // this arm's shape identical to its siblings' — the prefix is
+        // already proven present, so the slice below cannot panic.
+        let rest = &line["%exit".len()..];
+        Some(ControlLine::Exit {
+            reason: rest.strip_prefix(b" ").unwrap_or(rest),
+        })
     } else {
         None
     }
@@ -5882,7 +5941,7 @@ mod tests {
                     }
                 }
                 Some(ControlLine::Paused { .. }) => events.push(OutputEvent::Paused),
-                Some(ControlLine::Exit) => break,
+                Some(ControlLine::Exit { .. }) => break,
                 None => {}
             }
         }
@@ -6044,6 +6103,7 @@ mod tests {
             // surprising filler.
             exchange_timeout: CONTROL_EXCHANGE_TIMEOUT,
             pane_list_timeout: PANE_LIST_TIMEOUT,
+            exit_reason: None,
         };
         (stream, command_sink)
     }
@@ -6347,7 +6407,30 @@ mod tests {
         /// observable when its output reaches nobody (see
         /// [`read_progress`]). It outlives the server by drop order.
         dir: tempfile::TempDir,
+        /// Released once this server is gone, letting the next real-tmux
+        /// test start its own — see [`REAL_TMUX_SLOTS`]. Declared last so
+        /// it is released only after the tempdir and driver have been,
+        /// which is after `Drop` has killed the server.
+        _slot: tokio::sync::SemaphorePermit<'static>,
     }
+
+    /// Caps how many real-tmux tests in THIS binary run at once.
+    ///
+    /// libtest runs every test in a binary concurrently and bounds only
+    /// the thread count, not what those threads start. Each server below
+    /// is a tmux process plus one or two panes running tight `echo` loops
+    /// specifically designed to flood — a producer whose whole purpose is
+    /// to saturate something. Unbounded, they load the machine enough that
+    /// the multi-second timeouts these tests use stop meaning what they
+    /// say, and a pane that simply never got scheduled reads as a filter
+    /// that failed or a client that vanished.
+    ///
+    /// Two permits rather than one: these tests are dominated by waiting
+    /// on a real tmux, so serializing them outright would roughly double
+    /// the suite's wall time for no extra signal, while the step from two
+    /// to unbounded is where the flooders start competing. Mirrors the
+    /// e2e suite's own `SLOTS`, which exists for the same reason.
+    static REAL_TMUX_SLOTS: tokio::sync::Semaphore = tokio::sync::Semaphore::const_new(2);
 
     impl Drop for ScratchServer {
         fn drop(&mut self) {
@@ -6362,11 +6445,24 @@ mod tests {
     }
 
     impl ScratchServer {
+        /// Take a concurrency slot, then start a server on a fresh
+        /// socket. The slot is acquired here rather than in each test so
+        /// that standing up a real tmux is the thing that is bounded —
+        /// there is no way to reach one in this module without going
+        /// through this constructor.
         async fn start() -> ScratchServer {
+            let slot = REAL_TMUX_SLOTS
+                .acquire()
+                .await
+                .expect("semaphore is never closed");
             let dir = tempfile::tempdir().expect("tempdir");
             let driver = TmuxDriver::new(dir.path());
             driver.ensure_server().await.expect("tmux server");
-            ScratchServer { driver, dir }
+            ScratchServer {
+                driver,
+                dir,
+                _slot: slot,
+            }
         }
     }
 
@@ -6516,8 +6612,19 @@ mod tests {
     /// An `Err` or an EOF fails outright. Both mean the control client is
     /// gone, and a loop that swallowed them would keep counting an empty
     /// stream as "no foreign notifications arrived" — the exact reading
-    /// these tests are trying to earn.
-    async fn pump_own_pane_ticks(stream: &mut OutputStream, ticks: usize, secs: u64) {
+    /// these tests are trying to earn. That failure is reported through
+    /// [`client_gone_report`] rather than a bare `expect`, because it has
+    /// happened on CI three times and produced no evidence whatsoever
+    /// about WHY the client vanished.
+    ///
+    /// `server` is taken purely for that report: the stream itself cannot
+    /// say anything about the tmux server behind it.
+    async fn pump_own_pane_ticks(
+        server: &ScratchServer,
+        stream: &mut OutputStream,
+        ticks: usize,
+        secs: u64,
+    ) {
         let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(secs);
         let mut seen = 0;
         while seen < ticks {
@@ -6526,15 +6633,90 @@ mod tests {
                 .await
                 .unwrap_or_else(|_| {
                     panic!("only {seen} of {ticks} own-pane ticks arrived within {secs}s")
-                })
-                .expect("the control stream must not fail")
-                .expect("the control client must not exit mid-test");
-            if let OutputEvent::Bytes(bytes) = event
-                && contains(&bytes, b"AGENT-TICK")
-            {
-                seen += 1;
+                });
+            let event = match event {
+                Ok(Some(event)) => event,
+                Ok(None) => {
+                    let report = client_gone_report(server, stream).await;
+                    panic!("the control client exited after {seen} of {ticks} ticks; {report}");
+                }
+                Err(e) => {
+                    let report = client_gone_report(server, stream).await;
+                    panic!(
+                        "the control stream failed after {seen} of {ticks} ticks: {e:#}; \
+                         {report}"
+                    );
+                }
+            };
+            match event {
+                OutputEvent::Bytes(bytes) if contains(&bytes, b"AGENT-TICK") => seen += 1,
+                OutputEvent::Bytes(_) => {}
+                // Recovered exactly the way production recovers (the
+                // forwarder's `catch_up_after_tmux_pause`), and then the
+                // tick count simply carries on. A pause is a legitimate
+                // thing for tmux to do to a client that fell behind — this
+                // helper's own callers can provoke one by flooding a
+                // neighbouring pane — and treating it as fatal, or merely
+                // failing to resume, would turn it into a 30-second "ticks
+                // never arrived" that blames the wrong mechanism entirely.
+                // The replay's own content is deliberately NOT counted:
+                // those are history, not the fresh round trips these tests
+                // use as their clock.
+                OutputEvent::Paused => {
+                    stream
+                        .resume_paused_with_replay()
+                        .await
+                        .expect("a paused own pane must recover through the replay path");
+                }
             }
         }
+    }
+
+    /// Everything cheap to know about why a control client is no longer
+    /// there, gathered at the moment of failure.
+    ///
+    /// Exists because the alternative is what this suite actually had: a
+    /// bare "the control client must not exit mid-test", which says only
+    /// that the thing being measured stopped existing. Each piece answers
+    /// a different candidate cause — tmux's own `%exit` reason says
+    /// whether tmux announced the end or the pipe simply died; the child's
+    /// wait status distinguishes a crashed or signalled `tmux -C` from one
+    /// still running with a broken pipe; and the server probes say whether
+    /// the whole scratch server went away underneath it (the shape a
+    /// loaded CI box, an OOM kill, or a stray `kill-server` takes).
+    ///
+    /// Every probe is best-effort and its failure is folded into the text
+    /// rather than raised: this runs on a path that is already panicking,
+    /// and a probe that panics first would destroy the very report it was
+    /// gathering.
+    async fn client_gone_report(server: &ScratchServer, stream: &mut OutputStream) -> String {
+        let exit_reason = match stream.exit_reason() {
+            Some("") => "tmux announced a bare %exit with no reason".to_string(),
+            Some(reason) => format!("tmux said: %exit {reason}"),
+            None => "clean EOF, no %exit was ever announced".to_string(),
+        };
+        let child = match stream.child.try_wait() {
+            Ok(Some(status)) => format!("the tmux -C child exited: {status}"),
+            Ok(None) => "the tmux -C child is still running".to_string(),
+            Err(e) => format!("the tmux -C child could not be waited on: {e}"),
+        };
+        let sessions = match server
+            .driver
+            .run(&["list-sessions", "-F", "#{session_name}"])
+            .await
+        {
+            Ok(out) => format!("sessions: [{}]", out.trim().replace('\n', ", ")),
+            Err(e) => format!("list-sessions failed: {e:#}"),
+        };
+        let clients = match server
+            .driver
+            .run(&["list-clients", "-F", "#{client_flags}"])
+            .await
+        {
+            Ok(out) => format!("clients: [{}]", out.trim().replace('\n', ", ")),
+            Err(e) => format!("list-clients failed: {e:#}"),
+        };
+        format!("{exit_reason}; {child}; {sessions}; {clients}")
     }
 
     /// A session whose OTHER window is flooding must deliver none of that
@@ -6596,12 +6778,12 @@ mod tests {
         // Settle first: the neighbour can legitimately speak between the
         // pane listing and the cutover that filters it, so the count taken
         // over a FRESH window afterwards is the one that means anything.
-        pump_own_pane_ticks(&mut stream, 5, 30).await;
+        pump_own_pane_ticks(&server, &mut stream, 5, 30).await;
         let settled = stream.foreign_dropped;
         let before = read_progress(&progress);
 
         // Long enough to span several of the neighbour's bursts.
-        pump_own_pane_ticks(&mut stream, 15, 30).await;
+        pump_own_pane_ticks(&server, &mut stream, 15, 30).await;
 
         assert_eq!(
             stream.foreign_dropped,
@@ -6659,9 +6841,9 @@ mod tests {
             .open_replay_stream("fh-sink-mech", &agent)
             .await
             .expect("replay stream");
-        pump_own_pane_ticks(&mut stream, 5, 30).await;
+        pump_own_pane_ticks(&server, &mut stream, 5, 30).await;
         let before = read_progress(&progress);
-        pump_own_pane_ticks(&mut stream, 25, 60).await;
+        pump_own_pane_ticks(&server, &mut stream, 25, 60).await;
         // At most ONE, not zero. The producer writes its counter and THEN
         // starts the burst that fills the pty, so a pane frozen by this
         // filter can still be one step past where it was when the filter
@@ -6684,7 +6866,7 @@ mod tests {
             .await
             .expect("session sink");
         let sink_task = tokio::spawn(async move { sink.drain().await });
-        pump_own_pane_ticks(&mut stream, 25, 60).await;
+        pump_own_pane_ticks(&server, &mut stream, 25, 60).await;
         let running_at = read_progress(&progress);
         assert!(
             running_at >= frozen_at + 2,
@@ -6814,7 +6996,7 @@ mod tests {
         // Settle: the first notifications from the new pane are what
         // TRIGGER the filter, so they are expected and are not what this
         // measures.
-        pump_own_pane_ticks(&mut stream, 10, 30).await;
+        pump_own_pane_ticks(&server, &mut stream, 10, 30).await;
         let settled = stream.foreign_dropped;
         assert!(
             settled > 0,
@@ -6823,7 +7005,7 @@ mod tests {
         );
         let before = read_progress(&progress);
 
-        pump_own_pane_ticks(&mut stream, 15, 30).await;
+        pump_own_pane_ticks(&server, &mut stream, 15, 30).await;
         assert_eq!(
             stream.foreign_dropped,
             settled,
@@ -6907,7 +7089,7 @@ mod tests {
             .open_replay_stream("fh-filter-race", &agent)
             .await
             .expect("replay stream");
-        pump_own_pane_ticks(&mut stream, 3, 30).await;
+        pump_own_pane_ticks(&server, &mut stream, 3, 30).await;
 
         // A real filter command, left with its reply outstanding.
         stream

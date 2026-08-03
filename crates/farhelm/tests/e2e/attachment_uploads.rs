@@ -1045,7 +1045,7 @@ async fn startup_reconciliation_sweeps_staging_and_keeps_published_attachments()
     // file: `serve` binds before it reconciles, so a connect (or a mere
     // `exists`) can succeed while the sweep has not run. Only the accept
     // loop — which starts after reconciliation — can answer this.
-    wait_for_socket(&state.path().join("supervisor.sock")).await;
+    wait_for_supervisor_ready(state.path()).await;
     let stream = farhelm_supervisor::service::connect(state.path())
         .await
         .expect("connect to the serving supervisor");
@@ -1249,17 +1249,41 @@ async fn acks_are_cumulative_and_never_precede_the_write_they_claim() {
 /// transfer — and stalls it for long enough that the sender's own
 /// progress timeout may call the receiver dead.
 ///
-/// Measured as the terminal bytes a client has to read before its ack
-/// arrives, against a deliberately small transport buffer so that the
-/// supervisor's own queueing (rather than the pipe's) is what is being
-/// observed. On one shared FIFO the queued flood — up to
-/// `CONNECTION_WRITER_QUEUE` frames of it — precedes the ack; on a
-/// prioritized path only what was already in flight does.
+/// Measured as the ack's POSITION in a frozen backlog: where in the
+/// queued terminal output it landed, as a fraction of that queue's whole
+/// length. Under one shared FIFO the ack can only come out after
+/// essentially all of the backlog that was already queued ahead of it —
+/// up to `CONNECTION_WRITER_QUEUE` frames — so an ack arriving inside the
+/// first quarter is a fact a FIFO cannot produce. On a prioritized path
+/// only what was already in flight precedes it.
+///
+/// # Why the backlog is frozen, and why the reader waits
+///
+/// The measurement used to be a latency race: the flood kept producing
+/// while the reader drained, so "bytes before the ack" was a contest
+/// between the producer and the reader and the number moved with machine
+/// load — which made a fixed byte threshold either loose enough to prove
+/// nothing or tight enough to fail on a busy CI box. Pausing the
+/// attachment first (`PauseOutput`, which parks the forwarder) turns the
+/// queue into a fixed object, and the question into a bimodal one about
+/// ordering rather than a continuous one about speed.
+///
+/// Freezing the queue is necessary but not sufficient: reading is
+/// unthrottled, so a reader that starts draining while an upload round
+/// trip is still in flight empties the whole backlog in well under the
+/// millisecond that round trip costs, and the ack then trivially comes
+/// out last no matter how it is queued. So the reader deliberately does
+/// nothing while each upload message is being produced, and only then
+/// drains. What that leaves ahead of a prioritized ack is just the bytes
+/// already handed to the transport, which is why the transport buffer is
+/// deliberately tiny — smaller than one round of the queue being measured,
+/// so the supervisor's queue rather than the pipe dominates both the
+/// numerator and the denominator.
 #[tokio::test]
 async fn an_ack_arrives_ahead_of_a_backlog_of_terminal_output() {
     let h = harness().await;
     let (session, _work) = flood_session(&h).await;
-    let mut peer = RawPeer::connect_with_buffer(&h.sup, 16 * 1024).await;
+    let mut peer = RawPeer::connect_with_buffer(&h.sup, 1024).await;
 
     // Attach the flooding terminal on channel 1 and let its output pile
     // up in the connection's writer queue while nothing reads it.
@@ -1275,7 +1299,19 @@ async fn an_ack_arrives_ahead_of_a_backlog_of_terminal_output() {
     .await;
     tokio::time::sleep(Duration::from_secs(2)).await;
 
-    // Now an upload on its own channel, with one chunk to be acked.
+    // Freeze what piled up. From here the terminal queue only shrinks, so
+    // its total length is a real denominator rather than a moving target.
+    // The stall detach that a held pause eventually triggers
+    // (`STALL_DETACH_TIMEOUT`, a minute) is far away from the seconds this
+    // drain takes.
+    peer.control(&ControlMsg::PauseOutput { channel: 1 }).await;
+
+    // Now an upload on its own channel, and then a pause with NO reading
+    // at all, so the supervisor has finished producing `UploadStarted`
+    // before a single queued byte is consumed. A second of quiet is
+    // enormous next to the work involved (accept the transfer, open a
+    // staging file) and is what makes the drain below a measurement of
+    // ORDER rather than of who won a sub-millisecond race.
     peer.control(&ControlMsg::BeginUpload {
         req_id: 2,
         session_id: session.id.clone(),
@@ -1284,36 +1320,76 @@ async fn an_ack_arrives_ahead_of_a_backlog_of_terminal_output() {
         size: 16,
     })
     .await;
-    peer.chunk(2, vec![b'x'; 16]).await;
+    tokio::time::sleep(Duration::from_secs(1)).await;
 
-    // Read until the ack, counting the terminal bytes that preceded it.
+    // One reader for all three phases (await the start, then the ack, then
+    // the rest of the backlog), because every phase has to keep counting
+    // the same terminal bytes and a second reader would lose the running
+    // total. The chunk and its settle are sent from inside it for the same
+    // reason: the count must not restart across them.
+    //
+    // `UploadStarted` is awaited before the chunk goes out — the same
+    // order the sibling ack test uses — because a chunk sent before the
+    // supervisor has accepted the transfer is answered by an abort rather
+    // than the ack this test is trying to position.
     let mut terminal_bytes = 0usize;
-    let deadline = tokio::time::Instant::now() + Duration::from_secs(30);
+    let mut started = false;
+    let mut acked_at: Option<usize> = None;
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(60);
     loop {
         assert!(
             tokio::time::Instant::now() < deadline,
-            "no ack arrived within 30s after {terminal_bytes} bytes of terminal output"
+            "the backlog never drained: {terminal_bytes} bytes read, started={started}, \
+             ack at {acked_at:?}"
         );
-        let frame = tokio::time::timeout(Duration::from_secs(10), peer.reader.read_frame())
-            .await
-            .expect("read did not stall")
-            .expect("read frame")
-            .expect("connection stayed open");
+        // With the forwarder parked, a quiet stretch means the queue is
+        // genuinely empty rather than merely slow — which is what makes
+        // "the whole backlog" a knowable quantity at all.
+        let quiet = tokio::time::timeout(Duration::from_secs(3), peer.reader.read_frame()).await;
+        let Ok(frame) = quiet else {
+            assert!(
+                started && acked_at.is_some(),
+                "the queue went quiet before the upload was answered: {terminal_bytes} bytes \
+                 read, started={started}, ack at {acked_at:?}"
+            );
+            break;
+        };
+        let frame = frame.expect("read frame").expect("connection stayed open");
         match frame.kind {
             FrameKind::Data => terminal_bytes += frame.body.len(),
-            FrameKind::Control => {
-                if let ControlMsg::UploadAck { channel: 2, .. } =
-                    parse_control(&frame).expect("parse control")
-                {
-                    break;
+            FrameKind::Control => match parse_control(&frame).expect("parse control") {
+                ControlMsg::UploadStarted { .. } => {
+                    started = true;
+                    peer.chunk(2, vec![b'x'; 16]).await;
+                    // Same reason as the settle above: let the ack be
+                    // produced while the backlog is still whole, so what
+                    // the drain then reports is where the ack sits in that
+                    // backlog rather than how fast this loop can read.
+                    tokio::time::sleep(Duration::from_secs(1)).await;
                 }
-            }
+                ControlMsg::UploadAck { channel: 2, .. } => {
+                    assert!(started, "an ack arrived for a transfer never started");
+                    acked_at = Some(terminal_bytes);
+                }
+                _ => {}
+            },
         }
     }
+
+    let acked_at = acked_at.expect("the chunk must be acked");
+    // Both numbers are dominated by `CONNECTION_WRITER_QUEUE` frames of
+    // real terminal output; this floor only catches the degenerate case
+    // where the flood never got going and the ratio below would be
+    // measuring nothing.
     assert!(
-        terminal_bytes < 200 * 1024,
-        "the ack waited behind {terminal_bytes} bytes of terminal output — upload control \
-         frames are sharing the bulk queue"
+        terminal_bytes >= 32 * 1024,
+        "test premise: the soak must leave a real backlog for the ack to be positioned \
+         within, but only {terminal_bytes} bytes were queued"
+    );
+    assert!(
+        acked_at * 4 <= terminal_bytes,
+        "the ack arrived after {acked_at} of {terminal_bytes} queued terminal bytes — past \
+         the first quarter, which is where sharing the bulk queue would put it"
     );
 }
 

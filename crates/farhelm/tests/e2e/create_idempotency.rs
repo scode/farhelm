@@ -461,11 +461,10 @@ async fn retry_after_a_crash_at(stage: CreateStage) -> CrashScene {
         vec![format!("fh-{}", session.id)],
         "tmux must hold exactly the session the retry handed back"
     );
-    assert_eq!(
-        listed(&client2, &session.id).await.status,
-        SessionStatus::Alive,
-        "and the agent must actually be running in it"
-    );
+    // Waited for rather than read once: the agent must be running in it,
+    // and a single list landing on a tolerated tmux diagnostic reports a
+    // live session as `Exited { None }` (see `wait_for_status`).
+    wait_for_status(&client2, &session.id, SessionStatus::Alive, 30).await;
     // The retried session is a normal session: deleting it tears down
     // everything the retry built (the other half of item 6's
     // retry-versus-delete ordering — when the retry wins, the delete that
@@ -656,12 +655,10 @@ async fn a_reboot_does_not_turn_a_never_launched_intent_into_a_created_one() {
     let session = create_keyed(&client2, work.path(), "intent-reboot")
         .await
         .expect("the retry must perform the create the crash never did");
-    assert_eq!(
-        listed(&client2, &session.id).await.status,
-        SessionStatus::Alive,
-        "and the session it hands back must be a real, running one — not the interrupted \
-         placeholder the reboot left"
-    );
+    // The session it hands back must be a real, running one — not the
+    // interrupted placeholder the reboot left. Waited for rather than read
+    // once, for the reason `wait_for_status` documents.
+    wait_for_status(&client2, &session.id, SessionStatus::Alive, 30).await;
     assert_eq!(
         stored_sessions(state.path()).await.len(),
         1,

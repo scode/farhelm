@@ -136,18 +136,46 @@ pub(crate) async fn tmux_has_format(h: &Harness, name: &str) -> bool {
     !String::from_utf8_lossy(&out.stdout).trim().is_empty()
 }
 
-/// Wait for a supervisor's socket to appear, for tests that drive
-/// `serve()` directly rather than an in-process duplex pipe. Panics on
-/// timeout like every other wait helper here — silently proceeding
-/// would surface as a less legible connect failure later.
-pub(crate) async fn wait_for_socket(sock: &std::path::Path) {
-    for _ in 0..100 {
-        if sock.exists() {
-            return;
+/// Wait until a supervisor on `state_dir` actually accepts a connection,
+/// for tests that drive `serve()` directly (or run a supervisor as a real
+/// child process) rather than using an in-process duplex pipe.
+///
+/// Readiness is a successful DIAL, not the socket file existing. The file
+/// is the wrong state to poll for in both directions: `serve()` creates it
+/// before it is listening, and — the case that made this a real bug rather
+/// than a theoretical one — a `SIGKILL`ed supervisor leaves its socket file
+/// behind, so a test waiting for a REPLACEMENT supervisor's socket is
+/// satisfied instantly by the dead one's leftovers and proceeds to race a
+/// process that has not bound anything yet.
+///
+/// The budget matches the rest of this suite's waits (20s) rather than the
+/// 5s the file-existence version used: spawning a supervisor process,
+/// opening its store, and reconciling state is not a sub-second operation
+/// on a loaded machine, and a wait four times tighter than every sibling
+/// is a flake source of its own.
+///
+/// Note that accepting a connection is a weaker claim than having finished
+/// startup work: the listener is bound before `serve()` reconciles, so a
+/// test that needs the reconciliation to have run must still prove that
+/// with a completed REQUEST (the attachment-sweep test does exactly this).
+pub(crate) async fn wait_for_supervisor_ready(state_dir: &std::path::Path) {
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(20);
+    loop {
+        match farhelm_supervisor::service::connect(state_dir).await {
+            // Dropped immediately: this connection is the probe, not a
+            // client. The supervisor sees a peer that hangs up before
+            // saying hello, which it is already required to survive.
+            Ok(_stream) => return,
+            Err(e) => {
+                assert!(
+                    tokio::time::Instant::now() < deadline,
+                    "no supervisor began accepting on {}: {e:#}",
+                    state_dir.display()
+                );
+                tokio::time::sleep(Duration::from_millis(50)).await;
+            }
         }
-        tokio::time::sleep(Duration::from_millis(50)).await;
     }
-    panic!("supervisor socket never appeared at {}", sock.display());
 }
 
 /// Quote a path for an agent invocation string, which the supervisor
@@ -283,6 +311,54 @@ pub(crate) async fn wait_for_non_alive_status(
         assert!(
             tokio::time::Instant::now() < deadline,
             "session {session_id} never left Alive status within {secs}s"
+        );
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+}
+
+/// Poll `list_sessions` until `session_id` reports exactly `status`,
+/// returning the settled `SessionInfo`.
+///
+/// The sibling of [`wait_for_non_alive_status`], and it exists for a
+/// second reason on top of that one's (status is computed fresh from tmux
+/// at LIST time, so a transition is only ever observable by polling).
+/// A single list can also be WRONG about a settled session: `pane_states`
+/// tolerates three tmux diagnostics by degrading to an empty pane map
+/// (see `tmux.rs`'s `pane_states` and `is_definitively_empty`), and an
+/// entry whose pane is missing from that map honestly reports
+/// `Exited { exit_code: None }`. So a loaded machine that catches one
+/// list at such a moment turns a genuinely alive session into an
+/// `Exited` — and a single-shot `assert_eq!(.., Alive)` fails on a
+/// diagnostic the product is deliberately tolerant of. Waiting for the
+/// state instead is not weaker: a session that is really exited never
+/// becomes Alive again, so the wait still fails, just with a bounded
+/// number of chances to observe the truth.
+///
+/// The last observation is reported on timeout, because "never reached
+/// Alive" is not actionable without knowing what it reached instead.
+pub(crate) async fn wait_for_status(
+    client: &SupervisorClient,
+    session_id: &str,
+    status: SessionStatus,
+    secs: u64,
+) -> SessionInfo {
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(secs);
+    let mut last_seen: Option<SessionInfo> = None;
+    loop {
+        let listed = client
+            .list_sessions()
+            .await
+            .expect("list while polling for a status");
+        if let Some(found) = listed.sessions.iter().find(|s| s.id == session_id) {
+            if found.status == status {
+                return found.clone();
+            }
+            last_seen = Some(found.clone());
+        }
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "session {session_id} never reached {status:?} within {secs}s \
+             (last observed: {last_seen:?})"
         );
         tokio::time::sleep(Duration::from_millis(100)).await;
     }

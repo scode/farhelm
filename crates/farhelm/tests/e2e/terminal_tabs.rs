@@ -1818,39 +1818,47 @@ async fn a_killed_supervisor_leaves_no_orphaned_sink_client() {
         .kill_on_drop(true)
         .spawn()
         .expect("spawn the supervisor process");
-    wait_for_socket(&state.path().join("supervisor.sock")).await;
+    wait_for_supervisor_ready(state.path()).await;
 
-    let session = {
-        let client = connect_over_socket(state.path()).await;
-        let session = client
-            .create_session(
-                &work.path().to_string_lossy(),
-                &agent_cmd("internal fake-agent --script basic"),
-                None,
-                80,
-                24,
-            )
-            .await
-            .expect("create");
-        let (chan, mut rx) = client.attach(&session.id, 80, 24).await.expect("attach");
-        let mut seen = Vec::new();
-        wait_for(&mut rx, &mut seen, "FAKE-AGENT READY", 20).await;
-        // One attached terminal: its output client, its input client, and
-        // the session's sink.
-        assert_eq!(
-            count_control_clients(&sock).await,
-            3,
-            "test premise: an attached terminal must have brought a sink up"
-        );
-        let _ = chan;
-        session
-    };
+    // The client, its channel, and its stream all stay alive until after
+    // the kill below. Dropping them first would close the connection, and
+    // a supervisor that notices its client hung up tears the attachment —
+    // and the sink with it — down GRACEFULLY, which is the one path this
+    // test is not about. Held open, the SIGKILL is what ends them, so what
+    // gets measured is the protocol's own guarantee (stdin EOF on a reaped
+    // process ends control mode) rather than our own cleanup running one
+    // last time.
+    let client = connect_over_socket(state.path()).await;
+    let session = client
+        .create_session(
+            &work.path().to_string_lossy(),
+            &agent_cmd("internal fake-agent --script basic"),
+            None,
+            80,
+            24,
+        )
+        .await
+        .expect("create");
+    let (_chan, mut rx) = client.attach(&session.id, 80, 24).await.expect("attach");
+    let mut seen = Vec::new();
+    wait_for(&mut rx, &mut seen, "FAKE-AGENT READY", 20).await;
+    // One attached terminal: its output client, its input client, and
+    // the session's sink.
+    assert_eq!(
+        count_control_clients(&sock).await,
+        3,
+        "test premise: an attached terminal must have brought a sink up"
+    );
     let _cleanup = MarkerCleanupGuard::new(session.id.clone());
 
     // The whole point: no graceful shutdown, no `Drop`, no chance to kill
     // anything it owns.
     supervisor.start_kill().expect("kill the supervisor");
     let _ = supervisor.wait().await;
+    // Only now, with the owner already reaped, does the test let go of its
+    // end of the connection.
+    drop(rx);
+    drop(client);
 
     let deadline = tokio::time::Instant::now() + Duration::from_secs(20);
     while count_control_clients(&sock).await > 0 {
@@ -1871,7 +1879,7 @@ async fn a_killed_supervisor_leaves_no_orphaned_sink_client() {
         .kill_on_drop(true)
         .spawn()
         .expect("spawn the replacement supervisor");
-    wait_for_socket(&state.path().join("supervisor.sock")).await;
+    wait_for_supervisor_ready(state.path()).await;
     {
         let client = connect_over_socket(state.path()).await;
         let (_chan, mut rx) = client
@@ -1897,9 +1905,11 @@ async fn a_killed_supervisor_leaves_no_orphaned_sink_client() {
 /// supervisor they can kill, which is why this exists rather than being a
 /// second way to do the same thing. Retrying rather than dialling once
 /// because a socket FILE is not a listener: a killed supervisor leaves its
-/// socket path behind, so a replacement's file exists (and
-/// [`wait_for_socket`] is satisfied) well before the replacement has
-/// unlinked it, bound, and begun accepting.
+/// socket path behind, so a replacement's file exists well before the
+/// replacement has unlinked it, bound, and begun accepting. That is the
+/// same hazard [`wait_for_supervisor_ready`] now dials for; this one goes
+/// on to complete a handshake, so it stays separate rather than being
+/// folded into it.
 async fn connect_over_socket(state_dir: &std::path::Path) -> Arc<SupervisorClient> {
     let deadline = tokio::time::Instant::now() + Duration::from_secs(20);
     loop {
@@ -1922,9 +1932,30 @@ async fn connect_over_socket(state_dir: &std::path::Path) -> Arc<SupervisorClien
 /// How many control-mode clients are attached to the tmux server on
 /// `sock` — see [`attached_control_clients`], which is the same question
 /// asked of a [`Harness`].
+///
+/// A failed query is NOT zero clients, and conflating the two is how a
+/// test that polls "until no clients remain" passes by never having asked.
+/// The one failure that genuinely means zero is tmux saying there is no
+/// server to answer for at all, which it does in three exact shapes; the
+/// discrimination mirrors the driver's own `is_definitively_empty` (see
+/// `farhelm-supervisor`'s `tmux.rs`), including its rule that the match is
+/// against the WHOLE trimmed stderr rather than a substring — the socket
+/// path is embedded in one of these messages, so a `contains` check could
+/// launder an unrelated failure that merely mentions that path.
 async fn count_control_clients(sock: &std::path::Path) -> usize {
     let listed = tmux_query(sock, &["list-clients", "-F", "#{client_flags}"]).await;
     if !listed.status.success() {
+        let stderr = String::from_utf8_lossy(&listed.stderr);
+        let stderr = stderr.trim();
+        let definitively_empty = stderr == "no current target"
+            || stderr == "server exited unexpectedly"
+            || stderr == format!("no server running on {}", sock.display());
+        assert!(
+            definitively_empty,
+            "list-clients failed on {} with an unrecognized diagnostic, which is not evidence \
+             that no clients are attached: {stderr}",
+            sock.display()
+        );
         return 0;
     }
     String::from_utf8_lossy(&listed.stdout)

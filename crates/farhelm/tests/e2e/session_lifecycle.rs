@@ -1327,11 +1327,22 @@ async fn exited_agent_leaves_a_viewable_terminal() {
     // watching for the agent's farewell text. Output-watching would race
     // the process teardown this test deliberately provokes; `pane_dead`
     // is the state the assertion below actually depends on. (There is no
-    // `Detached` to wait for either: `remain-on-exit` keeps the session
-    // alive after the process dies, which is the property under test.)
+    // `Detached` to WAIT for: `remain-on-exit` keeps the session alive
+    // after the process dies, which is the property under test — but one
+    // ARRIVING means the attachment died and the quit can never land, so
+    // the stream is drained non-blockingly each pass and reported
+    // immediately rather than as a 30-second silence.)
     let sock = h.state.path().join("tmux.sock");
     let deadline = tokio::time::Instant::now() + Duration::from_secs(30);
     loop {
+        while let Ok(event) = rx.try_recv() {
+            if let TermEvent::Detached(reason) = event {
+                panic!(
+                    "the attachment was detached ({reason}) before the agent exited; the quit \
+                     can never be delivered now"
+                );
+            }
+        }
         let out = tmux_query(&sock, &["display-message", "-p", "#{pane_dead}"]).await;
         if String::from_utf8_lossy(&out.stdout).trim() == "1" {
             break;
@@ -1340,6 +1351,13 @@ async fn exited_agent_leaves_a_viewable_terminal() {
             tokio::time::Instant::now() < deadline,
             "agent never exited after quit"
         );
+        // Re-sent every pass, not just once. `quit` is idempotent against
+        // the basic fake agent (it exits on the first one and the pane is
+        // dead for every later one, which tmux simply drops), and each
+        // send is a 10s-bounded exchange with tmux that a loaded machine
+        // can lose outright — one lost send would otherwise leave this
+        // loop waiting the full 30s for an exit nobody ever asked for.
+        h.client.send_input(chan, b"quit\r".to_vec()).await;
         tokio::time::sleep(Duration::from_millis(100)).await;
     }
     h.client.detach(chan).await;
@@ -1349,11 +1367,35 @@ async fn exited_agent_leaves_a_viewable_terminal() {
     // session with it, and every tmux call in the attach path then fails.
     // (The replayed content is deliberately not asserted — a dead pane's
     // captured screen depends on what the exiting program left behind.)
-    let (_chan2, _rx2) = h
-        .client
-        .attach(&session.id, 80, 24)
-        .await
-        .expect("a session whose agent exited must still be attachable");
+    //
+    // Retried while the failure looks transient, because the contract is
+    // "an exited session's terminal is still attachable", not "attachable
+    // on the first try". An attach is several bounded tmux exchanges (the
+    // replay command group among them), and a machine loaded enough to
+    // blow one of those budgets says nothing about whether the window
+    // survived the exit. Anything that does NOT look like a timeout fails
+    // at once: a closed window is a permanent, differently-shaped error
+    // and must not be retried into a slow pass.
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(60);
+    let (_chan2, _rx2) = loop {
+        match h.client.attach(&session.id, 80, 24).await {
+            Ok(attached) => break attached,
+            Err(e) => {
+                let rendered = format!("{e:#}");
+                assert!(
+                    rendered.contains("timed out") || rendered.contains("timeout"),
+                    "a session whose agent exited must still be attachable, and this failure \
+                     is not a transient one: {rendered}"
+                );
+                assert!(
+                    tokio::time::Instant::now() < deadline,
+                    "a session whose agent exited never became attachable within 60s; last \
+                     error: {rendered}"
+                );
+                tokio::time::sleep(Duration::from_millis(250)).await;
+            }
+        }
+    };
 }
 
 /// The adopted-server gap: tmux reads a `-f` config only when it STARTS a
@@ -1960,9 +2002,8 @@ async fn stdio_proxy_carries_a_real_session() {
     tokio::spawn(async move {
         let _ = serving.serve().await;
     });
-    // Wait for the socket rather than sleeping.
-    let sock = state.path().join("supervisor.sock");
-    wait_for_socket(&sock).await;
+    // Wait for a listener rather than sleeping.
+    wait_for_supervisor_ready(state.path()).await;
 
     let mut child = tokio::process::Command::new(farhelm_bin())
         .args(["internal", "stdio", "--state-dir"])
@@ -1993,6 +2034,7 @@ async fn stdio_proxy_carries_a_real_session() {
         let launch = state.path().join("launch");
         let dir_mode = std::fs::metadata(&launch).unwrap().permissions().mode() & 0o777;
         assert_eq!(dir_mode, 0o700, "launch dir must be owner-only");
+        let sock = state.path().join("supervisor.sock");
         let sock_mode = std::fs::metadata(&sock).unwrap().permissions().mode() & 0o777;
         assert_eq!(sock_mode, 0o600, "supervisor socket must be owner-only");
     }
@@ -2319,7 +2361,7 @@ async fn serve_refuses_a_second_supervisor_but_replaces_a_stale_socket() {
         let _ = serving.serve().await;
     });
     let sock = state.path().join("supervisor.sock");
-    wait_for_socket(&sock).await;
+    wait_for_supervisor_ready(state.path()).await;
     let sup2 = Supervisor::new_with_exe(state.path(), farhelm_bin().into())
         .await
         .expect("supervisor 2");
@@ -2390,8 +2432,7 @@ async fn stdio_proxy_half_close_delivers_in_flight_replies() {
     tokio::spawn(async move {
         let _ = serving.serve().await;
     });
-    let sock = state.path().join("supervisor.sock");
-    wait_for_socket(&sock).await;
+    wait_for_supervisor_ready(state.path()).await;
 
     // Raw frames, no SupervisorClient: hello then a request, then EOF —
     // the reply is "in flight" precisely because stdin closed first.
@@ -2613,6 +2654,11 @@ async fn persisted_sessions_survive_a_supervisor_restart() {
         .expect("second supervisor construction on the same state dir");
     let client2 = connect_client(&sup2).await;
 
+    // Settle on Alive first, then assert the WHOLE listing against it: the
+    // equality below is about metadata round-tripping, and a single list
+    // that happened to catch a tolerated tmux diagnostic would fail it on
+    // the status field alone (see `wait_for_status`).
+    wait_for_status(&client2, &session.id, SessionStatus::Alive, 30).await;
     let listed = client2.list_sessions().await.expect("list after restart");
     assert_eq!(
         listed.sessions,
@@ -2833,6 +2879,13 @@ async fn stale_pane_id_after_server_restart_does_not_inherit_a_new_sessions_stat
          than the test silently passing for an unrelated reason"
     );
 
+    // Settle the new session first, then take ONE listing and read both
+    // rows out of it — the discrimination under test is between two
+    // entries of the same reply, so they must come from the same list.
+    // Waiting first is what keeps a tolerated tmux diagnostic (an empty
+    // pane map, see `wait_for_status`) from failing this on the live half
+    // right after the server was killed and restarted underneath it.
+    wait_for_status(&h.client, &new_session.id, SessionStatus::Alive, 30).await;
     let listed = h.client.list_sessions().await.expect("list");
     let find = |id: &str| {
         listed
@@ -2889,6 +2942,11 @@ async fn restart_gap_is_decided_per_session() {
         .expect("second supervisor construction after one session's tmux died");
     let client2 = connect_client(&sup2).await;
 
+    // Settle the surviving session first, for the same reason as the
+    // sibling test above: the per-session assertion below is an equality
+    // over the whole reply, so one list catching a tolerated tmux
+    // diagnostic (see `wait_for_status`) would fail it on the live half.
+    wait_for_status(&client2, &alive_session.id, SessionStatus::Alive, 30).await;
     let mut listed = client2
         .list_sessions()
         .await

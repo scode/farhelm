@@ -465,11 +465,14 @@ async fn a_restart_respawns_only_its_own_pane() {
         .expect("restart");
     wait_for_alive_status(&h.client, &restarted.id, 30).await;
 
-    assert_eq!(
-        listed(&h.client, &bystander.id).await.status,
-        SessionStatus::Alive,
-        "the bystander's agent must be untouched by another session's respawn"
-    );
+    // The bystander's agent must be untouched by another session's
+    // respawn. Waited for rather than read once: this list lands moments
+    // after a restart churned the same tmux server, which is exactly when
+    // a tolerated `list-panes` diagnostic can degrade one list to an empty
+    // pane map (see `wait_for_status`). The pane-identity check below is
+    // what actually carries "untouched"; this one only establishes it is
+    // alive at all.
+    wait_for_alive_status(&h.client, &bystander.id, 30).await;
     assert_eq!(
         pane_id_of(&sock, &format!("fh-{}", bystander.id)).await,
         bystander_pane,

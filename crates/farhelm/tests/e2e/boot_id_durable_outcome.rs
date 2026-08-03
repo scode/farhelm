@@ -222,11 +222,11 @@ async fn same_boot_classification_is_per_session_and_never_interrupted() {
         SessionStatus::Exited { exit_code: None },
         "nothing survived this session to hold a code, and none may be invented"
     );
-    assert_eq!(
-        listed(&client2, &untouched.id).await.status,
-        SessionStatus::Alive,
-        "an untouched session continues live across a supervisor restart"
-    );
+    // An untouched session continues live across a supervisor restart.
+    // Waited for rather than read once: a single list can degrade to an
+    // empty pane map on a tolerated tmux diagnostic and report a live
+    // session exited (see `wait_for_status`).
+    wait_for_status(&client2, &untouched.id, SessionStatus::Alive, 30).await;
 }
 
 /// M3 acceptance 3 and 5: after a reboot, sessions that were live become
@@ -290,11 +290,9 @@ async fn a_reboot_interrupts_live_sessions_and_preserves_ended_ones() {
         Some("stopped by user"),
         "the annotation survives a supervisor restart, not merely a reboot"
     );
-    assert_eq!(
-        listed(&client_restarted, &live.id).await.status,
-        SessionStatus::Alive,
-        "no reboot happened yet, so the live session is untouched"
-    );
+    // No reboot happened yet, so the live session is untouched. Waited for
+    // rather than read once, for the reason `wait_for_status` documents.
+    wait_for_status(&client_restarted, &live.id, SessionStatus::Alive, 30).await;
 
     // The reboot: tmux dies with the host, and the next supervisor reads a
     // different boot id.
@@ -391,12 +389,11 @@ async fn a_database_without_a_stored_boot_id_does_not_claim_a_reboot() {
 
     let sup2 = supervisor_believing_boot(state.path(), Some("boot-b")).await;
     let client2 = connect_client(&sup2).await;
-    assert_eq!(
-        listed(&client2, &session.id).await.status,
-        SessionStatus::Alive,
-        "with nothing stored to compare against, a differing boot id is not evidence of a \
-         reboot — and the live tmux session proves the point independently"
-    );
+    // With nothing stored to compare against, a differing boot id is not
+    // evidence of a reboot — and the live tmux session proves the point
+    // independently. Waited for rather than read once, for the reason
+    // `wait_for_status` documents.
+    wait_for_status(&client2, &session.id, SessionStatus::Alive, 30).await;
 
     // `boot-b` is stored now, so a THIRD boot id is a real reboot.
     kill_tmux_server_and_wait(&state.path().join("tmux.sock")).await;
