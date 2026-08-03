@@ -64,7 +64,11 @@ async fn real_agent_captures_its_conversation(
     let sup = Supervisor::new_with_seams(
         state.path(),
         farhelm_bin().into(),
-        SupervisorTimeouts::default(),
+        // Built directly rather than through `harness()`: this test needs
+        // `agent_home` seamed in before the real vendor agent ever launches.
+        // The suite's loaded-CI tmux floors still apply (this attaches for
+        // real below), so `suite_timeouts()` rather than a bare `Default`.
+        suite_timeouts(),
         SupervisorSeams {
             agent_home: Some(agent_home),
             ..SupervisorSeams::default()

@@ -1268,6 +1268,15 @@ async fn acks_are_cumulative_and_never_precede_the_write_they_claim() {
 /// queue into a fixed object, and the question into a bimodal one about
 /// ordering rather than a continuous one about speed.
 ///
+/// "Frozen" is very nearly exact rather than exact, and the residual is
+/// worth naming: the forwarder parks at the TOP of its pump loop, so one
+/// that was already blocked inside a `send` on the full writer queue when
+/// the pause arrived completes THAT send as soon as draining frees a slot,
+/// and only then parks. The denominator is therefore the queue as it stood
+/// at the pause plus at most one more frame — a bound, not a moving
+/// target, and one frame against `CONNECTION_WRITER_QUEUE` of them does
+/// not move the fraction this asserts on.
+///
 /// Freezing the queue is necessary but not sufficient: reading is
 /// unthrottled, so a reader that starts draining while an upload round
 /// trip is still in flight empties the whole backlog in well under the
@@ -1279,8 +1288,33 @@ async fn acks_are_cumulative_and_never_precede_the_write_they_claim() {
 /// deliberately tiny — smaller than one round of the queue being measured,
 /// so the supervisor's queue rather than the pipe dominates both the
 /// numerator and the denominator.
+///
+/// # The residual race, and its margin
+///
+/// Those two settles are a time bound, not an observation, and there is no
+/// honest way to make them one: nothing the supervisor already sends says
+/// "the ack is now enqueued", and any in-band signal this test could wait
+/// for (`UploadCommitted` rides the same priority queue as the ack) can
+/// only be observed by CONSUMING the measured stream — which perturbs the
+/// very queue positions under measurement. Adding a product seam to observe it
+/// would be a worse trade — a seam that exists only for this test, on the
+/// upload path.
+///
+/// So the settle is sized honestly instead. What has to fit inside it is
+/// one local round trip: the supervisor reads a frame off a duplex pipe,
+/// writes 16 bytes to a staging file through `spawn_blocking`, and hands
+/// one small frame to the priority queue. That is sub-millisecond
+/// unloaded, and the 5s budget is roughly three orders of magnitude of
+/// headroom on it. The failure mode if it is ever exceeded is a clean,
+/// legible one — the ack simply reports as arriving at the end of the
+/// backlog — rather than a silent weakening.
 #[tokio::test]
 async fn an_ack_arrives_ahead_of_a_backlog_of_terminal_output() {
+    // How long the reader stays silent while the supervisor produces each
+    // of the two upload messages. See this test's docs for the margin
+    // math: it covers a sub-millisecond local round trip.
+    const SETTLE: Duration = Duration::from_secs(5);
+
     let h = harness().await;
     let (session, _work) = flood_session(&h).await;
     let mut peer = RawPeer::connect_with_buffer(&h.sup, 1024).await;
@@ -1299,19 +1333,19 @@ async fn an_ack_arrives_ahead_of_a_backlog_of_terminal_output() {
     .await;
     tokio::time::sleep(Duration::from_secs(2)).await;
 
-    // Freeze what piled up. From here the terminal queue only shrinks, so
+    // Freeze what piled up. From here the terminal queue only shrinks
+    // (modulo the one in-flight frame this test's docs account for), so
     // its total length is a real denominator rather than a moving target.
     // The stall detach that a held pause eventually triggers
-    // (`STALL_DETACH_TIMEOUT`, a minute) is far away from the seconds this
-    // drain takes.
+    // (`STALL_DETACH_TIMEOUT`, a minute) is far away from the ~15s this
+    // whole sequence spends paused.
     peer.control(&ControlMsg::PauseOutput { channel: 1 }).await;
 
-    // Now an upload on its own channel, and then a pause with NO reading
+    // Now an upload on its own channel, and then a settle with NO reading
     // at all, so the supervisor has finished producing `UploadStarted`
-    // before a single queued byte is consumed. A second of quiet is
-    // enormous next to the work involved (accept the transfer, open a
-    // staging file) and is what makes the drain below a measurement of
-    // ORDER rather than of who won a sub-millisecond race.
+    // before a single queued byte is consumed. See this test's own docs
+    // for why the settle is a duration rather than an observation, and for
+    // the margin `SETTLE` carries over the round trip it has to cover.
     peer.control(&ControlMsg::BeginUpload {
         req_id: 2,
         session_id: session.id.clone(),
@@ -1320,7 +1354,7 @@ async fn an_ack_arrives_ahead_of_a_backlog_of_terminal_output() {
         size: 16,
     })
     .await;
-    tokio::time::sleep(Duration::from_secs(1)).await;
+    tokio::time::sleep(SETTLE).await;
 
     // One reader for all three phases (await the start, then the ack, then
     // the rest of the backlog), because every phase has to keep counting
@@ -1365,7 +1399,7 @@ async fn an_ack_arrives_ahead_of_a_backlog_of_terminal_output() {
                     // produced while the backlog is still whole, so what
                     // the drain then reports is where the ack sits in that
                     // backlog rather than how fast this loop can read.
-                    tokio::time::sleep(Duration::from_secs(1)).await;
+                    tokio::time::sleep(SETTLE).await;
                 }
                 ControlMsg::UploadAck { channel: 2, .. } => {
                     assert!(started, "an ack arrived for a transfer never started");

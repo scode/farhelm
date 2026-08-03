@@ -19,24 +19,6 @@ use crate::conversation_identity_capture::{
 // this crate's, so a faked driver would prove nothing about it.
 // ---------------------------------------------------------------------
 
-/// Poll `list_sessions` until `session_id` reports `Alive`.
-///
-/// Needed because a restart's reply says the pane exists, not that the
-/// agent inside it has execed yet, so "the relaunch is running" is only
-/// observable by asking tmux — which `ListSessions` does, freshly, on every
-/// call.
-///
-/// Kept as a named wrapper over the general [`wait_for_status`] purely for
-/// the restart tests' readability: this module's call sites read as "wait
-/// for the relaunch to be running", which is the fact they are about.
-pub(crate) async fn wait_for_alive_status(
-    client: &SupervisorClient,
-    session_id: &str,
-    secs: u64,
-) -> SessionInfo {
-    wait_for_status(client, session_id, SessionStatus::Alive, secs).await
-}
-
 /// The whole visible content of a session's pane, scrollback included —
 /// asked of tmux directly rather than through an attachment.
 ///
@@ -572,7 +554,10 @@ async fn interrupted_session_resumes_its_conversation(kind: &str) {
         let sup = Supervisor::new_with_seams(
             state.path(),
             farhelm_bin().into(),
-            SupervisorTimeouts::default(),
+            // Built by hand (not `harness()`) for the boot-id seam below;
+            // `suite_timeouts()` still gives this real attach the suite's
+            // loaded-CI tmux floors.
+            suite_timeouts(),
             seams("boot-a"),
         )
         .await
@@ -645,7 +630,9 @@ async fn interrupted_session_resumes_its_conversation(kind: &str) {
     let sup = Supervisor::new_with_seams(
         state.path(),
         farhelm_bin().into(),
-        SupervisorTimeouts::default(),
+        // Same reasoning as the first supervisor above: this one attaches
+        // for real too (the resume/reattach below).
+        suite_timeouts(),
         seams("boot-b"),
     )
     .await

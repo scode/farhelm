@@ -136,28 +136,32 @@ pub(crate) async fn tmux_has_format(h: &Harness, name: &str) -> bool {
     !String::from_utf8_lossy(&out.stdout).trim().is_empty()
 }
 
-/// Wait until a supervisor on `state_dir` actually accepts a connection,
-/// for tests that drive `serve()` directly (or run a supervisor as a real
-/// child process) rather than using an in-process duplex pipe.
+/// Wait until a supervisor on `state_dir` can be DIALLED, for tests that
+/// drive `serve()` directly (or run a supervisor as a real child process)
+/// rather than using an in-process duplex pipe.
 ///
-/// Readiness is a successful DIAL, not the socket file existing. The file
-/// is the wrong state to poll for in both directions: `serve()` creates it
-/// before it is listening, and — the case that made this a real bug rather
-/// than a theoretical one — a `SIGKILL`ed supervisor leaves its socket file
-/// behind, so a test waiting for a REPLACEMENT supervisor's socket is
-/// satisfied instantly by the dead one's leftovers and proceeds to race a
-/// process that has not bound anything yet.
+/// What a successful dial proves is exactly that a listening socket is
+/// bound at that path — no more. It does not prove the supervisor has
+/// accepted the connection (the kernel completes the handshake into the
+/// listen backlog on its own), and it certainly does not prove startup
+/// reconciliation has run, since `serve()` binds before it reconciles. A
+/// test that needs either of those must still prove it with a completed
+/// REQUEST; the attachment-sweep test does exactly that.
+///
+/// A dial is nonetheless the right thing to poll for, because the SOCKET
+/// FILE is not. The file is wrong in both directions: `serve()` creates it
+/// before it is listening on it, and — the case that made this a real bug
+/// rather than a theoretical one — a `SIGKILL`ed supervisor leaves its
+/// socket file behind, so a test waiting for a REPLACEMENT supervisor's
+/// socket is satisfied instantly by the dead one's leftovers and proceeds
+/// to race a process that has not bound anything yet. A dial against that
+/// stale file is refused, which is the distinction the file cannot make.
 ///
 /// The budget matches the rest of this suite's waits (20s) rather than the
 /// 5s the file-existence version used: spawning a supervisor process,
-/// opening its store, and reconciling state is not a sub-second operation
-/// on a loaded machine, and a wait four times tighter than every sibling
-/// is a flake source of its own.
-///
-/// Note that accepting a connection is a weaker claim than having finished
-/// startup work: the listener is bound before `serve()` reconciles, so a
-/// test that needs the reconciliation to have run must still prove that
-/// with a completed REQUEST (the attachment-sweep test does exactly this).
+/// opening its store, and binding is not a sub-second operation on a
+/// loaded machine, and a wait four times tighter than every sibling is a
+/// flake source of its own.
 pub(crate) async fn wait_for_supervisor_ready(state_dir: &std::path::Path) {
     let deadline = tokio::time::Instant::now() + Duration::from_secs(20);
     loop {
@@ -169,7 +173,7 @@ pub(crate) async fn wait_for_supervisor_ready(state_dir: &std::path::Path) {
             Err(e) => {
                 assert!(
                     tokio::time::Instant::now() < deadline,
-                    "no supervisor began accepting on {}: {e:#}",
+                    "nothing was listening on {}'s supervisor socket: {e:#}",
                     state_dir.display()
                 );
                 tokio::time::sleep(Duration::from_millis(50)).await;
@@ -316,52 +320,95 @@ pub(crate) async fn wait_for_non_alive_status(
     }
 }
 
-/// Poll `list_sessions` until `session_id` reports exactly `status`,
-/// returning the settled `SessionInfo`.
+/// Poll `list_sessions` until one whole reply satisfies `settled`, and
+/// return THAT reply's sessions.
 ///
-/// The sibling of [`wait_for_non_alive_status`], and it exists for a
-/// second reason on top of that one's (status is computed fresh from tmux
-/// at LIST time, so a transition is only ever observable by polling).
-/// A single list can also be WRONG about a settled session: `pane_states`
-/// tolerates three tmux diagnostics by degrading to an empty pane map
-/// (see `tmux.rs`'s `pane_states` and `is_definitively_empty`), and an
-/// entry whose pane is missing from that map honestly reports
-/// `Exited { exit_code: None }`. So a loaded machine that catches one
-/// list at such a moment turns a genuinely alive session into an
-/// `Exited` — and a single-shot `assert_eq!(.., Alive)` fails on a
-/// diagnostic the product is deliberately tolerant of. Waiting for the
-/// state instead is not weaker: a session that is really exited never
-/// becomes Alive again, so the wait still fails, just with a bounded
-/// number of chances to observe the truth.
+/// Two separate reasons a single list is not enough, and this helper
+/// answers both at once.
 ///
-/// The last observation is reported on timeout, because "never reached
-/// Alive" is not actionable without knowing what it reached instead.
-pub(crate) async fn wait_for_status(
+/// The first is the one [`wait_for_non_alive_status`] documents: status is
+/// computed fresh from tmux at LIST time rather than pushed, so any
+/// transition is only observable by polling for it.
+///
+/// The second is that one list can be WRONG about a session that has not
+/// transitioned at all. `pane_states` tolerates three tmux diagnostics by
+/// degrading to an empty pane map (see `tmux.rs`'s `pane_states` and
+/// `is_definitively_empty`), and an entry whose pane is missing from that
+/// map honestly reports `Exited { exit_code: None }`. A loaded machine
+/// that catches a list at such a moment turns a genuinely alive session
+/// into an exited one, so a single-shot `assert_eq!(.., Alive)` fails on a
+/// diagnostic the product is deliberately tolerant of. Waiting is not
+/// weaker than asserting: a session that has really exited never becomes
+/// Alive again, so the wait still fails — it just gets a bounded number of
+/// chances to observe the truth first.
+///
+/// Returning the whole listing, rather than only the entry that satisfied
+/// the predicate, is what lets a caller assert about SEVERAL rows of one
+/// reply — "this one is alive AND that one is exited" is a claim about a
+/// single observation of the world, and re-listing to check the second row
+/// would reintroduce exactly the racing single-shot read this exists to
+/// remove.
+///
+/// `what` names the condition for the timeout panic, which also reports
+/// the last listing seen: "never settled" is not actionable without
+/// knowing what it settled on instead.
+pub(crate) async fn wait_for_listing(
     client: &SupervisorClient,
-    session_id: &str,
-    status: SessionStatus,
     secs: u64,
-) -> SessionInfo {
+    what: &str,
+    settled: impl Fn(&[SessionInfo]) -> bool,
+) -> Vec<SessionInfo> {
     let deadline = tokio::time::Instant::now() + Duration::from_secs(secs);
-    let mut last_seen: Option<SessionInfo> = None;
     loop {
         let listed = client
             .list_sessions()
             .await
             .expect("list while polling for a status");
-        if let Some(found) = listed.sessions.iter().find(|s| s.id == session_id) {
-            if found.status == status {
-                return found.clone();
-            }
-            last_seen = Some(found.clone());
+        if settled(&listed.sessions) {
+            return listed.sessions;
         }
         assert!(
             tokio::time::Instant::now() < deadline,
-            "session {session_id} never reached {status:?} within {secs}s \
-             (last observed: {last_seen:?})"
+            "{what} did not hold within {secs}s (last listing: {:?})",
+            listed.sessions
         );
         tokio::time::sleep(Duration::from_millis(100)).await;
     }
+}
+
+/// Poll `list_sessions` until `session_id` reports `Alive`, returning the
+/// settled `SessionInfo`.
+///
+/// The overwhelmingly common shape of [`wait_for_listing`], and the only
+/// status this suite ever waits for positively — every other settled state
+/// is either reached through [`wait_for_non_alive_status`] or asserted on
+/// a listing that a wait already settled. See [`wait_for_listing`] for why
+/// waiting rather than reading once is the right shape at all; reach for
+/// it directly when the assertion spans more than one row of the reply.
+///
+/// A restart is the motivating case: its reply says the pane exists, not
+/// that the agent inside it has execed yet, so "the relaunch is running"
+/// is only ever observable by asking tmux again.
+pub(crate) async fn wait_for_alive_status(
+    client: &SupervisorClient,
+    session_id: &str,
+    secs: u64,
+) -> SessionInfo {
+    let alive = |sessions: &[SessionInfo]| {
+        sessions
+            .iter()
+            .any(|s| s.id == session_id && s.status == SessionStatus::Alive)
+    };
+    wait_for_listing(
+        client,
+        secs,
+        &format!("session {session_id} became Alive"),
+        alive,
+    )
+    .await
+    .into_iter()
+    .find(|s| s.id == session_id)
+    .expect("the predicate above matched this id")
 }
 
 /// Whether this host's tmux reliably records a dead pane's exit status.
@@ -483,26 +530,95 @@ pub(crate) async fn harness_with_timeouts(timeouts: SupervisorTimeouts) -> Harne
 }
 
 /// Floor for the supervisor's tmux control-exchange budget
-/// (`SupervisorTimeouts::tmux_exchange`) under every harness in this suite,
-/// regardless of what a test supplies for the OTHER timeout fields.
+/// (`SupervisorTimeouts::tmux_exchange`) under every harness in this suite.
 ///
 /// Production keeps `CONTROL_EXCHANGE_TIMEOUT` at 10s deliberately: it
 /// bounds how long a wedged tmux can hold the supervisor-wide attachments
-/// mutex, and that bound has to stay tight for a real deployment. A CI
-/// runner sharing a box with other jobs is a different animal — tmux
-/// itself is healthy, just slow to be scheduled and to answer a
-/// control-mode command — and 10s is not always enough headroom to tell
-/// "busy" apart from "wedged". Loosening it here, rather than in
-/// `SupervisorTimeouts::default()`, is what keeps the production constant
-/// honest while still giving every e2e attach the room a loaded box needs.
+/// mutex, and that bound has to stay tight for a real deployment.
+///
+/// The 30s floor here is this repo's leading HYPOTHESIS for a class of
+/// one-off CI failures, not a proven diagnosis — PLAN.md's M6.5 entry
+/// records six distinct e2e tests each failing exactly once on a loaded
+/// runner over one day, every one passing on rerun and in isolation, with
+/// panic messages that line-map to these two control-mode budgets
+/// expiring. That pattern is consistent with a busy-but-healthy tmux
+/// occasionally taking longer than 10s/2s to answer and being read as
+/// wedged, but nobody has reproduced the flake on demand to confirm it.
+/// Loosening the budget here costs nothing if the hypothesis is wrong
+/// (these tests do not otherwise depend on tmux answering slowly) and
+/// removes a plausible cause if it is right, which is why it is worth
+/// doing before the mechanism is settled.
 const SUITE_TMUX_EXCHANGE_TIMEOUT: Duration = Duration::from_secs(30);
 
-/// Floor for `SupervisorTimeouts::tmux_pane_list` under every harness; see
-/// [`SUITE_TMUX_EXCHANGE_TIMEOUT`] for the rationale. Production's 2s
-/// budget is deliberately much shorter than the exchange timeout (it must
-/// not eat the replay budget an attach still needs), so its CI floor
-/// keeps the same proportion rather than matching the exchange floor.
+/// Floor for `SupervisorTimeouts::tmux_pane_list`; see
+/// [`SUITE_TMUX_EXCHANGE_TIMEOUT`] for why this suite floors either budget
+/// at all.
+///
+/// 10s, not some fraction of the 30s exchange floor: production's 2s and
+/// 10s are not related by a ratio worth preserving (2:10 is a different
+/// proportion from any floor pairing that also stays comfortably above
+/// what a loaded runner needs), so there is no proportion here to keep.
+/// The number is simply "generous enough for a busy pane-list call to
+/// finish" — the same reasoning as the exchange floor's 30s, picked
+/// independently. What IS preserved from production, deliberately, is the
+/// STRUCTURAL relationship: this floor stays well below the exchange
+/// floor (10s < 30s), so a slow pane listing still cannot eat the budget
+/// the replay and cutover need afterward — see `PANE_LIST_TIMEOUT`'s own
+/// docs for why that separation exists at all.
 const SUITE_TMUX_PANE_LIST_TIMEOUT: Duration = Duration::from_secs(10);
+
+/// Floor for `SupervisorTimeouts::sink_ready`; see
+/// [`SUITE_TMUX_EXCHANGE_TIMEOUT`] for why this suite floors budgets at
+/// all.
+///
+/// Production's 15s already comfortably exceeds a handful of sink respawn
+/// retries (`SINK_RETRY_BASE` doubling up to `SINK_RETRY_MAX`), but a
+/// sink's respawn attempt itself opens a fresh control-mode client through
+/// [`SUITE_TMUX_EXCHANGE_TIMEOUT`]'s own budget — now 30s in this suite,
+/// double the unfloored sink-ready wait. Left at 15s, a legitimately
+/// answering-but-slow tmux could have its sink respawn attempt still
+/// in flight when this budget gave up on it, failing the attach for the
+/// same loaded-CI reason the tmux floors above exist to remove. 40s
+/// clears one respawn attempt at the new exchange floor with room to
+/// spare.
+const SUITE_SINK_READY_TIMEOUT: Duration = Duration::from_secs(40);
+
+/// `SupervisorTimeouts::default()` with this suite's loaded-CI floors
+/// already applied to the three tmux-facing fields above.
+///
+/// For the handful of e2e sites that construct a `Supervisor` directly —
+/// bypassing [`harness_with_seams`] entirely, typically to hold a
+/// `Harness`'s pieces across a restart — but still go on to do real tmux
+/// work (an attach, a stop that reaches the sink or the scope manager)
+/// through the fresh supervisor. Prefer `harness()` /
+/// `harness_with_seams()` whenever a `Harness` will do; reach for this only
+/// where the test's own shape requires calling `Supervisor::new_with_exe`
+/// or `Supervisor::new_with_seams` by hand. A caller that also wants to
+/// override one of the OTHER fields (`stall_detach`, say) does so with
+/// `SupervisorTimeouts { stall_detach: X, ..suite_timeouts() }`, the same
+/// `..Default::default()` shape used everywhere else in this suite.
+pub(crate) fn suite_timeouts() -> SupervisorTimeouts {
+    floor_suite_timeouts(SupervisorTimeouts::default())
+}
+
+/// Raise `timeouts`' three tmux-facing fields to at least this suite's
+/// floors, leaving every other field and any caller value ABOVE the floor
+/// untouched.
+///
+/// A floor, not an assignment: an earlier version of
+/// [`harness_with_seams`] unconditionally overwrote the two tmux budget
+/// fields (`sink_ready` arrived floored from the start), which
+/// would have silently shortened a larger value a future test supplied on
+/// purpose (say, a test that deliberately wants an even slower simulated
+/// tmux). `Duration::max` is what makes this a floor in both directions —
+/// it raises a default or a too-small caller value up to the suite
+/// minimum, and it leaves anything already at or above that minimum alone.
+fn floor_suite_timeouts(mut timeouts: SupervisorTimeouts) -> SupervisorTimeouts {
+    timeouts.tmux_exchange = timeouts.tmux_exchange.max(SUITE_TMUX_EXCHANGE_TIMEOUT);
+    timeouts.tmux_pane_list = timeouts.tmux_pane_list.max(SUITE_TMUX_PANE_LIST_TIMEOUT);
+    timeouts.sink_ready = timeouts.sink_ready.max(SUITE_SINK_READY_TIMEOUT);
+    timeouts
+}
 
 /// Like [`harness_with_timeouts`], but with the supervisor's injection
 /// points supplied too — the conversation-capture tests' entry point,
@@ -510,21 +626,20 @@ const SUITE_TMUX_PANE_LIST_TIMEOUT: Duration = Duration::from_secs(10);
 /// enough to prove two sessions in one directory do NOT overlap without
 /// waiting out a production minute.
 ///
-/// Every entry point above funnels through here, which is where the two
-/// tmux control-mode budgets are floored to [`SUITE_TMUX_EXCHANGE_TIMEOUT`]
-/// / [`SUITE_TMUX_PANE_LIST_TIMEOUT`] — unconditionally, overriding
-/// whatever `timeouts` carries for those two fields. A per-test override
-/// would have to be repeated at every one of this suite's call sites (most
-/// of which only care about `stall_detach` or an upload timeout and reach
-/// the tmux fields only through `..Default::default()`), and a single
-/// missed site would silently reintroduce the loaded-CI flake this exists
-/// to remove.
+/// Every entry point above funnels through here, which is where the tmux
+/// control-mode budgets are floored (see [`floor_suite_timeouts`]) —
+/// unconditionally applied regardless of what `timeouts` carries for its
+/// OTHER fields. A per-test override would have to be repeated at every
+/// one of this suite's call sites (most of which only care about
+/// `stall_detach` or an upload timeout and reach the tmux fields only
+/// through `..Default::default()`), and a single missed site would
+/// silently reintroduce the loaded-CI flake hypothesis this exists to
+/// close off.
 pub(crate) async fn harness_with_seams(
-    mut timeouts: SupervisorTimeouts,
+    timeouts: SupervisorTimeouts,
     seams: SupervisorSeams,
 ) -> Harness {
-    timeouts.tmux_exchange = SUITE_TMUX_EXCHANGE_TIMEOUT;
-    timeouts.tmux_pane_list = SUITE_TMUX_PANE_LIST_TIMEOUT;
+    let timeouts = floor_suite_timeouts(timeouts);
     let slot = SLOTS.acquire().await.expect("semaphore is never closed");
     let state = tempfile::tempdir().expect("tempdir");
     let sup = Supervisor::new_with_seams(state.path(), farhelm_bin().into(), timeouts, seams)

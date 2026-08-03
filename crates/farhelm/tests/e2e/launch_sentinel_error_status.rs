@@ -269,10 +269,15 @@ async fn a_reload_classified_error_session_keeps_its_terminal_for_attach_and_del
     // Reload — not list — is what this test targets: a fresh supervisor's
     // `reload_sessions` reconciliation is where item 5's bug lived,
     // separately from `ListSessions`'s own (already-correct) sentinel
-    // branch.
-    let sup2 = Supervisor::new_with_exe(h.state.path(), farhelm_bin().into())
-        .await
-        .expect("reload onto the sentinel-classified row");
+    // branch. This supervisor goes on to attach below, so it needs the
+    // suite's loaded-CI tmux floors.
+    let sup2 = Supervisor::new_with_exe_and_timeouts(
+        h.state.path(),
+        farhelm_bin().into(),
+        suite_timeouts(),
+    )
+    .await
+    .expect("reload onto the sentinel-classified row");
     let client2 = connect_client(&sup2).await;
     assert!(
         matches!(

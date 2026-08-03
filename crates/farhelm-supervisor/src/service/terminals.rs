@@ -500,6 +500,16 @@ const SINK_RETRY_MAX: Duration = Duration::from_secs(5);
 /// "there is an attached client right now" is the right one. Generous
 /// against the backoff above (several retries fit inside it) and still far
 /// short of leaving a user's attach hanging with no explanation.
+///
+/// This is the PRODUCTION value; `ensure_session_sink` actually consults
+/// [`crate::service::core::SupervisorTimeouts::sink_ready`], which
+/// defaults to this constant. Injectable for the same reason the tmux
+/// control-mode budgets are (`SupervisorTimeouts::tmux_exchange` and
+/// `tmux_pane_list`): a sink respawn opens a fresh control-mode client
+/// through THAT budget, so a test harness widening it must be able to
+/// widen this one to match, or a sink genuinely mid-respawn on a loaded
+/// runner could still fail this wait despite the retry itself being
+/// perfectly healthy.
 pub(crate) const SINK_READY_TIMEOUT: Duration = Duration::from_secs(15);
 
 /// The delay before the `n`th consecutive replacement attempt: exponential

@@ -9,7 +9,7 @@ use crate::conversation_identity_capture::{
     snapshot_of,
 };
 use crate::create_idempotency::handoff_to_new_supervisor;
-use crate::restart_with_resume::{pane_capture, wait_for_alive_status};
+use crate::restart_with_resume::pane_capture;
 
 // ---------------------------------------------------------------------
 // Restart under concurrency, and the failure paths that must not lose
@@ -469,7 +469,7 @@ async fn a_restart_respawns_only_its_own_pane() {
     // respawn. Waited for rather than read once: this list lands moments
     // after a restart churned the same tmux server, which is exactly when
     // a tolerated `list-panes` diagnostic can degrade one list to an empty
-    // pane map (see `wait_for_status`). The pane-identity check below is
+    // pane map (see `wait_for_listing`). The pane-identity check below is
     // what actually carries "untouched"; this one only establishes it is
     // alive at all.
     wait_for_alive_status(&h.client, &bystander.id, 30).await;

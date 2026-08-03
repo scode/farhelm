@@ -699,9 +699,13 @@ async fn tabs_are_rediscovered_across_a_supervisor_restart_and_unmarked_windows_
     // its windows untouched — the ordinary supervisor-restart shape.
     drop(client);
     drop(sup);
-    let sup = Supervisor::new_with_exe(state.path(), farhelm_bin().into())
-        .await
-        .expect("second supervisor");
+    // This second supervisor is the one that attaches a rediscovered tab
+    // below, so — unlike the first supervisor above, which only lists and
+    // never attaches — it needs the suite's loaded-CI tmux floors.
+    let sup =
+        Supervisor::new_with_exe_and_timeouts(state.path(), farhelm_bin().into(), suite_timeouts())
+            .await
+            .expect("second supervisor");
     let client = connect_client(&sup).await;
 
     assert_eq!(

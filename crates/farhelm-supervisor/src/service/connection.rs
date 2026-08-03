@@ -1268,22 +1268,34 @@ pub(crate) async fn set_attachment_paused(
         .values()
         .find(|a| a.channel == channel && a.notify.same_channel(tx))
     {
-        attachment
-            .pause
-            .send_if_modified(|current| match (paused, *current) {
-                // Already paused: keep the ORIGINAL start instant.
-                (true, Some(_)) => false,
-                (true, None) => {
-                    *current = Some(tokio::time::Instant::now());
-                    true
-                }
-                (false, None) => false,
-                (false, Some(_)) => {
-                    *current = None;
-                    true
-                }
-            });
+        apply_pause_transition(&attachment.pause, paused);
     }
+}
+
+/// The transition rule itself, pulled out of [`set_attachment_paused`] so it
+/// has a unit-test surface that needs no `Supervisor`, no attachment-map
+/// lookup, and no connection — see this module's
+/// `repeated_pause_spam_never_moves_the_stall_anchor` test, which drives
+/// this function and [`stalled_past_deadline`] directly against a bare
+/// `watch` channel under a paused clock.
+///
+/// Keeping the ORIGINAL start instant on a repeat of the current state is
+/// the one property that matters: see [`set_attachment_paused`]'s docs for
+/// why moving it would let a client hold an attachment open forever.
+fn apply_pause_transition(pause: &watch::Sender<Option<tokio::time::Instant>>, paused: bool) {
+    pause.send_if_modified(|current| match (paused, *current) {
+        // Already paused: keep the ORIGINAL start instant.
+        (true, Some(_)) => false,
+        (true, None) => {
+            *current = Some(tokio::time::Instant::now());
+            true
+        }
+        (false, None) => false,
+        (false, Some(_)) => {
+            *current = None;
+            true
+        }
+    });
 }
 
 #[cfg(test)]
@@ -1714,6 +1726,85 @@ mod tests {
             "task must have run to natural completion, not been aborted \
              mid-flight while progress was still arriving"
         );
+    }
+
+    /// A repeated `PauseOutput` must never move the stored pause anchor,
+    /// and [`stalled_past_deadline`] must fire measured from the FIRST
+    /// pause — not the most recent spam — within one 50ms virtual-time step
+    /// of the exact deadline (the loop's advance granularity, not wall-clock
+    /// slack: virtual time cannot drift, so the bound is one tick wide).
+    ///
+    /// This is the precise version of the property the e2e suite's
+    /// `terminal_backpressure::a_paused_replay_detaches_relative_to_the_
+    /// first_pause_despite_pause_spam` test can only bound loosely: that
+    /// test measures real wall-clock elapsed time against a fire-and-
+    /// forget `PauseOutput` send, so delivery and teardown latency eat
+    /// into whatever slack its ceiling allows, and an implementation whose
+    /// anchor drifts by less than that slack would still pass it. Here,
+    /// under a paused clock, "measured from the first pause" and "measured
+    /// from anything else" resolve at two DIFFERENT virtual instants, so
+    /// any wrong anchor misses the assertion below deterministically.
+    ///
+    /// No real process or I/O is awaited anywhere in this test — see
+    /// `terminals.rs`'s `a_healthy_sink_run_resets_the_respawn_backoff` for
+    /// why that matters under `start_paused`: an awaited real-world event
+    /// parks the runtime with nothing else ready, and tokio's time driver
+    /// is then free to auto-advance the frozen clock straight through the
+    /// very window being measured. Everything exercised here — a `watch`
+    /// channel and [`stalled_past_deadline`]'s own virtual sleep — is a
+    /// timer the paused-clock driver tracks explicitly, so `advance` only
+    /// ever moves exactly as far as this test tells it to.
+    #[tokio::test(start_paused = true)]
+    async fn repeated_pause_spam_never_moves_the_stall_anchor() {
+        let stall_timeout = Duration::from_secs(3);
+        // Shorter than the timeout, mirroring a client that re-sends
+        // `PauseOutput` on some cadence well inside the maximum it is
+        // trying (and failing) to outlast.
+        let spam_period = Duration::from_millis(300);
+        let spam_count = 5u32;
+
+        let (pause_tx, pause_rx) = watch::channel(None::<tokio::time::Instant>);
+        apply_pause_transition(&pause_tx, true);
+        let anchor = pause_rx
+            .borrow()
+            .expect("the first pause must record an anchor");
+
+        // Spam the SAME (paused, already paused) transition repeatedly,
+        // with virtual time elapsing between each — the anchor must not
+        // move on any of them.
+        for _ in 0..spam_count {
+            tokio::time::advance(spam_period).await;
+            apply_pause_transition(&pause_tx, true);
+            assert_eq!(
+                *pause_rx.borrow(),
+                Some(anchor),
+                "a repeated PauseOutput must never move the stored pause anchor"
+            );
+        }
+
+        let task = tokio::spawn(stalled_past_deadline(pause_rx.clone(), stall_timeout));
+        tokio::task::yield_now().await;
+        assert!(
+            !task.is_finished(),
+            "stalled_past_deadline fired before its deadline"
+        );
+
+        // Advance to just past the TRUE deadline, measured from the FIRST
+        // pause (`anchor + stall_timeout`) rather than from the most
+        // recent spam (`spam_count * spam_period` after it). A wrong-anchor
+        // implementation anchored to the latest spam would still be
+        // asleep here, since its own deadline lands `spam_count *
+        // spam_period` later than this one.
+        let elapsed_during_spam = spam_period * spam_count;
+        let remaining = stall_timeout.saturating_sub(elapsed_during_spam);
+        tokio::time::advance(remaining + Duration::from_millis(50)).await;
+        tokio::task::yield_now().await;
+        assert!(
+            task.is_finished(),
+            "stalled_past_deadline did not fire within one tick of anchor + {stall_timeout:?} — \
+             the anchor is being computed from something other than the first pause"
+        );
+        task.await.expect("stalled_past_deadline must not panic");
     }
 
     /// The lock-held detach notice must never block, and must never be

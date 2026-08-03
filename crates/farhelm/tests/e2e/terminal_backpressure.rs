@@ -758,7 +758,8 @@ async fn repeated_short_pauses_never_accumulate_into_a_stall_detach() {
 }
 
 /// A pause held across a large replay, with `PauseOutput` re-sent
-/// repeatedly, must still detach relative to the FIRST pause.
+/// repeatedly, must still detach — through the REAL attach/forwarder/
+/// connection stack, not a synthetic stand-in for it.
 ///
 /// Two failures in one test, both of which every other pause test
 /// survives. First, the stall deadline must be ABSOLUTE: an
@@ -774,17 +775,44 @@ async fn repeated_short_pauses_never_accumulate_into_a_stall_detach() {
 /// The spam is what makes the first failure observable: `PauseOutput`
 /// repeated every 300ms is well inside the shortened timeout, so an
 /// implementation that lets a repeat overwrite the stored pause start
-/// never detaches at all.
+/// never detaches at all — this test's `reason.expect` below is what
+/// catches that outright, by timing out the whole test if it happens.
+///
+/// # What this test does NOT pin
+///
+/// It deliberately asserts no numeric bound on how LONG the detach took.
+/// An earlier version tried one (`elapsed < 9s`, then `elapsed <
+/// STALL_DETACH + SPAM_PERIOD + 1s`) and a review swarm found both wrong in
+/// the same two ways every such bound here would be: real wall-clock
+/// elapsed time is measured from `pause_output`'s fire-and-forget SEND,
+/// so a CORRECT implementation can still miss a tight bound under nothing
+/// worse than ordinary delivery and forwarder-teardown latency on a loaded
+/// runner; and the loop below is itself capped at `spam_count *
+/// SPAM_PERIOD` (a few seconds) before `reason.expect` would fail it
+/// anyway, so any bound loose enough to absorb real scheduling noise is
+/// also too loose to catch a wrong-instant anchor (one anchored to the
+/// second spam rather than the first drifts by only one `SPAM_PERIOD`).
+/// There is no honest number to put here that is both tight enough to
+/// discriminate and loose enough not to flake.
+///
+/// The precise property — the stored anchor never moves under spam, and
+/// the deadline fires within one virtual-time tick of
+/// `anchor + stall_timeout` — is pinned deterministically and at zero
+/// wall-clock cost by
+/// `connection::tests::repeated_pause_spam_never_moves_the_stall_anchor`
+/// (a supervisor-level unit test against a paused clock, where "measured
+/// from the first pause" and "measured from anything else" land at
+/// different virtual instants with no timing noise to hide behind). What
+/// THIS test proves that the unit test cannot: that a real, continuously
+/// spammed client attached through the real stack genuinely gets detached
+/// with the right reason, rather than wedging forever.
 #[tokio::test]
 async fn a_paused_replay_detaches_relative_to_the_first_pause_despite_pause_spam() {
-    // Named so the honest bound at the end of this test is computed from
-    // the SAME two numbers the setup and spam loop use, rather than
-    // duplicating them as a second, driftable set of magic numbers.
-    const STALL_DETACH: Duration = Duration::from_secs(3);
-    const SPAM_PERIOD: Duration = Duration::from_millis(300);
+    let stall_detach = Duration::from_secs(3);
+    let spam_period = Duration::from_millis(300);
 
     let h = harness_with_timeouts(SupervisorTimeouts {
-        stall_detach: STALL_DETACH,
+        stall_detach,
         ..SupervisorTimeouts::default()
     })
     .await;
@@ -803,7 +831,6 @@ async fn a_paused_replay_detaches_relative_to_the_first_pause_despite_pause_spam
         .attach(&session.id, 80, 24)
         .await
         .expect("reattach");
-    let paused_at = tokio::time::Instant::now();
     h.client.pause_output(chan2).await;
 
     let mut replay = Vec::new();
@@ -812,7 +839,7 @@ async fn a_paused_replay_detaches_relative_to_the_first_pause_despite_pause_spam
     // 3s maximum, so only an absolute deadline detaches at all.
     for _ in 0..20 {
         h.client.pause_output(chan2).await;
-        if let Some(seen_reason) = drain_for(&mut rx2, &mut replay, SPAM_PERIOD).await {
+        if let Some(seen_reason) = drain_for(&mut rx2, &mut replay, spam_period).await {
             reason = Some(seen_reason);
             break;
         }
@@ -826,30 +853,6 @@ async fn a_paused_replay_detaches_relative_to_the_first_pause_despite_pause_spam
         reason,
         farhelm_proto::DETACH_REASON_STALLED,
         "the detach must be the stall detach"
-    );
-    let elapsed = paused_at.elapsed();
-    // A deadline that gets RESTARTED by every spammed `PauseOutput` (the
-    // bug this test's first assertion above already catches) would need
-    // 3s of silence after the LAST spam before it could ever fire — which,
-    // spammed every 300ms for 20 iterations, never happens inside this
-    // loop's own 6s budget, so that bug already panics at `reason.expect`
-    // and never reaches this line. What this bound catches is a subtler
-    // variant: an ABSOLUTE deadline computed from the wrong instant (say,
-    // the most recent spam rather than the first pause), which still
-    // fires, just later than it should. The previous 9s ceiling could
-    // never distinguish that from correct behavior — the spam loop itself
-    // caps elapsed time near 6-7s, so `reason.expect` above fails first on
-    // any run slow enough to approach 9s regardless of which instant the
-    // deadline was measured from. One stall window past the honest
-    // ceiling — the stall timeout, plus one spam period for the polling
-    // granularity in the loop above, plus a second of schedule slack for a
-    // loaded runner — is tight enough to actually fail on the wrong-instant
-    // bug while staying clear of that granularity.
-    let bound = STALL_DETACH + SPAM_PERIOD + Duration::from_secs(1);
-    assert!(
-        elapsed < bound,
-        "detached after {elapsed:?}, past {bound:?} measured from the first pause — the \
-         deadline is being computed from something other than the first pause"
     );
 }
 

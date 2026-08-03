@@ -1326,23 +1326,23 @@ async fn exited_agent_leaves_a_viewable_terminal() {
     // Wait for the pane to actually be dead by asking tmux, not by
     // watching for the agent's farewell text. Output-watching would race
     // the process teardown this test deliberately provokes; `pane_dead`
-    // is the state the assertion below actually depends on. (There is no
-    // `Detached` to WAIT for: `remain-on-exit` keeps the session alive
-    // after the process dies, which is the property under test — but one
-    // ARRIVING means the attachment died and the quit can never land, so
-    // the stream is drained non-blockingly each pass and reported
-    // immediately rather than as a 30-second silence.)
+    // is the state the assertion below actually depends on.
+    //
+    // There is no `Detached` to WAIT for — `remain-on-exit` keeps the
+    // session alive after the process dies, which is the property under
+    // test — but one ARRIVING means this attachment is gone and no further
+    // `quit` can ever reach the pane, so the wait below would burn its
+    // whole budget on an outcome already decided. That is monitored
+    // through the DETACH SIGNAL rather than by draining the event queue:
+    // the signal is out of band precisely so a consumer parked on
+    // something else can be woken by it, and `TermStream`'s queue-facing
+    // API deliberately prefers buffered data over the detach — so a poll
+    // of the queue can be empty for the entire life of a detached
+    // attachment and never report it.
+    let mut detached = rx.detach_signal();
     let sock = h.state.path().join("tmux.sock");
     let deadline = tokio::time::Instant::now() + Duration::from_secs(30);
     loop {
-        while let Ok(event) = rx.try_recv() {
-            if let TermEvent::Detached(reason) = event {
-                panic!(
-                    "the attachment was detached ({reason}) before the agent exited; the quit \
-                     can never be delivered now"
-                );
-            }
-        }
         let out = tmux_query(&sock, &["display-message", "-p", "#{pane_dead}"]).await;
         if String::from_utf8_lossy(&out.stdout).trim() == "1" {
             break;
@@ -1354,11 +1354,26 @@ async fn exited_agent_leaves_a_viewable_terminal() {
         // Re-sent every pass, not just once. `quit` is idempotent against
         // the basic fake agent (it exits on the first one and the pane is
         // dead for every later one, which tmux simply drops), and each
-        // send is a 10s-bounded exchange with tmux that a loaded machine
-        // can lose outright — one lost send would otherwise leave this
-        // loop waiting the full 30s for an exit nobody ever asked for.
+        // send is a bounded exchange with tmux that a loaded machine can
+        // lose outright — one lost send would otherwise leave this loop
+        // waiting the full 30s for an exit nobody ever asked for.
         h.client.send_input(chan, b"quit\r".to_vec()).await;
-        tokio::time::sleep(Duration::from_millis(100)).await;
+        // The pause between polls is also where the detach is watched.
+        // Both arms of this select are cancel-safe (a watch `changed()`
+        // and a sleep), so losing either race costs nothing.
+        tokio::select! {
+            reason = detached.detached() => match reason {
+                Some(reason) => panic!(
+                    "the attachment was detached ({reason}) before the agent exited; no \
+                     further quit can reach the pane"
+                ),
+                None => panic!(
+                    "the supervisor client went away before the agent exited; no further \
+                     quit can reach the pane"
+                ),
+            },
+            () = tokio::time::sleep(Duration::from_millis(100)) => {}
+        }
     }
     h.client.detach(chan).await;
 
@@ -1381,21 +1396,45 @@ async fn exited_agent_leaves_a_viewable_terminal() {
         match h.client.attach(&session.id, 80, 24).await {
             Ok(attached) => break attached,
             Err(e) => {
-                let rendered = format!("{e:#}");
                 assert!(
-                    rendered.contains("timed out") || rendered.contains("timeout"),
+                    looks_like_a_tmux_timeout(&e),
                     "a session whose agent exited must still be attachable, and this failure \
-                     is not a transient one: {rendered}"
+                     is not a transient one: {e:#}"
                 );
                 assert!(
                     tokio::time::Instant::now() < deadline,
                     "a session whose agent exited never became attachable within 60s; last \
-                     error: {rendered}"
+                     error: {e:#}"
                 );
                 tokio::time::sleep(Duration::from_millis(250)).await;
             }
         }
     };
+}
+
+/// Whether a failed request failed because a tmux exchange ran out of
+/// budget, as opposed to for a reason retrying cannot fix.
+///
+/// Text matching, deliberately, and the alternative deserves recording
+/// because it is the obvious one: the supervisor's timeouts really do
+/// carry a `tokio::time::error::Elapsed` at the root of their `anyhow`
+/// chain, so downcasting to it looks like the precise answer. It is not
+/// REACHABLE here. Every handler failure is flattened to a string on the
+/// wire (`ControlMsg::Error`'s `message`, built with `format!("{e:#}")`)
+/// and rebuilt client-side as a `SupervisorError`, so no source error
+/// survives the round trip at all — a downcast to `Elapsed` would match
+/// nothing and silently turn this into a no-retry loop, which is worse
+/// than the imprecision it was meant to remove.
+///
+/// The match is narrowed as far as the wire allows: the kind must be
+/// `Internal` (a timeout is never a refusal the caller could have
+/// avoided), and only the supervisor's own message is searched rather than
+/// the rendered chain, so context this test's own layers might add can
+/// never make an unrelated failure look retryable.
+fn looks_like_a_tmux_timeout(error: &anyhow::Error) -> bool {
+    error
+        .downcast_ref::<SupervisorError>()
+        .is_some_and(|e| e.kind == ErrorKind::Internal && e.message.contains("timed out"))
 }
 
 /// The adopted-server gap: tmux reads a `-f` config only when it STARTS a
@@ -1979,9 +2018,10 @@ async fn writer_never_reading_peer_does_not_hang_connection_shutdown() {
 async fn stdio_proxy_carries_a_real_session() {
     let _slot = SLOTS.acquire().await.expect("semaphore is never closed");
     let state = tempfile::tempdir().expect("tempdir");
-    let sup = Supervisor::new_with_exe(state.path(), farhelm_bin().into())
-        .await
-        .expect("supervisor");
+    let sup =
+        Supervisor::new_with_exe_and_timeouts(state.path(), farhelm_bin().into(), suite_timeouts())
+            .await
+            .expect("supervisor");
     // Declared after `state`, so it drops first: kill the server, then
     // delete the directory holding its socket. Without this guard a
     // panic anywhere below leaked the tmux server (plus login shell and
@@ -2002,7 +2042,6 @@ async fn stdio_proxy_carries_a_real_session() {
     tokio::spawn(async move {
         let _ = serving.serve().await;
     });
-    // Wait for a listener rather than sleeping.
     wait_for_supervisor_ready(state.path()).await;
 
     let mut child = tokio::process::Command::new(farhelm_bin())
@@ -2649,19 +2688,33 @@ async fn persisted_sessions_survive_a_supervisor_restart() {
     let h = harness().await;
     let (session, _work) = basic_session(&h).await;
 
-    let sup2 = Supervisor::new_with_exe(h.state.path(), farhelm_bin().into())
-        .await
-        .expect("second supervisor construction on the same state dir");
+    let sup2 = Supervisor::new_with_exe_and_timeouts(
+        h.state.path(),
+        farhelm_bin().into(),
+        suite_timeouts(),
+    )
+    .await
+    .expect("second supervisor construction on the same state dir");
     let client2 = connect_client(&sup2).await;
 
-    // Settle on Alive first, then assert the WHOLE listing against it: the
-    // equality below is about metadata round-tripping, and a single list
-    // that happened to catch a tolerated tmux diagnostic would fail it on
-    // the status field alone (see `wait_for_status`).
-    wait_for_status(&client2, &session.id, SessionStatus::Alive, 30).await;
-    let listed = client2.list_sessions().await.expect("list after restart");
+    // The listing asserted on is the one the wait SETTLED, not a fresh
+    // read taken afterwards: re-listing would put an unguarded single-shot
+    // observation back in front of the equality below, which is exactly
+    // what a tolerated tmux diagnostic (see `wait_for_listing`) turns into
+    // a spurious `Exited` on the status field.
+    let listed = wait_for_listing(
+        &client2,
+        30,
+        "the restarted supervisor lists the session as Alive",
+        |sessions| {
+            sessions
+                .iter()
+                .any(|s| s.id == session.id && s.status == SessionStatus::Alive)
+        },
+    )
+    .await;
     assert_eq!(
-        listed.sessions,
+        listed,
         vec![with_status(session.clone(), SessionStatus::Alive)],
         "session metadata must round-trip identically from SQLite, and a session whose \
          tmux server survived the restart must still list Alive"
@@ -2879,17 +2932,27 @@ async fn stale_pane_id_after_server_restart_does_not_inherit_a_new_sessions_stat
          than the test silently passing for an unrelated reason"
     );
 
-    // Settle the new session first, then take ONE listing and read both
-    // rows out of it — the discrimination under test is between two
-    // entries of the same reply, so they must come from the same list.
-    // Waiting first is what keeps a tolerated tmux diagnostic (an empty
-    // pane map, see `wait_for_status`) from failing this on the live half
-    // right after the server was killed and restarted underneath it.
-    wait_for_status(&h.client, &new_session.id, SessionStatus::Alive, 30).await;
-    let listed = h.client.list_sessions().await.expect("list");
+    // Both rows are read out of ONE settled listing. The discrimination
+    // under test is between two entries of the same reply — "this pane id
+    // is alive for the new session and dead for the old one" is a single
+    // claim about a single observation — so the wait's predicate is what
+    // picks the reply, and neither row is re-read afterwards. Waiting is
+    // also what keeps a tolerated tmux diagnostic (an empty pane map, see
+    // `wait_for_listing`) from failing the live half right after the
+    // server was killed and restarted underneath it.
+    let listed = wait_for_listing(
+        &h.client,
+        30,
+        "the new session lists Alive on its recycled pane id",
+        |sessions| {
+            sessions
+                .iter()
+                .any(|s| s.id == new_session.id && s.status == SessionStatus::Alive)
+        },
+    )
+    .await;
     let find = |id: &str| {
         listed
-            .sessions
             .iter()
             .find(|s| s.id == id)
             .cloned()
@@ -2937,21 +3000,32 @@ async fn restart_gap_is_decided_per_session() {
         String::from_utf8_lossy(&killed.stderr)
     );
 
-    let sup2 = Supervisor::new_with_exe(h.state.path(), farhelm_bin().into())
-        .await
-        .expect("second supervisor construction after one session's tmux died");
+    let sup2 = Supervisor::new_with_exe_and_timeouts(
+        h.state.path(),
+        farhelm_bin().into(),
+        suite_timeouts(),
+    )
+    .await
+    .expect("second supervisor construction after one session's tmux died");
     let client2 = connect_client(&sup2).await;
 
-    // Settle the surviving session first, for the same reason as the
-    // sibling test above: the per-session assertion below is an equality
-    // over the whole reply, so one list catching a tolerated tmux
-    // diagnostic (see `wait_for_status`) would fail it on the live half.
-    wait_for_status(&client2, &alive_session.id, SessionStatus::Alive, 30).await;
-    let mut listed = client2
-        .list_sessions()
-        .await
-        .expect("list after a partial restart gap");
-    listed.sessions.sort_by(|a, b| a.id.cmp(&b.id));
+    // One settled listing carries both rows, for the same reason as the
+    // sibling test above: the assertion is an equality over the WHOLE
+    // reply, so it has to be the reply the wait accepted rather than a
+    // fresh single-shot read that a tolerated tmux diagnostic (see
+    // `wait_for_listing`) could catch mid-degradation on the live half.
+    let mut listed = wait_for_listing(
+        &client2,
+        30,
+        "the surviving session lists Alive after a partial restart gap",
+        |sessions| {
+            sessions
+                .iter()
+                .any(|s| s.id == alive_session.id && s.status == SessionStatus::Alive)
+        },
+    )
+    .await;
+    listed.sort_by(|a, b| a.id.cmp(&b.id));
     let mut expected = vec![
         with_status(alive_session.clone(), SessionStatus::Alive),
         with_status(
@@ -2961,7 +3035,7 @@ async fn restart_gap_is_decided_per_session() {
     ];
     expected.sort_by(|a, b| a.id.cmp(&b.id));
     assert_eq!(
-        listed.sessions, expected,
+        listed, expected,
         "both sessions must remain listed regardless of which one's terminal died, and \
          only the one whose tmux session actually died must list as exited"
     );
@@ -4373,9 +4447,13 @@ async fn alt_screen_snapshot_survives_a_supervisor_restart() {
 
     h.client.stop_session(&session.id).await.expect("stop");
 
-    let sup2 = Supervisor::new_with_exe(h.state.path(), farhelm_bin().into())
-        .await
-        .expect("second supervisor construction on the same state dir");
+    let sup2 = Supervisor::new_with_exe_and_timeouts(
+        h.state.path(),
+        farhelm_bin().into(),
+        suite_timeouts(),
+    )
+    .await
+    .expect("second supervisor construction on the same state dir");
     let client2 = connect_client(&sup2).await;
 
     let (_chan2, mut rx2) = client2
@@ -4813,7 +4891,10 @@ async fn a_recorded_scope_survives_a_supervisor_restart_and_still_kills() {
     let restarted = Supervisor::new_with_seams(
         state.path(),
         farhelm_bin().into(),
-        SupervisorTimeouts::default(),
+        // Built by hand for the scope seam below, so `suite_timeouts()`
+        // rather than `harness_with_seams` — the stop this restarted
+        // supervisor runs still does real tmux work through the sweep.
+        suite_timeouts(),
         SupervisorSeams {
             scopes,
             ..SupervisorSeams::default()

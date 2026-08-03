@@ -182,13 +182,13 @@ pub const AGENT_WINDOW_OPTION: &str = "@farhelm-agent";
 ///
 /// This is the PRODUCTION value and must stay tight: it bounds how long a
 /// wedged tmux can hold the supervisor-wide attachments mutex, and every
-/// [`TmuxDriver`] defaults to it. Integration tests that run on a loaded
-/// CI box need a longer budget — a busy-but-healthy tmux can take seconds
-/// to answer under load, and this constant must not be the thing that
-/// makes CI mistake "busy" for "wedged" — so the value actually in effect
-/// is [`TmuxDriver`]'s `exchange_timeout` field, injected at construction
-/// (see [`TmuxDriver::new_with_timeouts`]) rather than read from here
-/// directly.
+/// [`TmuxDriver`] defaults to it. The e2e suite runs with a longer budget
+/// instead — see the `SUITE_TMUX_EXCHANGE_TIMEOUT` doc in the e2e harness
+/// for why (PLAN.md's M6.5 tracks this as a leading hypothesis for a class
+/// of loaded-CI one-offs, not a confirmed diagnosis) — so the value
+/// actually in effect is [`TmuxDriver`]'s `exchange_timeout` field,
+/// injected at construction (see [`TmuxDriver::new_with_timeouts`]) rather
+/// than read from here directly.
 pub(crate) const CONTROL_EXCHANGE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
 
 /// The format is deliberately comma-separated. See [`PaneModes::parse`].
@@ -416,6 +416,34 @@ pub struct TmuxDriver {
     /// [`PANE_LIST_TIMEOUT`]; injectable for the same reason as
     /// `exchange_timeout`.
     pane_list_timeout: std::time::Duration,
+}
+
+/// The two control-mode budgets a [`TmuxDriver`] is constructed with.
+///
+/// A named pair rather than two adjacent `Duration` parameters on
+/// [`TmuxDriver::new_with_timeouts`]: both fields are the same type, so two
+/// bare `Duration`s invite a transposed-argument bug the compiler cannot
+/// catch, where the exchange budget and the pane-list budget silently swap.
+/// A named field per budget makes a swap a compile error at the call site
+/// instead of a latent bug that only a slow pane-list (or a too-eager
+/// attach timeout) would ever surface.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct TmuxBudgets {
+    /// See [`CONTROL_EXCHANGE_TIMEOUT`].
+    pub(crate) exchange: std::time::Duration,
+    /// See [`PANE_LIST_TIMEOUT`].
+    pub(crate) pane_list: std::time::Duration,
+}
+
+impl Default for TmuxBudgets {
+    /// The production values — see [`TmuxDriver::new`], the only
+    /// constructor that uses this default.
+    fn default() -> Self {
+        TmuxBudgets {
+            exchange: CONTROL_EXCHANGE_TIMEOUT,
+            pane_list: PANE_LIST_TIMEOUT,
+        }
+    }
 }
 
 /// Enforce the control-mode floor before starting or adopting a server.
@@ -1318,27 +1346,25 @@ impl TmuxDriver {
     /// tests running on a loaded CI box) go through
     /// [`Self::new_with_timeouts`] instead.
     pub fn new(state_dir: &Path) -> TmuxDriver {
-        Self::new_with_timeouts(state_dir, CONTROL_EXCHANGE_TIMEOUT, PANE_LIST_TIMEOUT)
+        Self::new_with_timeouts(state_dir, TmuxBudgets::default())
     }
 
     /// Like [`Self::new`], with the two control-mode budgets supplied
     /// explicitly.
     ///
-    /// The production constants remain the only values real supervisors
-    /// use (see [`Self::new`]); this constructor exists purely as the
-    /// injection seam a test harness uses to lengthen them past what a
-    /// loaded CI runner's tmux can be slow to answer without that slowness
-    /// being mistaken for a wedge.
-    pub fn new_with_timeouts(
-        state_dir: &Path,
-        exchange_timeout: std::time::Duration,
-        pane_list_timeout: std::time::Duration,
-    ) -> TmuxDriver {
+    /// `pub(crate)`, not `pub`: the production constants remain the only
+    /// values any real supervisor uses (see [`Self::new`]), so the only
+    /// legitimate callers of this seam are this crate's own
+    /// `Supervisor::new_with_seams` (threading `SupervisorTimeouts`
+    /// through) and this module's own tests — never an embedder, and never
+    /// an e2e test directly (those go through `SupervisorTimeouts`, not
+    /// this driver).
+    pub(crate) fn new_with_timeouts(state_dir: &Path, budgets: TmuxBudgets) -> TmuxDriver {
         TmuxDriver {
             socket: state_dir.join("tmux.sock"),
             config: state_dir.join("tmux.conf"),
-            exchange_timeout,
-            pane_list_timeout,
+            exchange_timeout: budgets.exchange,
+            pane_list_timeout: budgets.pane_list,
         }
     }
 
@@ -3097,8 +3123,19 @@ pub struct OutputStream {
     /// `exchange_timeout`.
     pane_list_timeout: std::time::Duration,
     /// Why tmux said this control client was going away, if it said so at
-    /// all — see [`Self::exit_reason`], which is the only thing that ever
-    /// reads it.
+    /// all: `None` means no `%exit` was ever seen — the stream simply hit
+    /// EOF, which is what a tmux process killed outright looks like from
+    /// here — while `Some("")` means tmux announced a bare `%exit` with no
+    /// reason.
+    ///
+    /// Purely diagnostic, and deliberately private. Nothing in production
+    /// branches on it: `Ok(None)` from [`Self::next_output`] already means
+    /// everything the forwarder needs to act on, and the reason is logged
+    /// at the moment it is set. It is KEPT because this module's own tests
+    /// — a descendant module, so private is reach enough — need to name
+    /// the cause when a control client vanishes mid-test, which was
+    /// previously unrecoverable: three CI failures on a vanished client
+    /// yielded zero evidence of what had happened to it.
     exit_reason: Option<String>,
 }
 
@@ -3112,23 +3149,6 @@ impl OutputStream {
     /// history would look like a plain terminal glitch.
     pub fn pane(&self) -> &str {
         &self.pane
-    }
-
-    /// Why tmux said this client was going away, once
-    /// [`Self::next_output`] has returned `Ok(None)`.
-    ///
-    /// `None` means no `%exit` was ever seen — the stream simply hit EOF,
-    /// which is what a tmux process killed outright looks like from here.
-    /// An empty string means tmux announced a bare `%exit` with no reason.
-    ///
-    /// Purely diagnostic, and deliberately so: nothing in production
-    /// branches on it, because `Ok(None)` already means everything the
-    /// forwarder needs to act on. It exists because that collapse used to
-    /// be total — three CI failures on a vanished control client yielded
-    /// zero evidence of what had happened to it — and because the reason
-    /// is gone for good the moment this line is discarded.
-    pub fn exit_reason(&self) -> Option<&str> {
-        self.exit_reason.as_deref()
     }
 
     /// Every pane of this stream's session except its own, asked while
@@ -3577,13 +3597,16 @@ impl OutputStream {
                     // between a tmux server that was killed and one that
                     // died on its own, which is otherwise erased here and
                     // unrecoverable afterwards.
+                    self.exit_reason = Some(reason);
                     warn!(
                         pane = %self.pane,
+                        // The stored copy rather than the local, so this
+                        // field has a production reader and cannot drift
+                        // from what the tests later report.
                         session = %self.session,
-                        reason = %reason,
+                        reason = %self.exit_reason.as_deref().unwrap_or("(no reason given)"),
                         "tmux control client exited"
                     );
-                    self.exit_reason = Some(reason);
                     return Ok(None);
                 }
                 Decision::Incomplete => {}
@@ -4638,19 +4661,14 @@ fn classify_control_line(line: &[u8]) -> Option<ControlLine<'_>> {
         // would mean a shape this build does not understand, so the id is
         // taken verbatim and simply fails to match any stream's pane.
         Some(ControlLine::Paused { pane })
-    } else if line.starts_with(b"%exit") {
+    } else if let Some(rest) = line.strip_prefix(b"%exit") {
         // Both documented forms in one arm: a bare `%exit` leaves nothing
         // after the marker, `%exit <reason>` leaves a space then the
         // reason. The separator is stripped so the reason reads cleanly in
         // a log line; anything else trailing the marker is carried through
-        // verbatim rather than rejected, since this is diagnostics. A
-        // `starts_with` test rather than a `strip_prefix` binding keeps
-        // this arm's shape identical to its siblings' — the prefix is
-        // already proven present, so the slice below cannot panic.
-        let rest = &line["%exit".len()..];
-        Some(ControlLine::Exit {
-            reason: rest.strip_prefix(b" ").unwrap_or(rest),
-        })
+        // verbatim rather than rejected, since this is diagnostics.
+        let reason = rest.strip_prefix(b" ").unwrap_or(rest);
+        Some(ControlLine::Exit { reason })
     } else {
         None
     }
@@ -6688,9 +6706,14 @@ mod tests {
     /// Every probe is best-effort and its failure is folded into the text
     /// rather than raised: this runs on a path that is already panicking,
     /// and a probe that panics first would destroy the very report it was
-    /// gathering.
+    /// gathering. The same reasoning is why the two tmux probes are
+    /// bounded by [`REPORT_PROBE_TIMEOUT`] — the most likely reason a
+    /// control client vanished is a tmux in trouble, and asking a wedged
+    /// tmux a question through the UNBOUNDED [`TmuxDriver::run`] would
+    /// turn a test that was about to fail with a diagnosis into one that
+    /// hangs until the harness kills it.
     async fn client_gone_report(server: &ScratchServer, stream: &mut OutputStream) -> String {
-        let exit_reason = match stream.exit_reason() {
+        let exit_reason = match stream.exit_reason.as_deref() {
             Some("") => "tmux announced a bare %exit with no reason".to_string(),
             Some(reason) => format!("tmux said: %exit {reason}"),
             None => "clean EOF, no %exit was ever announced".to_string(),
@@ -6700,23 +6723,41 @@ mod tests {
             Ok(None) => "the tmux -C child is still running".to_string(),
             Err(e) => format!("the tmux -C child could not be waited on: {e}"),
         };
-        let sessions = match server
-            .driver
-            .run(&["list-sessions", "-F", "#{session_name}"])
-            .await
-        {
-            Ok(out) => format!("sessions: [{}]", out.trim().replace('\n', ", ")),
-            Err(e) => format!("list-sessions failed: {e:#}"),
-        };
-        let clients = match server
-            .driver
-            .run(&["list-clients", "-F", "#{client_flags}"])
-            .await
-        {
-            Ok(out) => format!("clients: [{}]", out.trim().replace('\n', ", ")),
-            Err(e) => format!("list-clients failed: {e:#}"),
-        };
+        let sessions = probe(
+            server,
+            "sessions",
+            &["list-sessions", "-F", "#{session_name}"],
+        )
+        .await;
+        let clients = probe(
+            server,
+            "clients",
+            &["list-clients", "-F", "#{client_flags}"],
+        )
+        .await;
         format!("{exit_reason}; {child}; {sessions}; {clients}")
+    }
+
+    /// How long one of [`client_gone_report`]'s tmux probes may take
+    /// before the report records that it hung instead of what it found.
+    ///
+    /// Short on purpose. These questions are one subprocess round trip
+    /// against a server that is, at worst, on the same box — anything
+    /// slower is itself the answer, and the panic this report decorates is
+    /// already overdue by the time it runs.
+    const REPORT_PROBE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(3);
+
+    /// One bounded tmux query for [`client_gone_report`], rendered as a
+    /// report fragment whether it answered, failed, or hung.
+    async fn probe(server: &ScratchServer, label: &str, args: &[&str]) -> String {
+        match tokio::time::timeout(REPORT_PROBE_TIMEOUT, server.driver.run(args)).await {
+            Ok(Ok(out)) => format!("{label}: [{}]", out.trim().replace('\n', ", ")),
+            Ok(Err(e)) => format!("{label} query failed: {e:#}"),
+            Err(_) => format!(
+                "{label} query did not answer within {REPORT_PROBE_TIMEOUT:?} — tmux itself \
+                 is not responding"
+            ),
+        }
     }
 
     /// A session whose OTHER window is flooding must deliver none of that

@@ -191,6 +191,17 @@ pub struct SupervisorTimeouts {
     /// [`crate::tmux::PANE_LIST_TIMEOUT`]. Threaded the same way and for
     /// the same CI-load reason as `tmux_exchange`.
     pub tmux_pane_list: Duration,
+    /// See [`SINK_READY_TIMEOUT`]: how long [`Supervisor::ensure_session_
+    /// sink`] waits for a sink that is between incarnations before failing
+    /// the attach it was called for.
+    ///
+    /// Grouped here for the same CI-load reason as `tmux_exchange` and
+    /// `tmux_pane_list`, and coupled to them in practice: a sink's respawn
+    /// attempt opens a fresh control-mode client through `tmux_exchange`'s
+    /// own budget, so a test suite that widens `tmux_exchange` without
+    /// also widening this one can end up with a sink-ready wait shorter
+    /// than the respawn attempt it is meant to cover.
+    pub sink_ready: Duration,
 }
 
 impl Default for SupervisorTimeouts {
@@ -202,6 +213,7 @@ impl Default for SupervisorTimeouts {
             upload_disk_stage: UPLOAD_DISK_STAGE_TIMEOUT,
             tmux_exchange: crate::tmux::CONTROL_EXCHANGE_TIMEOUT,
             tmux_pane_list: crate::tmux::PANE_LIST_TIMEOUT,
+            sink_ready: SINK_READY_TIMEOUT,
         }
     }
 }
@@ -2295,8 +2307,10 @@ impl Supervisor {
         // driver every attach and send-keys call goes through.
         let tmux = TmuxDriver::new_with_timeouts(
             state_dir,
-            timeouts.tmux_exchange,
-            timeouts.tmux_pane_list,
+            crate::tmux::TmuxBudgets {
+                exchange: timeouts.tmux_exchange,
+                pane_list: timeouts.tmux_pane_list,
+            },
         );
         tmux.ensure_server().await?;
 
@@ -5344,10 +5358,11 @@ impl Supervisor {
     /// installing pane filters is actively harmful (filters on, sink off,
     /// and tmux stops reading a pane nobody is watching), so this waits
     /// out that window rather than handing back a handle that is only
-    /// nominally healthy. The wait is bounded by [`SINK_READY_TIMEOUT`]
-    /// and its expiry fails the attach loudly; it is not a state a healthy
-    /// host reaches, and pretending otherwise would mean attaching into
-    /// exactly the configuration the wait exists to avoid.
+    /// nominally healthy. The wait is bounded by [`SupervisorTimeouts::
+    /// sink_ready`] (production: [`SINK_READY_TIMEOUT`]) and its expiry
+    /// fails the attach loudly; it is not a state a healthy host reaches,
+    /// and pretending otherwise would mean attaching into exactly the
+    /// configuration the wait exists to avoid.
     ///
     /// # Locking
     ///
@@ -5414,7 +5429,8 @@ impl Supervisor {
         // returns at once) or adopted (possibly mid-respawn).
         let mut state = handle.state.subscribe();
         if state.borrow().is_none() {
-            let ready = tokio::time::timeout(SINK_READY_TIMEOUT, async {
+            let sink_ready = self.timeouts.sink_ready;
+            let ready = tokio::time::timeout(sink_ready, async {
                 while state.changed().await.is_ok() {
                     if state.borrow().is_some() {
                         return true;
@@ -5431,7 +5447,7 @@ impl Supervisor {
                 ),
                 Err(_) => anyhow::bail!(
                     "the session sink for {tmux_name} did not come back within \
-                     {SINK_READY_TIMEOUT:?}; the tmux server is not answering"
+                     {sink_ready:?}; the tmux server is not answering"
                 ),
             }
         }

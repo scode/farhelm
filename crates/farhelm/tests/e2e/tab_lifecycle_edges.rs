@@ -515,9 +515,13 @@ async fn a_supervisor_restart_leaves_a_tabs_shell_and_scrollback_untouched() {
     let work = tempfile::tempdir().expect("workdir");
     let _tmux = TmuxServerGuard(state.path().join("tmux.sock"));
 
-    let sup = Supervisor::new_with_exe(state.path(), farhelm_bin().into())
-        .await
-        .expect("supervisor");
+    // Both this supervisor and its restart below attach for real (a tab
+    // before the restart, the rediscovered tab after), so both need the
+    // suite's loaded-CI tmux floors rather than production defaults.
+    let sup =
+        Supervisor::new_with_exe_and_timeouts(state.path(), farhelm_bin().into(), suite_timeouts())
+            .await
+            .expect("supervisor");
     let client = connect_client(&sup).await;
     let session = client
         .create_session(
@@ -562,9 +566,10 @@ async fn a_supervisor_restart_leaves_a_tabs_shell_and_scrollback_untouched() {
 
     drop(client);
     drop(sup);
-    let sup = Supervisor::new_with_exe(state.path(), farhelm_bin().into())
-        .await
-        .expect("second supervisor");
+    let sup =
+        Supervisor::new_with_exe_and_timeouts(state.path(), farhelm_bin().into(), suite_timeouts())
+            .await
+            .expect("second supervisor");
     let client = connect_client(&sup).await;
 
     let pane_after = tmux_query(&sock, &["list-panes", "-a", "-F", "#{pane_id} #{pane_pid}"]).await;
