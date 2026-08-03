@@ -99,7 +99,7 @@ pub mod io;
 /// connection loops treat that error as fatal — an unknown variant tears
 /// down an already-established connection instead of being ignored. A new
 /// variant is exactly the "cannot be additive" case that earns its own
-/// bump, per version 3's own docs above; `protocol_version_is_pinned_at_6`
+/// bump, per version 3's own docs above; `protocol_version_is_pinned_at_7`
 /// (renamed at every bump since `_at_4`) and
 /// `unknown_control_message_tag_fails_decode` below (plus the
 /// loop-level teardown test in the farhelm crate's e2e suite) pin both the
@@ -159,7 +159,31 @@ pub mod io;
 /// discipline of versions 4 and 5 continues to apply: new optional
 /// fields with decode defaults are fine; a new tagged variant, or a new
 /// REQUIRED field, earns the next bump.
-pub const PROTOCOL_VERSION: u32 = 6;
+///
+/// Bumped to 7 for the complete M5 wire vocabulary (PLAN_M5.md item 1):
+/// the replay-complete marker and session rename. `ReplayComplete` is a
+/// new tagged `ControlMsg` variant, independently earning the bump by
+/// version 4's argument above (an unrecognized tag is connection-fatal,
+/// never a tolerated no-op); `RenameSession` and `SessionRenamed` are two
+/// more — so, as with 5 and 6, all three land in ONE bump rather than a
+/// version per variant. Nothing else on the wire changes: no new
+/// `SessionInfo` field, no new `ErrorKind`, no new frame kind. The
+/// marker's alternative shapes were both considered and rejected, not
+/// merely unconsidered — an in-band byte sentinel spliced into terminal
+/// data (rejected because replay bytes are arbitrary history any
+/// sentinel could collide with, and this protocol never interprets or
+/// rewrites terminal bytes) and a new frame kind (rejected as a
+/// structural change to the framing layer for no gain over a control
+/// message) — see `ControlMsg::ReplayComplete`'s own docs for the full
+/// argument. `RenameSession`'s validation contract (control-character
+/// refusal, field cap, last-write-wins) and `SessionRenamed`'s built-not-
+/// echoed reply are handler-side behavior a later PR implements
+/// (PLAN_M5.md item 3); this bump only fixes what travels on the wire.
+/// Within version 7 the additive discipline of every prior version
+/// continues to apply: new optional fields with decode defaults are
+/// fine; a new tagged variant, or a new REQUIRED field, earns the next
+/// bump.
+pub const PROTOCOL_VERSION: u32 = 7;
 
 /// The build version compiled into this binary, carried in the hello for
 /// diagnostics.
@@ -773,10 +797,10 @@ pub enum RestartMode {
 
 /// Control-channel messages. `req_id` correlates a response to its request
 /// so one connection can carry concurrent requests; unsolicited events —
-/// `Detached`, and as of version 6 `UploadAck` and `UploadAborted` —
-/// carry no `req_id` and correlate by `channel` instead, so a
-/// demultiplexer must route them by channel rather than treating a
-/// missing `req_id` as an error.
+/// `Detached`, as of version 6 `UploadAck` and `UploadAborted`, and as of
+/// version 7 `ReplayComplete` — carry no `req_id` and correlate by
+/// `channel` instead, so a demultiplexer must route them by channel
+/// rather than treating a missing `req_id` as an error.
 ///
 /// Compatibility posture: within one protocol version the set of messages
 /// is fixed; anything incompatible bumps `PROTOCOL_VERSION` rather than
@@ -1048,6 +1072,60 @@ pub enum ControlMsg {
         req_id: u64,
         session: SessionInfo,
     },
+    /// Rename a session (PLAN_M5.md item 1) — SPEC.md's v1 client-surface
+    /// rename verb, closing one of the two still unimplemented since M1
+    /// (archive is the other, deliberately M7's). This crate fixes only
+    /// the WIRE contract below; the handler enforcing it (PLAN_M5.md item
+    /// 3) is a later PR, not this one.
+    ///
+    /// Validation is supervisor-authoritative, and deliberately identical
+    /// in shape to `CreateSession`'s explicit-title rule rather than a
+    /// stricter rename-specific rule: a `title` containing any
+    /// `char::is_control` character is refused `InvalidRequest` (the
+    /// title is echoed into terminals by `tracing` consumers, so an
+    /// embedded escape sequence would be terminal injection), and
+    /// `title` is capped at create's existing 64 KiB field cap — same
+    /// constant, same reason, keeping the `SessionRenamed` reply that
+    /// echoes it back structurally deliverable. An empty `title` is
+    /// accepted, exactly as an explicit empty title is on create:
+    /// SPEC.md names control characters as THE refusal for a supplied
+    /// title, and rename inventing a stricter rule would be an asymmetry
+    /// SPEC.md nowhere asks for. There is likewise no U+FFFD
+    /// sanitization here: sanitization exists for server-derived titles
+    /// the caller never chose, and a rename is always caller data, so it
+    /// gets the refuse-don't-rewrite treatment instead. Renaming a
+    /// session that does not exist is `NotFound`.
+    ///
+    /// Concurrent renames are last-write-wins, with no version token:
+    /// this is one mutable metadata field, both writers hold equal
+    /// authority to set it, and optimistic concurrency for a label would
+    /// add a conflict surface no user flow can hit deliberately — both
+    /// callers get a success reply, and the store ends up holding
+    /// whichever write lands last.
+    RenameSession {
+        req_id: u64,
+        session_id: String,
+        /// Sent verbatim: no trimming, no client-side validation. The
+        /// supervisor's refusal text is the contract (see this variant's
+        /// own docs above); duplicating its rules client-side would let
+        /// them drift, and rewriting the caller's input before sending
+        /// would be the same silently-altering-caller-data move the
+        /// supervisor itself refuses to make.
+        title: String,
+    },
+    /// Success reply to `RenameSession`, shaped like `SessionCreated` and
+    /// `SessionRestarted` deliberately: the caller gets the authoritative
+    /// answer back, not an ack it must follow with a fetch. `session` is
+    /// built the same way `ListSessions` builds one — live-probed
+    /// `status`, rediscovered `tabs`, freshly computed `restart_offer` —
+    /// never a stale stored row with the new title spliced in.
+    /// `SessionInfo` is more than a stored title (see its own docs), and
+    /// echoing the rest of it stale would hand the caller a `SessionInfo`
+    /// that lies about everything but the one field this request changed.
+    SessionRenamed {
+        req_id: u64,
+        session: SessionInfo,
+    },
     /// Open a terminal tab: a plain shell in the session's working
     /// directory, as a new window on the session's tmux session
     /// (PLAN_M4.md item 2). Refused — with the session untouched — when
@@ -1171,6 +1249,67 @@ pub enum ControlMsg {
     Detached {
         channel: u32,
         reason: String,
+    },
+    /// Unsolicited: this attach's initial catch-up is over — every byte
+    /// the supervisor is going to replay from history FOR THE ATTACH has
+    /// been written to `channel`, and the live stream follows
+    /// (PLAN_M5.md item 1). The supervisor emits it exactly once per
+    /// attach: after the pane-mode re-synthesis and snapshot prefill for
+    /// that attach, before forwarding any live output, which makes
+    /// "exactly once, after every attach-replay byte, before any live
+    /// byte" a consequence of the attach-cutover contract (PLAN_M5.md
+    /// item 2) rather than a best-effort claim. A dead-pane attach emits
+    /// it right after its own snapshot; a fresh terminal with nothing to
+    /// replay emits it immediately. There is deliberately no marker
+    /// outside an attach — it describes the catch-up phase of ONE
+    /// attachment, not a property of the session, so a second attach to
+    /// the same terminal gets its own marker and a takeover's incumbent
+    /// never sees the replacement's.
+    ///
+    /// One boundary is drawn deliberately narrow: "the live stream
+    /// follows" does not promise history can never appear on this
+    /// channel again. M2.5's flow-control recovery — the supervisor's
+    /// catch-up after a tmux `%pause` cut this client's stream — replays
+    /// retained history into the SAME attachment mid-stream, and that
+    /// recovery arrives as ordinary output with no marker of its own.
+    /// The marker bounds the attach's catch-up, not every catch-up the
+    /// attachment will ever perform; pause-recovery presentation is
+    /// explicitly outside M5's scope (PLAN_M5.md scopes REATTACH
+    /// presentation), and a consumer that assumed
+    /// all-bytes-after-marker-are-fresh would misrender exactly that
+    /// recovery path.
+    ///
+    /// Like `DETACH_REASON_STALLED` when it landed, this bump reserves
+    /// the vocabulary only: nothing emits the marker yet. The
+    /// supervisor's emission is PLAN_M5.md item 2's PR; the sentences
+    /// above are that PR's contract, stated here because the wire
+    /// vocabulary is where every implementation and test will point.
+    ///
+    /// ## Why a control message, not an in-band byte sentinel
+    ///
+    /// The alternative — splicing a sentinel byte sequence into the
+    /// terminal data stream itself — was rejected (PLAN_M5.md item 1):
+    /// replay bytes are arbitrary terminal history, so any sentinel can
+    /// be forged by, or collide with, content the agent itself already
+    /// printed, and this protocol's data path exists specifically to
+    /// never interpret or rewrite terminal bytes (see the module-level
+    /// docs above). A control message sidesteps both problems: it
+    /// travels its own channel-0 JSON path, never mixed into the opaque
+    /// bytes it describes. Its POSITION in the combined control-and-data
+    /// stream is its whole meaning, and that needs no new ordering
+    /// machinery anywhere — the supervisor writes replay data frames and
+    /// then this message into one pipe, the helm demultiplexes that pipe
+    /// sequentially, and one WebSocket's messages arrive in the order
+    /// they were sent, so every hop already preserves the ordering this
+    /// message depends on.
+    ///
+    /// Consumers must not branch anything but PRESENTATION on this
+    /// message: it drives exactly one transition — a terminal's catch-up
+    /// phase ending — and no session, lifecycle, or other client
+    /// behavior may key off it (PLAN_M5.md's scope explicitly rules this
+    /// out).
+    ReplayComplete {
+        channel: u32,
     },
     /// Set the session's terminal dimensions. Fire-and-forget: no
     /// `req_id`, no reply, and the supervisor ignores it unless `channel`
@@ -1707,13 +1846,13 @@ mod tests {
 
     /// `PROTOCOL_VERSION` is a load-bearing constant (see the const's own
     /// docs for the M2 bump to 3, the M2.5 bump to 4, the M3 bump to 5,
-    /// and the M4 bump to 6): pinning its value here makes an accidental
-    /// re-bump (or a forgotten one, if a later change needed it) a loud
-    /// test failure rather than a silent drift discovered only by two
-    /// builds refusing to talk to each other.
+    /// the M4 bump to 6, and the M5 bump to 7): pinning its value here
+    /// makes an accidental re-bump (or a forgotten one, if a later change
+    /// needed it) a loud test failure rather than a silent drift
+    /// discovered only by two builds refusing to talk to each other.
     #[test]
-    fn protocol_version_is_pinned_at_6() {
-        assert_eq!(PROTOCOL_VERSION, 6);
+    fn protocol_version_is_pinned_at_7() {
+        assert_eq!(PROTOCOL_VERSION, 7);
     }
 
     /// Pins the decode half of the failure PLAN_M2_5.md's version bump
@@ -2934,6 +3073,183 @@ mod tests {
                 mode: RestartMode::Fresh,
                 stop_if_running: false,
             }
+        );
+    }
+
+    /// PLAN_M5.md item 1's complete M5 wire vocabulary — `ReplayComplete`,
+    /// `RenameSession`, `SessionRenamed` — golden-pinned the same way the
+    /// M4 tab-lifecycle and upload families are below: a serde attribute
+    /// drift on any one of them would compile and round-trip cleanly
+    /// while quietly producing bytes an unmodified peer cannot parse. A
+    /// (message, expected JSON) table rather than three separately-named
+    /// locals, matching every other multi-variant golden test in this
+    /// file. `SessionRenamed`'s nested `session` gets the same
+    /// full-shape treatment `session_restarted_json_shape_is_pinned`
+    /// gives its own nested `SessionInfo`, for the identical reason: a
+    /// bare round-trip could hide a coordinated encode/decode drift that
+    /// still agrees with itself but not with an unmodified peer.
+    ///
+    /// Each row is pinned in BOTH directions against the golden value
+    /// itself — encode must produce it, and `parse_control` must decode
+    /// it (the literal golden bytes, not a re-serialization) back to the
+    /// original message — plus one pass through the real frame
+    /// encode/decode path, so a drift between the codec's framing and
+    /// serde's JSON shape cannot hide behind a value-level assertion.
+    /// One test rather than a golden/roundtrip pair: the earlier split
+    /// duplicated the three-variant fixture table and its "decode"
+    /// direction only round-tripped bytes it had itself just produced,
+    /// which proves self-agreement, not agreement with the pinned shape.
+    #[test]
+    fn replay_complete_and_rename_json_shapes_are_pinned() {
+        for (msg, expected) in [
+            (
+                ControlMsg::ReplayComplete { channel: 4 },
+                serde_json::json!({
+                    "type": "replay_complete",
+                    "channel": 4,
+                }),
+            ),
+            (
+                ControlMsg::RenameSession {
+                    req_id: 50,
+                    session_id: "s1".to_string(),
+                    title: "renamed title".to_string(),
+                },
+                serde_json::json!({
+                    "type": "rename_session",
+                    "req_id": 50,
+                    "session_id": "s1",
+                    "title": "renamed title",
+                }),
+            ),
+            (
+                ControlMsg::SessionRenamed {
+                    req_id: 50,
+                    session: SessionInfo {
+                        id: "s1".to_string(),
+                        title: "renamed title".to_string(),
+                        cwd: "/tmp".to_string(),
+                        invocation: "claude".to_string(),
+                        status: SessionStatus::Alive,
+                        annotation: None,
+                        restart_offer: RestartOffer::Resume,
+                        tabs: Vec::new(),
+                    },
+                },
+                serde_json::json!({
+                    "type": "session_renamed",
+                    "req_id": 50,
+                    "session": {
+                        "id": "s1",
+                        "title": "renamed title",
+                        "cwd": "/tmp",
+                        "invocation": "claude",
+                        "status": { "state": "alive" },
+                        "annotation": null,
+                        "restart_offer": "resume",
+                        "tabs": [],
+                    },
+                }),
+            ),
+        ] {
+            // Encode direction: the golden value, not just a round trip.
+            assert_eq!(serde_json::to_value(&msg).unwrap(), expected);
+            // Decode direction: the LITERAL golden bytes back through the
+            // real control-frame parser — a re-serialization here would
+            // only prove self-agreement.
+            let golden_frame = Frame {
+                kind: FrameKind::Control,
+                channel: 0,
+                body: expected.to_string().into_bytes(),
+            };
+            assert_eq!(crate::io::parse_control(&golden_frame).unwrap(), msg);
+            // And once through the real frame codec, where a framing
+            // drift would hide from both value-level assertions above.
+            let mut wire = Vec::new();
+            Frame::control(&msg).encode(&mut wire).unwrap();
+            let (frame, used) = Frame::decode(&wire).unwrap().unwrap();
+            assert_eq!(used, wire.len());
+            assert_eq!(
+                serde_json::from_slice::<ControlMsg>(&frame.body).unwrap(),
+                msg
+            );
+        }
+    }
+
+    /// Version 7's additive rule for FIELDS (see `PROTOCOL_VERSION`'s
+    /// docs), future-sender → current-decoder half, applied to the one
+    /// new REQUEST-shaped M5 variant — mirroring
+    /// `restart_session_with_future_extra_field_decodes_through_parse_control`'s
+    /// treatment of version 5's own new request. One representative
+    /// variant rather than all three, deliberately: every `ControlMsg`
+    /// variant shares one `serde(tag = "type")` enum with no
+    /// `deny_unknown_fields` anywhere, so unknown-field tolerance is a
+    /// property of the enum's derive, not of any single variant — the
+    /// generic mechanism is what this pins, on the variant whose decode
+    /// path (a request a supervisor must not reject) carries the
+    /// highest cost of getting it wrong. The golden test above already
+    /// decodes all three variants' exact shapes through the same
+    /// parser.
+    #[test]
+    fn rename_session_with_future_extra_field_decodes_through_parse_control() {
+        let frame = Frame {
+            kind: FrameKind::Control,
+            channel: 0,
+            body: br#"{"type":"rename_session","req_id":2,"session_id":"s1","title":"new title","priority":"high"}"#
+                .to_vec(),
+        };
+        let msg = crate::io::parse_control(&frame)
+            .expect("a known tag with an unknown extra field must decode, not error");
+        assert_eq!(
+            msg,
+            ControlMsg::RenameSession {
+                req_id: 2,
+                session_id: "s1".to_string(),
+                title: "new title".to_string(),
+            }
+        );
+    }
+
+    /// The OTHER half of version 7's additive rule: current-sender →
+    /// future-decoder, mirroring
+    /// `current_pause_output_decodes_under_a_future_v4_decoder_with_defaults`'s
+    /// shadow-struct technique. A hypothetical later-v7 build that grew
+    /// an optional field on `RenameSession` must accept today's rename
+    /// bytes and default the absent field — this is what makes "new
+    /// optional fields with decode defaults are fine" (the
+    /// `PROTOCOL_VERSION` docs' additive discipline) a tested promise
+    /// for the M5 vocabulary rather than an asserted one. Same
+    /// representative-variant argument as the future-extra-field test
+    /// above: the tolerance is the enum derive's property, pinned once
+    /// on the variant where a wrong answer costs most.
+    #[test]
+    fn current_rename_session_decodes_under_a_future_v7_decoder_with_defaults() {
+        #[derive(serde::Deserialize)]
+        struct FutureRenameSession {
+            req_id: u64,
+            session_id: String,
+            title: String,
+            #[serde(default)]
+            expected_generation: Option<u64>,
+        }
+        let mut wire = Vec::new();
+        Frame::control(&ControlMsg::RenameSession {
+            req_id: 7,
+            session_id: "s1".to_string(),
+            title: "new title".to_string(),
+        })
+        .encode(&mut wire)
+        .unwrap();
+        let (frame, _) = Frame::decode(&wire).unwrap().unwrap();
+        let value: serde_json::Value = serde_json::from_slice(&frame.body).unwrap();
+        assert_eq!(value["type"], "rename_session");
+        let decoded: FutureRenameSession = serde_json::from_value(value).unwrap();
+        assert_eq!(decoded.req_id, 7);
+        assert_eq!(decoded.session_id, "s1");
+        assert_eq!(decoded.title, "new title");
+        assert_eq!(
+            decoded.expected_generation, None,
+            "an absent future field must default, never fail the decode"
         );
     }
 
