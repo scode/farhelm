@@ -13,6 +13,7 @@ clap.workspace = true
 farhelm-proto.workspace = true
 farhelm-supervisor.workspace = true
 futures-util.workspace = true
+rusqlite.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 shell-words.workspace = true
@@ -22,8 +23,14 @@ tower-http.workspace = true
 tracing.workspace = true
 
 [dev-dependencies]
+tempfile.workspace = true
 # test-util enables tokio's virtual clock (`#[tokio::test(start_paused =
 # true)]`), used by the upload-relay stall tests so a sixty-second
 # no-progress bound is asserted exactly instead of waited out.
 tokio = { workspace = true, features = ["test-util"] }
 tower.workspace = true
+# Installs a process-global `tracing` layer in store.rs's
+# skip-and-log tests, the only way to observe a `tracing::warn!` emitted
+# from inside a `spawn_blocking` closure (a different OS thread than the
+# test body, so a merely thread-local subscriber override would miss it).
+tracing-subscriber.workspace = true

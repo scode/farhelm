@@ -375,6 +375,34 @@ remains that can never be represented on any page.
 - State in SQLite at `~/.local/state/farhelm/helm.db`: host registry (SSH destinations, host identities), last-known
   session cache (survives helm restarts per SPEC.md), web token hash, browser device sessions, remembered defaults
   (last-used profile per host).
+- The host registry (PLAN_M6.md item 3) reserves one row for the machine running the helm itself: auto-created at `open`
+  if absent, never user management surface, never removable. It exists specifically so the local host has a cache row to
+  serve stale sessions from when its own supervisor is down — the plan's first draft made this row optional, and review
+  caught that a row-less local host would have nowhere to cache into, breaking the very promise (stale sessions survive
+  a down host) the cache exists to keep. An SSH row also carries optional `remote_farhelm`/`remote_state_dir` fields
+  (the argv fields M1's `--remote-farhelm`/`--remote-state-dir` carried), `None` meaning "use the remote's own default",
+  not "unset for now". Two distinct SQL mechanisms enforce two distinct invariants here, not one: the `hosts` table's
+  own `CHECK` constraint is what pins the local row's NULL destination/remote-field shape, while a separate pair of
+  partial unique indexes enforces at most one local row and, independently, uniqueness of an SSH row's destination among
+  SSH rows.
+- A host's `host_identity` is `NULL` until first contact ever succeeds for that row — including the local row, which is
+  minted with no identity and learns one the same way any other host does. Recording it is split into two operations so
+  silent identity merging is structurally impossible at the storage layer (SPEC.md: never silently merge): first contact
+  writes only when the stored identity is still `NULL`, or is a no-op when it already matches what was just reported: a
+  DIFFERENT stored identity is refused outright, changing nothing, with the mismatch surfaced as a value the caller acts
+  on rather than an error. Adoption is a separate, explicit compare-and-swap that only a user's adopt choice may invoke.
+- Each host's session cache is replaced wholesale on every successful list refresh — delete then insert in one
+  transaction, never a partial mix — so a session dropped from a host's live list is dropped from its cache too, and
+  ordering never depends on parsing every cached row's JSON (created_at and session id are extracted as columns at write
+  time). Removing a host cascades its cache rows (SPEC.md's disposal rule). Adopting a new identity at a known
+  destination purges that host's cache in the same transaction as the identity write: the old identity's cached sessions
+  describe a dead install, and carrying them forward under the new identity would misattribute one install's history to
+  another. A cache write also carries the identity it was produced under, checked against the stored value in the same
+  transaction: this closes the window where a refresh already in flight when a user adopts a new identity could land
+  after the adoption's purge and repopulate the cache with the dead install's sessions by a side door. Reads of the two
+  tables disagree on purpose: a cache row that no longer decodes is skipped and logged rather than failing the read (it
+  is last-known display data, not authority), while a corrupt registry row still fails `list_hosts` loudly (the registry
+  is authority for which hosts exist at all).
 - axum serving: REST for CRUD (sessions, profiles, hosts), a WebSocket event stream for live session-list updates, a
   WebSocket per attached terminal, and the static UI bundle. Loopback bind enforced — refuses non-loopback per SPEC.md.
 - Web token: random 128-bit value, stored hashed; browser auth exchanges it once for a device-session cookie; rotation

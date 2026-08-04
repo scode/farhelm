@@ -35,6 +35,8 @@ pub use client::{
     TermStream,
 };
 
+pub mod store;
+
 /// CLI arguments for `farhelm helm run`. Lives here (not in the bin
 /// crate) so the helm's surface and its implementation evolve together.
 #[derive(Args, Debug, Clone)]

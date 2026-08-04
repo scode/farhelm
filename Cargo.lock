@@ -1744,14 +1744,17 @@ dependencies = [
  "farhelm-proto",
  "farhelm-supervisor",
  "futures-util",
+ "rusqlite",
  "serde",
  "serde_json",
  "shell-words",
+ "tempfile",
  "thiserror 2.0.19",
  "tokio",
  "tower",
  "tower-http",
  "tracing",
+ "tracing-subscriber",
 ]
 
 [[package]]
