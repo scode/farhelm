@@ -357,12 +357,14 @@ mod tests {
     /// rule) pinned at the unit level. Both directions of skew are
     /// exercised: a NEWER peer, and — since the M2.5 bump to 4 first made
     /// "older peer exists" a reality, and every milestone bump since (5
-    /// for M3, 6 for M4, 7 for M5) keeps it one — an OLDER, version-6
-    /// peer. The old side matters independently because a comparison bug
-    /// that rejects only newer versions (`>` instead of `!=`) would
-    /// accept a v6 peer that cannot even decode the M5 marker/rename
-    /// vocabulary (`ReplayComplete`, `RenameSession`, `SessionRenamed`),
-    /// the exact skew the version 7 bump exists to refuse.
+    /// for M3, 6 for M4, 7 for M5, 8 for M6) keeps it one — an OLDER,
+    /// version-7 peer. The old side matters independently because a
+    /// comparison bug that rejects only newer versions (`>` instead of
+    /// `!=`) would accept a v7 peer that cannot even decode the M6 host-
+    /// identity/pagination/creation-timestamp vocabulary (`Hello::
+    /// host_identity`, `ListSessions::cursor`/`limit`,
+    /// `SessionList::next_cursor` in place of the removed `truncated`),
+    /// the exact skew the version 8 bump exists to refuse.
     #[tokio::test]
     async fn handshake_refuses_protocol_mismatch() {
         for wrong_version in [PROTOCOL_VERSION + 1, PROTOCOL_VERSION - 1] {
@@ -383,6 +385,7 @@ mod tests {
                 protocol_version: wrong_version,
                 build_version: "9.9.9".into(),
                 role: "supervisor".into(),
+                host_identity: None,
             })
             .await
             .unwrap();

@@ -642,7 +642,16 @@ pub enum RetryClaim {
     /// The reservation was still pending and its row still un-launched:
     /// a fresh launching row is committed under the same identities and
     /// this process now owns the relaunch.
-    Acquired,
+    ///
+    /// `created_at` is the PREVIOUS attempt's value, not the caller's
+    /// freshly minted one — see `restart_pending_launch`'s own docs for
+    /// why the crashed attempt's timestamp must be preserved rather than
+    /// re-minted, and `StoredSession::created_at`'s docs for the
+    /// reload-then-list window that makes it client-observable. The
+    /// caller threads this value into the `SessionInfo` it replies with,
+    /// so a retried create's reply always matches whatever a concurrent
+    /// `ListSessions` could already have shown for the row.
+    Acquired { created_at: i64 },
     /// The reservation is no longer pending — something settled it first
     /// (most often a concurrent delete, which tombstones as `Created`). The
     /// caller must answer from this outcome, which for a deleted session is
@@ -918,13 +927,17 @@ pub type BootTxFault = Arc<dyn Fn() -> anyhow::Result<()> + Send + Sync>;
 /// The stored fields the supervisor actually consumes: wire metadata plus
 /// the tmux handles a session was created with.
 ///
-/// Not the whole `sessions` row — `created_at` is write-only from this
-/// type's perspective. `insert_session` fills it in itself (see
-/// `now_unix`) rather than accepting it here, and nothing yet reads it
-/// back (it exists for a human inspecting the database, and as a schema
-/// field a future migration can build on); adding a field to this struct
-/// for it would invite call sites to treat an informational timestamp as
-/// load-bearing.
+/// Not the whole `sessions` row — `outcome_state`/`exit_code`/etc. fold
+/// into [`LastOutcome`] below rather than appearing as their own fields.
+/// `created_at` DOES appear here as of PLAN_M6.md item 1: it was write-only
+/// from this type's perspective before that (a human-inspection column and
+/// a future migration's foothold, per the note that used to live here),
+/// but M6's `SessionInfo::created_at` and its pagination cursor's ordering
+/// key both need the value a live session was actually inserted with, so
+/// it is load-bearing now. The caller decides the value (`insert_session`
+/// no longer mints it internally) and `insert_session_row` simply persists
+/// what it is given — see that function's own docs for why the decision
+/// moved to the call site rather than staying inside the store.
 ///
 /// This is the store's own type rather than a reuse of `SessionInfo`
 /// (the wire type) or `service::SessionEntry` (the live in-memory type):
@@ -949,6 +962,31 @@ pub type BootTxFault = Arc<dyn Fn() -> anyhow::Result<()> + Send + Sync>;
 pub struct StoredSession {
     pub id: String,
     pub title: String,
+    /// Seconds since the Unix epoch when this row was inserted (`now_unix`,
+    /// called once by the caller so the exact instant matches what
+    /// `insert_session_row` persists — see that function's docs).
+    ///
+    /// A crash-interrupted create's RETRY (`SessionStore::
+    /// restart_pending_launch`, taken only when the earlier attempt left no
+    /// evidence of ever reaching tmux — see that method's own docs)
+    /// PRESERVES the dead attempt's value rather than minting a fresh one.
+    /// An earlier version of this doc argued mint-fresh was fine because
+    /// "the reply that would have carried it never went out" — true, but
+    /// beside the point: the dead attempt's row was still committed and
+    /// durable before the crash, and `service::Supervisor::reload_sessions`
+    /// loads and lists EVERY stored row unconditionally, `Launching`
+    /// included, with no filter on whether a reply for it ever shipped
+    /// (see that method's own docs). A supervisor restart between the
+    /// crash and the retry therefore CAN serve this row through
+    /// `ListSessions` before the retry ever runs, making the original
+    /// timestamp client-observable — an observation a re-minted value on
+    /// retry would silently move within PLAN_M6.md's creation-time-
+    /// descending pagination order, changing where the caller's own
+    /// earlier reload placed it. Preserving avoids exactly that. Once a
+    /// `SessionCreated`/`SessionRestarted` reply has actually shipped a
+    /// `created_at`, this field is immutable either way — nothing later
+    /// in this session's life re-derives or overwrites it.
+    pub created_at: i64,
     pub cwd: String,
     pub invocation: String,
     pub tmux_name: String,
@@ -1350,13 +1388,29 @@ fn apply_schema(conn: &Connection, may_migrate: bool) -> anyhow::Result<()> {
     )
 }
 
-/// Seconds since the Unix epoch, for `created_at`'s informational
-/// timestamp. Never fails the caller over a clock reading: `created_at`
-/// is documented (see the schema) as informational only, nothing in this
-/// module's own logic depends on it, so a pre-epoch system clock — the
-/// only way `duration_since` errors — degrades to `0` instead of
-/// rejecting an otherwise-successful session creation.
-fn now_unix() -> i64 {
+/// Seconds since the Unix epoch, for [`StoredSession::created_at`] and the
+/// `create_reservations` table's own informational timestamp. `pub(crate)`
+/// so a `StoredSession` builder in `service` can mint the SAME value it
+/// hands to `insert_session`/`restart_pending_launch`, which is what keeps
+/// a freshly created `SessionInfo`'s `created_at` (PLAN_M6.md item 1)
+/// consistent with the row that actually lands in SQLite rather than a
+/// second, independently-timed reading. Never fails the caller over a
+/// clock reading: a pre-epoch system clock — the only way `duration_since`
+/// errors — degrades to `0` instead of rejecting an otherwise-successful
+/// session creation.
+///
+/// DECISION (accepted, not built around): a pre-epoch clock's `0` is the
+/// same bit pattern `SessionInfo::created_at`'s wire doc assigns "sender
+/// predates the field" — a real pre-epoch host and an old sender that
+/// never sent this column are indistinguishable to any reader. Accepted
+/// as-is rather than given a fallible signature or a sentinel floor: a
+/// pre-epoch system clock is not a configuration this system supports
+/// running under at all, the worst case of the collision is one session's
+/// row sorting as if it were legacy-shaped (last, in the pagination
+/// order's descending-by-`created_at` walk), and total order survives
+/// regardless because the `id` tiebreak never depends on `created_at`
+/// being distinct.
+pub(crate) fn now_unix() -> i64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map_or(0, |d| d.as_secs() as i64)
@@ -1402,6 +1456,14 @@ fn settle_within(conn: &Connection, settlement: &Settlement) -> anyhow::Result<(
 /// is what stops a column added for one path from being silently absent on
 /// the other (a relaunch that dropped the integration snapshot would leave
 /// a session that could never resume, with nothing to point at).
+///
+/// `row.created_at` is persisted VERBATIM rather than minted here with
+/// `now_unix()` (as this function did before PLAN_M6.md item 1): the
+/// caller — `Supervisor::launch_reserved` — reads `now_unix()` itself once
+/// and reuses that same value for the `SessionInfo` it hands back in its
+/// create reply, so the timestamp the client sees always matches the one
+/// this row actually gets. Computing it twice (once here, once at the
+/// call site) would let the two drift by however long launch took.
 fn insert_session_row(conn: &Connection, row: &StoredSession) -> anyhow::Result<()> {
     let (state, exit_code, annotation, error_detail) = row.outcome.columns();
     conn.execute(
@@ -1419,7 +1481,7 @@ fn insert_session_row(conn: &Connection, row: &StoredSession) -> anyhow::Result<
             row.invocation,
             row.tmux_name,
             row.pane,
-            now_unix(),
+            row.created_at,
             state,
             exit_code,
             annotation,
@@ -1442,11 +1504,21 @@ fn insert_session_row(conn: &Connection, row: &StoredSession) -> anyhow::Result<
 /// The column list every session read shares, in the order
 /// [`decode_session_row`] expects. Named so the two readers cannot drift
 /// apart by one column and start decoding each other's fields.
+///
+/// `created_at` is appended at the END here even though the schema itself
+/// puts the column right after `pane` (see the `CREATE TABLE` above) —
+/// this list's order does NOT need to match the table's. What it must
+/// match is [`read_session_columns`]'s positional `r.get(N)` calls: every
+/// position before a given column is load-bearing for every index after
+/// it, so inserting a new column in the MIDDLE of this projection would
+/// silently shift every existing index by one. Appending is the one
+/// change that cannot do that, regardless of where the column actually
+/// sits in the table.
 const SESSION_COLUMNS: &str = "id, title, cwd, invocation, tmux_name, pane, \
                                outcome_state, exit_code, annotation, error_detail, \
                                agent_kind, resume_template, canonical_cwd, \
                                captured_conversation, captured_record, capture_ambiguous, \
-                               first_input_at, generation, launch_scoped";
+                               first_input_at, generation, launch_scoped, created_at";
 
 /// The raw columns of one session row, before the fallible decoding that
 /// cannot happen inside a rusqlite row mapper (whose error type is
@@ -1484,6 +1556,7 @@ fn read_session_columns(r: &rusqlite::Row<'_>) -> rusqlite::Result<SessionColumn
             first_input_at: r.get(16)?,
             generation: r.get(17)?,
             launch_scoped: r.get::<_, i64>(18)? != 0,
+            created_at: r.get(19)?,
         },
         (r.get(6)?, r.get(7)?, r.get(8)?, r.get(9)?),
         r.get(10)?,
@@ -1778,7 +1851,12 @@ impl SessionStore {
     ///
     /// On [`RetryClaim::Acquired`] the previous launching row — which by
     /// the conditions above described nothing — is replaced by `row`, under
-    /// the same id and tmux name the reservation already carries.
+    /// the same id and tmux name the reservation already carries. `row`'s
+    /// OWN `created_at` is discarded in favor of the row it replaces: see
+    /// [`StoredSession::created_at`]'s docs for why the crashed attempt's
+    /// timestamp already durable a moment ago must survive the takeover
+    /// rather than being re-minted, and the returned [`RetryClaim::Acquired`]
+    /// carries that preserved value back to the caller for its reply.
     pub async fn restart_pending_launch(
         &self,
         row: StoredSession,
@@ -1799,11 +1877,11 @@ impl SessionStore {
             {
                 return Ok(RetryClaim::Resolved(Box::new(reservation)));
             }
-            let current: Option<(String, String)> = tx
+            let current: Option<(String, String, i64)> = tx
                 .query_row(
-                    "SELECT outcome_state, pane FROM sessions WHERE id = ?1",
+                    "SELECT outcome_state, pane, created_at FROM sessions WHERE id = ?1",
                     rusqlite::params![row.id],
-                    |r| Ok((r.get(0)?, r.get(1)?)),
+                    |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
                 )
                 .optional()
                 .context("reading the reserved session's current state")?;
@@ -1816,20 +1894,53 @@ impl SessionStore {
             // never-launched rows too and which therefore proves nothing on
             // its own. Anything showing evidence refuses the takeover, so
             // the caller replays instead of starting a second agent.
-            if current.is_some_and(|(state, pane)| {
-                !pane.is_empty() || !matches!(state.as_str(), "launching" | "interrupted")
-            }) {
-                return Ok(RetryClaim::Launched);
-            }
+            //
+            // `created_at` rides along in the same read as a matched pair
+            // with `outcome_state`/`pane`: whichever row this transaction
+            // is about to act on (refuse, or replace) is also the row whose
+            // timestamp the reply must honor, so reading all three off one
+            // committed snapshot rules out a second query ever disagreeing
+            // with the first about which row it saw.
+            let preserved_created_at = match &current {
+                Some((state, pane, created_at)) => {
+                    if !pane.is_empty() || !matches!(state.as_str(), "launching" | "interrupted") {
+                        return Ok(RetryClaim::Launched);
+                    }
+                    *created_at
+                }
+                // Contradicts `SessionStore::insert_session`'s own
+                // invariant — a Pending reservation's row is committed in
+                // the SAME transaction as the reservation itself, so one
+                // can never durably exist without the other. Handled
+                // rather than asserted for the same reason the relaunch
+                // takeover as a whole re-checks its conditions instead of
+                // trusting the caller's evidence: "cannot happen" is a
+                // poor thing to stake a duplicate agent on, and here that
+                // would extend to a lost timestamp too. Falls back to the
+                // caller's own freshly minted `row.created_at` — the
+                // least-wrong answer when the row this takeover was
+                // supposed to preserve cannot be found at all. (The
+                // original `current.is_some_and(..)` check this replaces
+                // took the same "nothing found, proceed anyway" branch for
+                // `None`, so this preserves that behavior rather than
+                // introducing a new refusal path.)
+                None => row.created_at,
+            };
             tx.execute(
                 "DELETE FROM sessions WHERE id = ?1",
                 rusqlite::params![row.id],
             )
             .context("clearing the interrupted attempt's launching row")?;
+            let row = StoredSession {
+                created_at: preserved_created_at,
+                ..row
+            };
             insert_session_row(&tx, &row)
                 .context("re-inserting the launching row for a relaunch")?;
             tx.commit().context("committing the relaunch takeover")?;
-            Ok(RetryClaim::Acquired)
+            Ok(RetryClaim::Acquired {
+                created_at: preserved_created_at,
+            })
         })
         .await
         .context("relaunch takeover task panicked")?
@@ -2835,6 +2946,7 @@ mod tests {
                 StoredSession {
                     id: id.to_string(),
                     title: id.to_string(),
+                    created_at: now_unix(),
                     cwd: "/tmp/work".to_string(),
                     invocation: "agent".to_string(),
                     tmux_name: format!("fh-{id}"),
@@ -3556,6 +3668,7 @@ mod tests {
                 StoredSession {
                     id: "s1".to_string(),
                     title: "demo".to_string(),
+                    created_at: now_unix(),
                     cwd: "/tmp/work".to_string(),
                     invocation: "agent".to_string(),
                     tmux_name: "fh-1".to_string(),
@@ -3600,6 +3713,7 @@ mod tests {
                 StoredSession {
                     id: "s1".to_string(),
                     title: "demo".to_string(),
+                    created_at: now_unix(),
                     cwd: "/tmp/work".to_string(),
                     invocation: "agent".to_string(),
                     tmux_name: "fh-1".to_string(),
@@ -4198,6 +4312,7 @@ mod tests {
                 StoredSession {
                     id: "s1".to_string(),
                     title: "demo".to_string(),
+                    created_at: now_unix(),
                     cwd: "/tmp/work".to_string(),
                     invocation: "agent --flag".to_string(),
                     tmux_name: "fh-abc".to_string(),
@@ -4334,20 +4449,57 @@ mod tests {
             .expect("deleting an already-deleted row must be idempotent");
     }
 
-    /// `created_at` is written on every insert but read back by nothing in
-    /// this module (see `StoredSession`'s docs) — it exists for a human or
-    /// a future migration to consult directly. Assert it is at least
-    /// wired correctly: a timestamp captured around the insert (before and
-    /// after, since the write happens between the two reads) must bracket
-    /// the value SQLite actually stored, queried directly rather than
-    /// through `StoredSession` (which does not carry the field at all).
+    /// `created_at` (PLAN_M6.md item 1: load-bearing as of this PR, no
+    /// longer the write-only column `StoredSession`'s docs used to
+    /// describe) is written VERBATIM from what the caller put on the row,
+    /// never re-derived from SQLite's own clock. A fixed sentinel — not
+    /// `now_unix()`, unlike every other fixture in this module — is what
+    /// proves that: bracketing the insert with `before`/`after` reads of
+    /// the wall clock (as an earlier version of this test did) can only
+    /// ever show the store's OWN minting agrees with itself, since both
+    /// the fixture and the column would be reading the same clock at
+    /// roughly the same instant either way. Pinning a value nowhere near
+    /// "now" and asserting it comes back unchanged is the only way to
+    /// rule out the store silently substituting its own `now_unix()` for
+    /// whatever the caller passed. Two read paths are checked against the
+    /// sentinel: the raw SQLite column, and a fresh `load_all()` of the
+    /// same row — the latter catches a future `read_session_columns`
+    /// index drift (see [`SESSION_COLUMNS`]'s own docs on why that would
+    /// otherwise fail silently) that the raw-column check alone could not.
     #[tokio::test]
-    async fn insert_session_records_created_at_within_the_surrounding_window() {
+    async fn insert_session_persists_created_at_verbatim() {
         let (_dir, store) = fresh_store().await;
 
-        let before = now_unix();
-        insert_running(&store, "s1").await;
-        let after = now_unix();
+        // Deliberately far from "now": a value this test's own clock
+        // could never produce by accident is what makes a passing
+        // assertion mean the store passed the caller's value through
+        // unchanged, not merely that two clock reads landed close together.
+        const SENTINEL_CREATED_AT: i64 = 1_000_000_000;
+        store
+            .insert_session(
+                StoredSession {
+                    id: "s1".to_string(),
+                    title: "s1".to_string(),
+                    created_at: SENTINEL_CREATED_AT,
+                    cwd: "/tmp/work".to_string(),
+                    invocation: "agent".to_string(),
+                    tmux_name: "fh-s1".to_string(),
+                    pane: "%0".to_string(),
+                    outcome: LastOutcome::Running,
+                    agent_kind: farhelm_proto::AgentKind::Generic,
+                    resume_template: None,
+                    canonical_cwd: None,
+                    captured_conversation: None,
+                    captured_record: None,
+                    capture_ambiguous: false,
+                    first_input_at: None,
+                    generation: 0,
+                    launch_scoped: false,
+                },
+                None,
+            )
+            .await
+            .expect("insert");
 
         let conn = Arc::clone(&store.conn);
         let created_at: i64 = tokio::task::spawn_blocking(move || {
@@ -4360,10 +4512,15 @@ mod tests {
         .await
         .unwrap()
         .unwrap();
+        assert_eq!(
+            created_at, SENTINEL_CREATED_AT,
+            "the raw column must carry the caller's value verbatim, not a re-minted one"
+        );
 
-        assert!(
-            (before..=after).contains(&created_at),
-            "created_at {created_at} must fall within [{before}, {after}]"
+        let rows = store.load_all().await.expect("load");
+        assert_eq!(
+            rows[0].created_at, SENTINEL_CREATED_AT,
+            "StoredSession::created_at must agree with the raw column it was read from"
         );
     }
 
@@ -4379,6 +4536,7 @@ mod tests {
             capture_ambiguous: false,
             id: id.to_string(),
             title: id.to_string(),
+            created_at: now_unix(),
             cwd: "/tmp/work".to_string(),
             invocation: "agent".to_string(),
             tmux_name: format!("fh-{id}"),
@@ -4858,15 +5016,18 @@ mod tests {
     async fn the_relaunch_takeover_re_checks_both_of_its_conditions() {
         let (_dir, store) = fresh_store().await;
 
-        // Acquired: pending reservation, launching row.
+        // Acquired: pending reservation, launching row. `created_at` is not
+        // pinned here — `restart_pending_launch_preserves_created_at_across_
+        // a_retry` below is where that value earns its own scrutiny; this
+        // test only needs to know a takeover happened at all.
         insert_reserved(&store, "s1", "acquire", "fp").await;
-        assert_eq!(
+        assert!(matches!(
             store
                 .restart_pending_launch(launching_row("s1"), "acquire")
                 .await
                 .expect("takeover"),
-            RetryClaim::Acquired
-        );
+            RetryClaim::Acquired { .. }
+        ));
         assert_eq!(
             store.session("s1").await.expect("read").unwrap().outcome,
             LastOutcome::Launching,
@@ -4924,13 +5085,13 @@ mod tests {
         // a pane is the opposite case and refuses.
         insert_reserved(&store, "s4", "rebooted", "fp").await;
         force_outcome(&store, "s4", &LastOutcome::Interrupted);
-        assert_eq!(
+        assert!(matches!(
             store
                 .restart_pending_launch(launching_row("s4"), "rebooted")
                 .await
                 .expect("takeover"),
-            RetryClaim::Acquired
-        );
+            RetryClaim::Acquired { .. }
+        ));
         insert_reserved(&store, "s5", "rebooted-live", "fp").await;
         {
             let conn = store.conn.lock().expect("db mutex");
@@ -4945,6 +5106,70 @@ mod tests {
                 .expect("takeover"),
             RetryClaim::Launched,
             "an interrupted row WITH a pane was seen in tmux and must not be relaunched over"
+        );
+    }
+
+    /// PLAN_M6.md's pagination promises a total order over STABLE columns
+    /// (`PROTOCOL_VERSION`'s version-8 history), and `created_at` is the
+    /// primary one — a retry that re-minted it would silently move a
+    /// session within that order. This matters even though the crashed
+    /// attempt's own reply never shipped: `service::Supervisor::
+    /// reload_sessions` loads and lists every stored row unconditionally,
+    /// `Launching` included, so a supervisor restart between the crash and
+    /// the retry can already have served the ORIGINAL timestamp through a
+    /// real `ListSessions` reply before this takeover ever runs (see
+    /// `StoredSession::created_at`'s docs for the full argument). The
+    /// retry's own `row` here is built with a DELIBERATELY different
+    /// `created_at` from the original, so a test that silently re-minted —
+    /// rather than preserved — would fail loudly instead of by
+    /// coincidentally matching.
+    #[tokio::test]
+    async fn restart_pending_launch_preserves_created_at_across_a_retry() {
+        let (_dir, store) = fresh_store().await;
+
+        const ORIGINAL_CREATED_AT: i64 = 1_000_000_000;
+        const RETRY_CREATED_AT: i64 = 2_000_000_000;
+
+        store
+            .insert_session(
+                StoredSession {
+                    created_at: ORIGINAL_CREATED_AT,
+                    ..launching_row("s1")
+                },
+                Some(IntentClaim {
+                    intent_key: "retry".to_string(),
+                    fingerprint: "fp".to_string(),
+                }),
+            )
+            .await
+            .expect("insert with claim");
+
+        let claim = store
+            .restart_pending_launch(
+                StoredSession {
+                    created_at: RETRY_CREATED_AT,
+                    ..launching_row("s1")
+                },
+                "retry",
+            )
+            .await
+            .expect("takeover");
+        let RetryClaim::Acquired { created_at } = claim else {
+            panic!("expected the takeover to acquire: {claim:?}");
+        };
+        assert_eq!(
+            created_at, ORIGINAL_CREATED_AT,
+            "the reply must carry the crashed attempt's ORIGINAL timestamp, not the retry's own"
+        );
+
+        let row = store
+            .session("s1")
+            .await
+            .expect("read")
+            .expect("the takeover leaves a row under the same id");
+        assert_eq!(
+            row.created_at, ORIGINAL_CREATED_AT,
+            "the durable row after the takeover must still carry the original timestamp"
         );
     }
 
@@ -5019,6 +5244,7 @@ mod tests {
                 StoredSession {
                     id: "s1".to_string(),
                     title: "t".to_string(),
+                    created_at: now_unix(),
                     cwd: "/tmp/work".to_string(),
                     invocation: "agent".to_string(),
                     tmux_name: "fh-s1".to_string(),

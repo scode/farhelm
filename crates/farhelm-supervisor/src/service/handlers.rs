@@ -445,23 +445,74 @@ async fn session_info_now(
 /// `HANDLER_ADMISSION_PERMITS`/`HANDLER_SHUTDOWN_TIMEOUT`'s own
 /// docs for why an unbounded, untracked spawn per slow request
 /// is not safe to leave unmanaged.
+///
+/// ## Interim `cursor`/`limit` handling (PLAN_M6.md item 1, pending item 2)
+///
+/// This PR ships `ListSessions`'s cursor/limit VOCABULARY without its
+/// SERVING half — real page-walk ordering and cursor issuance are
+/// PLAN_M6.md item 2's job. Until that lands:
+///
+/// - `cursor: Some(_)` AND `limit: Some(_)` are both refused with
+///   `ErrorKind::InvalidRequest` before any work happens, by the same
+///   guard. This is safe precisely because it is temporary: no
+///   `SessionList` this build has ever sent carries a `next_cursor` other
+///   than `None` (`build_list_reply`'s own docs), so no honest caller can
+///   be holding a cursor this refusal contradicts — a `Some(_)` here is
+///   necessarily a caller assuming pagination this build does not yet
+///   serve, or an attacker/bug replaying a value from nowhere. `limit`
+///   rides the same refusal rather than being honored on its own: this
+///   handler always answers `next_cursor: None`, which the wire defines
+///   as exhaustion (`ControlMsg::SessionList`'s own docs) — honoring a
+///   caller-supplied `limit` while refusing the cursor that would be
+///   needed to fetch the rest would make that `None` a lie whenever the
+///   full session set is bigger than the requested page: `limit: Some(2)`
+///   over 5 sessions would return 2 sessions and an exhausted-page
+///   signal for the other 3, unreachable because cursors are refused.
+///   Pagination parameters are not served at all until PLAN_M6.md item 2
+///   lands; until then the page size is always `LIST_SESSION_CAP`.
+/// - The reply's `next_cursor` is unconditionally `None` regardless of
+///   whether this page was actually cut by the cap or the byte budget — a
+///   deliberate, documented interim exception to the wire's own
+///   exhaustion contract, not an oversight (see `build_list_reply`'s own
+///   docs for why it is safe to ship for exactly one more PR). A REST
+///   caller does not lose truncation visibility over it: the helm's
+///   `SessionListing::truncated` synthesizes the answer from `total` vs
+///   `sessions.len()` rather than trusting `next_cursor` alone (see that
+///   field's own docs), so the one place this exception could otherwise
+///   go unnoticed already has its own honest signal.
 async fn handle_list_sessions(
     sup: &Arc<Supervisor>,
     tx: &mpsc::Sender<Frame>,
     tasks: &mut tokio::task::JoinSet<()>,
     req_id: u64,
+    cursor: Option<String>,
+    limit: Option<u32>,
 ) {
+    if cursor.is_some() || limit.is_some() {
+        send_reply(
+            tx,
+            &ControlMsg::Error {
+                req_id,
+                message: "ListSessions cursors and page limits are not served yet; retry with \
+                          neither set (PLAN_M6.md item 2 adds real pagination)"
+                    .to_string(),
+                kind: ErrorKind::InvalidRequest,
+            },
+        )
+        .await;
+        return;
+    }
     let sup2 = Arc::clone(sup);
     let tx = tx.clone();
     spawn_admitted(&sup.admission, tasks, async move {
         let sup = sup2;
-        // `total` is captured, and the count cap applied, BEFORE
-        // a single entry is cloned or status-annotated: cloning
-        // (an `Arc` bump, cheap) is bounded by `.take(cap)` here,
-        // but the PER-ENTRY status computation just below is not
-        // free, and doing it for entries that `build_list_reply`
-        // would only drop a moment later wastes work proportional
-        // to however far over the cap the host is.
+        // `total` is captured, and the cap applied, BEFORE a single
+        // entry is cloned or status-annotated: cloning (an `Arc` bump,
+        // cheap) is bounded by `.take(LIST_SESSION_CAP)` here, but the
+        // PER-ENTRY status computation just below is not free, and
+        // doing it for entries that `build_list_reply` would only drop
+        // a moment later wastes work proportional to however far over
+        // the limit the host is.
         let (entries, total): (Vec<Arc<SessionEntry>>, u64) = {
             let sessions = sup.sessions.lock().await;
             let total = sessions.len() as u64;
@@ -2504,7 +2555,11 @@ pub(crate) async fn handle_control(
             )
             .await
         }
-        ControlMsg::ListSessions { req_id } => handle_list_sessions(sup, tx, tasks, req_id).await,
+        ControlMsg::ListSessions {
+            req_id,
+            cursor,
+            limit,
+        } => handle_list_sessions(sup, tx, tasks, req_id, cursor, limit).await,
         ControlMsg::StopSession { req_id, session_id } => {
             handle_stop_session(sup, tx, tasks, req_id, session_id).await
         }
@@ -2929,13 +2984,19 @@ mod tests {
     /// site, though, the SAME oversized fixture (a single session whose
     /// title alone exceeds `MAX_FRAME_LEN`) never reaches `reply_frame` in
     /// an oversized state at all: the byte budget already drops it from
-    /// the reply, honestly reporting `total: 1, truncated: true` with an
-    /// empty `sessions` list — a normal, well-formed answer, not the
-    /// `Error` substitution. This test pins THAT outcome, so a future
-    /// change that quietly dropped `build_list_reply` from this call site
-    /// (reverting to plain, uncapped `Frame::control`) would pass the
-    /// `reply_frame` and `build_list_reply` unit tests in `connection` and
-    /// `core` — they call those helpers directly — and only this test would catch it. It
+    /// the reply, honestly reporting `total: 1` with an empty `sessions`
+    /// list — a normal, well-formed answer, not the `Error` substitution.
+    /// `next_cursor` is asserted `None` too, but that is not this test's
+    /// real claim: PLAN_M6.md item 1 made it ALWAYS `None` this PR (see
+    /// `build_list_reply`'s own docs), whether or not a cut happened, so
+    /// it cannot distinguish this scenario from an untruncated one the way
+    /// the pre-8 `truncated` flag could — `sessions.is_empty()` combined
+    /// with `total: 1` is what actually proves the budget fired. This test
+    /// pins the byte-budget outcome, so a future change that quietly
+    /// dropped `build_list_reply` from this call site (reverting to plain,
+    /// uncapped `Frame::control`) would pass the `reply_frame` and
+    /// `build_list_reply` unit tests in `connection` and `core` — they
+    /// call those helpers directly — and only this test would catch it. It
     /// also proves the degrade is per-request: a second, ordinary request
     /// on the same connection (same `tx`) must still get an honest,
     /// untruncated reply.
@@ -2955,6 +3016,7 @@ mod tests {
                 info: SessionInfo {
                     id: "s1".to_string(),
                     title: "x".repeat(farhelm_proto::MAX_FRAME_LEN as usize),
+                    created_at: 1_700_000_000,
                     cwd: "/tmp".to_string(),
                     invocation: "agent".to_string(),
                     status: SessionStatus::default(),
@@ -2988,7 +3050,11 @@ mod tests {
 
         handle_control(
             &sup,
-            ControlMsg::ListSessions { req_id: 1 },
+            ControlMsg::ListSessions {
+                req_id: 1,
+                cursor: None,
+                limit: None,
+            },
             &tx,
             &tx,
             &mut input_routes,
@@ -3012,7 +3078,7 @@ mod tests {
             req_id,
             sessions,
             total,
-            truncated,
+            next_cursor,
         } = decoded
         else {
             panic!("expected a budget-truncated ControlMsg::SessionList, got {decoded:?}");
@@ -3026,7 +3092,10 @@ mod tests {
             total, 1,
             "total is the count BEFORE the budget's truncation"
         );
-        assert!(truncated);
+        assert_eq!(
+            next_cursor, None,
+            "no real cursor exists yet — see the doc comment above"
+        );
 
         // Clear the oversized fixture and send a normal request through
         // the SAME tx: a healthy reply here is what proves the earlier
@@ -3038,7 +3107,11 @@ mod tests {
         sup.sessions.lock().await.clear();
         handle_control(
             &sup,
-            ControlMsg::ListSessions { req_id: 2 },
+            ControlMsg::ListSessions {
+                req_id: 2,
+                cursor: None,
+                limit: None,
+            },
             &tx,
             &tx,
             &mut input_routes,
@@ -3055,7 +3128,7 @@ mod tests {
             req_id,
             sessions,
             total,
-            truncated,
+            next_cursor,
         } = decoded2
         else {
             panic!("expected a normal ControlMsg::SessionList, got {decoded2:?}");
@@ -3063,21 +3136,27 @@ mod tests {
         assert_eq!(req_id, 2);
         assert!(sessions.is_empty());
         assert_eq!(total, 0);
-        assert!(!truncated);
+        assert_eq!(next_cursor, None);
     }
 
     /// Production call-site coverage for `LIST_SESSION_CAP` itself — the
-    /// cheapest honest way to exercise the REAL wiring (`handle_control`'s
-    /// `ListSessions` arm applying `.take(LIST_SESSION_CAP)` before ever
-    /// cloning or status-annotating an entry) rather than only
+    /// cheapest honest way to exercise the REAL wiring (`handle_list_sessions`
+    /// applying `.take(LIST_SESSION_CAP)` before ever cloning or
+    /// status-annotating an entry — see that function's own docs for the
+    /// PLAN_M6.md item 1 interim contract) rather than only
     /// `build_list_reply`'s own pure-function tests, which never touch the
     /// handler at all. Creating `LIST_SESSION_CAP + 1` REAL tmux sessions
     /// to exercise this would be slow and environment-dependent for no
     /// added signal; every entry here is synthetic and terminal-less
-    /// (`terminal: None`), which is enough to drive the cap/total/
-    /// truncated wiring without needing a single real tmux round trip to
-    /// succeed for any of them (`session_status` returns `Exited` for a
-    /// terminal-less entry without ever consulting `pane_states`).
+    /// (`terminal: None`), which is enough to drive the cap/total wiring
+    /// without needing a single real tmux round trip to succeed for any
+    /// of them (`session_status` returns `Exited` for a terminal-less
+    /// entry without ever consulting `pane_states`). `limit` is always
+    /// `None` here: as of this PR a caller-supplied `limit` is refused
+    /// outright rather than honored — see
+    /// `list_sessions_limit_some_is_refused_as_invalid_request` — so
+    /// `LIST_SESSION_CAP` is the only page size this handler can ever
+    /// produce.
     #[tokio::test]
     async fn list_sessions_honors_the_session_cap_at_the_handler_level() {
         let state = StateDir::new();
@@ -3095,6 +3174,7 @@ mod tests {
                         info: SessionInfo {
                             id,
                             title: "t".to_string(),
+                            created_at: 1_700_000_000,
                             cwd: "/tmp".to_string(),
                             invocation: "agent".to_string(),
                             status: SessionStatus::default(),
@@ -3126,7 +3206,11 @@ mod tests {
         let mut tasks = tokio::task::JoinSet::new();
         handle_control(
             &sup,
-            ControlMsg::ListSessions { req_id: 1 },
+            ControlMsg::ListSessions {
+                req_id: 1,
+                cursor: None,
+                limit: None,
+            },
             &tx,
             &tx,
             &mut input_routes,
@@ -3140,10 +3224,7 @@ mod tests {
             .expect("reply channel closed before a reply arrived");
         let decoded: ControlMsg = serde_json::from_slice(&reply.body).unwrap();
         let ControlMsg::SessionList {
-            sessions,
-            total,
-            truncated,
-            ..
+            sessions, total, ..
         } = decoded
         else {
             panic!("expected ControlMsg::SessionList, got {decoded:?}");
@@ -3158,7 +3239,126 @@ mod tests {
             (LIST_SESSION_CAP + 1) as u64,
             "total is the count BEFORE the cap"
         );
-        assert!(truncated);
+    }
+
+    /// PLAN_M6.md item 1's interim `limit` contract: `Some(_)` is refused
+    /// outright, mirroring `list_sessions_cursor_some_is_refused_as_invalid_request`
+    /// above. An earlier version of this handler honored
+    /// `limit: Some(n)` as a page-size ceiling while still refusing
+    /// `cursor: Some(_)` — but `next_cursor: None` is this build's wire
+    /// contract for "the page reached the end of the order"
+    /// (`ControlMsg::SessionList`'s own docs), and this handler always
+    /// answers `None`, cap-cut or not. Honoring `limit` alone would have
+    /// made that reply lie: `limit: Some(2)` against 5 real sessions would
+    /// return 2 sessions and an exhausted-page signal for the other 3,
+    /// with no cursor a caller could use to reach them — and `limit:
+    /// Some(0)` would return an empty page that the same signal claims is
+    /// the caller's ENTIRE session set. Refusing `limit` the same way
+    /// `cursor` is refused keeps every reply honest until PLAN_M6.md item
+    /// 2 serves both for real.
+    ///
+    /// The refusal must land BEFORE any list work is admitted, per
+    /// `handle_list_sessions`'s own docs — this pins that directly rather
+    /// than trusting the error reply's mere presence as proof: `tasks`
+    /// (the `JoinSet` `spawn_admitted` work lands on) is asserted empty,
+    /// and the reply is drained with `try_recv` rather than an awaited
+    /// `recv`, so a handler that spawned list work first and refused
+    /// asynchronously afterward would fail this test even if the refusal
+    /// eventually arrived.
+    #[tokio::test]
+    async fn list_sessions_limit_some_is_refused_as_invalid_request() {
+        let state = StateDir::new();
+        let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
+            .await
+            .expect("supervisor construction touches only tmux, not the launch shim");
+
+        let (tx, mut rx) = mpsc::channel(CONNECTION_WRITER_QUEUE);
+        let mut input_routes = HashMap::new();
+        let mut tasks = tokio::task::JoinSet::new();
+        handle_control(
+            &sup,
+            ControlMsg::ListSessions {
+                req_id: 1,
+                cursor: None,
+                limit: Some(2),
+            },
+            &tx,
+            &tx,
+            &mut input_routes,
+            &mut no_uploads(),
+            &mut tasks,
+        )
+        .await;
+        assert_eq!(
+            tasks.len(),
+            0,
+            "a limit refusal must happen before any list work is admitted onto tasks"
+        );
+        let reply = rx.try_recv().expect(
+            "the error reply must already be in the channel once handle_control's future \
+             returns — a handler that scheduled list work before refusing could only reply \
+             later, which try_recv (unlike an awaited recv) would not paper over",
+        );
+        let decoded: ControlMsg = serde_json::from_slice(&reply.body).unwrap();
+        let ControlMsg::Error { req_id, kind, .. } = decoded else {
+            panic!("expected ControlMsg::Error, got {decoded:?}");
+        };
+        assert_eq!(req_id, 1);
+        assert_eq!(kind, ErrorKind::InvalidRequest);
+    }
+
+    /// PLAN_M6.md item 1's interim `cursor` contract: `Some(_)` is refused
+    /// outright, because this build has never issued a `next_cursor`
+    /// other than `None` for any caller to be legitimately holding — see
+    /// `handle_list_sessions`'s own docs for the full argument. Refused
+    /// BEFORE the request is even spawned onto its own task, which this
+    /// test pins directly rather than by inference: `tasks` (the
+    /// `JoinSet` `spawn_admitted` list work lands on) is asserted empty,
+    /// and the reply is drained with `try_recv` — not an awaited `recv`,
+    /// which would equally pass for a handler that admitted list work
+    /// first and refused only once that work finished. A handler that
+    /// schedules list work before refusing fails this test on either
+    /// assertion.
+    #[tokio::test]
+    async fn list_sessions_cursor_some_is_refused_as_invalid_request() {
+        let state = StateDir::new();
+        let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
+            .await
+            .expect("supervisor construction touches only tmux, not the launch shim");
+
+        let (tx, mut rx) = mpsc::channel(CONNECTION_WRITER_QUEUE);
+        let mut input_routes = HashMap::new();
+        let mut tasks = tokio::task::JoinSet::new();
+        handle_control(
+            &sup,
+            ControlMsg::ListSessions {
+                req_id: 1,
+                cursor: Some("anything".to_string()),
+                limit: None,
+            },
+            &tx,
+            &tx,
+            &mut input_routes,
+            &mut no_uploads(),
+            &mut tasks,
+        )
+        .await;
+        assert_eq!(
+            tasks.len(),
+            0,
+            "a cursor refusal must happen before any list work is admitted onto tasks"
+        );
+        let reply = rx.try_recv().expect(
+            "the error reply must already be in the channel once handle_control's future \
+             returns — a handler that scheduled list work before refusing could only reply \
+             later, which try_recv (unlike an awaited recv) would not paper over",
+        );
+        let decoded: ControlMsg = serde_json::from_slice(&reply.body).unwrap();
+        let ControlMsg::Error { req_id, kind, .. } = decoded else {
+            panic!("expected ControlMsg::Error, got {decoded:?}");
+        };
+        assert_eq!(req_id, 1);
+        assert_eq!(kind, ErrorKind::InvalidRequest);
     }
 
     /// PLAN_M2.md's list-status contract: a `ListSessions` reply whose
@@ -3199,6 +3399,7 @@ mod tests {
                 info: SessionInfo {
                     id: "s1".to_string(),
                     title: "t".to_string(),
+                    created_at: 1_700_000_000,
                     cwd: "/tmp".to_string(),
                     invocation: "agent".to_string(),
                     status: SessionStatus::default(),
@@ -3228,7 +3429,11 @@ mod tests {
         let mut tasks = tokio::task::JoinSet::new();
         handle_control(
             &sup,
-            ControlMsg::ListSessions { req_id: 1 },
+            ControlMsg::ListSessions {
+                req_id: 1,
+                cursor: None,
+                limit: None,
+            },
             &tx,
             &tx,
             &mut input_routes,

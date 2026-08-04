@@ -1328,6 +1328,7 @@ mod tests {
             sessions: vec![SessionInfo {
                 id: "s1".to_string(),
                 title: "x".repeat(farhelm_proto::MAX_FRAME_LEN as usize),
+                created_at: 1_700_000_000,
                 cwd: "/tmp".to_string(),
                 invocation: "agent".to_string(),
                 status: SessionStatus::Alive,
@@ -1336,7 +1337,7 @@ mod tests {
                 tabs: Vec::new(),
             }],
             total: 1,
-            truncated: false,
+            next_cursor: None,
         };
         assert!(
             Frame::control(&oversized).exceeds_max_len(),
@@ -1382,6 +1383,7 @@ mod tests {
             session: SessionInfo {
                 id: "s1".to_string(),
                 title: "demo".to_string(),
+                created_at: 1_700_000_000,
                 cwd: "/tmp".to_string(),
                 invocation: "agent".to_string(),
                 // Matches real `create_session` output: `Unknown`, not
@@ -1409,6 +1411,7 @@ mod tests {
             session: SessionInfo {
                 id: "s1".to_string(),
                 title: "demo".to_string(),
+                created_at: 1_700_000_000,
                 cwd: "/tmp".to_string(),
                 invocation: "agent".to_string(),
                 status: SessionStatus::Alive,
@@ -1495,7 +1498,11 @@ mod tests {
         for req_id in 0..REQUESTS {
             handle_control(
                 &sup,
-                ControlMsg::ListSessions { req_id },
+                ControlMsg::ListSessions {
+                    req_id,
+                    cursor: None,
+                    limit: None,
+                },
                 &tx,
                 &tx,
                 &mut input_routes,

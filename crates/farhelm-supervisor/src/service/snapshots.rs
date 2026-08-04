@@ -450,6 +450,7 @@ mod tests {
                 info: SessionInfo {
                     id: session_id.clone(),
                     title: "t".to_string(),
+                    created_at: 1_700_000_000,
                     cwd: "/".to_string(),
                     invocation: "agent".to_string(),
                     status: SessionStatus::Unknown,

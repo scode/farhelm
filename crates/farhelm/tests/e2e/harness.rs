@@ -21,7 +21,7 @@ pub(crate) use farhelm_proto::{
     ControlMsg, ErrorKind, Frame, FrameKind, SessionInfo, SessionStatus, TerminalSelector,
     UPLOAD_ABORT_REASON_STALLED, UPLOAD_CHUNK_BYTES,
 };
-pub(crate) use farhelm_supervisor::agent_kind::{CaptureWindow, CaptureWindowBounds};
+pub(crate) use farhelm_supervisor::agent_kind::{CaptureWindow, CaptureWindowBounds, now_unix};
 pub(crate) use farhelm_supervisor::launch::{spec_path_for_launch, status_path_for_spec};
 pub(crate) use farhelm_supervisor::service::{
     CaptureStoreFault, CreateCrashSeam, CreateStage, LIST_SESSION_CAP, SessionSnapshot, Supervisor,

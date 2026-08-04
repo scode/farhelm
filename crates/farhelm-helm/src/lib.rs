@@ -2592,6 +2592,7 @@ mod tests {
                     session: SessionInfo {
                         id: "sess-1".into(),
                         title: "some-agent".into(),
+                        created_at: 1_700_000_000,
                         cwd: "/some/dir".into(),
                         invocation: "some-agent".into(),
                         // Matches real `create_session` output: `Unknown`,
@@ -2684,6 +2685,7 @@ mod tests {
                     session: SessionInfo {
                         id: "sess-1".into(),
                         title: "t".into(),
+                        created_at: 1_700_000_000,
                         cwd: "/some/dir".into(),
                         invocation: "some-agent".into(),
                         status: farhelm_proto::SessionStatus::Unknown,
@@ -2951,10 +2953,27 @@ mod tests {
 
     /// `GET /api/sessions` now serializes the WHOLE `SessionListing`, not
     /// just the bare `sessions` array (PLAN_M2.md step 6) — this pins the
-    /// object shape end to end, with sentinel `total`/`truncated` values
-    /// deliberately far from `sessions.len()` so a regression that drops
-    /// either field, or recomputes `total` from the list length instead of
-    /// forwarding the supervisor's own count, shows up immediately.
+    /// object shape end to end, with a sentinel `total` value deliberately
+    /// far from `sessions.len()` so a regression that drops the field, or
+    /// recomputes `total` from the list length instead of forwarding the
+    /// supervisor's own count, shows up immediately. `truncated` in the
+    /// JSON body is REST-facing (`SessionListing::truncated`, PLAN_M6.md
+    /// item 1's docs) rather than read straight off the wire — the mock
+    /// supervisor below sends a `next_cursor: Some(_)` for the client to
+    /// translate, not a `truncated` field the wire no longer carries.
+    ///
+    /// This test's `total: 42` fixture leaves BOTH of
+    /// `SessionListing::truncated`'s synthesis disjuncts true at once
+    /// (`next_cursor.is_some()` and `sessions.len() < total`), so it is
+    /// NOT a claim that either disjunct individually drives the `true`
+    /// below — that isolation lives at the `SupervisorClient::list_sessions`
+    /// layer (`client.rs`'s
+    /// `list_sessions_reports_truncated_from_next_cursor_alone` and
+    /// `list_sessions_reports_truncated_from_a_larger_total_alone`), which
+    /// this HTTP handler calls through unmodified. What this test alone
+    /// covers is narrower: that the JSON body actually carries `total` and
+    /// `truncated` as top-level fields, forwarded rather than dropped or
+    /// recomputed from `sessions.len()`, over a real HTTP round trip.
     #[tokio::test]
     async fn list_sessions_returns_full_listing_object_shape() {
         use farhelm_proto::ControlMsg;
@@ -2969,7 +2988,7 @@ mod tests {
                 .await
                 .unwrap();
             let request = parse_control(&reader.read_frame().await.unwrap().unwrap()).unwrap();
-            let ControlMsg::ListSessions { req_id } = request else {
+            let ControlMsg::ListSessions { req_id, .. } = request else {
                 panic!("expected ListSessions, got {request:?}");
             };
             writer
@@ -2978,6 +2997,7 @@ mod tests {
                     sessions: vec![farhelm_proto::SessionInfo {
                         id: "sess-1".into(),
                         title: "sess-1".into(),
+                        created_at: 1_700_000_000,
                         cwd: "/sess-1".into(),
                         invocation: "agent".into(),
                         status: farhelm_proto::SessionStatus::Alive,
@@ -2986,7 +3006,7 @@ mod tests {
                         tabs: Vec::new(),
                     }],
                     total: 42,
-                    truncated: true,
+                    next_cursor: Some("opaque-cursor-value".to_string()),
                 })
                 .await
                 .unwrap();
@@ -3039,7 +3059,7 @@ mod tests {
                 .await
                 .unwrap();
             let request = parse_control(&reader.read_frame().await.unwrap().unwrap()).unwrap();
-            let ControlMsg::ListSessions { req_id } = request else {
+            let ControlMsg::ListSessions { req_id, .. } = request else {
                 panic!("expected ListSessions, got {request:?}");
             };
             writer
@@ -3048,6 +3068,7 @@ mod tests {
                     sessions: vec![farhelm_proto::SessionInfo {
                         id: "sess-1".into(),
                         title: "sess-1".into(),
+                        created_at: 1_700_000_000,
                         cwd: "/sess-1".into(),
                         invocation: "agent".into(),
                         status: farhelm_proto::SessionStatus::Alive,
@@ -3059,7 +3080,7 @@ mod tests {
                         ],
                     }],
                     total: 1,
-                    truncated: false,
+                    next_cursor: None,
                 })
                 .await
                 .unwrap();
@@ -3117,12 +3138,13 @@ mod tests {
                 .await
                 .unwrap();
             let request = parse_control(&reader.read_frame().await.unwrap().unwrap()).unwrap();
-            let ControlMsg::ListSessions { req_id } = request else {
+            let ControlMsg::ListSessions { req_id, .. } = request else {
                 panic!("expected ListSessions, got {request:?}");
             };
             let session = |id: &str, status, annotation: Option<&str>| farhelm_proto::SessionInfo {
                 id: id.into(),
                 title: id.into(),
+                created_at: 1_700_000_000,
                 cwd: "/tmp".into(),
                 invocation: "agent".into(),
                 status,
@@ -3142,7 +3164,7 @@ mod tests {
                         ),
                     ],
                     total: 2,
-                    truncated: false,
+                    next_cursor: None,
                 })
                 .await
                 .unwrap();
@@ -3409,6 +3431,7 @@ mod tests {
                     session: farhelm_proto::SessionInfo {
                         id: "sess-1".into(),
                         title: "t".into(),
+                        created_at: 1_700_000_000,
                         cwd: "/some/dir".into(),
                         invocation: "some-agent".into(),
                         status: farhelm_proto::SessionStatus::Unknown,
@@ -3548,6 +3571,7 @@ mod tests {
             let expected_session = SessionInfo {
                 id: "sess-1".into(),
                 title: expected_title.clone(),
+                created_at: 1_700_000_000,
                 cwd: "/distinctive/dir".into(),
                 invocation: "distinctive-agent --flag".into(),
                 status: SessionStatus::Alive,
@@ -3716,6 +3740,7 @@ mod tests {
                         session: farhelm_proto::SessionInfo {
                             id: "sess-1".into(),
                             title: String::new(),
+                            created_at: 1_700_000_000,
                             cwd: "/some/dir".into(),
                             invocation: "some-agent".into(),
                             status: farhelm_proto::SessionStatus::Unknown,

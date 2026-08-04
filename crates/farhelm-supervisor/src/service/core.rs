@@ -34,7 +34,7 @@ use crate::agent_kind::{
 use crate::launch::{LaunchSpec, resolve_shell, window_command};
 use crate::store::{
     Claimed, IntentClaim, LastOutcome, Reservation, ReservationOutcome, RetryClaim, SessionStore,
-    Settlement, StoredSession, Transition,
+    Settlement, StoredSession, Transition, now_unix,
 };
 use crate::tmux::{AGENT_WINDOW_OPTION, PaneState, TAB_WINDOW_OPTION, TmuxDriver};
 use anyhow::Context;
@@ -2959,6 +2959,7 @@ impl Supervisor {
                     info: SessionInfo {
                         id: row.id,
                         title: row.title,
+                        created_at: row.created_at,
                         cwd: row.cwd,
                         invocation: row.invocation,
                         // Placeholder only: `ListSessions` recomputes
@@ -3748,6 +3749,7 @@ impl Supervisor {
                     restart_offer: snapshot.restart_offer(row.captured_conversation.as_deref()),
                     id: row.id,
                     title: row.title,
+                    created_at: row.created_at,
                     cwd: row.cwd,
                     invocation: row.invocation,
                     status: SessionStatus::Unknown,
@@ -3932,6 +3934,37 @@ impl Supervisor {
         // the launching row is what makes it survive a crash straddling the
         // launch (PLAN_M3.md items 2 and 10).
         let scoped = self.scope_selected(&id).await;
+        // Sampled HERE, after `scope_selected`'s await — not before it —
+        // because that call's FIRST invocation anywhere in the process can
+        // run the full systemd-availability probe (`scope::ScopeManager::
+        // available`'s own docs), which is not instantaneous. A `created_at`
+        // read before that probe could predate the row it is about to be
+        // written into by however long the probe took, disagreeing with
+        // insert order under concurrency (a session that started launching
+        // SECOND could still record an EARLIER `created_at` than one that
+        // started first but hit a warm cache). Reading it here instead, as
+        // close to the durable insert as the shared control flow below
+        // allows, keeps the stored value honest.
+        //
+        // Read ONCE and threaded into both the durable row (whichever of
+        // the retry-takeover or fresh-insert branches below runs) and the
+        // `SessionInfo` this function returns, so a FRESH-INSERT reply's
+        // `created_at` (PLAN_M6.md item 1) is never a second,
+        // independently-timed reading of the clock that could drift from
+        // what actually landed in SQLite — see `StoredSession::created_at`'s
+        // own docs. On the retry-takeover path below this value is only a
+        // FALLBACK candidate for `row.created_at`: `restart_pending_launch`
+        // preserves the crashed attempt's own original timestamp instead
+        // whenever it can find it, and `created_at` is reassigned to that
+        // preserved value before this function's own reply is built, so a
+        // retry's reply matches the row a concurrent `ListSessions` could
+        // already have shown for it (`StoredSession::created_at`'s docs
+        // again, for why that matters) — this is also why sampling here,
+        // slightly before the retry branch's OWN awaits
+        // (`clear_launch_artifacts_fail_closed`, `restart_pending_launch`),
+        // is safe: nothing on that path ever keeps this fallback value once
+        // a preserved timestamp is found.
+        let mut created_at = now_unix();
         let launch_scope = launch_scope_unit(&id, 0, scoped);
         if let Reserved::Retry(reservation) = reserved {
             // Clear the interrupted attempt's leftovers before reusing its
@@ -3957,6 +3990,7 @@ impl Supervisor {
             let row = StoredSession {
                 id: id.clone(),
                 title: title.clone(),
+                created_at,
                 cwd: cwd.to_string(),
                 invocation: invocation.to_string(),
                 tmux_name: tmux_name.clone(),
@@ -3978,7 +4012,14 @@ impl Supervisor {
                 .await
                 .context("taking over the interrupted attempt's reservation")?
             {
-                RetryClaim::Acquired => {}
+                // Overwrites the fallback `now_unix()` reading above with
+                // the crashed attempt's PRESERVED value — see
+                // `RetryClaim::Acquired`'s and `StoredSession::created_at`'s
+                // own docs for why this reply must agree with whatever a
+                // concurrent reload-then-list could already have shown.
+                RetryClaim::Acquired {
+                    created_at: preserved,
+                } => created_at = preserved,
                 RetryClaim::Resolved(settled) => return self.answer_from(&settled).await,
                 RetryClaim::Launched => return self.settle_and_replay(reservation).await,
             }
@@ -4028,6 +4069,7 @@ impl Supervisor {
                     StoredSession {
                         id: id.clone(),
                         title: title.clone(),
+                        created_at,
                         cwd: cwd.to_string(),
                         invocation: invocation.to_string(),
                         tmux_name: tmux_name.clone(),
@@ -4195,6 +4237,13 @@ impl Supervisor {
         let info = SessionInfo {
             id: id.clone(),
             title,
+            // The same value just persisted: a fresh mint for a first-time
+            // insert, or — on a retry takeover — the crashed attempt's own
+            // PRESERVED value, reassigned from `RetryClaim::Acquired`
+            // above. Either way this is never a second, independently
+            // read clock value; see `StoredSession::created_at`'s docs for
+            // why a retry in particular must not re-mint.
+            created_at,
             cwd: cwd.to_string(),
             invocation: invocation.to_string(),
             // Create-time placeholder, deliberately NOT `Alive`:
@@ -5309,6 +5358,10 @@ impl Supervisor {
         let info = SessionInfo {
             id: entry.info.id.clone(),
             title: entry.info.title.clone(),
+            // A restart is a new LAUNCH GENERATION of the same session, not
+            // a new session — carried forward from the entry being
+            // replaced, never re-derived from "now".
+            created_at: entry.info.created_at,
             cwd: entry.info.cwd.clone(),
             invocation: entry.info.invocation.clone(),
             // Deliberately not a fabricated `Alive`: the pane exists, but
@@ -7715,16 +7768,14 @@ pub(crate) fn observation(recorded: &LastOutcome, live: Option<&PaneState>) -> O
 }
 
 /// Byte-budget half of PLAN_M2.md's list truncation. The count cap is the
-/// CALLER's job, applied before this is ever reached — `handle_control`'s
-/// `ListSessions` arm takes at most `LIST_SESSION_CAP` entries from the
-/// session map before cloning or status-annotating a single one of them
-/// (see that arm's own comment for why paying that cost for entries this
-/// function would only drop anyway is wasteful to avoid in the first
-/// place). Because of that, this function cannot reconstruct the true
-/// pre-cap session count from `sessions.len()` — `total` is supplied by
-/// the caller instead, and is reported as-is; `truncated` is set whenever
-/// fewer than `total` survive (whether the caller's cap or this
-/// function's own byte budget is why).
+/// CALLER's job, applied before this is ever reached — `handle_list_sessions`
+/// takes at most `LIST_SESSION_CAP` entries from the session map before
+/// cloning or status-annotating a single one of them (see that function's
+/// own comment for why paying that cost for entries this function would
+/// only drop anyway is wasteful to avoid in the first place). Because of
+/// that, this function cannot reconstruct the true pre-cap session count
+/// from `sessions.len()` — `total` is supplied by the caller instead, and
+/// is reported as-is.
 ///
 /// Truncation drops from the TAIL of whatever `sessions` it receives.
 /// Ordering note: sessions have no defined order today (the module docs,
@@ -7732,8 +7783,16 @@ pub(crate) fn observation(recorded: &LastOutcome, live: Option<&PaneState>) -> O
 /// the caller's map iteration happened to yield — an arbitrary subset
 /// survives, not a deliberately chosen one. That is acceptable for a
 /// budget meant to bound worst-case reply size, not to page through a
-/// stable ordering; a defined order (and real pagination) is M6's concern
-/// (PLAN_M2.md), not this one.
+/// stable ordering; a defined order (and real pagination) is PLAN_M6.md
+/// item 2's concern, not this one — this PR's `SessionList` therefore
+/// ALWAYS answers `next_cursor: None`, unlike the `truncated` flag this
+/// bump replaced: the pre-8 implementation set `truncated: true`
+/// whenever entries were actually cut, an honest per-reply signal this
+/// one deliberately does NOT reproduce yet (see
+/// `service::handle_list_sessions`'s own docs for why sending `None`
+/// here, even for a genuinely cut reply, is safe for exactly one more PR:
+/// no client can hold a cursor this build never issued, so there is
+/// nothing for an honest `None` to contradict yet).
 ///
 /// Single-pass, exact size accounting, and the final reply is constructed
 /// exactly ONCE — a previous version re-encoded a shrinking candidate on
@@ -7749,18 +7808,12 @@ pub(crate) fn observation(recorded: &LastOutcome, live: Option<&PaneState>) -> O
 /// the running total over `byte_budget` stops the scan; everything kept
 /// up to that point is the final answer.
 ///
-/// The envelope is deliberately measured with `truncated: false` even
-/// though the real answer might turn out `true`: JSON's `false` encodes
-/// ONE BYTE LONGER than `true` (5 ASCII characters vs. 4), so basing the
-/// accounting on the longer of the two can only ever OVER-count the
-/// envelope's own size, never under-count it — whatever this function
-/// returns is always at least as small as the accounting assumed, never
-/// larger. Getting this backwards (measuring against the SHORTER `true`)
-/// would under-count an untruncated reply by exactly one byte, which is
-/// academic for an ordinary reply deep under budget but tightens to a
-/// real one-byte overshoot — tripping the `debug_assert!` below in tests,
-/// and in release risking a reply one byte over `byte_budget` — for a
-/// reply that lands EXACTLY at the budget boundary.
+/// The envelope is measured with the SAME `next_cursor: None` the final
+/// reply always carries this PR, so there is no over/under-count risk to
+/// reason about the way the pre-8 `truncated: false`-vs-`true` byte-length
+/// gap used to require (that asymmetry no longer exists once `next_cursor`
+/// is fixed at `None` for both the envelope measurement and the real
+/// answer).
 ///
 /// A `debug_assert!` re-encodes the actual returned reply as a sanity
 /// check that the accounting above never drifted from reality. It is
@@ -7783,7 +7836,7 @@ pub(crate) fn build_list_reply(
         req_id,
         sessions: Vec::new(),
         total,
-        truncated: false,
+        next_cursor: None,
     })
     .encoded_len();
 
@@ -7802,12 +7855,11 @@ pub(crate) fn build_list_reply(
         kept.push(session);
     }
 
-    let truncated = (kept.len() as u64) < total;
     let reply = ControlMsg::SessionList {
         req_id,
         sessions: kept,
         total,
-        truncated,
+        next_cursor: None,
     };
     debug_assert!(
         Frame::control(&reply).encoded_len() <= byte_budget.max(envelope_len),
@@ -8271,6 +8323,7 @@ pub(crate) mod tests {
             info: SessionInfo {
                 id: "s1".to_string(),
                 title: "t".to_string(),
+                created_at: 1_700_000_000,
                 cwd: "/tmp".to_string(),
                 invocation: "agent".to_string(),
                 status: SessionStatus::default(),
@@ -8613,6 +8666,7 @@ pub(crate) mod tests {
                     StoredSession {
                         id: id.to_string(),
                         title: id.to_string(),
+                        created_at: now_unix(),
                         cwd: "/tmp".to_string(),
                         invocation: "agent".to_string(),
                         tmux_name: tmux_name.to_string(),
@@ -8734,6 +8788,7 @@ pub(crate) mod tests {
                 StoredSession {
                     id: scoped_id.clone(),
                     title: "scoped".to_string(),
+                    created_at: now_unix(),
                     cwd: "/tmp".to_string(),
                     invocation: "agent".to_string(),
                     tmux_name: "fh-scoped".to_string(),
@@ -8809,6 +8864,7 @@ pub(crate) mod tests {
                     StoredSession {
                         id: id.to_string(),
                         title: id.to_string(),
+                        created_at: now_unix(),
                         cwd: "/tmp".to_string(),
                         invocation: "agent".to_string(),
                         tmux_name,
@@ -8908,6 +8964,7 @@ pub(crate) mod tests {
                 StoredSession {
                     id: "s1".to_string(),
                     title: "t".to_string(),
+                    created_at: now_unix(),
                     cwd: "/tmp".to_string(),
                     invocation: "agent".to_string(),
                     tmux_name: "fh-1".to_string(),
@@ -8990,6 +9047,7 @@ pub(crate) mod tests {
                 StoredSession {
                     id: "s1".to_string(),
                     title: "t".to_string(),
+                    created_at: now_unix(),
                     cwd: "/tmp".to_string(),
                     invocation: "agent".to_string(),
                     tmux_name: "fh-1".to_string(),
@@ -9062,6 +9120,7 @@ pub(crate) mod tests {
                 StoredSession {
                     id: "s1".to_string(),
                     title: "t".to_string(),
+                    created_at: now_unix(),
                     cwd: "/tmp".to_string(),
                     invocation: "agent".to_string(),
                     tmux_name: "fh-does-not-exist".to_string(),
@@ -9871,6 +9930,7 @@ pub(crate) mod tests {
                 StoredSession {
                     id: "stranded".to_string(),
                     title: "stranded".to_string(),
+                    created_at: now_unix(),
                     cwd: "/".to_string(),
                     invocation: "agent".to_string(),
                     tmux_name: "fh-stranded".to_string(),
@@ -9947,6 +10007,7 @@ pub(crate) mod tests {
                 StoredSession {
                     id: "ended".to_string(),
                     title: "ended".to_string(),
+                    created_at: now_unix(),
                     cwd: "/".to_string(),
                     invocation: "agent".to_string(),
                     tmux_name: "fh-ended".to_string(),
@@ -10419,6 +10480,7 @@ pub(crate) mod tests {
                 StoredSession {
                     id: "stranded".to_string(),
                     title: "stranded".to_string(),
+                    created_at: now_unix(),
                     cwd: "/".to_string(),
                     invocation: "agent".to_string(),
                     tmux_name: "fh-stranded".to_string(),
@@ -10502,6 +10564,7 @@ pub(crate) mod tests {
                 StoredSession {
                     id: "stranded".to_string(),
                     title: "stranded".to_string(),
+                    created_at: now_unix(),
                     cwd: "/".to_string(),
                     invocation: "agent".to_string(),
                     tmux_name: "fh-stranded".to_string(),
@@ -10663,6 +10726,7 @@ pub(crate) mod tests {
         SessionInfo {
             id: id.to_string(),
             title: "x".repeat(title_len),
+            created_at: 1_700_000_000,
             cwd: "/tmp".to_string(),
             invocation: "agent".to_string(),
             status: SessionStatus::Alive,
@@ -10673,12 +10737,16 @@ pub(crate) mod tests {
     }
 
     /// The common case: everything fits under the byte budget, so nothing
-    /// is dropped and `truncated` is honestly `false`. `total` is passed
-    /// explicitly here (as the real `ListSessions` call site does — see
-    /// that arm's own comment) rather than derived from `sessions.len()`,
-    /// since `build_list_reply` no longer owns count-cap enforcement (the
-    /// caller applies it before this is ever reached; the handler-level
-    /// cap wiring itself is pinned by
+    /// is dropped. `next_cursor` is `None` here regardless — this PR's
+    /// `build_list_reply` never issues one yet (PLAN_M6.md item 2's job;
+    /// see the function's own docs) — so an untruncated reply and a
+    /// truncated one are indistinguishable by `next_cursor` alone; the
+    /// OTHER tests below are what actually exercise the cut. `total` is
+    /// passed explicitly here (as the real `ListSessions` call site does —
+    /// see that arm's own comment) rather than derived from
+    /// `sessions.len()`, since `build_list_reply` no longer owns count-cap
+    /// enforcement (the caller applies it before this is ever reached; the
+    /// handler-level cap wiring itself is pinned by
     /// `list_sessions_honors_the_session_cap_at_the_handler_level` in
     /// `handlers`' tests).
     #[test]
@@ -10689,7 +10757,7 @@ pub(crate) mod tests {
             req_id,
             sessions,
             total,
-            truncated,
+            next_cursor,
         } = reply
         else {
             panic!("expected ControlMsg::SessionList, got {reply:?}");
@@ -10697,7 +10765,7 @@ pub(crate) mod tests {
         assert_eq!(req_id, 1);
         assert_eq!(sessions.len(), 10);
         assert_eq!(total, 10);
-        assert!(!truncated);
+        assert_eq!(next_cursor, None);
     }
 
     /// The byte-budget's whole job: a count well under any cap can still
@@ -10711,7 +10779,7 @@ pub(crate) mod tests {
         let ControlMsg::SessionList {
             sessions,
             total,
-            truncated,
+            next_cursor,
             ..
         } = reply
         else {
@@ -10722,13 +10790,16 @@ pub(crate) mod tests {
             sessions.len() < 5,
             "fat records must be dropped even though the count never reached any cap"
         );
-        assert!(truncated);
+        // See the doc comment above: a genuinely cut page still answers
+        // `None` this PR, because nothing has issued a real cursor for it
+        // to resume from yet.
+        assert_eq!(next_cursor, None);
         assert!(
             Frame::control(&ControlMsg::SessionList {
                 req_id: 1,
                 sessions,
                 total,
-                truncated,
+                next_cursor,
             })
             .encoded_len()
                 <= 400,
@@ -10743,16 +10814,17 @@ pub(crate) mod tests {
     /// bug in that arithmetic could just as easily share) for EXACTLY `K`
     /// entries must keep exactly those `K` and drop the rest.
     ///
-    /// Derived with `truncated: false`, even though the real answer for
-    /// `K < total` is `true`: `build_list_reply`'s own envelope accounting
-    /// is conservatively based on the (longer) `false` shape throughout
-    /// the whole scan (see its doc comment on the envelope-length flip),
-    /// so a budget sized to a `true`-shaped K-entry reply is one byte too
-    /// tight for the algorithm to actually keep entry K — empirically,
-    /// it keeps only `K-1` (an earlier version of this test used `true`
-    /// and had exactly that failure). Budgeting against the `false`-shaped
-    /// size matches the conservative basis the algorithm itself commits
-    /// to and is the honest boundary this test can pin.
+    /// Pre-8 this derivation needed a one-byte compensation: `truncated`'s
+    /// two JSON spellings (`"false"`/`"true"`) differ in length, and
+    /// `build_list_reply`'s envelope was conservatively measured against
+    /// the longer one throughout the whole scan, so a budget sized to a
+    /// `true`-shaped K-entry reply came up one byte short of what the
+    /// algorithm needed to actually keep entry K. `next_cursor` replacing
+    /// `truncated` removes that asymmetry: BOTH the envelope measurement
+    /// and every real reply this PR produces use the exact same
+    /// `next_cursor: None` shape (see `build_list_reply`'s own docs), so a
+    /// K-entry reply's real encoded size is now an exact, not a
+    /// conservative, budget for keeping K entries.
     #[test]
     fn build_list_reply_keeps_exactly_the_entries_a_derived_budget_fits() {
         let sessions: Vec<SessionInfo> = (0..5).map(|i| fake_session(&i.to_string(), 20)).collect();
@@ -10763,7 +10835,7 @@ pub(crate) mod tests {
             req_id: 1,
             sessions: sessions[..K].to_vec(),
             total,
-            truncated: false,
+            next_cursor: None,
         };
         let budget = Frame::control(&k_reply).encoded_len();
 
@@ -10773,7 +10845,7 @@ pub(crate) mod tests {
             req_id: 1,
             sessions: sessions[..K + 1].to_vec(),
             total,
-            truncated: true,
+            next_cursor: None,
         };
         assert!(
             Frame::control(&k_plus_one_reply).encoded_len() > budget,
@@ -10781,12 +10853,7 @@ pub(crate) mod tests {
         );
 
         let reply = build_list_reply(1, sessions.clone(), total, budget);
-        let ControlMsg::SessionList {
-            sessions: kept,
-            truncated,
-            ..
-        } = reply
-        else {
+        let ControlMsg::SessionList { sessions: kept, .. } = reply else {
             panic!("expected ControlMsg::SessionList, got {reply:?}");
         };
         assert_eq!(
@@ -10794,21 +10861,21 @@ pub(crate) mod tests {
             sessions[..K],
             "a budget derived from a real K-entry reply must keep exactly those K"
         );
-        assert!(truncated);
     }
 
-    /// The envelope-flip boundary itself: a budget sized to fit ALL
-    /// sessions EXACTLY (again derived from a real, untruncated reply's
-    /// own encoded size via `Frame::control`) must keep every one of them
-    /// with `truncated: false` — not silently drop the last one. This is
-    /// the scenario the envelope-flip fix (measuring the envelope with
-    /// `truncated: false`, the LONGER of the two JSON booleans — `"false"`
-    /// is 5 ASCII characters, `"true"` is 4) exists for: getting that flip
-    /// backwards would under-count the envelope by exactly one byte for
-    /// this untruncated case, tripping `build_list_reply`'s own
-    /// `debug_assert!` in tests and, in a release build, risking a reply
-    /// that lands one byte over `byte_budget` for the one case that was
-    /// supposed to fit with room to spare.
+    /// The exact-fit boundary: a budget sized to fit ALL sessions EXACTLY
+    /// (again derived from a real reply's own encoded size via
+    /// `Frame::control`) must keep every one of them — not silently drop
+    /// the last one. Before `next_cursor` replaced `truncated`, this
+    /// scenario was ALSO the envelope-flip boundary the sibling test's doc
+    /// comment describes (measuring the envelope against the longer of
+    /// `truncated`'s two JSON spellings was what kept an exact-fit budget
+    /// from coming up one byte short); with `next_cursor: None` fixed on
+    /// both sides of the measurement, that flip no longer exists, but the
+    /// exact-fit case is still worth pinning on its own — it is the
+    /// boundary most likely to regress if `build_list_reply`'s
+    /// single-pass accounting ever drifts from `Frame::control`'s real
+    /// output again.
     #[test]
     fn build_list_reply_keeps_everything_at_an_exact_untruncated_boundary() {
         let sessions: Vec<SessionInfo> = (0..5).map(|i| fake_session(&i.to_string(), 20)).collect();
@@ -10818,30 +10885,24 @@ pub(crate) mod tests {
             req_id: 1,
             sessions: sessions.clone(),
             total,
-            truncated: false,
+            next_cursor: None,
         };
         let budget = Frame::control(&full_reply).encoded_len();
 
         let reply = build_list_reply(1, sessions.clone(), total, budget);
-        let ControlMsg::SessionList {
-            sessions: kept,
-            truncated,
-            ..
-        } = reply
-        else {
+        let ControlMsg::SessionList { sessions: kept, .. } = reply else {
             panic!("expected ControlMsg::SessionList, got {reply:?}");
         };
         assert_eq!(
             kept, sessions,
             "an exact-fit budget must not drop the last entry"
         );
-        assert!(!truncated);
     }
 
     /// The degenerate case for the single-pass entry scan: an empty
     /// `sessions` vec simply never enters the `for` loop at all, so this
     /// pins that the empty case still produces a well-formed reply —
-    /// `total: 0`, `truncated: false` — through the ordinary path, not a
+    /// `total: 0`, `next_cursor: None` — through the ordinary path, not a
     /// special case that could drift from it.
     #[test]
     fn build_list_reply_handles_zero_sessions() {
@@ -10849,7 +10910,7 @@ pub(crate) mod tests {
         let ControlMsg::SessionList {
             sessions,
             total,
-            truncated,
+            next_cursor,
             ..
         } = reply
         else {
@@ -10857,7 +10918,7 @@ pub(crate) mod tests {
         };
         assert!(sessions.is_empty());
         assert_eq!(total, 0);
-        assert!(!truncated);
+        assert_eq!(next_cursor, None);
     }
 
     /// "No supervisor is running here" is the single most common way this

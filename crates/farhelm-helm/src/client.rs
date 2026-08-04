@@ -192,8 +192,24 @@ pub struct SessionListing {
     pub total: u64,
     /// Whether `sessions` is missing entries the supervisor held back
     /// (PLAN_M2.md's list cap/byte-budget). `false` for a supervisor built
-    /// before this field existed, exactly like a fresh-default `total` —
-    /// see `ControlMsg::SessionList`'s docs on that tolerance.
+    /// before this field existed, exactly like a fresh-default `total`.
+    ///
+    /// As of PLAN_M6.md item 1 this is a REST-facing field synthesized,
+    /// not a value read directly off the wire the way `total` still is —
+    /// the wire itself dropped its own `truncated` bool in the same bump
+    /// `next_cursor` arrived in (see that field's own docs). The
+    /// synthesis is `next_cursor.is_some() || sessions.len() < total`,
+    /// not a bare `next_cursor.is_some()`: this build's `next_cursor` is
+    /// unconditionally `None` even on a cut reply (`handle_list_sessions`'s
+    /// interim contract), so the disjunction's second half is what still
+    /// catches a cap- or byte-budget-truncated page — see the
+    /// construction site in `list_sessions` for the full argument.
+    /// Keeping THIS struct's shape and name unchanged is deliberate:
+    /// `list_sessions`'s docs explain why the REST/UI JSON body's TOP-LEVEL
+    /// pagination fields (`sessions`/`total`/`truncated`) stay
+    /// byte-for-byte identical through this PR even though the wire
+    /// underneath it changed — that parity does not extend to each
+    /// session's own JSON, which gained `created_at` in this same bump.
     pub truncated: bool,
 }
 
@@ -1260,18 +1276,33 @@ impl SupervisorClient {
     /// the full count and whether either cut actually truncated anything.
     /// Always a live round trip — the helm caches no session state,
     /// because SPEC.md makes supervisors the authority.
+    ///
+    /// `cursor`/`limit` (PLAN_M6.md item 1's wire vocabulary) are sent as
+    /// `None` unconditionally: this PR ships the vocabulary, not helm-side
+    /// paging, so there is nothing yet to resume FROM and no reason to ask
+    /// for anything but the server's default page. `SessionListing`'s own
+    /// `truncated` — this method's REST-facing surface, unlike the wire's
+    /// `next_cursor` — keeps its pre-8 meaning by construction (see that
+    /// field's own docs).
     pub async fn list_sessions(&self) -> anyhow::Result<SessionListing> {
         let req_id = self.req_id();
         match self
-            .request(req_id, ControlMsg::ListSessions { req_id })
+            .request(
+                req_id,
+                ControlMsg::ListSessions {
+                    req_id,
+                    cursor: None,
+                    limit: None,
+                },
+            )
             .await?
         {
             ControlMsg::SessionList {
                 sessions,
                 total,
-                truncated,
+                next_cursor,
                 ..
-            } => Ok(SessionListing {
+            } => {
                 // Normalized against `sessions.len()`: an older
                 // `PROTOCOL_VERSION` 3 supervisor built before `total`
                 // existed omits the field entirely, which
@@ -1282,10 +1313,28 @@ impl SupervisorClient {
                 // actively misleading to a caller displaying "showing N
                 // of M" (PLAN_M2.md's UI contract): `total` must never be
                 // smaller than the number of sessions actually in hand.
-                total: total.max(sessions.len() as u64),
-                sessions,
-                truncated,
-            }),
+                let total = total.max(sessions.len() as u64);
+                Ok(SessionListing {
+                    // PLAN_M6.md item 1: the wire's `truncated` bool became
+                    // `next_cursor` (absence means exhaustion), but this PR
+                    // is vocabulary only — every supervisor this build can
+                    // reach still answers `next_cursor: None`
+                    // unconditionally, whether or not a cut actually
+                    // happened (`build_list_reply`'s own docs). A bare
+                    // `next_cursor.is_some()` would therefore report
+                    // `false` for a count-capped or byte-budget-cut list
+                    // that v7 honestly flagged `truncated: true` — the one
+                    // REST-visible regression this synthesis exists to
+                    // avoid. `sessions.len() < total` IS that cut, by
+                    // `total`'s own definition (the full count before any
+                    // cut), so the disjunction keeps the REST body faithful
+                    // both now and after PLAN_M6.md item 2 gives
+                    // `next_cursor` a real Some/None distinction.
+                    truncated: next_cursor.is_some() || (sessions.len() as u64) < total,
+                    total,
+                    sessions,
+                })
+            }
             other => bail!("unexpected reply to list_sessions: {other:?}"),
         }
     }
@@ -2228,6 +2277,7 @@ mod tests {
         SessionInfo {
             id: id.into(),
             title: id.into(),
+            created_at: 1_700_000_000,
             cwd: format!("/{id}"),
             invocation: "agent".into(),
             status: farhelm_proto::SessionStatus::Alive,
@@ -2281,7 +2331,7 @@ mod tests {
             let first = parse_control(&reader.read_frame().await.unwrap().unwrap()).unwrap();
             let second = parse_control(&reader.read_frame().await.unwrap().unwrap()).unwrap();
             let req_id = |message: ControlMsg| match message {
-                ControlMsg::ListSessions { req_id } => req_id,
+                ControlMsg::ListSessions { req_id, .. } => req_id,
                 other => panic!("unexpected request: {other:?}"),
             };
             let first = req_id(first);
@@ -2292,7 +2342,7 @@ mod tests {
                         req_id,
                         sessions: vec![session(&req_id.to_string())],
                         total: 1,
-                        truncated: false,
+                        next_cursor: None,
                     })
                     .await
                     .unwrap();
@@ -2301,8 +2351,22 @@ mod tests {
         let (r, w) = tokio::io::split(client_side);
         let client = SupervisorClient::start(r, w).await.unwrap();
 
-        let first = client.request(101, ControlMsg::ListSessions { req_id: 101 });
-        let second = client.request(202, ControlMsg::ListSessions { req_id: 202 });
+        let first = client.request(
+            101,
+            ControlMsg::ListSessions {
+                req_id: 101,
+                cursor: None,
+                limit: None,
+            },
+        );
+        let second = client.request(
+            202,
+            ControlMsg::ListSessions {
+                req_id: 202,
+                cursor: None,
+                limit: None,
+            },
+        );
         let (first, second) = tokio::join!(first, second);
 
         assert!(matches!(
@@ -2318,20 +2382,17 @@ mod tests {
         peer.await.unwrap();
     }
 
-    /// `list_sessions` must preserve `truncated` exactly, and `total`
-    /// whenever it is not SMALLER than `sessions.len()` — sentinel values
-    /// here (`total: 42`, `truncated: true`, deliberately far from
-    /// `sessions.len()`) prove an honest, larger `total` a truncating
-    /// supervisor sent on purpose survives untouched, rather than being
-    /// recomputed or dropped. This is deliberately NOT a claim that every
-    /// `total` value is preserved verbatim: `total.max(sessions.len())`
-    /// (see that call site's own docs, for the case where an old
-    /// supervisor's `total` UNDER-reports by omitting the field) rewrites
-    /// a `total` smaller than the list actually in hand — a different
-    /// test (`list_sessions_reports_a_populated_legacy_reply_with_a_real_total`)
-    /// pins that rewrite specifically.
+    /// `truncated` synthesizes from a disjunction —
+    /// `next_cursor.is_some() || sessions.len() < total` (see that call
+    /// site's own docs) — and this case isolates the FIRST disjunct: a
+    /// `next_cursor: Some(_)` with `total == sessions.len()`, so the count
+    /// half of the disjunction is false and cannot be the one making
+    /// `truncated` true. A regression that dropped `next_cursor.is_some()`
+    /// from the synthesis, keeping only the count comparison, would
+    /// compute `false` here and go uncaught by a test that let both
+    /// conditions hold at once.
     #[tokio::test]
-    async fn list_sessions_preserves_the_supervisors_total_and_truncated() {
+    async fn list_sessions_reports_truncated_from_next_cursor_alone() {
         let (client_side, peer_side) = tokio::io::duplex(64 * 1024);
         let peer = tokio::spawn(async move {
             let (r, w) = tokio::io::split(peer_side);
@@ -2341,7 +2402,62 @@ mod tests {
                 .await
                 .unwrap();
             let request = parse_control(&reader.read_frame().await.unwrap().unwrap()).unwrap();
-            let ControlMsg::ListSessions { req_id } = request else {
+            let ControlMsg::ListSessions { req_id, .. } = request else {
+                panic!("unexpected request: {request:?}");
+            };
+            writer
+                .write_control(&ControlMsg::SessionList {
+                    req_id,
+                    sessions: vec![session("only-one")],
+                    total: 1,
+                    next_cursor: Some("opaque-cursor-value".to_string()),
+                })
+                .await
+                .unwrap();
+        });
+        let (r, w) = tokio::io::split(client_side);
+        let client = SupervisorClient::start(r, w).await.unwrap();
+
+        let listing = client.list_sessions().await.unwrap();
+        assert_eq!(listing.sessions.len(), 1);
+        assert_eq!(listing.total, 1);
+        assert!(
+            listing.truncated,
+            "next_cursor alone must synthesize truncated: true even when total == sessions.len()"
+        );
+        peer.await.unwrap();
+    }
+
+    /// `truncated` synthesizes from a disjunction —
+    /// `next_cursor.is_some() || sessions.len() < total` (see that call
+    /// site's own docs) — and this case isolates the SECOND disjunct: a
+    /// `next_cursor: None` with a `total` (sentinel `42`, deliberately far
+    /// from `sessions.len()`) that proves an honest, larger `total` a
+    /// truncating supervisor sent on purpose survives untouched, rather
+    /// than being recomputed or dropped. A regression that dropped
+    /// `sessions.len() < total` from the synthesis, keeping only
+    /// `next_cursor.is_some()`, would compute `false` here and go
+    /// uncaught by a test that let both conditions hold at once.
+    ///
+    /// This is deliberately NOT a claim that every `total` value is
+    /// preserved verbatim: `total.max(sessions.len())` (see that call
+    /// site's own docs, for the case where an old supervisor's `total`
+    /// UNDER-reports by omitting the field) rewrites a `total` smaller
+    /// than the list actually in hand — a different test
+    /// (`list_sessions_reports_a_populated_legacy_reply_with_a_real_total`)
+    /// pins that rewrite specifically.
+    #[tokio::test]
+    async fn list_sessions_reports_truncated_from_a_larger_total_alone() {
+        let (client_side, peer_side) = tokio::io::duplex(64 * 1024);
+        let peer = tokio::spawn(async move {
+            let (r, w) = tokio::io::split(peer_side);
+            let mut reader = FrameReader::new(r);
+            let mut writer = FrameWriter::new(w);
+            handshake(&mut reader, &mut writer, "supervisor")
+                .await
+                .unwrap();
+            let request = parse_control(&reader.read_frame().await.unwrap().unwrap()).unwrap();
+            let ControlMsg::ListSessions { req_id, .. } = request else {
                 panic!("unexpected request: {request:?}");
             };
             writer
@@ -2349,7 +2465,7 @@ mod tests {
                     req_id,
                     sessions: vec![session("only-one")],
                     total: 42,
-                    truncated: true,
+                    next_cursor: None,
                 })
                 .await
                 .unwrap();
@@ -2363,23 +2479,34 @@ mod tests {
             listing.total, 42,
             "an honest, larger total than sessions.len() must survive unchanged"
         );
-        assert!(listing.truncated);
+        assert!(
+            listing.truncated,
+            "a larger total alone must synthesize truncated: true even when next_cursor is None"
+        );
         peer.await.unwrap();
     }
 
     /// The other half of the normalization at `list_sessions`'s call
     /// site: an older `PROTOCOL_VERSION` 3 supervisor, built before
-    /// `total`/`truncated` existed, sends a `SessionList` with those
-    /// fields simply ABSENT — `#[serde(default)]` decodes that as `total:
-    /// 0, truncated: false` (see `ControlMsg::SessionList`'s own docs) —
-    /// even though its `sessions` vec is complete and non-empty. Forwarding
-    /// that raw `0` would be actively misleading ("showing 0 of 0" next to
-    /// a visibly populated list), so `total.max(sessions.len())` must
-    /// rewrite it up to the real count. This is the scripted-peer
-    /// complement to the pure `total.max(...)` arithmetic itself: it pins
-    /// that the client's `list_sessions` call site actually applies the
-    /// rewrite to a wire reply shaped exactly like a real legacy sender's,
-    /// not just to a value constructed directly in a unit test.
+    /// `total` existed, sends a `SessionList` with the field simply
+    /// ABSENT — `#[serde(default)]` decodes that as `total: 0` (see
+    /// `ControlMsg::SessionList`'s own docs) — even though its `sessions`
+    /// vec is complete and non-empty. Forwarding that raw `0` would be
+    /// actively misleading ("showing 0 of 0" next to a visibly populated
+    /// list), so `total.max(sessions.len())` must rewrite it up to the
+    /// real count. This is the scripted-peer complement to the pure
+    /// `total.max(...)` arithmetic itself: it pins that the client's
+    /// `list_sessions` call site actually applies the rewrite to a wire
+    /// reply shaped exactly like a real legacy sender's, not just to a
+    /// value constructed directly in a unit test.
+    ///
+    /// It doubles as the BOTH-FALSE case of `truncated`'s disjunction
+    /// (`next_cursor.is_some() || sessions.len() < total`): `next_cursor`
+    /// is absent (decodes to `None`) and, after the rewrite above,
+    /// `total == sessions.len()`. A regression that made either disjunct
+    /// unconditionally `true` — reporting a cut that never happened —
+    /// would flip `listing.truncated` here and be caught by the assertion
+    /// below.
     #[tokio::test]
     async fn list_sessions_reports_a_populated_legacy_reply_with_a_real_total() {
         let (client_side, peer_side) = tokio::io::duplex(64 * 1024);
@@ -2391,10 +2518,10 @@ mod tests {
                 .await
                 .unwrap();
             let request = parse_control(&reader.read_frame().await.unwrap().unwrap()).unwrap();
-            let ControlMsg::ListSessions { req_id } = request else {
+            let ControlMsg::ListSessions { req_id, .. } = request else {
                 panic!("unexpected request: {request:?}");
             };
-            // Write the JSON by hand, WITHOUT `total`/`truncated` at all —
+            // Write the JSON by hand, WITHOUT `total`/`next_cursor` at all —
             // constructing a `ControlMsg::SessionList` in Rust and just
             // not setting them is not possible (the fields are required
             // in this build's own type); omitting them from the wire is

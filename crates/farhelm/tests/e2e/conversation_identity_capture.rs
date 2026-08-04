@@ -1042,6 +1042,7 @@ async fn capture_considers_sessions_beyond_the_list_reply_cap() {
                 StoredSession {
                     id: format!("extra-{i}"),
                     title: format!("extra-{i}"),
+                    created_at: now_unix(),
                     cwd: work.path().to_string_lossy().into_owned(),
                     invocation: "agent".to_string(),
                     tmux_name: format!("fh-extra-{i}"),

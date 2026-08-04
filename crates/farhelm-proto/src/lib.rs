@@ -99,7 +99,7 @@ pub mod io;
 /// connection loops treat that error as fatal — an unknown variant tears
 /// down an already-established connection instead of being ignored. A new
 /// variant is exactly the "cannot be additive" case that earns its own
-/// bump, per version 3's own docs above; `protocol_version_is_pinned_at_7`
+/// bump, per version 3's own docs above; `protocol_version_is_pinned_at_8`
 /// (renamed at every bump since `_at_4`) and
 /// `unknown_control_message_tag_fails_decode` below (plus the
 /// loop-level teardown test in the farhelm crate's e2e suite) pin both the
@@ -183,7 +183,46 @@ pub mod io;
 /// continues to apply: new optional fields with decode defaults are
 /// fine; a new tagged variant, or a new REQUIRED field, earns the next
 /// bump.
-pub const PROTOCOL_VERSION: u32 = 7;
+///
+/// Bumped to 8 for the complete M6 wire vocabulary (PLAN_M6.md item 1): the
+/// supervisor's host identity, cursor-paginated `ListSessions`, and each
+/// `SessionInfo`'s creation timestamp. Unlike every prior headline reason,
+/// none of the three is a new tagged variant — but all three still earn the
+/// bump:
+///
+/// - `Hello::host_identity` (`Option<String>`, always `None` until a later
+///   PR mints and fills the supervisor's identity) is additive on its own;
+///   it only rides this bump because one was already needed for the other
+///   two, and shipping it separately would just be another version for a
+///   mixed fleet to reason about, per version 5's argument for bundling all
+///   of one milestone's vocabulary into a single bump.
+/// - `ListSessions` gains `cursor: Option<String>` and `limit: Option<u32>`,
+///   themselves additive — but the reply they page through is not (next
+///   point).
+/// - `SessionList` DROPS `truncated` and gains `next_cursor: Option<String>`
+///   (PLAN_M6.md's "Pagination shape": absence means exhaustion).
+///   Truncation-as-error is replaced by next-cursor-as-continuation; `total`
+///   keeps meaning what it always has, the full count before any cut. A
+///   field REMOVAL is the version-2 precedent this doc keeps citing: an old
+///   decoder has no way to notice a field vanished, so a v8 sender must
+///   never reach a v7 decoder, exactly as if `next_cursor` had instead been
+///   a new tagged variant.
+/// - `SessionInfo` gains `created_at: i64` (seconds since the Unix epoch,
+///   matching `StoredSession::created_at`'s column — see that field's docs),
+///   additive via `#[serde(default)]` like every prior `SessionInfo` field
+///   addition, and folded into this same bump for the bundling reason above.
+///
+/// `created_at` IS sourced from storage by this same PR (the supervisor's
+/// store has held it since M2 — see `StoredSession::created_at`'s docs),
+/// since doing so is a mechanical fill-in at every existing `SessionInfo`
+/// construction site rather than new serving logic. Minting a host
+/// identity and serving real cursor-paginated pages are what remain a
+/// later PR's job (PLAN_M6.md items 1 and 2); this bump only fixes what
+/// travels on the wire for those two. Within version 8 the additive
+/// discipline of every prior version continues to apply: new optional
+/// fields with decode defaults are fine; a new tagged variant, a new
+/// REQUIRED field, or a field REMOVAL earns the next bump.
+pub const PROTOCOL_VERSION: u32 = 8;
 
 /// The build version compiled into this binary, carried in the hello for
 /// diagnostics.
@@ -479,6 +518,35 @@ pub enum SessionStatus {
 pub struct SessionInfo {
     pub id: String,
     pub title: String,
+    /// Seconds since the Unix epoch when this session was created —
+    /// `StoredSession::created_at`'s own value, carried onto the wire
+    /// unchanged (see that field's docs for where it comes from: the
+    /// supervisor mints it once at insert time and every later reply
+    /// re-reads the stored row, so SQLite is the durable record, not a
+    /// second independently-timed source). PLAN_M6.md item 1
+    /// needs it on the wire for the pagination cursor's ordering key: pages
+    /// are creation-time descending with `id` as tiebreak, and a cursor
+    /// resuming that walk has to encode the same key `SessionInfo` reports.
+    /// `#[serde(default)]` is what makes this additive within
+    /// `PROTOCOL_VERSION` 8, the same tolerance argument `status` and
+    /// `tabs` make above: an old sender's JSON has no `created_at` at all
+    /// and decodes to `0`, which readers must document as "sender predates
+    /// the field" (the same reading `SessionList::total` assigns its own
+    /// defaulted 0), not "created at the epoch". In the descending order
+    /// pagination uses, a 0 simply sorts last; no consumer may assign it
+    /// more meaning than that.
+    ///
+    /// DECISION (accepted collision, not guarded against): a genuine
+    /// pre-epoch host clock also mints `0` (`store::now_unix`'s own docs
+    /// carry the mirrored argument), which is indistinguishable on this
+    /// side of the wire from "sender predates the field" — both read the
+    /// same way and sort the same way. Accepted rather than special-cased,
+    /// because a pre-epoch system clock is not a supported configuration
+    /// and the worst case is exactly the sort-last treatment a legacy
+    /// sender already gets; total order over the page still holds either
+    /// way through the `id` tiebreak.
+    #[serde(default)]
+    pub created_at: i64,
     /// Working directory the session was created in. UTF-8-only by
     /// construction (see the module-level "Paths are UTF-8-only" note) —
     /// a non-UTF-8 host path cannot reach this field; it must have been
@@ -816,6 +884,20 @@ pub enum ControlMsg {
         build_version: String,
         /// "helm" or "supervisor"; diagnostic only.
         role: String,
+        /// The supervisor's identity (PLAN_M6.md item 2), minted once at
+        /// first run and stored in `supervisor_meta` — SPEC.md's promise
+        /// that a supervisor is "generated by its supervisor at install
+        /// time" and immutable thereafter, so wiping a supervisor's state
+        /// dir mints a new one and is exactly SPEC.md's reinstall
+        /// semantics. `None` on every hello this PR sends, from both
+        /// roles: the minting lands in the next PR
+        /// (`Supervisor::hello`/`ControlMsg::hello` do not yet know how to
+        /// fill it), so this bump only reserves the field's place on the
+        /// wire. Meaningless coming from the helm, which has no identity
+        /// of its own to report — only the supervisor's value is ever
+        /// consulted, by the connection manager's first-contact and
+        /// mismatch handling (PLAN_M6.md item 4).
+        host_identity: Option<String>,
     },
     /// Create and launch a session. This is the one true creation path:
     /// the M1 CLI flags and any future UI dialog both land here
@@ -892,37 +974,87 @@ pub enum ControlMsg {
     /// this reply reaches the caller. `ListSessions` computes the real
     /// answer from tmux (`service.rs`'s `session_status`); nothing about
     /// creation itself can honestly claim more.
-    SessionCreated {
-        req_id: u64,
-        session: SessionInfo,
-    },
+    SessionCreated { req_id: u64, session: SessionInfo },
+    /// List sessions, one page at a time (PLAN_M6.md item 1, "Pagination
+    /// shape"). `cursor: None` starts from the front of the order
+    /// `SessionList`'s own docs define (creation-time descending, session
+    /// id as tiebreak); `Some` resumes after the ordering key a previous
+    /// `SessionList::next_cursor` encoded, and is opaque to callers — a
+    /// client stores and replays it verbatim, never parses or constructs
+    /// one itself. `limit: None` takes the server's default page size
+    /// (`LIST_SESSION_CAP`); `Some` asks for a smaller (or larger, subject
+    /// to the server's own caps) page — once real pagination serves it,
+    /// per the interim contract below.
+    ///
+    /// This PR ships the vocabulary only: until PLAN_M6.md item 2 lands,
+    /// the supervisor accepts `cursor: None` and `limit: None` exactly as
+    /// it always has, and refuses `cursor: Some(_)` OR `limit: Some(_)`
+    /// with `ErrorKind::InvalidRequest` — see
+    /// `service::handle_list_sessions`'s own docs for that interim
+    /// contract and why refusing BOTH fields, not just `cursor`, is what
+    /// keeps every reply honest
+    /// (no client can hold a cursor a v8 supervisor never issued, and
+    /// honoring `limit` alone would make this build's unconditional
+    /// `next_cursor: None` a lie whenever a caller-requested page cuts off
+    /// sessions it has no cursor left to reach).
     ListSessions {
         req_id: u64,
+        cursor: Option<String>,
+        limit: Option<u32>,
     },
-    /// Reply to `ListSessions`: the supervisor's session set, in no
-    /// defined order, subject to two independent cuts in
-    /// `service.rs` — a count cap enforced by the `ListSessions` handler
-    /// itself before a single entry is even cloned, and an encoded-size
-    /// budget `build_list_reply` enforces on top of that (see its own
-    /// docs for why the cap deliberately does NOT live inside that
-    /// function).
+    /// Reply to `ListSessions`: one page of the supervisor's session set,
+    /// subject to two independent cuts in `service.rs` — the page limit
+    /// (`ListSessions::limit`, or `LIST_SESSION_CAP` by default) enforced
+    /// by the `ListSessions` handler itself before a single entry is even
+    /// cloned, and an encoded-size budget `build_list_reply` enforces on
+    /// top of that (see its own docs for why the cap deliberately does NOT
+    /// live inside that function).
     ///
-    /// `total` and `truncated` are additive within `PROTOCOL_VERSION` 3,
-    /// like `SessionInfo::status` (see that field's docs for the same
-    /// tolerance argument). `total` is the FULL session count before any
-    /// truncation, not `sessions.len()`; an old sender's reply decodes
-    /// `total` as 0 via `#[serde(default)]`, which is documented here as
-    /// "sender predates the field" rather than "zero sessions" — tolerable
-    /// because `sessions` itself is still present and correct either way,
-    /// and no M2 caller treats a 0 `total` as authoritative proof of
-    /// emptiness on its own.
+    /// Ordering (PLAN_M6.md's "Pagination shape") is creation-time
+    /// descending with session id as tiebreak — a total order over stable
+    /// columns, so a page walk survives sessions being created or deleted
+    /// between requests: the order is total and stable, so an issued
+    /// cursor stays valid; a walk never sees a duplicate and never tears.
+    /// A session created DURING an in-progress walk may be missed by that
+    /// walk — same-second creations tie-break by id and can land behind
+    /// the cursor, and a clock rollback can place a new session mid-order
+    /// — but is guaranteed visible in the next walk, from the start. A
+    /// deletion behind the cursor is simply absent from the next page,
+    /// never corrupting it. This PR fixes the wire shape only; the
+    /// handler that actually orders and walks pages is PLAN_M6.md item
+    /// 2's job (`service::handle_list_sessions`'s docs name the interim
+    /// behavior this PR ships instead).
+    ///
+    /// `total` is additive within `PROTOCOL_VERSION` 3, like
+    /// `SessionInfo::status` (see that field's docs for the same tolerance
+    /// argument), and unchanged in meaning by this PR's bump: the FULL
+    /// session count before any cut, not `sessions.len()` and not scoped
+    /// to one page. An old sender's reply decodes `total` as 0 via
+    /// `#[serde(default)]`, documented here as "sender predates the field"
+    /// rather than "zero sessions" — tolerable because `sessions` itself
+    /// is still present and correct either way, and no M2 caller treats a
+    /// 0 `total` as authoritative proof of emptiness on its own.
+    ///
+    /// `next_cursor` REPLACES the pre-8 `truncated` flag (removed, not
+    /// deprecated — see `PROTOCOL_VERSION`'s own docs for why that forces
+    /// this bump rather than riding an additive one): `None` means this
+    /// page reached the end of the order, `Some` carries the opaque
+    /// resume point for the next `ListSessions::cursor`. Truncation was an
+    /// error the caller had no way to recover from; a cursor is a
+    /// continuation the caller can just follow.
+    ///
+    /// That "`None` means exhaustion" contract is the one real pagination
+    /// serves, once PLAN_M6.md item 2 lands. Until then, `None` is this
+    /// build's ONLY value — no code path in this PR ever issues a `Some`
+    /// — regardless of whether a reply was actually cut by the cap or the
+    /// byte budget; see `service::handle_list_sessions`'s own docs for
+    /// that interim exception and why it is safe for exactly one more PR.
     SessionList {
         req_id: u64,
         sessions: Vec<SessionInfo>,
         #[serde(default)]
         total: u64,
-        #[serde(default)]
-        truncated: bool,
+        next_cursor: Option<String>,
     },
     /// Kill the agent's entire process tree (MCP servers, dev servers,
     /// every descendant), leaving the session and its terminal in place —
@@ -957,17 +1089,12 @@ pub enum ControlMsg {
     /// sides of the kill, since a failure BEFORE it means nothing was
     /// killed at all while one after it means the session did stop but may
     /// list as an ordinary exit.
-    StopSession {
-        req_id: u64,
-        session_id: String,
-    },
+    StopSession { req_id: u64, session_id: String },
     /// Acknowledges `StopSession`: sent only once the kill sweep has
     /// actually run to completion (or been confirmed unnecessary — a dead
     /// or absent pane, the restart-gap case), never merely because the
     /// request was accepted.
-    SessionStopped {
-        req_id: u64,
-    },
+    SessionStopped { req_id: u64 },
     /// Remove a session and all its stored state — the DB row, the
     /// in-memory entry, and (if the terminal is still live) the agent's
     /// process tree and its tmux session — regardless of whether the
@@ -980,10 +1107,7 @@ pub enum ControlMsg {
     /// client is told `Detached` before its connection loses the ability
     /// to reach this session at all, so it learns why rather than just
     /// going quiet.
-    DeleteSession {
-        req_id: u64,
-        session_id: String,
-    },
+    DeleteSession { req_id: u64, session_id: String },
     /// Acknowledges `DeleteSession`: sent only once the row, the tmux
     /// session, and (if one existed) the process tree are all positively
     /// confirmed gone. A teardown failure never yields this reply — it
@@ -992,9 +1116,7 @@ pub enum ControlMsg {
     /// lore/2026-07-27-m2-process-tree-stop.md for why removing the last
     /// handle on a possibly-running agent is the one outcome that must
     /// never happen silently).
-    SessionDeleted {
-        req_id: u64,
-    },
+    SessionDeleted { req_id: u64 },
     /// Relaunch a session's agent (PLAN_M3.md item 9) — the only relaunch
     /// mechanism SPEC.md's lifecycle "restart" names; the resume offered
     /// when opening an interrupted session sends this same message, not a
@@ -1068,10 +1190,7 @@ pub enum ControlMsg {
     /// `session` carries the session's resulting state (including its
     /// freshly recomputed `restart_offer`) so a caller does not have to
     /// re-list to see it.
-    SessionRestarted {
-        req_id: u64,
-        session: SessionInfo,
-    },
+    SessionRestarted { req_id: u64, session: SessionInfo },
     /// Rename a session (PLAN_M5.md item 1) — SPEC.md's v1 client-surface
     /// rename verb, closing one of the two still unimplemented since M1
     /// (archive is the other, deliberately M7's). This crate fixes only
@@ -1122,10 +1241,7 @@ pub enum ControlMsg {
     /// `SessionInfo` is more than a stored title (see its own docs), and
     /// echoing the rest of it stale would hand the caller a `SessionInfo`
     /// that lies about everything but the one field this request changed.
-    SessionRenamed {
-        req_id: u64,
-        session: SessionInfo,
-    },
+    SessionRenamed { req_id: u64, session: SessionInfo },
     /// Open a terminal tab: a plain shell in the session's working
     /// directory, as a new window on the session's tmux session
     /// (PLAN_M4.md item 2). Refused — with the session untouched — when
@@ -1136,10 +1252,7 @@ pub enum ControlMsg {
     /// and when the shell is already dead by reply time (the pane's last
     /// words travel as the error detail — a launch that failed must not
     /// masquerade as a successful open holding a dead pane).
-    OpenTab {
-        req_id: u64,
-        session_id: String,
-    },
+    OpenTab { req_id: u64, session_id: String },
     /// Success reply to `OpenTab`. The tab exists and its shell was alive
     /// when this was sent; attach it via `Attach` with
     /// `TerminalSelector::Tab`. Carries the `TabInfo` alone rather than a
@@ -1150,10 +1263,7 @@ pub enum ControlMsg {
     /// list from a refreshed `SessionInfo::tabs`, the one place ordering
     /// is authoritative; this reply is only what the opener needs to
     /// attach immediately.
-    TabOpened {
-        req_id: u64,
-        tab: TabInfo,
-    },
+    TabOpened { req_id: u64, tab: TabInfo },
     /// Close a terminal tab: kill its shell and every process it left
     /// behind (SPEC.md: close "kills that shell and its processes" —
     /// daemonized children included), then drop the window. The reap runs
@@ -1171,9 +1281,7 @@ pub enum ControlMsg {
     /// completion and the window is gone — `SessionStopped`'s honesty
     /// rule, per tab. A reap or teardown failure yields `Error` instead,
     /// never a false success.
-    TabClosed {
-        req_id: u64,
-    },
+    TabClosed { req_id: u64 },
     /// Attach to one of a session's terminals. The requester picks the
     /// (connection-unique) data channel; the supervisor replays history
     /// onto it and then streams live output. SPEC.md's one-attachment
@@ -1226,17 +1334,12 @@ pub enum ControlMsg {
     /// reply is processed — the supervisor starts the replay as soon as
     /// the attachment is installed — so a client must have the channel
     /// registered before it sends `Attach`, not after it sees `Attached`.
-    Attached {
-        req_id: u64,
-        channel: u32,
-    },
+    Attached { req_id: u64, channel: u32 },
     /// Give up an attachment voluntarily. No reply, and no error if the
     /// channel was never attached or was already taken over: detach is
     /// idempotent so a client tearing down a closed terminal never has to
     /// reason about who won a race.
-    Detach {
-        channel: u32,
-    },
+    Detach { channel: u32 },
     /// Unsolicited: this channel's attachment was taken over or torn down.
     ///
     /// `reason` is one of a small open-ended set of user-legible strings,
@@ -1246,10 +1349,7 @@ pub enum ControlMsg {
     /// because two independent emitters (supervisor and helm) and their
     /// tests must produce the identical string; the "another client took
     /// over" case has no constant because only one place emits it.
-    Detached {
-        channel: u32,
-        reason: String,
-    },
+    Detached { channel: u32, reason: String },
     /// Unsolicited: this attach's initial catch-up is over — every byte
     /// the supervisor is going to replay from history FOR THE ATTACH has
     /// been written to `channel`, and the live stream follows
@@ -1326,9 +1426,7 @@ pub enum ControlMsg {
     /// phase ending — and no session, lifecycle, or other client
     /// behavior may key off it (PLAN_M5.md's scope explicitly rules this
     /// out).
-    ReplayComplete {
-        channel: u32,
-    },
+    ReplayComplete { channel: u32 },
     /// Set the session's terminal dimensions. Fire-and-forget: no
     /// `req_id`, no reply, and the supervisor ignores it unless `channel`
     /// is the session's live attachment on the sending connection —
@@ -1354,17 +1452,13 @@ pub enum ControlMsg {
     /// still in flight from a client that just lost this attachment's
     /// takeover.
     ///
-    PauseOutput {
-        channel: u32,
-    },
+    PauseOutput { channel: u32 },
     /// The client has drained its backlog below the low-water mark; output
     /// may flow again. Pairs with `PauseOutput` and shares its rationale
     /// for carrying `channel` (see `Resize`'s doc comment) and its
     /// fire-and-forget shape.
     ///
-    ResumeOutput {
-        channel: u32,
-    },
+    ResumeOutput { channel: u32 },
     /// Start an attachment upload into a session's attachments directory
     /// (PLAN_M4.md items 1 and 4). The requester picks a
     /// connection-unique data channel — `Attach`'s convention, but the
@@ -1403,10 +1497,7 @@ pub enum ControlMsg {
     /// baseline would invite). A refused begin (see `BeginUpload` for
     /// the refusal set — filenames are never in it) is `Error`, and
     /// nothing was created on disk.
-    UploadStarted {
-        req_id: u64,
-        channel: u32,
-    },
+    UploadStarted { req_id: u64, channel: u32 },
     /// Unsolicited receiver progress: `received` is the CUMULATIVE byte
     /// count safely written so far on `channel`. Two jobs in one message
     /// (PLAN_M4.md items 1 and 4): it extends the sender's credit window,
@@ -1424,10 +1515,7 @@ pub enum ControlMsg {
     /// ack is a protocol error the sender answers by aborting the
     /// transfer, and window arithmetic is checked so no ack value can
     /// overflow it.
-    UploadAck {
-        channel: u32,
-        received: u64,
-    },
+    UploadAck { channel: u32, received: u64 },
     /// All bytes sent; publish the file. The supervisor verifies the
     /// received count against `BeginUpload`'s declared `size`, fsyncs,
     /// and publishes atomically WITHOUT CLOBBERING (item 4's atomicity
@@ -1444,10 +1532,7 @@ pub enum ControlMsg {
     /// this message's to report: they already tore the channel down as
     /// `UploadAborted`, and a commit naming a channel that no longer
     /// carries an upload is itself an `Error`.
-    CommitUpload {
-        req_id: u64,
-        channel: u32,
-    },
+    CommitUpload { req_id: u64, channel: u32 },
     /// The upload published. `path` is the RAW absolute host-side path —
     /// UTF-8 by the module-level path contract (a non-UTF-8 publish path
     /// fails the commit, never lossy-converts), but otherwise
@@ -1458,18 +1543,13 @@ pub enum ControlMsg {
     /// contract, decided where insertion lives (PLAN_M4.md item 7) —
     /// this field just promises the true path, exactly as the
     /// filesystem knows it.
-    UploadCommitted {
-        req_id: u64,
-        path: String,
-    },
+    UploadCommitted { req_id: u64, path: String },
     /// Abandon an upload. Fire-and-forget and idempotent like `Detach`,
     /// and for the same reason: a client tearing down (a cancelled drop,
     /// a closed view) must never have to reason about who won a race
     /// against a concurrent abort or completion. The receiver drops the
     /// channel and cleans the temp file.
-    AbortUpload {
-        channel: u32,
-    },
+    AbortUpload { channel: u32 },
     /// Unsolicited: the receiver gave up on this upload. This is the
     /// outcome for EVERY post-start receiver-side failure — the stall
     /// timeout ([`UPLOAD_ABORT_REASON_STALLED`]), the session deleted
@@ -1495,10 +1575,7 @@ pub enum ControlMsg {
     /// receiver's private staging area, which its next startup
     /// reconciles. Neither case is visible to the client, and neither
     /// affects the published path.
-    UploadAborted {
-        channel: u32,
-        reason: String,
-    },
+    UploadAborted { channel: u32, reason: String },
     /// A request failed, or (with `req_id` 0) something went wrong that no
     /// request is waiting on. `message` is meant for the user verbatim —
     /// SPEC.md requires concrete, actionable errors, so it travels
@@ -1520,6 +1597,10 @@ impl ControlMsg {
             protocol_version: PROTOCOL_VERSION,
             build_version: BUILD_VERSION.to_string(),
             role: role.to_string(),
+            // Always `None` from this shared constructor, whichever role
+            // calls it: neither role mints an identity yet (see the
+            // field's own docs).
+            host_identity: None,
         }
     }
 }
@@ -1862,15 +1943,291 @@ mod tests {
         );
     }
 
+    /// `Hello::host_identity` (PLAN_M6.md item 1), golden-pinned in both
+    /// the explicit-`null` and the present-value shape — the two cases
+    /// this crate's own `Serialize` impl can actually produce. `None` is
+    /// the ONLY value this PR's own code ever sends (`ControlMsg::hello`
+    /// — see its own docs), which makes the `Some` case here a
+    /// forward-looking pin rather than one exercised by production code
+    /// yet: the field's wire NAME and shape must already be right,
+    /// because the next PR that starts filling it in from the
+    /// supervisor's minted identity gets no second chance at a
+    /// `PROTOCOL_VERSION` bump if the shape is wrong. Each pair round-trips
+    /// (encode matches the golden value, decoding that same value returns
+    /// the original message) — but round-tripping this crate's own
+    /// `null` says nothing about a KEY that never appears on the wire at
+    /// all, which is what a real absent-field sender would produce; the
+    /// sibling test below covers that case with hand-written JSON instead.
+    #[test]
+    fn hello_json_shape_is_pinned_with_and_without_host_identity() {
+        for (msg, expected) in [
+            (
+                ControlMsg::Hello {
+                    protocol_version: 8,
+                    build_version: "1.2.3".to_string(),
+                    role: "supervisor".to_string(),
+                    host_identity: None,
+                },
+                serde_json::json!({
+                    "type": "hello",
+                    "protocol_version": 8,
+                    "build_version": "1.2.3",
+                    "role": "supervisor",
+                    "host_identity": null,
+                }),
+            ),
+            (
+                ControlMsg::Hello {
+                    protocol_version: 8,
+                    build_version: "1.2.3".to_string(),
+                    role: "supervisor".to_string(),
+                    host_identity: Some("11111111-1111-1111-1111-111111111111".to_string()),
+                },
+                serde_json::json!({
+                    "type": "hello",
+                    "protocol_version": 8,
+                    "build_version": "1.2.3",
+                    "role": "supervisor",
+                    "host_identity": "11111111-1111-1111-1111-111111111111",
+                }),
+            ),
+        ] {
+            assert_eq!(serde_json::to_value(&msg).unwrap(), expected);
+            let decoded: ControlMsg = serde_json::from_value(expected).unwrap();
+            assert_eq!(decoded, msg);
+        }
+    }
+
+    /// The case the golden test above cannot reach: a hello whose JSON
+    /// never mentions `host_identity` at all, the shape an OLD-8 or
+    /// genuinely pre-8 sender's `Hello` would have (impossible in
+    /// practice for a real peer — the handshake refuses a mismatched
+    /// version before any other field is inspected — but decode
+    /// tolerance for it is still part of the contract `#[serde(default)]`-
+    /// less `Option` fields make elsewhere in this file, see that field's
+    /// own docs). Hand-written JSON, not `serde_json::json!` built from a
+    /// `ControlMsg`, is what makes the key's absence real instead of an
+    /// explicit `null` that merely happens to render the same in this
+    /// one crate's own encoder.
+    #[test]
+    fn hello_json_decodes_with_host_identity_key_entirely_absent() {
+        let raw = r#"{
+            "type": "hello",
+            "protocol_version": 8,
+            "build_version": "1.2.3",
+            "role": "supervisor"
+        }"#;
+        let decoded: ControlMsg = serde_json::from_str(raw)
+            .expect("a hello JSON object with no host_identity key at all must still decode");
+        let ControlMsg::Hello { host_identity, .. } = decoded else {
+            panic!("expected ControlMsg::Hello, got {decoded:?}");
+        };
+        assert_eq!(
+            host_identity, None,
+            "an absent key must decode the same as an explicit null"
+        );
+    }
+
+    /// The REVERSE direction from the two tests above, following the
+    /// shadow-decoder pattern near
+    /// `new_session_list_json_decodes_under_a_legacy_pre_status_decoder`: a
+    /// hand-rolled decoder shaped like the genuine v7 `Hello` — before
+    /// `host_identity` existed at all (see `PROTOCOL_VERSION`'s own docs
+    /// for when it was added) — must still decode a NEW v8 sender's
+    /// `Hello` JSON, silently ignoring the field it does not recognize.
+    /// As with the `SessionList` sibling, a real peer never exercises this
+    /// path (the handshake refuses a `protocol_version` mismatch before
+    /// any other field is inspected), but the decode tolerance is still
+    /// part of the additive contract this file pins independently of
+    /// whether production code currently walks it.
+    #[derive(Debug, Deserialize)]
+    #[serde(tag = "type", rename_all = "snake_case")]
+    enum LegacyHelloControlMsg {
+        Hello {
+            protocol_version: u32,
+            build_version: String,
+            role: String,
+        },
+    }
+
+    #[test]
+    fn new_hello_json_decodes_under_a_legacy_pre_host_identity_decoder() {
+        let new_msg = ControlMsg::Hello {
+            protocol_version: 8,
+            build_version: "1.2.3".to_string(),
+            role: "supervisor".to_string(),
+            host_identity: Some("11111111-1111-1111-1111-111111111111".to_string()),
+        };
+        let json = serde_json::to_value(&new_msg).unwrap();
+
+        let LegacyHelloControlMsg::Hello {
+            protocol_version,
+            build_version,
+            role,
+        } = serde_json::from_value(json.clone())
+            .expect("a legacy decoder without host_identity must still decode new-shape JSON");
+        assert_eq!(protocol_version, 8);
+        assert_eq!(build_version, "1.2.3");
+        assert_eq!(role, "supervisor");
+
+        // The REAL type round-trips the same JSON too — same discipline as
+        // the SessionList sibling test, making explicit that `json` is
+        // exactly what a real `ControlMsg::Hello` produces.
+        let real_decoded: ControlMsg = serde_json::from_value(json).unwrap();
+        assert_eq!(real_decoded, new_msg);
+    }
+
+    /// `ListSessions::cursor`/`limit` (PLAN_M6.md item 1's pagination
+    /// request shape), golden-pinned with both absent (a first page at the
+    /// server's default size) and both present (a resumed, size-capped
+    /// page). Both fields are plain `Option`s with no `#[serde(default)]`,
+    /// matching every other optional request field this file pins the
+    /// same way (`CreateSession::title`, `RestartSession`'s snapshot
+    /// overrides) — see `SessionInfo::annotation`'s docs for why that
+    /// attribute is not needed for `Option` to decode absence as `None`.
+    #[test]
+    fn list_sessions_cursor_and_limit_json_shapes_are_pinned() {
+        for (msg, expected) in [
+            (
+                ControlMsg::ListSessions {
+                    req_id: 1,
+                    cursor: None,
+                    limit: None,
+                },
+                serde_json::json!({
+                    "type": "list_sessions",
+                    "req_id": 1,
+                    "cursor": null,
+                    "limit": null,
+                }),
+            ),
+            (
+                ControlMsg::ListSessions {
+                    req_id: 2,
+                    cursor: Some("opaque-cursor-value".to_string()),
+                    limit: Some(50),
+                },
+                serde_json::json!({
+                    "type": "list_sessions",
+                    "req_id": 2,
+                    "cursor": "opaque-cursor-value",
+                    "limit": 50,
+                }),
+            ),
+        ] {
+            assert_eq!(serde_json::to_value(&msg).unwrap(), expected);
+            let decoded: ControlMsg = serde_json::from_value(expected).unwrap();
+            assert_eq!(decoded, msg);
+        }
+    }
+
+    /// The golden test above's "absent" case is really an explicit
+    /// `"cursor": null, "limit": null` — this crate's own encoder never
+    /// omits an `Option` key, so it cannot exercise a real absent-key
+    /// decode (a panel review flagged the gap). Hand-written JSON with
+    /// both keys left out entirely, matching `hello_json_decodes_with_host_identity_key_entirely_absent`'s
+    /// approach for the same reason, is what makes the absence real
+    /// instead of a `null` that happens to render the same in this one
+    /// crate's own serializer — the shape a genuine v7 sender's
+    /// `ListSessions` (before `cursor`/`limit` existed) would produce.
+    #[test]
+    fn list_sessions_json_decodes_with_cursor_and_limit_keys_entirely_absent() {
+        let raw = r#"{"type":"list_sessions","req_id":3}"#;
+        let decoded: ControlMsg = serde_json::from_str(raw)
+            .expect("a list_sessions JSON object with no cursor/limit keys must still decode");
+        let ControlMsg::ListSessions {
+            req_id,
+            cursor,
+            limit,
+        } = decoded
+        else {
+            panic!("expected ControlMsg::ListSessions, got {decoded:?}");
+        };
+        assert_eq!(req_id, 3);
+        assert_eq!(
+            cursor, None,
+            "an absent cursor key must decode the same as an explicit null"
+        );
+        assert_eq!(
+            limit, None,
+            "an absent limit key must decode the same as an explicit null"
+        );
+    }
+
+    /// The REVERSE direction: a hand-rolled decoder shaped like the
+    /// genuine v7 `ListSessions` — before `cursor`/`limit` existed (see
+    /// `PROTOCOL_VERSION`'s own docs) — must still decode a NEW v8
+    /// sender's `ListSessions` JSON, silently ignoring both fields it
+    /// does not recognize. Same shadow-decoder pattern as
+    /// `new_session_list_json_decodes_under_a_legacy_pre_status_decoder`
+    /// and `new_hello_json_decodes_under_a_legacy_pre_host_identity_decoder`;
+    /// as with those, no real peer exercises this path (the handshake
+    /// refuses a version mismatch first), but the tolerance is still part
+    /// of the additive contract this file pins directly.
+    #[derive(Debug, Deserialize)]
+    #[serde(tag = "type", rename_all = "snake_case")]
+    enum LegacyListSessionsControlMsg {
+        ListSessions { req_id: u64 },
+    }
+
+    #[test]
+    fn new_list_sessions_json_decodes_under_a_legacy_pre_cursor_decoder() {
+        let new_msg = ControlMsg::ListSessions {
+            req_id: 4,
+            cursor: Some("opaque-cursor-value".to_string()),
+            limit: Some(50),
+        };
+        let json = serde_json::to_value(&new_msg).unwrap();
+
+        let LegacyListSessionsControlMsg::ListSessions { req_id } =
+            serde_json::from_value(json.clone())
+                .expect("a legacy decoder without cursor/limit must still decode new-shape JSON");
+        assert_eq!(req_id, 4);
+
+        // The REAL type round-trips the same JSON too — same discipline as
+        // the SessionList and Hello siblings, making explicit that `json`
+        // is exactly what a real `ControlMsg::ListSessions` produces.
+        let real_decoded: ControlMsg = serde_json::from_value(json).unwrap();
+        assert_eq!(real_decoded, new_msg);
+    }
+
+    /// `SessionInfo::created_at` (PLAN_M6.md item 1), golden-pinned as its
+    /// own test rather than only riding along inside the larger
+    /// `SessionInfo` golden tests elsewhere in this file: this is the one
+    /// field whose exact wire NAME and TYPE (a bare integer, seconds since
+    /// the Unix epoch — not a nested object, not an RFC 3339 string) the
+    /// pagination cursor's ordering key depends on, per PLAN_M6.md's
+    /// "Pagination shape" paragraph, so a rename or a type change here
+    /// deserves a failure that points straight at this field rather than
+    /// getting lost in a larger struct's diff.
+    #[test]
+    fn session_info_created_at_json_shape_is_pinned() {
+        let info = SessionInfo {
+            id: "s1".to_string(),
+            title: "demo".to_string(),
+            created_at: 1_700_000_000,
+            cwd: "/tmp".to_string(),
+            invocation: "agent".to_string(),
+            status: SessionStatus::default(),
+            annotation: None,
+            restart_offer: RestartOffer::default(),
+            tabs: Vec::new(),
+        };
+        assert_eq!(
+            serde_json::to_value(&info).unwrap()["created_at"],
+            serde_json::json!(1_700_000_000)
+        );
+    }
+
     /// `PROTOCOL_VERSION` is a load-bearing constant (see the const's own
     /// docs for the M2 bump to 3, the M2.5 bump to 4, the M3 bump to 5,
-    /// the M4 bump to 6, and the M5 bump to 7): pinning its value here
-    /// makes an accidental re-bump (or a forgotten one, if a later change
-    /// needed it) a loud test failure rather than a silent drift
-    /// discovered only by two builds refusing to talk to each other.
+    /// the M4 bump to 6, the M5 bump to 7, and the M6 bump to 8): pinning
+    /// its value here makes an accidental re-bump (or a forgotten one, if
+    /// a later change needed it) a loud test failure rather than a silent
+    /// drift discovered only by two builds refusing to talk to each other.
     #[test]
-    fn protocol_version_is_pinned_at_7() {
-        assert_eq!(PROTOCOL_VERSION, 7);
+    fn protocol_version_is_pinned_at_8() {
+        assert_eq!(PROTOCOL_VERSION, 8);
     }
 
     /// Pins the decode half of the failure PLAN_M2_5.md's version bump
@@ -2223,44 +2580,82 @@ mod tests {
             .expect_err("a v4 decoder must fail on `conflict`, not silently ignore or default it");
     }
 
-    /// `SessionList`'s `total`/`truncated` addition, pinned the same way:
-    /// both fields must sit alongside `sessions` in the encoded object,
-    /// under their exact snake_case names, or a mismatched rename would
-    /// pass every Rust-side test here while a real cross-build peer reads
-    /// something else entirely.
+    /// `SessionList`'s `total`/`next_cursor` shape at `PROTOCOL_VERSION` 8
+    /// (PLAN_M6.md item 1), golden-pinned in both the exhaustion and
+    /// continuation cases: `next_cursor: None` (a page that reached the
+    /// end of the order) and `next_cursor: Some(_)` (more pages remain).
+    /// `total` itself is unchanged from the pre-8 shape — still additive,
+    /// still the full pre-cut count — so it rides along here rather than
+    /// getting its own test. `next_cursor` REPLACING `truncated` is the
+    /// one part of this shape that is NOT additive: `truncated` simply no
+    /// longer exists on the wire, and a decoder built before this PR has
+    /// no way to notice that absence, which is exactly the field-removal
+    /// case `PROTOCOL_VERSION`'s own docs say forces a bump rather than
+    /// riding an additive one — see the two tests below for what that
+    /// forced bump buys in exchange (both directions of tolerance
+    /// WITHIN version 8, once both peers are known to speak it).
     #[test]
-    fn session_list_total_and_truncated_json_shape_is_pinned() {
-        let msg = ControlMsg::SessionList {
-            req_id: 5,
-            sessions: vec![],
-            total: 7,
-            truncated: true,
-        };
-        assert_eq!(
-            serde_json::to_value(&msg).unwrap(),
-            serde_json::json!({
-                "type": "session_list",
-                "req_id": 5,
-                "sessions": [],
-                "total": 7,
-                "truncated": true,
-            })
-        );
+    fn session_list_total_and_next_cursor_json_shape_is_pinned() {
+        for (msg, expected) in [
+            (
+                ControlMsg::SessionList {
+                    req_id: 5,
+                    sessions: vec![],
+                    total: 7,
+                    next_cursor: None,
+                },
+                serde_json::json!({
+                    "type": "session_list",
+                    "req_id": 5,
+                    "sessions": [],
+                    "total": 7,
+                    "next_cursor": null,
+                }),
+            ),
+            (
+                ControlMsg::SessionList {
+                    req_id: 6,
+                    sessions: vec![],
+                    total: 700,
+                    next_cursor: Some("opaque-cursor-value".to_string()),
+                },
+                serde_json::json!({
+                    "type": "session_list",
+                    "req_id": 6,
+                    "sessions": [],
+                    "total": 700,
+                    "next_cursor": "opaque-cursor-value",
+                }),
+            ),
+        ] {
+            assert_eq!(serde_json::to_value(&msg).unwrap(), expected);
+        }
     }
 
-    /// The additive-decode half of PLAN_M2.md's "Proto growth" contract:
-    /// JSON shaped exactly like a PRE-this-change sender — a `SessionInfo`
-    /// with no `state` field, a `SessionList` with no `total`/`truncated`
-    /// — must still decode successfully, defaulting the new fields rather
-    /// than failing. This is what makes the addition safe within the
-    /// existing `PROTOCOL_VERSION` 3 instead of needing its own bump: an
-    /// old-build supervisor and a new-build helm (or vice versa) must keep
-    /// interoperating.
+    /// The additive-decode half of PLAN_M2.md's "Proto growth" contract,
+    /// extended for version 8: JSON shaped like a genuine v7 sender — a
+    /// `SessionInfo` with no `state` or `created_at`, a `SessionList`
+    /// still carrying the pre-8 `truncated` bool (removed, not merely
+    /// unfilled, by this PR's bump — see `PROTOCOL_VERSION`'s own docs)
+    /// but no `total`/`next_cursor` — must still decode successfully:
+    /// `truncated` is silently dropped as an unrecognized key, and the new
+    /// fields default rather than failing. `total` was already
+    /// additive-tolerant before this PR (see the version history above);
+    /// `created_at` is NOT — it is this PR's own addition, decoding to `0`
+    /// under the same `#[serde(default)]` tolerance every prior addition
+    /// got on the PR that introduced IT. What decodes differently from
+    /// every earlier version is `next_cursor`, which takes over
+    /// `truncated`'s old job: absence decodes to `None`, the same way
+    /// `truncated`'s absence used to decode to `false` — but this
+    /// tolerance is intra-version-8 only (both peers already speak v8; the
+    /// handshake refused anything older), NOT a claim that a real pre-8
+    /// peer's `SessionList` reaches this decoder at all.
     #[test]
     fn old_shape_session_list_json_decodes_with_defaulted_new_fields() {
         let old_shape = serde_json::json!({
             "type": "session_list",
             "req_id": 9,
+            "truncated": false,
             "sessions": [
                 {
                     "id": "s1",
@@ -2275,15 +2670,22 @@ mod tests {
             req_id,
             sessions,
             total,
-            truncated,
+            next_cursor,
         } = decoded
         else {
             panic!("expected ControlMsg::SessionList, got {decoded:?}");
         };
         assert_eq!(req_id, 9);
         assert_eq!(total, 0, "an old sender's reply predates the field");
-        assert!(!truncated, "an old sender's reply predates the field");
+        assert_eq!(
+            next_cursor, None,
+            "an old sender's reply predates the field, same as an exhausted page"
+        );
         assert_eq!(sessions.len(), 1);
+        assert_eq!(
+            sessions[0].created_at, 0,
+            "an old sender's SessionInfo predates created_at"
+        );
         assert_eq!(
             sessions[0].status,
             SessionStatus::Unknown,
@@ -2292,12 +2694,18 @@ mod tests {
     }
 
     /// The REVERSE direction from the test above: a hand-rolled decoder
-    /// shaped like a peer built BEFORE this PR — no `status`, no
-    /// `total`/`truncated` — must still decode a NEW sender's JSON
-    /// successfully, silently dropping the fields it does not know
-    /// about. Serde's default of ignoring unrecognized object keys is
-    /// what makes this work. The shadow types below deliberately carry no
-    /// `#[serde(deny_unknown_fields)]` either, standing in for a real old
+    /// shaped like a much OLDER peer than the one that test models — no
+    /// `status`, no `total`, no `created_at`/`next_cursor` (nor, further
+    /// back, the `truncated` this version replaced) — must still decode a
+    /// NEW sender's JSON successfully, silently dropping every field it
+    /// does not know about. This is deliberately older than "the peer
+    /// immediately before this PR": a genuine v7 sender already HAD
+    /// `status` and `total` (see the version history above for when each
+    /// arrived), so this shadow type instead stands in for a peer that
+    /// predates both — the pre-status/pre-total shape its own test name
+    /// says it models. Serde's default of ignoring unrecognized object
+    /// keys is what makes this work. The shadow types below deliberately
+    /// carry no `#[serde(deny_unknown_fields)]` either, standing in for a real old
     /// peer that never had a reason to add one — but this test's decode
     /// path never touches the REAL `ControlMsg`/`SessionInfo` types at
     /// all, so it says nothing about whether THOSE gaining
@@ -2333,6 +2741,7 @@ mod tests {
             sessions: vec![SessionInfo {
                 id: "s1".to_string(),
                 title: "demo".to_string(),
+                created_at: 1_700_000_000,
                 cwd: "/tmp".to_string(),
                 invocation: "agent".to_string(),
                 status: SessionStatus::Exited { exit_code: Some(1) },
@@ -2341,14 +2750,14 @@ mod tests {
                 tabs: Vec::new(),
             }],
             total: 3,
-            truncated: true,
+            next_cursor: Some("cursor-after-s1".to_string()),
         };
         let json = serde_json::to_value(&new_msg).unwrap();
 
         let LegacyControlMsg::SessionList { req_id, sessions } =
             serde_json::from_value(json.clone()).expect(
-                "a legacy decoder without status/total/truncated must still decode new-shape \
-                 JSON",
+                "a legacy decoder without status/total/next_cursor/created_at must still decode \
+                 new-shape JSON",
             );
         assert_eq!(req_id, 4);
         assert_eq!(sessions.len(), 1);
@@ -2384,6 +2793,7 @@ mod tests {
         let bare = SessionInfo {
             id: "s1".to_string(),
             title: "demo".to_string(),
+            created_at: 1_700_000_000,
             cwd: "/tmp".to_string(),
             invocation: "agent".to_string(),
             status: SessionStatus::default(),
@@ -2396,6 +2806,7 @@ mod tests {
             serde_json::json!({
                 "id": "s1",
                 "title": "demo",
+                "created_at": 1_700_000_000,
                 "cwd": "/tmp",
                 "invocation": "agent",
                 "status": { "state": "unknown" },
@@ -2420,16 +2831,18 @@ mod tests {
             serde_json::json!("resume")
         );
 
-        // JSON shaped as if none of `annotation`, `restart_offer`, or
-        // `tabs` had been added YET — must still decode, defaulting all
-        // three. This is intra-version additive discipline, not real
-        // cross-build interop: an actual pre-M3 (v4) peer is refused
-        // outright at the handshake (see `PROTOCOL_VERSION`'s own docs)
-        // and never reaches this decode path at all — `tabs` predates no
-        // real peer either, since it shipped in the same version 6 bump
-        // as every other M4 addition, but pinning it here keeps the same
-        // "additive within one version" guarantee `status` needed when
-        // THAT field was added within v3 (see
+        // JSON shaped as if none of `annotation`, `restart_offer`, `tabs`,
+        // or (version 8) `created_at` had been added YET — must still
+        // decode, defaulting all four. This is intra-version additive
+        // discipline, not real cross-build interop: an actual pre-M3 (v4)
+        // peer is refused outright at the handshake (see
+        // `PROTOCOL_VERSION`'s own docs) and never reaches this decode
+        // path at all — `tabs` predates no real peer either, since it
+        // shipped in the same version 6 bump as every other M4 addition,
+        // and `created_at` likewise predates no real peer, having shipped
+        // in version 8 alongside the rest of M6's vocabulary — but pinning
+        // both here keeps the same "additive within one version" guarantee
+        // `status` needed when THAT field was added within v3 (see
         // `old_shape_session_list_json_decodes_with_defaulted_new_fields`
         // above) explicit for every field this struct has ever grown.
         let old_shape = serde_json::json!({
@@ -2447,6 +2860,10 @@ mod tests {
             Vec::new(),
             "a sender that predates tabs must decode to \"none known\", not an error"
         );
+        assert_eq!(
+            decoded.created_at, 0,
+            "a sender that predates created_at must default to 0, not fail or guess a real time"
+        );
     }
 
     /// PLAN_M4.md item 2's `SessionInfo::tabs` addition, golden-pinned
@@ -2463,6 +2880,7 @@ mod tests {
         let info = SessionInfo {
             id: "s1".to_string(),
             title: "demo".to_string(),
+            created_at: 1_700_000_000,
             cwd: "/tmp".to_string(),
             invocation: "agent".to_string(),
             status: SessionStatus::Alive,
@@ -2514,7 +2932,7 @@ mod tests {
                     }
                 ],
                 "total": 1,
-                "truncated": false,
+                "next_cursor": null,
             })
             .to_string()
             .into_bytes(),
@@ -2660,7 +3078,7 @@ mod tests {
                     }
                 ],
                 "total": 1,
-                "truncated": false,
+                "next_cursor": null,
             })
             .to_string()
             .into_bytes(),
@@ -2947,6 +3365,7 @@ mod tests {
             session: SessionInfo {
                 id: "s1".to_string(),
                 title: "demo".to_string(),
+                created_at: 1_700_000_000,
                 cwd: "/tmp".to_string(),
                 invocation: "claude".to_string(),
                 status: SessionStatus::Alive,
@@ -3035,6 +3454,7 @@ mod tests {
             session: SessionInfo {
                 id: "s1".to_string(),
                 title: "demo".to_string(),
+                created_at: 1_700_000_000,
                 cwd: "/tmp".to_string(),
                 invocation: "claude".to_string(),
                 status: SessionStatus::Alive,
@@ -3051,6 +3471,7 @@ mod tests {
                 "session": {
                     "id": "s1",
                     "title": "demo",
+                    "created_at": 1_700_000_000,
                     "cwd": "/tmp",
                     "invocation": "claude",
                     "status": { "state": "alive" },
@@ -3146,6 +3567,7 @@ mod tests {
                     session: SessionInfo {
                         id: "s1".to_string(),
                         title: "renamed title".to_string(),
+                        created_at: 1_700_000_000,
                         cwd: "/tmp".to_string(),
                         invocation: "claude".to_string(),
                         status: SessionStatus::Alive,
@@ -3160,6 +3582,7 @@ mod tests {
                     "session": {
                         "id": "s1",
                         "title": "renamed title",
+                        "created_at": 1_700_000_000,
                         "cwd": "/tmp",
                         "invocation": "claude",
                         "status": { "state": "alive" },
