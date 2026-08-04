@@ -217,6 +217,56 @@ pub struct SessionListing {
     pub truncated: bool,
 }
 
+/// The peer's own hello, retained from the handshake that opened this
+/// connection.
+///
+/// Kept because the handshake is the ONLY moment these values cross the
+/// wire — `ControlMsg::Hello` is exchanged once, at connection setup, and
+/// never repeated — while the consumer that needs them runs much later.
+/// PLAN_M6.md item 4's connection manager decides a host's identity
+/// disposition (first contact, mismatch, duplicate) from `host_identity`
+/// after the connection is already live, and its diagnostic trail names
+/// `build_version` on every reconnection. Without this the manager would
+/// have to run its own handshake beside the client's, which is exactly the
+/// duplication that lets two hellos drift apart.
+///
+/// Only the two fields a consumer actually acts on are kept. The hello's
+/// `protocol_version` and `role` are not among them: a version this side
+/// cannot speak has already failed the handshake by the time this value
+/// exists (the skew refusal carries both versions itself), and `role` is
+/// diagnostic-only per the wire contract. Retaining them "in case" would
+/// invite a future reader to believe the connection's compatibility is
+/// still an open question here.
+///
+/// `host_identity` is `Option` because the wire's is: a supervisor whose
+/// construction has no standing to mint an identity legitimately reports
+/// none (see `ControlMsg::Hello::host_identity`). `None` here means
+/// exactly that and is never papered over with a synthesized value.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PeerHello {
+    pub build_version: String,
+    pub host_identity: Option<String>,
+}
+
+/// One page of a paginated session list, as
+/// [`SupervisorClient::list_sessions_page`] returns it.
+///
+/// Deliberately NOT [`SessionListing`]: that type is the helm's REST body
+/// shape, whose `truncated` bool is a rendering decision for a UI (see its
+/// own docs). This one is the wire's own page, `next_cursor` and all,
+/// because its consumer is a page WALK — PLAN_M6.md item 5's drain to
+/// exhaustion — which needs the resume point itself and has no use for a
+/// boolean summary of it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SessionPage {
+    pub sessions: Vec<SessionInfo>,
+    /// The supervisor's full session count before any cut, as reported.
+    pub total: u64,
+    /// `None` means this page reached the end of the order — the walk is
+    /// done. `Some` is the opaque resume point for the next request.
+    pub next_cursor: Option<String>,
+}
+
 /// What an attached terminal receives from the supervisor side.
 #[derive(Debug)]
 pub enum TermEvent {
@@ -495,6 +545,16 @@ pub struct CreateExtras {
 /// fast rather than queueing onto a corpse. Reconnection with bounded
 /// retries (SPEC.md's Errors section) arrives with the host registry.
 pub struct SupervisorClient {
+    /// What the peer said about itself when this connection came up. Fixed
+    /// for the connection's whole life — a hello is exchanged once and
+    /// never repeated — which is what makes retaining it here correct
+    /// rather than a cache that could go stale. See [`PeerHello`].
+    peer: PeerHello,
+    /// The connection-is-dead flag both background halves publish to (see
+    /// [`Self::closed`]). A RECEIVER, never a sender: holding a sender here
+    /// would keep the channel alive past the tasks and, worse, invert the
+    /// weak-handle discipline the two tasks are built on.
+    closed: watch::Receiver<bool>,
     writer_tx: mpsc::Sender<Outbound>,
     pending: Mutex<Pending>,
     terminals: Mutex<HashMap<u32, TerminalHandle>>,
@@ -672,12 +732,31 @@ impl SupervisorClient {
         let (w, bytes_written) = ProgressWrite::new(w);
         let mut reader = FrameReader::new(r);
         let mut writer = FrameWriter::new(w);
-        handshake(&mut reader, &mut writer, "helm").await?;
+        // Retained rather than discarded: the peer's identity and build
+        // reach this process exactly once, here. See [`PeerHello`].
+        // `handshake` guarantees the reply is a `Hello` (anything else is
+        // already an `Err` above), so the `else` arm below is unreachable
+        // in practice — it is written as a hard failure rather than a
+        // silent default so a future change to that guarantee cannot
+        // quietly hand every host a `None` identity.
+        let peer = match handshake(&mut reader, &mut writer, "helm").await? {
+            ControlMsg::Hello {
+                build_version,
+                host_identity,
+                ..
+            } => PeerHello {
+                build_version,
+                host_identity,
+            },
+            other => bail!("handshake returned a non-hello reply: {other:?}"),
+        };
 
         let (writer_tx, mut writer_rx) = mpsc::channel::<Outbound>(SUPERVISOR_WRITER_QUEUE);
         let (connection_done, _) = watch::channel(false);
 
         let client = Arc::new(SupervisorClient {
+            peer,
+            closed: connection_done.subscribe(),
             writer_tx,
             pending: Mutex::new(Pending::default()),
             terminals: Mutex::new(HashMap::new()),
@@ -1163,6 +1242,43 @@ impl SupervisorClient {
         self.next_req.fetch_add(1, Ordering::Relaxed)
     }
 
+    /// What the supervisor said about itself at handshake time — in
+    /// particular its host identity, which PLAN_M6.md item 4's connection
+    /// manager runs every first-contact/mismatch/duplicate decision from.
+    ///
+    /// Immutable for this connection's lifetime by construction: a hello is
+    /// exchanged once and never repeated, so a host whose identity changed
+    /// is necessarily a DIFFERENT connection, which is precisely why
+    /// identity handling belongs on the connect path rather than on a
+    /// refresh.
+    pub fn peer_hello(&self) -> &PeerHello {
+        &self.peer
+    }
+
+    /// Resolves once this connection is dead — either half having failed,
+    /// or both background tasks having exited — and stays resolved.
+    ///
+    /// The HTTP surface never needed this: a request against a dead
+    /// connection fails on its own, immediately, which is all a one-shot
+    /// handler wants. A connection ACTOR wants the opposite shape
+    /// (PLAN_M6.md item 4). It has to notice loss while it is doing
+    /// nothing — between refreshes, an idle host is idle for whole
+    /// cadence periods — because the reconnect clock starts at the loss,
+    /// not at the next thing that happened to fail. Deriving it from a
+    /// failed request instead would delay every reconnection by up to one
+    /// refresh interval and would make an idle host's outage invisible in
+    /// the diagnostic trail until something asked it a question.
+    ///
+    /// Both a `true` value and the senders being dropped mean the same
+    /// thing here, so both end the wait: the flag is set by whichever half
+    /// died first (see `start_with_stall_timeouts`), and the senders can
+    /// only disappear once both tasks have exited, which is itself the end
+    /// of the connection.
+    pub async fn closed(&self) {
+        let mut rx = self.closed.clone();
+        let _ = rx.wait_for(|done| *done).await;
+    }
+
     /// Create and launch a session on this supervisor.
     ///
     /// Success means the session exists, not that the agent is running.
@@ -1340,6 +1456,68 @@ impl SupervisorClient {
                     sessions,
                 })
             }
+            other => bail!("unexpected reply to list_sessions: {other:?}"),
+        }
+    }
+
+    /// One page of the supervisor's session list, wire-shaped: the entries,
+    /// the full count, and the opaque resume point (`None` = exhausted).
+    ///
+    /// The page-walk primitive PLAN_M6.md item 5's drain is built from,
+    /// deliberately separate from [`Self::list_sessions`] rather than a
+    /// generalization of it. The two have genuinely different jobs: that
+    /// one answers a single REST request and normalizes the reply into the
+    /// browser-facing [`SessionListing`] shape (including synthesizing
+    /// `truncated`), while this one is a step in a loop whose caller
+    /// reassembles the pages itself and must see the raw cursor. Folding
+    /// them together would mean the REST path either grew a cursor
+    /// parameter no REST caller supplies, or the walk had to reconstruct a
+    /// resume point from a boolean that deliberately discards it.
+    ///
+    /// `limit` is passed through verbatim, and every caller in this
+    /// codebase passes `None` on purpose: that lets the supervisor apply
+    /// its own default page cap (`LIST_SESSION_CAP`), which is sized so an
+    /// ordinary host's whole list fits in ONE page. That matters beyond
+    /// round-trip count — see [`crate::manager::drain_sessions`]'s docs for
+    /// the per-page cost a smaller limit would multiply.
+    ///
+    /// `total` is NOT normalized against `sessions.len()` the way
+    /// [`Self::list_sessions`] normalizes it, and that difference is
+    /// intentional. That normalization is defensive: it repairs a `total`
+    /// smaller than the page it accompanies, which no supervisor this side
+    /// can talk to should ever send — the version gate refuses anything
+    /// that predates the field — so it guards against a bug or a hostile
+    /// peer, not against a known older build. Here the same repair would be
+    /// actively wrong: `sessions.len() < total` is the ORDINARY case for
+    /// one page of a walk, and raising `total` to the page's length would
+    /// destroy the whole-host count a caller asked for.
+    pub async fn list_sessions_page(
+        &self,
+        cursor: Option<String>,
+        limit: Option<u32>,
+    ) -> anyhow::Result<SessionPage> {
+        let req_id = self.req_id();
+        match self
+            .request(
+                req_id,
+                ControlMsg::ListSessions {
+                    req_id,
+                    cursor,
+                    limit,
+                },
+            )
+            .await?
+        {
+            ControlMsg::SessionList {
+                sessions,
+                total,
+                next_cursor,
+                ..
+            } => Ok(SessionPage {
+                sessions,
+                total,
+                next_cursor,
+            }),
             other => bail!("unexpected reply to list_sessions: {other:?}"),
         }
     }

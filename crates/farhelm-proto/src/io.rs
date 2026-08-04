@@ -285,6 +285,75 @@ impl ClosedBeforeHello {
     }
 }
 
+/// The peer spoke this protocol, at a version this side cannot talk to.
+///
+/// A distinct payload type for the same reason [`ClosedBeforeHello`] is
+/// one, but answering a different question. That marker exists so a caller
+/// can tell two failures apart; this one exists so a caller can READ the
+/// refusal's contents. SPEC.md's skew rule ("incompatible versions refuse
+/// to connect with a clear, actionable error") is surfaced per host by the
+/// helm's connection manager as a state carrying BOTH versions plus a
+/// remediation, and both numbers are known only here, at the one place that
+/// compares them. Recovering them from [`Display`]'s prose would make a
+/// diagnostic message load-bearing for a state machine — the message would
+/// then be unable to change without breaking the manager, and a
+/// re-wording would break it silently.
+///
+/// Rides inside the `io::Error` [`handshake`] already returns rather than
+/// widening its signature, exactly as [`ClosedBeforeHello`] does, and for
+/// the same reason: `farhelm-proto` carries no error framework, and every
+/// other caller wants a plain `io::Error`. Use [`VersionSkew::cause_of`]
+/// to recover it — the marker is the error's *payload*, not a link in its
+/// `source()` chain.
+///
+/// [`Display`] is the exact refusal text this handshake has always
+/// produced, and stays so deliberately: it is what the peer is told over
+/// the wire (`ControlMsg::Error`), what an operator reads on the helm's
+/// stderr, and what `annotate_ssh_handshake_eof`'s sibling tests assert on.
+/// Introducing this type changed the error's payload, never its rendering.
+///
+/// [`Display`]: std::fmt::Display
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct VersionSkew {
+    /// What the peer said it speaks, from its own hello.
+    pub peer_protocol: u32,
+    /// The peer's build version, for diagnostics — it names which side
+    /// needs updating in a way a protocol number alone does not.
+    pub peer_build: String,
+    /// [`PROTOCOL_VERSION`] as compiled into THIS binary.
+    pub our_protocol: u32,
+    /// [`crate::BUILD_VERSION`] as compiled into this binary.
+    pub our_build: String,
+}
+
+impl std::fmt::Display for VersionSkew {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        // Also the Display of the wrapping `io::Error` and the text sent to
+        // the peer, so it has to read as a complete diagnostic on its own.
+        write!(
+            f,
+            "protocol version mismatch: peer speaks v{} (build {}), this side speaks v{} (build \
+             {}); update one side so the versions are compatible",
+            self.peer_protocol, self.peer_build, self.our_protocol, self.our_build
+        )
+    }
+}
+
+impl std::error::Error for VersionSkew {}
+
+impl VersionSkew {
+    /// Recover the skew details from an error [`handshake`] returned, or
+    /// `None` if the handshake failed for any other reason.
+    ///
+    /// Matches by payload type rather than by `io::ErrorKind` (which is
+    /// `Other` for several unrelated handshake failures) or by message
+    /// text — see this type's own docs for why the prose must not be a
+    /// state machine's input.
+    pub fn cause_of(err: &std::io::Error) -> Option<&VersionSkew> {
+        err.get_ref()?.downcast_ref::<VersionSkew>()
+    }
+}
+
 /// Exchange hellos on a fresh connection and enforce the version-skew
 /// rule: send ours, read theirs, refuse a protocol mismatch. Returns the
 /// peer's hello on success so callers can log build versions.
@@ -360,6 +429,49 @@ pub async fn handshake_with_host_identity<R: AsyncRead + Unpin, W: AsyncWrite + 
     .await
 }
 
+/// Longest `build_version` a peer's hello may carry.
+///
+/// A build version is a semver string with, at most, a git describe suffix
+/// — tens of bytes. The cap exists because this value is RETAINED for the
+/// connection's whole life on the other side (the helm's `PeerHello`, and
+/// from there a per-host state a UI renders), so an unbounded one is a
+/// per-connection memory cost a peer chooses for its counterpart. 256 bytes
+/// is generous enough that no honest build can hit it.
+pub const MAX_BUILD_VERSION_BYTES: usize = 256;
+
+/// Longest `host_identity` a peer's hello may carry.
+///
+/// Sized the same way and for the same reason: the identities this project
+/// mints are UUIDs (36 bytes), and 256 leaves room for a differently-shaped
+/// one without leaving room for a payload.
+///
+/// LENGTH only — deliberately not shape. An identity is opaque to
+/// everything that handles it (see `ControlMsg::Hello::host_identity`),
+/// which is a settled disposition rather than an oversight: the helm
+/// compares identities and never parses them, so a format check here would
+/// invent a compatibility constraint no other code has, and would break the
+/// day a supervisor legitimately mints something else. What a length cap
+/// costs a well-behaved peer is nothing; what shape validation would cost
+/// is a class of hosts that can never connect.
+pub const MAX_HOST_IDENTITY_BYTES: usize = 256;
+
+/// Refuse an over-long hello field, naming which one and by how much.
+///
+/// A refusal at handshake time, not a truncation: a peer whose identity
+/// does not fit is not a peer whose identity can be safely shortened —
+/// truncating one would silently map two distinct hosts onto one claim,
+/// which is the exact confusion the identity vocabulary exists to prevent.
+fn check_hello_length(field: &str, value: &str, cap: usize) -> std::io::Result<()> {
+    if value.len() > cap {
+        return Err(std::io::Error::other(format!(
+            "the peer's hello carries a {field} of {} bytes, over the {cap}-byte limit; refusing \
+             the connection",
+            value.len()
+        )));
+    }
+    Ok(())
+}
+
 /// Shared implementation behind [`handshake`] and
 /// [`handshake_with_host_identity`]: send `hello`, read the peer's own
 /// hello, and enforce the version-skew rule. Splitting the hello VALUE
@@ -388,6 +500,7 @@ async fn handshake_with_hello<R: AsyncRead + Unpin, W: AsyncWrite + Unpin>(
     let ControlMsg::Hello {
         protocol_version,
         build_version,
+        host_identity,
         ..
     } = &msg
     else {
@@ -395,17 +508,24 @@ async fn handshake_with_hello<R: AsyncRead + Unpin, W: AsyncWrite + Unpin>(
             "expected hello, got {msg:?}"
         )));
     };
+    check_hello_length("build_version", build_version, MAX_BUILD_VERSION_BYTES)?;
+    if let Some(identity) = host_identity {
+        check_hello_length("host_identity", identity, MAX_HOST_IDENTITY_BYTES)?;
+    }
     if *protocol_version == PROTOCOL_VERSION {
         return Ok(msg);
     }
-    let err = format!(
-        "protocol version mismatch: peer speaks v{} (build {}), this side speaks v{} (build {}); \
-         update one side so the versions are compatible",
-        protocol_version,
-        build_version,
-        PROTOCOL_VERSION,
-        crate::BUILD_VERSION
-    );
+    // Both versions are captured structurally, not just formatted into a
+    // message: the helm's connection manager renders them as a per-host
+    // version-skew state (PLAN_M6.md item 4), and the wire text below is
+    // this value's `Display` rather than the other way round — see
+    // [`VersionSkew`] for why the prose must not be the only carrier.
+    let skew = VersionSkew {
+        peer_protocol: *protocol_version,
+        peer_build: build_version.clone(),
+        our_protocol: PROTOCOL_VERSION,
+        our_build: crate::BUILD_VERSION.to_string(),
+    };
     // Best effort: tell the peer why before hanging up. Both the helm and
     // the supervisor call `handshake` and refuse a mismatch the same way —
     // there is no distinguished "server" side here, just whichever end
@@ -413,13 +533,13 @@ async fn handshake_with_hello<R: AsyncRead + Unpin, W: AsyncWrite + Unpin>(
     let _ = writer
         .write_control(&ControlMsg::Error {
             req_id: 0,
-            message: err.clone(),
+            message: skew.to_string(),
             // This side's own refusal to proceed, not a complaint about
             // anything the peer's request body contained.
             kind: ErrorKind::Internal,
         })
         .await;
-    Err(std::io::Error::other(err))
+    Err(std::io::Error::other(skew))
 }
 
 #[cfg(test)]
@@ -439,6 +559,15 @@ mod tests {
     /// host_identity`, `ListSessions::cursor`/`limit`,
     /// `SessionList::next_cursor` in place of the removed `truncated`),
     /// the exact skew the version 8 bump exists to refuse.
+    ///
+    /// Also pins the two properties [`VersionSkew`] added on top of that
+    /// refusal, both of which have consumers that would otherwise only
+    /// break at a distance: the refusal's payload is recoverable as a
+    /// TYPED value carrying both versions (PLAN_M6.md item 4's per-host
+    /// version-skew state is built from those fields, not from parsing
+    /// this message), and the message the peer is sent is byte-identical
+    /// to that value's `Display` — the property that let the payload be
+    /// introduced without changing a single rendered diagnostic.
     #[tokio::test]
     async fn handshake_refuses_protocol_mismatch() {
         for wrong_version in [PROTOCOL_VERSION + 1, PROTOCOL_VERSION - 1] {
@@ -470,21 +599,131 @@ mod tests {
             // the peer's request).
             let _their_hello = r.read_frame().await.unwrap().unwrap();
             let refusal = parse_control(&r.read_frame().await.unwrap().unwrap()).unwrap();
-            assert!(matches!(
-                refusal,
-                ControlMsg::Error {
-                    req_id: 0,
-                    kind: ErrorKind::Internal,
-                    ..
-                }
-            ));
+            let ControlMsg::Error {
+                req_id: 0,
+                kind: ErrorKind::Internal,
+                message: refusal_text,
+            } = refusal
+            else {
+                panic!("expected an unsolicited Internal refusal, got {refusal:?}");
+            };
 
             let err = good.await.unwrap().unwrap_err();
             assert!(
                 err.to_string().contains("protocol version mismatch"),
                 "version {wrong_version} must be refused"
             );
+            let skew = VersionSkew::cause_of(&err)
+                .expect("a version refusal must carry its versions as a typed payload");
+            assert_eq!(
+                skew,
+                &VersionSkew {
+                    peer_protocol: wrong_version,
+                    peer_build: "9.9.9".to_string(),
+                    our_protocol: PROTOCOL_VERSION,
+                    our_build: crate::BUILD_VERSION.to_string(),
+                }
+            );
+            assert_eq!(
+                refusal_text,
+                skew.to_string(),
+                "the text the peer is told must remain exactly the payload's own rendering"
+            );
         }
+    }
+
+    /// The hello's two free-text fields are LENGTH-capped at decode, and a
+    /// peer that exceeds one is refused rather than truncated.
+    ///
+    /// Both fields are retained by the peer's counterpart for the whole
+    /// life of the connection — the helm keeps them in `PeerHello` and
+    /// renders them in a per-host state — so an unbounded one is a memory
+    /// cost a peer chooses for the other side, per connection, and a
+    /// reconnecting host would choose it again on every attempt.
+    ///
+    /// Refusal rather than truncation for `host_identity` specifically:
+    /// shortening an identity would map two distinct hosts onto one claim,
+    /// which is precisely the confusion the identity vocabulary exists to
+    /// prevent. And length ONLY — nothing here inspects the shape, because
+    /// an identity is opaque to every consumer by design (see
+    /// [`ControlMsg::Hello`]); a format check would invent a compatibility
+    /// rule no other code has.
+    #[tokio::test]
+    async fn handshake_refuses_over_long_hello_fields() {
+        let over = "x".repeat(MAX_BUILD_VERSION_BYTES.max(MAX_HOST_IDENTITY_BYTES) + 1);
+        let cases = [
+            ("build_version", over.clone(), None),
+            (
+                "host_identity",
+                crate::BUILD_VERSION.to_string(),
+                Some(over.clone()),
+            ),
+        ];
+        for (field, build_version, host_identity) in cases {
+            let (a, b) = tokio::io::duplex(64 * 1024);
+            let (ar, aw) = tokio::io::split(a);
+            let (br, bw) = tokio::io::split(b);
+
+            let ours = tokio::spawn(async move {
+                let mut r = FrameReader::new(ar);
+                let mut w = FrameWriter::new(aw);
+                handshake(&mut r, &mut w, "helm").await
+            });
+
+            let mut r = FrameReader::new(br);
+            let mut w = FrameWriter::new(bw);
+            w.write_control(&ControlMsg::Hello {
+                // A CURRENT protocol version on purpose: the length check
+                // must bind on a peer this side would otherwise accept, not
+                // ride along with a skew refusal.
+                protocol_version: PROTOCOL_VERSION,
+                build_version,
+                role: "supervisor".into(),
+                host_identity,
+            })
+            .await
+            .unwrap();
+            let _their_hello = r.read_frame().await.unwrap().unwrap();
+
+            let err = ours.await.unwrap().unwrap_err();
+            let rendered = err.to_string();
+            assert!(
+                rendered.contains(field) && rendered.contains("limit"),
+                "the refusal must name the offending field and the bound: {rendered}"
+            );
+        }
+    }
+
+    /// The caps must not bind on anything a real peer sends: this side's
+    /// own build version and a UUID-shaped identity both pass, which is the
+    /// half of the previous test that keeps its bounds honest rather than
+    /// merely strict.
+    #[tokio::test]
+    async fn handshake_accepts_ordinary_hello_field_lengths() {
+        let (a, b) = tokio::io::duplex(64 * 1024);
+        let (ar, aw) = tokio::io::split(a);
+        let (br, bw) = tokio::io::split(b);
+
+        let ours = tokio::spawn(async move {
+            let mut r = FrameReader::new(ar);
+            let mut w = FrameWriter::new(aw);
+            handshake(&mut r, &mut w, "helm").await
+        });
+
+        let mut r = FrameReader::new(br);
+        let mut w = FrameWriter::new(bw);
+        w.write_control(&ControlMsg::Hello {
+            protocol_version: PROTOCOL_VERSION,
+            build_version: crate::BUILD_VERSION.to_string(),
+            role: "supervisor".into(),
+            host_identity: Some("2f8a1c3e-9d4b-4f7a-8e21-6b5c0d9a7e13".to_string()),
+        })
+        .await
+        .unwrap();
+        let _their_hello = r.read_frame().await.unwrap().unwrap();
+
+        let hello = ours.await.unwrap().expect("an ordinary hello must pass");
+        assert!(matches!(hello, ControlMsg::Hello { .. }));
     }
 
     /// A peer that dies mid-frame must look like an error, not a clean

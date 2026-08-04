@@ -73,6 +73,38 @@ jobs:
       # fail here rather than exercising the substrate they exist to pin.
       - name: Install tmux
         run: sudo apt-get update && sudo apt-get install -y tmux
+      # From M6 on, `ssh localhost` is a transport under test, not just a
+      # deployment detail: the connection manager's ssh-row test dials a
+      # real supervisor through the user's own ssh (PLAN_M6.md's testing
+      # decisions). That test skips loudly where passwordless self-ssh is
+      # unavailable — which is the right behavior on a developer's laptop
+      # and exactly the wrong one here, where it would leave the whole ssh
+      # path permanently uncovered while announcing so in output nobody
+      # reads. Provisioning it makes the skip a local-only affordance.
+      - name: Provision passwordless ssh to localhost
+        run: |
+          sudo apt-get install -y openssh-server
+          sudo systemctl enable --now ssh || sudo service ssh start
+          mkdir -p ~/.ssh && chmod 700 ~/.ssh
+          ssh-keygen -t ed25519 -N '' -f ~/.ssh/id_ed25519
+          # `from=` restricts this key to loopback. The runner is
+          # short-lived and firewalled, so this is defense in depth rather
+          # than a fix for a known exposure — but the key is passphrase-less
+          # and lives beside a running sshd, and the only thing that ever
+          # uses it dials localhost. A key that can only be used from where
+          # it is meant to be used costs nothing and removes the whole
+          # question.
+          printf 'from="127.0.0.1,::1" ' >> ~/.ssh/authorized_keys
+          cat ~/.ssh/id_ed25519.pub >> ~/.ssh/authorized_keys
+          chmod 600 ~/.ssh/authorized_keys
+          # BatchMode's refusal to prompt is what makes the ssh transport
+          # usable unattended, and it also means an unknown host key is a
+          # hard failure rather than a question — so known_hosts has to be
+          # seeded before anything dials.
+          ssh-keyscan -H localhost >> ~/.ssh/known_hosts
+          # Fail the job here, loudly, rather than letting the test fall
+          # back to its skip and report green on coverage that never ran.
+          ssh -o BatchMode=yes localhost true
       # `--show-output` is load-bearing, not verbosity: the tests that can
       # only run where a systemd user manager exists announce their own skip
       # on this runner (which has none), and libtest swallows a passing

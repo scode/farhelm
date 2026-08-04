@@ -56,6 +56,21 @@
 //!   raw SQLite constraint message, while the index remains the actual
 //!   invariant enforcement any writer — including a future one this module
 //!   does not anticipate — cannot bypass.
+//!
+//! ## Identity claims are a SCHEMA invariant, not a call-order convention
+//!
+//! At most one row may hold a given `host_identity` (the
+//! `hosts_identity_claim` partial unique index, schema version 2). That is
+//! deliberately enforced in SQL rather than by the connection manager
+//! checking for a twin before it records, because the check-then-record
+//! shape has a TOCTOU that costs the user the whole host: two actors
+//! reaching the same freshly-installed supervisor both see no twin, both
+//! record, both connect — and at the next helm start each sees the other as
+//! its twin and BOTH freeze as duplicates, so a live host appears ZERO
+//! times. [`HelmStore::record_first_contact`] and
+//! [`HelmStore::adopt_identity`] resolve the claim inside the same
+//! transaction as the write, so whichever caller loses gets a typed answer
+//! naming the winner instead of a durable collision.
 
 use anyhow::Context;
 use farhelm_proto::SessionInfo;
@@ -80,7 +95,7 @@ const BUSY_TIMEOUT: Duration = Duration::from_secs(5);
 
 /// The schema's current shape. See [`apply_schema`] for the version
 /// history and the ladder future migrations extend.
-const SCHEMA_VERSION: i64 = 1;
+const SCHEMA_VERSION: i64 = 2;
 
 /// Surrogate primary key of a `hosts` row.
 ///
@@ -203,6 +218,19 @@ pub enum HostStoreError {
     /// second lookup.
     #[error("a host is already registered at destination {0:?}")]
     DuplicateDestination(String),
+    /// A destination that cannot be handed to `ssh` as a destination at
+    /// all: empty, or shaped like an option (a leading `-`).
+    ///
+    /// The option-shaped case is a security refusal wearing a usability
+    /// coat. `crate::ssh_args` already terminates ssh's option parsing
+    /// before the destination, which is what actually stops
+    /// `-oProxyCommand=...` from executing; refusing it HERE means a user
+    /// who pastes such a string gets told what is wrong with it at the
+    /// moment they register it, instead of a host that permanently fails
+    /// to connect with ssh's own usage message. Defense in depth in the
+    /// literal sense: neither layer is load-bearing alone.
+    #[error("{0:?} is not a usable ssh destination")]
+    InvalidDestination(String),
     /// A call named a [`HostId`] no row currently holds — including one
     /// that once existed and was removed.
     #[error("host {0} does not exist")]
@@ -237,6 +265,78 @@ pub enum HostStoreError {
         expected: String,
         actual: Option<String>,
     },
+    /// [`HelmStore::adopt_identity`] would have claimed an identity another
+    /// row already holds — the `hosts_identity_claim` index's refusal,
+    /// resolved inside the adoption's own transaction so nothing was
+    /// written.
+    ///
+    /// Reachable in practice, not merely in theory: a rival entry can
+    /// first-contact the very identity a user is being asked to adopt in
+    /// the window between the mismatch being displayed and the adopt
+    /// arriving. The caller's correct response is to re-render the host,
+    /// which now shows the duplicate-resolution surface instead of the
+    /// adopt-or-fix one.
+    #[error("host {owner} already holds identity {identity:?}; host {host} cannot adopt it")]
+    IdentityClaimed {
+        host: HostId,
+        identity: String,
+        owner: HostId,
+    },
+    /// The row no longer carries the connection-defining configuration the
+    /// caller's attempt was made under (see [`DialedAs`]) — the user edited
+    /// the destination while a handshake or an adoption decision was in
+    /// flight, so the answer in hand describes a host this row no longer
+    /// points at. Nothing was written.
+    #[error("host {host} has been reconfigured since this attempt was made")]
+    StaleAttempt { host: HostId },
+}
+
+/// The connection-defining fields an attempt was dialed under, carried
+/// back into the identity write it produced.
+///
+/// Identity writes are keyed by [`HostId`], and a HostId alone is not
+/// enough to make the write correct: a hello that crossed the wire while
+/// the user was editing the row's destination describes the OLD endpoint,
+/// and committing its identity under the NEW configuration would durably
+/// attribute one machine's identity to another. The connection manager
+/// tears down in-flight attempts when a row is reconfigured, which narrows
+/// that window; passing the dialed configuration back into the transaction
+/// is what CLOSES it, since the check and the write then happen together.
+///
+/// All three fields, not just `destination`: `remote_farhelm` and
+/// `remote_state_dir` select WHICH supervisor answers on that destination,
+/// so editing either can change the identity a dial reaches just as surely
+/// as retargeting the host. `None` throughout is the reserved local row's
+/// shape and matches only itself.
+///
+/// Deliberately a value snapshot rather than a row revision counter: the
+/// registry has no revision column, and adding one would mean every future
+/// writer of any of these three columns had to remember to bump it — a
+/// convention with the same failure mode this type exists to remove.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DialedAs {
+    pub destination: Option<String>,
+    pub remote_farhelm: Option<String>,
+    pub remote_state_dir: Option<String>,
+}
+
+impl DialedAs {
+    /// The configuration `row` describes right now — what a caller records
+    /// just before it dials, and hands back with whatever the dial learned.
+    pub fn of(row: &HostRow) -> DialedAs {
+        DialedAs {
+            destination: row.destination.clone(),
+            remote_farhelm: row.remote_farhelm.clone(),
+            remote_state_dir: row.remote_state_dir.clone(),
+        }
+    }
+}
+
+/// Whether `destination` is something `ssh` can be handed as a
+/// destination — see [`HostStoreError::InvalidDestination`] for why the
+/// leading-`-` half of this exists.
+fn destination_is_usable(destination: &str) -> bool {
+    !destination.is_empty() && !destination.starts_with('-')
 }
 
 /// The non-error result of [`HelmStore::record_first_contact`] — a
@@ -259,6 +359,23 @@ pub enum FirstContactOutcome {
     /// choice rather than merge silently — [`HelmStore::adopt_identity`] is
     /// the explicit acknowledgment that performs the merge the user chose.
     Mismatch { recorded: String, reported: String },
+    /// ANOTHER row already claims `identity`; nothing was written.
+    ///
+    /// This is the store-level answer to "two registry entries reach one
+    /// host" — the duplicate the connection manager surfaces — and it is
+    /// produced by the same transaction that would have written, so two
+    /// actors racing first contact on one fresh identity cannot both win.
+    /// `owner` is the row that holds the claim, which is exactly what the
+    /// duplicate state must name.
+    Collision { owner: HostId },
+    /// The row's connection-defining configuration changed since this
+    /// attempt was dialed (see [`DialedAs`]); nothing was written.
+    ///
+    /// Carries what the row says NOW, purely so the caller's log line can
+    /// show what it was outrun by. A caller treats this as a failed
+    /// attempt: the identity in hand belongs to the endpoint the row USED
+    /// to name, and the next attempt will dial the new one.
+    StaleAttempt { current: DialedAs },
 }
 
 /// The helm's registry-and-cache database.
@@ -290,21 +407,28 @@ pub struct HelmStore {
 /// it actually has, never one whose tables are half-built, for the same
 /// single-transaction reason.
 ///
+/// A fresh database is created directly in its FINAL shape rather than
+/// built up by replaying history — the migrations below exist to preserve
+/// data, and a new file has none — with
+/// `a_migrated_database_matches_a_freshly_created_one` pinning that the two
+/// paths agree, exactly as the supervisor store's own
+/// `migrated_and_fresh_schemas_agree` does.
+///
 /// Version history:
 /// - 1: PLAN_M6.md item 3 — `hosts` (the registry: the reserved local row
 ///   plus registered ssh destinations) and `session_cache` (the last-known
-///   session list, replaced wholesale per host). This database's first
-///   version, so — like the supervisor store's own version 1 — there is no
-///   migration step, only fresh creation; there is no prior data anywhere
-///   to preserve. The NEXT schema change follows the template above this
-///   entry: another `if version == 1 { ... }` block below, its own
-///   `user_version` bump, and a fixture here (mirroring the supervisor
-///   store's `plant_v1_database`) that the migration test plants FROM.
+///   session list, replaced wholesale per host).
+/// - 2: the `hosts_identity_claim` partial unique index, making
+///   at-most-one-row-per-identity a schema invariant instead of something
+///   the connection manager checked for before writing (see the module
+///   docs' own section on why that check-then-write shape loses hosts). The
+///   migration also has DATA to resolve, since a version-1 database predates
+///   the constraint and may already hold rows sharing an identity.
 fn apply_schema(conn: &mut Connection) -> anyhow::Result<()> {
     let tx = conn
         .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
         .context("beginning schema transaction")?;
-    let version: i64 = tx
+    let mut version: i64 = tx
         .query_row("PRAGMA user_version", [], |row| row.get(0))
         .context("reading schema version")?;
     if version == 0 {
@@ -356,6 +480,16 @@ fn apply_schema(conn: &mut Connection) -> anyhow::Result<()> {
              -- incidental behavior.
              CREATE UNIQUE INDEX hosts_ssh_destination
                  ON hosts (destination) WHERE kind = 'ssh';
+             -- At most one row may CLAIM a given host identity (schema
+             -- version 2). Partial so the many rows that have not yet
+             -- learned an identity (host_identity IS NULL) do not collide
+             -- with each other -- SQL uniqueness already treats NULLs as
+             -- distinct, but the partial WHERE states the intent instead
+             -- of relying on that. This index is what makes the
+             -- check-for-a-twin-then-record race unconstructible; see the
+             -- module docs and HelmStore::record_first_contact.
+             CREATE UNIQUE INDEX hosts_identity_claim
+                 ON hosts (host_identity) WHERE host_identity IS NOT NULL;
              -- The durable, cross-restart cache of each host's last-known
              -- session list (the \"stale list\" a down host is served from,
              -- SPEC.md). Its rows persist across helm binary upgrades
@@ -401,11 +535,45 @@ fn apply_schema(conn: &mut Connection) -> anyhow::Result<()> {
              -- instead.
              CREATE INDEX session_cache_by_host_order
                  ON session_cache (host_id, created_at DESC, session_id ASC);
-             PRAGMA user_version = 1;",
+             PRAGMA user_version = 2;",
         )
         .context("creating schema")?;
-        tx.commit().context("committing schema creation")?;
-        return Ok(());
+        version = SCHEMA_VERSION;
+    }
+    if version == 1 {
+        // The constraint arrives with data that predates it, so the
+        // resolution rule has to be stated rather than left to whichever
+        // row SQLite happens to reject: the LOWEST HostId keeps its claim
+        // (ids are assigned in registration order and never recycled, so
+        // this is "the entry that learned it first"), and every later row
+        // sharing that identity has its claim erased.
+        //
+        // Erasing a claim is not the same as forgetting the host: those
+        // rows re-learn their identity at the next contact and, finding it
+        // taken, freeze as duplicates properly — visible, resolvable, and
+        // exactly what they should have been all along. Their cache rows
+        // go with the claim for the same reason
+        // `HelmStore::adopt_identity` purges: a cache is only meaningful
+        // under the identity it was fetched for, and this row no longer
+        // claims that identity. Order matters — the cache delete reads the
+        // claims the UPDATE is about to erase.
+        tx.execute_batch(
+            "DELETE FROM session_cache WHERE host_id IN (
+                 SELECT h.id FROM hosts h
+                 WHERE h.host_identity IS NOT NULL
+                   AND h.id > (SELECT MIN(o.id) FROM hosts o
+                               WHERE o.host_identity = h.host_identity)
+             );
+             UPDATE hosts SET host_identity = NULL
+             WHERE host_identity IS NOT NULL
+               AND id > (SELECT MIN(o.id) FROM hosts o
+                         WHERE o.host_identity = hosts.host_identity);
+             CREATE UNIQUE INDEX hosts_identity_claim
+                 ON hosts (host_identity) WHERE host_identity IS NOT NULL;
+             PRAGMA user_version = 2;",
+        )
+        .context("migrating helm.db to schema version 2")?;
+        version = 2;
     }
     if version == SCHEMA_VERSION {
         // Nothing to change; commit the otherwise-empty transaction to
@@ -440,6 +608,56 @@ fn ensure_local_row(conn: &Connection) -> anyhow::Result<()> {
     )
     .context("minting the reserved local host row")?;
     Ok(())
+}
+
+/// One row's recorded identity together with the connection-defining
+/// configuration it currently carries, or `None` if no such row exists.
+///
+/// Shared by the two identity writers because both must answer the same
+/// pair of questions — "is this row's identity what I think it is" and "is
+/// this row still the host I dialed" — from ONE read inside their own
+/// transaction. Two separate reads would be two separate answers.
+fn read_identity_and_config(
+    tx: &rusqlite::Transaction<'_>,
+    host: HostId,
+) -> anyhow::Result<Option<(Option<String>, DialedAs)>> {
+    tx.query_row(
+        "SELECT host_identity, destination, remote_farhelm, remote_state_dir \
+         FROM hosts WHERE id = ?1",
+        rusqlite::params![host],
+        |r| {
+            Ok((
+                r.get(0)?,
+                DialedAs {
+                    destination: r.get(1)?,
+                    remote_farhelm: r.get(2)?,
+                    remote_state_dir: r.get(3)?,
+                },
+            ))
+        },
+    )
+    .optional()
+    .context("reading the host's identity and configuration")
+}
+
+/// The row OTHER than `host` that currently claims `identity`, if any.
+///
+/// The `hosts_identity_claim` index guarantees there is at most one, so
+/// this is a lookup rather than a scan-and-choose. Called inside the
+/// caller's own write transaction, never before it: the whole point is that
+/// the answer cannot change between being read and being acted on.
+fn claimant_of(
+    tx: &rusqlite::Transaction<'_>,
+    host: HostId,
+    identity: &str,
+) -> anyhow::Result<Option<HostId>> {
+    tx.query_row(
+        "SELECT id FROM hosts WHERE host_identity = ?1 AND id <> ?2",
+        rusqlite::params![identity, host],
+        |r| r.get(0),
+    )
+    .optional()
+    .context("looking up the current claimant of a host identity")
 }
 
 impl HelmStore {
@@ -587,6 +805,12 @@ impl HelmStore {
     /// Creating a second local row is not a case this function can even
     /// express: it always inserts `kind = 'ssh'`, so the reserved row's
     /// uniqueness needs no enforcement on this path at all.
+    ///
+    /// A destination that is not usable AS a destination — empty, or
+    /// option-shaped — is refused as
+    /// [`HostStoreError::InvalidDestination`] before anything is written;
+    /// see that variant's docs for why the registry, and not only the ssh
+    /// argv builder, takes a position on this.
     pub async fn add_ssh_host(
         &self,
         destination: &str,
@@ -595,6 +819,11 @@ impl HelmStore {
     ) -> anyhow::Result<HostId> {
         let conn = Arc::clone(&self.conn);
         let destination = destination.to_string();
+        if !destination_is_usable(&destination) {
+            return Err(anyhow::Error::new(HostStoreError::InvalidDestination(
+                destination,
+            )));
+        }
         let remote_farhelm = remote_farhelm.map(str::to_string);
         let remote_state_dir = remote_state_dir.map(str::to_string);
         tokio::task::spawn_blocking(move || -> anyhow::Result<HostId> {
@@ -640,6 +869,12 @@ impl HelmStore {
     /// host's own current destination can never collide with itself the way
     /// a `WHERE ... destination = ?2` sub-select would have to guard
     /// against.
+    ///
+    /// Shares [`Self::add_ssh_host`]'s
+    /// [`HostStoreError::InvalidDestination`] refusal: an edit is exactly
+    /// as capable of introducing an unusable destination as an add, and a
+    /// registry that validated only one of the two paths would be
+    /// validating nothing.
     pub async fn update_ssh_destination(
         &self,
         host: HostId,
@@ -647,6 +882,11 @@ impl HelmStore {
     ) -> anyhow::Result<()> {
         let conn = Arc::clone(&self.conn);
         let destination = destination.to_string();
+        if !destination_is_usable(&destination) {
+            return Err(anyhow::Error::new(HostStoreError::InvalidDestination(
+                destination,
+            )));
+        }
         tokio::task::spawn_blocking(move || -> anyhow::Result<()> {
             let mut conn = conn.lock().expect("helm db mutex poisoned");
             let tx = conn
@@ -736,50 +976,83 @@ impl HelmStore {
     /// passes — there is no code path here that does so, rather than a
     /// runtime check a future edit could weaken.
     ///
-    /// Three outcomes, none of them ambiguous:
-    /// - stored is `NULL` → written, [`FirstContactOutcome::Recorded`].
+    /// Five outcomes, none of them ambiguous:
+    /// - stored is `NULL` and no other row claims `identity` → written,
+    ///   [`FirstContactOutcome::Recorded`].
     /// - stored equals `identity` → nothing to write, still
     ///   [`FirstContactOutcome::Recorded`] (an idempotent repeat hello).
     /// - stored is a DIFFERENT identity → nothing written,
     ///   [`FirstContactOutcome::Mismatch`] carrying both values so the
     ///   caller can surface SPEC.md's adopt-or-fix-destination choice.
+    /// - ANOTHER row already claims `identity` → nothing written,
+    ///   [`FirstContactOutcome::Collision`] naming that row.
+    /// - the row was reconfigured since `dialed` was captured → nothing
+    ///   written, [`FirstContactOutcome::StaleAttempt`].
+    ///
+    /// **Everything happens in ONE `BEGIN IMMEDIATE` transaction**, which
+    /// is what makes the collision answer trustworthy rather than advisory.
+    /// Resolving the claim in a separate call first — the shape this
+    /// replaced — leaves a window in which two actors both see no claimant
+    /// and both write; the `hosts_identity_claim` index would then reject
+    /// one of them with a raw constraint error at best, and at worst (two
+    /// processes, two connections) leave the losing entry believing it had
+    /// recorded. Holding the write lock from the first read means the
+    /// claim this call reports is the claim it would have written against.
+    ///
+    /// `dialed` is the row's connection-defining configuration as the
+    /// caller saw it before dialing (see [`DialedAs`]): the identity in an
+    /// attempt's hand belongs to whatever endpoint it actually reached, so
+    /// committing it under a row whose destination has since been edited
+    /// would attribute one machine's identity to another.
     ///
     /// [`HostStoreError::HostNotFound`] for an id nothing currently holds.
     pub async fn record_first_contact(
         &self,
         host: HostId,
+        dialed: &DialedAs,
         identity: &str,
     ) -> anyhow::Result<FirstContactOutcome> {
         let conn = Arc::clone(&self.conn);
         let identity = identity.to_string();
+        let dialed = dialed.clone();
         tokio::task::spawn_blocking(move || -> anyhow::Result<FirstContactOutcome> {
-            let conn = conn.lock().expect("helm db mutex poisoned");
-            let current: Option<Option<String>> = conn
-                .query_row(
-                    "SELECT host_identity FROM hosts WHERE id = ?1",
-                    rusqlite::params![host],
-                    |r| r.get(0),
-                )
-                .optional()
-                .context("reading current host identity")?;
-            let Some(current) = current else {
+            let mut conn = conn.lock().expect("helm db mutex poisoned");
+            let tx = conn
+                .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
+                .context("beginning first-contact transaction")?;
+            let Some((current, configured)) = read_identity_and_config(&tx, host)? else {
                 return Err(anyhow::Error::new(HostStoreError::HostNotFound(host)));
             };
-            match current {
-                None => {
-                    conn.execute(
-                        "UPDATE hosts SET host_identity = ?2 WHERE id = ?1",
-                        rusqlite::params![host, identity],
-                    )
-                    .context("recording first-contact identity")?;
-                    Ok(FirstContactOutcome::Recorded)
+            let outcome = if configured != dialed {
+                FirstContactOutcome::StaleAttempt {
+                    current: configured,
                 }
-                Some(recorded) if recorded == identity => Ok(FirstContactOutcome::Recorded),
-                Some(recorded) => Ok(FirstContactOutcome::Mismatch {
-                    recorded,
-                    reported: identity,
-                }),
-            }
+            } else {
+                match current {
+                    Some(recorded) if recorded == identity => FirstContactOutcome::Recorded,
+                    Some(recorded) => FirstContactOutcome::Mismatch {
+                        recorded,
+                        reported: identity,
+                    },
+                    None => match claimant_of(&tx, host, &identity)? {
+                        Some(owner) => FirstContactOutcome::Collision { owner },
+                        None => {
+                            tx.execute(
+                                "UPDATE hosts SET host_identity = ?2 WHERE id = ?1",
+                                rusqlite::params![host, identity],
+                            )
+                            .context("recording first-contact identity")?;
+                            FirstContactOutcome::Recorded
+                        }
+                    },
+                }
+            };
+            // Committed on every path, including the ones that wrote
+            // nothing: an explicit commit releases the write lock this
+            // transaction took at BEGIN IMMEDIATE, rather than leaving it
+            // to a rollback on drop.
+            tx.commit().context("committing first contact")?;
+            Ok(outcome)
         })
         .await
         .context("record first contact task panicked")?
@@ -805,36 +1078,51 @@ impl HelmStore {
     /// second adoption, or a first contact that landed first) is refused as
     /// [`HostStoreError::IdentityMismatch`] with NOTHING changed, same as
     /// [`HostStoreError::HostNotFound`] for an id nothing currently holds.
+    ///
+    /// Adoption inherits first contact's two atomic guards, in the same
+    /// transaction and for the same reasons:
+    /// - a rival row that claimed `new` between the mismatch being shown
+    ///   and this call arriving is refused as
+    ///   [`HostStoreError::IdentityClaimed`] — the user is then looking at
+    ///   a duplicate to resolve, not an adoption to confirm, and the
+    ///   compare-and-swap alone would not have noticed;
+    /// - a row reconfigured since `dialed` was captured is refused as
+    ///   [`HostStoreError::StaleAttempt`], because the identity being
+    ///   adopted was reported by an endpoint this row no longer names.
     pub async fn adopt_identity(
         &self,
         host: HostId,
+        dialed: &DialedAs,
         expected_old: &str,
         new: &str,
     ) -> anyhow::Result<()> {
         let conn = Arc::clone(&self.conn);
         let expected_old = expected_old.to_string();
         let new = new.to_string();
+        let dialed = dialed.clone();
         tokio::task::spawn_blocking(move || -> anyhow::Result<()> {
             let mut conn = conn.lock().expect("helm db mutex poisoned");
             let tx = conn
-                .transaction()
+                .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
                 .context("beginning identity adoption transaction")?;
-            let current: Option<Option<String>> = tx
-                .query_row(
-                    "SELECT host_identity FROM hosts WHERE id = ?1",
-                    rusqlite::params![host],
-                    |r| r.get(0),
-                )
-                .optional()
-                .context("reading current host identity")?;
-            let Some(current) = current else {
+            let Some((current, configured)) = read_identity_and_config(&tx, host)? else {
                 return Err(anyhow::Error::new(HostStoreError::HostNotFound(host)));
             };
+            if configured != dialed {
+                return Err(anyhow::Error::new(HostStoreError::StaleAttempt { host }));
+            }
             if current.as_deref() != Some(expected_old.as_str()) {
                 return Err(anyhow::Error::new(HostStoreError::IdentityMismatch {
                     host,
                     expected: expected_old,
                     actual: current,
+                }));
+            }
+            if let Some(owner) = claimant_of(&tx, host, &new)? {
+                return Err(anyhow::Error::new(HostStoreError::IdentityClaimed {
+                    host,
+                    identity: new,
+                    owner,
                 }));
             }
             tx.execute(
@@ -1117,13 +1405,45 @@ mod tests {
     /// sequencing produces.
     async fn host_with_identity(store: &HelmStore, destination: &str, identity: &str) -> HostId {
         let host = store.add_ssh_host(destination, None, None).await.unwrap();
-        let outcome = store.record_first_contact(host, identity).await.unwrap();
+        let outcome = store
+            .record_first_contact(host, &dialed_as(store, host).await, identity)
+            .await
+            .unwrap();
         assert_eq!(
             outcome,
             FirstContactOutcome::Recorded,
             "helper assumes a freshly added host with no prior identity"
         );
         host
+    }
+
+    /// The configuration a host currently carries — what a real caller
+    /// captures before it dials and hands back to the identity writers
+    /// (see [`DialedAs`]). Every test that is not ABOUT staleness reads it
+    /// fresh, so it always matches and the guard stays out of the way.
+    async fn dialed_as(store: &HelmStore, host: HostId) -> DialedAs {
+        store
+            .list_hosts()
+            .await
+            .unwrap()
+            .iter()
+            .find(|row| row.id == host)
+            .map(DialedAs::of)
+            .expect("host row")
+    }
+
+    /// One host's claim as the registry actually holds it — the
+    /// independent check that a refused write really did write nothing,
+    /// rather than merely returning an error on its way out.
+    async fn recorded_identity(store: &HelmStore, host: HostId) -> Option<String> {
+        store
+            .list_hosts()
+            .await
+            .unwrap()
+            .into_iter()
+            .find(|row| row.id == host)
+            .expect("host row")
+            .host_identity
     }
 
     /// A host's cached session ids, in wire order — a terser way to assert
@@ -1148,94 +1468,21 @@ mod tests {
     // IDENTICAL to a warned one from the `Vec` alone, so a test asserting
     // only "the poisoned row is missing" could not tell a future
     // regression that deleted the `tracing::warn!` call from one that
-    // never had it. The infrastructure below exists to close that gap by
-    // actually observing the log line.
+    // never had it. Observing the log line is what closes that gap.
     //
-    // `tracing`'s dispatcher has a thread-local override
-    // (`subscriber::set_default`) and a process-global one
-    // (`subscriber::set_global_default`); the warning fires inside a
-    // `spawn_blocking` closure, which tokio runs on a DIFFERENT OS thread
-    // than the test body, so only the global installation reaches it. Every
-    // `#[tokio::test]` in this module may install it — `try_init` and a
-    // `OnceLock`-backed shared buffer make repeated calls across many
-    // concurrently-running tests harmless (first call wins, the rest are
-    // no-ops against the same buffer) — so each test below filters the
-    // buffer down to fields naming ITS OWN unique session id rather than
-    // assuming it is the only writer.
+    // The capture itself lives in `crate::test_capture` rather than here:
+    // it must be installed process-globally to reach the `spawn_blocking`
+    // thread these warnings fire on, a process global can only be claimed
+    // once, and this crate's whole test suite shares one binary — so the
+    // buffer is everyone's, and each test below filters it down to its own
+    // unique session id.
 
-    /// One captured `tracing::warn!` event's structured fields, keyed by
-    /// field name — the message itself lands under the key `"message"`,
-    /// same as `tracing`'s own convention for the format-string argument.
-    struct CapturedWarn {
-        fields: std::collections::HashMap<String, String>,
-    }
-
-    /// A `tracing::field::Visit` that stringifies every field it sees
-    /// (regardless of its original type) into the shared map the test
-    /// bodies inspect — this module's warnings only ever carry an `i64`
-    /// host id, `&str` session id, and a `Display`-formatted error, so a
-    /// full typed visitor would be overkill for what these tests actually
-    /// need to assert.
-    #[derive(Default)]
-    struct WarnFields(std::collections::HashMap<String, String>);
-
-    impl tracing::field::Visit for WarnFields {
-        fn record_debug(&mut self, field: &tracing::field::Field, value: &dyn std::fmt::Debug) {
-            self.0
-                .insert(field.name().to_string(), format!("{value:?}"));
-        }
-        fn record_str(&mut self, field: &tracing::field::Field, value: &str) {
-            self.0.insert(field.name().to_string(), value.to_string());
-        }
-        fn record_i64(&mut self, field: &tracing::field::Field, value: i64) {
-            self.0.insert(field.name().to_string(), value.to_string());
-        }
-    }
-
-    /// Install (once per test process) a `tracing` layer that records
-    /// every "skipping a cached session" warning, and hand back the shared
-    /// buffer it writes into. See this section's own header comment for
-    /// why the installation must be process-global and why every caller
-    /// must filter the shared buffer down to its own test's data.
-    fn install_skip_warning_capture() -> Arc<Mutex<Vec<CapturedWarn>>> {
-        use tracing_subscriber::layer::SubscriberExt;
-
-        static CAPTURED: std::sync::OnceLock<Arc<Mutex<Vec<CapturedWarn>>>> =
-            std::sync::OnceLock::new();
-
-        struct Capture(Arc<Mutex<Vec<CapturedWarn>>>);
-
-        impl<S: tracing::Subscriber> tracing_subscriber::Layer<S> for Capture {
-            fn on_event(
-                &self,
-                event: &tracing::Event<'_>,
-                _ctx: tracing_subscriber::layer::Context<'_, S>,
-            ) {
-                let mut fields = WarnFields::default();
-                event.record(&mut fields);
-                let Some(message) = fields.0.get("message") else {
-                    return;
-                };
-                if !message.contains("info_json no longer decodes") {
-                    return;
-                }
-                self.0
-                    .lock()
-                    .expect("capture mutex")
-                    .push(CapturedWarn { fields: fields.0 });
-            }
-        }
-
-        let events = CAPTURED
-            .get_or_init(|| Arc::new(Mutex::new(Vec::new())))
-            .clone();
-        // `try_init` rather than `init`: another test in this process may
-        // have installed the global subscriber already, and a second
-        // attempt must be a harmless no-op rather than a panic.
-        let _ = tracing_subscriber::util::SubscriberInitExt::try_init(
-            tracing_subscriber::registry().with(Capture(events.clone())),
-        );
-        events
+    /// Every "skipped a cached session" warning captured so far.
+    fn skip_warnings() -> Vec<crate::test_capture::CapturedEvent> {
+        crate::test_capture::matching(
+            &crate::test_capture::install(),
+            "info_json no longer decodes",
+        )
     }
 
     // ---- Schema and the version mechanism ----------------------------
@@ -1311,6 +1558,213 @@ mod tests {
         assert!(
             format!("{err:#}").contains(&version.to_string()),
             "error must name the unrecognized version: {err:#}"
+        );
+    }
+
+    /// A version-1 database, planted verbatim as that version shipped it:
+    /// the schema BEFORE `hosts_identity_claim` existed, which is the only
+    /// state from which the version-2 migration's duplicate resolution has
+    /// anything to do. Written out in full rather than derived from
+    /// [`apply_schema`] on purpose — a fixture that tracked the current
+    /// code would stop being a fixture, and would quietly start testing the
+    /// migration against a database no user ever had.
+    fn plant_v1_database(path: &Path) -> Connection {
+        let conn = Connection::open(path).expect("create raw db");
+        conn.execute_batch(
+            "CREATE TABLE hosts (
+                 id               INTEGER PRIMARY KEY AUTOINCREMENT,
+                 kind             TEXT NOT NULL CHECK (kind IN ('local', 'ssh')),
+                 destination      TEXT,
+                 remote_farhelm   TEXT,
+                 remote_state_dir TEXT,
+                 host_identity    TEXT,
+                 CHECK (
+                     (kind = 'local' AND destination IS NULL AND remote_farhelm IS NULL
+                          AND remote_state_dir IS NULL)
+                     OR (kind = 'ssh' AND destination IS NOT NULL)
+                 )
+             ) STRICT;
+             CREATE UNIQUE INDEX hosts_one_local_row
+                 ON hosts (kind) WHERE kind = 'local';
+             CREATE UNIQUE INDEX hosts_ssh_destination
+                 ON hosts (destination) WHERE kind = 'ssh';
+             CREATE TABLE session_cache (
+                 host_id    INTEGER NOT NULL REFERENCES hosts (id) ON DELETE CASCADE,
+                 session_id TEXT NOT NULL,
+                 created_at INTEGER NOT NULL,
+                 info_json  TEXT NOT NULL,
+                 PRIMARY KEY (host_id, session_id)
+             ) STRICT;
+             CREATE INDEX session_cache_order
+                 ON session_cache (created_at DESC, session_id ASC);
+             CREATE INDEX session_cache_by_host_order
+                 ON session_cache (host_id, created_at DESC, session_id ASC);
+             PRAGMA user_version = 1;",
+        )
+        .expect("plant the version-1 schema");
+        conn
+    }
+
+    /// Every object the schema defines, as SQLite records it, normalized
+    /// down to the part that is actually the schema — the comparison
+    /// `a_migrated_database_matches_a_freshly_created_one` makes.
+    ///
+    /// SQLite stores each object's `CREATE` statement VERBATIM, comments
+    /// and indentation included, and this module's DDL is heavily
+    /// commented. A raw comparison would therefore fail on prose alone
+    /// while the two databases were structurally identical — and, worse,
+    /// could be "fixed" by pasting the comments into the migration, which
+    /// would make the test pass without checking anything. Stripping `--`
+    /// comments and collapsing whitespace compares the schema instead.
+    /// (Safe for this DDL specifically: it contains no string literal that
+    /// could hide a `--`.)
+    fn schema_objects(conn: &Connection) -> Vec<(String, String)> {
+        fn normalize(sql: &str) -> String {
+            sql.lines()
+                .map(|line| line.split("--").next().unwrap_or_default())
+                .flat_map(str::split_whitespace)
+                .collect::<Vec<_>>()
+                .join(" ")
+        }
+
+        let mut stmt = conn
+            .prepare(
+                "SELECT name, COALESCE(sql, '') FROM sqlite_master \
+                 WHERE name NOT LIKE 'sqlite_%' ORDER BY name",
+            )
+            .expect("prepare schema query");
+        stmt.query_map([], |r| {
+            let name: String = r.get(0)?;
+            let sql: String = r.get(1)?;
+            Ok((name, normalize(&sql)))
+        })
+        .expect("query schema")
+        .collect::<Result<_, _>>()
+        .expect("read schema")
+    }
+
+    /// The migration's DATA half: a version-1 database may already hold two
+    /// rows claiming ONE identity, because nothing stopped it. Version 2's
+    /// index cannot simply be created over that, and which row keeps the
+    /// claim must be a decision this code makes rather than one SQLite
+    /// makes for it — the lowest [`HostId`] (the entry that learned it
+    /// first) keeps it, later rows are demoted to unclaimed and lose the
+    /// cache that was only ever meaningful under that identity.
+    ///
+    /// The stakes are the whole reason the constraint exists: left as-is,
+    /// each of those rows sees the OTHER as its twin at the next helm start
+    /// and both freeze as duplicates, so a live host appears ZERO times.
+    /// The last assertion here is that the resolved database can no longer
+    /// be talked into that shape — the demoted row's next contact is
+    /// refused as a collision naming the survivor, which is a visible,
+    /// resolvable duplicate rather than a mutual standoff.
+    #[tokio::test]
+    async fn migrating_from_v1_resolves_duplicated_identity_claims() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let db_path = dir.path().join("helm.db");
+        {
+            let conn = plant_v1_database(&db_path);
+            let cached = serde_json::to_string(&session("ghost", 100)).unwrap();
+            conn.execute_batch(
+                "INSERT INTO hosts (kind) VALUES ('local');
+                 INSERT INTO hosts (kind, destination, host_identity)
+                     VALUES ('ssh', 'first@host', 'shared-identity');
+                 INSERT INTO hosts (kind, destination, host_identity)
+                     VALUES ('ssh', 'second@host', 'shared-identity');
+                 INSERT INTO hosts (kind, destination, host_identity)
+                     VALUES ('ssh', 'unrelated@host', 'its-own-identity');",
+            )
+            .expect("plant two rows sharing one identity");
+            conn.execute(
+                "INSERT INTO session_cache (host_id, session_id, created_at, info_json)
+                 SELECT id, 'ghost', 100, ?1 FROM hosts WHERE host_identity IS NOT NULL",
+                rusqlite::params![cached],
+            )
+            .expect("give every identified row a cache");
+        }
+
+        let store = HelmStore::open(&db_path).await.expect("migrate and open");
+        let hosts = store.list_hosts().await.expect("list hosts");
+        let by_destination = |destination: &str| -> HostRow {
+            hosts
+                .iter()
+                .find(|h| h.destination.as_deref() == Some(destination))
+                .expect("planted row")
+                .clone()
+        };
+        let first = by_destination("first@host");
+        let second = by_destination("second@host");
+        let unrelated = by_destination("unrelated@host");
+        assert_eq!(
+            first.host_identity.as_deref(),
+            Some("shared-identity"),
+            "the lowest id keeps the claim"
+        );
+        assert_eq!(
+            second.host_identity, None,
+            "every later claimant is demoted to unclaimed"
+        );
+        assert_eq!(
+            unrelated.host_identity.as_deref(),
+            Some("its-own-identity"),
+            "a row whose identity was never duplicated must be left entirely alone"
+        );
+        assert_eq!(
+            store.cached_sessions(first.id).await.unwrap().len(),
+            1,
+            "the surviving claimant keeps the cache its identity still vouches for"
+        );
+        assert_eq!(
+            store.cached_sessions(second.id).await.unwrap(),
+            Vec::new(),
+            "a demoted row's cache goes with its claim — it was only meaningful under it"
+        );
+        assert_eq!(
+            store.cached_sessions(unrelated.id).await.unwrap().len(),
+            1,
+            "an untouched row's cache must survive the migration"
+        );
+
+        // The both-frozen, zero-owner outcome is now unconstructible: the
+        // demoted row cannot re-take the identity behind the survivor's
+        // back, no matter how the two actors interleave at the next start.
+        let outcome = store
+            .record_first_contact(second.id, &DialedAs::of(&second), "shared-identity")
+            .await
+            .expect("a collision is a value, not a storage failure");
+        assert_eq!(
+            outcome,
+            FirstContactOutcome::Collision { owner: first.id },
+            "the demoted row's next contact must be a duplicate naming the survivor"
+        );
+    }
+
+    /// A migrated database and a freshly created one must end up with
+    /// byte-identical schemas — the invariant that lets [`apply_schema`]'s
+    /// version-0 branch create the final shape directly instead of
+    /// replaying every historical step. Without this, a migration that
+    /// forgot an index would leave upgraded installs subtly different from
+    /// new ones, and every later test would pass on whichever of the two
+    /// the CI machine happened to create.
+    #[tokio::test]
+    async fn a_migrated_database_matches_a_freshly_created_one() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let migrated_path = dir.path().join("migrated.db");
+        drop(plant_v1_database(&migrated_path));
+        let migrated = HelmStore::open(&migrated_path).await.expect("migrate");
+        let fresh = HelmStore::open(&dir.path().join("fresh.db"))
+            .await
+            .expect("create");
+
+        let read = |store: &HelmStore| {
+            let conn = Arc::clone(&store.conn);
+            tokio::task::spawn_blocking(move || schema_objects(&conn.lock().unwrap()))
+        };
+        let (migrated, fresh) = tokio::join!(read(&migrated), read(&fresh));
+        assert_eq!(
+            migrated.unwrap(),
+            fresh.unwrap(),
+            "the migration ladder and the fresh-create path must agree on the final schema"
         );
     }
 
@@ -1546,6 +2000,46 @@ mod tests {
         .unwrap();
     }
 
+    /// `hosts_identity_claim`'s uniqueness must bind at the SQL level, not
+    /// merely inside `record_first_contact`'s transaction — the module
+    /// docs' claim is that at-most-one-row-per-identity is a schema
+    /// invariant, which is only true if a writer that never goes through
+    /// this module's API is refused too.
+    #[tokio::test]
+    async fn schema_index_rejects_a_duplicate_identity_bypassing_the_api() {
+        let (_dir, store) = fresh_store().await;
+        let conn = Arc::clone(&store.conn);
+        tokio::task::spawn_blocking(move || {
+            let conn = conn.lock().unwrap();
+            conn.execute(
+                "INSERT INTO hosts (kind, destination, host_identity) \
+                 VALUES ('ssh', 'claim-a@host', 'one-identity')",
+                [],
+            )
+            .expect("first raw claim");
+            conn.execute(
+                "INSERT INTO hosts (kind, destination, host_identity) \
+                 VALUES ('ssh', 'claim-b@host', 'one-identity')",
+                [],
+            )
+            .expect_err(
+                "the partial unique index must refuse a second row claiming one identity, \
+                 even for a raw insert no API call ever sees",
+            );
+            // The partial WHERE is what keeps unclaimed rows out of the
+            // index's way: any number of them may coexist.
+            for destination in ["null-a@host", "null-b@host"] {
+                conn.execute(
+                    "INSERT INTO hosts (kind, destination) VALUES ('ssh', ?1)",
+                    rusqlite::params![destination],
+                )
+                .expect("rows with no identity yet must not collide with each other");
+            }
+        })
+        .await
+        .unwrap();
+    }
+
     /// [`HelmStore::list_hosts`]'s fail-loudly posture on a corrupt `kind`
     /// (see that method's own docs, and contrast
     /// `cached_sessions_skips_a_poisoned_blob_and_serves_the_rest` below,
@@ -1658,6 +2152,67 @@ mod tests {
         );
     }
 
+    /// The registry half of the ssh argv-injection fix: a destination that
+    /// OpenSSH would read as an option (`-oProxyCommand=...` executes a
+    /// local command) never becomes a registry row in the first place, and
+    /// neither does an empty one. `crate::ssh_args`' terminator placement
+    /// is the real guard — it protects callers that never touch this
+    /// module — so what this pins is the OTHER half: the user finds out at
+    /// registration time, with a typed error naming the value, instead of
+    /// owning a host that fails to connect for reasons ssh explains in its
+    /// own usage message.
+    ///
+    /// Both entry points, because an edit introduces a destination exactly
+    /// as an add does.
+    #[tokio::test]
+    async fn option_shaped_destinations_are_refused_at_both_entry_points() {
+        let (_dir, store) = fresh_store().await;
+        let existing = store.add_ssh_host("real@host", None, None).await.unwrap();
+
+        for rejected in ["-oProxyCommand=touch /tmp/pwned", "-4", ""] {
+            let err = store
+                .add_ssh_host(rejected, None, None)
+                .await
+                .expect_err("an unusable destination must be refused at add");
+            assert!(
+                matches!(
+                    err.downcast_ref::<HostStoreError>(),
+                    Some(HostStoreError::InvalidDestination(d)) if d == rejected
+                ),
+                "must name the rejected destination: {err:#}"
+            );
+
+            let err = store
+                .update_ssh_destination(existing, rejected)
+                .await
+                .expect_err("an unusable destination must be refused at update");
+            assert!(
+                matches!(
+                    err.downcast_ref::<HostStoreError>(),
+                    Some(HostStoreError::InvalidDestination(d)) if d == rejected
+                ),
+                "must name the rejected destination: {err:#}"
+            );
+        }
+
+        let hosts = store.list_hosts().await.unwrap();
+        assert_eq!(
+            hosts.len(),
+            2,
+            "no refused destination may have created a row: {hosts:?}"
+        );
+        assert_eq!(
+            hosts
+                .iter()
+                .find(|h| h.id == existing)
+                .unwrap()
+                .destination
+                .as_deref(),
+            Some("real@host"),
+            "no refused edit may have rewritten the existing row"
+        );
+    }
+
     /// The same duplicate check on the update path — `UPDATE OR IGNORE`
     /// against the same partial unique index `add_ssh_host` targets, rather
     /// than a second hand-written conditional query. A collision must
@@ -1719,7 +2274,7 @@ mod tests {
             .await
             .unwrap();
         store
-            .record_first_contact(host, "identity-full")
+            .record_first_contact(host, &dialed_as(&store, host).await, "identity-full")
             .await
             .unwrap();
         store
@@ -1905,7 +2460,7 @@ mod tests {
         }
 
         let outcome = store
-            .record_first_contact(host, "identity-a")
+            .record_first_contact(host, &dialed_as(&store, host).await, "identity-a")
             .await
             .expect("record");
         assert_eq!(outcome, FirstContactOutcome::Recorded);
@@ -1935,7 +2490,7 @@ mod tests {
             .unwrap();
 
         let outcome = store
-            .record_first_contact(host, "identity-x")
+            .record_first_contact(host, &dialed_as(&store, host).await, "identity-x")
             .await
             .expect("re-recording the same identity is not an error");
         assert_eq!(outcome, FirstContactOutcome::Recorded);
@@ -1964,7 +2519,7 @@ mod tests {
             .unwrap();
 
         let outcome = store
-            .record_first_contact(host, "identity-new")
+            .record_first_contact(host, &dialed_as(&store, host).await, "identity-new")
             .await
             .expect("a conflicting identity is a value, not an error");
         assert_eq!(
@@ -1994,6 +2549,198 @@ mod tests {
         );
     }
 
+    /// The race the `hosts_identity_claim` index exists for, run with two
+    /// genuinely independent `Connection`s (as two helm processes, or two
+    /// actors on two blocking-pool threads, would be): two registry entries
+    /// reach the SAME fresh identity at the same moment.
+    ///
+    /// The outcome must be decided rather than interleaving-dependent —
+    /// exactly one `Recorded` and one `Collision` naming the winner — which
+    /// is what the check-then-write shape could not promise. With that
+    /// shape both callers could see no claimant and both write, and the
+    /// database would then hold the very state that makes BOTH entries
+    /// freeze as duplicates at the next start, hiding a live host
+    /// completely.
+    #[tokio::test]
+    async fn concurrent_first_contact_on_one_identity_has_exactly_one_winner() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let db_path = dir.path().join("helm.db");
+        let store_a = HelmStore::open(&db_path).await.expect("open a");
+        let store_b = HelmStore::open(&db_path).await.expect("open b");
+        let host_a = store_a
+            .add_ssh_host("race-a@host", None, None)
+            .await
+            .unwrap();
+        let host_b = store_a
+            .add_ssh_host("race-b@host", None, None)
+            .await
+            .unwrap();
+        let config_a = dialed_as(&store_a, host_a).await;
+        let config_b = dialed_as(&store_a, host_b).await;
+
+        let (a, b) = tokio::join!(
+            store_a.record_first_contact(host_a, &config_a, "contested"),
+            store_b.record_first_contact(host_b, &config_b, "contested"),
+        );
+        let outcomes = [
+            a.expect("no storage failure"),
+            b.expect("no storage failure"),
+        ];
+
+        let recorded = outcomes
+            .iter()
+            .filter(|o| **o == FirstContactOutcome::Recorded)
+            .count();
+        assert_eq!(recorded, 1, "exactly one racer may record: {outcomes:?}");
+        let winner = if outcomes[0] == FirstContactOutcome::Recorded {
+            host_a
+        } else {
+            host_b
+        };
+        assert!(
+            outcomes.contains(&FirstContactOutcome::Collision { owner: winner }),
+            "the loser must be told who won, not merely refused: {outcomes:?}"
+        );
+        let claimants = store_a
+            .list_hosts()
+            .await
+            .unwrap()
+            .into_iter()
+            .filter(|row| row.host_identity.as_deref() == Some("contested"))
+            .count();
+        assert_eq!(claimants, 1, "the database must hold exactly one claim");
+    }
+
+    /// The adopt half of the same race: a rival first-contacts the identity
+    /// the user is being asked to adopt, in the window between the mismatch
+    /// being displayed and the adopt arriving. The compare-and-swap alone
+    /// would happily proceed — `expected_old` is still accurate — so the
+    /// claim check inside the same transaction is what refuses it, leaving
+    /// the user with a duplicate to resolve instead of two rows claiming
+    /// one host.
+    #[tokio::test]
+    async fn adopt_identity_refuses_an_identity_a_rival_already_claimed() {
+        let (_dir, store) = fresh_store().await;
+        let mismatched = host_with_identity(&store, "mismatched@host", "identity-old").await;
+        store
+            .replace_host_sessions(mismatched, "identity-old", vec![session("kept", 100)])
+            .await
+            .unwrap();
+        let rival = host_with_identity(&store, "rival@host", "identity-reinstalled").await;
+
+        let err = store
+            .adopt_identity(
+                mismatched,
+                &dialed_as(&store, mismatched).await,
+                "identity-old",
+                "identity-reinstalled",
+            )
+            .await
+            .expect_err("adopting a claimed identity must be refused");
+        assert!(
+            matches!(
+                err.downcast_ref::<HostStoreError>(),
+                Some(HostStoreError::IdentityClaimed { host, identity, owner })
+                    if *host == mismatched && identity == "identity-reinstalled" && *owner == rival
+            ),
+            "must name the rival that holds the claim: {err:#}"
+        );
+        assert_eq!(
+            recorded_identity(&store, mismatched).await.as_deref(),
+            Some("identity-old"),
+            "a refused adoption must leave the identity exactly as it was"
+        );
+        assert_eq!(
+            store.cached_sessions(mismatched).await.unwrap().len(),
+            1,
+            "a refused adoption must not purge the cache either"
+        );
+    }
+
+    /// The window cluster 6 closes: a hello that was in flight while the
+    /// user retargeted the row would otherwise commit the OLD endpoint's
+    /// identity under the NEW destination — a durable lie about which
+    /// machine this entry is. The write is refused instead, and the outcome
+    /// says what the row says now so the log can show what outran it.
+    ///
+    /// Both identity writers are pinned, because they carry the same risk
+    /// from opposite directions: first contact learns an identity, adoption
+    /// accepts one, and neither is meaningful once the row points somewhere
+    /// else.
+    #[tokio::test]
+    async fn identity_writes_are_refused_after_the_row_is_retargeted() {
+        let (_dir, store) = fresh_store().await;
+        let host = store.add_ssh_host("dialed@host", None, None).await.unwrap();
+        let dialed = dialed_as(&store, host).await;
+        store
+            .update_ssh_destination(host, "retargeted@host")
+            .await
+            .expect("the user edits the destination mid-handshake");
+
+        let outcome = store
+            .record_first_contact(host, &dialed, "identity-from-the-old-endpoint")
+            .await
+            .expect("staleness is a value, not a storage failure");
+        assert!(
+            matches!(
+                &outcome,
+                FirstContactOutcome::StaleAttempt { current }
+                    if current.destination.as_deref() == Some("retargeted@host")
+            ),
+            "must report what the row says now: {outcome:?}"
+        );
+        assert_eq!(
+            recorded_identity(&store, host).await,
+            None,
+            "the stale attempt must not have claimed anything"
+        );
+
+        // The same row, now genuinely dialed as it stands, records fine —
+        // the guard is about staleness, not about refusing this row.
+        let fresh = dialed_as(&store, host).await;
+        assert_eq!(
+            store
+                .record_first_contact(host, &fresh, "identity-from-the-new-endpoint")
+                .await
+                .unwrap(),
+            FirstContactOutcome::Recorded
+        );
+
+        // And adoption inherits the guard, against a configuration change
+        // that does not touch `destination` at all.
+        let stale_for_adopt = dialed_as(&store, host).await;
+        {
+            let conn = Arc::clone(&store.conn);
+            tokio::task::spawn_blocking(move || {
+                conn.lock()
+                    .unwrap()
+                    .execute(
+                        "UPDATE hosts SET remote_state_dir = '/elsewhere' WHERE id = ?1",
+                        rusqlite::params![host],
+                    )
+                    .unwrap();
+            })
+            .await
+            .unwrap();
+        }
+        let err = store
+            .adopt_identity(
+                host,
+                &stale_for_adopt,
+                "identity-from-the-new-endpoint",
+                "identity-from-somewhere-else",
+            )
+            .await
+            .expect_err("adoption under a superseded configuration must be refused");
+        assert!(
+            matches!(
+                err.downcast_ref::<HostStoreError>(),
+                Some(HostStoreError::StaleAttempt { host: h }) if *h == host
+            ),
+            "must be the typed staleness refusal: {err:#}"
+        );
+    }
+
     /// The ADOPT path: a successful compare-and-swap purges exactly that
     /// host's cache, leaving every other host's cache untouched — pinned
     /// with a second host present specifically so a buggy unconditional
@@ -2014,7 +2761,12 @@ mod tests {
             .unwrap();
 
         store
-            .adopt_identity(host, "identity-old", "identity-new")
+            .adopt_identity(
+                host,
+                &dialed_as(&store, host).await,
+                "identity-old",
+                "identity-new",
+            )
             .await
             .expect("adopt a new identity");
 
@@ -2057,7 +2809,12 @@ mod tests {
             .unwrap();
 
         let err = store
-            .adopt_identity(host, "wrong-expected-old", "identity-y")
+            .adopt_identity(
+                host,
+                &dialed_as(&store, host).await,
+                "wrong-expected-old",
+                "identity-y",
+            )
             .await
             .expect_err("a stale expected_old must be refused");
         assert!(
@@ -2105,10 +2862,14 @@ mod tests {
             .await
             .unwrap();
         let ghost = store.add_ssh_host("ghost3@host", None, None).await.unwrap();
+        // Captured while the row still exists, exactly as a real caller
+        // would have captured it before dialing — so the refusal below is
+        // "this host is gone", never "this attempt is stale".
+        let ghost_config = dialed_as(&store, ghost).await;
         store.remove_ssh_host(ghost).await.unwrap();
 
         let err = store
-            .record_first_contact(ghost, "identity-z")
+            .record_first_contact(ghost, &ghost_config, "identity-z")
             .await
             .expect_err("first contact against a removed host must be refused");
         assert!(
@@ -2120,7 +2881,7 @@ mod tests {
         );
 
         let err = store
-            .adopt_identity(ghost, "anything", "identity-z")
+            .adopt_identity(ghost, &ghost_config, "anything", "identity-z")
             .await
             .expect_err("adoption against a removed host must be refused");
         assert!(
@@ -2187,7 +2948,12 @@ mod tests {
         }
 
         store
-            .adopt_identity(host, "identity-before", "identity-after")
+            .adopt_identity(
+                host,
+                &dialed_as(&store, host).await,
+                "identity-before",
+                "identity-after",
+            )
             .await
             .expect_err("the forced trigger failure must fail the whole adoption");
 
@@ -2298,7 +3064,12 @@ mod tests {
             .await
             .unwrap();
         store
-            .adopt_identity(host, "identity-before", "identity-after")
+            .adopt_identity(
+                host,
+                &dialed_as(&store, host).await,
+                "identity-before",
+                "identity-after",
+            )
             .await
             .expect("adopt");
         store
@@ -2552,7 +3323,8 @@ mod tests {
     /// see its own header comment) can never be mistaken for this one's.
     #[tokio::test]
     async fn cached_sessions_skips_a_poisoned_blob_and_serves_the_rest() {
-        let captured = install_skip_warning_capture();
+        // Installed before anything is logged; read back at the end.
+        let _capture = crate::test_capture::install();
         let (_dir, store) = fresh_store().await;
         let host = host_with_identity(&store, "poison@host", "poison-identity").await;
         store
@@ -2593,16 +3365,16 @@ mod tests {
             "the poisoned row must be skipped and every other row still served"
         );
 
-        let events = captured.lock().unwrap();
-        let hit = events.iter().find(|e| {
-            e.fields.get("session_id").map(String::as_str) == Some("cached-sessions-poisoned")
-        });
+        let events = skip_warnings();
+        let hit = events
+            .iter()
+            .find(|e| e.field("session_id") == Some("cached-sessions-poisoned"));
         let hit = hit.expect(
             "the skipped row must be logged via tracing::warn! naming its session id, \
              not just silently dropped from the returned Vec",
         );
         assert_eq!(
-            hit.fields.get("host").map(String::as_str),
+            hit.field("host"),
             Some(host.to_string().as_str()),
             "the warning must name the host the poisoned row belongs to"
         );
@@ -2616,7 +3388,8 @@ mod tests {
     /// take down another host's rows in the shared cross-host list either.
     #[tokio::test]
     async fn cached_sessions_all_skips_a_poisoned_blob_and_serves_the_rest() {
-        let captured = install_skip_warning_capture();
+        // Installed before anything is logged; read back at the end.
+        let _capture = crate::test_capture::install();
         let (_dir, store) = fresh_store().await;
         let poisoned_host =
             host_with_identity(&store, "poison-all@host", "poison-all-identity").await;
@@ -2665,16 +3438,16 @@ mod tests {
             "the poisoned row must be skipped while the other host's row is still served"
         );
 
-        let events = captured.lock().unwrap();
-        let hit = events.iter().find(|e| {
-            e.fields.get("session_id").map(String::as_str) == Some("cached-sessions-all-poisoned")
-        });
+        let events = skip_warnings();
+        let hit = events
+            .iter()
+            .find(|e| e.field("session_id") == Some("cached-sessions-all-poisoned"));
         let hit = hit.expect(
             "the skipped row must be logged via tracing::warn! naming its session id, \
              not just silently dropped from the returned Vec",
         );
         assert_eq!(
-            hit.fields.get("host").map(String::as_str),
+            hit.field("host"),
             Some(poisoned_host.to_string().as_str()),
             "the warning must name the host the poisoned row belongs to"
         );
@@ -2698,11 +3471,15 @@ mod tests {
                 .await
                 .unwrap();
             store
-                .record_first_contact(local_id, "local-identity")
+                .record_first_contact(
+                    local_id,
+                    &dialed_as(&store, local_id).await,
+                    "local-identity",
+                )
                 .await
                 .unwrap();
             store
-                .record_first_contact(ssh_id, "remote-identity")
+                .record_first_contact(ssh_id, &dialed_as(&store, ssh_id).await, "remote-identity")
                 .await
                 .unwrap();
             store

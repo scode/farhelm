@@ -262,6 +262,29 @@ interactive latency stays low and reconnects are cheap. The supervisor is reache
 on the remote side, which proxies stdio to the supervisor's unix socket. Supervisors listen on that unix socket only —
 no network port, exactly as SPEC.md requires.
 
+The ssh child's stderr is piped and relayed as bounded, control-escaped tracing events attributed to the host, not
+inherited. Inheriting is defensible for the single-host path a user started by hand; for a registered host it hands a
+remote party a direct, unbounded write channel to the operator's own terminal, escape sequences included. The relay
+drains continuously (a full stderr pipe would wedge the child), caps each line, stops logging after a per-connection
+budget while still draining, and Debug-escapes what it does log — the same treatment the supervisor gives tmux's exit
+reasons, for the same reason. Peer-supplied error text is normalized the same way wherever it is logged or retained in a
+host's state, and repeated identical failures stop being logged after a few, with the suppressed count reported by the
+next different one — a host that is down, or a peer that errors on every refresh, must not be able to write the log
+indefinitely.
+
+The hello's two free-text fields carry generous LENGTH caps checked at handshake decode (256 bytes each): both are
+retained for the connection's whole life by the peer's counterpart, so an unbounded one is a memory cost a peer chooses
+for the other side and re-chooses on every reconnect. Over-long is refused, never truncated — a shortened identity would
+map two distinct hosts onto one claim. Length only, never shape: an identity is opaque to every consumer by design, so a
+format check would invent a compatibility rule nothing else has.
+
+The ssh argv puts its option terminator (`--`) BEFORE the destination, and that placement is a security boundary rather
+than a style choice: a destination is user-supplied text, and one shaped like `-oProxyCommand=...` is read by OpenSSH's
+own option parser and executed locally — a command injection with no ssh connection involved at all — for as long as the
+terminator sits anywhere after it. The registry additionally refuses option-shaped destinations when they are
+registered, so the user gets a clear error rather than a puzzling ssh failure; the argv ordering is the actual guard,
+since it also covers callers that never go through the registry.
+
 On top of that byte pipe: a multiplexed framing protocol — length-prefixed frames carrying a channel id and a type tag;
 control messages are serde_json, terminal data channels are raw bytes. The same protocol runs over the unix socket
 locally, so "local host" and "remote host" differ only in transport. Connection setup exchanges protocol and build
@@ -382,15 +405,28 @@ remains that can never be represented on any page.
   a down host) the cache exists to keep. An SSH row also carries optional `remote_farhelm`/`remote_state_dir` fields
   (the argv fields M1's `--remote-farhelm`/`--remote-state-dir` carried), `None` meaning "use the remote's own default",
   not "unset for now". Two distinct SQL mechanisms enforce two distinct invariants here, not one: the `hosts` table's
-  own `CHECK` constraint is what pins the local row's NULL destination/remote-field shape, while a separate pair of
-  partial unique indexes enforces at most one local row and, independently, uniqueness of an SSH row's destination among
-  SSH rows.
+  own `CHECK` constraint is what pins the local row's NULL destination/remote-field shape, while separate partial unique
+  indexes enforce at most one local row, uniqueness of an SSH row's destination among SSH rows, and — see below — at
+  most one row claiming any given host identity.
 - A host's `host_identity` is `NULL` until first contact ever succeeds for that row — including the local row, which is
   minted with no identity and learns one the same way any other host does. Recording it is split into two operations so
   silent identity merging is structurally impossible at the storage layer (SPEC.md: never silently merge): first contact
   writes only when the stored identity is still `NULL`, or is a no-op when it already matches what was just reported: a
   DIFFERENT stored identity is refused outright, changing nothing, with the mismatch surfaced as a value the caller acts
   on rather than an error. Adoption is a separate, explicit compare-and-swap that only a user's adopt choice may invoke.
+- At most one registry row may hold a given identity, and that is a SCHEMA invariant (a partial unique index), not a
+  check the connection manager performs before writing. The difference is not stylistic: with a check-then-record shape,
+  two entries reaching one freshly installed supervisor can both see no twin and both record, and at the next helm start
+  each sees the other as its twin and both freeze as duplicates — so a live host appears zero times. First contact and
+  adoption therefore resolve the claim inside the same transaction as the write, and a loser gets a typed outcome naming
+  the row that holds it, which the manager renders as the ordinary duplicate state. Databases predating the constraint
+  are resolved by its migration: the lowest host id keeps the claim, later rows are demoted to unclaimed and lose the
+  cache that was only meaningful under it, so they re-learn at next contact and freeze as duplicates properly.
+- Both identity writes also carry the connection-defining configuration the attempt was DIALED under (destination,
+  remote farhelm, remote state dir) and are refused if the row no longer matches. A hello that crossed the wire while
+  the user was retargeting a row describes the old endpoint, and committing its identity under the new configuration
+  would durably attribute one machine's identity to another. Tearing down in-flight attempts on an edit narrows that
+  window; checking the dialed configuration inside the write's own transaction closes it.
 - Each host's session cache is replaced wholesale on every successful list refresh — delete then insert in one
   transaction, never a partial mix — so a session dropped from a host's live list is dropped from its cache too, and
   ordering never depends on parsing every cached row's JSON (created_at and session id are extracted as columns at write
@@ -403,6 +439,72 @@ remains that can never be represented on any page.
   tables disagree on purpose: a cache row that no longer decodes is skipped and logged rather than failing the read (it
   is last-known display data, not authority), while a corrupt registry row still fails `list_hosts` loudly (the registry
   is authority for which hosts exist at all).
+- One connection actor per registry row, the local row included (PLAN_M6.md item 4), each owning its transport
+  connection, its reconnect state machine, and its slice of the session cache. A row's connection is always in exactly
+  one of six states, and the last three exist because folding them into "unreachable" would throw away the only
+  information that makes the situation fixable: **connecting** (active retries in progress), **unreachable-reprobing**
+  (the active window is spent, background probes continue forever, no give-up), **connected**, **version-skew** (the
+  hello was answered and refused; carries both protocol versions, the peer's build, and the remediation text, since
+  SPEC.md demands actionable rather than merely diagnostic errors), **identity-mismatch** (frozen, carrying both
+  identities, connecting nothing until the user adopts or fixes the destination), and **duplicate** (this entry's
+  identity is already another entry's; connects nothing while it stays one, so the HOST appears exactly once under the
+  twin while the entry stays visible as something to resolve). The local row's unreachable state additionally
+  distinguishes "no supervisor is running on this machine" from a generic transport failure, because that is the one
+  case whose remedy is a command on the machine the user is already sitting at — a manual-path hint, never an offer to
+  install (provisioning is M7's). A seventh state exists that is not about the host at all — **retired** — for an entry
+  whose actor has stopped: a panicked task, or one that outlived its own registry row. Without it, an actor's last
+  published status stands forever after the actor is gone, so a task that died mid-connection would leave the entry
+  reading connected, with a routable client, and nothing left running to ever correct it. Each actor is therefore
+  supervised by the task the manager actually holds, which publishes the retired state (client dropped) when the actor
+  it wraps finishes for any reason other than being cancelled on purpose.
+- A host's state and its live connection are read TOGETHER, from one borrow of the actor's published status. The pair
+  has an invariant — a client exists exactly while the state is connected — and session routing is built on it, so two
+  separate reads straddling a transition would let a caller refuse an operation against a host that is up, or route one
+  onto a connection that is already gone.
+- Shutting the manager down is terminal: the flag it sets is checked in the same lock hold that reconciliation does its
+  insertions in, so a reconcile that read the registry just before the shutdown becomes a no-op instead of repopulating
+  the map with actors nothing can stop.
+- Cadences (user decision 2026-08-04, "snappy"), all injectable so tests can drive real transports without waiting out
+  production timescales: active retries wait 1, 2, 4, 8, 15 and 30 seconds between attempts — an immediate attempt plus
+  six, spread over about a minute — and then background re-probing takes over at 45 seconds, forever. The whole point of
+  those numbers is that a host which comes back is noticed within about a minute of returning, while a fleet of down
+  hosts costs a little over one connection attempt per host per minute. A connected host's session list refreshes every
+  3 seconds, matching the UI's own poll interval, so multi-host aggregation does not make the visible list staler than
+  the single-host path already is. The two regimes are distinct rather than one repeating ladder: a re-probe is a SINGLE
+  attempt, and a fresh active window is granted only where something changed — startup, a connection that was up and was
+  lost, or the resolution of a freeze. A re-probe also leaves the host's existing state alone while it dials, so an
+  entry that has been unreachable overnight reads as unreachable instead of flickering into "connecting" every 45
+  seconds. Version-skewed and duplicate entries ride the same 45-second cadence: the first so an upgraded host
+  resurfaces by itself, the second to re-ask the registry whether the collision is still there. Identity-mismatch is
+  deliberately the one state with no timer at all, because no amount of waiting answers a question only a user can.
+- Two DEADLINES bound what a peer can do to an actor by saying nothing, both injectable alongside the cadences. One
+  connection attempt (dial and hello together) is bounded at 20 seconds, and expiry is an ordinary failed attempt so the
+  ladder and the re-probe cadence carry on unchanged; one cache refresh is bounded at 30 seconds, and expiry drops the
+  connection so the actor re-enters its normal loss handling. Without them a transport that accepts and then goes silent
+  parks the whole state machine indefinitely while every layer below looks healthy — no error, no EOF, and a host that
+  reads as connecting or connected forever.
+- Editing a registry row's connection-defining fields RECONNECTS the host rather than waiting for its current connection
+  to end on its own: the connection is torn down, a non-connected state is published together with the new row (so a
+  hosts list can never pair an edited destination with the old connection's state), and the actor gets a fresh active
+  window, which is the same treatment resolving a freeze earns. An explicit retry is the same restart without the fresh
+  window — a user clicking retry is not evidence that a down host is back, so it makes one attempt and returns to the
+  re-probe cadence, while a connected host's retry is a genuine reconnect rather than an early poll.
+- A cache write refused because this connection's identity is no longer the row's also ends the connection. Every later
+  refresh on it would be refused identically, so keeping it up would show a host as healthily connected while its stale
+  list silently stopped advancing; dropping it re-asks the identity question against the row as it now stands.
+- A connected host's cache refresh is drain-then-replace: follow the supervisor's `next_cursor` to exhaustion, then
+  replace that host's whole cache slice in one identity-bound write. The page limit is left unset so the supervisor
+  applies its own default cap, which is sized so an ordinary host's entire list arrives in one page — that matters
+  beyond round-trip count, because the supervisor's conversation-capture sweep rides the `ListSessions` handler and
+  therefore runs once per page, so a smaller limit would multiply whole-host scans for every host on every refresh. A
+  failed refresh records the failure and keeps the previous cache, never wiping it: the cache's whole job is to answer
+  "what did this host have, last we knew" while the host is unavailable, so clearing it on failure would destroy the
+  answer exactly when it becomes the only one available, and would make a transient failure look identical to "this host
+  genuinely has no sessions". A host whose supervisor reports no identity at all connects and serves live but writes no
+  cache, since the identity binding has nothing to bind to. The walk's termination is never the peer's to decide: it is
+  bounded by pages followed, by sessions accumulated (ten of the supervisor's own default pages), and by a refusal to
+  follow a cursor identical to the one that produced it — each catching a shape the others cannot, and all three landing
+  as an ordinary failed refresh that keeps the previous cache.
 - axum serving: REST for CRUD (sessions, profiles, hosts), a WebSocket event stream for live session-list updates, a
   WebSocket per attached terminal, and the static UI bundle. Loopback bind enforced — refuses non-loopback per SPEC.md.
 - Web token: random 128-bit value, stored hashed; browser auth exchanges it once for a device-session cookie; rotation
@@ -416,9 +518,18 @@ remains that can never be represented on any page.
 session and host ids, so SPEC.md's required diagnostic trails (creation, PTY lifecycle, attachment transfer,
 reconnection, resume) fall out of structured context rather than ad-hoc log lines.
 
-M1 emits structured lifecycle and failure events, attaching session or channel fields where that context exists. It does
-not yet establish the systematic session/host spans above: the host registry, reconnection, and resume are later
-milestones, so their diagnostic trails cannot exist yet either.
+M1 emits structured lifecycle and failure events, attaching session or channel fields where that context exists. The
+host half of the span discipline above now exists: M6's connection manager runs every actor inside a span carrying the
+host id, kind, and destination, so the reconnection trail SPEC.md requires — connection attempts, phase transitions,
+hello refusals, identity decisions (first contact, mismatch, adoption, duplicate), refresh outcomes, and recovery —
+falls out of that context rather than out of per-call-site discipline. Two decisions are made by the manager rather than
+by an actor, and therefore outside that span: adopting an identity and reconfiguring an edited host. Both attach the
+same host metadata explicitly, so the trail has no gap where a user's decision should be. The destination is attached
+per event rather than carried in the span, because a span's fields are fixed at creation and a retargeted host would
+otherwise keep being described by the address it no longer uses — including in the very lines about reconnecting to its
+new one. Phase transitions are logged when the phase actually changes, never on every republish, so a connected host
+refreshing on its poll cadence does not bury the handful of lines that describe what happened to it. The session half
+and resume's own trail are still later milestones.
 
 Logs go to stderr, and deliberately not stdout: under `farhelm internal stdio` the process's stdout IS the protocol
 channel, so a stray line there corrupts frames. File logging under `~/.local/state/farhelm/logs/` with rotation
