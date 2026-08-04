@@ -23,6 +23,11 @@ repository = "https://github.com/scode/farhelm"
 [workspace.dependencies]
 anyhow = "1"
 axum = { version = "0.8", features = ["ws"] }
+# Opaque encoding for the `ListSessions` pagination cursor
+# (farhelm-supervisor's `service::core`, PLAN_M6.md item 2) — URL-safe so a
+# cursor cannot break a caller that happens to embed it in a URL, even
+# though this protocol never requires that itself.
+base64 = "0.22"
 clap = { version = "4", features = ["derive"] }
 dioxus = "0.7.0"
 futures-util = { version = "0.3", default-features = false }

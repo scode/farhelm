@@ -16,7 +16,8 @@ use super::uploads::{
 };
 use crate::tmux::{OutputEvent, OutputStream, PaneModes};
 use farhelm_proto::io::{
-    FrameReader, FrameWriter, ProgressWrite, handshake, parse_control, write_frame_before_stall,
+    FrameReader, FrameWriter, ProgressWrite, handshake_with_host_identity, parse_control,
+    write_frame_before_stall,
 };
 use farhelm_proto::{ControlMsg, DETACH_REASON_STALLED, ErrorKind, Frame};
 use std::collections::HashMap;
@@ -121,7 +122,14 @@ where
     let (w, bytes_written) = ProgressWrite::new(w);
     let mut reader = FrameReader::new(r);
     let mut writer = FrameWriter::new(w);
-    handshake(&mut reader, &mut writer, "supervisor").await?;
+    // The one production caller of `handshake_with_host_identity` (see its
+    // own docs): every hello this supervisor sends carries the identity
+    // `Supervisor::new_with_seams` resolved once at construction — `None`
+    // for a claimless construction with nothing yet to report, `Some` once
+    // this process minted or read back a durable one — never a fresh read
+    // per connection; the value is immutable for the process lifetime, so
+    // cloning it here is cheap and there is nothing to race.
+    handshake_with_host_identity(&mut reader, &mut writer, sup.host_identity.clone()).await?;
 
     // Single writer task; everything that wants to send (request
     // handlers, the output forwarder, takeover notifications) goes
@@ -1472,6 +1480,215 @@ mod tests {
             channel: 1,
             reason: "x".into(),
         });
+    }
+
+    /// Drive one real `handle_connection` server task over an in-process
+    /// duplex pipe, perform the (helm-side) handshake against it, and
+    /// return the host identity its hello carries — the duplex/handshake/
+    /// hello-extraction sequence shared by every case in
+    /// `supervisor_hello_carries_a_real_stable_host_identity` and
+    /// `supervisor_hello_reports_the_owners_identity_to_a_claimless_reader`
+    /// below, so it exists once rather than being hand-rolled repeatedly
+    /// with the risk of the copies drifting apart.
+    ///
+    /// Takes `sup` BY REFERENCE and clones only what the spawned task
+    /// needs: the restart case below has to keep observing the caller's
+    /// own `Arc` after this call returns (to prove the predecessor's
+    /// claim is actually gone before the second `Supervisor` is
+    /// constructed), which an owning parameter would make impossible —
+    /// the clone moved into `handle_connection` would be this function's
+    /// last use of it either way.
+    ///
+    /// Joins the server task itself (after dropping the client's own
+    /// reader/writer, which is what lets `handle_connection` see EOF and
+    /// return) and asserts BOTH result layers: the `JoinHandle`'s own
+    /// `Result` (a panicked server task) and the `anyhow::Result`
+    /// `handle_connection` returns (a clean but erroring exit). A bare
+    /// `let _ = server.await;` would silently accept either failure mode —
+    /// exactly the shape this helper exists to close off.
+    async fn hello_host_identity_over_a_fresh_connection(sup: &Arc<Supervisor>) -> String {
+        let sup = Arc::clone(sup);
+        let (client_side, server_side) = tokio::io::duplex(64 * 1024);
+        let server = tokio::spawn(async move { handle_connection(sup, server_side).await });
+        let (r, w) = tokio::io::split(client_side);
+        let mut reader = FrameReader::new(r);
+        let mut writer = FrameWriter::new(w);
+        let hello = farhelm_proto::io::handshake(&mut reader, &mut writer, "helm")
+            .await
+            .expect("handshake");
+        let ControlMsg::Hello { host_identity, .. } = hello else {
+            panic!("expected a Hello, got {hello:?}");
+        };
+        let identity = host_identity.expect("a supervisor's hello must carry an identity");
+        drop(reader);
+        drop(writer);
+        server
+            .await
+            .expect("the connection server task must not panic")
+            .expect("handle_connection must return Ok for a clean client-initiated close");
+        identity
+    }
+
+    /// PLAN_M6.md item 2's end-to-end proof that host identity actually
+    /// reaches the wire: drives the REAL `handle_connection` (not
+    /// `handshake_with_host_identity` in isolation, which `farhelm-proto`'s
+    /// own tests already cover) over an in-process duplex pipe, and reads
+    /// back the hello it sends. Pinned here rather than only at the store
+    /// level (`store::tests`'s own identity tests) because minting a value
+    /// and actually PUTTING it on the wire are two different things — a
+    /// bug that left `Supervisor::host_identity` unused would pass every
+    /// store-level test and still ship a supervisor whose hello lied by
+    /// omission.
+    ///
+    /// Stability across a supervisor RESTART (mirroring the boot_id
+    /// tests' own shape) is pinned by constructing a SECOND `Supervisor`
+    /// against the same state directory, ONLY after the first has fully
+    /// released its claim, and checking its hello carries the identical
+    /// identity — the store-level
+    /// `host_identity_is_minted_once_and_stable_across_reopen` test
+    /// already covers the store's own durability; this is the same
+    /// guarantee observed from the wire a real client actually sees.
+    ///
+    /// The strong-count drain before dropping `sup` (rather than trusting
+    /// the join above alone) is what makes "restart" an honest label
+    /// rather than an assumption: `StateDirOwnership::claim`'s own docs
+    /// name a real, if narrow, race between one claim's concurrent drop
+    /// and a fresh claim attempt, and `owns_state_dir`'s docs are explicit
+    /// that a "restarted" supervisor built while its predecessor is still
+    /// alive silently takes the READ-ONLY path instead — a claimless
+    /// second instance would still answer this test's hello, so nothing
+    /// about the OLD assertions here would have caught that regression.
+    /// Asserting `owns_state_dir()` on the second instance is what turns
+    /// that silent substitution into a loud one.
+    #[tokio::test]
+    async fn supervisor_hello_carries_a_real_stable_host_identity() {
+        let state = StateDir::new();
+        let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
+            .await
+            .expect("supervisor construction touches only tmux, not the launch shim");
+        let first_identity = hello_host_identity_over_a_fresh_connection(&sup).await;
+        uuid::Uuid::parse_str(&first_identity).expect("the identity must be a real UUID");
+
+        // Prove the predecessor is REALLY gone (see this test's own docs)
+        // before the second `Supervisor` ever calls `StateDirOwnership::
+        // claim`: `hello_host_identity_over_a_fresh_connection` already
+        // joins its connection task, so this loop ordinarily spins zero
+        // times, but only the strong count — not the join alone — is
+        // actually load-bearing for the claim below.
+        while Arc::strong_count(&sup) > 1 {
+            tokio::task::yield_now().await;
+        }
+        drop(sup);
+
+        // A second `Supervisor` against the SAME state directory — the
+        // restart case — must report the identical identity, not a fresh
+        // one: `StateDir` does not wipe anything between these two
+        // constructions, so this is the durable-reuse path, not the
+        // wiped-state-dir path `a_wiped_state_dir_mints_a_different_
+        // host_identity` (store-level) covers separately.
+        let sup2 = Supervisor::new_with_exe(state.path(), dummy_exe())
+            .await
+            .expect("second construction against the same state dir");
+        assert!(
+            sup2.owns_state_dir(),
+            "a genuine restart (predecessor's claim released) must own the state dir, not \
+             merely read alongside a still-live one"
+        );
+        let second_identity = hello_host_identity_over_a_fresh_connection(&sup2).await;
+        assert_eq!(
+            first_identity, second_identity,
+            "identity must survive a supervisor restart against the same state directory"
+        );
+    }
+
+    /// The other half of the shape the RESTART test above deliberately
+    /// excludes: a `Supervisor` constructed while something ELSE holds the
+    /// state directory's claim takes the claimless, read-only path instead
+    /// — `Supervisor::owns_state_dir`'s own docs call this "a handoff's
+    /// brief overlap," never a restart. Truthfully labeled reader-reopen
+    /// coverage, kept alongside the restart case rather than folded into
+    /// it: the two exercise different branches of `Supervisor::
+    /// new_with_seams`'s ownership gate, and a single test conflating them
+    /// would only ever exercise whichever branch construction ordering
+    /// happened to win.
+    ///
+    /// The incumbent is a bare `flock` on the lock file, NOT a second live
+    /// `Supervisor` — mirroring `a_supervisor_without_the_state_dir_claim_
+    /// reconciles_nothing_durably`'s own fixture (`core.rs`) and for the
+    /// same reason its docs give: `StateDirOwnership::claim` reuses a
+    /// still-live claim for a second in-process `Supervisor` against the
+    /// same directory (deliberately — see that type's docs), so two real
+    /// `Supervisor`s here would both report ownership and this test would
+    /// prove nothing about the claimless path at all. A raw `flock`
+    /// conflicts at the syscall level regardless of which process (or
+    /// which in-process registry) holds it, which is what actually forces
+    /// the second construction below to lose the race.
+    #[tokio::test]
+    async fn supervisor_hello_reports_the_owners_identity_to_a_claimless_reader() {
+        let state = StateDir::new();
+        let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
+            .await
+            .expect("supervisor construction touches only tmux, not the launch shim");
+        assert!(
+            sup.owns_state_dir(),
+            "test fixture: the first construction against a fresh state dir must own it"
+        );
+        let owner_identity = hello_host_identity_over_a_fresh_connection(&sup).await;
+
+        // Release the owner's claim (see the restart test's own docs on
+        // why the strong-count drain, not just the join, is what actually
+        // proves this) before an unrelated `flock` takes its place —
+        // otherwise `StateDirOwnership::claim`'s in-process registry
+        // reuse would hand the flock-holder's later `try_lock` a moot
+        // point: this process's own live claim would already have
+        // answered the reader's construction before it ever touched the
+        // lock file.
+        while Arc::strong_count(&sup) > 1 {
+            tokio::task::yield_now().await;
+        }
+        drop(sup);
+
+        let incumbent = std::fs::OpenOptions::new()
+            .create(true)
+            .truncate(false)
+            .write(true)
+            .open(state.path().join("supervisor.lock"))
+            .expect("lock file");
+        // `StateDirOwnership::claim`'s own docs name a real (if narrow)
+        // race here: the OS-level `flock` this process's own claim held
+        // is released synchronously by `sup`'s drop above, but that is a
+        // kernel-level fact this test thread only learns about through an
+        // ordinary syscall — under a heavily loaded test run (many other
+        // tests' real tmux servers competing for the scheduler) the retry
+        // below is what absorbs the gap, rather than this test flaking on
+        // a claim that is releasing but has not quite finished the
+        // instant this line runs.
+        let mut attempts_remaining = 50;
+        loop {
+            match incumbent.try_lock() {
+                Ok(()) => break,
+                Err(_) if attempts_remaining > 0 => {
+                    attempts_remaining -= 1;
+                    tokio::time::sleep(Duration::from_millis(20)).await;
+                }
+                Err(e) => panic!("the incumbent never took the claim: {e}"),
+            }
+        }
+
+        let reader = Supervisor::new_with_exe(state.path(), dummy_exe())
+            .await
+            .expect("a claimless construction must still succeed, per StateDirOwnership::claim");
+        assert!(
+            !reader.owns_state_dir(),
+            "a construction that lost the flock race must NOT claim ownership"
+        );
+
+        let reader_identity = hello_host_identity_over_a_fresh_connection(&reader).await;
+        assert_eq!(
+            owner_identity, reader_identity,
+            "a claimless reader must report the SAME identity the owner already minted, not \
+             one of its own — it never writes, only reads back what is already durable"
+        );
     }
 
     /// Steady-state contract for `reap_finished_tasks` (its own docs): a

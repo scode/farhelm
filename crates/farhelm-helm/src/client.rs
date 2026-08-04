@@ -199,12 +199,16 @@ pub struct SessionListing {
     /// the wire itself dropped its own `truncated` bool in the same bump
     /// `next_cursor` arrived in (see that field's own docs). The
     /// synthesis is `next_cursor.is_some() || sessions.len() < total`,
-    /// not a bare `next_cursor.is_some()`: this build's `next_cursor` is
-    /// unconditionally `None` even on a cut reply (`handle_list_sessions`'s
-    /// interim contract), so the disjunction's second half is what still
-    /// catches a cap- or byte-budget-truncated page — see the
-    /// construction site in `list_sessions` for the full argument.
-    /// Keeping THIS struct's shape and name unchanged is deliberate:
+    /// not a bare `next_cursor.is_some()`: PLAN_M6.md item 2's supervisor
+    /// issues a real `next_cursor` on every genuinely cut page, so the
+    /// first disjunct is the common case in practice, but the second
+    /// disjunct is not merely historical belt-and-suspenders — a
+    /// supervisor's `build_list_reply` still answers `next_cursor: None`
+    /// for the one degenerate case where a byte-budget cut leaves NOTHING
+    /// kept (a single session too large to fit even alone; see that
+    /// function's own docs), which the disjunction's second half is what
+    /// still catches. Keeping THIS struct's shape and name unchanged is
+    /// deliberate:
     /// `list_sessions`'s docs explain why the REST/UI JSON body's TOP-LEVEL
     /// pagination fields (`sessions`/`total`/`truncated`) stay
     /// byte-for-byte identical through this PR even though the wire
@@ -1277,13 +1281,13 @@ impl SupervisorClient {
     /// Always a live round trip — the helm caches no session state,
     /// because SPEC.md makes supervisors the authority.
     ///
-    /// `cursor`/`limit` (PLAN_M6.md item 1's wire vocabulary) are sent as
-    /// `None` unconditionally: this PR ships the vocabulary, not helm-side
-    /// paging, so there is nothing yet to resume FROM and no reason to ask
-    /// for anything but the server's default page. `SessionListing`'s own
-    /// `truncated` — this method's REST-facing surface, unlike the wire's
-    /// `next_cursor` — keeps its pre-8 meaning by construction (see that
-    /// field's own docs).
+    /// `cursor`/`limit` are sent as `None` unconditionally: this method is
+    /// still a single full-page fetch, not a page-by-page walk — the helm
+    /// draining a supervisor's real cursor to exhaustion is PLAN_M6.md item
+    /// 5's job, layered on top of this same per-request shape rather than
+    /// replacing it. `SessionListing`'s own `truncated` — this method's
+    /// REST-facing surface, unlike the wire's `next_cursor` — keeps its
+    /// pre-8 meaning by construction (see that field's own docs).
     pub async fn list_sessions(&self) -> anyhow::Result<SessionListing> {
         let req_id = self.req_id();
         match self
@@ -1315,21 +1319,22 @@ impl SupervisorClient {
                 // smaller than the number of sessions actually in hand.
                 let total = total.max(sessions.len() as u64);
                 Ok(SessionListing {
-                    // PLAN_M6.md item 1: the wire's `truncated` bool became
-                    // `next_cursor` (absence means exhaustion), but this PR
-                    // is vocabulary only — every supervisor this build can
-                    // reach still answers `next_cursor: None`
-                    // unconditionally, whether or not a cut actually
-                    // happened (`build_list_reply`'s own docs). A bare
-                    // `next_cursor.is_some()` would therefore report
-                    // `false` for a count-capped or byte-budget-cut list
-                    // that v7 honestly flagged `truncated: true` — the one
-                    // REST-visible regression this synthesis exists to
-                    // avoid. `sessions.len() < total` IS that cut, by
-                    // `total`'s own definition (the full count before any
-                    // cut), so the disjunction keeps the REST body faithful
-                    // both now and after PLAN_M6.md item 2 gives
-                    // `next_cursor` a real Some/None distinction.
+                    // PLAN_M6.md item 1 turned the wire's `truncated` bool
+                    // into `next_cursor` (absence means exhaustion); item 2
+                    // is what makes a supervisor's `next_cursor` a REAL
+                    // Some/None distinction (`build_list_reply`'s own
+                    // docs). `next_cursor.is_some()` is therefore the
+                    // common-case answer here, but not the WHOLE answer: a
+                    // pre-8 supervisor never sends `next_cursor` at all
+                    // (decodes to `None` via its absence), and even a
+                    // current one answers `None` for the one degenerate
+                    // byte-budget case where nothing fit at all (see
+                    // `build_list_reply`'s docs) despite sessions
+                    // genuinely remaining. `sessions.len() < total` IS that
+                    // cut, by `total`'s own definition (the full count
+                    // before any cut), so the disjunction keeps the REST
+                    // body faithful in both cases a bare
+                    // `next_cursor.is_some()` would miss.
                     truncated: next_cursor.is_some() || (sessions.len() as u64) < total,
                     total,
                     sessions,

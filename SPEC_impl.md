@@ -273,6 +273,23 @@ binary honors ~/.ssh/config fully (ProxyJump, Match blocks, agent forwarding, Co
 exactly that: partial config support would quietly break the promise. JSON control frames keep the protocol debuggable
 by eye; raw binary data channels keep PTY throughput off the JSON path.
 
+The session list is cursor-paginated on this wire (protocol 8, M6). The contract, recorded here because the milestone
+plan that settled it is history the moment M6 closes: pages walk a total order — creation time descending, session id
+ascending as the tiebreak — over columns that never change for a live session, so an issued cursor stays a valid resume
+point for as long as its holder cares to use it. The cursor is opaque: it encodes the last-returned entry's ordering
+key, callers store and replay it verbatim, and an undecodable cursor is refused as an invalid request. A decodable
+cursor is simply an ordering key, and deliberately so — cursors carry no authority in a single-user supervisor, any
+well-formed key is a valid resume position (which is also what lets a deleted session's cursor resume cleanly), so there
+is nothing a forged cursor obtains that honest paging does not. Resumption is strictly-after, which is also what makes a
+cursor whose own session was deleted resume cleanly. Under concurrent mutation the walk promises no duplicates and no
+tearing, and deliberately NOT completeness: a session created mid-walk can land behind the cursor (same-second creations
+tie-break by id; a clock rollback places new sessions mid-order) and is only guaranteed by the next walk from the start.
+Both page cuts — the count limit and the frame-size budget — carry the same continuation cursor, so truncation is a
+resumable state rather than M2's terminal flag, and the reply's total keeps reporting the full count before any cut. One
+case is neither cut: a record too large to ship even alone (nothing bounds a title below the byte budget) is an explicit
+error, never a fake exhaustion — an empty page with no cursor would otherwise claim the walk was done when a session
+remains that can never be represented on any page.
+
 ## Supervisor internals
 
 - State in SQLite (rusqlite) at `~/.local/state/farhelm/supervisor.db`: sessions and their metadata (SPEC.md's
