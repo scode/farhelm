@@ -1,7 +1,7 @@
 # Farhelm plan
 
 NOTE: This is the overall build plan: the motivation for how the work is ordered, and the coarse milestone ladder. Only
-the current milestone is ever planned in detail — see PLAN_M5.md (PLAN_M0.md through PLAN_M4.md are history). Later
+the current milestone is ever planned in detail — see PLAN_M6.md (PLAN_M0.md through PLAN_M5.md are history). Later
 milestones get their own PLAN_M*.md when their turn comes; pre-emptive detail would just be fiction that dogfooding
 invalidates.
 
@@ -76,7 +76,7 @@ Consequences of that stance:
   risk. The terminal websocket's auto-reconnect also lands here (found in post-M3 manual testing: a laptop sleep kills
   only that socket, and today recovery is a manual back-and-reopen): SPEC.md's Errors section already assigns
   reconnection with bounded retries to the connection-state model this milestone builds, so a client-side quick fix
-  beforehand would preempt the designed behavior.
+  beforehand would preempt the designed behavior. Planned in detail in PLAN_M6.md.
 - **M6.5 — test-suite backfill.** Test debt deliberately parked while the focus was end-to-end progress, tracked here so
   it cannot be quietly forgotten. Known entries: unit coverage for terminal.js's `onBinary` byte conversion, which needs
   a JS test-harness decision first (the repo has only Playwright today, and adopting a JS unit runner for one small
