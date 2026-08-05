@@ -77,6 +77,21 @@ work="$state/work"
 # run entirely. Set-then-trap is the ordering that makes that
 # unconstructible rather than unlikely.
 remote_state="$state/remote"
+# Where this run publishes what it built, for the multi-host tests that
+# have to reach BEHIND the API — killing the "remote" supervisor to make a
+# host go unreachable, and re-registering it afterwards with the same
+# install fields the ensure file used.
+#
+# Under the repo rather than in /tmp, and that is the security half of the
+# choice rather than convenience: every other path here is a fresh mktemp
+# dir precisely because a fixed, predictable /tmp name lets another local
+# user pre-create it, and a fixed name for THIS file would reintroduce
+# exactly that. The repo checkout is already the user's own. Removed by the
+# cleanup trap, and gitignored, so a HANDLED exit or signal leaves no
+# misleading leftover describing a stack that no longer exists — an
+# untrappable death (SIGKILL, OOM) can still strand a stale file, so
+# readers must not treat its presence as proof of a live stack.
+stack_info="$repo/e2e/.stack-info.json"
 mkdir -p "$work" "$remote_state" || exit 1
 
 # Trap installed BEFORE anything is spawned: a TERM during the socket
@@ -86,6 +101,7 @@ cleanup() {
   kill "${helm_pid:-}" 2>/dev/null
   kill "${sup_pid:-}" 2>/dev/null
   kill "${remote_sup_pid:-}" 2>/dev/null
+  rm -f "$stack_info"
   # The tmux servers daemonize out of this process group, so killing a
   # supervisor does not reap its own; each needs its own shutdown, and the
   # "remote" has one of its own precisely because its state dir is
@@ -114,7 +130,11 @@ sup_pid=$!
 # Where passwordless self-ssh is unavailable the second host simply shows
 # unreachable, which is an honest state and not a failure: nothing here
 # creates sessions on it, so the list and every existing assertion are
-# unaffected. PR 7's host-panel tests are what will consume the fleet.
+# unaffected — and the multi-host tests skip loudly rather than failing
+# (terminal.spec.ts's fleet probe). Those tests are the fleet's consumer,
+# and two of them reach past the API at this supervisor: one kills it to
+# drive a host through unreachable, and both re-register it. Everything
+# they need to do that is published in $stack_info below.
 "$bin" supervisor run --state-dir "$remote_state" >"$state/remote-supervisor.log" 2>&1 &
 remote_sup_pid=$!
 
@@ -144,6 +164,27 @@ print(json.dumps({
     }],
 }))
 ' "$bin" "$remote_state" >"$ensure" || exit 1
+
+# Published BEFORE the helm starts, deliberately: Playwright treats the
+# stack as ready the moment the helm answers, so a file written after that
+# could be missing for the first test that looks. Everything in it is
+# already known here, and the one thing that is not — the helm's own host
+# ids — the tests read from /api/hosts, which is the authority for them
+# anyway.
+#
+# Only what the tests actually reach for. The helm's OWN state directory was
+# published here too and never read — the tests drive the helm through its
+# API and have no business at its files — and a published path is an
+# invitation to reach for it, so it is not published.
+python3 -c '
+import json, sys
+print(json.dumps({
+    "farhelm": sys.argv[1],
+    "remote_state": sys.argv[2],
+    "remote_supervisor_pid": int(sys.argv[3]),
+    "remote_ssh": "localhost",
+}))
+' "$bin" "$remote_state" "$remote_sup_pid" >"$stack_info" || exit 1
 
 # The helm runs as a child, NOT via exec: bash does not run EXIT traps
 # across exec, so an exec'd helm would leave the supervisor and the

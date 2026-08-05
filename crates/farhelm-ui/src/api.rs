@@ -1,19 +1,23 @@
 //! The helm's HTTP contract, as this UI speaks it: one `async fn` per
-//! endpoint (fetch/create/stop/restart/rename/delete/tab-open/tab-close), each
-//! flattening every failure — transport, status, or body-read — into a
-//! single displayable `String` rather than a typed error. That flattening
-//! is deliberate, not laziness: every caller (`list::ListView`,
-//! `list::CreateSessionForm`, `session_view::SessionView`) renders the
-//! message directly to the user per SPEC.md's "concrete, actionable
-//! errors", so there is no second consumer that would ever want a
-//! structured error to match on.
+//! endpoint — the session routes
+//! (fetch/create/stop/restart/rename/delete/tab-open/tab-close) and, since
+//! PLAN_M6.md item 5 froze them, the host registry's
+//! (list/add/retarget/remove/adopt/retry) — each flattening every failure
+//! — transport, status, or body-read — into a single displayable `String`
+//! rather than a typed error. That flattening is deliberate, not laziness:
+//! every caller (`list::ListView`, `list::CreateSessionForm`,
+//! `hosts::HostsPanel`, `session_view::SessionView`) renders the message
+//! directly to the user per SPEC.md's "concrete, actionable errors", so
+//! there is no second consumer that would ever want a structured error to
+//! match on.
 //!
-//! `SessionListing`, `POLL_INTERVAL_MS`, and `restart_mode_for` live here
-//! too, even though none of them performs I/O directly: the first is this
-//! module's own decoded response shape, the second is the cadence both
-//! pollers (`ListView`'s listing poll and `SessionView`'s detail poll)
-//! share, and the third documents the wire-level pairing `restart_session`
-//! enforces from the caller's side — all three are part of the HTTP
+//! `SessionPage`/`SessionListing`, `POLL_INTERVAL_MS`, and
+//! `restart_mode_for` live here too, even though none of them performs I/O
+//! directly: the first pair is this module's own decoded response shape and
+//! the walked result it assembles, the second is the cadence every poller
+//! (`ListView`'s listing and hosts polls, `SessionView`'s detail poll)
+//! shares, and the third documents the wire-level pairing `restart_session`
+//! enforces from the caller's side — all of them are part of the HTTP
 //! contract this module owns, not the view code that consumes it.
 //!
 //! The URL-building helpers (`encode_query_value`, `encode_path_segment`)
@@ -27,32 +31,59 @@
 //! called from the view components in `list`, `session_view`, and
 //! `tabs`, never from outside this crate — `main.rs` only ever reaches
 //! `App`/`ApiBase` (see `lib.rs`). Internal helpers (`encode_bytes`,
-//! `sort_sessions`, `eval_minted_id`) stay private to this module.
+//! `install_field`, `eval_minted_id`, and the two failure-text builders)
+//! stay private to this module.
 
-use crate::{RestartOffer, Session, Tab};
+use crate::{Host, HostId, RestartOffer, Session, Tab};
 use serde::Deserialize;
 
-/// Mirror of the helm's `GET /api/sessions` response body (farhelm-helm's
-/// `SessionListing`, PLAN_M2.md step 6): `{"sessions": [...], "total": N,
-/// "truncated": bool}`. `total`/`truncated` are `#[serde(default)]` for
-/// the same old-peer tolerance as `Session::status` above; a decoder that
-/// only ever talks to this build's own helm will never hit that path, but
-/// nothing here should assume that. `Deserialize` is the only derive this
-/// needs: it is read once by reference out of the signal that holds it
-/// (see `fetch_sessions`'s docs), never cloned or compared.
+/// Mirror of one PAGE of the helm's `GET /api/sessions` response
+/// (farhelm-helm's `SessionPageBody`): `{"sessions": [...], "total": N,
+/// "truncated": bool, "next_cursor": "…"}`.
+///
+/// `total`/`truncated` keep `#[serde(default)]` for the same old-peer
+/// tolerance as `Session::status`; `next_cursor` needs none, since serde
+/// already decodes a missing `Option` key as `None` — and absent is exactly
+/// what "this was the last page" means on the wire.
+///
+/// Private, unlike the walked result: no caller wants one page. See
+/// [`SessionListing`], which is what a walk produces.
+#[derive(Deserialize)]
+struct SessionPage {
+    sessions: Vec<Session>,
+    #[serde(default)]
+    total: u64,
+    #[serde(default)]
+    truncated: bool,
+    /// Opaque resume key for the next page — replayed verbatim, never
+    /// constructed or interpreted here.
+    next_cursor: Option<String>,
+}
+
+/// The whole session list, as this UI holds it: every page of the helm's
+/// cursor walk concatenated, in the helm's own order.
 ///
 /// `pub(crate)` on the type and every field: `list::ListView` holds one of
-/// these in its own signal and reads `sessions`/`total`/`truncated`
-/// directly, which a private struct (this module's default) cannot allow
-/// across the module boundary this split introduced. Nothing outside the
-/// crate has any business seeing it.
-#[derive(Deserialize)]
+/// these in its own signal and reads all three directly, which a private
+/// struct cannot allow across the module boundary this split introduced.
+/// Nothing outside the crate has any business seeing it.
 pub(crate) struct SessionListing {
     pub(crate) sessions: Vec<Session>,
-    #[serde(default)]
+    /// Every session in the merged view across every host, as the helm
+    /// counts them — which is what SPEC.md's "showing N of M" is about, and
+    /// is NOT the same as `sessions.len()` whenever a walk stopped early.
     pub(crate) total: u64,
-    #[serde(default)]
+    /// Whether entries remain beyond what `sessions` carries: the walk hit
+    /// one of its own ceilings, the helm's last page still reported more, or
+    /// the walk turned out `incoherent`.
     pub(crate) truncated: bool,
+    /// Whether the walk collected more rows than the helm says exist.
+    ///
+    /// Reported separately from `truncated` because the two mean different
+    /// things to a reader: truncated is "there is more", incoherent is "this
+    /// changed underneath the walk, so the count and the rows disagree". The
+    /// UI says so rather than presenting either number as authoritative.
+    pub(crate) incoherent: bool,
 }
 
 // ---------------------------------------------------------------------
@@ -132,54 +163,227 @@ fn encode_bytes(value: &str, keep: impl Fn(u8) -> bool) -> String {
     out
 }
 
-/// Fetch the session listing, flattening every failure into a displayable
-/// string.
+// ---------------------------------------------------------------------
+// Failure text
+//
+// Two shapes, and the difference between them is deliberate rather than
+// incidental. A READ that fails is reported with the request that failed
+// (a user seeing "failed to load sessions" needs to know what was asked of
+// whom), while a MUTATION that is refused surfaces the helm's own words and
+// nothing else — SPEC.md wants the supervisor's "working directory does not
+// exist" or the host's "is unreachable-reprobing, so this operation is
+// refused" to reach the user unwrapped, not buried behind a URL.
+//
+// Both live here rather than being spelled out at each call site because
+// every endpoint below needs one of the two, and the one thing that must
+// never drift is which endpoints hand back the helm's own words unwrapped.
+// What those words look like ON SCREEN is a rendering question, answered
+// separately and identically for every peer string (`hosts::PeerLine`):
+// preserved raw here, escaped and direction-isolated where displayed.
+// ---------------------------------------------------------------------
+
+/// The message a NON-SUCCESS status produces on a read: method, URL, status,
+/// and whatever the body said.
 ///
-/// The message is a `String`, not `reqwest::Error`, because it is
-/// rendered to the user directly (SPEC.md wants concrete errors) — the
-/// URL and status are folded into the message here rather than logged
-/// and dropped. That is the whole reason, not a Dioxus constraint:
-/// `Signal<T>` only requires `T: 'static` to hold a value, nothing about
-/// `Clone` or `PartialEq`.
-pub(crate) async fn fetch_sessions(base: &str) -> Result<SessionListing, String> {
-    let url = format!("{base}/api/sessions");
-    let resp = reqwest::get(&url).await.map_err(|e| e.to_string())?;
-    if !resp.status().is_success() {
-        let status = resp.status();
-        let detail = resp
-            .text()
-            .await
-            .map_err(|error| format!("GET {url}: {status}: reading error response: {error}"))?;
-        let detail = detail.trim();
-        return Err(if detail.is_empty() {
-            format!("GET {url}: {status}")
-        } else {
-            format!("GET {url}: {status}: {detail}")
-        });
+/// Scoped to that one case, which is worth stating because the module's
+/// other two failure modes deliberately do NOT go through here and read
+/// differently as a result: a transport failure never got a status to
+/// report (`reqwest`'s own message stands alone), and a decode failure got a
+/// 2xx whose body this build could not read (serde's message stands alone).
+/// Only a status the server chose has a method/URL/status triple worth
+/// printing.
+///
+/// A body-read failure INSIDE this path is reported WITH the
+/// method/URL/status that were already known rather than swallowed: turning
+/// "we do not know why this failed" into "it failed for no stated reason" is
+/// strictly worse for a line the user is meant to act on.
+async fn read_failure(method: &str, url: &str, resp: reqwest::Response) -> String {
+    let status = resp.status();
+    let detail = match resp.text().await {
+        Ok(detail) => detail,
+        Err(error) => return format!("{method} {url}: {status}: reading error response: {error}"),
+    };
+    let detail = detail.trim();
+    if detail.is_empty() {
+        format!("{method} {url}: {status}")
+    } else {
+        format!("{method} {url}: {status}: {detail}")
     }
-    let mut listing = resp
-        .json::<SessionListing>()
-        .await
-        .map_err(|e| e.to_string())?;
-    listing.sessions = sort_sessions(listing.sessions);
-    Ok(listing)
 }
 
-/// Stabilize the list's display order across the protocol's undefined
-/// wire order.
+/// The message a refused MUTATION produces: the helm's own body, preserved
+/// as the raw value apart from surrounding whitespace.
 ///
-/// The wire order is a HashMap's ("no defined order" per the proto
-/// docs), so without a sort the list would visibly reshuffle rows on
-/// every poll even when nothing changed — distracting at best, and
-/// actively confusing for a "did status flip?" glance. `id` sort was M1's
-/// stopgap for picking a stable `first()`; it survives into M2 as the
-/// list's actual display order (its doc previously called it
-/// unnecessary once M2 landed a real list — that turned out to be wrong,
-/// since a list still needs SOME deterministic order) and stays until
-/// something better — most likely creation time — is wanted.
-fn sort_sessions(mut sessions: Vec<Session>) -> Vec<Session> {
-    sessions.sort_by(|a, b| a.id.cmp(&b.id));
-    sessions
+/// RAW rather than "verbatim as the user sees it", and the distinction is
+/// worth keeping straight now that a refusal can quote peer-supplied text
+/// (an adoption superseded by a re-probe embeds the identity a host is
+/// reporting): what this returns is unaltered, and the surfaces that DISPLAY
+/// it escape directional and invisible characters and isolate the run
+/// (`hosts::PeerLine`). Nothing rewrites the message; the rendering makes it
+/// unable to rearrange the sentence around it.
+///
+/// The trim is the one liberty taken here, and it is also what decides the
+/// fallback: a refusal that carried no text at all would otherwise render as
+/// an empty line, so method/URL/status stand in.
+async fn refusal_text(method: &str, url: &str, resp: reqwest::Response) -> String {
+    let status = resp.status();
+    let detail = match resp.text().await {
+        Ok(detail) => detail,
+        Err(error) => return format!("{method} {url}: {status}: reading error response: {error}"),
+    };
+    let detail = detail.trim();
+    if detail.is_empty() {
+        format!("{method} {url}: {status}")
+    } else {
+        detail.to_string()
+    }
+}
+
+/// How many pages one listing walk will follow before it stops.
+///
+/// A termination guarantee, not a tuning knob. The loop's continuation
+/// condition is a value the SERVER supplies (`next_cursor`), so a helm that
+/// is buggy, or merely racing its own session churn in a way nobody
+/// anticipated, could hand back a cursor forever and park this poll in an
+/// unbounded loop — every three seconds, in a browser tab. Two hundred pages
+/// of the helm's 500-row default is a hundred thousand sessions, far past
+/// any fleet a person manages, and stopping short is visible rather than
+/// silent: the count line says how many of the total are shown.
+///
+/// Deliberately mirrors the helm's own `REFRESH_PAGE_LIMIT`, which bounds
+/// its walk of a supervisor for exactly the same reason one layer down.
+const MAX_LIST_PAGES: usize = 200;
+
+/// How many rows one walk will accumulate before it stops.
+///
+/// The page ceiling alone does not bound the WORK: a helm serving a caller's
+/// `?limit=` (up to its own 5,000) makes 200 pages a million rows, all of
+/// them decoded, cloned into an optimistic-rename pass, and rendered as DOM.
+/// This is the bound that matches what the browser actually has to survive.
+///
+/// Twenty thousand is far past any fleet a person manages by hand and still
+/// an order of magnitude under what a tab renders comfortably — and stopping
+/// here is visible rather than silent, because the count line then reads
+/// "showing N of M".
+const MAX_LIST_ROWS: usize = 20_000;
+
+/// How many bytes of listing body one walk will accumulate before it stops.
+///
+/// The third bound, and the one the other two cannot stand in for: a session
+/// carries user-supplied text with no cap this side enforces (a title may be
+/// tens of KB), so a few hundred fat rows can be larger than a hundred
+/// thousand lean ones. Sixteen mebibytes is generous for any honest list and
+/// bounded enough that a hostile or broken helm cannot make a browser tab
+/// grow without limit three seconds at a time.
+///
+/// Counted on the RAW body rather than on the decoded rows, because that is
+/// what was actually transferred and held.
+const MAX_LIST_BYTES: usize = 16 * 1024 * 1024;
+
+/// Fetch the whole session listing, following the helm's cursor to
+/// exhaustion, flattening every failure into a displayable string.
+///
+/// ## Why this walks rather than taking the first page
+///
+/// The helm's list is cursor-paginated (PLAN_M6.md item 5) and its default
+/// page is 500 rows. A client that read only the first page would show a
+/// FLEET's list truncated at an arbitrary boundary — and, worse, would show
+/// it as though it were complete, because `total` is the merged count while
+/// the rows are one page of it. Multi-host aggregation is what makes lists
+/// long enough for that to happen, so the walk lands with the panel that
+/// makes fleets manageable.
+///
+/// Each page is requested with the PREVIOUS page's `next_cursor` replayed
+/// verbatim; the cursor is opaque and this UI never constructs or interprets
+/// one. The helm's page-walk contract makes the resume point a KEY rather
+/// than an offset, so a session created between two page fetches appears at
+/// the front of a later refresh instead of tearing the walk, and one deleted
+/// between them simply is not there.
+///
+/// An EMPTY page with a cursor is legitimate and must not stop the walk: the
+/// helm skips rows whose cached metadata no longer decodes while still
+/// advancing past them, so a page can carry nothing and still have more
+/// behind it. That is why the loop is driven by the cursor alone.
+///
+/// ## The order is the helm's
+///
+/// No client-side sort. The helm serves creation-time-descending with
+/// stable tiebreaks, and its cursor walks that exact order — so re-sorting
+/// the rows here (this used to sort by session id) would scramble the pages
+/// back together in an order no cursor agrees with, making the boundary
+/// between page 1 and page 2 land in the middle of the list.
+///
+/// ## Three bounds, and what hitting one means
+///
+/// [`MAX_LIST_PAGES`], [`MAX_LIST_ROWS`] and [`MAX_LIST_BYTES`] each stop the
+/// walk independently, because each bounds a different resource and none
+/// implies the others. Stopping is not an error: the rows collected are real
+/// and in order, so they are returned with `truncated` set, and the count
+/// line's "showing N of M" is the continuation story a user reads. Failing
+/// the whole poll instead would replace a partial list with no list at all,
+/// which is strictly worse for a surface refreshed every three seconds.
+///
+/// The message on failure is a `String`, not `reqwest::Error`, because it is
+/// rendered to the user directly (SPEC.md wants concrete errors) — the URL
+/// and status are folded into the message here rather than logged and
+/// dropped.
+pub(crate) async fn fetch_sessions(base: &str) -> Result<SessionListing, String> {
+    let mut sessions: Vec<Session> = Vec::new();
+    let mut cursor: Option<String> = None;
+    // Assigned by the first iteration, which always runs: a walk fetches at
+    // least one page, and taking the LAST page's numbers is what keeps the
+    // count fresh under a list that changes during the walk.
+    let mut total;
+    let mut truncated;
+    let mut pages = 0;
+    let mut bytes = 0_usize;
+    loop {
+        let url = match &cursor {
+            None => format!("{base}/api/sessions"),
+            Some(cursor) => format!("{base}/api/sessions?cursor={}", encode_query_value(cursor)),
+        };
+        let resp = reqwest::get(&url).await.map_err(|e| e.to_string())?;
+        if !resp.status().is_success() {
+            return Err(read_failure("GET", &url, resp).await);
+        }
+        // Read as text and decode from it, rather than `resp.json()`, so the
+        // byte ceiling counts what was actually transferred. Decoding stays
+        // strict either way.
+        let body = resp.text().await.map_err(|e| e.to_string())?;
+        bytes = bytes.saturating_add(body.len());
+        let page = serde_json::from_str::<SessionPage>(&body).map_err(|e| e.to_string())?;
+        sessions.extend(page.sessions);
+        // The LAST page's numbers win: they are the freshest read of a count
+        // that can legitimately change under a walk.
+        total = page.total;
+        truncated = page.truncated;
+        pages += 1;
+        cursor = page.next_cursor;
+        if cursor.is_none() {
+            break;
+        }
+        // Stopped short by one of OUR ceilings rather than by the helm. Each
+        // is checked after taking the page, so a walk always makes progress
+        // and never spins on a bound it has already exceeded.
+        if pages >= MAX_LIST_PAGES || sessions.len() >= MAX_LIST_ROWS || bytes >= MAX_LIST_BYTES {
+            truncated = true;
+            break;
+        }
+    }
+    // A walk that collected MORE rows than the helm says exist is
+    // incoherent: the list changed underneath it in a way that makes
+    // "complete" unprovable — a session deleted from an earlier page shrinks
+    // `total` while the rows already taken stay taken, and a cursor replayed
+    // across such a change can re-serve a row. Presenting that as a finished
+    // walk would claim a completeness nothing supports, so it is reported as
+    // truncated and the next poll (three seconds away) re-reads.
+    let incoherent = sessions.len() as u64 > total;
+    Ok(SessionListing {
+        sessions,
+        total,
+        truncated: truncated || incoherent,
+        incoherent,
+    })
 }
 
 /// How often the views refetch (PLAN_M2.md: "Polling for list freshness"
@@ -214,12 +418,22 @@ pub(crate) const POLL_INTERVAL_MS: u64 = 3_000;
 /// original session instead of launching a second agent. It is a required
 /// argument, not an option — a create from this UI always carries one (see
 /// `list::CreateSessionForm`).
+///
+/// `host` names which registered host to create on (PLAN_M6.md item 5),
+/// carrying SPEC.md's default — the host of the currently open session, else
+/// the helm's own — as a value the CLIENT decided, because only the client
+/// knows what the user is looking at. `None` leaves the helm to fall back to
+/// its local row, which is what every hand-written caller means on a
+/// single-machine setup. A host that is not connected fails the create as a
+/// precondition, and that refusal arrives here as the helm's own words like
+/// any other.
 pub(crate) async fn create_session(
     base: &str,
     cwd: &str,
     invocation: &str,
     title: &str,
     intent_key: &str,
+    host: Option<HostId>,
 ) -> Result<Session, String> {
     let url = format!("{base}/api/sessions");
     // `title` is the API's `Option<String>`, not a bare string: an empty
@@ -232,6 +446,7 @@ pub(crate) async fn create_session(
         "invocation": invocation,
         "title": title,
         "intent_key": intent_key,
+        "host": host,
     });
     let resp = reqwest::Client::new()
         .post(&url)
@@ -240,17 +455,7 @@ pub(crate) async fn create_session(
         .await
         .map_err(|e| e.to_string())?;
     if !resp.status().is_success() {
-        let status = resp.status();
-        let detail = resp
-            .text()
-            .await
-            .map_err(|error| format!("POST {url}: {status}: reading error response: {error}"))?;
-        let detail = detail.trim();
-        return Err(if detail.is_empty() {
-            format!("POST {url}: {status}")
-        } else {
-            detail.to_string()
-        });
+        return Err(refusal_text("POST", &url, resp).await);
     }
     resp.json::<Session>().await.map_err(|e| e.to_string())
 }
@@ -402,17 +607,7 @@ pub(crate) async fn stop_session(base: &str, id: &str) -> Result<(), String> {
         .await
         .map_err(|e| e.to_string())?;
     if !resp.status().is_success() {
-        let status = resp.status();
-        let detail = resp
-            .text()
-            .await
-            .map_err(|error| format!("POST {url}: {status}: reading error response: {error}"))?;
-        let detail = detail.trim();
-        return Err(if detail.is_empty() {
-            format!("POST {url}: {status}")
-        } else {
-            detail.to_string()
-        });
+        return Err(refusal_text("POST", &url, resp).await);
     }
     Ok(())
 }
@@ -449,17 +644,7 @@ pub(crate) async fn fetch_session(base: &str, id: &str) -> Result<Option<Session
         return Ok(None);
     }
     if !resp.status().is_success() {
-        let status = resp.status();
-        let detail = resp
-            .text()
-            .await
-            .map_err(|error| format!("GET {url}: {status}: reading error response: {error}"))?;
-        let detail = detail.trim();
-        return Err(if detail.is_empty() {
-            format!("GET {url}: {status}")
-        } else {
-            format!("GET {url}: {status}: {detail}")
-        });
+        return Err(read_failure("GET", &url, resp).await);
     }
     resp.json::<Session>()
         .await
@@ -496,17 +681,7 @@ pub(crate) async fn restart_session(
         .await
         .map_err(|e| e.to_string())?;
     if !resp.status().is_success() {
-        let status = resp.status();
-        let detail = resp
-            .text()
-            .await
-            .map_err(|error| format!("POST {url}: {status}: reading error response: {error}"))?;
-        let detail = detail.trim();
-        return Err(if detail.is_empty() {
-            format!("POST {url}: {status}")
-        } else {
-            detail.to_string()
-        });
+        return Err(refusal_text("POST", &url, resp).await);
     }
     resp.json::<Session>().await.map_err(|e| e.to_string())
 }
@@ -540,17 +715,7 @@ pub(crate) async fn rename_session(base: &str, id: &str, title: &str) -> Result<
         .await
         .map_err(|e| e.to_string())?;
     if !resp.status().is_success() {
-        let status = resp.status();
-        let detail = resp
-            .text()
-            .await
-            .map_err(|error| format!("POST {url}: {status}: reading error response: {error}"))?;
-        let detail = detail.trim();
-        return Err(if detail.is_empty() {
-            format!("POST {url}: {status}")
-        } else {
-            detail.to_string()
-        });
+        return Err(refusal_text("POST", &url, resp).await);
     }
     resp.json::<Session>().await.map_err(|e| e.to_string())
 }
@@ -566,17 +731,7 @@ pub(crate) async fn delete_session(base: &str, id: &str) -> Result<(), String> {
         .await
         .map_err(|e| e.to_string())?;
     if !resp.status().is_success() {
-        let status = resp.status();
-        let detail = resp
-            .text()
-            .await
-            .map_err(|error| format!("DELETE {url}: {status}: reading error response: {error}"))?;
-        let detail = detail.trim();
-        return Err(if detail.is_empty() {
-            format!("DELETE {url}: {status}")
-        } else {
-            detail.to_string()
-        });
+        return Err(refusal_text("DELETE", &url, resp).await);
     }
     Ok(())
 }
@@ -627,17 +782,7 @@ pub(crate) async fn open_tab(base: &str, session_id: &str) -> Result<Tab, String
         .await
         .map_err(|e| e.to_string())?;
     if !resp.status().is_success() {
-        let status = resp.status();
-        let detail = resp
-            .text()
-            .await
-            .map_err(|error| format!("POST {url}: {status}: reading error response: {error}"))?;
-        let detail = detail.trim();
-        return Err(if detail.is_empty() {
-            format!("POST {url}: {status}")
-        } else {
-            detail.to_string()
-        });
+        return Err(refusal_text("POST", &url, resp).await);
     }
     resp.json::<TabOpened>()
         .await
@@ -667,17 +812,257 @@ pub(crate) async fn close_tab(base: &str, session_id: &str, tab_id: &str) -> Res
         .await
         .map_err(|e| e.to_string())?;
     if !resp.status().is_success() {
-        let status = resp.status();
-        let detail = resp
-            .text()
-            .await
-            .map_err(|error| format!("DELETE {url}: {status}: reading error response: {error}"))?;
-        let detail = detail.trim();
-        return Err(if detail.is_empty() {
-            format!("DELETE {url}: {status}")
-        } else {
-            detail.to_string()
-        });
+        return Err(refusal_text("DELETE", &url, resp).await);
+    }
+    Ok(())
+}
+
+// ---------------------------------------------------------------------
+// Host management (PLAN_M6.md item 5's REST surface, item 6's consumer)
+//
+// Five mutations and one read, mirroring the helm's `/api/hosts` routes
+// one-for-one. Every mutation surfaces the helm's own words on refusal,
+// exactly as the session verbs do — and here that matters more than
+// anywhere else in this file, because each host refusal is a DIFFERENT
+// remedy: an address already registered, a row that cannot be edited at
+// all, an adoption superseded by a re-probe. A generic "could not add
+// host" would leave the user with no way to tell them apart.
+// ---------------------------------------------------------------------
+
+/// Mirror of `GET /api/hosts`'s body: `{"hosts": [...]}`.
+///
+/// `hosts` is REQUIRED. Defaulting it — which this briefly did, reasoning
+/// from the panel's never-blank rule — gets that rule exactly backwards: a
+/// body with no `hosts` key is a malformed reply, and decoding it as an
+/// empty fleet would render "no hosts at all" on a helm that always has at
+/// least its own local row. That is a fabricated claim, and a far more
+/// alarming one than the honest alternative. Failing here makes it a failed
+/// READ instead, which `hosts::HostsRead` reports while keeping the last
+/// snapshot it trusts.
+#[derive(Deserialize)]
+struct HostListing {
+    hosts: Vec<Host>,
+}
+
+/// Fetch the whole host registry with each host's live connection state.
+///
+/// Never paginated, because the helm does not paginate it: SPEC.md's promise
+/// is that per-host connection state is ALWAYS visible, and a fleet whose
+/// host count needed paging is not one a person manages by hand.
+pub(crate) async fn fetch_hosts(base: &str) -> Result<Vec<Host>, String> {
+    let url = format!("{base}/api/hosts");
+    let resp = reqwest::get(&url).await.map_err(|e| e.to_string())?;
+    if !resp.status().is_success() {
+        return Err(read_failure("GET", &url, resp).await);
+    }
+    resp.json::<HostListing>()
+        .await
+        .map(|listing| listing.hosts)
+        .map_err(|e| e.to_string())
+}
+
+/// One optional install field as it goes on the wire: absent when the user
+/// left it blank, and otherwise exactly what they typed.
+///
+/// The trim decides PRESENCE only. It is tempting to trim the value too —
+/// a stray trailing space in a path field looks like a typo — but these are
+/// paths on a machine this UI cannot see, a path may legally contain leading
+/// or trailing spaces, and an entry silently dialing a path the user did not
+/// type fails in a way nothing on screen explains.
+fn install_field(value: &str) -> Option<String> {
+    (!value.trim().is_empty()).then(|| value.to_string())
+}
+
+/// How a mutation that the helm ACCEPTED came back.
+///
+/// The distinction exists because a 2xx whose body this build cannot decode
+/// is not a refusal, and treating it as one — which the two host mutations
+/// did — tells the user their change did not happen when it demonstrably
+/// did. The registry row was written; only the description of it was
+/// unreadable. Everything downstream of that difference is different: the
+/// form closes, the authoritative hosts refresh fires, and the decode
+/// problem is reported as a warning about this CLIENT rather than as the
+/// helm rejecting something.
+///
+/// Decoding stays strict (see `HostPhase`'s own docs on why a fabricated
+/// field is worse than a failed read). This changes what a failed decode
+/// MEANS on a path that has already committed, not how hard it is to fail.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum Commit {
+    /// Accepted, and the reply described the result.
+    Confirmed,
+    /// Accepted, but the reply could not be read by this build. Carries the
+    /// decode failure, for a warning line.
+    Unvalidated(String),
+}
+
+/// Classify a successful response by whether its body decoded.
+///
+/// Shared by the two mutations that answer with a host row so both make the
+/// same call about the same situation — the alternative being one of them
+/// quietly reverting to "a bad body is a refusal" the next time it is
+/// touched.
+async fn commit_of<T: serde::de::DeserializeOwned>(resp: reqwest::Response) -> Commit {
+    match resp.json::<T>().await {
+        Ok(_) => Commit::Confirmed,
+        Err(error) => Commit::Unvalidated(format!(
+            "the helm accepted this change, but its reply could not be read by this build \
+             ({error}); the hosts list below is the authoritative view of what happened"
+        )),
+    }
+}
+
+/// Register an ssh destination (`POST /api/hosts`).
+///
+/// Adding ALWAYS registers when the destination is usable at all: whether
+/// anything answered is the new host's connection STATE, not this request's
+/// status. So a caller must not read `Ok` as "the host is up" — the panel
+/// that renders the returned row is where "there was nothing there" shows
+/// up, as an ordinary connecting-then-unreachable chip.
+///
+/// The two optional fields describe the INSTALL rather than the address:
+/// where the remote farhelm binary lives and which state directory it
+/// serves. A blank field is sent as ABSENT rather than as an empty value —
+/// the helm would take `Some("")` literally and dial a binary named nothing
+/// — and a field with anything in it is sent BYTE FOR BYTE.
+///
+/// The distinction matters more than it looks: trimming decides only
+/// whether the field is present, never what it contains. These are
+/// filesystem paths on someone else's machine, and a path may legally begin
+/// or end with a space — trimming one away produces an entry that dials a
+/// path the user did not type and cannot see the difference in. The same
+/// posture the create dialog takes with a working directory, for the same
+/// reason.
+///
+/// A 2xx whose body will not decode is [`Commit::Unvalidated`], not an
+/// error: the row was written (see [`Commit`]).
+pub(crate) async fn add_host(
+    base: &str,
+    ssh: &str,
+    remote_farhelm: &str,
+    remote_state_dir: &str,
+) -> Result<Commit, String> {
+    let url = format!("{base}/api/hosts");
+    let body = serde_json::json!({
+        "ssh": ssh,
+        "remote_farhelm": install_field(remote_farhelm),
+        "remote_state_dir": install_field(remote_state_dir),
+    });
+    let resp = reqwest::Client::new()
+        .post(&url)
+        .json(&body)
+        .send()
+        .await
+        .map_err(|e| e.to_string())?;
+    if !resp.status().is_success() {
+        return Err(refusal_text("POST", &url, resp).await);
+    }
+    Ok(commit_of::<Host>(resp).await)
+}
+
+/// Retarget a registered host (`POST /api/hosts/{id}/destination`).
+///
+/// The body carries only `ssh`: the remote binary and state directory
+/// describe the install, not the address it is reached at, so the helm
+/// deliberately keeps them across a retarget. Refused for the reserved local
+/// row, which has no destination to change.
+///
+/// A 2xx whose body will not decode is [`Commit::Unvalidated`], not an
+/// error: the retarget was written and the actor re-dialled (see [`Commit`]).
+pub(crate) async fn set_host_destination(
+    base: &str,
+    host: HostId,
+    ssh: &str,
+) -> Result<Commit, String> {
+    let url = format!("{base}/api/hosts/{host}/destination");
+    let resp = reqwest::Client::new()
+        .post(&url)
+        .json(&serde_json::json!({ "ssh": ssh }))
+        .send()
+        .await
+        .map_err(|e| e.to_string())?;
+    if !resp.status().is_success() {
+        return Err(refusal_text("POST", &url, resp).await);
+    }
+    // Decoded and discarded: the reply's `Host` validates the contract shape
+    // and nothing more, because the caller repaints from the
+    // generation-disciplined hosts refresh rather than from this one-off
+    // snapshot.
+    Ok(commit_of::<Host>(resp).await)
+}
+
+/// Forget a registered host (`DELETE /api/hosts/{id}`).
+///
+/// SPEC.md's remove-merely-forgets contract: the registry row and the
+/// helm's cached sessions for it go, while the host itself — its supervisor,
+/// its running agents — is untouched, and re-adding the same destination
+/// later rediscovers all of it. That is why the panel's confirmation says
+/// "forget", not "delete".
+pub(crate) async fn remove_host(base: &str, host: HostId) -> Result<(), String> {
+    let url = format!("{base}/api/hosts/{host}");
+    let resp = reqwest::Client::new()
+        .delete(&url)
+        .send()
+        .await
+        .map_err(|e| e.to_string())?;
+    if !resp.status().is_success() {
+        return Err(refusal_text("DELETE", &url, resp).await);
+    }
+    Ok(())
+}
+
+/// Accept the identity a mismatched host is reporting
+/// (`POST /api/hosts/{id}/adopt`).
+///
+/// `reported` is not a formality and must be the value the user was SHOWN —
+/// the `reported` field of the very `HostPhase::IdentityMismatch` the adopt
+/// control was rendered from. The helm compares it under its own lock and
+/// answers 409 if the host has since started reporting something else, which
+/// is what turns "a re-probe landed between the prompt and the click" from a
+/// silent adoption of a third install into a refusal the user answers by
+/// looking again. Sending whatever is current at request time would defeat
+/// the entire check, so this argument is never derived from a fresh poll.
+///
+/// Deliberately has no counterpart for `identity-unverified`: there is
+/// nothing to adopt there, and the helm refuses it (see that phase's docs).
+pub(crate) async fn adopt_host(base: &str, host: HostId, reported: &str) -> Result<(), String> {
+    let url = format!("{base}/api/hosts/{host}/adopt");
+    let resp = reqwest::Client::new()
+        .post(&url)
+        .json(&serde_json::json!({ "reported": reported }))
+        .send()
+        .await
+        .map_err(|e| e.to_string())?;
+    if !resp.status().is_success() {
+        return Err(refusal_text("POST", &url, resp).await);
+    }
+    Ok(())
+}
+
+/// Reconnect one host now (`POST /api/hosts/{id}/retry`).
+///
+/// One attempt, not a fresh retry ladder — a click is not evidence the host
+/// is back, and the two-regime cadence exists to avoid hammering. TWO cases
+/// are exceptions, and both are exceptions because there is no attempt in
+/// progress for one more to be added to:
+///
+/// - A RETIRED host has no actor at all, so retry respawns it from the
+///   current registry row and the fresh actor starts on the full ladder.
+///   That is what makes this control load-bearing rather than a
+///   convenience: nothing else ever restarts a dead actor.
+/// - A FROZEN host — either identity state — is not attempting anything
+///   either, so resolving the freeze earns the ladder from the actor rather
+///   than spending a single attempt (farhelm-helm's `retry_now`:
+///   "resolving a freeze still earns the ladder").
+pub(crate) async fn retry_host(base: &str, host: HostId) -> Result<(), String> {
+    let url = format!("{base}/api/hosts/{host}/retry");
+    let resp = reqwest::Client::new()
+        .post(&url)
+        .send()
+        .await
+        .map_err(|e| e.to_string())?;
+    if !resp.status().is_success() {
+        return Err(refusal_text("POST", &url, resp).await);
     }
     Ok(())
 }
@@ -708,45 +1093,27 @@ pub(crate) fn restart_mode_for(offer: RestartOffer) -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::SessionStatus;
 
-    /// Shared test fixture: a minimally distinct `Session` keyed by `id`.
-    /// Lives in this module (rather than a crate-wide test-support module)
-    /// because it is only `sort_sessions`'s own ordering test that needs
-    /// more than one distinguishable session at a time.
-    fn session(id: &str, title: &str) -> Session {
-        Session {
-            id: id.into(),
-            title: title.into(),
-            cwd: format!("/{id}"),
-            invocation: format!("agent-{id}"),
-            status: SessionStatus::Unknown,
-            annotation: None,
-            restart_offer: RestartOffer::FreshOnly,
-            tabs: Vec::new(),
-        }
-    }
-
-    /// The list's display order must be stable even though the
-    /// supervisor's HashMap-backed wire order is not (M1 regression
-    /// this helper originally existed to prevent for `first()`; it
-    /// carries the same requirement for the whole list now). Reversing
-    /// the response must not change the rendered order.
+    /// A blank install field must reach the wire as ABSENT, and a non-blank
+    /// one byte for byte.
+    ///
+    /// Both halves are real failures. `Some("")` is taken literally by the
+    /// helm — a host registered to dial a binary named nothing, which then
+    /// never connects for a reason no chip can explain. And a trimmed value
+    /// is a path the user did not type: paths may legally begin or end with
+    /// a space, and the entry would dial one thing while the form shows
+    /// another.
     #[test]
-    fn session_order_is_stable_across_wire_orders() {
-        let a = session("a", "A");
-        let b = session("b", "B");
-
-        let forward = sort_sessions(vec![a.clone(), b.clone()]);
-        let reverse = sort_sessions(vec![b, a]);
+    fn blank_install_fields_are_absent_while_others_survive_verbatim() {
+        assert_eq!(install_field(""), None);
+        assert_eq!(install_field("   "), None);
+        assert_eq!(install_field("\t\n"), None);
         assert_eq!(
-            forward.iter().map(|s| s.id.as_str()).collect::<Vec<_>>(),
-            vec!["a", "b"]
+            install_field(" /opt/with space/farhelm "),
+            Some(" /opt/with space/farhelm ".to_string()),
+            "trimming decides presence, never content"
         );
-        assert_eq!(
-            reverse.iter().map(|s| s.id.as_str()).collect::<Vec<_>>(),
-            vec!["a", "b"]
-        );
+        assert_eq!(install_field("/srv/state"), Some("/srv/state".to_string()));
     }
 
     /// Each offer authorizes exactly one mode, and the wire spellings must
@@ -763,7 +1130,7 @@ mod tests {
         );
     }
 
-    /// The other half of `SessionListing`'s missing-field tolerance
+    /// The other half of `SessionPage`'s missing-field tolerance
     /// (mirrors `crate::tests::session_without_status_field_decodes_as_unknown`,
     /// and farhelm-proto's own
     /// `old_shape_session_list_json_decodes_with_defaulted_new_fields`):
@@ -777,15 +1144,23 @@ mod tests {
     /// call it "a breaking shape change from M1's bare array"), which
     /// `SessionListing` cannot decode either way — there is no array
     /// fallback here. What this pins is forward tolerance WITHIN the
-    /// object shape: a later field added to `SessionListing` must still
+    /// object shape: a later field added to `SessionPage` must still
     /// let a build one step behind decode today's object, the same
     /// tolerance farhelm-proto's own wire types carry.
+    ///
+    /// `next_cursor` is covered by the same assertion for a different
+    /// reason: absent IS its meaningful value ("this was the last page"), so
+    /// a body without it must decode as a terminated walk rather than fail.
     #[test]
-    fn session_listing_without_total_or_truncated_defaults_both() {
+    fn session_page_without_total_or_truncated_defaults_both() {
         let json = serde_json::json!({ "sessions": [] });
-        let decoded: SessionListing = serde_json::from_value(json).unwrap();
+        let decoded: SessionPage = serde_json::from_value(json).unwrap();
         assert_eq!(decoded.total, 0);
         assert!(!decoded.truncated);
+        assert_eq!(
+            decoded.next_cursor, None,
+            "no cursor is how a walk learns it has reached the end"
+        );
     }
 
     /// A tab id is supervisor-supplied and lands in a URL PATH, so an id

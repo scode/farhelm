@@ -413,6 +413,286 @@ body,
   color: #e0685f;
 }
 
+/* Multi-host list rows (PLAN_M6.md item 6). The host leads the row, sized
+   like the other metadata fields and shrinking on the same terms: a
+   destination is user data with no length limit this UI enforces, so it
+   needs the same basis/floor/ellipsis treatment `.session-cwd` documents —
+   without it a long `user@very.long.name` would claim the row's space and
+   starve the fields beside it. */
+.session-host {
+  color: #8a919e;
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1 1 0;
+  min-width: 6em;
+}
+
+/* A stale row (SPEC.md: sessions on an unreachable host "stay in the list
+   … clearly marked") is DIMMED rather than hidden or greyed out as
+   disabled: it is still a real session with working controls, and the
+   dimming plus the badge beside its status say the row is last-known
+   knowledge rather than a live report. Amber marks last-known metadata:
+   staleness covers EVERY non-connected phase — unreachable, skew, an
+   identity decision, duplicate, retired — so the color must not imply any
+   one of them. The badge's phase story lives on the host chip; this only
+   says "what you see was true at last contact." */
+.session-row.stale .session-row-open {
+  opacity: 0.65;
+}
+
+/* Shared shape for the two small status capsules; their meaning lives in
+   their colors below. */
+.stale-badge,
+.host-chip {
+  font-size: 12px;
+  padding: 2px 8px;
+  border-radius: 3px;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.stale-badge {
+  color: #d8b45f;
+}
+
+/* The hosts panel (PLAN_M6.md item 6), above the session list because
+   SPEC.md requires per-host connection state to be ALWAYS visible — not
+   behind a toggle, and not only when something is wrong. */
+.hosts-panel {
+  border-bottom: 1px solid #1d2026;
+  padding: 8px 14px;
+}
+
+.hosts-panel-header {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+}
+
+.hosts-panel-title {
+  font-size: 12px;
+  color: #8a919e;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.add-host-button {
+  font-size: 12px;
+  padding: 2px 8px;
+}
+
+.hosts-status {
+  font-size: 12px;
+}
+
+.host-row {
+  display: flex;
+  flex-direction: column;
+  padding: 4px 0;
+}
+
+.host-row-main {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+}
+
+/* Same shrink discipline as the session row's fields: an ssh destination
+   is user data of unbounded length, and without a floor plus ellipsis it
+   would push this row's controls off the viewport — out of reach of the
+   only affordances (edit, remove) that could fix a mistyped one. */
+.host-name {
+  font-weight: 600;
+  font-size: 13px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1 1 0;
+  min-width: 8em;
+}
+
+/* Every run of peer-supplied text — an identity, a build string, an ssh
+   destination, a transport error — renders inside one of these, carrying
+   `dir="ltr"` from the markup.
+
+   `unicode-bidi: isolate` is the load-bearing half and is NOT decoration:
+   `dir` alone sets a base direction while leaving the run part of the
+   surrounding paragraph's bidirectional resolution, so a strong-RTL value
+   could still reorder the words around it — which for the mismatch evidence
+   means swapping which identity reads as "recorded" and which as
+   "reported", and for the adopt button means a label naming one install
+   while the request approves another. Isolation bounds resolution to the
+   element, so a value can only ever rearrange itself. Directional CONTROL
+   characters are escaped one layer up (`hosts::display_peer`); this covers
+   the ones that need no control character at all. */
+.peer-value {
+  unicode-bidi: isolate;
+}
+
+/* The chip carries the helm's own phase word; its COLOR is the coarse
+   category (see `hosts::phase_class`), grouping the phases by what a
+   person should do about them rather than by what they are: nine colors
+   would be noise next to a label that already says exactly which state this
+   is. Shape is shared with `.stale-badge` above. */
+
+.host-chip.connected {
+  color: #7fd88f;
+}
+
+.host-chip.connecting {
+  color: #8a919e;
+  font-style: italic;
+}
+
+/* Amber, not red: an unreachable host is being re-probed forever and
+   recovers on its own, so it is something to know about rather than
+   something that failed. */
+.host-chip.unreachable {
+  color: #d8b45f;
+}
+
+/* The red-family case, and the only one that is: skew, both identity
+   states, duplicate, retired, and a state this build does not recognize all
+   sit exactly where they are until a person does something. What that
+   something IS differs per phase — upgrade a binary, decide between two
+   identities, edit or remove an entry, press retry — which is why the chip
+   groups them by "needs attention" while the words beside it say which. */
+.host-chip.needs-attention {
+  color: #e0685f;
+}
+
+/* A hosts read that failed while a snapshot is still held. Its own line
+   above the rows rather than in place of them: SPEC.md requires connection
+   state to be visible, one dropped poll is not evidence that anything
+   changed, and the honest report is that what follows is as of the last
+   successful read (see `hosts::HostsRead`). */
+.hosts-refresh-error,
+.hosts-load-error {
+  font-size: 12px;
+  padding: 2px 0 4px;
+}
+
+/* A mutation the helm ACCEPTED whose reply this build could not read. Amber
+   rather than the error red, and that distinction is the whole point: the
+   change happened, so colouring it as a refusal would tell the user the
+   opposite of what occurred. */
+.host-warning {
+  font-size: 12px;
+  color: #d8b45f;
+  padding: 2px 0 0;
+}
+
+/* The evidence and the remedy each get a full-width line under the row's
+   controls rather than squeezing into it: both are sentences (a transport
+   error, the helm's remediation), and a single non-wrapping flex row would
+   clip exactly the part that says what is wrong. */
+.host-detail,
+.host-remedy {
+  font-size: 12px;
+  color: #8a919e;
+  padding: 1px 0 0;
+}
+
+.host-remedy {
+  color: #d8dee9;
+}
+
+.host-error {
+  padding: 2px 0 0;
+}
+
+.host-destination-form {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  flex: 2 1 0;
+  min-width: 0;
+}
+
+.host-destination-input {
+  background: #14161a;
+  border: 1px solid #3a3f47;
+  border-radius: 3px;
+  color: #d8dee9;
+  font: inherit;
+  font-size: 13px;
+  padding: 2px 6px;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.host-adopt,
+.host-retry,
+.host-edit,
+.host-remove,
+.host-save-destination,
+.host-cancel-edit {
+  font-size: 12px;
+  padding: 2px 8px;
+  flex-shrink: 0;
+}
+
+.host-remove {
+  color: #e08080;
+}
+
+/* The add-host form reuses the create dialog's box entirely — same inline,
+   non-modal shape, same field styling — so the two registration surfaces do
+   not look like they come from different applications. */
+.add-host-form {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 0 4px;
+}
+
+.add-host-form label {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 12px;
+  color: #8a919e;
+}
+
+.add-host-form input {
+  background: #14161a;
+  border: 1px solid #3a3f47;
+  border-radius: 3px;
+  color: #d8dee9;
+  font: inherit;
+  font-size: 13px;
+  padding: 4px 8px;
+}
+
+.add-host-submit {
+  align-self: flex-start;
+  font-size: 13px;
+  padding: 4px 10px;
+}
+
+/* A stale session's notice (SPEC.md: metadata behind a clear notice, and
+   no terminal). It takes the terminal's place in the layout rather than
+   floating over it, which is why it can wrap freely and does not need the
+   overlay discipline `.banner` has. Amber for the same reason the stale
+   badge is: the host is being re-probed and nothing has failed. */
+.host-stale-notice {
+  padding: 10px 14px;
+  font-size: 13px;
+  color: #d8b45f;
+  background: #1d2026;
+}
+
+/* The rest of SPEC.md's metadata triple for a stale session: the titlebar
+   above already carries the title and the directory, and this carries the
+   LAST-KNOWN status, drawn with the list's own badge so one session cannot
+   be described two ways on two surfaces. */
+.stale-metadata {
+  padding: 4px 14px 8px;
+  background: #1d2026;
+}
+
 /* Create dialog (PLAN_M2.md step 8): an inline form toggled from the
    toolbar, not a modal library — see the design note in lib.rs's
    `CreateSessionForm` doc. Kept visually close to the row/badge styling
@@ -444,7 +724,8 @@ body,
   color: #8a919e;
 }
 
-.create-session-form input {
+.create-session-form input,
+.create-session-host {
   background: #14161a;
   border: 1px solid #3a3f47;
   border-radius: 3px;
@@ -452,6 +733,24 @@ body,
   font: inherit;
   font-size: 13px;
   padding: 4px 8px;
+}
+
+/* Sized to its content rather than stretched like the text fields beside
+   it: a host name is short and fixed, and a full-width select would read as
+   a field the user is expected to type into. */
+.create-session-host {
+  align-self: flex-start;
+  min-width: 12em;
+}
+
+/* The selector's reconciliation line: shown when a chosen host has left the
+   registry and the effective target has therefore moved. Amber rather than
+   red because nothing has failed — but visible, because the failure this
+   prevents is exactly the invisible one, a selector showing host A while
+   the create carries host B. */
+.create-session-host-note {
+  font-size: 12px;
+  color: #d8b45f;
 }
 
 .create-session-submit {
@@ -516,6 +815,19 @@ body,
   display: block;
   background: #3a3520;
   color: #e0d090;
+}
+
+/* The complete-list counterpart, and it always renders (see `ListView`): a
+   count line that appeared only when something was wrong would make its own
+   ABSENCE carry meaning nobody can read — "this is all of them" and "this UI
+   forgot to say" would look identical. Quiet rather than amber, because
+   nothing here needs attention; the amber one above is reserved for a walk
+   that did not finish. */
+.banner.session-count {
+  display: block;
+  background: #1d2026;
+  color: #8a919e;
+  font-size: 12px;
 }
 
 .banner {

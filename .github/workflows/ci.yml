@@ -183,6 +183,24 @@ jobs:
           rustflags: ""
       - name: Install tmux
         run: sudo apt-get update && sudo apt-get install -y tmux
+      # Same block as the test job's, and it must stay in sync: the fleet
+      # start-stack.sh boots registers its second supervisor as an
+      # ssh-to-localhost host, so the helm under test dials this runner's
+      # own sshd. Without this, that host never connects and the fleet
+      # tests fail (they refuse to skip in CI by design — a skipped fleet
+      # would read as green coverage that never ran). The rationale for
+      # each line lives on the test job's copy.
+      - name: Provision passwordless ssh to localhost
+        run: |
+          sudo apt-get install -y openssh-server
+          sudo systemctl enable --now ssh || sudo service ssh start
+          mkdir -p ~/.ssh && chmod 700 ~/.ssh
+          ssh-keygen -t ed25519 -N '' -f ~/.ssh/id_ed25519
+          printf 'from="127.0.0.1,::1" ' >> ~/.ssh/authorized_keys
+          cat ~/.ssh/id_ed25519.pub >> ~/.ssh/authorized_keys
+          chmod 600 ~/.ssh/authorized_keys
+          ssh-keyscan -H localhost >> ~/.ssh/known_hosts
+          ssh -o BatchMode=yes localhost true
       # Pinned by version and verified by checksum: this unpacks an
       # executable onto PATH and runs it, so a mutable `latest` URL would
       # be a weaker link than the SHA-pinned actions above.

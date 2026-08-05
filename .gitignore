@@ -17,6 +17,10 @@ target
 node_modules/
 test-results/
 playwright-report/
+# What start-stack.sh publishes about the stack it booted, for the
+# multi-host tests that have to reach behind the API (see that script).
+# Per-run and removed by its cleanup trap.
+e2e/.stack-info.json
 
 # RustRover
 #  JetBrains specific template is maintained in a separate JetBrains.gitignore that can

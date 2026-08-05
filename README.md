@@ -5,14 +5,15 @@ interface, through their real TUIs. See SPEC.md for what this is and is not, SPE
 and PLAN.md for where the build currently stands.
 
 NOTE: This is mid-milestone-6 software: several sessions at once, across every host in a registry the helm keeps. Hosts
-are registered by SSH destination — through `--ensure-hosts` at startup or the API at runtime — and the machine running
-the helm is always one of them without being registered at all; one flat session list spans them, each row naming its
-host, with a host that goes dark keeping its sessions listed and marked stale. The UI surfaces for all of this — the
-hosts panel, the stale notices, the create dialog's host selector — are the next milestone step and are not built yet,
-so today a fleet is managed through the API and seen through those row labels. Reopening a session lands at the tail of
-its history instead of replaying it as a scroll animation — for any replay within the client's buffering bounds, which
-is every ordinary one; an unusually large replay, or one that stalls part-way, falls back to showing the catch-up as it
-arrives instead of hiding it. A session can be renamed from either the list or its own view. Sessions survive a
+are registered by SSH destination — through `--ensure-hosts` at startup, the API, or the UI's own hosts panel — and the
+machine running the helm is always one of them without being registered at all; one flat session list spans them, each
+row naming its host, with a host that goes dark keeping its sessions listed and marked stale. The hosts panel shows
+every host's connection state at all times and is where hosts are added, retargeted, removed, retried, and where an
+identity change is decided; opening a stale session shows its metadata behind a notice naming its host's actual state
+instead of a terminal, and the create dialog picks which host a session is launched on. Reopening a session lands at the
+tail of its history instead of replaying it as a scroll animation — for any replay within the client's buffering bounds,
+which is every ordinary one; an unusually large replay, or one that stalls part-way, falls back to showing the catch-up
+as it arrives instead of hiding it. A session can be renamed from either the list or its own view. Sessions survive a
 supervisor restart (persisted metadata, and a still-viewable terminal whenever the private tmux server survived too), a
 host reboot classifies previously-running sessions as interrupted rather than guessing, and a user-stopped session keeps
 its "stopped by user" qualifier durably. Restart is live too: an interrupted (or exited, or errored) session relaunches
@@ -67,32 +68,45 @@ Ubuntu 24.04 ships 3.4.
 - Sessions are created in the UI, not on the command line. The working directory must be an absolute path on the host
   you pick — the supervisor rejects a relative one outright, and against a remote host a `~` would be expanded by your
   local shell against the wrong home.
-- Open the printed loopback URL in a browser: a session list (title, working directory, invocation, and a status —
+- Open the printed loopback URL in a browser: a hosts panel above a session list. Every registered host is listed with
+  its connection state in the helm's own words — connecting, unreachable-reprobing, connected, version-skew,
+  identity-mismatch, identity-unverified, duplicate, retired — plus the evidence behind it (both versions on a skew,
+  both identities on a mismatch) and, where there is one, what to do about it. "add host" registers a destination (with
+  optional remote farhelm path and state directory for an install that is not on the remote's `PATH` or uses a
+  non-default state directory); each ssh row can be retargeted in place or removed, every row can be retried, and a host
+  reporting an identity that does not match the one on record offers to adopt it. Removing forgets the host and the
+  helm's cached view of its sessions — the supervisor and its agents keep running, and re-adding the destination finds
+  them again.
+- Under it, the session list: which host each session lives on, its title, working directory, invocation, and a status —
   alive; exited with the code when known, qualified "stopped by user" when you stopped it; interrupted after a host
-  reboot; error, with the reason, when the agent's own command could not start at all), refreshing on its own every few
-  seconds. Click a row to open its terminal; a back control returns to the list. Close the tab, reopen it later: same
-  session, scrollback intact, the agent never noticed. Reopening shows a brief "connecting — catching up" line instead
-  of the history flying past: the terminal appears once, already at the end of what you missed. A replay that outgrows
-  the client's buffer, or that goes quiet part-way, degrades to showing the rest as it arrives — visible catch-up rather
-  than a hidden terminal, and never dropped output.
-- "new session" opens an inline form (working directory and agent command required, title optional); submitting launches
-  the agent and takes you straight into its terminal. The form has no host selector yet, so it creates on the machine
-  running the helm; creating on a registered remote is an API call until the next milestone step adds the selector.
-  Paths are sent literally in both cases — nothing expands `~` or any variable at any point between the form and the
-  host — so a working directory must be written out in full as it exists on the host it names. A bad working directory
-  fails the create in place, with the supervisor's own error shown next to the form and nothing created. A bad
-  EXECUTABLE (a typo'd command, a path that does not exist) is different: creation still succeeds — the working
-  directory and terminal both exist — and the session then reports error once its agent's own exec fails, with the
-  reason shown right in the list.
+  reboot; error, with the reason, when the agent's own command could not start at all — refreshing on its own every few
+  seconds. Sessions on a host that is not connected stay listed, dimmed and badged "stale"; their controls still work
+  and the helm refuses them by naming the host's state rather than failing silently, and opening one shows its metadata
+  behind a notice naming that state instead of a terminal. Click a row to open its terminal; a back control returns to
+  the list. Close the tab, reopen it later: same session, scrollback intact, the agent never noticed. Reopening shows a
+  brief "connecting — catching up" line instead of the history flying past: the terminal appears once, already at the
+  end of what you missed. A replay that outgrows the client's buffer, or that goes quiet part-way, degrades to showing
+  the rest as it arrives — visible catch-up rather than a hidden terminal, and never dropped output.
+- "new session" opens an inline form (host, working directory and agent command required, title optional); submitting
+  launches the agent and takes you straight into its terminal. The host selector lists every registered host, defaulting
+  to the one your open session runs on and otherwise to the machine running the helm; a host that is not connected is
+  offered too, labelled with its state, and the create against it fails in place with the helm's own explanation rather
+  than being hidden from the list. Paths are sent literally — nothing expands `~` or any variable at any point between
+  the form and the host — so a working directory must be written out in full as it exists on the host it names. A bad
+  working directory fails the create in place, with the supervisor's own error shown next to the form and nothing
+  created. A bad EXECUTABLE (a typo'd command, a path that does not exist) is different: creation still succeeds — the
+  working directory and terminal both exist — and the session then reports error once its agent's own exec fails, with
+  the reason shown right in the list.
 - Submitting the same form twice yields one session, not two. Every create from the form carries an idempotency key, so
   a submit retried after an ambiguous failure — the request landed but its reply did not, the supervisor restarted
   mid-create — returns the session the first attempt already made instead of launching a second agent, and a failed
   create replays the same error rather than re-evaluating it. Editing any field first starts a NEW intent, which is how
   you fix a bad working directory and try again; it is also how you deliberately create a second session with the same
-  parameters (change a field and change it back, or use the API). A key whose session you have since deleted is spent:
-  the form says so rather than quietly recreating it. The create API additionally accepts explicit agent-kind and
-  resume-template overrides for invocations that basename recognition cannot classify (a wrapper script, `env claude`),
-  which the form does not expose.
+  parameters (change a field and change it back, or use the API). The chosen host is part of that intent — keys are
+  scoped per host, so changing the target starts a new one too, whether you change it or a host leaving the registry
+  moves it for you. A key whose session you have since deleted is spent: the form says so rather than quietly recreating
+  it. The create API additionally accepts explicit agent-kind and resume-template overrides for invocations that
+  basename recognition cannot classify (a wrapper script, `env claude`), which the form does not expose.
 - Each row also has rename, stop and delete. Rename opens a field in place — the same control the session view's header
   has — and what you type is sent exactly as typed; a title the supervisor refuses (control characters in it) comes back
   with the supervisor's own words while the old name stays. Stop kills the agent and its whole process tree; the session

@@ -13,10 +13,12 @@ use std::collections::{HashMap, HashSet};
 use dioxus::prelude::*;
 
 use crate::api::{
-    POLL_INTERVAL_MS, close_tab, fetch_session, mint_lease, open_tab, rename_session,
+    POLL_INTERVAL_MS, close_tab, fetch_hosts, fetch_session, mint_lease, open_tab, rename_session,
     restart_mode_for, restart_session,
 };
 use crate::attachments::{attachment_policy, attachment_status_element_id};
+use crate::hosts::{HostLookup, HostsRead, PeerLine, is_connected, stale_session_notice};
+use crate::list::status_badge;
 use crate::rename::RenameForm;
 use crate::tabs::{
     AGENT_BANNER_ELEMENT_ID, AGENT_CONNECTING_ELEMENT_ID, AGENT_TERMINAL_ELEMENT_ID,
@@ -110,6 +112,27 @@ use crate::{ApiBase, RestartOffer, Session, SessionStatus};
 /// un-leased attachments from ONE view would take each other over in turn
 /// and the session would end up with exactly one live terminal and no
 /// explanation. Refusing loudly beats shipping that.
+///
+/// ## A stale session shows metadata, not a terminal (PLAN_M6.md item 6)
+///
+/// When the helm marks this session stale — its host is in any
+/// non-connected state — this view renders its metadata behind a notice and
+/// mounts NO terminal at all. SPEC.md: "opening such a session shows its
+/// metadata — title, directory, last-known status — behind a clear
+/// host-unreachable notice; there is no terminal to show." Attaching anyway
+/// would produce a socket the helm refuses, and a blank pane under a failed
+/// attach explains nothing.
+///
+/// The notice names the host's ACTUAL state rather than saying "unreachable"
+/// for every cause (`hosts::stale_session_notice`), because a skewed host
+/// described as unreachable hides the upgrade that fixes it and a
+/// mismatched one hides that a decision is being waited on. That costs one
+/// extra read of `/api/hosts`, taken only while the session is stale — see
+/// the host-state poll below.
+///
+/// The restart affordance deliberately stays: a refused restart surfaces the
+/// helm's own words, which is the same bargain the list's stale rows make
+/// with their lifecycle controls.
 ///
 /// ## Mount/unmount lifecycle (PLAN_M2.md step 7)
 ///
@@ -251,6 +274,18 @@ pub(crate) fn SessionView(session: Session, on_back: EventHandler<()>) -> Elemen
     // `TAB_OPEN_ERROR_KEY` for the add control and the tab's own id for a
     // close, so an operation only ever clears its own message.
     let mut tab_errors = use_signal(HashMap::<String, String>::new);
+    // The hosts read behind a stale session's notice, refreshed ONLY while
+    // the session is stale — that is the one time this view needs it, and
+    // polling `/api/hosts` for every open terminal would be a second request
+    // per tick to answer a question nobody is asking.
+    //
+    // The four-state model rather than an `Option<Host>`, because this
+    // surface has to tell three failures apart: not read yet, could not be
+    // refreshed, and confirmed gone from the registry. An `Option` collapses
+    // all three into "no host", and the worst of the three — a failed
+    // refresh — would then be rendered as the phase this view happened to
+    // see last, which is a claim about the past dressed as the present.
+    let mut host_read = use_signal(HostsRead::default);
 
     // Minted once, on mount, and never re-minted: the lease identifies
     // THIS view instance for as long as it lives, so a remount of one
@@ -364,6 +399,61 @@ pub(crate) fn SessionView(session: Session, on_back: EventHandler<()>) -> Elemen
                 }
                 // Same per-target sleep split as `ListView`'s poll — see
                 // its own comment for why each target gets its own idiom.
+                #[cfg(target_arch = "wasm32")]
+                gloo_timers::future::TimeoutFuture::new(POLL_INTERVAL_MS as u32).await;
+                #[cfg(not(target_arch = "wasm32"))]
+                tokio::time::sleep(std::time::Duration::from_millis(POLL_INTERVAL_MS)).await;
+            }
+        }
+    });
+
+    // The host-state read behind a stale session's notice (PLAN_M6.md item
+    // 6). Its own loop rather than a leg of the detail poll above, for the
+    // property that matters here: it runs its first iteration IMMEDIATELY on
+    // mount, so a session opened from a stale row names its host's state on
+    // the first frames rather than after a poll interval of saying "not read
+    // yet" — and it costs nothing at all for the overwhelmingly common
+    // not-stale case, which is the whole reason it is conditional.
+    let host_poll_base = base.clone();
+    let host_poll_id = session.id.clone();
+    use_future(move || {
+        let base = host_poll_base.clone();
+        let poll_id = host_poll_id.clone();
+        async move {
+            loop {
+                let (stale, host) = {
+                    let session = current.peek();
+                    (session.stale, session.host)
+                };
+                if stale {
+                    // Recorded through the four-state model, so a dropped
+                    // request becomes a REPORTED refresh failure rather than
+                    // either a silent hold — which would keep presenting a
+                    // phase that may have changed since — or a blank, which
+                    // would lose the only explanation on screen.
+                    let outcome = fetch_hosts(&base).await;
+                    host_read.write().record(outcome);
+                    // The host is back while this session still reads stale:
+                    // two reads disagreeing, not a state to explain. The
+                    // notice says exactly that (`stale_session_notice`), and
+                    // this closes the gap rather than waiting out the detail
+                    // poll — the terminal cannot mount until the session row
+                    // itself stops saying stale, so a whole interval of
+                    // "reconnected — refreshing" would be a whole interval
+                    // of a usable session showing no terminal.
+                    let reconnected = matches!(
+                        host_read.peek().lookup(host),
+                        HostLookup::Known(host) if is_connected(&host.state)
+                    );
+                    if reconnected && let Ok(Some(fresh)) = fetch_session(&base, &poll_id).await {
+                        current.set(fresh);
+                    }
+                } else if *host_read.peek() != HostsRead::default() {
+                    // The host came back. Dropping the record is what keeps
+                    // a LATER staleness from being explained by a reading
+                    // taken before the host recovered.
+                    host_read.set(HostsRead::default());
+                }
                 #[cfg(target_arch = "wasm32")]
                 gloo_timers::future::TimeoutFuture::new(POLL_INTERVAL_MS as u32).await;
                 #[cfg(not(target_arch = "wasm32"))]
@@ -650,6 +740,14 @@ pub(crate) fn SessionView(session: Session, on_back: EventHandler<()>) -> Elemen
     let terminal_specs = use_memo(move || {
         let lease = lease.read().clone()?;
         let session = current.read();
+        // A stale session has no terminal to attach (see this component's
+        // docs), so the desired set is EMPTY rather than absent — an empty
+        // sync is what tears down islands belonging to a host that went away
+        // while this view was open, which returning `None` (the
+        // lease-not-yet-minted case) would leave mounted and silently dead.
+        if session.stale {
+            return Some("[]".to_string());
+        }
         let tabs = visible_tabs(&session.tabs, &opened_tabs.read(), &closed_tabs.read());
         let active = selected.read().clone().filter(|id| tabs.contains(id));
         // Only the tabs within the island cap are ever handed to
@@ -786,6 +884,26 @@ pub(crate) fn SessionView(session: Session, on_back: EventHandler<()>) -> Elemen
         .as_ref()
         .map(|(title, _)| title.clone())
         .unwrap_or_else(|| shown.title.clone());
+    // Built from the row's own `host_name` rather than from the host record,
+    // so the notice can name the host even before the hosts read lands —
+    // and so it still names it if the host has since been removed from the
+    // registry entirely.
+    let host_read_now = host_read.read();
+    let stale_notice = shown.stale.then(|| {
+        stale_session_notice(
+            shown.host_name.as_deref().unwrap_or_default(),
+            host_read_now.lookup(shown.host),
+        )
+    });
+    // SPEC.md's metadata triple for a stale session is "title, directory,
+    // last-known status", and the status is the one this view has nowhere
+    // else to put: the titlebar carries the title and the directory, while
+    // the restart offer describes what a relaunch would do rather than what
+    // the session last WAS. Rendered through the list's own badge so the two
+    // surfaces cannot describe one session differently.
+    let stale_badge = shown
+        .stale
+        .then(|| status_badge(&shown.status, shown.annotation.as_deref()));
     rsx! {
         div { class: "layout",
             header { class: "titlebar",
@@ -938,96 +1056,6 @@ pub(crate) fn SessionView(session: Session, on_back: EventHandler<()>) -> Elemen
                     div { class: "restart-error", "{err}" }
                 }
             }
-            // The tab strip: the agent terminal first and unclosable
-            // (SPEC.md gives a session one agent terminal, and closing it
-            // is not one of the operations that exist), then every open
-            // tab in the server's creation order, then the add control.
-            div { class: "tab-strip",
-                button {
-                    r#type: "button",
-                    class: if active_tab.is_none() { "btn tab tab-agent selected" } else { "btn tab tab-agent" },
-                    "data-terminal": "agent",
-                    onclick: move |_| selected.set(None),
-                    "agent"
-                }
-                // `key` is the tab id, not the loop index, and that is
-                // load-bearing rather than a lint: closing a tab shifts
-                // every later sibling's position, and an index key would
-                // make Dioxus reuse each item's DOM for a DIFFERENT tab —
-                // carrying the wrong id into the close handler of a
-                // still-open prompt. The id keys the PANES below for the
-                // same reason, with more at stake: reused pane DOM would
-                // hand one tab's mounted island to another's element.
-                for (index , tab_id) in tabs.iter().enumerate() {
-                    TabStripItem {
-                        key: "{tab_id}",
-                        tab_id: tab_id.clone(),
-                        label: tab_label(index),
-                        selected: active_tab.as_deref() == Some(tab_id.as_str()),
-                        busy: closing_tabs.read().contains(tab_id),
-                        on_select: move |id| selected.set(Some(id)),
-                        on_close: on_close_tab,
-                    }
-                }
-                button {
-                    r#type: "button",
-                    class: "btn tab-add",
-                    disabled: opening_tab(),
-                    onclick: on_add_tab,
-                    "+ terminal"
-                }
-            }
-            // The close confirmation, on its own row under the strip
-            // rather than in place of the tab's own controls: the strip is
-            // a single-line flex row that a prompt would push tabs out of,
-            // and unlike a session row there is no per-row action area for
-            // it to take over. Consequence first, then the label, then the
-            // buttons — the same reading order (and the same untruncatable
-            // consequence / truncatable name split) the delete prompt uses;
-            // see `list::confirm_consequence`'s docs for why that order is
-            // the safety-critical part.
-            if let Some(tab_id) = confirming_tab {
-                div { class: "tab-confirm",
-                    span { class: "confirm-consequence", "{CLOSE_TAB_CONSEQUENCE}" }
-                    span { class: "confirm-title",
-                        "{confirming_label.clone().unwrap_or_default()}"
-                    }
-                    button {
-                        r#type: "button",
-                        class: "btn confirm-delete confirm-close-tab",
-                        onclick: move |_| confirm_close_tab(tab_id.clone()),
-                        "confirm close"
-                    }
-                    button {
-                        r#type: "button",
-                        class: "btn confirm-cancel",
-                        // Safe default, exactly as the delete prompt does
-                        // it: keyboard focus lands on the way OUT of the
-                        // destructive action, via the plain HTML attribute
-                        // rather than a fallible `set_focus` whose
-                        // discarded `Result` could silently drop the
-                        // safety behavior.
-                        autofocus: true,
-                        onclick: move |_| confirming_close.set(None),
-                        "cancel"
-                    }
-                }
-            }
-            // One line per failed operation, each keyed to the operation
-            // that produced it (see `tab_errors`), so an unrelated success
-            // never clears a message the user has not read. Sorted so the
-            // lines do not reshuffle on every render — a `HashMap` has no
-            // order of its own, and rows jumping around under the strip
-            // would make a second failure look like a replaced one.
-            for (key , err) in sorted_tab_errors(&tab_errors.read()) {
-                div { key: "{key}", class: "tab-error", "data-tab-error": "{key}", "{err}" }
-            }
-            // Fatal to the terminals, not to the view: the metadata, the
-            // restart affordance, and the tab strip all still work, and
-            // saying so beats rendering empty panes with no explanation.
-            if let Some(err) = lease_error.read().clone() {
-                div { class: "lease-error", "{err}" }
-            }
             // Worded to state the FACT (the helm stopped listing this
             // session) and the CONSEQUENCE (what is shown may be stale),
             // then BOTH readings — never a pick between them, because this
@@ -1039,6 +1067,11 @@ pub(crate) fn SessionView(session: Session, on_back: EventHandler<()>) -> Elemen
             // another client has had its terminals killed, and they will
             // say so in their own banners a moment later. Naming the two
             // possibilities and stopping is the most this can honestly do.
+            //
+            // Distinct from the host-staleness notice below, and both can
+            // legitimately show at once: this one is about the LIST no
+            // longer carrying this session, that one about its HOST being
+            // gone. Collapsing them would attribute one cause to the other.
             if refresh_stale() {
                 div { class: "refresh-stale",
                     "the helm stopped listing this session, so what is shown here may be out of \
@@ -1046,85 +1079,194 @@ pub(crate) fn SessionView(session: Session, on_back: EventHandler<()>) -> Elemen
                      the helm lists at once"
                 }
             }
-            // Every terminal is mounted at once and stacked; only the
-            // selected one is visible. The agent's pane is a fixed node
-            // rather than part of the loop below so that Dioxus never
-            // recreates its DOM (and with it `#term-banner`, which
-            // long-lived observers in the browser suite hold a reference
-            // to) just because the tab list changed around it.
-            div { class: "terminal-panes",
-                div {
-                    class: if active_tab.is_none() { "terminal-pane selected" } else { "terminal-pane" },
-                    "data-terminal": "agent",
-                    div { id: "{AGENT_BANNER_ELEMENT_ID}", class: "banner" }
-                    div { id: "{AGENT_TERMINAL_ELEMENT_ID}", class: "terminal" }
-                    // Empty, hidden, and owned by terminal.js exactly like
-                    // the banner beside it: the reveal it performs happens
-                    // inside a `term.write()` completion callback
-                    // (PLAN_M5.md item 5), which is not a moment the
-                    // reactive layer can be driven from — and routing it
-                    // through the eval channel would put the one surface a
-                    // catching-up terminal shows on the channel that is
-                    // dead on wry's WKWebView (MT-5).
-                    //
-                    // Overlaid rather than in flow, for the reason the
-                    // attachment status line below documents: an in-flow
-                    // element would take height from the terminal, and the
-                    // per-island ResizeObserver would answer with a real
-                    // pty resize — so every single attach would reflow the
-                    // pane twice.
-                    div {
-                        id: "{AGENT_CONNECTING_ELEMENT_ID}",
-                        class: "terminal-connecting",
-                    }
-                    // Empty, hidden, and never touched by Dioxus again —
-                    // terminal.js owns its content for the same reason it
-                    // owns the banner's: an upload's progress and failures
-                    // are events on the island's own DOM path, not
-                    // reactive state, and routing them back through the
-                    // eval channel would put the one message a failed
-                    // attachment gets on the channel that is dead on wry's
-                    // WKWebView (MT-5).
-                    //
-                    // Last in the pane, because it OVERLAYS the terminal
-                    // (app.css explains why it must not take layout space)
-                    // and paint order is what puts it on top.
-                    div {
-                        id: "{attachment_status_element_id(AGENT_TERMINAL_ELEMENT_ID)}",
-                        class: "attach-status",
+            // The whole terminal surface is either present or replaced by
+            // the host-state notice — never both. SPEC.md gives a stale
+            // session metadata behind a notice and NO terminal, and an
+            // empty strip beside a dead pane would be exactly the
+            // unexplained blankness that rule exists to prevent.
+            if let Some(notice) = stale_notice {
+                // The notice is rendered as PARTS, not as one interpolated
+                // string: every peer-supplied value in it (the host's name,
+                // its identities, the transport's own words) gets its own
+                // direction-isolated element, so none of them can rearrange
+                // the sentence explaining why this session has no terminal.
+                PeerLine { class: "host-stale-notice", parts: notice }
+                if let Some((badge_class, badge_text)) = stale_badge {
+                    div { class: "stale-metadata",
+                        span { class: "status-badge {badge_class}", "{badge_text}" }
                     }
                 }
-                for (index , tab_id) in tabs.iter().enumerate() {
+            } else {
+                // The tab strip: the agent terminal first and unclosable
+                // (SPEC.md gives a session one agent terminal, and closing it
+                // is not one of the operations that exist), then every open
+                // tab in the server's creation order, then the add control.
+                div { class: "tab-strip",
+                    button {
+                        r#type: "button",
+                        class: if active_tab.is_none() { "btn tab tab-agent selected" } else { "btn tab tab-agent" },
+                        "data-terminal": "agent",
+                        onclick: move |_| selected.set(None),
+                        "agent"
+                    }
+                    // `key` is the tab id, not the loop index, and that is
+                    // load-bearing rather than a lint: closing a tab shifts
+                    // every later sibling's position, and an index key would
+                    // make Dioxus reuse each item's DOM for a DIFFERENT tab —
+                    // carrying the wrong id into the close handler of a
+                    // still-open prompt. The id keys the PANES below for the
+                    // same reason, with more at stake: reused pane DOM would
+                    // hand one tab's mounted island to another's element.
+                    for (index , tab_id) in tabs.iter().enumerate() {
+                        TabStripItem {
+                            key: "{tab_id}",
+                            tab_id: tab_id.clone(),
+                            label: tab_label(index),
+                            selected: active_tab.as_deref() == Some(tab_id.as_str()),
+                            busy: closing_tabs.read().contains(tab_id),
+                            on_select: move |id| selected.set(Some(id)),
+                            on_close: on_close_tab,
+                        }
+                    }
+                    button {
+                        r#type: "button",
+                        class: "btn tab-add",
+                        disabled: opening_tab(),
+                        onclick: on_add_tab,
+                        "+ terminal"
+                    }
+                }
+                // The close confirmation, on its own row under the strip
+                // rather than in place of the tab's own controls: the strip is
+                // a single-line flex row that a prompt would push tabs out of,
+                // and unlike a session row there is no per-row action area for
+                // it to take over. Consequence first, then the label, then the
+                // buttons — the same reading order (and the same untruncatable
+                // consequence / truncatable name split) the delete prompt uses;
+                // see `list::confirm_consequence`'s docs for why that order is
+                // the safety-critical part.
+                if let Some(tab_id) = confirming_tab {
+                    div { class: "tab-confirm",
+                        span { class: "confirm-consequence", "{CLOSE_TAB_CONSEQUENCE}" }
+                        span { class: "confirm-title",
+                            "{confirming_label.clone().unwrap_or_default()}"
+                        }
+                        button {
+                            r#type: "button",
+                            class: "btn confirm-delete confirm-close-tab",
+                            onclick: move |_| confirm_close_tab(tab_id.clone()),
+                            "confirm close"
+                        }
+                        button {
+                            r#type: "button",
+                            class: "btn confirm-cancel",
+                            // Safe default, exactly as the delete prompt does
+                            // it: keyboard focus lands on the way OUT of the
+                            // destructive action, via the plain HTML attribute
+                            // rather than a fallible `set_focus` whose
+                            // discarded `Result` could silently drop the
+                            // safety behavior.
+                            autofocus: true,
+                            onclick: move |_| confirming_close.set(None),
+                            "cancel"
+                        }
+                    }
+                }
+                // One line per failed operation, each keyed to the operation
+                // that produced it (see `tab_errors`), so an unrelated success
+                // never clears a message the user has not read. Sorted so the
+                // lines do not reshuffle on every render — a `HashMap` has no
+                // order of its own, and rows jumping around under the strip
+                // would make a second failure look like a replaced one.
+                for (key , err) in sorted_tab_errors(&tab_errors.read()) {
+                    div { key: "{key}", class: "tab-error", "data-tab-error": "{key}", "{err}" }
+                }
+                // Fatal to the terminals, not to the view: the metadata, the
+                // restart affordance, and the tab strip all still work, and
+                // saying so beats rendering empty panes with no explanation.
+                if let Some(err) = lease_error.read().clone() {
+                    div { class: "lease-error", "{err}" }
+                }
+                // Every terminal is mounted at once and stacked; only the
+                // selected one is visible. The agent's pane is a fixed node
+                // rather than part of the loop below so that Dioxus never
+                // recreates its DOM (and with it `#term-banner`, which
+                // long-lived observers in the browser suite hold a reference
+                // to) just because the tab list changed around it.
+                div { class: "terminal-panes",
                     div {
-                        key: "{tab_id}",
-                        class: if active_tab.as_deref() == Some(tab_id.as_str()) { "terminal-pane selected" } else { "terminal-pane" },
-                        "data-terminal": "{tab_id}",
-                        // Past the island cap this view renders an
-                        // explanation instead of a mount point, and
-                        // deliberately renders no terminal DIV at all: an
-                        // element with the island's id but no island
-                        // behind it is exactly what a later `sync()` would
-                        // mount into.
-                        if index < MAX_MOUNTED_TAB_ISLANDS {
-                            div { id: "{tab_banner_element_id(tab_id)}", class: "banner" }
-                            div { id: "{tab_terminal_element_id(tab_id)}", class: "terminal" }
-                            // This tab's own catch-up surface — see the
-                            // agent pane's for why it is overlaid and why
-                            // terminal.js owns its content.
-                            div {
-                                id: "{tab_connecting_element_id(tab_id)}",
-                                class: "terminal-connecting",
-                            }
-                            // Last, and overlaid — see the agent pane's
-                            // own status element above.
-                            div {
-                                id: "{attachment_status_element_id(&tab_terminal_element_id(tab_id))}",
-                                class: "attach-status",
-                            }
-                        } else {
-                            div { class: "terminal-not-mounted",
-                                "this session reports more than {MAX_MOUNTED_TAB_ISLANDS} terminal tabs; \
-                                 this one is listed but not attached (close some to attach it)"
+                        class: if active_tab.is_none() { "terminal-pane selected" } else { "terminal-pane" },
+                        "data-terminal": "agent",
+                        div { id: "{AGENT_BANNER_ELEMENT_ID}", class: "banner" }
+                        div { id: "{AGENT_TERMINAL_ELEMENT_ID}", class: "terminal" }
+                        // Empty, hidden, and owned by terminal.js exactly like
+                        // the banner beside it: the reveal it performs happens
+                        // inside a `term.write()` completion callback
+                        // (PLAN_M5.md item 5), which is not a moment the
+                        // reactive layer can be driven from — and routing it
+                        // through the eval channel would put the one surface a
+                        // catching-up terminal shows on the channel that is
+                        // dead on wry's WKWebView (MT-5).
+                        //
+                        // Overlaid rather than in flow, for the reason the
+                        // attachment status line below documents: an in-flow
+                        // element would take height from the terminal, and the
+                        // per-island ResizeObserver would answer with a real
+                        // pty resize — so every single attach would reflow the
+                        // pane twice.
+                        div {
+                            id: "{AGENT_CONNECTING_ELEMENT_ID}",
+                            class: "terminal-connecting",
+                        }
+                        // Empty, hidden, and never touched by Dioxus again —
+                        // terminal.js owns its content for the same reason it
+                        // owns the banner's: an upload's progress and failures
+                        // are events on the island's own DOM path, not
+                        // reactive state, and routing them back through the
+                        // eval channel would put the one message a failed
+                        // attachment gets on the channel that is dead on wry's
+                        // WKWebView (MT-5).
+                        //
+                        // Last in the pane, because it OVERLAYS the terminal
+                        // (app.css explains why it must not take layout space)
+                        // and paint order is what puts it on top.
+                        div {
+                            id: "{attachment_status_element_id(AGENT_TERMINAL_ELEMENT_ID)}",
+                            class: "attach-status",
+                        }
+                    }
+                    for (index , tab_id) in tabs.iter().enumerate() {
+                        div {
+                            key: "{tab_id}",
+                            class: if active_tab.as_deref() == Some(tab_id.as_str()) { "terminal-pane selected" } else { "terminal-pane" },
+                            "data-terminal": "{tab_id}",
+                            // Past the island cap this view renders an
+                            // explanation instead of a mount point, and
+                            // deliberately renders no terminal DIV at all: an
+                            // element with the island's id but no island
+                            // behind it is exactly what a later `sync()` would
+                            // mount into.
+                            if index < MAX_MOUNTED_TAB_ISLANDS {
+                                div { id: "{tab_banner_element_id(tab_id)}", class: "banner" }
+                                div { id: "{tab_terminal_element_id(tab_id)}", class: "terminal" }
+                                // This tab's own catch-up surface — see the
+                                // agent pane's for why it is overlaid and why
+                                // terminal.js owns its content.
+                                div {
+                                    id: "{tab_connecting_element_id(tab_id)}",
+                                    class: "terminal-connecting",
+                                }
+                                // Last, and overlaid — see the agent pane's
+                                // own status element above.
+                                div {
+                                    id: "{attachment_status_element_id(&tab_terminal_element_id(tab_id))}",
+                                    class: "attach-status",
+                                }
+                            } else {
+                                div { class: "terminal-not-mounted",
+                                    "this session reports more than {MAX_MOUNTED_TAB_ISLANDS} terminal tabs; \
+                                     this one is listed but not attached (close some to attach it)"
+                                }
                             }
                         }
                     }
