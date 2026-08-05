@@ -27,13 +27,19 @@
 //! WebSocket's path and query. `encode_bytes` is their shared,
 //! module-private implementation.
 //!
+//! Every request below is issued through this module's own [`send`], which
+//! is also where the helm's build stamp is read off the reply (`skew`).
+//! That funnel is a contract rather than a convenience: the skew check only
+//! means anything if there is no second path to the helm that skips it.
+//!
 //! The cross-module entry points are `pub(crate)`: they exist to be
 //! called from the view components in `list`, `session_view`, and
 //! `tabs`, never from outside this crate — `main.rs` only ever reaches
-//! `App`/`ApiBase` (see `lib.rs`). Internal helpers (`encode_bytes`,
-//! `install_field`, `eval_minted_id`, and the two failure-text builders)
-//! stay private to this module.
+//! `App`/`ApiBase` (see `lib.rs`). Internal helpers (`send`,
+//! `encode_bytes`, `install_field`, `eval_minted_id`, and the two
+//! failure-text builders) stay private to this module.
 
+use crate::skew;
 use crate::{Host, HostId, RestartOffer, Session, Tab};
 use serde::Deserialize;
 
@@ -161,6 +167,32 @@ fn encode_bytes(value: &str, keep: impl Fn(u8) -> bool) -> String {
         }
     }
     out
+}
+
+// ---------------------------------------------------------------------
+// Every request, one door
+// ---------------------------------------------------------------------
+
+/// Send one request and read the helm's build stamp off its reply
+/// (PLAN_M6.md item 6's client↔helm skew edge).
+///
+/// EVERY request this module makes goes through here, and that is the point
+/// rather than tidiness: the skew check's whole premise is that a tab left
+/// open across a helm upgrade notices on whatever it does next, which only
+/// holds if there is no second path to the helm that skips the observation.
+/// A call site that reached for `reqwest` directly would be a hole in that,
+/// invisible until someone upgraded a helm under a real tab.
+///
+/// The reply is handed back untouched — the observation only reads a
+/// header — so this is a one-line substitution at each call site and every
+/// status/decode decision below is unchanged.
+async fn send(request: reqwest::RequestBuilder) -> Result<reqwest::Response, String> {
+    let resp = request.send().await.map_err(|e| e.to_string())?;
+    // Called for its effect, in a statement of its own. Folding it into a
+    // `.map()` reads as a transformation of the response and is not one —
+    // the value is unchanged and the point is entirely the side effect.
+    skew::note_build(&resp);
+    Ok(resp)
 }
 
 // ---------------------------------------------------------------------
@@ -342,7 +374,7 @@ pub(crate) async fn fetch_sessions(base: &str) -> Result<SessionListing, String>
             None => format!("{base}/api/sessions"),
             Some(cursor) => format!("{base}/api/sessions?cursor={}", encode_query_value(cursor)),
         };
-        let resp = reqwest::get(&url).await.map_err(|e| e.to_string())?;
+        let resp = send(reqwest::Client::new().get(&url)).await?;
         if !resp.status().is_success() {
             return Err(read_failure("GET", &url, resp).await);
         }
@@ -448,12 +480,7 @@ pub(crate) async fn create_session(
         "intent_key": intent_key,
         "host": host,
     });
-    let resp = reqwest::Client::new()
-        .post(&url)
-        .json(&body)
-        .send()
-        .await
-        .map_err(|e| e.to_string())?;
+    let resp = send(reqwest::Client::new().post(&url).json(&body)).await?;
     if !resp.status().is_success() {
         return Err(refusal_text("POST", &url, resp).await);
     }
@@ -601,11 +628,7 @@ pub(crate) async fn mint_intent_key() -> Result<String, String> {
 /// reqwest error string rather than a wrong one, not a silent failure.
 pub(crate) async fn stop_session(base: &str, id: &str) -> Result<(), String> {
     let url = format!("{base}/api/sessions/{}/stop", encode_path_segment(id));
-    let resp = reqwest::Client::new()
-        .post(&url)
-        .send()
-        .await
-        .map_err(|e| e.to_string())?;
+    let resp = send(reqwest::Client::new().post(&url)).await?;
     if !resp.status().is_success() {
         return Err(refusal_text("POST", &url, resp).await);
     }
@@ -639,7 +662,7 @@ pub(crate) async fn stop_session(base: &str, id: &str) -> Result<(), String> {
 /// and "the helm answered 404" must not be confused either.
 pub(crate) async fn fetch_session(base: &str, id: &str) -> Result<Option<Session>, String> {
     let url = format!("{base}/api/sessions/{}", encode_path_segment(id));
-    let resp = reqwest::get(&url).await.map_err(|e| e.to_string())?;
+    let resp = send(reqwest::Client::new().get(&url)).await?;
     if resp.status() == reqwest::StatusCode::NOT_FOUND {
         return Ok(None);
     }
@@ -674,12 +697,7 @@ pub(crate) async fn restart_session(
 ) -> Result<Session, String> {
     let url = format!("{base}/api/sessions/{}/restart", encode_path_segment(id));
     let body = serde_json::json!({ "mode": mode, "stop_if_running": stop_if_running });
-    let resp = reqwest::Client::new()
-        .post(&url)
-        .json(&body)
-        .send()
-        .await
-        .map_err(|e| e.to_string())?;
+    let resp = send(reqwest::Client::new().post(&url).json(&body)).await?;
     if !resp.status().is_success() {
         return Err(refusal_text("POST", &url, resp).await);
     }
@@ -708,12 +726,7 @@ pub(crate) async fn restart_session(
 pub(crate) async fn rename_session(base: &str, id: &str, title: &str) -> Result<Session, String> {
     let url = format!("{base}/api/sessions/{}/rename", encode_path_segment(id));
     let body = serde_json::json!({ "title": title });
-    let resp = reqwest::Client::new()
-        .post(&url)
-        .json(&body)
-        .send()
-        .await
-        .map_err(|e| e.to_string())?;
+    let resp = send(reqwest::Client::new().post(&url).json(&body)).await?;
     if !resp.status().is_success() {
         return Err(refusal_text("POST", &url, resp).await);
     }
@@ -725,11 +738,7 @@ pub(crate) async fn rename_session(base: &str, id: &str, title: &str) -> Result<
 /// endpoint.
 pub(crate) async fn delete_session(base: &str, id: &str) -> Result<(), String> {
     let url = format!("{base}/api/sessions/{}", encode_path_segment(id));
-    let resp = reqwest::Client::new()
-        .delete(&url)
-        .send()
-        .await
-        .map_err(|e| e.to_string())?;
+    let resp = send(reqwest::Client::new().delete(&url)).await?;
     if !resp.status().is_success() {
         return Err(refusal_text("DELETE", &url, resp).await);
     }
@@ -776,11 +785,7 @@ pub(crate) async fn open_tab(base: &str, session_id: &str) -> Result<Tab, String
         "{base}/api/sessions/{}/tabs",
         encode_path_segment(session_id)
     );
-    let resp = reqwest::Client::new()
-        .post(&url)
-        .send()
-        .await
-        .map_err(|e| e.to_string())?;
+    let resp = send(reqwest::Client::new().post(&url)).await?;
     if !resp.status().is_success() {
         return Err(refusal_text("POST", &url, resp).await);
     }
@@ -806,11 +811,7 @@ pub(crate) async fn close_tab(base: &str, session_id: &str, tab_id: &str) -> Res
         encode_path_segment(session_id),
         encode_path_segment(tab_id)
     );
-    let resp = reqwest::Client::new()
-        .delete(&url)
-        .send()
-        .await
-        .map_err(|e| e.to_string())?;
+    let resp = send(reqwest::Client::new().delete(&url)).await?;
     if !resp.status().is_success() {
         return Err(refusal_text("DELETE", &url, resp).await);
     }
@@ -851,7 +852,7 @@ struct HostListing {
 /// host count needed paging is not one a person manages by hand.
 pub(crate) async fn fetch_hosts(base: &str) -> Result<Vec<Host>, String> {
     let url = format!("{base}/api/hosts");
-    let resp = reqwest::get(&url).await.map_err(|e| e.to_string())?;
+    let resp = send(reqwest::Client::new().get(&url)).await?;
     if !resp.status().is_success() {
         return Err(read_failure("GET", &url, resp).await);
     }
@@ -948,12 +949,7 @@ pub(crate) async fn add_host(
         "remote_farhelm": install_field(remote_farhelm),
         "remote_state_dir": install_field(remote_state_dir),
     });
-    let resp = reqwest::Client::new()
-        .post(&url)
-        .json(&body)
-        .send()
-        .await
-        .map_err(|e| e.to_string())?;
+    let resp = send(reqwest::Client::new().post(&url).json(&body)).await?;
     if !resp.status().is_success() {
         return Err(refusal_text("POST", &url, resp).await);
     }
@@ -975,12 +971,12 @@ pub(crate) async fn set_host_destination(
     ssh: &str,
 ) -> Result<Commit, String> {
     let url = format!("{base}/api/hosts/{host}/destination");
-    let resp = reqwest::Client::new()
-        .post(&url)
-        .json(&serde_json::json!({ "ssh": ssh }))
-        .send()
-        .await
-        .map_err(|e| e.to_string())?;
+    let resp = send(
+        reqwest::Client::new()
+            .post(&url)
+            .json(&serde_json::json!({ "ssh": ssh })),
+    )
+    .await?;
     if !resp.status().is_success() {
         return Err(refusal_text("POST", &url, resp).await);
     }
@@ -1000,11 +996,7 @@ pub(crate) async fn set_host_destination(
 /// "forget", not "delete".
 pub(crate) async fn remove_host(base: &str, host: HostId) -> Result<(), String> {
     let url = format!("{base}/api/hosts/{host}");
-    let resp = reqwest::Client::new()
-        .delete(&url)
-        .send()
-        .await
-        .map_err(|e| e.to_string())?;
+    let resp = send(reqwest::Client::new().delete(&url)).await?;
     if !resp.status().is_success() {
         return Err(refusal_text("DELETE", &url, resp).await);
     }
@@ -1027,12 +1019,12 @@ pub(crate) async fn remove_host(base: &str, host: HostId) -> Result<(), String> 
 /// nothing to adopt there, and the helm refuses it (see that phase's docs).
 pub(crate) async fn adopt_host(base: &str, host: HostId, reported: &str) -> Result<(), String> {
     let url = format!("{base}/api/hosts/{host}/adopt");
-    let resp = reqwest::Client::new()
-        .post(&url)
-        .json(&serde_json::json!({ "reported": reported }))
-        .send()
-        .await
-        .map_err(|e| e.to_string())?;
+    let resp = send(
+        reqwest::Client::new()
+            .post(&url)
+            .json(&serde_json::json!({ "reported": reported })),
+    )
+    .await?;
     if !resp.status().is_success() {
         return Err(refusal_text("POST", &url, resp).await);
     }
@@ -1056,11 +1048,7 @@ pub(crate) async fn adopt_host(base: &str, host: HostId, reported: &str) -> Resu
 ///   "resolving a freeze still earns the ladder").
 pub(crate) async fn retry_host(base: &str, host: HostId) -> Result<(), String> {
     let url = format!("{base}/api/hosts/{host}/retry");
-    let resp = reqwest::Client::new()
-        .post(&url)
-        .send()
-        .await
-        .map_err(|e| e.to_string())?;
+    let resp = send(reqwest::Client::new().post(&url)).await?;
     if !resp.status().is_success() {
         return Err(refusal_text("POST", &url, resp).await);
     }

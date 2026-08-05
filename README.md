@@ -4,8 +4,8 @@ Run coding agents (Claude Code, Codex, other terminal agents) on machines you co
 interface, through their real TUIs. See SPEC.md for what this is and is not, SPEC_impl.md for how it is built and why,
 and PLAN.md for where the build currently stands.
 
-NOTE: This is mid-milestone-6 software: several sessions at once, across every host in a registry the helm keeps. Hosts
-are registered by SSH destination — through `--ensure-hosts` at startup, the API, or the UI's own hosts panel — and the
+NOTE: This is milestone-6 software: several sessions at once, across every host in a registry the helm keeps. Hosts are
+registered by SSH destination — through `--ensure-hosts` at startup, the API, or the UI's own hosts panel — and the
 machine running the helm is always one of them without being registered at all; one flat session list spans them, each
 row naming its host, with a host that goes dark keeping its sessions listed and marked stale. The hosts panel shows
 every host's connection state at all times and is where hosts are added, retargeted, removed, retried, and where an
@@ -16,17 +16,18 @@ which is every ordinary one; an unusually large replay, or one that stalls part-
 as it arrives instead of hiding it. A session can be renamed from either the list or its own view. Sessions survive a
 supervisor restart (persisted metadata, and a still-viewable terminal whenever the private tmux server survived too), a
 host reboot classifies previously-running sessions as interrupted rather than guessing, and a user-stopped session keeps
-its "stopped by user" qualifier durably. Restart is live too: an interrupted (or exited, or errored) session relaunches
-its agent — resuming its own Claude Code or Codex conversation where that conversation was captured, and saying plainly
-that it is launching fresh where it was not. On Linux hosts with a systemd user manager, stopping a session also kills
-its launch's own cgroup before the portable process sweep, which catches descendants that daemonized away from both (see
-SPEC_impl.md for what that does and does not promise). Usable for real work, minimal in everything else. Two caveats
-worth knowing before that real work: the helm's loopback API carries no authentication yet (the web token is a later
-milestone), so any local account on the helm's machine can drive your sessions — treat multi-user hosts accordingly; and
-every agent invocation entered through the GUI's create dialog is ordinary argv, visible to every local user via `ps`,
-so credentials do not belong in it.
+its "stopped by user" qualifier durably. A terminal that loses its connection — a closed laptop, a network that went
+away — gets itself back without you closing and reopening the session. Restart is live too: an interrupted (or exited,
+or errored) session relaunches its agent — resuming its own Claude Code or Codex conversation where that conversation
+was captured, and saying plainly that it is launching fresh where it was not. On Linux hosts with a systemd user
+manager, stopping a session also kills its launch's own cgroup before the portable process sweep, which catches
+descendants that daemonized away from both (see SPEC_impl.md for what that does and does not promise). Usable for real
+work, minimal in everything else. Two caveats worth knowing before that real work: the helm's loopback API carries no
+authentication yet (the web token is a later milestone), so any local account on the helm's machine can drive your
+sessions — treat multi-user hosts accordingly; and every agent invocation entered through the GUI's create dialog is
+ordinary argv, visible to every local user via `ps`, so credentials do not belong in it.
 
-## Trying it (M6, in progress)
+## Trying it (M6)
 
 Prerequisites: Rust with the `wasm32-unknown-unknown` target (`rustup target add wasm32-unknown-unknown`), tmux on every
 host involved, and `cargo binstall dioxus-cli@0.7.9` (or `cargo install dioxus-cli@0.7.9` — match the workspace's dioxus
@@ -143,6 +144,19 @@ Ubuntu 24.04 ships 3.4.
   the tab or silently dropping bytes. A viewer that stops consuming entirely — a wedged tab, a laptop asleep past its
   connection timeout — is detached, with a visible reason, after a bounded stall; the session keeps running unaffected,
   and reattaching picks it back up.
+- A terminal whose connection drops reconnects on its own — including the case where nothing appears to have dropped,
+  because a sleeping machine or a timed-out network path leaves a socket that looks fine and carries nothing. The
+  terminal says which phase it is in (retrying for the first half-minute, then checking every 30 seconds for as long as
+  it takes) and offers "reconnect now" throughout; a recovered terminal comes back where the session is now, not
+  scrolling its history past again. Losing the session to another client, or being detached for stalling, deliberately
+  does not reconnect: those are decisions, not dropped connections, and both keep their existing surface. Nor can a
+  recovering terminal take the session BACK: if someone else opened it while you were disconnected, the automatic
+  attempt is refused and you get the same "take control" button any displaced client gets.
+- Upgrade the helm while a browser tab is open and the tab says so, in a line above everything else, instead of failing
+  in ways nothing explains: the page carries the build it was made from and compares it against the helm's on every
+  reply. It keeps working — the notice asks for a reload rather than taking the app away — but it stops doing anything
+  UNATTENDED against a helm it does not match, so a terminal on a mismatched page waits for you to press "reconnect now"
+  rather than reconnecting on its own.
 
 The desktop window is the same UI in a wry webview: `cargo run -p farhelm-ui --features desktop` with `FARHELM_URL`
 pointing at the helm (default `http://127.0.0.1:7433`).

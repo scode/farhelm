@@ -726,5 +726,14 @@ constraint (see the GUI section's motivation), not an afterthought:
 ## Version and skew
 
 One version number across the workspace; the protocol hello carries protocol and build versions; incompatibility refuses
-with a clear error at the edge (helm↔supervisor connect, client↔helm load) per SPEC.md. Protocol version bumps only with
-incompatible frame changes.
+with a clear error at the edge (helm↔supervisor connect, client↔helm load) per SPEC.md. Protocol version bumps with any
+incompatible change — which includes a field whose omission changes what the receiver DOES, not only changes to frames
+and message sets. A serde-additive field can still be semantically load-bearing: the non-displacing attach is the worked
+example (a peer that ignores it displaces a client it was asked to leave alone, silently, on both ends), and decode
+tolerance is why such a bump is required rather than why it is unnecessary.
+
+The client↔helm edge has no hello to refuse at, so the helm stamps its build on every reply and the UI compares it
+against the one compiled into its bundle. A mismatch — including a helm that reports no build at all — surfaces a reload
+prompt and, more importantly, withdraws every UNATTENDED behavior that depends on the helm honoring this milestone's
+vocabulary: the terminal heartbeat and automatic reconnect both stop, while anything the user explicitly asks for keeps
+working.

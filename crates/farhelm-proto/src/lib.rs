@@ -99,7 +99,7 @@ pub mod io;
 /// connection loops treat that error as fatal — an unknown variant tears
 /// down an already-established connection instead of being ignored. A new
 /// variant is exactly the "cannot be additive" case that earns its own
-/// bump, per version 3's own docs above; `protocol_version_is_pinned_at_8`
+/// bump, per version 3's own docs above; `protocol_version_is_pinned_at_9`
 /// (renamed at every bump since `_at_4`) and
 /// `unknown_control_message_tag_fails_decode` below (plus the
 /// loop-level teardown test in the farhelm crate's e2e suite) pin both the
@@ -230,7 +230,43 @@ pub mod io;
 /// version continues to apply: new optional fields with decode defaults are
 /// fine; a new tagged variant, a new REQUIRED field, or a field REMOVAL
 /// earns the next bump.
-pub const PROTOCOL_VERSION: u32 = 8;
+///
+/// Bumped to 9 for ONE field: [`ControlMsg::Attach::if_unowned`], the
+/// non-displacing attach auto-reconnect needs (PLAN_M6.md item 7). It is
+/// decode-additive — `#[serde(default)]`, an older decoder drops it
+/// without complaint — and that is precisely why it earns a bump instead
+/// of riding version 8. Every additive field this doc has waved through
+/// was additive in MEANING as well as in decoding: ignoring it produced
+/// the same outcome the sender would have accepted anyway. This one
+/// inverts that. It says "refuse rather than displace", and a peer that
+/// ignores it does the opposite of what was asked — it takes a session
+/// from a client that still holds it, on behalf of a browser that was not
+/// even there to ask. The failure is silent on both ends: the sender sees
+/// a successful attach, the displaced client sees its terminal die, and
+/// nothing anywhere reports a version problem.
+///
+/// So the rule this doc has stated since version 4 gains its sharper
+/// form: a field whose whole purpose is to CHANGE what the receiver does
+/// is not additive, whatever serde makes of it. SPEC.md's version rule
+/// ("Incompatible versions refuse to connect with a clear, actionable
+/// error; there is no silent degradation") is the standard being met
+/// here, and the hello refusal is the machinery that meets it — a helm on
+/// 9 and a supervisor on 8 now refuse each other at connect, and the host
+/// surfaces `version-skew` with both builds named and the helm's own
+/// remediation sentence, instead of quietly running a fleet where
+/// automatic reconnects steal sessions.
+///
+/// The browser edge cannot use the hello, having none: it is gated on the
+/// helm's build stamp instead (farhelm-ui's `skew` module), which refuses
+/// unattended attaches whenever the helm answering is not the build this
+/// bundle was made for. Same rule, same milestone, different handshake.
+///
+/// Within version 9 the additive discipline of every prior version
+/// continues to apply, now with that sharper reading: new optional fields
+/// with decode defaults are fine WHEN ignoring one is harmless; a field
+/// whose omission changes behavior, a new tagged variant, a new REQUIRED
+/// field, or a field REMOVAL earns the next bump.
+pub const PROTOCOL_VERSION: u32 = 9;
 
 /// The build version compiled into this binary, carried in the hello for
 /// diagnostics.
@@ -314,6 +350,26 @@ pub const MAX_FRAME_LEN: u32 = 8 * 1024 * 1024;
 /// yet. The supervisor stall timer and the helm channel bound land in
 /// later M2.5 PRs.
 pub const DETACH_REASON_STALLED: &str = "terminal stopped consuming output (stalled)";
+
+/// Why a non-displacing attach ([`ControlMsg::Attach::if_unowned`]) was
+/// refused: another client holds this session.
+///
+/// Named in this crate for the same reason [`DETACH_REASON_STALLED`] is —
+/// three parties have to agree on it byte for byte and none of them can
+/// see the others' source: the supervisor emits it, the helm relays it
+/// into the browser's detach notice unchanged (the attach-failure arm of
+/// its terminal socket), and the browser matches it to decide that this
+/// view lost the session and must show its take-control surface rather
+/// than keep reconnecting.
+///
+/// The wording is deliberately IDENTICAL to what a displaced client is
+/// told when it is taken over while attached, because the fact is
+/// identical — another client attached — and only the timing differs
+/// (this one had no socket to be told on at the time). Keeping the two
+/// strings the same is what lets a client render one state for one
+/// situation instead of inventing a second vocabulary for the half of it
+/// that happens to be observed late.
+pub const ATTACH_REFUSED_TAKEN_OVER: &str = "another client attached";
 
 /// Errors surfaced by frame encoding/decoding.
 #[derive(Debug, thiserror::Error)]
@@ -1331,6 +1387,35 @@ pub enum ControlMsg {
         /// the single-terminal semantics every older caller expects.
         #[serde(default)]
         lease: String,
+        /// Refuse this attach instead of displacing another client
+        /// (PLAN_M6.md item 7's auto-reconnect).
+        ///
+        /// The default — `false`, and therefore every pre-M6 caller — is
+        /// the displacing attach the takeover rule above describes: last
+        /// attach wins. `true` asks for the opposite trade, and exists
+        /// because ONE caller cannot honestly make that claim: a client
+        /// reconnecting after transport loss was not there to be told the
+        /// session had been taken over (it had no socket to be told on),
+        /// so its attach carries no user intent at all. A displacing
+        /// automatic attach would silently take the session back from
+        /// whoever legitimately holds it, which is the eviction loop the
+        /// takeover latch exists to prevent — and worse than the latched
+        /// case, because no one pressed anything.
+        ///
+        /// Refused with [`ErrorKind::Conflict`] and
+        /// [`ATTACH_REFUSED_TAKEN_OVER`] as the message, which is what
+        /// lets a client render the refusal as the ordinary takeover it
+        /// is. A refusal installs nothing: the channel this attach named
+        /// stays unattached and its caller must not send on it.
+        ///
+        /// "Owned" means the session-scoped rule already spelled out
+        /// above: any attachment under a DIFFERENT lease, on any of this
+        /// session's terminals. The client's OWN stale attachment — same
+        /// lease, same terminal — is not ownership by anyone else and is
+        /// replaced exactly as it always was, which is precisely what a
+        /// reconnect after transport loss finds waiting for it.
+        #[serde(default)]
+        if_unowned: bool,
     },
     /// Attach accepted. Data frames on `channel` may arrive *before* this
     /// reply is processed — the supervisor starts the replay as soon as
@@ -1750,6 +1835,7 @@ mod tests {
             rows: 24,
             terminal: TerminalSelector::default(),
             lease: String::new(),
+            if_unowned: false,
         };
         let json = serde_json::to_value(&msg).unwrap();
         assert_eq!(
@@ -1763,6 +1849,7 @@ mod tests {
                 "rows": 24,
                 "terminal": { "kind": "agent" },
                 "lease": "",
+                "if_unowned": false,
             })
         );
     }
@@ -1788,6 +1875,7 @@ mod tests {
                     rows: 24,
                     terminal: TerminalSelector::Agent,
                     lease: "client-abc".into(),
+                    if_unowned: false,
                 },
                 serde_json::json!({
                     "type": "attach",
@@ -1798,6 +1886,7 @@ mod tests {
                     "rows": 24,
                     "terminal": { "kind": "agent" },
                     "lease": "client-abc",
+                    "if_unowned": false,
                 }),
             ),
             (
@@ -1809,6 +1898,7 @@ mod tests {
                     rows: 24,
                     terminal: TerminalSelector::Tab { id: "t1".into() },
                     lease: "client-abc".into(),
+                    if_unowned: true,
                 },
                 serde_json::json!({
                     "type": "attach",
@@ -1819,6 +1909,7 @@ mod tests {
                     "rows": 24,
                     "terminal": { "kind": "tab", "id": "t1" },
                     "lease": "client-abc",
+                    "if_unowned": true,
                 }),
             ),
         ] {
@@ -1862,12 +1953,24 @@ mod tests {
     /// (mirroring `new_session_list_json_decodes_under_a_legacy_pre_status_decoder`):
     /// a hand-rolled decoder shaped like a genuine pre-M4 (version 5)
     /// peer — no `terminal`, no `lease` field at all — must still decode
-    /// a CURRENT sender's `Attach` JSON, silently dropping the two fields
-    /// it predates. `terminal` is deliberately set to the NON-default
-    /// `Tab` selector with a non-empty `lease` here, unlike
+    /// a CURRENT sender's `Attach` JSON, silently dropping the fields it
+    /// predates. `terminal` is deliberately set to the NON-default `Tab`
+    /// selector with a non-empty `lease` here, unlike
     /// `control_json_shape_is_pinned`'s all-defaults case above, so this
     /// pins that a legacy peer tolerates losing real information, not
     /// just a default it would have reconstructed anyway.
+    ///
+    /// What this DOES NOT license, and what a reader coming to it for
+    /// reassurance most needs to hear: decoding tolerance is why the
+    /// version bumps are REQUIRED, not why they are unnecessary. Silently
+    /// dropping a field is exactly the failure mode that makes a mixed
+    /// fleet dangerous — most sharply for `if_unowned` (set here, and
+    /// dropped by the legacy shape below), whose whole meaning is "do
+    /// something DIFFERENT from what you would otherwise do". A peer that
+    /// drops it displaces a client it was asked to leave alone, and
+    /// nothing on either side notices. The hello refusal is what makes
+    /// that unreachable; this test documents the shape of the hazard it
+    /// closes, not a tolerance anyone may rely on.
     #[derive(Debug, Deserialize)]
     #[serde(tag = "type", rename_all = "snake_case")]
     enum LegacyV5ControlMsg {
@@ -1892,6 +1995,7 @@ mod tests {
                 id: "t1".to_string(),
             },
             lease: "client-xyz".to_string(),
+            if_unowned: true,
         };
         let json = serde_json::to_value(&new_msg).unwrap();
 
@@ -2227,13 +2331,14 @@ mod tests {
 
     /// `PROTOCOL_VERSION` is a load-bearing constant (see the const's own
     /// docs for the M2 bump to 3, the M2.5 bump to 4, the M3 bump to 5,
-    /// the M4 bump to 6, the M5 bump to 7, and the M6 bump to 8): pinning
-    /// its value here makes an accidental re-bump (or a forgotten one, if
-    /// a later change needed it) a loud test failure rather than a silent
-    /// drift discovered only by two builds refusing to talk to each other.
+    /// the M4 bump to 6, the M5 bump to 7, the M6 bump to 8, and the
+    /// non-displacing attach's bump to 9): pinning its value here makes an
+    /// accidental re-bump (or a forgotten one, if a later change needed
+    /// it) a loud test failure rather than a silent drift discovered only
+    /// by two builds refusing to talk to each other.
     #[test]
-    fn protocol_version_is_pinned_at_8() {
-        assert_eq!(PROTOCOL_VERSION, 8);
+    fn protocol_version_is_pinned_at_9() {
+        assert_eq!(PROTOCOL_VERSION, 9);
     }
 
     /// Pins the decode half of the failure PLAN_M2_5.md's version bump
@@ -2985,7 +3090,12 @@ mod tests {
         let msg = crate::io::parse_control(&frame).expect(
             "an unknown field nested inside a TerminalSelector object must decode, not error",
         );
-        let ControlMsg::Attach { terminal, .. } = msg else {
+        let ControlMsg::Attach {
+            terminal,
+            if_unowned,
+            ..
+        } = msg
+        else {
             panic!("expected ControlMsg::Attach, got {msg:?}");
         };
         assert_eq!(
@@ -2994,6 +3104,29 @@ mod tests {
                 id: "t1".to_string()
             }
         );
+        assert!(
+            !if_unowned,
+            "an attach from a sender that predates PLAN_M6.md item 7 must read as the DISPLACING \
+             attach every caller has always sent — defaulting it the other way would turn every \
+             legacy reattach into a refusal the moment anyone else held the session"
+        );
+    }
+
+    /// The refusal string a non-displacing attach comes back with must be
+    /// the SAME string a client displaced while attached is told
+    /// (`DETACH_REASON_TAKEOVER`, private to the supervisor).
+    ///
+    /// Pinned as a literal here because the two constants live in
+    /// different crates with nothing but this equality holding them
+    /// together, and the browser matches on ONE string to decide it lost
+    /// the session (terminal.js's `TAKEOVER_DETACH_REASON`). If the
+    /// supervisor's copy ever drifts from this one, a client refused a
+    /// reconnect would fall through to its generic banner and keep
+    /// climbing the ladder against a session it can never have — the exact
+    /// eviction loop the refusal exists to end, minus the eviction.
+    #[test]
+    fn the_refused_attach_reason_is_the_takeover_wording() {
+        assert_eq!(ATTACH_REFUSED_TAKEN_OVER, "another client attached");
     }
 
     /// The `TabInfo` sibling of the two nesting-additivity tests above:

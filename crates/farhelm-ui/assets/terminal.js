@@ -111,6 +111,83 @@
 // deferred path therefore checks this mount's own `alive` token, which
 // `unmount()` clears before it disposes anything.
 //
+// ## Auto-reconnect (PLAN_M6.md item 7)
+//
+// A terminal whose TRANSPORT dies gets itself back without the user doing
+// anything: the socket closing with no explanation, and — the case this
+// milestone exists for — the socket that silently stops carrying anything
+// while still looking open, which is what a laptop sleep or a NAT timeout
+// leaves behind. The second is why waiting for a close event is not
+// enough, and why an island runs an idle-gated heartbeat (see
+// `armHeartbeat` inside `mount()`): a terminal with output flowing never
+// sends a thing, while a quiet one asks the helm whether the socket is
+// still there and tears it down locally when no answer comes.
+//
+// "An island", not "every island": the probe — like every other UNATTENDED
+// behavior here — runs only while the helm answering this page is the
+// build it was made for (`reconnectControls`). A helm that predates this
+// milestone ignores the probe by its own tolerance contract, so sending
+// one would manufacture the death it is meant to detect.
+//
+// Both paths enter ONE flow, driven by a per-island controller in
+// `reconnects` below: unmount, remount, and let the ordinary attach do the
+// rest. That is deliberately the cheapest possible implementation of
+// "reconnect" — a reattach already replays and lands at the tail through
+// M5's marker, so riding it means a recovered terminal looks exactly like
+// a reopened one, with no second code path to keep honest. The ladder and
+// the phases come from Rust (`reconnect::reconnect_policy`), so what is
+// left here is mechanism only.
+//
+// ### Three kinds of ending, not two
+//
+// A detach notice is not one thing. Sorting them is what the carve-outs
+// actually are (PLAN_M6.md item 7), and getting the split wrong in either
+// direction is a real failure:
+//
+// - DECISIONS — a takeover, a stall — end recovery. A displaced client
+//   that bounced back would fight the new owner, visibly, as the two
+//   clients' takeovers alternated; a stalled client reconnecting into the
+//   same wedge helps nobody. Both keep the surface they were given
+//   (`decisionDetach`).
+// - INFRASTRUCTURE — the helm losing its supervisor, a host that went
+//   away, an attach refused because the host is unreachable — is transport
+//   loss one layer up, and RECOVERS. This is SPEC.md's "comes back
+//   overnight" sentence: attempts fail while the host is down, the ladder
+//   degrades into background probes, and the terminal is back when the
+//   host is.
+// - NAVIGATION is not an ending at all: `unmount()` nulls the socket
+//   callbacks before closing, and the page-level `navigating` flag covers
+//   the unload that races it — reset again on a bfcache restore, which is
+//   the one way a page comes BACK from that state.
+//
+// An attach that never CONNECTED is also not transport loss — see
+// `openedOnce`. A first mount against a helm that is not there keeps M5's
+// "never finished connecting" banner rather than silently retrying behind
+// it; only a socket that worked and then stopped is something to recover.
+//
+// ### An unattended attach must not steal the session
+//
+// A client between attempts holds no socket, so a takeover that happens
+// while it is away reaches it nowhere: its next attempt would attach under
+// the same lease it always had and silently displace whoever now owns the
+// session — an eviction with nobody behind it. So automatic attempts carry
+// `if_unowned` and are REFUSED when another lease holds the session; the
+// refusal arrives as the ordinary takeover notice and lands this view in
+// the take-control state it was in all along. Manual reconnect and the
+// take-control button displace, because a press is intent.
+//
+// That safety depends on the far end HONORING the request, and it is made
+// unignorable in two layers rather than trusted. An automatic attempt asks
+// on a ROUTE only a conforming helm serves (`spec.pathUnowned`), so an
+// older one cannot quietly perform the displacing attach instead — it has
+// no such path, the handshake fails, and the ladder simply carries on. And
+// unattended behavior as a whole is gated on the build stamp
+// (`reconnectControls`): no matching helm, no automatic attempts and no
+// heartbeat, only the manual control and a surface saying why. The gate is
+// re-read at every decision rather than captured, so a helm upgraded — or
+// rolled back — under an open tab revokes it mid-ladder, and the route
+// covers the seconds before the stamp catches up.
+//
 // ## Paste and drop interception (PLAN_M4.md item 7)
 //
 // SPEC.md's attachments contract quantifies over "any of a session's
@@ -336,6 +413,21 @@
   // is only its client-side half.
   const TAKEOVER_DETACH_REASON = "another client attached";
 
+  // The reason a client is detached for not consuming its output
+  // (`farhelm_proto::DETACH_REASON_STALLED`, emitted by both the
+  // supervisor's stall timer and the helm's channel bound — which is
+  // exactly why that crate names it).
+  //
+  // Matched here for ONE purpose: PLAN_M6.md item 7's stall carve-out. A
+  // stalled client's wedge is the reason it was detached, so reconnecting
+  // into the same wedge helps nobody and the user acts first. Like the
+  // takeover string above this is a cross-language coupling with nothing
+  // in either language forcing the two to move together; what pins it is
+  // the browser suite's stall test, which provokes a REAL stall detach
+  // through the real stack and fails if the client starts recovering from
+  // it.
+  const STALL_DETACH_REASON = "terminal stopped consuming output (stalled)";
+
   // Non-null once a takeover-reason `Detached` has arrived on any of this
   // view's terminals: the reason string, used both as the latch flag and as
   // the text painted onto terminals that never got to attach. Cleared by
@@ -349,6 +441,533 @@
   // Reclaim has to work from a latched state where, by construction, no
   // further sync has been allowed to change anything.
   let lastSync = null;
+
+  // ------------------------------------------------------------------
+  // Auto-reconnect (PLAN_M6.md item 7; this file's header carries the
+  // design and the carve-outs)
+  // ------------------------------------------------------------------
+
+  // The islands currently recovering from transport loss, keyed by element
+  // id — at most one controller per element, and its presence is what makes
+  // the controller the OWNER of that element's mount lifecycle: `sync()`
+  // steps over an element a controller holds, because the island it wants
+  // is exactly the one being rebuilt on the ladder's own schedule.
+  //
+  // Each value is `{el, spec, baseUrl, attach, policy, controls, path, gen,
+  // failures, timer, attempting}`. `path`/`gen` are copied out of the spec
+  // so `sync()`'s identity check can read a controller and an island the
+  // same way.
+  const reconnects = new Map();
+
+  // Elements holding a DECISION's aftermath: the screen a client keeps
+  // after being taken over or stall-detached while it was recovering
+  // (`cancelReconnect`'s `"restore"`), keyed by element id.
+  //
+  // A tombstone rather than a bare screen, and that distinction is the
+  // carve-out itself. SPEC.md is absolute that a takeover or a stall
+  // detach comes back only "because someone asks" — but the island is gone
+  // by then, and `sync()` mounts whatever it finds unmounted. The very
+  // next desired-set change (a sibling tab opening, a poll noticing
+  // anything) would therefore reattach the terminal with nobody having
+  // asked, which is exactly the bounce-back the carve-out forbids, arrived
+  // at through the reconciler instead of through the ladder.
+  //
+  // So each entry carries the identity it is a tombstone FOR, and `sync()`
+  // reads it: the same terminal stays suppressed, a genuinely different
+  // one (a restart's new generation, a different attachment) buries it and
+  // mounts. Everything that IS a user asking — take control, leaving and
+  // reopening the session — clears them explicitly.
+  //
+  // They also own a live xterm instance each, so whoever buries one
+  // disposes it; a departed terminal takes its tombstone with it rather
+  // than leaving it for the view's teardown.
+  const tombstones = new Map();
+
+  /**
+   * Bury the tombstone for `el` — disposing the screen it was holding —
+   * because something is about to put a terminal there, or take the
+   * element away.
+   */
+  function buryTombstone(el) {
+    const tomb = tombstones.get(el);
+    if (!tomb) return;
+    tombstones.delete(el);
+    tomb.term.dispose();
+  }
+
+  /**
+   * Whether this element is holding a decision's aftermath for the SAME
+   * attachment `spec` describes — the question `sync()` asks before it
+   * mounts anything.
+   *
+   * An identity change is not suppressed: a restart, or a different
+   * terminal in the same slot, is a new attachment that nobody was
+   * detached from, so the tombstone is buried and the mount proceeds.
+   */
+  function tombstoned(spec) {
+    const tomb = tombstones.get(spec.el);
+    if (!tomb) return false;
+    if (tomb.path === spec.path && tomb.gen === spec.gen) return true;
+    buryTombstone(spec.el);
+    return false;
+  }
+
+  // Whether this page is on its way out.
+  //
+  // A navigation closes every socket on the page, and those closes are not
+  // failures — reconnecting through them would open sockets for a document
+  // that is being torn down, and (on a reload) race the fresh page's own
+  // attach for the same lease. `unmount()` already covers the orderly path
+  // by nulling the callbacks first; this covers the one it cannot, where
+  // the engine closes the sockets itself before anything here runs.
+  //
+  // `pagehide` ALONE, deliberately. A `beforeunload` listener is the
+  // obvious second signal and is actively harmful here: registering one
+  // makes a page ineligible for Chrome's back/forward cache outright, so
+  // the belt-and-braces version of this flag would trade a real feature
+  // (the restore below) for a redundant one — `pagehide` fires for every
+  // navigation in every engine this ships on, unload and bfcache alike.
+  //
+  // Not a one-way latch, which the first version of this was and which was
+  // a bug: `pagehide` also fires when a page enters the back/forward
+  // cache, and a page RESTORED from it is live again, with dead sockets
+  // and a user looking at it. Latching would have left every restored tab
+  // permanently unable to reconnect — the exact papercut this feature
+  // exists to remove, reintroduced through the one path where the page
+  // does not reload.
+  let navigating = false;
+  window.addEventListener("pagehide", () => {
+    navigating = true;
+  });
+  window.addEventListener("pageshow", (event) => {
+    // `persisted` is the engine saying this document came back from the
+    // bfcache rather than being freshly loaded; a fresh load runs this
+    // file from scratch and has nothing to restore.
+    if (!event.persisted) return;
+    navigating = false;
+    reviveRestoredIslands();
+  });
+
+  /**
+   * After a bfcache restore: put every island whose socket did not survive
+   * back on the recovery path.
+   *
+   * Engines close a document's WebSockets when it enters the cache, so a
+   * restored page holds live-looking islands over dead sockets — the same
+   * "typing goes nowhere" state the heartbeat exists to catch, arrived at
+   * by a route the heartbeat cannot see (its timers were frozen with the
+   * page, and the socket's own close was correctly ignored on the way out).
+   *
+   * Each island decides for itself, through the same `socketEnded` path
+   * every other loss takes, so the carve-outs still hold: a view that was
+   * taken over before it was cached stays taken over.
+   */
+  function reviveRestoredIslands() {
+    // Unguarded on purpose: every island entry carries `revive`, and one
+    // that did not would be a mount that half-registered — a state this
+    // file has no honest recovery for and should not hide.
+    for (const island of islands.values()) island.revive();
+  }
+
+  // The reconnect policy from the most recent `sync()` — the ONE copy this
+  // file reads, deliberately not threaded through mounts and controllers.
+  //
+  // That indirection is what makes capability REVOCATION work at all. The
+  // policy carries whether unattended behavior is allowed (`auto`, and the
+  // heartbeat timings), and Rust recomputes it the moment a build mismatch
+  // latches; every decision point below re-reads it through
+  // `reconnectControls()`, so an island mounted minutes ago and a
+  // controller mid-ladder both stop attaching on their own without anyone
+  // having to walk them and tell them so. A copy captured at mount time
+  // would be exactly the stale permission this gate exists to withdraw.
+  let syncedPolicy = null;
+
+  /**
+   * This page's reconnect controls, from the policy the last `sync()`
+   * carried, with `window.__farhelmTestReconnect` overriding the timings.
+   *
+   * Returns `null` — auto-reconnect and the heartbeat both OFF — when
+   * there is no policy at all, rather than falling back to numbers spelled
+   * out here. That is the same tolerance the attachment policy gets (a
+   * caller that predates the feature must still get a working terminal),
+   * and the refusal to invent defaults is deliberate: the ladder is a
+   * user-visible decision recorded in Rust, and a second copy of it in this
+   * file would be the one that drifted.
+   *
+   * TEST-ONLY overrides, and the second place in this file where a hook
+   * feeds PRODUCTION behavior (see `replayControls` for the first). The
+   * reasons are the same in kind: the suite cannot wait out a real ladder —
+   * thirty seconds of active window plus a thirty-second probe interval is
+   * longer than a test's whole budget — and `disabled` exists because
+   * auto-reconnect now REPAIRS the exact state several older tests are
+   * built to observe (a terminal left detached, M5's degrade-on-close
+   * banner). Those tests pin contracts that still hold; without a way to
+   * hold a terminal down, they would be silently rewritten into tests of
+   * this feature instead.
+   */
+  // A build mismatch this PAGE observed for itself, on the one path that
+  // does not go through Rust's HTTP funnel (an attachment upload — see
+  // `noteUploadBuild`).
+  //
+  // Sticky and one-way, exactly like the Rust-side verdict it duplicates,
+  // and it exists for the gap between them: the funnel's next poll may be
+  // three seconds away, while a sibling terminal's ladder fires in five
+  // hundred milliseconds. A mismatch seen anywhere on this page is enough
+  // to stop every unattended attach on it immediately.
+  let uploadSawMismatch = false;
+
+  function reconnectControls() {
+    const overrides = window.__farhelmTestReconnect || {};
+    if (overrides.disabled) return null;
+    const policy = syncedPolicy;
+    if (!policy || !policy.delaysMs) return null;
+    // `auto` and the heartbeat block are the CAPABILITY gate (see
+    // `reconnect::reconnect_policy`): both are withheld when the helm
+    // answering this page is not the build it was made for. Withheld means
+    // no unattended attach — one that a helm predating `if_unowned` would
+    // silently turn into a session theft — and no liveness probe, which
+    // such a helm ignores by contract and would therefore fail every time.
+    // The manual control is unaffected and always allowed.
+    const heartbeat = policy.heartbeat;
+    return {
+      auto: policy.auto !== false && !uploadSawMismatch,
+      delaysMs: overrides.delaysMs || policy.delaysMs,
+      probeIntervalMs: overrides.probeIntervalMs || policy.probeIntervalMs,
+      idleMs: heartbeat && (overrides.heartbeatIdleMs || heartbeat.idleMs),
+      timeoutMs: heartbeat && (overrides.heartbeatTimeoutMs || heartbeat.timeoutMs),
+      text: policy.text || {},
+    };
+  }
+
+  /**
+   * The capability a policy grants, as the one value transitions are
+   * compared on: unattended behavior allowed, manual only, or no recovery
+   * machinery at all.
+   *
+   * A coarse signature rather than a deep comparison, because it is
+   * exactly what any of this branches on — the ladder and the wording are
+   * the same object every time Rust builds it.
+   */
+  function capabilityOf(policy) {
+    if (!policy || !policy.delaysMs) return "off";
+    return policy.auto !== false && !uploadSawMismatch ? "auto" : "manual-only";
+  }
+
+  /**
+   * Carry a capability transition into recoveries that are already
+   * running — the only thing a policy change is allowed to disturb.
+   *
+   * A REVOCATION also cancels an attempt already in flight, which is the
+   * half that a rescheduled timer alone would miss: that socket was opened
+   * under the old permission, and letting it complete is precisely the
+   * unattended attach the revocation exists to prevent. The held screen is
+   * left where it is (hidden, still owned by the controller), because the
+   * recovery has not ended — it has become something the user drives.
+   */
+  function applyCapabilityChange() {
+    for (const controller of [...reconnects.values()]) {
+      if (controller.attempting && capabilityOf(syncedPolicy) !== "auto") {
+        farhelmTerm.unmount(controller.el);
+      }
+      scheduleReconnect(controller);
+    }
+  }
+
+  /**
+   * The wait and the phase after `failures` failed attempts — the JS half
+   * reading the ladder `reconnect::reconnect_policy` handed it. The
+   * decisions are Rust's; the walk over them is this file's, because this
+   * is where the failures are counted.
+   *
+   * Past the ladder every step is a background probe, forever: there is no
+   * state this gives up in, because SPEC.md's Errors section promises that
+   * something which comes back overnight resurfaces by itself.
+   */
+  function reconnectStep(controls, failures) {
+    if (failures < controls.delaysMs.length) {
+      return { delayMs: controls.delaysMs[failures], phase: "retrying" };
+    }
+    return { delayMs: controls.probeIntervalMs, phase: "probing" };
+  }
+
+  /**
+   * Paint one recovering terminal's own surface: what is happening, and
+   * the manual control that skips the wait.
+   *
+   * It writes into the CONNECTING element rather than the banner, and that
+   * is the point rather than a convenience — this is the terminal surface
+   * saying why it is not showing a live terminal, which is what the
+   * placeholder is for. It is deliberately DISTINCT from M5's connecting
+   * placeholder all the same (PLAN_M6.md item 7): a `reconnecting` class
+   * for the stylesheet, and `data-reconnect-phase`/`data-reconnect-attempt`
+   * so the phase is inspectable rather than only readable as prose.
+   *
+   * The manual control is present from the first failure onward, never only
+   * once the ladder is spent: a user who knows their VPN just came back
+   * should not have to sit through a backoff they can see on screen. It is
+   * built here, like the reclaim button, because the state that decides
+   * whether it belongs on screen lives here — and because routing it
+   * through the eval channel would put a control whose whole job is to work
+   * when things have gone wrong on the channel that is dead on wry's
+   * WKWebView (MT-5).
+   */
+  function paintReconnect(controller) {
+    const node = document.getElementById(controller.spec.connecting);
+    if (!node) return;
+    const controls = reconnectControls();
+    if (!controls) return;
+    const step = reconnectStep(controls, controller.failures);
+    const values = {
+      n: controller.failures + 1,
+      of: controls.delaysMs.length,
+      seconds: Math.round(step.delayMs / 1000),
+    };
+    // Three states, not two: attempting, waiting for the next attempt, and
+    // waiting for a PERSON — the last one being what a revoked capability
+    // leaves (see `reconnectControls`). It says why nothing is happening
+    // on its own, because a terminal that quietly stopped trying, with a
+    // button and no sentence, is the silent degradation this milestone's
+    // version rule forbids.
+    const template = !controls.auto
+      ? controls.text.manualOnly
+      : controller.attempting
+      ? (step.phase === "probing" ? controls.text.probing : controls.text.attempting)
+      : (step.phase === "probing" ? controls.text.probingWaiting : controls.text.waiting);
+    node.classList.add("terminal-reconnecting");
+    node.setAttribute("data-reconnect-phase", controls.auto ? step.phase : "manual-only");
+    node.setAttribute("data-reconnect-attempt", String(values.n));
+    // Updated IN PLACE rather than rebuilt, and the control is the reason.
+    // This surface repaints on every schedule and every attempt — several
+    // times a second on a short ladder — and a button replaced out from
+    // under a pointer is a button that cannot be pressed: the browser
+    // suite caught exactly that on WebKit, where the click never landed
+    // because the element kept being detached mid-gesture. A real user
+    // aiming at a control that flickers has the same problem, so the
+    // element persists and only the sentence changes.
+    let line = node.querySelector(".terminal-reconnect-status");
+    if (!line) {
+      // First paint (or a paint after the placeholder was reset): build
+      // the structure once. `textContent` first, so nothing a previous
+      // state left behind survives underneath it.
+      node.textContent = "";
+      line = document.createElement("div");
+      line.className = "terminal-reconnect-status";
+      node.appendChild(line);
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "btn terminal-reconnect-now";
+      button.textContent = controls.text.manual || "reconnect now";
+      // Closes over the ELEMENT ID, never this controller: the id is what
+      // stays true across every rebuild of the recovery behind it, and
+      // `reconnectNow` looks the current one up.
+      button.addEventListener("click", () => farhelmTerm.reconnectNow(controller.el));
+      node.appendChild(button);
+    }
+    line.textContent = fillTemplate(template, values);
+    node.style.display = "block";
+  }
+
+  /**
+   * Begin (or continue) recovering one island after transport loss.
+   *
+   * Called only from a socket that had OPENED and then died without a
+   * DECISION detach — a takeover or a stall (see `decisionDetach`). Every
+   * other detach notice is infrastructure failing, which recovers like any
+   * other transport loss; this file's header carries the three-way split. The first call builds the
+   * controller; later ones (a reconnect attempt that itself failed) only
+   * advance the failure count, which is what makes the ladder climb rather
+   * than restart.
+   *
+   * The dead island is deliberately NOT torn down here. Leaving it mounted
+   * keeps the user's last screen under the overlay, and it means the
+   * teardown happens at the start of the next attempt instead of inside the
+   * socket callback that just fired — one less piece of reentrancy on a
+   * path that runs while a terminal is already misbehaving.
+   */
+  function noteTransportLoss(spec, baseUrl, attach) {
+    let controller = reconnects.get(spec.el);
+    if (controller) {
+      controller.failures += 1;
+      controller.attempting = false;
+    } else {
+      controller = {
+        el: spec.el,
+        spec,
+        baseUrl,
+        attach,
+        path: spec.path,
+        gen: spec.gen,
+        failures: 0,
+        timer: null,
+        attempting: false,
+        // The rendered screen this recovery is trying to get back, held
+        // aside by the first attempt — see `runReconnect`.
+        snapshot: null,
+      };
+      reconnects.set(spec.el, controller);
+    }
+    scheduleReconnect(controller);
+  }
+
+  /**
+   * Arm the next attempt at this controller's current rung.
+   *
+   * The surface is painted BEFORE the timer is armed, so the very first
+   * frame after a socket dies already explains itself and already offers
+   * the manual control — a terminal that goes quiet for half a second with
+   * nothing on screen is the papercut this whole feature is about.
+   */
+  function scheduleReconnect(controller) {
+    if (controller.timer !== null) clearTimeout(controller.timer);
+    controller.timer = null;
+    controller.attempting = false;
+    paintReconnect(controller);
+    const controls = reconnectControls();
+    // No capability, no unattended attempt — and no timer left armed
+    // either, which is what makes a revocation that lands mid-ladder take
+    // effect immediately rather than at the end of the current wait. The
+    // surface painted above says so and keeps offering the manual control.
+    if (!controls || !controls.auto) return;
+    const step = reconnectStep(controls, controller.failures);
+    controller.timer = setTimeout(() => {
+      controller.timer = null;
+      runReconnect(controller, false);
+    }, step.delayMs);
+  }
+
+  /**
+   * Make one attempt: discard whatever is left of the old island and mount
+   * the SAME spec again.
+   *
+   * A reconnect is an ordinary reattach, which is what makes it land at the
+   * tail with no visible re-scroll for free — the new mount buffers its
+   * replay and rides M5's marker exactly as a reopen does. Nothing about
+   * the spec changes, the lease included: reusing it is what makes this a
+   * reconnect of this view's own channel rather than a takeover of it.
+   *
+   * The overlay is repainted after the unmount because `unmount()` hands
+   * the placeholder back to the stylesheet on its way out; without the
+   * repaint the surface would blank for the length of the attempt.
+   *
+   * The FIRST attempt holds the dying island's rendered screen aside
+   * instead of disposing it, and that is a SPEC obligation rather than a
+   * nicety: a client displaced by a takeover "keeps a non-live snapshot",
+   * and an automatic attempt can be refused for exactly that reason
+   * (`if_unowned`) — so tearing the screen down before the attach resolves
+   * would leave the loser staring at an empty pane with a banner over it.
+   * The held terminal is hidden while a replacement occupies the element,
+   * disposed if the recovery succeeds, and put back if it ends any other
+   * way (`cancelReconnect`). Later attempts hold nothing: the screen worth
+   * keeping is the one the user actually had, not the empty grid of the
+   * attempt before.
+   *
+   * `manual` separates the two kinds of attempt, and the difference is a
+   * correctness one rather than bookkeeping. An AUTOMATIC attempt attaches
+   * `if_unowned` — it refuses rather than displacing, because nobody asked
+   * for it and this view may well have been taken over while it had no
+   * socket to be told on. A MANUAL one (the "reconnect now" control) is a
+   * user pressing a button, which is the same intent every other attach
+   * carries, so it displaces exactly as opening a session does.
+   */
+  function runReconnect(controller, manual) {
+    controller.attempting = true;
+    const island = islands.get(controller.el);
+    if (island && !controller.snapshot) {
+      island.keepTerm = true;
+      controller.snapshot = island.term;
+    }
+    farhelmTerm.unmount(controller.el);
+    paintReconnect(controller);
+    // The throw is caught for the same reason `sync()` catches it, plus one
+    // of this path's own: a mount failing here has ALREADY counted itself as
+    // a failed attempt (see `mount()`'s rollback), so the ladder is armed
+    // and the exception has nothing left to tell anyone — while letting it
+    // escape would surface as an unhandled error on a timer's own stack, or
+    // abort a click handler halfway.
+    try {
+      farhelmTerm.mountWhenReady(
+        controller.spec,
+        controller.baseUrl,
+        controller.attach,
+        !manual,
+      );
+    } catch (err) {
+      console.error("farhelm: reconnecting terminal", controller.el, "failed", err);
+    }
+  }
+
+  /**
+   * Retire this element's controller, leaving nothing armed and no
+   * reconnect surface painted.
+   *
+   * Every way a recovery can end comes through here, and `outcome` is
+   * which way — because the held screen (`runReconnect`) has to go
+   * somewhere, and the three answers are genuinely different:
+   *
+   * - `"confirmed"`: the attach is proved. The held screen is stale now
+   *   and is disposed, and the surface is deliberately LEFT UP for the
+   *   island to take down at its reveal — a flush of a deep replay is real
+   *   work, and clearing here would show a blank pane for the length of it
+   *   where leaving the recovery line says something true for exactly that
+   *   long.
+   * - `"restore"`: the recovery ended without a working attachment — a
+   *   takeover, a stall, a refusal. The unproven island is torn down and
+   *   the held screen comes back, which is SPEC.md's non-live snapshot for
+   *   a displaced client. Safe by construction: a proved attach retires
+   *   the controller as `"confirmed"`, so nothing reaches here holding a
+   *   screen that is older than a live one.
+   * - `"discard"`: the terminal is going away entirely (it left the
+   *   desired set, or the view did). The caller unmounts; the held screen
+   *   is simply disposed.
+   */
+  function cancelReconnect(el, outcome) {
+    const controller = reconnects.get(el);
+    if (!controller) return;
+    if (controller.timer !== null) clearTimeout(controller.timer);
+    reconnects.delete(el);
+    const held = controller.snapshot;
+    controller.snapshot = null;
+    if (outcome === "restore" && held) {
+      // The unproven replacement goes first, so the element holds only the
+      // screen being put back — which then becomes a TOMBSTONE, since the
+      // controller that was holding it is being retired here and something
+      // has to keep `sync()` from quietly reattaching what a decision just
+      // detached (see `tombstones`).
+      farhelmTerm.unmount(el);
+      held.element.style.display = "";
+      tombstones.set(el, {
+        term: held,
+        path: controller.path,
+        gen: controller.gen,
+      });
+    } else if (held) {
+      held.dispose();
+    }
+    if (outcome !== "confirmed") paintConnecting(controller.spec.connecting, false);
+  }
+
+  /**
+   * Whether a recovery currently owns the placeholder element with this
+   * id — asked by `paintConnecting` before it clears one.
+   *
+   * Keyed by the CONNECTING element rather than the terminal's, because
+   * that is what the caller has in hand; the map is one entry per
+   * recovering terminal, so the scan is nothing.
+   */
+  function surfaceOwnedByRecovery(connectingId) {
+    for (const controller of reconnects.values()) {
+      if (controller.spec.connecting === connectingId) return true;
+    }
+    return false;
+  }
+
+  /**
+   * Whether `el` is mid-recovery — the one question `sync()` and `mount()`
+   * ask about another island's business.
+   */
+  function reconnecting(el) {
+    return reconnects.has(el);
+  }
 
   // Test-only registry (e2e/tests/terminal.spec.ts), keyed by element id:
   // the per-island term/ws/test-hook triple, so the suite can read a
@@ -770,6 +1389,54 @@
     }
 
     /**
+     * Compare the build stamp on an upload's reply against the one this
+     * bundle was built from, and say so on this island's own status line
+     * when they disagree (PLAN_M6.md item 6's client↔helm skew edge).
+     *
+     * This is the one request the UI makes that does NOT go through the
+     * Rust HTTP funnel where every other reply's stamp is read
+     * (farhelm-ui's `api::send`): a `File` cannot be handed across that
+     * boundary, so the upload is a `fetch` from here and would otherwise be
+     * the single path that observes nothing.
+     *
+     * It reports LOCALLY rather than driving the page-level banner, and the
+     * reason is a boundary rather than a preference: the banner is reactive
+     * state on the Rust side, and this file has no way to write it that
+     * works on both targets — the eval channel is dead on wry's WKWebView
+     * (MT-5), which is precisely the build whose uploads are cross-origin.
+     * Nothing is lost by that: the page's own polls read the same stamp on
+     * every reply, so the banner appears within a poll interval anyway.
+     * What this adds is the message arriving WHERE the user is looking, at
+     * the moment their attachment misbehaves.
+     *
+     * A MISSING stamp is a mismatch, not a shrug — the same rule the Rust
+     * side applies (`skew::Skew::Silent`). A conforming helm both sends the
+     * header and exposes it to this cross-origin read
+     * (`Access-Control-Expose-Headers`), so an upload reply without one
+     * came from a peer that is not this build, whatever the reason.
+     */
+    function noteUploadBuild(response) {
+      if (!policy.build) return;
+      const observed = (response.headers.get(policy.buildHeader) || "").trim();
+      if (observed === policy.build) return;
+      // Recorded for the whole PAGE, not just reported on this line. The
+      // Rust-side verdict will reach the same conclusion on its next poll,
+      // but a sibling terminal's ladder fires in half a second and this
+      // page now KNOWS the helm cannot be trusted with an unattended
+      // attach — so the revocation happens here, immediately, and any
+      // recovery already waiting is downgraded with it.
+      if (!uploadSawMismatch) {
+        uploadSawMismatch = true;
+        applyCapabilityChange();
+      }
+      fail(
+        observed
+          ? fillTemplate(messages.skew, { helm: observed.slice(0, 64) })
+          : fillTemplate(messages.skewSilent, {}),
+      );
+    }
+
+    /**
      * POST one file to the helm and return the host-side path it
      * published (the pinned attachment REST contract: raw body, the
      * proposed name in `?filename=`, `{"path"}` back).
@@ -788,6 +1455,11 @@
       const init = { method: "POST", body: file };
       if (controller) init.signal = controller.signal;
       const response = await fetch(url, init);
+      // Checked BEFORE the status is looked at, because a refusal is at
+      // least as likely to BE the skew as a success is to reveal it: an
+      // upload the helm rejects for a reason this bundle cannot render is
+      // exactly what a stale page looks like from the user's side.
+      noteUploadBuild(response);
       if (!response.ok) {
         let detail = "";
         try {
@@ -983,9 +1655,27 @@
    */
   function paintConnecting(connectingId, connecting) {
     if (!connectingId) return;
+    // A recovery owns this surface until it ends, and TAKING IT DOWN
+    // between attempts is not a repaint — it is a control disappearing
+    // under the pointer. Each attempt unmounts its island, which hands the
+    // placeholder back to the stylesheet, and `runReconnect` paints it
+    // again a moment later: on a fast ladder that destroyed and rebuilt
+    // the "reconnect now" button several times a second, which the browser
+    // suite caught on WebKit as a click that could never land. Skipping
+    // here means the surface — and the control on it — persists for the
+    // whole recovery, and the only thing that changes is its sentence.
+    if (!connecting && surfaceOwnedByRecovery(connectingId)) return;
     const node = document.getElementById(connectingId);
     if (!node) return;
     node.textContent = connecting ? CONNECTING_TEXT : "";
+    // The reconnect surface writes into this same element (see
+    // `paintReconnect`), so taking the placeholder down has to take its
+    // decoration down with it — otherwise a terminal that came back would
+    // keep the styling, and the phase attributes, of the recovery it just
+    // finished.
+    node.classList.remove("terminal-reconnecting");
+    node.removeAttribute("data-reconnect-phase");
+    node.removeAttribute("data-reconnect-attempt");
     // Cleared back to the stylesheet's own `display: none`, the same way
     // the attachment status line hides itself when it has nothing to say.
     node.style.display = connecting ? "block" : "";
@@ -1059,6 +1749,12 @@
      * spec, since only `status` differs between terminals. Omitting it
      * leaves interception off and changes nothing else.
      *
+     * `reconnect` is the auto-reconnect policy (farhelm-ui/src/reconnect.rs),
+     * shared by every island for the same reason and with the same
+     * tolerance: omitting it leaves auto-reconnect AND the heartbeat off,
+     * and a terminal whose transport dies then behaves exactly as it did
+     * before PLAN_M6.md item 7 — a detach banner and a manual reopen.
+     *
      * `path` and `gen` together are the island's IDENTITY. A still-wanted
      * island whose path changed is a different attachment and is rebuilt;
      * `gen` exists for the case where the path is identical but the
@@ -1084,8 +1780,28 @@
      * rides along here; anything that starts issuing syncs concurrently
      * would have to add one.
      */
-    sync(baseUrl, specs, attach) {
-      lastSync = { baseUrl, specs, attach };
+    sync(baseUrl, specs, attach, reconnect) {
+      lastSync = { baseUrl, specs, attach, reconnect };
+      // Adopted before anything below runs, so every decision this call
+      // triggers — and every decision any controller makes afterwards —
+      // reads the CURRENT capability rather than one captured earlier. A
+      // policy that has just revoked unattended behavior takes effect on
+      // islands and ladders that already exist, which is the whole point
+      // of keeping one copy (see `syncedPolicy`).
+      const wasCapable = capabilityOf(syncedPolicy);
+      syncedPolicy = reconnect;
+      // Only a genuine CHANGE in capability disturbs a running recovery,
+      // and that condition is doing real work rather than saving a few
+      // repaints. `sync()` runs on every desired-set change — a tab
+      // selected, focus moved, a poll noticing a sibling — and
+      // unconditionally rescheduling meant each of those reset the current
+      // backoff deadline, so a user clicking around could postpone their
+      // own recovery indefinitely, and a sync landing during an attempt
+      // could arm a second one against it or tear down a replay that was
+      // merely slow.
+      if (capabilityOf(syncedPolicy) !== wasCapable) {
+        applyCapabilityChange();
+      }
       const wanted = new Map(specs.map((spec) => [spec.el, spec]));
 
       // Tear down first, over the UNION of both maps (an element id is in
@@ -1099,12 +1815,21 @@
       // detach banner are the only record the user has of the session they
       // lost. Rebuilding it would mean opening a socket, which is exactly
       // what the latch exists to prevent.
-      for (const el of new Set([...islands.keys(), ...pendings.keys()])) {
+      // An element mid-RECONNECT is included, and carries `path`/`gen`
+      // exactly as an island does so it answers the same identity question.
+      // Both outcomes matter: a terminal that left the desired set must
+      // stop being rebuilt on a timer nothing else can reach, and one whose
+      // identity changed (a restart bumping `gen`) is a different
+      // attachment — the recovery of the old one is moot, and the ordinary
+      // mount below is what should happen instead.
+      for (const el of new Set([...islands.keys(), ...pendings.keys(), ...reconnects.keys()])) {
         const spec = wanted.get(el);
-        const held = islands.get(el) ?? pendings.get(el);
+        const held = islands.get(el) ?? pendings.get(el) ?? reconnects.get(el);
         const departed = !spec;
         const changed = spec && (spec.path !== held.path || spec.gen !== held.gen);
         if (departed || (changed && !takeover)) {
+          cancelReconnect(el, "discard");
+          buryTombstone(el);
           farhelmTerm.unmount(el);
         }
       }
@@ -1126,6 +1851,19 @@
         // anything still in `pendings` is already waiting for exactly this
         // spec — in both cases there is nothing to do.
         if (islands.has(spec.el) || pendings.has(spec.el)) continue;
+        // A controller that survived the identity check above owns this
+        // element's mounts: between attempts there is deliberately nothing
+        // mounted, and mounting here would open a socket off the ladder —
+        // one immediate attach for every three-second poll, which is the
+        // opposite of backing off.
+        if (reconnecting(spec.el)) continue;
+        // A decision detached this terminal and its screen is still on
+        // display: SPEC.md says it comes back when someone ASKS, and a
+        // reconciler noticing an unmounted element is not someone asking.
+        // Left as it is — screen, banner and all — until a user act
+        // (`reclaim`, or leaving and reopening) or a genuine identity
+        // change buries it.
+        if (tombstoned(spec)) continue;
         if (takeover) {
           // Discovered, rendered, and explained — but not attached. Left
           // to the placeholder rather than silently blank, because a tab
@@ -1173,6 +1911,41 @@
       if (takeover) return;
       takeover = reason;
       for (const el of [...pendings.keys()]) farhelmTerm.unmount(el);
+      // An island mid-RECOVERY may already have an attempt's socket in
+      // flight — constructed, not yet open, and therefore not holding an
+      // attachment anything has told about this takeover. Cancelling its
+      // controller (below) stops the next attempt but not that one: it
+      // would open a moment later, clear this banner in its `onopen`, and
+      // attach. The attach itself is refused (`if_unowned`), so the winner
+      // is safe either way, but the loser would be left with a cleared
+      // banner and a socket that then dies for reasons nothing on screen
+      // explains. Unmounting kills the in-flight socket first.
+      // A takeover-detach carve-out that has to be enforced HERE as well as
+      // at the socket that received the notice: a session-scoped takeover
+      // arrives as one notice per terminal the loser still HELD, and a
+      // terminal that was mid-reconnect held none — it has no socket to be
+      // detached from. Left alone, its ladder would keep firing and hand
+      // the winner exactly the bounce-back this carve-out exists to
+      // prevent. It gets the same banner and the same reclaim control the
+      // notified terminals paint for themselves, because from the user's
+      // side it lost the session in precisely the same way.
+      for (const [el, controller] of [...reconnects]) {
+        // `"restore"` rather than a bare cancel-and-unmount: this island
+        // lost the session while it had no socket, and a displaced client
+        // keeps its screen (SPEC.md). Restoring also disposes whatever
+        // unproven attempt was in flight, which is the teardown this loop
+        // needs anyway.
+        const inFlightWithNoScreen = controller.attempting && !controller.snapshot;
+        cancelReconnect(el, "restore");
+        // The one case restoring does not cover: an attempt in flight with
+        // no screen held behind it (the recovery began with nothing
+        // mounted). Its socket can still open, and an attach that lands
+        // after this latch would fight the winner — so it goes. Everything
+        // else is deliberately left alone, because unmounting it would
+        // dispose the very snapshot this client is entitled to keep.
+        if (inFlightWithNoScreen) farhelmTerm.unmount(el);
+        paintBanner(controller.spec.banner, `Detached: ${reason}`, true);
+      }
     },
 
     /**
@@ -1196,7 +1969,45 @@
       for (const el of new Set([...islands.keys(), ...pendings.keys()])) {
         farhelmTerm.unmount(el);
       }
-      if (lastSync) farhelmTerm.sync(lastSync.baseUrl, lastSync.specs, lastSync.attach);
+      // THIS is someone asking (see `tombstones`): the frozen screens a
+      // takeover left go, and the re-sync below is allowed to attach.
+      for (const el of [...tombstones.keys()]) buryTombstone(el);
+      if (lastSync) {
+        farhelmTerm.sync(
+          lastSync.baseUrl,
+          lastSync.specs,
+          lastSync.attach,
+          lastSync.reconnect,
+        );
+      }
+    },
+
+    /**
+     * Make this terminal's next reconnect attempt NOW, skipping whatever
+     * is left of its current wait — the "reconnect now" control
+     * `paintReconnect` puts on the recovery surface.
+     *
+     * It does not reset the ladder, and that is deliberate: an impatient
+     * click is not evidence that the connection is back, so a failed manual
+     * attempt advances the count exactly as an automatic one does and the
+     * next wait is the next rung. What the click buys is the wait it
+     * skipped, which is the only thing the user actually asked for.
+     *
+     * It also DISPLACES, unlike the automatic attempts (see
+     * `runReconnect`). A press is user intent, and user intent taking a
+     * session back from another client is the ordinary one-attached-client
+     * rule — the same thing opening the session from the list does.
+     *
+     * A no-op when nothing is recovering (the button's element is rebuilt
+     * on every repaint, but a click can still land in the gap between a
+     * successful attach and the repaint that removes the surface).
+     */
+    reconnectNow(el) {
+      const controller = reconnects.get(el);
+      if (!controller) return;
+      if (controller.timer !== null) clearTimeout(controller.timer);
+      controller.timer = null;
+      runReconnect(controller, true);
     },
 
     /**
@@ -1233,7 +2044,7 @@
      * across session views, still gives the cross-session cancellation
      * above exactly the same key it had when there was only one island.
      */
-    mountWhenReady(spec, baseUrl, attach) {
+    mountWhenReady(spec, baseUrl, attach, ifUnowned) {
       const previous = pendings.get(spec.el);
       if (previous) clearTimeout(previous.timer);
       const attempt = { timer: null, path: spec.path, gen: spec.gen };
@@ -1242,7 +2053,7 @@
         if (pendings.get(spec.el) !== attempt) return;
         if (window.Terminal && window.FitAddon && document.getElementById(spec.el)) {
           pendings.delete(spec.el);
-          farhelmTerm.mount(spec, baseUrl, attach);
+          farhelmTerm.mount(spec, baseUrl, attach, ifUnowned);
         } else {
           attempt.timer = setTimeout(tryMount, 50);
         }
@@ -1265,8 +2076,14 @@
      * webview (whose origin is not the helm). An empty string falls back
      * to the current page's host, which only happens if origin lookup
      * failed.
+     *
+     * `reconnect` is the auto-reconnect policy (PLAN_M6.md item 7). This
+     * mount resolves its OWN controls from it, exactly as it resolves its
+     * own catch-up controls: a remount driven by the reconnect ladder is
+     * an ordinary mount in every other respect, and nothing about the
+     * previous attachment's state carries into it.
      */
-    mount(spec, baseUrl, attach) {
+    mount(spec, baseUrl, attach, ifUnowned) {
       // Re-renders may call mount again; one island per element id.
       // `islands` (see its declaration above) IS the guard; `unmount()`
       // drops the key on the way out, so a session reopened after
@@ -1274,6 +2091,15 @@
       // silently no-opping against state that no longer has a live DOM
       // node underneath it.
       if (islands.has(spec.el)) return null;
+
+      // A decision's aftermath goes now: this mount is about to put a live
+      // terminal in that element, and two stacked screens is not a state
+      // anyone can read (see `tombstones`). Reaching here at all means
+      // something already decided the mount is legitimate — `sync()`
+      // checks `tombstoned` first, and the paths that bypass it are the
+      // user's own (take control, reopening the session).
+      buryTombstone(spec.el);
+
 
       // Declared before the try/catch, not inside it: the rollback path
       // below needs to reach whatever got created before the exception,
@@ -1303,13 +2129,14 @@
       // behind "connecting…" forever, with its own failure banner painted
       // over an invisible terminal.
       let el = null;
-      // Invalidates this mount's catch-up state (its `alive` token and its
-      // idle timer), once that state exists. Hoisted for the same
-      // catch-block reason as everything above, and for a sharper version
-      // of it: a throw AFTER the timer is armed would otherwise leave it
-      // running with nothing to stop it, and it would then flush a replay
-      // into the terminal this catch block just disposed.
-      let disposeCatchUp = null;
+      // Invalidates every piece of DEFERRED work this mount owns — its
+      // `alive` token, the catch-up idle timer, and the heartbeat's two
+      // timers — once that state exists. Hoisted for the same catch-block
+      // reason as everything above, and for a sharper version of it: a
+      // throw AFTER a timer is armed would otherwise leave it running with
+      // nothing to stop it, and it would then flush a replay into (or
+      // close the socket of) the terminal this catch block just disposed.
+      let disposeDeferred = null;
       let bannered = false;
       function showBanner(text, reclaimable) {
         // Sticky by design: the first banner wins for the life of the
@@ -1335,7 +2162,13 @@
         // box, so `fit()` would size this terminal to zero columns and the
         // pty would be told about it.
         el.style.visibility = "hidden";
-        paintConnecting(spec.connecting, true);
+        // The connecting placeholder yields to the RECONNECT surface when
+        // one is up (PLAN_M6.md item 7): this attach is an attempt on that
+        // ladder, and overwriting the recovery's own line — the phase, the
+        // attempt count, the manual control — with the ordinary
+        // "connecting…" would hide the one thing the user is waiting to
+        // read, and take the control they might want to press with it.
+        if (!reconnecting(spec.el)) paintConnecting(spec.connecting, true);
         term = new Terminal({
           // At most the tmux history floor (`HISTORY_LIMIT`,
           // farhelm-supervisor/src/tmux.rs), never more: PLAN_M2_5.md
@@ -1365,9 +2198,30 @@
           : (location.protocol === "https:" ? "wss://" : "ws://") + location.host;
         // `?` or `&` depending on whether the caller's path already
         // carries a query (`?tab=`/`?lease=` — see this function's docs).
-        const sep = spec.path.indexOf("?") === -1 ? "?" : "&";
+        // Which of the two ROUTES this attach uses is what makes an
+        // unattended attempt safe (PLAN_M6.md item 7). A reconnect after
+        // transport loss was not there to be told the session had been
+        // taken over — it had no socket to be told on — so its attach must
+        // refuse rather than silently take the session back from whoever
+        // holds it now. `pathUnowned` is served only by a helm that honors
+        // that refusal; a helm that does not simply has no such route, so
+        // the request cannot be misread as the ordinary displacing attach
+        // (which a query flag WOULD be, by any helm that predates it — the
+        // rollback window this closes). The refusal itself comes back as
+        // an ordinary takeover detach notice, which is exactly the state
+        // this view is in, and the latch below turns it into the
+        // take-control surface.
+        //
+        // Only automatic attempts take that route: a click, a reload and a
+        // reclaim all carry someone's intent, and go to the ordinary path.
+        // `pathUnowned` falls back to `path` for a caller that predates it
+        // — the same tolerance every other spec field gets, and safe
+        // because the flow that needs it is the one this file also gates
+        // on capability.
+        const path = (ifUnowned && spec.pathUnowned) || spec.path;
+        const sep = path.indexOf("?") === -1 ? "?" : "&";
         ws = new WebSocket(
-          `${base}${spec.path}${sep}cols=${term.cols}&rows=${term.rows}`,
+          `${base}${path}${sep}cols=${term.cols}&rows=${term.rows}`,
         );
         ws.binaryType = "arraybuffer";
         // The catch-up's idle watchdog is armed further down, the moment
@@ -1508,6 +2362,91 @@
         // its own catch-up.
         let alive = true;
 
+        // ------------------------------------------------------------
+        // Transport-loss state (PLAN_M6.md item 7). Per attachment, with
+        // everything else in this closure: what makes a close a FAILURE
+        // rather than an explanation is a property of this socket's own
+        // history, and a fresh mount starts that history over.
+        // ------------------------------------------------------------
+        //
+        // `openedOnce` is what separates transport LOSS from an attach that
+        // never happened. A socket that never reached OPEN has nothing to
+        // have lost, and M5's never-connected banner already explains it
+        // with a remedy — retrying silently behind that banner would be a
+        // ladder the user cannot see running under a sentence saying to
+        // reopen the session.
+        //
+        // `decisionDetach` is the structural half of both carve-outs, and
+        // it is set for exactly TWO reasons out of the open-ended set the
+        // wire allows — because only two of them are decisions:
+        //
+        // - A takeover: someone else asked for this session.
+        // - A stall: the server disciplined this client for not reading.
+        //
+        // Every other detach notice a browser can receive is INFRASTRUCTURE
+        // failing, and vetoing on those was a real bug in the first version
+        // of this file. The helm detaches every terminal it holds when its
+        // own connection to the supervisor dies ("supervisor connection
+        // lost"), and a host that goes away refuses each reattach with its
+        // state — both of which are transport loss one layer up, exactly
+        // the case SPEC.md's "comes back overnight" sentence is about. A
+        // terminal that stopped recovering the moment the helm said
+        // anything at all would have sat dead behind a banner until the
+        // user reopened it, which is the papercut this feature removes.
+        //
+        // So the veto is a small allowlist of decisions rather than "the
+        // server spoke", and the ladder is what handles everything else:
+        // attempts fail while the host is down, the ladder degrades into
+        // background probes, and the terminal is simply back when the host
+        // is.
+        //
+        // A NON-decision notice deliberately does not cancel the recovery
+        // either (see the handler): each failed attempt gets its own fresh
+        // notice, and treating those as vetoes would stop the ladder on its
+        // first rung — the exact opposite of the behavior above.
+        let openedOnce = false;
+        let decisionDetach = false;
+        // Whether this socket's ending has been committed — the first one
+        // wins (see `socketEnded`). Declared with the rest of the
+        // per-socket state rather than beside its own function, because
+        // `noteAttachProved` reads it and a temporal-dead-zone read from a
+        // callback would be a much worse failure than the one it guards.
+        let ended = false;
+        // Whether this attach has been PROVED to be attached: a replay
+        // byte, or the marker. See `endCatchUp` for why an idle timeout
+        // alone must not be read as a working attachment.
+        let attachProved = false;
+
+        /**
+         * Record that this attach is REAL — a replay byte or the marker —
+         * and, if the catch-up already ended without that evidence, finish
+         * the job it could not finish then.
+         *
+         * The late path matters because the evidence-free idle ending
+         * deliberately leaves the terminal hidden and the recovery running:
+         * bytes arriving afterwards (a helm that stalled and then found its
+         * voice) must make that harmless rather than permanent, so they
+         * confirm the recovery and reveal here instead of accumulating
+         * behind a placeholder nobody is going to take down.
+         */
+        function noteAttachProved() {
+          if (attachProved) return;
+          // Evidence that arrives after this socket's ending has been
+          // COMMITTED is evidence about a corpse, and acting on it strands
+          // the terminal: `socketEnded` has already begun the teardown, so
+          // confirming here would retire the ladder and reveal a socket
+          // that is closing — leaving an element with no surface, no timer,
+          // and nothing that will ever try again, because the eventual
+          // close is suppressed by the same `ended` guard. A frame queued
+          // before the idle expiry fired is exactly that race, and it
+          // proves nothing about the NEXT socket either way.
+          if (ended) return;
+          attachProved = true;
+          if (catchingUp) return;
+          cancelReconnect(spec.el, "confirmed");
+          reveal(false);
+        }
+
         function clearIdleTimer() {
           if (idleTimer !== null) clearTimeout(idleTimer);
           idleTimer = null;
@@ -1547,7 +2486,23 @@
             // clear ran must not banner (or close a socket) on behalf of
             // an island that no longer exists.
             if (!alive) return;
-            if (ws.readyState === WebSocket.CONNECTING) {
+            const stillConnecting = ws.readyState === WebSocket.CONNECTING;
+            // A RECONNECT attempt that produced NOTHING is simply an
+            // attempt that failed, and belongs on the ladder rather than
+            // under M5's never-connected banner or a revealed empty
+            // terminal. Two shapes of nothing, one outcome: a socket that
+            // never finished connecting, and one that opened and then sat
+            // silent — which is what a helm that accepted the upgrade and
+            // stalled before attaching looks like. The transition is taken
+            // directly (and the socket closed after) for the reason the
+            // heartbeat takes it directly: a dead transport's close can
+            // stall in CLOSING and never come back as an event.
+            if (reconnecting(spec.el) && (stillConnecting || !attachProved)) {
+              socketEnded("closed");
+              ws.close();
+              return;
+            }
+            if (stillConnecting) {
               focusOnReveal = false;
               endCatchUp("unconnected");
               showBanner(UNCONNECTED_TEXT);
@@ -1590,6 +2545,15 @@
          */
         function reveal(fromWriteCallback) {
           if (revealed || !alive) return;
+          // An attach that produced NOTHING has nothing to reveal, and
+          // revealing it during a recovery would be actively wrong: it
+          // replaces the surface that is explaining the outage with an
+          // empty terminal, and does it at the exact moment the ladder is
+          // about to try again. The evidence-free idle ending is the path
+          // that gets here (see `armIdleTimer`); it is treated as a failed
+          // attempt, and `noteAttachProved` is what un-sticks the terminal
+          // if evidence turns up late after all.
+          if (!attachProved && reconnecting(spec.el)) return;
           revealed = true;
           term.scrollToBottom();
           const buffer = term.buffer.active;
@@ -1727,6 +2691,29 @@
           clearIdleTimer();
           testHook.replay.buffering = false;
           testHook.replay.revealReason = reason;
+          // What CONFIRMS a reconnect (PLAN_M6.md item 7): evidence that
+          // this attach is ATTACHED, not merely that a socket exists.
+          //
+          // A socket merely OPENING is not enough — the helm answers a
+          // doomed attach on an established socket, so an attempt that
+          // opened and was then refused would retire the ladder just before
+          // the refusal arrived. Neither is an `idle` ending on its own,
+          // which is the sharper version of the same mistake: an idle
+          // timeout with nothing received means the socket opened and the
+          // stream never started, which is precisely what a helm that
+          // accepted the upgrade and then stalled looks like. Confirming
+          // there would leave a terminal looking recovered until the next
+          // heartbeat expiry noticed it was not.
+          //
+          // So: only the four endings that leave a terminal LIVE can
+          // confirm at all (`closed`, `error`, `detached` and `unconnected`
+          // are the phase being ended BY the failure, not by success), and
+          // among those the marker stands alone while the three
+          // degradations need bytes to have actually arrived.
+          const live = ["marker", "size", "chunks", "idle"].includes(reason);
+          if (live && (reason === "marker" || attachProved)) {
+            cancelReconnect(spec.el, "confirmed");
+          }
           const chunks = replayChunks;
           const total = replayBytes;
           replayChunks = [];
@@ -1748,6 +2735,103 @@
           writeBytes(joined, () => reveal(true));
         }
 
+        // ------------------------------------------------------------
+        // The liveness heartbeat (PLAN_M6.md item 7)
+        // ------------------------------------------------------------
+        //
+        // Two timers, never armed at once. `idleTimer` (the catch-up
+        // watchdog above) is a different thing entirely and both can be
+        // running: that one bounds how long a terminal stays HIDDEN, this
+        // one bounds how long a terminal can be WRONG about being
+        // connected.
+        //
+        // The check exists because a close event is not guaranteed. A
+        // laptop that slept past its connection's lifetime, or a NAT that
+        // dropped the flow, leaves a socket that reads OPEN forever with
+        // nothing behind it — and every keystroke typed into it is
+        // accepted, encoded, and dropped on the floor. SPEC.md requires
+        // exactly that failure to be detected and reported rather than
+        // inferred by the user.
+        let heartbeatIdle = null;
+        let heartbeatDue = null;
+
+        function clearHeartbeat() {
+          if (heartbeatIdle !== null) clearTimeout(heartbeatIdle);
+          if (heartbeatDue !== null) clearTimeout(heartbeatDue);
+          heartbeatIdle = null;
+          heartbeatDue = null;
+        }
+
+        /**
+         * Start (or restart) the idle window, so the probe below only ever
+         * fires at a socket that has genuinely gone quiet.
+         *
+         * This is what makes an active terminal cost nothing: every frame
+         * from the helm — output, the marker, a detach notice — re-arms it,
+         * so a terminal with anything at all happening never sends a probe.
+         */
+        function armHeartbeat() {
+          // DISARM FIRST, decide second. The order is the fix for a real
+          // hole: with the capability guard ahead of the clear, a policy
+          // that withdrew the heartbeat mid-session left whatever was
+          // already armed running — so the very timer the withdrawal was
+          // meant to stop would go on to ping a helm that cannot answer
+          // and tear down a perfectly healthy socket. Clearing
+          // unconditionally means "no heartbeat" always means no heartbeat.
+          clearHeartbeat();
+          // Controls are re-read here rather than captured at mount, so a
+          // capability withdrawn mid-session (a helm upgraded under this
+          // tab) silences the probe at once rather than at the next mount.
+          // No timings at all means the probe is off for this page — a helm
+          // that is not this bundle's build does not answer `ping`, and
+          // probing it would manufacture the very failure it checks for.
+          // See `reconnectControls`.
+          const controls = reconnectControls();
+          if (!controls || !controls.idleMs || !alive) return;
+          heartbeatIdle = setTimeout(() => {
+            heartbeatIdle = null;
+            // The same redundant liveness check every deferred path here
+            // carries: a timer already queued when `clearHeartbeat` ran
+            // must not send on, or close, a socket belonging to an island
+            // that no longer exists.
+            if (!alive || ws.readyState !== WebSocket.OPEN) return;
+            // And the capability is re-read at the moment of USE, not
+            // trusted from when this timer was armed: a revocation that
+            // lands inside the idle window must stop the probe it would
+            // otherwise send, without depending on anything else happening
+            // first.
+            const sending = reconnectControls();
+            if (!sending || !sending.idleMs) return;
+            sendControl("ping");
+            heartbeatDue = setTimeout(() => {
+              heartbeatDue = null;
+              if (!alive) return;
+              // Re-read again, for the sharper half of the same rule: this
+              // callback TEARS A SOCKET DOWN, and doing that on behalf of a
+              // probe the page is no longer allowed to send would break a
+              // healthy terminal over a question nobody asked.
+              const expiring = reconnectControls();
+              if (!expiring || !expiring.idleMs) return;
+              // Silent death, and the transition is taken DIRECTLY rather
+              // than by closing and waiting for `onclose` to bring the news.
+              // That indirection was a real bug: `close()` on a socket whose
+              // transport is gone starts a closing handshake that has
+              // nobody to complete it, so the socket can sit in CLOSING —
+              // no close event, no recovery — on precisely the dead
+              // transport this whole check exists to catch. Calling the
+              // shared transition first means the ladder starts on the
+              // timer's own tick; `socketEnded`'s first-ending guard then
+              // makes the real close event, if it ever arrives, a no-op.
+              //
+              // The close still follows, because a socket left open would
+              // hold a supervisor-side attachment that the reconnect would
+              // then have to displace as its own stale twin.
+              socketEnded("closed");
+              ws.close();
+            }, sending.timeoutMs);
+          }, controls.idleMs);
+        }
+
         // Armed now, not at `onopen`: the watchdog's job is to bound how
         // long this terminal can stay hidden, and the socket failing to
         // connect at all is one of the ways that can happen (see
@@ -1760,9 +2844,10 @@
         // by this function's own rollback if something below throws. Both
         // must run BEFORE the terminal is disposed, since the point is to
         // stop deferred work from reaching a disposed instance.
-        disposeCatchUp = () => {
+        disposeDeferred = () => {
           alive = false;
           clearIdleTimer();
+          clearHeartbeat();
         };
         // Test-only (e2e/tests/terminal.spec.ts): resume a catch-up phase
         // held open by `replayControls`'s `holdMarker`, applying whatever
@@ -1776,6 +2861,18 @@
         };
 
         ws.onmessage = (ev) => {
+          // Before anything is looked at: the helm spoke, so this socket is
+          // demonstrably alive and the heartbeat's window starts over. Any
+          // frame is proof of life — the pong is not special, and
+          // deliberately so: a busy terminal proves its own liveness with
+          // the bytes it is already carrying, and treating only the pong as
+          // an answer would make a healthy socket depend on a message that
+          // is only ever sent when nothing else is. An EMPTY binary frame
+          // counts too, even though it is dropped below: it still crossed a
+          // live connection, which is the only thing this measures. (The
+          // catch-up watchdog deliberately does NOT count it; see that path
+          // for why the two differ.)
+          armHeartbeat();
           if (typeof ev.data === "string") {
             // Text frames are control JSON from the helm: the detach
             // notice (SPEC.md: takeover must be visible) and, since
@@ -1786,6 +2883,12 @@
             // island banners its own, independently.
             const msg = JSON.parse(ev.data);
             if (msg.type === "replay_complete") {
+              // Evidence in its own right, recorded before the phase is
+              // ended so a marker that arrives LATE — after an
+              // evidence-free idle gave up on this attach — still confirms
+              // it rather than being dropped by `endCatchUp`'s own
+              // already-ended guard.
+              noteAttachProved();
               // The ONLY thing this message does, here or anywhere: end
               // one terminal's catch-up phase. Nothing about the session,
               // its lifecycle, or any other client behavior may key off it
@@ -1793,7 +2896,44 @@
               endCatchUp("marker");
               return;
             }
+            if (msg.type === "pong") {
+              // The heartbeat's answer, and it does nothing beyond having
+              // ARRIVED — the `armHeartbeat` above already restarted the
+              // window for any frame at all.
+              // Handled explicitly rather than left to fall through the
+              // unknown-message path so that the wire vocabulary this file
+              // speaks is readable in one place.
+              return;
+            }
             if (msg.type === "detached") {
+              // The two DECISIONS, and only those, end recovery — see
+              // `decisionDetach` for why every other notice is treated as
+              // infrastructure and left to the ladder.
+              //
+              // R1, recorded here because this is the site it is about: a
+              // stall detach whose notice never ARRIVES (the socket died
+              // before it could be delivered) is deliberately not made
+              // durable, and such a terminal will auto-reconnect. That is
+              // the right default for the ambiguous case rather than a gap.
+              // A client that received nothing cannot tell a stall detach
+              // from transport loss; the sleeping laptop this milestone
+              // exists for is routinely stall-detached server-side WHILE
+              // asleep, so refusing to recover on an undelivered notice
+              // would preserve exactly the papercut this removes. A
+              // genuinely wedged tab cannot run these timers while it is
+              // wedged, and by the time it can, reconnecting into a working
+              // terminal is recovery rather than harm. The
+              // `if_unowned` refusal caps the blast radius of any lost
+              // decision notice: whatever else was decided while this
+              // client was away, it cannot take the session back by
+              // accident.
+              const lost = msg.reason === TAKEOVER_DETACH_REASON;
+              decisionDetach = lost || msg.reason === STALL_DETACH_REASON;
+              // Only a decision ends an in-flight recovery. Anything else
+              // — a host that went away, the helm losing its supervisor —
+              // is one more failed attempt, and cancelling here would stop
+              // the ladder on the notice its own attempt provoked.
+              if (decisionDetach) cancelReconnect(spec.el, "restore");
               // The buffer is flushed BEFORE the banner, so a terminal
               // detached mid-replay shows what it did receive underneath
               // the notice explaining the loss — this attach will never
@@ -1806,7 +2946,6 @@
               // file's header). Only a session-scoped takeover latches;
               // every other reason is a detach this view caused or
               // recovers from on its own.
-              const lost = msg.reason === TAKEOVER_DETACH_REASON;
               if (lost) farhelmTerm.latchTakeover(msg.reason);
               showBanner(`Detached: ${msg.reason}`, lost);
             }
@@ -1819,6 +2958,12 @@
           // hidden indefinitely at no cost — silence it cannot be caught
           // out on, because the stream never actually goes quiet.
           if (bytes.length === 0) return;
+          // Real bytes for this attachment: the evidence `endCatchUp` uses
+          // to tell a working attach from a socket that opened and then sat
+          // there. An empty frame is deliberately excluded, for the same
+          // reason the catch-up watchdog excludes it — a peer must not be
+          // able to manufacture proof of an attachment at no cost.
+          noteAttachProved();
           if (catchingUp) {
             // Held, not written: this is the whole no-visible-re-scroll
             // feature (see this file's header). Both bounds are checked
@@ -1853,14 +2998,111 @@
         // all, and an attach that fails server-side closes the socket —
         // so the socket dying is, on those paths, the only signal this
         // island will ever get that no more bytes are coming.
-        ws.onclose = () => {
-          endCatchUp("closed");
-          showBanner("Connection closed");
-        };
-        ws.onerror = () => {
-          endCatchUp("error");
-          showBanner("Connection error");
-        };
+        /**
+         * Whether this socket dying is something to RECOVER from — the one
+         * condition PLAN_M6.md item 7 acts on, gathered in one place so
+         * every carve-out is readable together rather than scattered across
+         * the handlers that happen to check it.
+         *
+         * The vetoes each exclude a death that is not a failure of the
+         * connection: recovery switched off for this page at all (no
+         * policy, the suite's opt-out, or a helm this bundle does not match
+         * — note that only the AUTOMATIC half is withheld there, the manual
+         * control still works); `unmount()` having got here first, so the
+         * island is already being replaced by whoever asked for the
+         * teardown; the page unloading and taking its sockets with it; this
+         * view having LOST the session, where reconnecting would fight the
+         * client that now owns it; and a DECISION detach — a takeover or a
+         * stall, and only those two. Every other explanation the server
+         * gives is infrastructure failing, which is transport loss one
+         * layer up and recovers exactly like the rest (see
+         * `decisionDetach`).
+         *
+         * What remains is the positive test, and it is two cases rather
+         * than one. A socket that reached OPEN and then died is transport
+         * loss by definition. A socket on an EXISTING ladder counts even
+         * though it never opened: the ladder's premise is a connection that
+         * did work, and an attempt failing to connect is exactly what it is
+         * there to count — treating it as "never connected" would strand
+         * the recovery on its first failed attempt.
+         */
+        function recoverable() {
+          if (!reconnectControls() || !alive || navigating || takeover) return false;
+          if (decisionDetach) return false;
+          return openedOnce || reconnecting(spec.el);
+        }
+
+        /**
+         * Handle the socket ending — the single decision point for both
+         * `onclose` and `onerror`, since either can be the last thing an
+         * island hears and both mean the same thing to this flow.
+         *
+         * First ending wins, for the same reason `showBanner` is sticky and
+         * with more at stake: an error is normally followed by a close, and
+         * counting both would burn two rungs of the ladder for one failed
+         * attempt.
+         *
+         * No banner on the recovery path. The reconnect surface is already
+         * saying what is happening and offering the control that skips the
+         * wait; a "Connection closed" underneath it would read as a
+         * contradiction. Everything else keeps the pre-M6 behavior exactly,
+         * including `showBanner`'s refusal to overwrite a detach reason
+         * that arrived a moment earlier.
+         */
+        function socketEnded(reason) {
+          endCatchUp(reason);
+          if (ended) return;
+          ended = true;
+          if (recoverable()) {
+            noteTransportLoss(spec, baseUrl, attach);
+            return;
+          }
+          showBanner(reason === "error" ? "Connection error" : "Connection closed");
+        }
+
+        // A detach notice is immediately followed by the server closing
+        // the socket; the close handler must not clobber the more specific
+        // banner (the takeover message is the one SPEC.md requires the user
+        // to see) — `showBanner`'s own stickiness handles that.
+        //
+        // Both endings also end the catch-up phase, and that is not
+        // belt-and-braces: a client-initiated detach gets no notice at
+        // all, and an attach that fails server-side closes the socket —
+        // so the socket dying is, on those paths, the only signal this
+        // island will ever get that no more bytes are coming.
+        ws.onclose = () => socketEnded("closed");
+        ws.onerror = () => socketEnded("error");
+
+        /**
+         * Reconsider this island after the page came back from the
+         * back/forward cache (`reviveRestoredIslands`).
+         *
+         * Two states have to be told apart. A socket that is still OPEN
+         * survived the round trip and needs nothing — except its heartbeat
+         * re-armed, since the timers were frozen with the document and the
+         * one that was pending may be minutes stale. A socket that is not
+         * open died while the page was cached, and its own close was
+         * correctly IGNORED at the time (`navigating` was set on the way
+         * out), so nothing else will ever bring the news.
+         *
+         * That "correctly ignored" is why this deliberately reopens an
+         * ending the island already recorded: the first ending was declined
+         * on purpose, and declining it again would leave a restored page
+         * looking live over a dead socket forever. Only a
+         * transport-shaped ending is reopened — a takeover or a stall the
+         * server announced before the page was cached is still a decision,
+         * and the surface it painted is still the truth.
+         */
+        function reviveAfterRestore() {
+          if (!alive) return;
+          if (ws.readyState === WebSocket.OPEN) {
+            armHeartbeat();
+            return;
+          }
+          if (decisionDetach) return;
+          ended = false;
+          socketEnded("closed");
+        }
 
         const enc = new TextEncoder();
         // Swallow DECRQM mode queries (CSI Pm $ p and CSI ? Pm $ p, e.g.
@@ -2054,6 +3296,15 @@
             banner.style.display = "";
             banner.textContent = "";
           }
+          // Recorded here and nowhere else: this is the only moment that
+          // separates "the connection worked and then stopped" from "there
+          // was never a connection", which is the line PLAN_M6.md item 7's
+          // recovery is drawn along (see `recoverable`).
+          openedOnce = true;
+          // The heartbeat starts with the socket, not with the mount: a
+          // window armed before the upgrade completed would spend itself on
+          // the handshake, which the catch-up watchdog already covers.
+          armHeartbeat();
           sendResize();
         };
         // Named (not inline) so unmount() can remove exactly this
@@ -2129,9 +3380,14 @@
           testHook,
           // Everything `unmount()` needs to leave the catch-up
           // presentation behind: the invalidation that stops deferred work
-          // from reaching a disposed terminal, and the placeholder element
-          // this mount may still be holding open.
-          disposeCatchUp,
+          // — the catch-up's timer and reveal, and the heartbeat's two
+          // timers — from reaching a disposed terminal, and the placeholder
+          // element this mount may still be holding open.
+          disposeDeferred,
+          // How a bfcache restore reaches back into this closure (see
+          // `reviveAfterRestore`): the page-level `pageshow` handler has no
+          // other way to ask an island whether its socket survived.
+          revive: reviveAfterRestore,
           connecting: spec.connecting,
           path: spec.path,
           gen: spec.gen,
@@ -2155,8 +3411,9 @@
         if (attachments) attachments.dispose();
         // Before the disposal below, not after: a still-armed idle timer
         // would otherwise flush this attach's buffer into the terminal
-        // this line is about to destroy.
-        if (disposeCatchUp) disposeCatchUp();
+        // this line is about to destroy, and a still-armed heartbeat would
+        // close a socket this line already closed.
+        if (disposeDeferred) disposeDeferred();
         if (ws) ws.close();
         if (term) term.dispose();
         // The catch-up presentation goes back too, so the pane shows the
@@ -2164,6 +3421,16 @@
         // "connecting…" line that will never resolve.
         showTerminal(el, spec.connecting);
         showBanner(`Failed to start terminal: ${err}`);
+        // A mount that threw ON THE LADDER is one more failed attempt, not
+        // the end of the recovery: the reasons a mount can throw here (a
+        // missing element mid-rerender, a constructor that objected) are as
+        // transient as the connection failures the ladder already survives,
+        // and giving up on one would leave the terminal permanently down
+        // behind a banner. `showBanner` above still records what happened;
+        // the next attempt's `onopen` clears it.
+        if (reconnecting(spec.el)) {
+          noteTransportLoss(spec, baseUrl, attach);
+        }
         throw err;
       }
     },
@@ -2172,7 +3439,8 @@
      * Tear down one mounted terminal and cancel any still-pending
      * `mountWhenReady()` wait for the same element id, so remounting it —
      * a restart, a reopened session, a tab closed and another opened into
-     * the same slot — gets a genuine fresh mount: a fresh xterm instance,
+     * the same slot, an auto-reconnect attempt (PLAN_M6.md item 7) — gets a
+     * genuine fresh mount: a fresh xterm instance,
      * a fresh socket, and a fresh attach/replay, rather than either
      * compounding onto the previous mount's state or losing a race to a
      * zombie retry loop. That reopen-after-close path is exactly the
@@ -2201,15 +3469,17 @@
       // also aborts any upload still in flight, which is what stops a
       // transfer from completing into a terminal that no longer exists.
       if (island.attachments) island.attachments.dispose();
-      // The catch-up's deferred work is the same class of hazard one step
+      // The island's deferred work is the same class of hazard one step
       // further along, and it has to be invalidated BEFORE the disposal
-      // below rather than merely alongside it. Two things outlive this
-      // island otherwise: the idle timer, which would flush a buffered
-      // replay into a disposed terminal, and any `term.write()` completion
-      // callback still queued — xterm.js runs those after `dispose()`, so
-      // a stale reveal would un-hide a DOM node the NEXT mount is already
-      // using for its own catch-up, showing a half-replayed terminal.
-      island.disposeCatchUp();
+      // below rather than merely alongside it. Three things outlive this
+      // island otherwise: the catch-up idle timer, which would flush a
+      // buffered replay into a disposed terminal; any `term.write()`
+      // completion callback still queued — xterm.js runs those after
+      // `dispose()`, so a stale reveal would un-hide a DOM node the NEXT
+      // mount is already using for its own catch-up; and the heartbeat,
+      // whose expiry would close a socket this teardown has already
+      // replaced, driving a reconnect nobody asked for.
+      island.disposeDeferred();
       // And the presentation itself, for the reason the attachment status
       // node is cleared above: both elements belong to the PANE, which for
       // the agent terminal outlives every remount, so a teardown during
@@ -2229,7 +3499,19 @@
       island.ws.onerror = null;
       island.ws.onclose = null;
       island.ws.close();
-      island.term.dispose();
+      // `keepTerm` is a reconnect attempt asking for this island's rendered
+      // screen to OUTLIVE its teardown (`runReconnect`): the xterm instance
+      // and its DOM stay, hidden, so a refused attempt can put them back
+      // instead of leaving the user an empty pane under a banner. Hidden
+      // rather than left visible because the replacement mounts into the
+      // same element and two stacked screens is not a state anyone can
+      // read; the recovery surface covers the pane meanwhile. Whoever asked
+      // owns the disposal from here (`cancelReconnect`).
+      if (island.keepTerm) {
+        island.term.element.style.display = "none";
+      } else {
+        island.term.dispose();
+      }
       islands.delete(el);
       unpublishIsland(el);
       if (!island.primary) return;
@@ -2266,10 +3548,22 @@
      * - the takeover latch and the last desired set, because both describe
      *   THIS view's relationship to a session — a view opened afterwards
      *   has its own lease and has lost nothing, so inheriting a latch
-     *   would leave it permanently unable to attach.
+     *   would leave it permanently unable to attach;
+     * - every reconnect controller, because a recovery is an attempt to
+     *   get THIS view's terminal back and this view is going away. Left
+     *   armed, one would fire minutes later, mount an island into a pane
+     *   that now belongs to a different session, and attach it under a
+     *   lease nothing on screen is using.
      */
     unmountAll() {
-      for (const el of new Set([...islands.keys(), ...pendings.keys()])) {
+      for (const el of new Set([
+        ...islands.keys(),
+        ...pendings.keys(),
+        ...reconnects.keys(),
+        ...tombstones.keys(),
+      ])) {
+        cancelReconnect(el, "discard");
+        buryTombstone(el);
         farhelmTerm.unmount(el);
       }
       focusedEl = null;

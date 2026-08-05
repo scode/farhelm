@@ -46,6 +46,16 @@
 //!   the renderer-free derivations (which tabs to show, their labels and
 //!   DOM ids, the WebSocket path) plus the strip's one presentational
 //!   piece, `TabStripItem`, and the close-confirmation wording.
+//! - `reconnect`: the terminal auto-reconnect domain (PLAN_M6.md item 7) —
+//!   the backoff ladder, the boundary between active retries and background
+//!   probing, the heartbeat's timings, and the wording a recovering
+//!   terminal shows, serialized into the page for terminal.js to apply. The
+//!   same split as `attachments`, for the same reason: the decisions are
+//!   Rust's and unit-testable, the socket handling is not.
+//! - `skew`: the client↔helm build-stamp check (PLAN_M6.md item 6) — the
+//!   comparison itself plus the one signal `App` renders its reload prompt
+//!   from, so a tab left open across a helm upgrade says so instead of
+//!   failing in ways nothing explains.
 //! - `rename`: `RenameForm`, the one control both rename surfaces share
 //!   (PLAN_M5.md item 6) — a single-line field that sends what the user
 //!   typed verbatim, with the request, the optimistic paint, and the
@@ -60,7 +70,7 @@
 //!   calling into `api` for I/O and `tabs`/`attachments` for the pure
 //!   derivations.
 //!
-//! All seven are private modules with `pub(crate)` entry points: nothing
+//! All of them are private modules with `pub(crate)` entry points: nothing
 //! outside this crate has a legitimate reason to reach into any of them,
 //! so `main.rs` only ever sees `App`/`ApiBase`, both defined and exported
 //! here.
@@ -73,8 +83,10 @@ mod attachments;
 mod hosts;
 mod list;
 mod ops;
+mod reconnect;
 mod rename;
 mod session_view;
+mod skew;
 mod tabs;
 
 use list::ListView;
@@ -467,6 +479,11 @@ pub fn App() -> Element {
         document::Script { src: VENDOR_XTERM_JS }
         document::Script { src: VENDOR_FIT_JS }
         document::Script { src: TERMINAL_JS }
+        // Above both views and outside the match, deliberately: a build
+        // mismatch is a fact about this whole PAGE rather than about
+        // whatever it happens to be showing, and it must not disappear
+        // because the user navigated into a session while reading it.
+        skew::BuildSkewNotice {}
         match &*current.read() {
             None => rsx! {
                 ListView { on_open: move |session: Session| current.set(Some(session)) }

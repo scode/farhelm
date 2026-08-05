@@ -1333,6 +1333,7 @@ async fn an_ack_arrives_ahead_of_a_backlog_of_terminal_output() {
         rows: 24,
         terminal: TerminalSelector::default(),
         lease: "flooding-lease".to_string(),
+        if_unowned: false,
     })
     .await;
     tokio::time::sleep(Duration::from_secs(2)).await;

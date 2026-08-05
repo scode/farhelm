@@ -399,6 +399,93 @@ async fn an_attach_under_a_different_lease_takes_over_and_silences_the_loser() {
     );
 }
 
+/// A NON-DISPLACING attach (`ControlMsg::Attach::if_unowned`) is refused
+/// while another lease holds the session, and refuses without touching
+/// anything — PLAN_M6.md item 7's auto-reconnect safety property, at the
+/// layer that enforces it.
+///
+/// The failure it exists to prevent is an eviction with nobody behind it.
+/// A client recovering from transport loss has no socket, so a takeover
+/// that happens while it is away reaches it nowhere; its next automatic
+/// attach carries the same lease it always had, and a displacing one would
+/// take the session back from whoever legitimately holds it now. Nobody
+/// asked for that, and the displaced winner would learn about it as its own
+/// terminal going dead.
+///
+/// Both halves are asserted because either alone is a different bug. The
+/// refusal must be a CONFLICT carrying the takeover wording — that exact
+/// string is what lets a browser render the refusal as the takeover it is
+/// rather than as a mysterious error. And the incumbent must still be
+/// LIVE afterwards: a refusal that swept first and refused second would
+/// leave the winner detached by an attach that was itself rejected, which
+/// is strictly worse than the displacement it was meant to prevent.
+#[tokio::test]
+async fn an_unattended_attach_is_refused_while_another_lease_holds_the_session() {
+    let h = harness().await;
+    let (session, _work) = basic_session(&h).await;
+
+    let (owner_chan, mut owner_rx) = h
+        .client
+        .attach_terminal(&session.id, 80, 24, TerminalSelector::Agent, "lease-owner")
+        .await
+        .expect("the owner attaches normally");
+    let mut seen = Vec::new();
+    wait_for(&mut owner_rx, &mut seen, "FAKE-AGENT READY", 20).await;
+
+    let refused = h
+        .client
+        .attach_terminal_if_unowned(
+            &session.id,
+            80,
+            24,
+            TerminalSelector::Agent,
+            "lease-latecomer",
+        )
+        .await
+        .expect_err("an unattended attach must not take a session someone else holds");
+    let supervised = refused
+        .downcast_ref::<farhelm_helm::SupervisorError>()
+        .expect("the refusal is the supervisor's own error");
+    assert_eq!(
+        supervised.kind,
+        farhelm_proto::ErrorKind::Conflict,
+        "a session held by someone else is a conflict, not a bad request"
+    );
+    assert_eq!(
+        supervised.message,
+        farhelm_proto::ATTACH_REFUSED_TAKEN_OVER,
+        "the refusal must carry the takeover wording verbatim: a browser matches on it to decide \
+         it lost the session"
+    );
+
+    // The owner never noticed: no detach notice, and input still lands.
+    h.client
+        .send_input(owner_chan, b"still-mine\r".to_vec())
+        .await;
+    wait_for(&mut owner_rx, &mut seen, "still-mine", 15).await;
+
+    // And the same client CAN still take the session deliberately — the
+    // refusal is about unattended attaches, not about this lease.
+    let (_taken, mut taken_rx) = h
+        .client
+        .attach_terminal(
+            &session.id,
+            80,
+            24,
+            TerminalSelector::Agent,
+            "lease-latecomer",
+        )
+        .await
+        .expect("a displacing attach is unaffected");
+    let reason = expect_detached(&mut owner_rx, 10).await;
+    assert!(
+        reason.contains("another client"),
+        "the deliberate takeover still displaces, got: {reason}"
+    );
+    let mut seen_taken = Vec::new();
+    wait_for(&mut taken_rx, &mut seen_taken, "FAKE-AGENT READY", 15).await;
+}
+
 /// The SAME lease reattaching to the SAME terminal is an ordinary
 /// reconnect: the incumbent channel is still cut over, but it is told a
 /// REPLACED reason rather than a takeover one.
@@ -742,6 +829,7 @@ async fn attachment_channels_must_be_nonzero_and_unique() {
             // here.
             terminal: TerminalSelector::default(),
             lease: String::new(),
+            if_unowned: false,
         })
         .await
         .unwrap();
@@ -763,6 +851,7 @@ async fn attachment_channels_must_be_nonzero_and_unique() {
             rows: 24,
             terminal: TerminalSelector::default(),
             lease: String::new(),
+            if_unowned: false,
         })
         .await
         .unwrap();
@@ -783,6 +872,7 @@ async fn attachment_channels_must_be_nonzero_and_unique() {
             rows: 24,
             terminal: TerminalSelector::default(),
             lease: String::new(),
+            if_unowned: false,
         })
         .await
         .unwrap();
@@ -807,6 +897,100 @@ async fn attachment_channels_must_be_nonzero_and_unique() {
     })
     .await
     .expect("supervisor did not reject duplicate attachment channel");
+}
+
+/// A peer speaking the LAST protocol version before the non-displacing
+/// attach is refused at the handshake, so its `Attach` never reaches the
+/// handler at all.
+///
+/// This is the machinery `PROTOCOL_VERSION`'s bump to 9 exists to engage,
+/// pinned at the layer where the engaging happens. `if_unowned` is
+/// decode-additive — a version-8 supervisor drops it without complaint and
+/// performs the DISPLACING attach the caller explicitly asked it not to —
+/// and a silent wrong answer is exactly what SPEC.md's version rule
+/// forbids ("Incompatible versions refuse to connect with a clear,
+/// actionable error; there is no silent degradation"). Since the old
+/// binary cannot be recompiled to prove that here, this proves the thing
+/// that MAKES it unreachable: an old-version peer is refused before it can
+/// send anything, with a diagnostic naming both versions.
+///
+/// The refusal is asserted to arrive as an unsolicited `Error` and to be
+/// followed by teardown, because both halves matter to the fleet story: a
+/// helm reads that message into its host's `version-skew` state (with the
+/// remediation the panel renders), and the teardown is what stops the
+/// connection from limping on in a state where attaches would be honored
+/// with the wrong semantics.
+#[tokio::test]
+async fn a_peer_one_protocol_version_behind_is_refused_before_it_can_attach() {
+    let h = harness().await;
+    let (client_side, server_side) = tokio::io::duplex(1 << 20);
+    let sup = Arc::clone(&h.sup);
+    tokio::spawn(async move {
+        let _ = handle_connection(sup, server_side).await;
+    });
+    let (read_half, write_half) = tokio::io::split(client_side);
+    let mut reader = FrameReader::new(read_half);
+    let mut writer = FrameWriter::new(write_half);
+
+    // A hello from the version this milestone's field was added AFTER —
+    // the exact peer that would ignore `if_unowned` and displace anyway.
+    writer
+        .write_control(&ControlMsg::Hello {
+            protocol_version: farhelm_proto::PROTOCOL_VERSION - 1,
+            build_version: "0.0.0-before-if-unowned".to_string(),
+            role: "helm".to_string(),
+            host_identity: None,
+        })
+        .await
+        .unwrap();
+
+    let _their_hello = reader.read_frame().await.unwrap().unwrap();
+    let refusal =
+        farhelm_proto::io::parse_control(&reader.read_frame().await.unwrap().unwrap()).unwrap();
+    let ControlMsg::Error { message, kind, .. } = refusal else {
+        panic!("a version-skewed peer must be refused, got {refusal:?}");
+    };
+    assert_eq!(kind, farhelm_proto::ErrorKind::Internal);
+    // BOTH numbers, not just the shape of the complaint. Which side is
+    // behind is the first thing anyone reading this asks, and it is what
+    // the host's version-skew chip is built from — a diagnostic naming
+    // only one version cannot answer it, and a test asserting only a
+    // generic phrase would not notice if one went missing.
+    assert!(
+        message.contains("protocol version mismatch")
+            && message.contains(&format!("v{}", farhelm_proto::PROTOCOL_VERSION - 1))
+            && message.contains(&format!("v{}", farhelm_proto::PROTOCOL_VERSION))
+            && message.contains("0.0.0-before-if-unowned"),
+        "the refusal must name both protocol versions and the peer's build, so a host can render \
+         it with a remedy: {message}"
+    );
+
+    // And the connection is gone: an attach sent after the refusal is not
+    // answered, which is what makes the refusal a gate rather than a
+    // warning.
+    let _ = writer
+        .write_control(&ControlMsg::Attach {
+            req_id: 1,
+            session_id: "whatever".to_string(),
+            channel: 7,
+            cols: 80,
+            rows: 24,
+            terminal: TerminalSelector::Agent,
+            lease: "lease-from-an-old-peer".to_string(),
+            if_unowned: true,
+        })
+        .await;
+    let outcome = tokio::time::timeout(std::time::Duration::from_secs(10), async {
+        while let Ok(Some(frame)) = reader.read_frame().await {
+            let msg = farhelm_proto::io::parse_control(&frame).unwrap();
+            assert!(
+                !matches!(msg, ControlMsg::Attached { .. }),
+                "a refused peer must never get an attachment"
+            );
+        }
+    })
+    .await;
+    outcome.expect("a version-refused connection must be torn down, not left serving");
 }
 
 /// An unknown control-message tag tears down the whole connection — the

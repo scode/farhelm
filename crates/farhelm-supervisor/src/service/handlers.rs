@@ -1549,6 +1549,7 @@ async fn handle_attach(
     rows: u16,
     selector: TerminalSelector,
     lease: String,
+    if_unowned: bool,
 ) {
     if channel == 0
         || input_routes.contains_key(&channel)
@@ -1768,6 +1769,32 @@ async fn handle_attach(
     // check that has always guarded it. A stale route can never
     // deliver to the winner — the channel ids differ, and the
     // arm compares both.
+    // A non-displacing attach refuses instead of sweeping (PLAN_M6.md
+    // item 7; `ControlMsg::Attach::if_unowned`). Checked with the SAME
+    // predicate the sweep below uses, so "would this attach take the
+    // session from someone" cannot drift from "who does this attach take
+    // it from", and inside the same lock hold for the reason that hold
+    // exists at all: a check outside it could be answered before a
+    // concurrent attach installed the owner it was asking about.
+    //
+    // The refusal names the takeover, because that is what happened —
+    // see `ATTACH_REFUSED_TAKEN_OVER`. Nothing is installed and nothing
+    // is torn down: the caller's channel stays unattached, which is what
+    // makes an auto-reconnect that loses this race a no-op rather than an
+    // eviction.
+    if if_unowned
+        && attachments
+            .iter()
+            .any(|(k, a)| displaced_by_attach(k, &a.lease, &session_id, &lease))
+    {
+        drop(attachments);
+        permit.send(reply_frame(&ControlMsg::Error {
+            req_id,
+            message: farhelm_proto::ATTACH_REFUSED_TAKEN_OVER.to_string(),
+            kind: ErrorKind::Conflict,
+        }));
+        return;
+    }
     let displaced: Vec<ActiveAttach> = attachments
         .extract_if(|k, a| displaced_by_attach(k, &a.lease, &session_id, &lease))
         .map(|(_, attachment)| attachment)
@@ -2674,6 +2701,7 @@ pub(crate) async fn handle_control(
             rows,
             terminal: selector,
             lease,
+            if_unowned,
         } => {
             handle_attach(
                 sup,
@@ -2687,6 +2715,7 @@ pub(crate) async fn handle_control(
                 rows,
                 selector,
                 lease,
+                if_unowned,
             )
             .await
         }

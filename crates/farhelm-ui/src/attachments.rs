@@ -553,6 +553,30 @@ const HTTP_STATUS_TEXT: &str = "the helm answered {status} with no message";
 /// the only honest report is that no path arrived.
 const NO_PATH_TEXT: &str = "the upload reply carried no usable path";
 
+/// What an upload's reply says when it came from a DIFFERENT build of the
+/// helm than this page was loaded from (PLAN_M6.md item 6).
+///
+/// Reported on the terminal's own status line rather than through the
+/// page-level banner, because this file's messages are the only surface
+/// terminal.js can reach on both targets — see `noteUploadBuild` there.
+/// It names the consequence for the thing the user was actually doing
+/// (this transfer) before the remedy, since a line about versions on an
+/// attachment error would otherwise read as a non-sequitur. `{helm}` is
+/// what the helm reported.
+const SKEW_TEXT: &str = "this page was built against a different farhelm than the helm now running ({helm}), so this \
+     upload may not behave as expected — reload to pick up the matching interface";
+
+/// What an upload's reply says when it carried NO build stamp at all.
+///
+/// Its own sentence rather than a blank in the one above, because there is
+/// no version to name: a helm that reports nothing predates the reporting,
+/// and — since a conforming helm both sends the header and exposes it to
+/// this cross-origin read — a reply without one is a peer that is not this
+/// build, which is the same conclusion by a different route.
+const SKEW_SILENT_TEXT: &str = "this page was built against a different farhelm than the helm now running (it reports no \
+     build at all), so this upload may not behave as expected — reload to pick up the matching \
+     interface";
+
 /// Everything terminal.js needs to intercept, upload, name, quote, and
 /// report for one session's terminals, as the JSON handed to
 /// `farhelmTerm.sync()`.
@@ -586,6 +610,15 @@ pub(crate) fn attachment_policy(session_id: &str) -> serde_json::Value {
         .collect();
     serde_json::json!({
         "upload": attachment_upload_path(session_id),
+        // The skew pair (PLAN_M6.md item 6). The upload is the one request
+        // this UI makes with `fetch` instead of through `api::send`, so it
+        // is the one reply whose build stamp nothing else would read — see
+        // terminal.js's `noteUploadBuild`. Both halves ride the policy
+        // rather than being spelled out in JS: the header name is a
+        // contract with the helm, and the stamp is what THIS bundle was
+        // compiled from, which only Rust knows.
+        "build": crate::skew::CLIENT_BUILD,
+        "buildHeader": crate::skew::BUILD_HEADER,
         "classify": classification_table(),
         "extensionAliases": aliases,
         "maxExtensionLength": MAX_DERIVED_EXTENSION,
@@ -605,6 +638,8 @@ pub(crate) fn attachment_policy(session_id: &str) -> serde_json::Value {
             "landed": LANDED_TEXT,
             "httpStatus": HTTP_STATUS_TEXT,
             "noPath": NO_PATH_TEXT,
+            "skew": SKEW_TEXT,
+            "skewSilent": SKEW_SILENT_TEXT,
         },
     })
 }
@@ -884,6 +919,13 @@ mod tests {
         assert_eq!(policy["safePathChars"], SHELL_SAFE_PATH_CHARS);
         assert!(policy["classify"].is_array());
         assert!(policy["extensionAliases"].is_object());
+        // The skew pair the upload path reads (PLAN_M6.md item 6). Pinned
+        // here because an absent `build` silently disables the check on the
+        // ONE request that does not go through `api::send` — the failure
+        // mode is a path that observes nothing, with every other test still
+        // green.
+        assert_eq!(policy["build"], crate::skew::CLIENT_BUILD);
+        assert_eq!(policy["buildHeader"], crate::skew::BUILD_HEADER);
         for key in [
             "busyOne",
             "busyMany",
@@ -894,6 +936,8 @@ mod tests {
             "landed",
             "httpStatus",
             "noPath",
+            "skew",
+            "skewSilent",
         ] {
             assert!(
                 policy["text"][key].is_string(),

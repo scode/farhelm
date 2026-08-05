@@ -1746,6 +1746,9 @@ impl SupervisorClient {
         cols: u16,
         rows: u16,
     ) -> anyhow::Result<(u32, TermStream)> {
+        // Displacing, like every pre-M6 attach: this wrapper exists for
+        // callers with no lease and no reconnect flow, and a refusal is
+        // something only an automatic retry knows what to do with.
         self.attach_terminal(session_id, cols, rows, TerminalSelector::default(), "")
             .await
     }
@@ -1767,6 +1770,46 @@ impl SupervisorClient {
         rows: u16,
         terminal: TerminalSelector,
         lease: &str,
+    ) -> anyhow::Result<(u32, TermStream)> {
+        self.attach_with_policy(session_id, cols, rows, terminal, lease, false)
+            .await
+    }
+
+    /// Attach only if no OTHER client holds this session, refusing rather
+    /// than displacing one that does (`ControlMsg::Attach::if_unowned`).
+    ///
+    /// The counterpart to [`Self::attach_terminal`], and a separate entry
+    /// point rather than a flag on it because the difference is not a
+    /// parameter a caller tunes — it is which of two DIFFERENT operations
+    /// is being asked for, and the wrong one is a session taken from
+    /// someone who is using it. A bare `false` at forty call sites says
+    /// nothing at any of them; a name says which contract each one wants.
+    ///
+    /// Refused with [`farhelm_proto::ATTACH_REFUSED_TAKEN_OVER`] and
+    /// `ErrorKind::Conflict`, and nothing is installed on a refusal — the
+    /// channel this named stays unattached.
+    pub async fn attach_terminal_if_unowned(
+        &self,
+        session_id: &str,
+        cols: u16,
+        rows: u16,
+        terminal: TerminalSelector,
+        lease: &str,
+    ) -> anyhow::Result<(u32, TermStream)> {
+        self.attach_with_policy(session_id, cols, rows, terminal, lease, true)
+            .await
+    }
+
+    /// The shared body of the two attach entry points above; `if_unowned`
+    /// is the one thing they differ in and it goes straight onto the wire.
+    async fn attach_with_policy(
+        &self,
+        session_id: &str,
+        cols: u16,
+        rows: u16,
+        terminal: TerminalSelector,
+        lease: &str,
+        if_unowned: bool,
     ) -> anyhow::Result<(u32, TermStream)> {
         let channel = allocate_channel(&self.next_channel)?;
         let (events_tx, events_rx) = mpsc::channel(TERM_EVENT_QUEUE);
@@ -1800,6 +1843,7 @@ impl SupervisorClient {
                     rows,
                     terminal,
                     lease: lease.to_string(),
+                    if_unowned,
                 },
             )
             .await;

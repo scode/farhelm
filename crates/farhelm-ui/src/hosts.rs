@@ -155,12 +155,17 @@ pub(crate) enum DetailPart {
 
 impl DetailPart {
     /// Our own words.
-    fn text(words: impl Into<String>) -> DetailPart {
+    ///
+    /// `pub(crate)` alongside its sibling because the build-skew notice
+    /// (`skew`) is a second surface built out of these runs: it mixes this
+    /// UI's sentence with a version string the helm supplied, which is
+    /// exactly the shape this type exists for.
+    pub(crate) fn text(words: impl Into<String>) -> DetailPart {
         DetailPart::Text(words.into())
     }
 
     /// Someone else's.
-    fn peer(value: impl Into<String>) -> DetailPart {
+    pub(crate) fn peer(value: impl Into<String>) -> DetailPart {
         DetailPart::Peer(value.into())
     }
 }
@@ -332,6 +337,16 @@ pub(crate) fn adoptable(state: &HostPhase) -> Option<&str> {
     }
 }
 
+/// The helm's stable label for the one unreachable cause a user can fix
+/// with a command on the machine they are already sitting at
+/// (farhelm-helm's `HostStateView::Unreachable::cause`).
+///
+/// Named rather than spelled out at each of its two match arms: the string
+/// is a cross-crate coupling, and the diagnosis and the remedy have to key
+/// off exactly the same one or the row would explain one state while
+/// prescribing for another.
+const LOCAL_SUPERVISOR_NOT_RUNNING: &str = "local-supervisor-not-running";
+
 /// The evidence behind a phase — the diagnosis, never the remedy (that is
 /// [`state_remedy`]'s job).
 ///
@@ -362,6 +377,15 @@ pub(crate) fn state_detail(state: &HostPhase) -> Vec<DetailPart> {
                 "the first connection attempt is in flight",
             )],
         },
+        // The one unreachable cause whose evidence and whose REMEDY are the
+        // same sentence: the helm's dial failure for the local row carries
+        // the exact command that fixes it, so the text belongs in the remedy
+        // slot ([`state_remedy`]) and this slot says only what happened.
+        // Printing the whole chain in both would put one long peer string on
+        // two consecutive lines, where the second is the one a user acts on.
+        HostPhase::Unreachable { cause, .. } if cause == LOCAL_SUPERVISOR_NOT_RUNNING => {
+            vec![DetailPart::text("no supervisor is running on this machine")]
+        }
         // The transport's own words, preserved raw and escaped only where
         // they are displayed (see [`DetailPart`]). ssh's stderr is the most
         // informative thing anyone has about why a host will not answer, and
@@ -489,19 +513,34 @@ pub(crate) fn state_remedy(state: &HostPhase) -> Option<Vec<DetailPart>> {
         // the user is already sitting at. Provisioning is M7's, so this is a
         // manual path and deliberately never an offer to install anything.
         //
-        // The `--state-dir` caveat is load-bearing rather than pedantic: a
-        // helm started with `--state-dir` reaches its local supervisor over
-        // the socket in THAT directory, so a bare `farhelm supervisor run`
-        // would start a supervisor this helm never talks to — and the user
-        // would be left staring at an unreachable row after doing exactly
-        // what it told them. The frozen `/api/hosts` contract carries no
-        // state directory, so this is as exact as this PR can honestly be;
-        // a contract-borne remediation is a later extension.
-        HostPhase::Unreachable { cause, .. } if cause == "local-supervisor-not-running" => {
-            Some(vec![DetailPart::text(
-                "no supervisor is running on this machine — start one with `farhelm supervisor \
-                 run`, passing the same `--state-dir` this helm was started with if it has one",
-            )])
+        // CONTRACT-BORNE as of PLAN_M6.md item 7, and that is a correctness
+        // fix rather than a tidy-up. The helm reaches its local supervisor
+        // over the socket in the state directory it was STARTED with, so a
+        // bare `farhelm supervisor run` starts a supervisor that helm never
+        // talks to — and the row stays exactly as it was after the user did
+        // exactly what it told them. This UI cannot know that directory: it
+        // is not on `/api/hosts` and never will be. The helm's own dial
+        // failure already contains the answer, spelled out with the real
+        // path (`farhelm_supervisor::service::connect`, whose remedy quotes
+        // the state dir precisely so it survives a paste into a shell), and
+        // surfacing that beats any sentence written here from a version of
+        // the facts this side does not have.
+        //
+        // The hardcoded hint survives only as the fallback for a helm that
+        // reported nothing at all — an empty `last_error` — because a remedy
+        // slot with nothing in it would be worse than an approximate one.
+        HostPhase::Unreachable { cause, last_error } if cause == LOCAL_SUPERVISOR_NOT_RUNNING => {
+            if last_error.trim().is_empty() {
+                Some(vec![DetailPart::text(
+                    "start a supervisor on this machine with `farhelm supervisor run`, passing \
+                     the same `--state-dir` this helm was started with if it has one",
+                )])
+            } else {
+                Some(vec![
+                    DetailPart::text("the helm reports: "),
+                    DetailPart::peer(last_error),
+                ])
+            }
         }
         HostPhase::Unreachable { .. }
         | HostPhase::Connecting { .. }
@@ -1700,35 +1739,62 @@ mod tests {
         );
     }
 
-    /// The manual-start hint belongs to exactly one cause, and it must offer
-    /// a COMMAND rather than an installation: provisioning is M7's, and
-    /// PLAN_M6.md is explicit that a registered destination with no running
-    /// supervisor gets a manual path and never an offer to install.
+    /// The manual-start remedy belongs to exactly one cause, and it must be
+    /// the helm's OWN sentence — which is the one that names the exact
+    /// command, `--state-dir` and all (PLAN_M6.md item 7's contract-borne
+    /// remedy).
     ///
-    /// The `--state-dir` caveat is asserted because without it the hint is
-    /// actively wrong for a helm started with one: the user would start a
-    /// supervisor on the default state directory, which that helm never
-    /// dials, and the row would stay exactly as it was.
+    /// The state directory is the whole reason this is not written here: a
+    /// helm reaches its local supervisor over the socket in the directory it
+    /// was started with, that directory is not on `/api/hosts`, and a hint
+    /// that said only `farhelm supervisor run` would send the user to start
+    /// a supervisor their helm never dials. The realistic fixture is
+    /// therefore the real dial failure's shape, and the assertion is that
+    /// the command survives into the remedy verbatim rather than being
+    /// paraphrased.
+    ///
+    /// The row must also not print that same long chain twice: the helm's
+    /// text is a REMEDY, so the diagnosis line beside it says only what
+    /// happened.
     #[test]
     fn only_the_local_supervisor_cause_gets_the_manual_start_hint() {
-        let hint = detail_text(
-            &state_remedy(&HostPhase::Unreachable {
-                cause: "local-supervisor-not-running".to_string(),
-                last_error: "no such file or directory".to_string(),
-            })
-            .expect("the one unreachable cause with a remedy"),
-        );
+        let reported = "no supervisor is running on this machine: supervisor does not appear to \
+                        be running (socket /srv/state/supervisor.sock is not accepting \
+                        connections); start it with `farhelm supervisor run --state-dir \
+                        /srv/state`: Connection refused (os error 111)";
+        let down = HostPhase::Unreachable {
+            cause: LOCAL_SUPERVISOR_NOT_RUNNING.to_string(),
+            last_error: reported.to_string(),
+        };
+        let hint =
+            detail_text(&state_remedy(&down).expect("the one unreachable cause with a remedy"));
         assert!(
-            hint.contains("farhelm supervisor run"),
-            "the hint has to name the command: {hint}"
-        );
-        assert!(
-            hint.contains("--state-dir"),
-            "a helm with its own state dir needs the supervisor pointed at it: {hint}"
+            hint.contains("farhelm supervisor run --state-dir /srv/state"),
+            "the exact command, state dir included, has to reach the user: {hint}"
         );
         assert!(
             !hint.contains("install"),
             "provisioning is M7's; this must not offer to set anything up: {hint}"
+        );
+        let diagnosis = detail_text(&state_detail(&down));
+        assert!(
+            !diagnosis.contains("farhelm supervisor run"),
+            "the command belongs to the remedy alone, not to both lines: {diagnosis}"
+        );
+
+        // A helm that reported nothing still gets a remedy, since an empty
+        // one would be worse than an approximate one — and it is the only
+        // case where this UI writes the command itself.
+        let silent = detail_text(
+            &state_remedy(&HostPhase::Unreachable {
+                cause: LOCAL_SUPERVISOR_NOT_RUNNING.to_string(),
+                last_error: String::new(),
+            })
+            .expect("a remedy is offered even with no reported error"),
+        );
+        assert!(
+            silent.contains("farhelm supervisor run") && silent.contains("--state-dir"),
+            "the fallback still names the command and the state-dir caveat: {silent}"
         );
 
         assert!(

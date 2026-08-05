@@ -19,12 +19,13 @@ use crate::api::{
 use crate::attachments::{attachment_policy, attachment_status_element_id};
 use crate::hosts::{HostLookup, HostsRead, PeerLine, is_connected, stale_session_notice};
 use crate::list::status_badge;
+use crate::reconnect::reconnect_policy;
 use crate::rename::RenameForm;
 use crate::tabs::{
     AGENT_BANNER_ELEMENT_ID, AGENT_CONNECTING_ELEMENT_ID, AGENT_TERMINAL_ELEMENT_ID,
     CLOSE_TAB_CONSEQUENCE, MAX_MOUNTED_TAB_ISLANDS, TAB_OPEN_ERROR_KEY, TabStripItem,
     sorted_tab_errors, tab_banner_element_id, tab_connecting_element_id, tab_label,
-    tab_terminal_element_id, terminal_ws_path, visible_tabs,
+    tab_terminal_element_id, terminal_ws_path, terminal_ws_unowned_path, visible_tabs,
 };
 use crate::{ApiBase, RestartOffer, Session, SessionStatus};
 
@@ -78,6 +79,17 @@ use crate::{ApiBase, RestartOffer, Session, SessionStatus};
 /// that is declarative — render the element, name it in the terminal's
 /// spec — because the reveal happens inside a `term.write()` completion
 /// callback, a moment the reactive layer has no way to observe.
+///
+/// ## Auto-reconnect (PLAN_M6.md item 7)
+///
+/// A terminal that loses its TRANSPORT gets itself back, and this
+/// component's part in that is one more policy object handed to
+/// `farhelmTerm.sync()` — the ladder and the wording from `reconnect`,
+/// applied by terminal.js. Nothing here changes: the recovery reuses this
+/// view's existing spec, lease included, so it is an ordinary reattach of a
+/// channel this view already owns rather than anything the reactive layer
+/// has to arrange. The surface it paints is the same connecting element
+/// declared below, wearing its recovery face.
 ///
 /// ## Rename (PLAN_M5.md item 6)
 ///
@@ -776,6 +788,11 @@ pub(crate) fn SessionView(session: Session, on_back: EventHandler<()>) -> Elemen
             // they dropped somewhere they cannot see.
             "status": attachment_status_element_id(AGENT_TERMINAL_ELEMENT_ID),
             "path": terminal_ws_path(&spec_session_id, None, &lease),
+            // Where an UNATTENDED reconnect attaches instead (PLAN_M6.md
+            // item 7): a route only a helm that honors the non-displacing
+            // contract serves, so the request cannot be silently
+            // reinterpreted by one that does not.
+            "pathUnowned": terminal_ws_unowned_path(&spec_session_id, None, &lease),
             // Only the agent terminal carries the restart generation: a
             // restart detaches the agent's attachment alone (the
             // supervisor's `detach_for_restart`), so bumping a tab's would
@@ -793,6 +810,7 @@ pub(crate) fn SessionView(session: Session, on_back: EventHandler<()>) -> Elemen
                 "connecting": tab_connecting_element_id(id),
                 "status": attachment_status_element_id(&tab_terminal_element_id(id)),
                 "path": terminal_ws_path(&spec_session_id, Some(id), &lease),
+                "pathUnowned": terminal_ws_unowned_path(&spec_session_id, Some(id), &lease),
                 "gen": 0,
                 "primary": false,
                 "focus": active.as_deref() == Some(id.as_str()),
@@ -811,6 +829,27 @@ pub(crate) fn SessionView(session: Session, on_back: EventHandler<()>) -> Elemen
     // this would serialize the same ~1KB of JSON forever, for nothing.
     let policy_session_id = session.id.clone();
     let attach_policy = use_memo(move || attachment_policy(&policy_session_id).to_string());
+    // The auto-reconnect policy (PLAN_M6.md item 7), handed across the same
+    // boundary and for the same reason as the one above: the ladder, the
+    // phase boundary, and every sentence a recovering terminal shows are
+    // decisions, reviewable in Rust and unit-tested there, while the socket
+    // handling that applies them can only live in terminal.js.
+    //
+    // Depends on ONE thing: whether the helm answering this page is the
+    // build this bundle was made for (`skew::helm_is_current`), which is
+    // what decides whether either UNATTENDED behavior — the heartbeat and
+    // automatic reconnect attempts — may run at all. See
+    // `reconnect_policy`.
+    //
+    // Reactive rather than sampled, and here that is load-bearing rather
+    // than tidy: a helm upgraded (or rolled back) under an open tab latches
+    // a mismatch on the very next reply, and this memo is what carries that
+    // revocation into terminals that are ALREADY open — terminal.js reads
+    // the synced policy at every decision, so a pending attempt is
+    // downgraded to the manual-only surface rather than firing against a
+    // helm that cannot honor it.
+    let reconnect_policy =
+        use_memo(move || reconnect_policy(crate::skew::helm_is_current()).to_string());
     use_effect(move || {
         // Nothing attaches until the lease is minted; `lease_error` is
         // what the user sees if it never is.
@@ -818,6 +857,7 @@ pub(crate) fn SessionView(session: Session, on_back: EventHandler<()>) -> Elemen
             return;
         };
         let attach_policy = attach_policy();
+        let reconnect_policy = reconnect_policy();
         let base_js = serde_json::to_string(&base).expect("string is serializable");
         let js = format!(
             r#"(function() {{
@@ -826,7 +866,9 @@ pub(crate) fn SessionView(session: Session, on_back: EventHandler<()>) -> Elemen
                 (function waitForIsland() {{
                     if (window.__farhelmSyncGeneration !== gen) return;
                     if (window.farhelmTerm) {{
-                        farhelmTerm.sync({base_js}, {specs}, {attach_policy});
+                        farhelmTerm.sync(
+                            {base_js}, {specs}, {attach_policy}, {reconnect_policy}
+                        );
                     }} else {{
                         setTimeout(waitForIsland, 50);
                     }}

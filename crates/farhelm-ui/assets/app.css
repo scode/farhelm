@@ -919,6 +919,42 @@ body,
   color: #b8c0cc;
 }
 
+/* The reconnect surface (PLAN_M6.md item 7): the same placeholder element,
+   wearing a different face while a terminal recovers from transport loss.
+
+   It has to be VISUALLY DISTINCT from the catch-up placeholder above,
+   because the two say opposite things about how worried to be — one is
+   the ordinary thing every reattach does, the other is a connection that
+   dropped. So this one is warmer in color and, unlike the plain
+   placeholder, carries a control. It stops short of the banner's red:
+   nothing is broken yet, and the terminal is expected back on its own.
+
+   The dimmed background is what the plain placeholder deliberately does
+   not have, and it earns it here: a recovery can outlast a replay by
+   minutes, over a last screen that is now stale, and the fade is what
+   keeps that frozen content from reading as live. */
+.terminal-connecting.terminal-reconnecting {
+  background: rgba(24, 27, 34, 0.82);
+  color: #e0c890;
+}
+
+/* The manual control on that surface. Interactivity is restored for the
+   BUTTON alone: its host keeps `pointer-events: none` (see above), so a
+   recovering pane swallows nothing else — and, unlike everything else the
+   placeholder has ever held, this one exists to be clicked. */
+.terminal-reconnect-now {
+  margin-top: 10px;
+  pointer-events: auto;
+  font-size: 12px;
+  padding: 1px 8px;
+  border-color: #e0c890;
+  color: #fff;
+}
+
+.terminal-reconnect-now:hover:not(:disabled) {
+  background: #6a5a34;
+}
+
 .attach-error {
   color: #e08080;
 }
@@ -1038,6 +1074,22 @@ body,
   padding: 4px 10px;
   font-size: 12px;
   color: #e08080;
+}
+
+/* The client↔helm build mismatch (PLAN_M6.md item 6): one line above the
+   whole app, on its own band so it reads as a statement about the PAGE
+   rather than about whichever view is under it.
+
+   Amber and non-blocking for the same reason `.refresh-stale` is: a stale
+   bundle mostly works, and the honest posture is to say what happened and
+   what to do rather than to take the app away from someone who may be
+   mid-sentence in a terminal. */
+.build-skew {
+  padding: 6px 10px;
+  font-size: 12px;
+  color: #e0d090;
+  background: #2a2620;
+  border-bottom: 1px solid #4a4230;
 }
 
 /* Amber, not red: the detail poll no longer finding this session is a

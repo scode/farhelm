@@ -191,6 +191,19 @@ fn build_router(state: Arc<AppState>, ui_dist: Option<&std::path::Path>, port: u
                 .layer(axum::middleware::from_fn(attachment_cors)),
         )
         .route("/api/sessions/{id}/term", get(term_ws))
+        // The non-displacing attach lives at its own PATH rather than
+        // behind a query flag, and the difference is the whole safety
+        // property (PLAN_M6.md item 7). A flag is something an older helm
+        // ignores while happily performing the displacing attach the
+        // caller was trying to avoid — the browser has no handshake to
+        // catch that with, and the build stamp it does have can be up to a
+        // poll interval stale, which is exactly the window a rolled-back
+        // helm lives in. A path an older helm does not serve cannot be
+        // misread: the upgrade simply fails (a 404, or the UI's own
+        // index.html from the static fallback — either way no WebSocket),
+        // the attempt counts as a failure, the ladder carries on, and the
+        // stamp check latches the mismatch moments later.
+        .route("/api/sessions/{id}/term/unowned", get(term_ws_if_unowned))
         // Host management (PLAN_M6.md item 5). The two verb routes are
         // shaped like the session verbs (`/stop`, `/rename`) rather than as
         // PATCHes, for the reason `rename_session` records: each changes
@@ -224,6 +237,41 @@ fn build_router(state: Arc<AppState>, ui_dist: Option<&std::path::Path>, port: u
             require_loopback_origin(port, req, next)
         },
     ))
+    // OUTSIDE the origin guard, and that placement is the whole point:
+    // layers apply outside-in, so this one decorates every response the
+    // stack can produce — including the guard's own 403, which returns
+    // before anything inner runs. "Every reply carries the stamp" has to
+    // mean every reply, or the one path that skips it is the one a
+    // skewed client hits first.
+    .layer(axum::middleware::from_fn(stamp_build))
+}
+
+/// Stamp this helm's build version onto one response (PLAN_M6.md item 6's
+/// client↔helm skew edge; SPEC_impl.md's version-and-skew section).
+///
+/// The UI compares it against the stamp compiled into its own bundle and
+/// surfaces a reload prompt; nothing here refuses anything, unlike the
+/// helm↔supervisor hello. The two edges differ deliberately: the supervisor
+/// edge refuses because a mismatched FRAME contract cannot be spoken at
+/// all, while a stale bundle still works well enough that taking the app
+/// away from its user would be the bigger harm.
+///
+/// Universal by construction rather than by discipline. A browser tab left
+/// open across a helm upgrade must learn about it from whatever request it
+/// happens to make next, and that includes the requests that FAIL — a
+/// mismatch is at least as likely to surface as an inexplicable refusal as
+/// it is on a success, and a 403 from the origin guard is exactly the shape
+/// a confused client produces.
+async fn stamp_build(
+    req: axum::extract::Request,
+    next: axum::middleware::Next,
+) -> axum::response::Response {
+    let mut resp = next.run(req).await;
+    resp.headers_mut().insert(
+        axum::http::HeaderName::from_static(BUILD_STAMP_HEADER),
+        axum::http::HeaderValue::from_static(farhelm_proto::BUILD_VERSION),
+    );
+    resp
 }
 
 /// Run the helm until the process is killed: open helm.db, apply any
@@ -303,6 +351,16 @@ pub async fn run(args: HelmArgs) -> anyhow::Result<()> {
     axum::serve(listener, app).await?;
     Ok(())
 }
+
+/// The response header carrying this helm's build version to the browser
+/// (PLAN_M6.md item 6).
+///
+/// Lowercase because `HeaderName::from_static` accepts nothing else, and
+/// spelled out in one place because the UI matches on the same literal
+/// (farhelm-ui's `skew::BUILD_HEADER`) — a cross-language coupling with
+/// nothing but this pairing to hold it together, which is why the browser
+/// suite asserts the header by name.
+const BUILD_STAMP_HEADER: &str = "x-farhelm-build";
 
 /// Reject requests whose `Host` — or, for browsers, `Origin` — is not
 /// this helm's own loopback address.
@@ -483,6 +541,17 @@ async fn attachment_cors(
     headers.insert(
         axum::http::header::ACCESS_CONTROL_ALLOW_HEADERS,
         axum::http::HeaderValue::from_static("content-type"),
+    );
+    // The build stamp is READABLE cross-origin, and only it. A
+    // cross-origin response exposes none of its headers to script by
+    // default — so without this the desktop webview's upload path, the one
+    // request this UI makes with `fetch` rather than through its own HTTP
+    // client, could not see the stamp it is supposed to be checking on
+    // every reply (PLAN_M6.md item 6). Nothing else is exposed: this list
+    // is the same deliberate minimum the methods and headers above are.
+    headers.insert(
+        axum::http::header::ACCESS_CONTROL_EXPOSE_HEADERS,
+        axum::http::HeaderValue::from_static(BUILD_STAMP_HEADER),
     );
     // Ten minutes: long enough that a burst of pastes does not preflight
     // every time, short enough that a helm restarted with different rules
@@ -2071,12 +2140,23 @@ async fn attach_from_query(
     state: &AppState,
     session_id: &str,
     q: &TermQuery,
+    if_unowned: bool,
 ) -> anyhow::Result<(Arc<SupervisorClient>, u32, TermStream)> {
     let (terminal, lease) = resolve_attach_request(q)?;
     let (_claim, client) = route_session(state, session_id).await?;
-    let (channel, stream) = client
-        .attach_terminal(session_id, q.cols, q.rows, terminal, lease)
-        .await?;
+    // Which of the two attach contracts this socket wants, decided by the
+    // query the browser sent: an unattended reconnect refuses rather than
+    // displaces (see `TermQuery::if_unowned`), everything else is the
+    // ordinary last-attach-wins attach.
+    let (channel, stream) = if if_unowned {
+        client
+            .attach_terminal_if_unowned(session_id, q.cols, q.rows, terminal, lease)
+            .await?
+    } else {
+        client
+            .attach_terminal(session_id, q.cols, q.rows, terminal, lease)
+            .await?
+    };
     Ok((client, channel, stream))
 }
 
@@ -2087,6 +2167,15 @@ async fn attach_from_query(
 /// dumb.
 ///
 /// `?cols=`/`?rows=` set the initial size (see `TermQuery`'s docs).
+/// The sibling route `/api/sessions/{id}/term/unowned` (PLAN_M6.md item 7)
+/// is this same socket attached NON-DISPLACINGLY, and its refusal arrives
+/// here as an ordinary `{"type":"detached","reason":"another client
+/// attached"}` notice — the same notice, and the same string, a client
+/// displaced while attached receives. That identity is the point: a
+/// browser that was away when it lost the session renders the state it is
+/// actually in without a second vocabulary for it. See `term_ws_if_unowned`
+/// for why it is a path rather than a parameter.
+///
 /// `?tab=<id>` and `?lease=<id>` (PLAN_M4.md item 5) select which of the
 /// session's terminals this socket attaches and under which client
 /// identity; BOTH default to the exact pre-M4 behavior when absent —
@@ -2106,6 +2195,21 @@ async fn attach_from_query(
 ///   backlog crossed its high-water mark; stop sending output.
 /// - `{"type":"resume"}` — the backlog drained below the low-water mark;
 ///   output may flow again.
+/// - `{"type":"ping"}` — the browser's idle-gated liveness probe
+///   (PLAN_M6.md item 7), answered with `{"type":"pong"}` and forwarded to
+///   nobody.
+///
+/// The ping is the one client message this helm ANSWERS itself rather than
+/// relaying, and that is the whole design rather than an optimization. What
+/// the browser needs to know is whether ITS socket is still carrying
+/// anything — the laptop-wake case, where a NAT or sleep timeout killed the
+/// connection and left both ends believing it is open — and that question
+/// is answered entirely by this end replying. Round-tripping it to the
+/// supervisor would answer a different question (is the HOST healthy),
+/// which already has its own surfaces: the host's connection state, the
+/// stall detach, and the detach notice this socket would receive anyway.
+/// It would also put a periodic message on every idle session's control
+/// path for no added signal.
 ///
 /// Pause and resume carry no payload because the channel is implicit:
 /// one socket is one attachment. They are the browser end of
@@ -2133,21 +2237,90 @@ async fn attach_from_query(
 /// this socket ever sends is this exact string.
 const REPLAY_COMPLETE_TEXT_MESSAGE: &str = r#"{"type":"replay_complete"}"#;
 
+/// Whether this failure is the supervisor refusing a non-displacing attach
+/// because another client holds the session.
+///
+/// `anyhow`'s `downcast_ref` searches the root cause and every context
+/// layer above it, so this survives callers that annotate the error on the
+/// way out — which is exactly what comparing rendered text does not.
+fn refused_as_taken_over(error: &anyhow::Error) -> bool {
+    error
+        .downcast_ref::<SupervisorError>()
+        .is_some_and(|supervised| {
+            supervised.kind == ErrorKind::Conflict
+                && supervised.message == farhelm_proto::ATTACH_REFUSED_TAKEN_OVER
+        })
+}
+
 async fn term_ws(
     State(state): State<Arc<AppState>>,
     AxPath(id): AxPath<String>,
     Query(q): Query<TermQuery>,
     upgrade: WebSocketUpgrade,
 ) -> impl IntoResponse {
+    serve_term_upgrade(state, id, q, upgrade, false)
+}
+
+/// The same socket, attached NON-DISPLACINGLY: refused rather than taking
+/// the session from another client (`ControlMsg::Attach::if_unowned`).
+///
+/// A route of its own, served only by a helm that understands the contract
+/// — see `build_router` for why the request has to be unaskable rather
+/// than merely ignorable. Only the browser's automatic reconnect uses it;
+/// a click, a reload and a take-control all carry user intent and go to
+/// the ordinary path.
+async fn term_ws_if_unowned(
+    State(state): State<Arc<AppState>>,
+    AxPath(id): AxPath<String>,
+    Query(q): Query<TermQuery>,
+    upgrade: WebSocketUpgrade,
+) -> impl IntoResponse {
+    serve_term_upgrade(state, id, q, upgrade, true)
+}
+
+/// The upgrade both terminal routes share; `if_unowned` is the one thing
+/// they differ in.
+fn serve_term_upgrade(
+    state: Arc<AppState>,
+    id: String,
+    q: TermQuery,
+    upgrade: WebSocketUpgrade,
+    if_unowned: bool,
+) -> axum::response::Response {
     // Sized to what the client can chunk onward (MAX_FRAME_LEN), not
     // smaller: xterm.js hands a bracketed paste to us as ONE message, so
     // a tighter cap would turn a large clipboard paste into a dropped
     // connection — the very failure chunking exists to prevent.
+    // Kept for the log line below, which runs after `id` has moved into
+    // the handler.
+    let id_for_log = id.clone();
     upgrade
         .max_message_size(farhelm_proto::MAX_FRAME_LEN as usize)
         .on_upgrade(move |socket| async move {
-            if let Err(e) = serve_term(state, id, q, socket).await {
-                error!(error = %e, "terminal websocket ended with error");
+            if let Err(e) = serve_term(state, id, q, socket, if_unowned).await {
+                // A refused non-displacing attach is an ORDINARY outcome,
+                // not a fault: a browser probing every thirty seconds for a
+                // session someone else holds is the reconnect ladder
+                // working exactly as designed (PLAN_M6.md item 7), and
+                // logging each probe at ERROR would fill the helm's log
+                // with the sound of nothing going wrong. It is still
+                // logged, because SPEC.md lists reconnection among the
+                // things that must be observable — just at the level the
+                // event deserves.
+                //
+                // Classified by DOWNCAST, the same way `http_error` reads a
+                // supervisor failure's kind, rather than by comparing the
+                // rendered message: `{e:#}` folds in every `.context(...)`
+                // layer, so a caller adding one anywhere above this would
+                // silently promote a routine refusal back to ERROR. The
+                // kind is checked alongside the reason because the reason
+                // is user-facing prose and the kind is what makes it a
+                // refusal rather than a coincidence.
+                if refused_as_taken_over(&e) {
+                    info!(session = %id_for_log, "terminal reconnect refused: another client holds this session");
+                } else {
+                    error!(error = %e, "terminal websocket ended with error");
+                }
             }
         })
 }
@@ -2181,7 +2354,17 @@ enum WsClientMsg {
     /// somebody else's.
     Pause,
     Resume,
+    /// The browser's liveness probe (PLAN_M6.md item 7), answered here with
+    /// [`PONG_TEXT_MESSAGE`] and never forwarded — see `term_ws`'s docs for
+    /// why the answer belongs to this end of the socket.
+    Ping,
 }
+
+/// The fixed wire text for the heartbeat's answer.
+///
+/// A constant for the same reason the replay marker is one: the shape never
+/// varies, so there is nothing for a JSON builder to add over a literal.
+const PONG_TEXT_MESSAGE: &str = r#"{"type":"pong"}"#;
 
 /// Pump one attached terminal between the browser and the supervisor.
 ///
@@ -2218,6 +2401,7 @@ async fn serve_term(
     session_id: String,
     q: TermQuery,
     socket: ws::WebSocket,
+    if_unowned: bool,
 ) -> anyhow::Result<()> {
     use futures_util::{SinkExt, StreamExt};
 
@@ -2232,16 +2416,17 @@ async fn serve_term(
     // request it just made. See `attach_from_query`'s own docs for why
     // folding them into one `Result` is what keeps this a single arm
     // instead of two copies of the same three lines.
-    let (client, channel, mut events) = match attach_from_query(&state, &session_id, &q).await {
-        Ok(parts) => parts,
-        Err(e) => {
-            let notice = serde_json::json!({"type": "detached", "reason": format!("{e:#}")});
-            let _ = ws_tx
-                .send(ws::Message::Text(notice.to_string().into()))
-                .await;
-            return Err(e);
-        }
-    };
+    let (client, channel, mut events) =
+        match attach_from_query(&state, &session_id, &q, if_unowned).await {
+            Ok(parts) => parts,
+            Err(e) => {
+                let notice = serde_json::json!({"type": "detached", "reason": format!("{e:#}")});
+                let _ = ws_tx
+                    .send(ws::Message::Text(notice.to_string().into()))
+                    .await;
+                return Err(e);
+            }
+        };
 
     // The detach signal, watched independently of the event queue. This is
     // the priority path that makes teardown always possible: a browser
@@ -2251,13 +2436,46 @@ async fn serve_term(
     // itself pinned for as long as the wedge lasted — the very leak the
     // stall detach exists to prevent.
     let mut detach_signal = events.detach_signal();
+    // The heartbeat's return path (PLAN_M6.md item 7). The inbound half
+    // reads the ping, but `ws_tx` belongs to the outbound task — and it has
+    // to stay there: two halves writing to one sink is exactly the
+    // interleaving that would let a pong land in the middle of a terminal
+    // frame. So the ping crosses as a bare signal and the answer is written
+    // where every other outbound message is written.
+    //
+    // `Notify` rather than a channel, because coalescing IS the wanted
+    // behavior rather than a limit to configure: a ping arriving while an
+    // earlier pong is still unsent means the outbound half is already
+    // stuck, and a second answer to a socket that has not taken the first
+    // one adds nothing. `notify_one` collapses those into the single
+    // pending permit — the same drop, without a queue depth to justify or a
+    // sender to keep alive so the receiver does not spin.
+    let pong = Arc::new(tokio::sync::Notify::new());
+    let pong_outbound = Arc::clone(&pong);
     let mut outbound = tokio::spawn(async move {
         loop {
-            let Some(event) = events.recv().await else {
-                break;
+            // A pong does not queue behind the terminal's events: a
+            // heartbeat is only ever sent when that queue has been silent,
+            // so parking the answer behind it would answer late precisely
+            // when the answer is being timed. It still goes out through the
+            // same detach-racing send below as everything else, which is
+            // what keeps a wedged browser from pinning this handler on a
+            // one-frame write — and through the same sink, since two halves
+            // writing to one socket is exactly the interleaving that would
+            // let a pong land in the middle of a terminal frame.
+            let next = tokio::select! {
+                event = events.recv() => match event {
+                    Some(event) => Some(event),
+                    None => break,
+                },
+                // `None` stands for the pong: the signal carries no
+                // payload, because the only thing a ping conveys is that it
+                // arrived.
+                _ = pong_outbound.notified() => None,
             };
-            let message = match event {
-                TermEvent::Data(bytes) => ws::Message::Binary(bytes.into()),
+            let message = match next {
+                None => ws::Message::Text(PONG_TEXT_MESSAGE.into()),
+                Some(TermEvent::Data(bytes)) => ws::Message::Binary(bytes.into()),
                 // The catch-up boundary (PLAN_M5.md item 4). Built as an
                 // ordinary outbound `Message` rather than sent inline like
                 // `Detached` below, deliberately: it must go through the
@@ -2266,8 +2484,10 @@ async fn serve_term(
                 // between the marker and this send abandons it exactly
                 // like abandoned data, instead of the marker getting a
                 // priority path data never had.
-                TermEvent::ReplayComplete => ws::Message::Text(REPLAY_COMPLETE_TEXT_MESSAGE.into()),
-                TermEvent::Detached(reason) => {
+                Some(TermEvent::ReplayComplete) => {
+                    ws::Message::Text(REPLAY_COMPLETE_TEXT_MESSAGE.into())
+                }
+                Some(TermEvent::Detached(reason)) => {
                     let notice = serde_json::json!({"type": "detached", "reason": reason});
                     // Best-effort and last: the socket closes right after,
                     // and a browser that cannot even take this notice is
@@ -2312,6 +2532,13 @@ async fn serve_term(
                     }
                     Ok(WsClientMsg::Pause) => client.pause_output(channel).await,
                     Ok(WsClientMsg::Resume) => client.resume_output(channel).await,
+                    // The one client message answered HERE rather than
+                    // relayed (see `term_ws`'s docs). Notifying never parks,
+                    // which is the property this loop needs: the browser
+                    // that is not draining is exactly the one whose ping
+                    // would otherwise block every keystroke queued behind
+                    // it.
+                    Ok(WsClientMsg::Ping) => pong.notify_one(),
                     // Unparseable or unknown: ignored on purpose, so a
                     // newer browser bundle talking to an older helm
                     // degrades rather than dropping the terminal.
@@ -2391,7 +2618,7 @@ async fn settle_outbound(
 
 #[cfg(test)]
 mod tests {
-    use super::{SupervisorError, origin_is_allowed, rest_harness};
+    use super::{BUILD_STAMP_HEADER, SupervisorError, origin_is_allowed, rest_harness};
     use axum::http::HeaderMap;
     use farhelm_proto::io::{FrameReader, FrameWriter, handshake};
     use farhelm_proto::{ControlMsg, Frame};
@@ -5169,6 +5396,20 @@ mod tests {
             "dioxus://index.html",
             "an error the page cannot read is a failure with no message"
         );
+        // The build stamp has to be READABLE, not merely present: a
+        // cross-origin response hides every header script did not ask to
+        // have exposed, so without this the desktop webview's upload — the
+        // one request this UI makes with `fetch` — could not perform the
+        // skew check every other reply gets (PLAN_M6.md item 6).
+        assert_eq!(
+            response.headers()["access-control-expose-headers"],
+            BUILD_STAMP_HEADER,
+            "the upload path must be able to read the stamp it is checking"
+        );
+        assert!(
+            response.headers().contains_key(BUILD_STAMP_HEADER),
+            "and the stamp itself must be on the refusal too"
+        );
         let body = axum::body::to_bytes(response.into_body(), usize::MAX)
             .await
             .unwrap();
@@ -6259,6 +6500,163 @@ mod tests {
         assert_eq!(response.status(), axum::http::StatusCode::BAD_REQUEST);
 
         let _peer = peer.await.unwrap();
+    }
+
+    /// The heartbeat's ping is answered BY THE HELM and never relayed
+    /// (PLAN_M6.md item 7).
+    ///
+    /// Both halves are the contract, and each fails differently. Without
+    /// the answer, a browser on a healthy-but-quiet socket would time its
+    /// own probe out, tear a perfectly good terminal down, and reattach on
+    /// a ladder — turning the check that exists to catch dead sockets into
+    /// a generator of spurious reconnects. Without the non-relay, every
+    /// idle terminal in a fleet would put a periodic message on its host's
+    /// control path forever, and a probe about the BROWSER's socket would
+    /// be answered by the health of something else entirely.
+    ///
+    /// The non-relay is proven positively rather than by waiting for an
+    /// absence: a `pause` follows the ping, and the first control frame the
+    /// supervisor sees must be that pause. A relayed ping would be sitting
+    /// in front of it, in the same order this one socket wrote them.
+    #[tokio::test]
+    async fn term_ws_answers_a_heartbeat_ping_without_relaying_it() {
+        use farhelm_proto::ControlMsg;
+
+        let (client_side, peer_side) = tokio::io::duplex(64 * 1024);
+        let peer = tokio::spawn(scripted_supervisor_attach(peer_side));
+        let mut harness = rest_harness::spliced_helm(client_side).await;
+        let addr = harness.serve().await;
+        let (mut ws, peer) = tokio::join!(
+            WsTestClient::connect(addr, "/api/sessions/sess-1/term"),
+            peer
+        );
+        let (mut reader, _writer, channel) = peer.unwrap();
+
+        ws.send_text(r#"{"type":"ping"}"#).await;
+        ws.send_text(r#"{"type":"pause"}"#).await;
+
+        let (opcode, payload) = tokio::time::timeout(Duration::from_secs(5), ws.recv())
+            .await
+            .expect("the helm never answered the heartbeat")
+            .expect("socket closed before the pong");
+        assert_eq!(opcode, 1, "the pong is a text frame");
+        assert_eq!(
+            serde_json::from_slice::<serde_json::Value>(&payload).unwrap(),
+            serde_json::json!({"type": "pong"}),
+            "the answer is exactly this fixed object — the browser matches on its type and \
+             nothing else"
+        );
+
+        let frame = tokio::time::timeout(Duration::from_secs(5), reader.read_frame())
+            .await
+            .expect("the supervisor never saw the pause that followed the ping")
+            .unwrap()
+            .expect("connection closed");
+        let got = farhelm_proto::io::parse_control(&frame).unwrap();
+        assert_eq!(
+            format!("{got:?}"),
+            format!("{:?}", ControlMsg::PauseOutput { channel }),
+            "the ping must not reach the supervisor at all, so the pause is the FIRST control \
+             frame it sees"
+        );
+    }
+
+    /// The unattended attach route reaches the supervisor as a
+    /// NON-DISPLACING attach, and the ordinary route does not (PLAN_M6.md
+    /// item 7).
+    ///
+    /// Pinned at the wire because that is where the safety property lives:
+    /// the browser's automatic reconnect asks for the refusal by CHOOSING
+    /// A PATH, and what has to be true is that the path it chose becomes
+    /// the flag the supervisor reads. A regression that dropped the flag
+    /// would leave every automatic reconnect displacing again — silently,
+    /// and only observably in a two-client race.
+    #[tokio::test]
+    async fn the_unowned_route_asks_the_supervisor_not_to_displace() {
+        for (path, expected) in [
+            ("/api/sessions/sess-1/term", false),
+            ("/api/sessions/sess-1/term/unowned", true),
+        ] {
+            let (client_side, peer_side) = tokio::io::duplex(64 * 1024);
+            let peer = tokio::spawn(async move {
+                let (r, w) = tokio::io::split(peer_side);
+                let mut reader = FrameReader::new(r);
+                let mut writer = FrameWriter::new(w);
+                handshake(&mut reader, &mut writer, "supervisor")
+                    .await
+                    .unwrap();
+                let request =
+                    farhelm_proto::io::parse_control(&reader.read_frame().await.unwrap().unwrap())
+                        .unwrap();
+                let ControlMsg::Attach { if_unowned, .. } = request else {
+                    panic!("expected an Attach, got {request:?}");
+                };
+                if_unowned
+            });
+            let mut harness = rest_harness::spliced_helm(client_side).await;
+            let addr = harness.serve().await;
+            let (_ws, asked) = tokio::join!(WsTestClient::connect(addr, path), peer);
+            assert_eq!(
+                asked.unwrap(),
+                expected,
+                "{path} must attach with if_unowned={expected}"
+            );
+        }
+    }
+
+    /// Every reply carries this helm's build stamp (PLAN_M6.md item 6), so
+    /// a browser tab left open across a helm upgrade can notice on whatever
+    /// request it makes next.
+    ///
+    /// Asserted on the responses that do NOT come from a handler as well as
+    /// the ones that do, and those are the interesting cases: the stamp is
+    /// added by the OUTERMOST layer precisely so a mismatch surfaces even
+    /// when it manifests as an inexplicable refusal, which is the shape a
+    /// stale bundle's failures usually take.
+    ///
+    /// The rejected-origin leg is the one that caught a real hole: the
+    /// origin guard answers 403 and returns before anything inside it runs,
+    /// so a stamp inserted in that guard's own success path — where this
+    /// started — was absent from exactly the reply a confused client is
+    /// most likely to receive. A skewed UI whose requests are being refused
+    /// would have been told nothing at all.
+    #[tokio::test]
+    async fn every_reply_carries_the_helms_build_stamp() {
+        let harness = rest_harness::helm_listing(vec![]).await;
+        for (uri, origin, expected) in [
+            ("/api/sessions", None, axum::http::StatusCode::OK),
+            (
+                "/api/sessions/nope",
+                None,
+                axum::http::StatusCode::NOT_FOUND,
+            ),
+            (
+                "/api/sessions",
+                Some("http://attacker.example"),
+                axum::http::StatusCode::FORBIDDEN,
+            ),
+        ] {
+            let mut builder = axum::http::Request::builder()
+                .method("GET")
+                .uri(uri)
+                .header("host", "127.0.0.1:7433");
+            if let Some(origin) = origin {
+                builder = builder.header("origin", origin);
+            }
+            let request = builder.body(axum::body::Body::empty()).unwrap();
+            let response = tower::ServiceExt::oneshot(harness.router(), request)
+                .await
+                .unwrap();
+            assert_eq!(response.status(), expected, "{uri}");
+            assert_eq!(
+                response
+                    .headers()
+                    .get(BUILD_STAMP_HEADER)
+                    .and_then(|value| value.to_str().ok()),
+                Some(farhelm_proto::BUILD_VERSION),
+                "{uri} must carry the stamp the UI compares against its own"
+            );
+        }
     }
 
     /// The three ways a WS attach's selector/lease resolve to an `Attach`

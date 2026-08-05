@@ -180,13 +180,39 @@ pub(crate) fn visible_tabs(
 /// (agent-only) reading of this endpoint already means, so the agent's URL
 /// differs from an old build's only by the lease.
 pub(crate) fn terminal_ws_path(session_id: &str, tab_id: Option<&str>, lease: &str) -> String {
+    terminal_ws_path_on(session_id, tab_id, lease, "term")
+}
+
+/// The same terminal's path for an UNATTENDED attach — the route that
+/// refuses rather than displacing another client (PLAN_M6.md item 7).
+///
+/// A different PATH rather than a flag on the one above, and built here
+/// rather than spliced together in terminal.js, for two reasons that point
+/// the same way. The safety one: a helm that predates this milestone does
+/// not serve this route at all, so an automatic reconnect reaching a
+/// rolled-back helm fails its handshake instead of quietly performing the
+/// displacing attach a flag would have let it ignore — the browser has no
+/// version handshake to catch that with, and its build-stamp check can be
+/// a poll interval stale. The tidiness one: every id in these URLs comes
+/// from a supervisor, so the escaping belongs where the encoders are, not
+/// in string surgery on the far side of the eval boundary.
+pub(crate) fn terminal_ws_unowned_path(
+    session_id: &str,
+    tab_id: Option<&str>,
+    lease: &str,
+) -> String {
+    terminal_ws_path_on(session_id, tab_id, lease, "term/unowned")
+}
+
+/// The shared body of the two paths above; `route` is the only difference.
+fn terminal_ws_path_on(session_id: &str, tab_id: Option<&str>, lease: &str, route: &str) -> String {
     let session = encode_path_segment(session_id);
     let lease = encode_query_value(lease);
     match tab_id {
-        None => format!("/api/sessions/{session}/term?lease={lease}"),
+        None => format!("/api/sessions/{session}/{route}?lease={lease}"),
         Some(tab) => {
             let tab = encode_query_value(tab);
-            format!("/api/sessions/{session}/term?tab={tab}&lease={lease}")
+            format!("/api/sessions/{session}/{route}?tab={tab}&lease={lease}")
         }
     }
 }
@@ -396,6 +422,33 @@ mod tests {
         assert_eq!(
             terminal_ws_path("s1", Some("t1"), "lease-1"),
             "/api/sessions/s1/term?tab=t1&lease=lease-1"
+        );
+    }
+
+    /// The unattended attach goes to a DIFFERENT ROUTE, not to the same
+    /// one with a flag on it — the property PLAN_M6.md item 7's safety
+    /// rests on (a helm that predates the contract does not serve this
+    /// path at all, so it cannot silently perform the displacing attach
+    /// instead). Pinned as the literal URL because that is what makes an
+    /// old helm answer with something that is not a WebSocket.
+    ///
+    /// Everything else about the two must stay identical: same session,
+    /// same selector, same lease, same escaping — a recovery that attached
+    /// a different TERMINAL would be a bug the safety property would hide.
+    #[test]
+    fn the_unattended_path_differs_only_in_its_route() {
+        assert_eq!(
+            terminal_ws_unowned_path("s1", None, "lease-1"),
+            "/api/sessions/s1/term/unowned?lease=lease-1"
+        );
+        assert_eq!(
+            terminal_ws_unowned_path("s1", Some("t1"), "lease-1"),
+            "/api/sessions/s1/term/unowned?tab=t1&lease=lease-1"
+        );
+        assert_eq!(
+            terminal_ws_unowned_path("s1", Some("t&lease=stolen"), "mine"),
+            "/api/sessions/s1/term/unowned?tab=t%26lease%3Dstolen&lease=mine",
+            "the escaping is the shared body's, not a second implementation"
         );
     }
 

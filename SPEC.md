@@ -271,6 +271,23 @@ whatever the agent renders is what you see. There is no composer, no message abs
   connection's lifetime) is detached with a visible stall reason rather than honored forever — the same surface as a
   takeover detach, with reattach behaving exactly as any reconnect does. Flow control never drops terminal output:
   whatever bound it degrades to is the same replay floor above, never a silent gap.
+- A terminal that loses its CONNECTION recovers by itself, without the session ever being closed and reopened by hand.
+  That covers the connection dropping visibly and the connection dying silently — a sleeping laptop or a timed-out
+  network path leaves a terminal that looks connected and carries nothing, which is checked for rather than left for the
+  user to discover by typing. Recovery follows the same two regimes as a host connection: bounded retries, then periodic
+  re-probing, so a terminal whose network comes back overnight is simply there again. Which phase it is in is visible in
+  the terminal itself, along with a way to retry immediately, and a recovered terminal reattaches exactly as any client
+  does — landing where the session is now, not scrolling its history past again.
+- Reconnection is for lost connections only, and the two detaches that are NOT lost connections deliberately stay put. A
+  client displaced by a takeover keeps its snapshot and its take-control action rather than reattaching: it was
+  displaced on purpose, and a client that came back on its own would fight the one that displaced it. A viewer detached
+  for stalling keeps its reason: the wedge is why it was detached, and returning into the same wedge repeats it. Both
+  come back the way any client attaches — because someone asks.
+- A terminal recovering on its own never TAKES the session. Recovery is unattended by definition — the client was not
+  there to be told anything while its connection was gone — so if someone else has attached meanwhile, the automatic
+  attach is refused and that client lands where it actually stands: displaced, with the same take-control action any
+  other displaced client has. Taking a session over stays a thing someone does on purpose, whether by opening it or by
+  asking for it back.
 
 ## Attachments
 

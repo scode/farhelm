@@ -111,7 +111,23 @@ Consequences of that stance:
   an unwritable database fails the title write first, a different path); a deterministic ack-enqueued observation for
   the upload-priority test (today a settle window with documented margins); and a component test of the scope probe's
   timeout-versus-retry path (needs injectable tool paths or timeouts — the probe deliberately has no fake-tools seam, so
-  today the retry decision is pinned as a pure function only).
+  today the retry decision is pinned as a pure function only). The diagnosis instrument that series left behind then
+  FIRED — pause-spam-detach, during M6's stack CI (2026-08-04), its first failure since it was individually closed — and
+  what it captured is the next data point for the open server-death-under-load hypothesis: "reattach: tmux control
+  client exited before the session-sink attach reply". A control client that announces its own exit mid-reattach, in a
+  test whose own fix had nothing to do with the tmux server's liveness, is the same shape the pane-silenced case was
+  hardened for, which makes this evidence about the SERVER rather than about either test. Stack CI is itself part of the
+  picture: with a seven-PR stack, a push triggers overlapping full runs on one runner and the whole load-sensitive class
+  fires more often, so the load the class is sensitive to is partly self-inflicted. Two candidates are recorded and
+  neither is decided — a GitHub concurrency group per ref (cancelling superseded runs of the same branch), and lowering
+  e2e `SLOTS` under CI — because both trade coverage or latency for quiet, and that trade wants evidence rather than a
+  reflex. Separately on watch, not yet a class: two one-off SIGSEGVs in the supervisor lib test binary under
+  full-workspace parallel load (2026-08-04 and 2026-08-05), both clean on rerun, no shared test and no pattern between
+  them. A THIRD occurrence is a real bug to investigate — a segfault is not a timing flake, and the standing rule is
+  that the next one is chased rather than quietly rerun. One product bug is parked here too, found through the e2e
+  snapshot paths rather than by a test: an invocation of 120-odd characters overflows the session view's titlebar and
+  pushes the rename control out of reach, which is a real UI failure on a surface every session has and not test debt at
+  all.
 - **M6.75 — status and profiles.** Running/waiting/idle heuristics with per-agent sharpening, list filtering, profile
   CRUD and starter profiles. Also live push replacing BOTH of the UI's polls — M2's session-list poll and M4's
   session-detail/tab-list poll — status transitions are what make polling genuinely painful, and the push channel serves
