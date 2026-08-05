@@ -25,6 +25,12 @@ tracing-subscriber.workspace = true
 # Only the integration tests speak the wire protocol directly; the binary
 # reaches it through the helm and supervisor crates.
 farhelm-proto.workspace = true
+# The two-host aggregation test drives a REAL `farhelm helm run` over real
+# loopback HTTP (merged_hosts.rs), because that is the only way to exercise
+# the shipped binary's own serving path; a hand-rolled HTTP client would be
+# a second, worse thing to maintain. Loopback only, so no TLS backend is
+# needed and the workspace's default-feature-less reqwest is enough.
+reqwest.workspace = true
 shell-words.workspace = true
 tempfile.workspace = true
 # The attachment-diagnostics test implements a `tracing` layer to capture

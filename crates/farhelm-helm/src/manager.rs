@@ -24,17 +24,19 @@
 //! *connection manager* — and naming the module after the mechanism rather
 //! than the noun keeps that split legible from the file list alone.
 //!
-//! ## What this module is NOT wired to yet
+//! ## Who consumes this
 //!
-//! Nothing user-visible. PLAN_M6.md's order of work puts aggregation, REST
-//! host management, and session-op routing in the NEXT PR; the helm's
-//! serving path today is still `AppState`'s single client, untouched. This
-//! module is built, tested, and exported so that PR has a substrate to
-//! wire, not a design to invent. The public surface is shaped for exactly
-//! those consumers: [`ConnectionManager::snapshots`] is the hosts list REST
-//! will render, [`ConnectionManager::client`] is how a session operation
-//! finds its host's live connection, and [`ConnectionManager::adopt`] is
-//! the identity-mismatch resolution verb.
+//! The serving path, entirely (PLAN_M6.md item 5). `AppState` holds one of
+//! these beside the store and answers every request through it, so the
+//! public surface here IS the helm's own vocabulary for a fleet:
+//! [`ConnectionManager::snapshots`] is what `/api/hosts` renders and what
+//! the merged session list tags its rows from,
+//! [`ConnectionManager::status`] is how a session operation finds its
+//! host's live connection (or learns why there is none),
+//! [`ConnectionManager::sync_registry`] is what every host add, edit, and
+//! remove calls to make its change take, and
+//! [`ConnectionManager::adopt`]/[`ConnectionManager::retry_now`] are the
+//! two user decisions REST exposes as verbs.
 //!
 //! ## The shape of an actor
 //!
@@ -66,7 +68,7 @@ use crate::store::{
 };
 use anyhow::Context as _;
 use farhelm_proto::io::VersionSkew;
-use farhelm_proto::{ErrorKind, SessionInfo};
+use farhelm_proto::{ErrorKind, SessionInfo, SessionStatus};
 use std::collections::HashMap;
 use std::future::Future;
 use std::pin::Pin;
@@ -193,6 +195,38 @@ pub const REFRESH_SESSION_CAP: usize = 5_000;
 /// refused connection.
 pub const CONNECT_ATTEMPT_TIMEOUT: Duration = Duration::from_secs(20);
 
+/// How many encoded bytes of session metadata one refresh may accumulate
+/// before the walk is abandoned.
+///
+/// The third independent bound on a drain, and the one the other two cannot
+/// stand in for: pages and rows are both satisfied by a peer that sends few,
+/// enormous pages, and `REFRESH_PAGE_LIMIT` frames of `REFRESH_SESSION_CAP`
+/// fat records is gigabytes of retained `SessionInfo` — chosen entirely by
+/// the far end, which for a registered host is a machine the helm does not
+/// control.
+///
+/// Sixty-four mebibytes is far above any honest fleet's whole list (a
+/// session's metadata is a few hundred bytes) and far below what would
+/// threaten this process. Tripping it is an ordinary failed refresh: the
+/// previous cache is kept, exactly as for every other way a walk can fail.
+pub const REFRESH_BYTE_CAP: usize = 64 * 1024 * 1024;
+
+/// Longest session id this helm will accept from a peer.
+///
+/// Not a guess at what a supervisor mints (a UUID, 36 bytes) but a bound on
+/// what this side can still WORK with. A session id is embedded verbatim in
+/// the helm's own list cursors, and those travel as a query parameter — so
+/// an id anywhere near the frame limit yields a cursor no client could
+/// replay, because the request head is refused before any handler sees it.
+/// A page whose continuation cannot be replayed is a walk that stops
+/// forever at that row.
+///
+/// A kibibyte is two orders of magnitude above every id any farhelm
+/// supervisor has ever minted and still leaves a cursor comfortably inside
+/// any HTTP head limit. Over-cap rows are poison-tier: skipped and warned
+/// about, never silently kept.
+pub const MAX_SESSION_ID_BYTES: usize = 1024;
+
 /// How long one cache refresh may take before the CONNECTION is torn down.
 ///
 /// A connected host that stops answering `ListSessions` — without closing
@@ -306,6 +340,35 @@ struct RefreshStep {
     /// path; the reason is log text, not a state (the state the user sees
     /// is whatever the reconnection produces).
     end_connection: Option<&'static str>,
+    /// What this refresh means for an identity-less host's in-memory list
+    /// (see [`LiveSessions`]). Always [`LiveSessions::Clear`] for a host
+    /// that has an identity: its sessions live in helm.db, and a second
+    /// in-memory copy would be a second answer to the same question.
+    live: LiveSessions,
+    /// The session ids this drain found already claimed by another host,
+    /// or `None` for a refresh that produced no evidence either way (a
+    /// failed one). See [`ActorStatus::contested`].
+    contested: Option<Arc<Vec<String>>>,
+}
+
+/// What a refresh does to the in-memory session list a connected host
+/// serves from when it has no identity to bind a cache write to.
+///
+/// The three cases mirror the cache's own rules exactly, which is the
+/// point: an identity-less host must behave like every other connected host
+/// from the outside, differing only in where its rows are kept.
+enum LiveSessions {
+    /// Leave whatever is published alone — a FAILED refresh keeps the
+    /// previous list, for the same reason a failed refresh keeps the
+    /// previous cache: "what did this host have, last we knew" is the
+    /// question, and clearing it on failure destroys the answer exactly
+    /// when it becomes the only one available.
+    Retain,
+    /// This host has no identity and just drained cleanly; serve this.
+    Set(Arc<Vec<SessionInfo>>),
+    /// This host's sessions are in helm.db (or it is not connected at all),
+    /// so nothing is retained here.
+    Clear,
 }
 
 /// How a connected host's most recent cache refresh went.
@@ -434,6 +497,37 @@ pub enum HostState {
         /// The identity the destination just reported.
         reported: String,
     },
+    /// FROZEN: the destination answered without an identity at all, while
+    /// this entry has one on record.
+    ///
+    /// Distinct from [`Self::IdentityMismatch`] because the remedy is
+    /// different, and offering the wrong one would be worse than offering
+    /// none: there is nothing to ADOPT here, since no new identity was
+    /// presented. Something is answering that will not say who it is, and
+    /// this helm has a cache written under a name it can no longer confirm
+    /// belongs to whatever is there — connecting anyway would merge two
+    /// installs through an unverified peer, which is the silent merge
+    /// SPEC.md forbids arriving by the one door the mismatch check cannot
+    /// see through.
+    ///
+    /// Nothing is connected and nothing is written. The recorded identity's
+    /// cache stays and serves STALE like any other non-connected host's,
+    /// which is the honest reading: it is still the last thing this helm
+    /// actually verified.
+    ///
+    /// Re-probed on [`Cadence::reprobe`], unlike `IdentityMismatch`. The
+    /// difference is not arbitrary: a mismatch asks a question only a human
+    /// can answer, so a timer would churn the log over a decision nobody
+    /// made — whereas here there is no decision available at all, so waiting
+    /// for the host to start reporting its identity again is the ONLY
+    /// remedy this side has, and re-probing is how it is noticed. The
+    /// user's alternatives — retarget the entry, or remove it — take effect
+    /// through their own paths.
+    IdentityUnverified {
+        /// The identity this registry row holds, which the peer would not
+        /// confirm.
+        recorded: String,
+    },
     /// This entry reaches an identity that ANOTHER registry entry already
     /// holds — two rows, one host.
     ///
@@ -508,6 +602,7 @@ impl HostState {
             HostState::Connected { .. } => "connected",
             HostState::VersionSkew { .. } => "version-skew",
             HostState::IdentityMismatch { .. } => "identity-mismatch",
+            HostState::IdentityUnverified { .. } => "identity-unverified",
             HostState::Duplicate { .. } => "duplicate",
             HostState::Retired { .. } => "retired",
         }
@@ -515,11 +610,13 @@ impl HostState {
 
     /// Whether a session operation may be routed to this host right now.
     ///
-    /// The next PR refuses operations against any non-connected host with
-    /// the host's state named in the error (PLAN_M6.md item 5): unreachable
-    /// is not special, it is just the common case. Expressed here, once, so
-    /// that adding a seventh state cannot silently become "routable by
-    /// default" at some call site that forgot about it.
+    /// `crate::route_session` refuses operations against any non-connected
+    /// host with the host's state named in the error (PLAN_M6.md item 5):
+    /// unreachable is not special, it is just the common case. Expressed
+    /// here, once, so that adding a seventh state cannot silently become
+    /// "routable by default" at some call site that forgot about it — and so
+    /// the merged list's `stale` flag and the routing decision cannot drift
+    /// apart, since both are this one predicate.
     pub fn is_connected(&self) -> bool {
         matches!(self, HostState::Connected { .. })
     }
@@ -548,6 +645,22 @@ pub struct HostSnapshot {
     /// `None` for the reserved local row, always `Some` for an ssh row.
     pub destination: Option<String>,
     pub state: HostState,
+    /// The sessions this host is serving from MEMORY rather than from
+    /// helm.db — non-empty only for a connected host that reports no
+    /// identity, which therefore caches nothing.
+    ///
+    /// Carried in the snapshot rather than fetched separately because the
+    /// merged list needs it in the same coherent read as the state it is
+    /// paired with: taken apart, a caller could see a host still `Connected`
+    /// beside a list its actor had already dropped, and serve sessions from
+    /// a connection that is gone. `None` is the ordinary case for every
+    /// host with an identity.
+    pub live_sessions: Option<Arc<Vec<SessionInfo>>>,
+    /// Session ids this host reports that another host's cache already
+    /// claims — see [`ActorStatus::contested`]. Empty for essentially every
+    /// host, and read from the same borrow as everything else here so a
+    /// routing decision cannot pair one host's claims with another's state.
+    pub contested: Arc<Vec<String>>,
 }
 
 // ---- The transport seam ---------------------------------------------
@@ -770,7 +883,7 @@ const PEER_TEXT_CAP: usize = 1024;
 ///
 /// Truncation is marked rather than silent: "the host said this" and "the
 /// host said this and kept going" are different diagnostics.
-fn peer_text(text: &str) -> String {
+pub fn peer_text(text: &str) -> String {
     let truncated = text.len() > PEER_TEXT_CAP;
     // Split on a char boundary — `text` is a Rust `String`, so a byte
     // index in the middle of a multi-byte char would panic.
@@ -839,15 +952,9 @@ const SSH_STDERR_LINE_BUDGET: usize = 200;
 /// there is no separate lifetime to manage, and the task cannot outlive
 /// the transport that spawned it by more than the child's own teardown.
 async fn relay_ssh_stderr(host: HostId, destination: String, stderr: tokio::process::ChildStderr) {
-    use tokio::io::AsyncBufReadExt as _;
-
-    // `split`, not `lines`: stderr from a remote is arbitrary bytes, and
-    // the `lines` adapter would fail the whole stream on the first
-    // non-UTF-8 one. Lossy conversion keeps a mostly-text diagnostic
-    // readable instead of discarding it.
-    let mut lines = tokio::io::BufReader::new(stderr).split(b'\n');
+    let mut reader = tokio::io::BufReader::new(stderr);
     let mut relayed = 0usize;
-    while let Ok(Some(line)) = lines.next_segment().await {
+    while let Some(line) = next_capped_line(&mut reader, SSH_STDERR_LINE_CAP).await {
         relayed += 1;
         // Past the budget the loop keeps READING and stops logging. It
         // must not stop reading: closing this pipe early makes the child's
@@ -868,17 +975,86 @@ async fn relay_ssh_stderr(host: HostId, destination: String, stderr: tokio::proc
             }
             std::cmp::Ordering::Less => {}
         }
-        let truncated = line.len() > SSH_STDERR_LINE_CAP;
-        let text = String::from_utf8_lossy(&line[..line.len().min(SSH_STDERR_LINE_CAP)]);
+        let text = String::from_utf8_lossy(&line.bytes);
         warn!(
             host,
             destination = destination.as_str(),
-            truncated,
+            truncated = line.truncated,
             // Debug-formatted deliberately; see this function's own docs.
             message = ?text,
             "ssh reported a problem for this host"
         );
     }
+}
+
+/// One capped line of a stderr stream: at most `cap` bytes of it, plus
+/// whether more were thrown away.
+struct CappedLine {
+    bytes: Vec<u8>,
+    truncated: bool,
+}
+
+/// Read up to the next newline, RETAINING at most `cap` bytes and
+/// discarding the rest as it goes. `None` at end of stream.
+///
+/// The cap has to be applied while reading, not after. The obvious shape —
+/// `BufReader::split(b'\n')` and truncate the segment — allocates the whole
+/// segment first, so a remote that writes megabytes without a newline
+/// (a binary blob on stderr, a wedged pager, a deliberate flood) makes this
+/// process buy every byte of it before any limit is consulted. That is an
+/// unbounded allocation driven entirely by the far end of an ssh channel,
+/// which for a registered host is a machine the helm does not control.
+///
+/// `fill_buf`/`consume` is what makes the bound real: bytes past `cap` are
+/// consumed and dropped without ever being retained, so an endless
+/// newline-free stream costs the reader's fixed buffer and nothing more.
+/// Draining rather than stopping is still the rule — see this function's
+/// caller for why closing the pipe early would kill the transport.
+async fn next_capped_line<R>(reader: &mut R, cap: usize) -> Option<CappedLine>
+where
+    R: tokio::io::AsyncBufRead + Unpin,
+{
+    use tokio::io::AsyncBufReadExt as _;
+
+    let mut kept: Vec<u8> = Vec::new();
+    let mut truncated = false;
+    let mut saw_any = false;
+    // A read ERROR ends the line the same way end-of-stream does: there is
+    // nothing more to relay either way, and the caller's loop stops.
+    while let Ok(available) = reader.fill_buf().await {
+        if available.is_empty() {
+            break;
+        }
+        saw_any = true;
+        match available.iter().position(|byte| *byte == b'\n') {
+            Some(newline) => {
+                let take = cap.saturating_sub(kept.len()).min(newline);
+                kept.extend_from_slice(&available[..take]);
+                truncated |= newline > take;
+                // The newline itself is consumed but never kept: callers
+                // want the line's content, and a trailing newline in a log
+                // field would break the line the field is rendered on.
+                reader.consume(newline + 1);
+                return Some(CappedLine {
+                    bytes: kept,
+                    truncated,
+                });
+            }
+            None => {
+                let take = cap.saturating_sub(kept.len()).min(available.len());
+                kept.extend_from_slice(&available[..take]);
+                truncated |= available.len() > take;
+                let consumed = available.len();
+                reader.consume(consumed);
+            }
+        }
+    }
+    // A final segment with no trailing newline is still a line; a stream
+    // that ended with nothing pending is the end.
+    saw_any.then_some(CappedLine {
+        bytes: kept,
+        truncated,
+    })
 }
 
 /// Tag a failed local-socket dial that means "no supervisor here" with
@@ -948,7 +1124,13 @@ fn classify_local_dial(error: anyhow::Error) -> anyhow::Error {
 /// walk that did not finish.
 pub async fn drain_sessions(client: &SupervisorClient) -> anyhow::Result<Vec<SessionInfo>> {
     let mut collected: Vec<SessionInfo> = Vec::new();
+    let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
+    let mut bytes = 0usize;
     let mut cursor: Option<String> = None;
+    // The ordering key of the previous entry, carried ACROSS page
+    // boundaries — a peer that orders each page correctly but restarts the
+    // order at every page would otherwise pass an inside-a-page check.
+    let mut previous: Option<(std::cmp::Reverse<i64>, String)> = None;
     for _ in 0..REFRESH_PAGE_LIMIT {
         // Kept so the reply's own `next_cursor` can be compared against
         // the cursor that produced it.
@@ -957,7 +1139,82 @@ pub async fn drain_sessions(client: &SupervisorClient) -> anyhow::Result<Vec<Ses
             .list_sessions_page(cursor.take(), None)
             .await
             .context("listing a page of the host's sessions")?;
-        collected.extend(page.sessions);
+        for entry in page.sessions {
+            // A session id is peer-supplied text that ends up inside the
+            // helm's own cursors, which travel as a query parameter. An id
+            // near the frame limit therefore produces a cursor no client
+            // could replay — the request head would be refused long before
+            // the handler saw it — so the walk would advance to a position
+            // nothing could ever resume from. Bounded at ingress, where the
+            // value first enters this process, rather than at each of the
+            // places it is later embedded.
+            if entry.id.len() > MAX_SESSION_ID_BYTES {
+                anyhow::bail!(
+                    "the host reported a session id of {} bytes (cap {MAX_SESSION_ID_BYTES}); \
+                     refusing a list this side could not build resumable cursors over",
+                    entry.id.len()
+                );
+            }
+            // Uniqueness is checked HERE, before either publication branch,
+            // rather than at the cache write. A list that names one session
+            // twice is a list that contradicts itself, and the durable path
+            // has always refused it — but the in-memory path an
+            // identity-less host publishes through never touched the store,
+            // so the same malformed reply used to be accepted there. One
+            // check on the drain covers both, and the refusal keeps the
+            // previous list either way (see `HostActor::refresh_once`).
+            if !seen.insert(entry.id.clone()) {
+                anyhow::bail!(
+                    "the host listed session id {:?} more than once; refusing a list that \
+                     contradicts itself",
+                    entry.id
+                );
+            }
+            // THE ORDER IS A CONTRACT, and until now it was an assumption.
+            // PLAN_M6.md fixes the wire order as creation-time descending
+            // with the session id as tiebreak, and this side does not
+            // merely display that order — it BUILDS ON it. An
+            // identity-less host's list is binary-searched for a resume
+            // point (`aggregate`'s `partition_point`) and merged in
+            // lockstep with the persisted page, both of which are simply
+            // wrong over an unsorted sequence: the search lands anywhere,
+            // and the merge interleaves two sequences that were never
+            // ordered. The failure is silent — pages that quietly skip or
+            // repeat entries — which is exactly the kind a peer should not
+            // be able to cause by accident or otherwise.
+            let key = (std::cmp::Reverse(entry.created_at), entry.id.clone());
+            if let Some(previous) = &previous
+                && *previous >= key
+            {
+                anyhow::bail!(
+                    "the host's session list is not in the wire order (creation time descending, \
+                     id ascending): {:?} followed {:?}",
+                    entry.id,
+                    previous.1
+                );
+            }
+            previous = Some(key);
+            // Cumulative BYTES, not just pages and rows. The other two
+            // bounds are satisfied by a peer that sends few, enormous
+            // pages: `REFRESH_PAGE_LIMIT` near-frame-sized pages of
+            // `REFRESH_SESSION_CAP` sessions is gigabytes of retained
+            // `SessionInfo`, all of it the far end's choice. Measured on the
+            // encoded form because that is what a session's cost actually
+            // is — its fields are user-supplied text with no individual cap
+            // worth trusting.
+            bytes = bytes.saturating_add(
+                serde_json::to_vec(&entry)
+                    .map(|encoded| encoded.len())
+                    .unwrap_or(0),
+            );
+            if bytes > REFRESH_BYTE_CAP {
+                anyhow::bail!(
+                    "the host's session list exceeded {REFRESH_BYTE_CAP} bytes; refusing to keep \
+                     draining it"
+                );
+            }
+            collected.push(entry);
+        }
         if collected.len() > REFRESH_SESSION_CAP {
             anyhow::bail!(
                 "the host's session list exceeded {REFRESH_SESSION_CAP} entries; refusing to keep \
@@ -1013,6 +1270,70 @@ pub async fn drain_sessions(client: &SupervisorClient) -> anyhow::Result<Vec<Ses
 struct ActorStatus {
     state: HostState,
     client: Option<Arc<SupervisorClient>>,
+    /// The last successful drain of a host that reports NO identity, kept
+    /// here because there is nowhere durable to keep it.
+    ///
+    /// A supervisor with no identity connects and serves but writes no
+    /// cache — the cache's identity binding has nothing to bind to — and
+    /// for a while that meant its sessions existed nowhere the serving path
+    /// looked: they were absent from the merged list and unroutable for
+    /// operations, so the host read as connected and empty. Retaining the
+    /// drain HERE, in the same published status as the state and the
+    /// client, is what makes such a host serve like any other while it is
+    /// connected.
+    ///
+    /// `None` for every host that has an identity (its rows are in helm.db)
+    /// and for every host that is not connected — which is the whole
+    /// stale-service story for this case, and it is deliberate: with no
+    /// durable copy there is nothing honest to show once the connection is
+    /// gone, so these sessions vanish from the list rather than lingering
+    /// as knowledge nothing can vouch for.
+    ///
+    /// `Arc` because every list read clones the published status, and a
+    /// hosts-list poll must not copy a fleet's worth of `SessionInfo`.
+    live_sessions: Option<Arc<Vec<SessionInfo>>>,
+    /// Session ids THIS host reports that another host's cache already
+    /// claims — rebuilt from scratch on every successful drain.
+    ///
+    /// Refresh state rather than a remembered incident, and that shape is
+    /// the whole design. A collision is a standing property of the fleet
+    /// ("two hosts both say they have session S"), not an event: it holds
+    /// while both keep reporting the id and stops holding the moment one
+    /// stops. Reconstructing it from each drain's own evidence means it
+    /// clears itself when the claimant stops reporting the id, goes with
+    /// the host when it is removed, goes with the cache when an adoption
+    /// purges it, and needs no schema to survive a helm restart — a restart
+    /// forgets the marker, and the next drains re-observe the collision if
+    /// it is still real. The cost of that reconstruction is a ONE-REFRESH
+    /// window after a restart in which a genuine collision routes to the
+    /// cached owner; said out loud rather than papered over, because the
+    /// alternative — persisting a marker — would outlive the situation it
+    /// describes and need its own invalidation rules.
+    ///
+    /// Empty for essentially every host that ever runs. `Arc` for the same
+    /// reason `live_sessions` is: every status read clones it.
+    contested: Arc<Vec<String>>,
+    /// Which CONNECTION this status describes, as a token drawn from a
+    /// MANAGER-WIDE counter that is never reused.
+    ///
+    /// A mutation captures this alongside the client it is about to use,
+    /// and the write that follows presents it back: a reconnect, a
+    /// retarget, or an adoption in between changes the token, so the write
+    /// is dropped instead of filing one install's session under another's
+    /// identity. Comparing the client pointer would not do — a host can
+    /// reconnect to a different install, and the fact that both are
+    /// `Arc<SupervisorClient>` says nothing about which.
+    ///
+    /// MANAGER-WIDE rather than per-actor, which is the whole point and was
+    /// a real hole while it was per-actor: every respawn built a fresh
+    /// counter starting at zero, so a claim captured on a retired actor's
+    /// second connection validated perfectly against its replacement's
+    /// second connection — a delayed reply filed against a host that had
+    /// since been retired, edited, and respawned, which is precisely the
+    /// case the check exists to catch. A token that is never reused makes
+    /// "the same connection" mean the same thing across the manager's whole
+    /// life rather than within one actor's.
+    incarnation: u64,
 }
 
 /// An out-of-band request from the manager to one actor: stop whatever you
@@ -1066,7 +1387,46 @@ struct ActorHandle {
     /// decision takes effect at once instead of at the next tick. See
     /// [`Nudge`].
     nudge: watch::Sender<Nudge>,
+    /// Cuts short the wait BETWEEN refreshes, and nothing else.
+    ///
+    /// Deliberately not a [`Nudge`]: a nudge returns the actor to its
+    /// row-reload boundary and drops the connection on the way, which is
+    /// right for a user decision and far too much for "please look again
+    /// now". This is the narrow primitive the nudge contract replaced when
+    /// it was widened, resurrected under its own name so the two cannot be
+    /// confused: the connection, the identity and the retry regime are all
+    /// untouched, and the only effect is that the next `ListSessions`
+    /// happens now rather than at the end of the interval.
+    ///
+    /// A counter rather than a unit signal so a wake arriving while a
+    /// refresh is already running is RETAINED — `watch` keeps the value, so
+    /// the actor sees it on its next check instead of losing it — and so
+    /// several wakes arriving together collapse into one extra pass.
+    refresh: watch::Sender<u64>,
     task: tokio::task::JoinHandle<()>,
+    /// Released once this handle is INSTALLED in the actor map; the actor
+    /// does nothing until then (see [`ConnectionManager::spawn_actor`]).
+    ///
+    /// `Option` because releasing consumes the sender: `None` means started.
+    /// A handle dropped without releasing never runs its actor at all,
+    /// which is what makes losing a slot arbitration free of side effects.
+    start: Option<tokio::sync::oneshot::Sender<()>>,
+    /// Serializes this host's cache WRITES — the actor's wholesale refresh
+    /// against a create's single-row seed.
+    ///
+    /// The two are otherwise a lost-update race with a wide window: a
+    /// refresh drains a host's whole list (a network round trip, possibly
+    /// several pages), and a create landing during that drain is committed
+    /// by the seed and then erased by the replacement, which was built from
+    /// a snapshot taken before the session existed. Holding this across
+    /// each write makes the two orderable at all; [`Self::seed_epoch`] is
+    /// what tells the refresh it lost.
+    cache_lock: Arc<tokio::sync::Mutex<()>>,
+    /// Bumped by every seed. The actor samples it BEFORE draining and
+    /// compares under [`Self::cache_lock`] before committing: a
+    /// replacement built from a snapshot older than the newest seed is
+    /// skipped rather than allowed to overwrite it.
+    seed_epoch: Arc<std::sync::atomic::AtomicU64>,
 }
 
 /// One connection actor per registry host, plus the entry points a user
@@ -1076,6 +1436,11 @@ struct ActorHandle {
 /// and the only mutable state is the actor map behind a short-held std
 /// mutex (never across an await).
 pub struct ConnectionManager {
+    /// Source of [`ActorStatus::incarnation`] tokens: monotonic, never
+    /// reset, never reused, shared by every actor this manager ever spawns.
+    /// Starts at one so a zero can only ever be an uninitialized value, not
+    /// a real connection.
+    incarnations: Arc<std::sync::atomic::AtomicU64>,
     store: HelmStore,
     transport: Arc<dyn HostTransport>,
     cadence: Cadence,
@@ -1116,6 +1481,27 @@ struct ActorMap {
     shut_down: bool,
 }
 
+/// What a session operation captured about the connection it is about to
+/// use, so the record that follows can prove it is still talking about the
+/// same one.
+///
+/// Taken from the SAME status read that produced the client, which is the
+/// whole point: a reconnect, a retarget, or an adoption between the
+/// operation and its record changes the generation, and an identity-bound
+/// write presented against a superseded generation would file one install's
+/// session under another install's name — the silent merge again, arriving
+/// through the create path.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SessionClaim {
+    pub host: HostId,
+    /// Which connection this claim was made on — a manager-wide token that
+    /// is never reused (see [`ActorStatus::incarnation`]).
+    pub incarnation: u64,
+    /// The identity that connection reported, or `None` for a host that
+    /// caches nothing and serves from memory instead.
+    pub identity: Option<String>,
+}
+
 /// One host's live state and its live connection, read TOGETHER.
 ///
 /// The pair has an invariant — the client is `Some` exactly while the state
@@ -1134,6 +1520,55 @@ pub struct HostStatus {
     /// path PLAN_M6.md item 5 specifies, and `state` beside it is what says
     /// WHICH non-connected state it was.
     pub client: Option<Arc<SupervisorClient>>,
+    /// This host's in-memory session list, non-empty only while a connected
+    /// identity-less host has one — see [`HostSnapshot::live_sessions`],
+    /// whose docs carry the whole reasoning. Read from the same borrow as
+    /// the two fields above so a routing decision cannot straddle a
+    /// transition.
+    pub live_sessions: Option<Arc<Vec<SessionInfo>>>,
+    /// Session ids this host reports that another host's cache already
+    /// claims — see [`ActorStatus::contested`].
+    pub contested: Arc<Vec<String>>,
+    /// Which CONNECTION this status describes — see
+    /// [`ActorStatus::incarnation`]. Read from the same borrow as everything
+    /// above, so a mutation can capture it alongside the client it is about
+    /// to use and present it back when it records the reply.
+    pub incarnation: u64,
+}
+
+/// A manager operation refused for a reason a caller must act on rather
+/// than merely report.
+///
+/// Typed for the same reason [`HostStoreError`] is, and stated here because
+/// the alternative was live for a while and was wrong: these refusals used
+/// to be `anyhow::bail!` prose, which is accurate and completely opaque to
+/// the REST edge — every one of them reached the browser as a 500, so "you
+/// asked to adopt a host that is not asking" was indistinguishable from
+/// "the helm broke". The status a client sees is part of the contract.
+#[derive(Debug, thiserror::Error)]
+pub enum ManagerError {
+    /// No actor is running for this id — the entry does not exist (or no
+    /// longer does). A 404.
+    #[error("host {0} is not registered")]
+    NoSuchHost(HostId),
+    /// Adoption asked of a host that is not awaiting an identity decision.
+    /// Carries the phase it IS in, which is what tells a client what to
+    /// offer instead.
+    #[error("host {host} is {phase}, not awaiting an identity decision; there is nothing to adopt")]
+    NotAwaitingAdoption { host: HostId, phase: &'static str },
+    /// The host is reporting a DIFFERENT identity than the one the user
+    /// approved — a re-probe landed between the decision being displayed
+    /// and this call arriving. Nothing was adopted; the caller re-renders
+    /// and asks again about the identity now on offer.
+    #[error(
+        "host {host} now reports identity {reported}, not the {approved} that was approved; \
+         nothing was adopted"
+    )]
+    AdoptionSuperseded {
+        host: HostId,
+        approved: String,
+        reported: String,
+    },
 }
 
 /// Aborts a task when dropped — the piece that makes one spawned task's
@@ -1148,6 +1583,61 @@ struct AbortOnDrop(tokio::task::AbortHandle);
 impl Drop for AbortOnDrop {
     fn drop(&mut self) {
         self.0.abort();
+    }
+}
+
+/// The status a recorded session should end up with, given what the helm
+/// already knew and what a mutation's reply just said.
+///
+/// `Unknown` NEVER overwrites a definite status, and that one rule is the
+/// whole function.
+///
+/// The asymmetry is the protocol's, not this helm's invention.
+/// `SessionStatus::Unknown`'s own contract is explicit that `ListSessions`
+/// is the only reply computing a REAL answer, and that everywhere else the
+/// value means "not yet known" rather than "known not to be running" — so a
+/// restart's or a create's reply carries `Unknown` deliberately, because at
+/// the instant it is built the pane exists but the agent's own `exec`
+/// inside it has not been observed. Claiming `Alive` there would be a
+/// fabrication; the supervisor is right to refuse it.
+///
+/// What follows for THIS side is that such a reply is not evidence about
+/// liveness at all, and must not be recorded as if it were. Letting it
+/// through cost a real, user-visible regression: a restart of a live
+/// session replaced a cached `alive` with `unknown`, so the list answered a
+/// successful restart with a badge that says the helm has no idea — for a
+/// session it had definite knowledge about a moment earlier. Every other
+/// field of the reply is fresh and authoritative and is taken as given; the
+/// status alone is knowledge the reply does not have.
+///
+/// Keeping the previous value can leave it briefly STALE — a restart of an
+/// `exited` session goes on reading `exited` until the owning host's next
+/// refresh computes the truth. That is the same one-interval lag the list
+/// had before mutations were recorded at all, and it is strictly better
+/// than the alternative: stale-but-definite is a claim the helm can defend,
+/// and `unknown` is the absence of one.
+pub fn merged_status(previous: &SessionStatus, incoming: SessionStatus) -> SessionStatus {
+    match incoming {
+        SessionStatus::Unknown => previous.clone(),
+        definite => definite,
+    }
+}
+
+/// Whether two published clients are the SAME live connection.
+///
+/// Pointer identity, not equality: two `Arc<SupervisorClient>`s are the same
+/// connection exactly when they are the same allocation, and nothing about
+/// a client's contents would distinguish one install from another anyway.
+/// `None` on both sides is "still no connection", which is not a change
+/// either.
+fn same_connection(
+    before: Option<&Arc<SupervisorClient>>,
+    after: Option<&Arc<SupervisorClient>>,
+) -> bool {
+    match (before, after) {
+        (Some(before), Some(after)) => Arc::ptr_eq(before, after),
+        (None, None) => true,
+        _ => false,
     }
 }
 
@@ -1185,6 +1675,7 @@ impl ConnectionManager {
         cadence: Cadence,
     ) -> anyhow::Result<Arc<ConnectionManager>> {
         let manager = Arc::new(ConnectionManager {
+            incarnations: Arc::new(std::sync::atomic::AtomicU64::new(1)),
             store,
             transport,
             cadence,
@@ -1199,9 +1690,9 @@ impl ConnectionManager {
     /// every row that has none, stop the ones whose row is gone, and
     /// refresh the registry facts snapshots are rendered from.
     ///
-    /// Called at startup and, in the next PR, after every host add, edit,
-    /// and remove. Idempotent, so a caller that is unsure whether anything
-    /// changed can simply call it.
+    /// Called at startup and after every host add, edit, and remove that
+    /// `/api/hosts` performs. Idempotent, so a caller that is unsure whether
+    /// anything changed can simply call it.
     ///
     /// An EDITED row keeps its actor but NOT its connection: a change to
     /// any of the fields that decide how the host is reached
@@ -1247,10 +1738,44 @@ impl ConnectionManager {
             handle.task.abort();
             false
         });
+        // Handles released as this reconcile installs them; the actors
+        // stay dormant until every map decision is made (see
+        // `ActorHandle::start`).
+        let mut started: Vec<tokio::sync::oneshot::Sender<()>> = Vec::new();
         for row in rows {
             match map.actors.entry(row.id) {
                 std::collections::hash_map::Entry::Occupied(mut existing) => {
                     let handle = existing.get_mut();
+                    let dead = matches!(handle.status.borrow().state, HostState::Retired { .. })
+                        || handle.task.is_finished()
+                        || handle.nudge.is_closed();
+                    if dead {
+                        // An entry whose actor is GONE cannot be edited,
+                        // nudged, or reconfigured — there is nothing there
+                        // to receive any of it. The shape this replaces
+                        // overwrote the retired state with `connecting` and
+                        // nudged a dropped receiver, so an edit to a
+                        // retired host left it stuck in a phase that would
+                        // never advance and never retry: visibly
+                        // "connecting", permanently, with a control that
+                        // did nothing. Respawning is the only coherent
+                        // answer, and it applies whether or not the row
+                        // changed — a reconcile that noticed a dead actor
+                        // and left it dead would be no better.
+                        info!(
+                            host = row.id,
+                            kind = ?row.kind,
+                            destination = display_destination(&row),
+                            "the host's connection actor is gone; respawning it"
+                        );
+                        let mut replacement = self.spawn_actor(row);
+                        if let Some(start) = replacement.start.take() {
+                            started.push(start);
+                        }
+                        let previous = existing.insert(replacement);
+                        previous.task.abort();
+                        continue;
+                    }
                     if reconfigured(&handle.row, &row) {
                         // Carries `from`/`to` because this line IS the
                         // phase transition for an edited host: the actor's
@@ -1277,12 +1802,24 @@ impl ConnectionManager {
                         // for the interval in between, since a session
                         // operation sent onto it would reach the host the
                         // user just stopped pointing at.
-                        handle.status.send_replace(ActorStatus {
-                            state: HostState::Connecting {
+                        handle.status.send_modify(|status| {
+                            status.state = HostState::Connecting {
                                 attempt: 0,
                                 last_error: None,
-                            },
-                            client: None,
+                            };
+                            status.client = None;
+                            // Retargeting drops an identity-less host's
+                            // in-memory list with its connection: those
+                            // sessions belonged to the address the user
+                            // just stopped pointing at.
+                            status.live_sessions = None;
+                            // A retarget invalidates every outstanding
+                            // claim by definition: the client is gone and
+                            // what answers next may be a different machine
+                            // entirely.
+                            status.incarnation = self
+                                .incarnations
+                                .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                         });
                         handle.nudge.send_modify(|nudge| {
                             nudge.revision += 1;
@@ -1293,9 +1830,20 @@ impl ConnectionManager {
                     }
                 }
                 std::collections::hash_map::Entry::Vacant(slot) => {
-                    slot.insert(self.spawn_actor(row));
+                    let mut fresh = self.spawn_actor(row);
+                    if let Some(start) = fresh.start.take() {
+                        started.push(start);
+                    }
+                    slot.insert(fresh);
                 }
             }
+        }
+        // Released only once every map decision is made and the lock is
+        // gone: an actor that started mid-reconcile could publish over a
+        // handle this pass is about to replace.
+        drop(map);
+        for start in started {
+            let _ = start.send(());
         }
         Ok(())
     }
@@ -1308,8 +1856,26 @@ impl ConnectionManager {
                 last_error: None,
             },
             client: None,
+            live_sessions: None,
+            // Zero is "never connected": no claim can ever carry it,
+            // because a claim is only made against a published client.
+            incarnation: 0,
+            contested: Arc::new(Vec::new()),
         }));
         let (nudge_tx, nudge_rx) = watch::channel(Nudge::default());
+        let (refresh_tx, refresh_rx) = watch::channel(0u64);
+        // The actor waits on this before doing ANYTHING. Spawning happens
+        // outside the actor-map lock (spawning under a std mutex would mean
+        // holding it across a task start), so without a gate a freshly
+        // spawned actor could dial, connect, and publish before the caller
+        // has decided whether to keep it — and the loser of a slot
+        // arbitration would then be a second live connection to the same
+        // host, publishing over the winner. Dormant until inserted is what
+        // makes "reserve the slot, then release" a real ordering rather
+        // than a hopeful one.
+        let (gate_tx, gate_rx) = tokio::sync::oneshot::channel::<()>();
+        let cache_lock = Arc::new(tokio::sync::Mutex::new(()));
+        let seed_epoch = Arc::new(std::sync::atomic::AtomicU64::new(0));
         let actor = HostActor {
             id: row.id,
             store: self.store.clone(),
@@ -1318,6 +1884,9 @@ impl ConnectionManager {
             status: Arc::clone(&status),
             destination: Mutex::new(display_destination(&row)),
             last_failure: Mutex::new(RepeatedFailure::default()),
+            cache_lock: Arc::clone(&cache_lock),
+            seed_epoch: Arc::clone(&seed_epoch),
+            incarnations: Arc::clone(&self.incarnations),
         };
         // One span per actor, entered for the task's whole life: SPEC.md
         // wants a reconnection trail whose every line names the host, and
@@ -1335,7 +1904,18 @@ impl ConnectionManager {
         let host = row.id;
         let kind = row.kind;
         let destination = display_destination(&row);
-        let actor_task = tokio::spawn(actor.run(row.clone(), nudge_rx).instrument(span));
+        let gated = {
+            let row = row.clone();
+            async move {
+                // A dropped gate means the manager decided not to keep this
+                // actor: it never runs at all, and its task ends here.
+                if gate_rx.await.is_err() {
+                    return;
+                }
+                actor.run(row, nudge_rx, refresh_rx).await;
+            }
+        };
+        let actor_task = tokio::spawn(gated.instrument(span));
         // The handle the manager holds is a SUPERVISOR of the actor, not
         // the actor itself. Nothing else watches a spawned task, so an
         // actor that ends — by panicking, or by retiring itself when its
@@ -1346,6 +1926,7 @@ impl ConnectionManager {
         // is dropped when this task's future is, which is exactly what
         // cancellation does.
         let supervised = Arc::clone(&status);
+        let incarnations = Arc::clone(&self.incarnations);
         let task = tokio::spawn(async move {
             let _abort_actor = AbortOnDrop(actor_task.abort_handle());
             let reason = match actor_task.await {
@@ -1366,18 +1947,25 @@ impl ConnectionManager {
             // The client goes with the state, in one publish: an entry with
             // no actor must not stay routable for even the moment it would
             // take to clear them separately.
-            supervised.send_replace(ActorStatus {
-                state: HostState::Retired {
+            supervised.send_modify(|status| {
+                status.state = HostState::Retired {
                     reason: reason.to_string(),
-                },
-                client: None,
+                };
+                status.client = None;
+                status.live_sessions = None;
+                status.incarnation =
+                    incarnations.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
             });
         });
         ActorHandle {
             row,
             status,
             nudge: nudge_tx,
+            refresh: refresh_tx,
             task,
+            start: Some(gate_tx),
+            cache_lock,
+            seed_epoch,
         }
     }
 
@@ -1393,11 +1981,19 @@ impl ConnectionManager {
         let mut out: Vec<HostSnapshot> = map
             .actors
             .values()
-            .map(|handle| HostSnapshot {
-                id: handle.row.id,
-                kind: handle.row.kind,
-                destination: handle.row.destination.clone(),
-                state: handle.status.borrow().state.clone(),
+            .map(|handle| {
+                // ONE borrow for both, for the reason `live_sessions`
+                // documents: a state and the list it implies must never be
+                // read either side of a transition.
+                let published = handle.status.borrow();
+                HostSnapshot {
+                    id: handle.row.id,
+                    kind: handle.row.kind,
+                    destination: handle.row.destination.clone(),
+                    state: published.state.clone(),
+                    live_sessions: published.live_sessions.clone(),
+                    contested: Arc::clone(&published.contested),
+                }
             })
             .collect();
         out.sort_by_key(|snapshot| snapshot.id);
@@ -1422,6 +2018,9 @@ impl ConnectionManager {
         Some(HostStatus {
             state: published.state.clone(),
             client: published.client.clone(),
+            live_sessions: published.live_sessions.clone(),
+            contested: Arc::clone(&published.contested),
+            incarnation: published.incarnation,
         })
     }
 
@@ -1438,8 +2037,9 @@ impl ConnectionManager {
     ///
     /// Exists because the interesting properties of this module are
     /// TRANSITIONS, and polling for them is how a test becomes either slow
-    /// or flaky. Public rather than test-only because the next PR's
-    /// event-stream work needs exactly this shape, and because an
+    /// or flaky. Public rather than test-only because M6.75's event-stream
+    /// work needs exactly this shape, because the `farhelm` crate's
+    /// real-transport tests are written against it, and because an
     /// `adopt`-then-observe caller should not have to invent it.
     ///
     /// `None` means no actor is running for `host`, or its actor died —
@@ -1460,6 +2060,384 @@ impl ConnectionManager {
         Some(matched.state.clone())
     }
 
+    /// Record what a host just told us about ONE session, where the serving
+    /// path will find it — against the connection the operation used.
+    ///
+    /// Every mutation whose reply carries a fresh `SessionInfo` goes
+    /// through here: a create (so its session is routable at once) and a
+    /// restart or rename (so the LIST reflects a completed mutation
+    /// immediately rather than at the owning host's next refresh tick). The
+    /// second case is not cosmetic — a restart that left the row reading
+    /// `exited` for a poll interval is a user watching their own successful
+    /// action appear to have failed.
+    ///
+    /// The two storage shapes are not a caller's concern and deliberately
+    /// not a caller's choice: a host with an identity gets a durable
+    /// single-row cache write, one without gets its in-memory list updated,
+    /// and which of those applies is decided by the claim rather than by
+    /// whoever is calling. That is what keeps the promise true for BOTH —
+    /// before this, the identity-less case recorded nothing at all and every
+    /// operation on a just-created session 404'd.
+    ///
+    /// Refuses — without writing — when the claim is stale: the host has no
+    /// actor, or its published generation has moved on. The alternative is
+    /// worse than a missed write, which merely costs one refresh interval.
+    ///
+    /// Takes this host's cache lock and bumps its seed epoch, which is how
+    /// a refresh whose drain predates this write learns not to overwrite it
+    /// (see [`ActorHandle::seed_epoch`]).
+    pub async fn remember_session(
+        &self,
+        claim: &SessionClaim,
+        session: &SessionInfo,
+    ) -> anyhow::Result<()> {
+        let (status, cache_lock, seed_epoch) = {
+            let map = self.actors.lock().expect("actor map mutex poisoned");
+            let Some(handle) = map.actors.get(&claim.host) else {
+                return Err(anyhow::Error::new(ManagerError::NoSuchHost(claim.host)));
+            };
+            (
+                Arc::clone(&handle.status),
+                Arc::clone(&handle.cache_lock),
+                Arc::clone(&handle.seed_epoch),
+            )
+        };
+        let _writing = cache_lock.lock().await;
+        // Re-read the CURRENT map entry, not the handle captured above: a
+        // detached handle's status sender stays perfectly usable after its
+        // entry has been replaced, so a write validated against the clone
+        // would land on a host whose actor has since been retired, edited,
+        // and respawned. The incarnation token is never reused, so this
+        // second look also rules out a replacement that happens to have
+        // reached the same point in its own life.
+        if !self.claim_is_current(claim, &status) {
+            anyhow::bail!(
+                "host {}'s connection changed between the operation and its cache write; the \
+                 session will be picked up at the next refresh",
+                claim.host
+            );
+        }
+        match &claim.identity {
+            Some(identity) => {
+                // The durable path's second line of defense is the store's
+                // own identity binding, which refuses a write whose
+                // identity is no longer the row's — so a connection that
+                // drops between this check and the commit cannot file a
+                // session under an install that has since been adopted
+                // away. The check above narrows the window; the binding is
+                // what closes it.
+                self.store
+                    .remember_session(claim.host, identity, session)
+                    .await?;
+            }
+            None => {
+                // The in-memory path has no such binding, so the check and
+                // the insert happen INSIDE one status mutation. Split apart
+                // they were a race with teeth: a disconnect between them
+                // republished sessions onto a host that was no longer
+                // connected, where nothing would ever clear them except
+                // another connection.
+                let mut refused = None;
+                status.send_modify(|status| {
+                    if status.incarnation != claim.incarnation {
+                        refused = Some("the host reconnected");
+                        return;
+                    }
+                    if status.client.is_none() {
+                        refused = Some("the host is no longer connected");
+                        return;
+                    }
+                    if status.live_sessions.is_none() {
+                        refused = Some("the host no longer serves from memory");
+                        return;
+                    }
+                    let mut entries = status
+                        .live_sessions
+                        .as_ref()
+                        .map(|live| live.as_ref().clone())
+                        .unwrap_or_default();
+                    // Same merge rule as the durable path, applied where
+                    // this path's "previous value" lives: a reply's
+                    // `Unknown` must not erase a definite status. See
+                    // `merged_status`. Two call sites, one predicate, so
+                    // the two storage shapes cannot come to disagree about
+                    // what a mutation's reply is evidence of.
+                    let mut session = session.clone();
+                    if let Some(previous) =
+                        entries.iter().find(|existing| existing.id == session.id)
+                    {
+                        session.status = merged_status(&previous.status, session.status);
+                    }
+                    let session = &session;
+                    entries.retain(|existing| existing.id != session.id);
+                    // The same bounds a drain obeys, for the same reason:
+                    // this list is retained memory whose size is decided by
+                    // how many creates a caller makes, and an unbounded one
+                    // is an unbounded one however it grew.
+                    let bytes: usize = entries
+                        .iter()
+                        .chain(std::iter::once(session))
+                        .map(|info| {
+                            serde_json::to_vec(info)
+                                .map(|encoded| encoded.len())
+                                .unwrap_or(0)
+                        })
+                        .sum();
+                    if entries.len() >= REFRESH_SESSION_CAP || bytes > REFRESH_BYTE_CAP {
+                        refused = Some("the host's in-memory session list is at its cap");
+                        return;
+                    }
+                    // Inserted in the merged order rather than pushed: a
+                    // created session is usually newest, but "usually" is
+                    // not an ordering guarantee, and the page merge
+                    // binary-searches this list.
+                    let at = entries.partition_point(|existing| {
+                        (std::cmp::Reverse(existing.created_at), existing.id.as_str())
+                            < (std::cmp::Reverse(session.created_at), session.id.as_str())
+                    });
+                    entries.insert(at, session.clone());
+                    status.live_sessions = Some(Arc::new(entries));
+                });
+                if let Some(refused) = refused {
+                    anyhow::bail!(
+                        "host {}'s session could not be recorded in memory: {refused}",
+                        claim.host
+                    );
+                }
+            }
+        }
+        // AFTER the write, so a refresh that reads the epoch and then takes
+        // the lock cannot see the bump without also seeing the write.
+        seed_epoch.fetch_add(1, std::sync::atomic::Ordering::Release);
+        // A status of `Unknown` is the one thing a reply cannot tell this
+        // side anything with (see [`merged_status`]): it is declined when
+        // something definite is already known, and recorded as the absence
+        // of knowledge when nothing is. Either way the answer the caller
+        // actually wants is one `ListSessions` away, so ask for it NOW
+        // rather than at the end of the refresh interval. Without this the
+        // no-degrade rule pays for its own correctness with a visible lag —
+        // a restart of an exited session goes on reading `exited` until the
+        // next tick, which is a successful action looking like a failed one
+        // for as long as the cadence says.
+        //
+        // Sent AFTER the epoch bump, and that ordering is load-bearing: the
+        // woken drain samples the epoch when it starts, so it starts after
+        // the bump and therefore COMMITS, where a pre-seed snapshot would
+        // correctly decline and leave the lag exactly where it was.
+        if session.status == SessionStatus::Unknown {
+            self.refresh_now(claim.host);
+        }
+        Ok(())
+    }
+
+    /// Drop one session from where the serving path finds it — the
+    /// delete's counterpart to [`Self::remember_session`].
+    ///
+    /// A delete's reply carries no `SessionInfo`, but it carries the one
+    /// fact that matters: the session is gone. The merged list is served
+    /// from what the helm has recorded, so a delete that recorded nothing
+    /// leaves the row listed until the owning host's next refresh — and a
+    /// client that deletes and immediately re-creates then sees BOTH, which
+    /// is indistinguishable from a duplicate and is exactly how the browser
+    /// suite found this.
+    ///
+    /// Same claim discipline, same lock, same epoch bump as a seed: the
+    /// three writes are one mechanism with three verbs, and a delete that
+    /// took a different path would be a fourth place for the
+    /// refresh-versus-mutation ordering to be got wrong.
+    pub async fn forget_session(
+        &self,
+        claim: &SessionClaim,
+        session_id: &str,
+    ) -> anyhow::Result<()> {
+        let (status, cache_lock, seed_epoch) = {
+            let map = self.actors.lock().expect("actor map mutex poisoned");
+            let Some(handle) = map.actors.get(&claim.host) else {
+                return Err(anyhow::Error::new(ManagerError::NoSuchHost(claim.host)));
+            };
+            (
+                Arc::clone(&handle.status),
+                Arc::clone(&handle.cache_lock),
+                Arc::clone(&handle.seed_epoch),
+            )
+        };
+        let _writing = cache_lock.lock().await;
+        if !self.claim_is_current(claim, &status) {
+            anyhow::bail!(
+                "host {}'s connection changed between the delete and its cache write; the \
+                 session will disappear at the next refresh",
+                claim.host
+            );
+        }
+        match &claim.identity {
+            Some(identity) => {
+                self.store
+                    .forget_session(claim.host, identity, session_id)
+                    .await?;
+            }
+            None => {
+                status.send_modify(|status| {
+                    if status.incarnation != claim.incarnation || status.client.is_none() {
+                        return;
+                    }
+                    if let Some(live) = status.live_sessions.as_ref() {
+                        let mut entries = live.as_ref().clone();
+                        entries.retain(|existing| existing.id != session_id);
+                        status.live_sessions = Some(Arc::new(entries));
+                    }
+                });
+            }
+        }
+        // A deleted session cannot be contested by anyone: whatever the
+        // collision was about is gone from this host.
+        status.send_modify(|status| {
+            if status.contested.iter().any(|id| id == session_id) {
+                let remaining: Vec<String> = status
+                    .contested
+                    .iter()
+                    .filter(|id| id.as_str() != session_id)
+                    .cloned()
+                    .collect();
+                status.contested = Arc::new(remaining);
+            }
+        });
+        seed_epoch.fetch_add(1, std::sync::atomic::Ordering::Release);
+        Ok(())
+    }
+
+    /// Ask `host` to refresh NOW, without disturbing anything else.
+    ///
+    /// The narrow sibling of [`Self::retry_now`], and the distinction is the
+    /// point: a retry drops the connection and returns the actor to its
+    /// row-reload boundary, which is right for a user decision and
+    /// catastrophically heavy-handed for "look again". This only cuts short
+    /// the wait BETWEEN refreshes — the connection, the identity, the
+    /// contested set and the retry regime all carry on exactly as they
+    /// were, and the next `ListSessions` simply happens now. It is the
+    /// primitive the nudge contract used to provide before that contract
+    /// was deliberately widened, back under a name that says which of the
+    /// two it is.
+    ///
+    /// A no-op for a host that is not currently serving: an actor waiting
+    /// out a backoff has no refresh to hurry, and hurrying the CONNECTION
+    /// is `retry_now`'s job. Returns whether a host was found at all, which
+    /// is the only thing this can honestly report — a wake is delivered to
+    /// a `watch`, never acknowledged.
+    pub fn refresh_now(&self, host: HostId) -> bool {
+        let map = self.actors.lock().expect("actor map mutex poisoned");
+        let Some(handle) = map.actors.get(&host) else {
+            return false;
+        };
+        handle.refresh.send_modify(|wake| *wake += 1);
+        true
+    }
+
+    /// Whether `claim` still describes the connection the actor map holds
+    /// for its host, right now.
+    ///
+    /// Two things are checked and both are load-bearing: that the map's
+    /// entry is the SAME handle the claim was taken through (a detached
+    /// handle's status sender stays usable after its entry is replaced), and
+    /// that the incarnation matches (the token is never reused, so a
+    /// replacement cannot coincide with it).
+    fn claim_is_current(
+        &self,
+        claim: &SessionClaim,
+        status: &Arc<watch::Sender<ActorStatus>>,
+    ) -> bool {
+        let map = self.actors.lock().expect("actor map mutex poisoned");
+        map.actors.get(&claim.host).is_some_and(|handle| {
+            Arc::ptr_eq(&handle.status, status)
+                && handle.status.borrow().incarnation == claim.incarnation
+        })
+    }
+
+    /// Which host holds `session_id` in memory, and that host's status —
+    /// from ONE hold of the actor map.
+    ///
+    /// The pairing is the point, and splitting it was a real bug: reading
+    /// ownership from a snapshot and then fetching the client through a
+    /// second call lets a reconnect land in between, so an operation
+    /// resolved against install A's in-memory session list would be sent on
+    /// install B's fresh client. That is the same hazard [`Self::status`]
+    /// exists to prevent for the cached case, and it deserves the same
+    /// answer rather than a second, weaker one.
+    ///
+    /// The SCAN, however, happens after the lock is released. Cloning the
+    /// candidate `Arc`s under the mutex and searching them outside it keeps
+    /// a global lock — the one every routing decision, every hosts poll and
+    /// every reconcile contends for — off a linear walk of every
+    /// identity-less host's whole session list. The clones are `Arc`s, so
+    /// this costs a refcount per candidate host and nothing per session.
+    ///
+    /// FAILS CLOSED on two claimants, naming both: picking one would mean a
+    /// stop aimed at one machine landing on another.
+    pub fn live_owner(&self, session_id: &str) -> anyhow::Result<Option<(HostId, HostStatus)>> {
+        let candidates: Vec<(HostId, Arc<Vec<SessionInfo>>, HostStatus)> = {
+            let map = self.actors.lock().expect("actor map mutex poisoned");
+            map.actors
+                .iter()
+                .filter_map(|(id, handle)| {
+                    let published = handle.status.borrow();
+                    let live = published.live_sessions.clone()?;
+                    Some((
+                        *id,
+                        live,
+                        HostStatus {
+                            state: published.state.clone(),
+                            client: published.client.clone(),
+                            live_sessions: published.live_sessions.clone(),
+                            contested: Arc::clone(&published.contested),
+                            incarnation: published.incarnation,
+                        },
+                    ))
+                })
+                .collect()
+        };
+        let mut found: Option<(HostId, HostStatus)> = None;
+        for (id, live, status) in candidates {
+            if !live.iter().any(|info| info.id == session_id) {
+                continue;
+            }
+            if let Some((first, _)) = &found {
+                return Err(anyhow::Error::new(HostStoreError::SessionOwnerAmbiguous {
+                    session: session_id.to_string(),
+                    first: *first.min(&id),
+                    second: *first.max(&id),
+                }));
+            }
+            found = Some((id, status));
+        }
+        Ok(found)
+    }
+
+    /// Every host that currently reports `session_id` as CONTESTED — an id
+    /// it lists that another host's cache already claims.
+    ///
+    /// Reconstructed refresh state rather than a remembered incident (see
+    /// [`ActorStatus::contested`]), so a caller asking this question gets
+    /// the fleet as it stands rather than as it once was: a claimant that
+    /// has stopped reporting the id, or been removed, or had its cache
+    /// purged by an adoption, simply is not in the answer.
+    pub fn contested_claimants(&self, session_id: &str) -> Vec<HostId> {
+        let map = self.actors.lock().expect("actor map mutex poisoned");
+        let mut claimants: Vec<HostId> = map
+            .actors
+            .iter()
+            .filter(|(_, handle)| {
+                handle
+                    .status
+                    .borrow()
+                    .contested
+                    .iter()
+                    .any(|id| id == session_id)
+            })
+            .map(|(id, _)| *id)
+            .collect();
+        claimants.sort_unstable();
+        claimants
+    }
+
     /// Accept the identity a mismatched host is reporting, purging the old
     /// identity's cached sessions, and reconnect.
     ///
@@ -1475,27 +2453,47 @@ impl ConnectionManager {
     /// concurrent change is adopted instead of the one the user was
     /// actually shown.
     ///
+    /// `approved` is the REPORTED identity the caller was looking at when
+    /// the user said yes, and it is checked under the same lock hold that
+    /// reads the state. Without it this call means "adopt whatever this host
+    /// is reporting NOW", which is a different promise entirely: a re-probe
+    /// landing between the decision being displayed and this call arriving
+    /// can change the reported identity, so a user shown "adopt install B?"
+    /// could adopt install C by pressing the same button. A disagreement is
+    /// [`ManagerError::AdoptionSuperseded`] and the caller's correct
+    /// response is to re-render and ask again.
+    ///
     /// The row's dialed configuration is captured in the same lock hold as
     /// the state, and handed to the store: an adoption is only meaningful
     /// for the configuration the mismatch was observed under, and the store
     /// refuses it otherwise (see [`HelmStore::adopt_identity`]). So is a
     /// rival's claim on the identity being adopted, which is why this can
     /// fail even though the state it was called on was current.
-    pub async fn adopt(&self, host: HostId) -> anyhow::Result<()> {
+    ///
+    /// Every refusal is TYPED ([`ManagerError`]) rather than formatted
+    /// prose, so the REST edge can map it to a status a client can act on
+    /// instead of turning "you fired the wrong verb" into a 500.
+    pub async fn adopt(&self, host: HostId, approved: &str) -> anyhow::Result<()> {
         let (state, row) = {
             let map = self.actors.lock().expect("actor map mutex poisoned");
-            let handle = map
-                .actors
-                .get(&host)
-                .with_context(|| format!("no connection actor is running for host {host}"))?;
+            let Some(handle) = map.actors.get(&host) else {
+                return Err(anyhow::Error::new(ManagerError::NoSuchHost(host)));
+            };
             (handle.status.borrow().state.clone(), handle.row.clone())
         };
         let HostState::IdentityMismatch { recorded, reported } = state else {
-            anyhow::bail!(
-                "host {host} is {}, not awaiting an identity decision; nothing to adopt",
-                state.phase()
-            );
+            return Err(anyhow::Error::new(ManagerError::NotAwaitingAdoption {
+                host,
+                phase: state.phase(),
+            }));
         };
+        if reported != approved {
+            return Err(anyhow::Error::new(ManagerError::AdoptionSuperseded {
+                host,
+                approved: approved.to_string(),
+                reported,
+            }));
+        }
         self.store
             .adopt_identity(host, &DialedAs::of(&row), &recorded, &reported)
             .await
@@ -1509,11 +2507,22 @@ impl ConnectionManager {
             host,
             kind = ?row.kind,
             destination = display_destination(&row),
-            superseded = recorded.as_str(),
-            adopted = reported.as_str(),
+            superseded = peer_text(&recorded).as_str(),
+            adopted = peer_text(&reported).as_str(),
             "adopted a new host identity; the superseded identity's cached sessions were purged"
         );
-        self.retry_now(host);
+        // The adoption is already durable; reconnecting is how it takes
+        // effect. A failure to do so is worth saying out loud but must not
+        // undo the decision the user just made — the actor reconnects on
+        // its own cadence regardless.
+        if let Err(error) = self.retry_now(host).await {
+            warn!(
+                host,
+                error = %error,
+                "the adoption was recorded but its reconnect could not be requested; the host \
+                 will reconnect on its own cadence"
+            );
+        }
         Ok(())
     }
 
@@ -1537,17 +2546,151 @@ impl ConnectionManager {
     /// instead. Resolving a freeze still earns the ladder — that decision
     /// lives in the actor, where the freeze does.
     ///
-    /// A no-op for a host with no actor.
-    pub fn retry_now(&self, host: HostId) {
-        let map = self.actors.lock().expect("actor map mutex poisoned");
-        if let Some(handle) = map.actors.get(&host) {
-            handle.nudge.send_modify(|nudge| {
-                nudge.revision += 1;
-                // Explicitly cleared rather than left alone: the value is
-                // retained between sends, so a previous reconfigure's flag
-                // would otherwise still be riding along.
-                nudge.fresh_window = false;
-            });
+    /// A RETIRED host is the exception, and the important one: its actor is
+    /// gone, so there is no wait to interrupt and nothing a nudge could
+    /// reach. Retry respawns it from the registry row as it stands now, with
+    /// a fresh active-retry window, because retry is exactly how a retired
+    /// entry comes back — nothing else in this module ever restarts an actor
+    /// on its own (a timer cannot resurrect a task, and
+    /// [`Self::sync_registry`] respawns only when it is called). Without
+    /// this, an actor that panicked left its host permanently unreachable
+    /// with a control that visibly did nothing.
+    ///
+    /// Returns whether a host was actually found: `false` means no such
+    /// registry entry, which the REST edge reports as a 404 rather than
+    /// answering 200 to a retry that could not possibly have happened.
+    pub async fn retry_now(&self, host: HostId) -> anyhow::Result<bool> {
+        // A nudge is only meaningful to a LIVE actor. Two things make one
+        // meaningless, and both used to be reported as success: a retired
+        // entry (its task is gone), and an entry whose nudge receiver has
+        // been dropped — which is the same thing observed a moment earlier,
+        // while the supervising task is still on its way to publishing
+        // `Retired`. Sending into either and answering 200 tells a user
+        // their retry happened when nothing will ever act on it.
+        let needs_revival = {
+            let map = self.actors.lock().expect("actor map mutex poisoned");
+            let Some(handle) = map.actors.get(&host) else {
+                return Ok(false);
+            };
+            let retired = matches!(handle.status.borrow().state, HostState::Retired { .. });
+            let unreachable_actor = handle.nudge.is_closed() || handle.task.is_finished();
+            if !(retired || unreachable_actor) {
+                handle.nudge.send_modify(|nudge| {
+                    nudge.revision += 1;
+                    // Explicitly cleared rather than left alone: the value
+                    // is retained between sends, so a previous
+                    // reconfigure's flag would otherwise still be riding
+                    // along.
+                    nudge.fresh_window = false;
+                });
+                return Ok(true);
+            }
+            true
+        };
+        debug_assert!(needs_revival);
+        self.revive(host).await
+    }
+
+    /// Replace a dead entry's actor with a fresh one, from the registry row
+    /// as it stands now.
+    ///
+    /// Serialized against [`Self::sync_registry`] through the SAME
+    /// reconcile mutex, which is what makes retry-versus-removal safe: a
+    /// removal that has already committed and drained the map cannot be
+    /// followed by a revival that reads a row it can no longer see, and a
+    /// revival in progress finishes before a reconcile can decide the map
+    /// is complete. Without that shared discipline the two interleave into
+    /// a ghost — an actor dialing a host the registry has forgotten, with
+    /// nothing left that would ever stop it.
+    ///
+    /// The slot is RESERVED under the actor-map lock before the new actor
+    /// runs a single step: [`Self::spawn_actor`] hands back a dormant
+    /// handle, and only the caller that wins the map entry releases it (see
+    /// [`ActorHandle::start`]). Spawning-then-inserting would let two
+    /// concurrent revivals both dial the same host and publish over each
+    /// other.
+    async fn revive(&self, host: HostId) -> anyhow::Result<bool> {
+        let _reconcile = self.reconcile.lock().await;
+        let row = self
+            .store
+            .list_hosts()
+            .await
+            .context("reading the registry to respawn a host's connection actor")?
+            .into_iter()
+            .find(|row| row.id == host);
+        let Some(row) = row else {
+            // Removed while this call was reading, or never there. Either
+            // way the entry genuinely does not exist, which is the same
+            // answer a caller would have got a moment earlier.
+            return Ok(false);
+        };
+        let mut replacement = self.spawn_actor(row);
+        let mut map = self.actors.lock().expect("actor map mutex poisoned");
+        if map.shut_down {
+            // Checked in the hold the insertion happens in, for the reason
+            // `ActorMap::shut_down` documents: a manager that is already
+            // gone must not acquire a new actor nothing will stop. The
+            // replacement is dropped without ever being started.
+            return Ok(false);
+        }
+        if let Some(existing) = map.actors.get(&host) {
+            let alive = !matches!(existing.status.borrow().state, HostState::Retired { .. })
+                && !existing.task.is_finished()
+                && !existing.nudge.is_closed();
+            if alive {
+                // Someone else already revived it (a concurrent retry, a
+                // reconcile). Theirs wins; ours is dropped before it can
+                // dial anything.
+                return Ok(true);
+            }
+        }
+        // Install FIRST, release SECOND: the actor does nothing until the
+        // gate opens, so the map is the single arbiter of which actor owns
+        // this host.
+        let start = replacement.start.take();
+        if let Some(previous) = map.actors.insert(host, replacement) {
+            previous.task.abort();
+        }
+        drop(map);
+        if let Some(start) = start {
+            let _ = start.send(());
+        }
+        info!(host, "respawned a host's connection actor on request");
+        Ok(true)
+    }
+
+    /// Stop ONE host's actor and drop its connection, without touching the
+    /// registry or anything else.
+    ///
+    /// The infallible half of removing a host. `remove_ssh_host` commits
+    /// first and the live actors have to follow, but the general reconcile
+    /// that would normally do that reads the registry — so it can FAIL, and
+    /// a failure there would leave an actor dialing a host the registry no
+    /// longer has, with its cache rows already cascaded away. This takes the
+    /// id the caller already committed and needs no read at all, so the
+    /// commit-then-converge pair cannot come apart.
+    ///
+    /// Takes the RECONCILE mutex first, which is what makes this the last
+    /// word rather than merely the latest. A revival or a reconcile that
+    /// read the registry BEFORE the row was deleted is still holding a row
+    /// it intends to install an actor for; without serializing against
+    /// them, this removal can drain the map and have one of them put an
+    /// actor back a moment later — a ghost dialing a host the registry has
+    /// forgotten, with nothing left that would ever stop it. Every path
+    /// that installs an actor holds the same mutex, so after this returns
+    /// no in-flight one can still land.
+    ///
+    /// Returns whether an actor was actually stopped, so a caller can tell
+    /// "removed" from "there was nothing there".
+    pub async fn stop_actor(&self, host: HostId) -> bool {
+        let _reconcile = self.reconcile.lock().await;
+        let mut map = self.actors.lock().expect("actor map mutex poisoned");
+        match map.actors.remove(&host) {
+            Some(handle) => {
+                handle.task.abort();
+                true
+            }
+            None => false,
         }
     }
 
@@ -1618,6 +2761,18 @@ struct HostActor {
     /// The last failure this actor logged, and how many identical ones it
     /// has swallowed since — see [`Self::note_failure`].
     last_failure: Mutex<RepeatedFailure>,
+    /// Shared with the manager: held across every cache write so a refresh
+    /// and a create's seed cannot interleave. See [`ActorHandle::cache_lock`].
+    cache_lock: Arc<tokio::sync::Mutex<()>>,
+    /// Shared with the manager: sampled before a drain and re-read under
+    /// the lock, so a replacement built from a pre-seed snapshot is skipped
+    /// rather than allowed to erase the seed. See
+    /// [`ActorHandle::seed_epoch`].
+    seed_epoch: Arc<std::sync::atomic::AtomicU64>,
+    /// The manager's incarnation source, shared by every actor: a new
+    /// connection draws the next token from it (see
+    /// [`ActorStatus::incarnation`]).
+    incarnations: Arc<std::sync::atomic::AtomicU64>,
 }
 
 /// What [`HostActor::reload_row`] found, distinguishing "removed" from
@@ -1684,6 +2839,9 @@ enum AttemptOutcome {
     Skew(VersionSkew),
     /// The peer answered with an identity that is not this row's.
     Mismatch { recorded: String, reported: String },
+    /// The peer answered with NO identity, against a row that has one on
+    /// record — so there is nothing to compare and nothing to adopt.
+    Unverified { recorded: String },
     /// The peer's identity belongs to another registry row.
     Duplicate { twin: HostId, identity: String },
     /// The transport never got as far as a settled hello.
@@ -1750,7 +2908,12 @@ impl HostActor {
     /// "the edit took effect" true for an actor mid-ladder, mid-dial,
     /// mid-refresh, or frozen, without each of those states needing its own
     /// notion of what an edit means.
-    async fn run(self, mut row: HostRow, mut nudge: watch::Receiver<Nudge>) {
+    async fn run(
+        self,
+        mut row: HostRow,
+        mut nudge: watch::Receiver<Nudge>,
+        mut refresh: watch::Receiver<u64>,
+    ) {
         let mut active = true;
         loop {
             match self.reload_row().await {
@@ -1832,7 +2995,7 @@ impl HostActor {
                     identity,
                     build_version,
                 } => {
-                    self.serve(client, identity, build_version, &mut nudge)
+                    self.serve(client, identity, build_version, &mut nudge, &mut refresh)
                         .await;
                     // A connection that WAS up and was lost earns a fresh
                     // active window: a supervisor restarted by hand is
@@ -1845,8 +3008,14 @@ impl HostActor {
                     active = true;
                 }
                 AttemptOutcome::Skew(skew) => {
-                    // The outcome is owned here, so its strings move into
-                    // the state rather than being copied into it.
+                    // The peer's build string enters the STATE verbatim,
+                    // deliberately. It is already bounded at the wire
+                    // boundary (`MAX_BUILD_VERSION_BYTES`), and the surface
+                    // it is rendered on from here is JSON, where serde
+                    // escapes control characters correctly and a
+                    // Debug-quoted value would just be an ugly one. The
+                    // escaping belongs where the hazard is — a terminal —
+                    // and that is the log site below.
                     self.set_state(HostState::VersionSkew {
                         peer_protocol: skew.peer_protocol,
                         peer_build: skew.peer_build,
@@ -1869,6 +3038,13 @@ impl HostActor {
                     // active window behind it — regardless of whether the
                     // nudge itself asked for one.
                     active = true;
+                }
+                AttemptOutcome::Unverified { recorded } => {
+                    self.set_state(HostState::IdentityUnverified { recorded });
+                    // Re-probed, unlike a mismatch: there is no decision to
+                    // wait for here, only a host that might start reporting
+                    // its identity again. See `HostState::IdentityUnverified`.
+                    active = self.hold(&mut nudge, self.cadence.reprobe).await;
                 }
                 AttemptOutcome::Duplicate { twin, identity } => {
                     self.set_state(HostState::Duplicate { twin, identity });
@@ -2049,23 +3225,39 @@ impl HostActor {
                     .filter_map(|cause| cause.downcast_ref::<std::io::Error>())
                     .find_map(VersionSkew::cause_of)
                 {
-                    // The payload's own `Display` rides along, not just the
-                    // fields recovered from it: that text is the refusal
-                    // exactly as the handshake words it — the same wording
-                    // sent to the peer and shown by the single-host path —
-                    // and `farhelm_proto::io::VersionSkew`'s docs promise
-                    // an operator reads it on the helm's stderr. Recovering
-                    // the numbers as a TYPE is what the state machine needs;
-                    // it is not a reason to withhold the sentence a human
+                    // Every PEER-SUPPLIED string here goes through
+                    // `peer_text`, and the whole line through the
+                    // repeated-failure suppressor. Both were missing and
+                    // both mattered: a build version is arbitrary bytes the
+                    // far end chose, rendered straight onto an operator's
+                    // terminal, so an escape sequence in it could repaint or
+                    // hide what the operator was reading — a length cap
+                    // bounds how much, not what. And the re-probe cadence
+                    // repeats this refusal forever, outside the suppression
+                    // every other repeated failure obeys, so one skewed host
+                    // would write the log by itself.
+                    //
+                    // The payload's own `Display` still rides along (escaped
+                    // like the rest): it is the refusal exactly as the
+                    // handshake words it, and
+                    // `farhelm_proto::io::VersionSkew`'s docs promise an
+                    // operator reads it on the helm's stderr. Recovering the
+                    // numbers as a TYPE is what the state machine needs; it
+                    // is not a reason to withhold the sentence a human
                     // needs.
-                    warn!(
-                        peer_protocol = skew.peer_protocol,
-                        peer_build = skew.peer_build.as_str(),
-                        our_protocol = skew.our_protocol,
-                        destination = %self.destination(),
-                        skew = %skew,
-                        "the host's supervisor refused the hello: protocol version skew"
-                    );
+                    let peer_build = peer_text(&skew.peer_build);
+                    let sentence = peer_text(&skew.to_string());
+                    if let Some(suppressed) = self.note_failure(&sentence) {
+                        warn!(
+                            peer_protocol = skew.peer_protocol,
+                            peer_build = peer_build.as_str(),
+                            our_protocol = skew.our_protocol,
+                            destination = %self.destination(),
+                            skew = sentence.as_str(),
+                            suppressed,
+                            "the host's supervisor refused the hello: protocol version skew"
+                        );
+                    }
                     return AttemptOutcome::Skew(skew.clone());
                 }
                 // An ssh channel that closed before a single byte of
@@ -2099,14 +3291,49 @@ impl HostActor {
             // before this, so what actually lands here is a construction
             // with no standing to mint one (a test peer, an embedded
             // supervisor built without a state directory to claim from).
-            // Connected and usable — sessions still list, terminals still
-            // attach — but NOT cacheable, because the cache's identity
-            // binding is what protects a stale refresh from landing on the
-            // wrong install and there is nothing here to bind to. Warned
-            // rather than silently degraded: a host that never caches would
-            // otherwise show an empty stale list with no explanation.
+            //
+            // What happens next depends entirely on whether this ROW has an
+            // identity on record, and the two answers are opposites.
+            if let Some(recorded) = row.host_identity.clone() {
+                // FAIL CLOSED. This row was contacted before and learned an
+                // identity; something is answering at its destination now
+                // that will not say who it is. Connecting anyway would put
+                // an unverified peer in charge of a host whose cache —
+                // written under the recorded identity, and still in scope
+                // for the merged list — describes a DIFFERENT install. That
+                // is precisely the silent merge SPEC.md forbids, arriving
+                // by the one door the mismatch check cannot see through:
+                // there is no reported identity to compare, so the
+                // comparison never happens.
+                //
+                // A distinct state rather than `IdentityMismatch` because
+                // the remedy is different and the UI must not offer the
+                // wrong one: there is nothing to ADOPT here — no new
+                // identity was presented — so the only ways out are fixing
+                // the host so it reports its identity again, retargeting the
+                // entry, or removing it. The old cache stays and serves
+                // stale like any other non-connected host's, which is
+                // exactly right: it is still the last thing this helm
+                // actually verified.
+                warn!(
+                    recorded = peer_text(&recorded).as_str(),
+                    build_version = peer_text(&build_version).as_str(),
+                    destination = %self.destination(),
+                    "the destination answered without an identity, but this entry has one on                      record; refusing to connect an unverified peer to a known host"
+                );
+                return AttemptOutcome::Unverified { recorded };
+            }
+            // No identity on either side: nothing to merge and nothing to
+            // verify against. Connected and usable — sessions still list,
+            // terminals still attach — but NOT cacheable, because the
+            // cache's identity binding is what protects a stale refresh
+            // from landing on the wrong install and there is nothing here
+            // to bind to. Its sessions ride the actor's in-memory list
+            // instead (see `LiveSessions`). Warned rather than silently
+            // degraded: a host that never caches would otherwise show an
+            // empty stale list with no explanation.
             warn!(
-                build_version = build_version.as_str(),
+                build_version = peer_text(&build_version).as_str(),
                 destination = %self.destination(),
                 "the host's supervisor reported no identity; connecting without a session cache"
             );
@@ -2138,8 +3365,8 @@ impl HostActor {
         {
             Ok(FirstContactOutcome::Recorded) => {
                 info!(
-                    identity = identity.as_str(),
-                    build_version = build_version.as_str(),
+                    identity = peer_text(&identity).as_str(),
+                    build_version = peer_text(&build_version).as_str(),
                     destination = %self.destination(),
                     "host identity confirmed at hello"
                 );
@@ -2154,8 +3381,8 @@ impl HostActor {
                 // not this call site's discipline — so freezing here
                 // leaves the registry exactly as the user last left it.
                 warn!(
-                    recorded = recorded.as_str(),
-                    reported = reported.as_str(),
+                    recorded = peer_text(&recorded).as_str(),
+                    reported = peer_text(&reported).as_str(),
                     destination = %self.destination(),
                     "the destination reports a different host identity; freezing until the user \
                      adopts it or fixes the destination"
@@ -2165,7 +3392,7 @@ impl HostActor {
             Ok(FirstContactOutcome::Collision { owner }) => {
                 warn!(
                     twin = owner,
-                    identity = identity.as_str(),
+                    identity = peer_text(&identity).as_str(),
                     destination = %self.destination(),
                     "this entry reaches a host another entry already owns; connecting nothing"
                 );
@@ -2181,7 +3408,7 @@ impl HostActor {
                 // is nothing wrong with the host, and the very next pass
                 // dials what the registry says now.
                 warn!(
-                    identity = identity.as_str(),
+                    identity = peer_text(&identity).as_str(),
                     dialed = ?dialed.destination,
                     current = ?current.destination,
                     "the host was reconfigured while this handshake was in flight; discarding \
@@ -2226,7 +3453,10 @@ impl HostActor {
         identity: Option<String>,
         build_version: String,
         nudge: &mut watch::Receiver<Nudge>,
+        refresh: &mut watch::Receiver<u64>,
     ) {
+        // Anything sent before this connection existed is not about it.
+        refresh.mark_unchanged();
         let connected_at = tokio::time::Instant::now();
         self.publish(
             HostState::Connected {
@@ -2254,13 +3484,15 @@ impl HostActor {
                 break;
             }
             let end_connection = step.end_connection;
-            self.publish(
+            self.publish_refresh(
                 HostState::Connected {
                     identity: identity.clone(),
                     build_version: build_version.clone(),
                     last_refresh: step.health,
                 },
                 Some(Arc::clone(&client)),
+                step.live,
+                step.contested,
             );
             if let Some(reason) = end_connection {
                 ended = reason;
@@ -2269,6 +3501,11 @@ impl HostActor {
             tokio::select! {
                 _ = client.closed() => break,
                 _ = tokio::time::sleep(self.cadence.refresh) => {}
+                // A refresh-only wake: loop straight back into another
+                // drain WITHOUT leaving this connection. The whole
+                // difference from the nudge arm below is that this one does
+                // not `break` — see [`ActorHandle::refresh`].
+                _ = refresh.changed() => {}
                 nudge = next_nudge(nudge) => {
                     let _ = nudge;
                     ended = "the host was reconfigured or an immediate retry was requested";
@@ -2328,6 +3565,13 @@ impl HostActor {
     /// nothing must not be allowed to park this loop. The previous cache
     /// survives both, like any other failed refresh.
     async fn refresh_once(&self, client: &SupervisorClient, identity: Option<&str>) -> RefreshStep {
+        // Sampled BEFORE the drain, compared under the cache lock after it.
+        // The drain is a network walk of unbounded duration, so a create
+        // landing during it is committed by its seed and would then be
+        // erased by this replacement — which was built from a snapshot
+        // taken before that session existed. The epoch is how a stale
+        // snapshot recognizes that it lost.
+        let epoch_before = self.seed_epoch.load(std::sync::atomic::Ordering::Acquire);
         let drained = tokio::time::timeout(self.cadence.refresh_timeout, drain_sessions(client));
         let entries = match drained.await {
             Err(_) => {
@@ -2351,6 +3595,8 @@ impl HostActor {
                         ),
                     },
                     end_connection: Some("the host stopped answering its session list"),
+                    live: LiveSessions::Retain,
+                    contested: None,
                 };
             }
             Ok(Ok(entries)) => entries,
@@ -2378,31 +3624,99 @@ impl HostActor {
                 return RefreshStep {
                     health: RefreshHealth::Failed { error },
                     end_connection: None,
+                    live: LiveSessions::Retain,
+                    contested: None,
                 };
             }
         };
         let Some(identity) = identity else {
             // Live-only: the walk succeeded, so the count is real, but
             // there is nothing to bind a cache write to. See this method's
-            // own docs.
+            // own docs. The publication is still ordered against seeds — a
+            // create on an identity-less host seeds the in-memory list, and
+            // a pre-create drain replacing it wholesale would erase it just
+            // as surely as it would a cached one.
+            let sessions = entries.len();
+            let _committing = self.cache_lock.lock().await;
+            if self.seed_epoch.load(std::sync::atomic::Ordering::Acquire) != epoch_before {
+                debug!(
+                    sessions,
+                    "a session was seeded while this walk was in flight; keeping the newer list"
+                );
+                return RefreshStep {
+                    health: RefreshHealth::Ok { sessions },
+                    end_connection: None,
+                    live: LiveSessions::Retain,
+                    contested: None,
+                };
+            }
             return RefreshStep {
-                health: RefreshHealth::Ok {
-                    sessions: entries.len(),
-                },
+                health: RefreshHealth::Ok { sessions },
                 end_connection: None,
+                live: LiveSessions::Set(Arc::new(entries)),
+                contested: Some(Arc::new(Vec::new())),
             };
         };
         let sessions = entries.len();
+        // Held across the write, and released when this scope ends. Every
+        // writer of this host's cache takes it, so the refresh and a seed
+        // are orderable rather than interleaved.
+        let _committing = self.cache_lock.lock().await;
+        if self.seed_epoch.load(std::sync::atomic::Ordering::Acquire) != epoch_before {
+            // A create seeded this host's cache while the walk was in
+            // flight, so this replacement is built from a snapshot that
+            // predates a session the caller has already been told about.
+            // Skipping is the honest resolution: the walk itself succeeded
+            // (so the connection is healthy and the count is real), and the
+            // NEXT refresh — which starts after the seed — is authoritative
+            // within one interval.
+            debug!(
+                sessions,
+                "a session was seeded while this walk was in flight; keeping the newer cache"
+            );
+            return RefreshStep {
+                health: RefreshHealth::Ok { sessions },
+                end_connection: None,
+                live: LiveSessions::Clear,
+                contested: None,
+            };
+        }
         match self
             .store
             .replace_host_sessions(self.id, identity, entries)
             .await
         {
-            Ok(()) => {
+            Ok(contested) => {
                 debug!(sessions, "replaced the host's cached session list");
+                if let Some(sample) = contested.first() {
+                    // ONE bounded line per refresh, not one per colliding
+                    // row per tick: a host reporting a thousand ids that
+                    // another host owns would otherwise write a thousand
+                    // warnings every few seconds, which is a log a peer
+                    // gets to compose. Routed through the same suppressor
+                    // every other repeated failure obeys, and the sample is
+                    // escaped because it is the peer's text.
+                    let summary = format!(
+                        "{} session id(s) claimed by another host, e.g. {}",
+                        contested.len(),
+                        peer_text(sample)
+                    );
+                    if let Some(suppressed) = self.note_failure(&summary) {
+                        warn!(
+                            collisions = contested.len(),
+                            sample = peer_text(sample).as_str(),
+                            destination = %self.destination(),
+                            suppressed,
+                            "this host reports session ids another host's cache already claims; \
+                             the first claim holds and these rows were dropped"
+                        );
+                    }
+                }
                 RefreshStep {
                     health: RefreshHealth::Ok { sessions },
                     end_connection: None,
+                    live: LiveSessions::Clear,
+                    contested: Some(Arc::new(contested)),
                 }
             }
             Err(error) => {
@@ -2427,6 +3741,8 @@ impl HostActor {
                     health: RefreshHealth::Failed { error },
                     end_connection: superseded
                         .then_some("this connection's identity is no longer the row's"),
+                    live: LiveSessions::Clear,
+                    contested: None,
                 }
             }
         }
@@ -2500,6 +3816,40 @@ impl HostActor {
     /// (which attempt, which identity, why a refresh failed) is logged at
     /// the point of decision instead, where the evidence is in hand.
     fn publish(&self, state: HostState, client: Option<Arc<SupervisorClient>>) {
+        self.publish_with_live(state, client, LiveSessions::Clear);
+    }
+
+    /// [`Self::publish`] with an explicit disposition for the in-memory
+    /// list an identity-less host serves from (see [`LiveSessions`]).
+    ///
+    /// Separate from `publish` only so the ordinary call sites cannot get it
+    /// wrong: every transition OUT of a live connection must drop that list,
+    /// and defaulting to [`LiveSessions::Clear`] is what makes forgetting to
+    /// think about it produce the safe answer rather than a host serving
+    /// sessions it can no longer see.
+    fn publish_with_live(
+        &self,
+        state: HostState,
+        client: Option<Arc<SupervisorClient>>,
+        live: LiveSessions,
+    ) {
+        self.publish_refresh(state, client, live, None);
+    }
+
+    /// [`Self::publish_with_live`] plus this refresh's contested set.
+    ///
+    /// `None` leaves the previous set standing — a FAILED refresh produced
+    /// no evidence either way, and clearing a collision because one walk
+    /// did not finish would be inventing an answer. A successful drain
+    /// always supplies a set, empty or not, which is what makes the state
+    /// reconstructed rather than remembered (see [`ActorStatus::contested`]).
+    fn publish_refresh(
+        &self,
+        state: HostState,
+        client: Option<Arc<SupervisorClient>>,
+        live: LiveSessions,
+        contested: Option<Arc<Vec<String>>>,
+    ) {
         let previous = self.status.borrow().state.phase();
         if previous != state.phase() {
             info!(
@@ -2519,7 +3869,45 @@ impl HostActor {
         // connection the actor believed it had dropped would stay open and
         // its peer would never see the close. The old status is returned
         // and dropped here, which is what actually releases it.
-        let _previous = self.status.send_replace(ActorStatus { state, client });
+        // `send_modify` rather than building a whole `ActorStatus`: the
+        // generation is the actor's running count of its own connections
+        // and must survive a publish that is not about it, so it is read
+        // and advanced in place rather than reconstructed from nothing.
+        self.status.send_modify(|status| {
+            let live_sessions = match live {
+                LiveSessions::Retain => status.live_sessions.take(),
+                LiveSessions::Set(entries) => Some(entries),
+                LiveSessions::Clear => None,
+            };
+            // A fresh token whenever the CLIENT changes — including when it
+            // goes away. Bumping only on connect (the shape this replaces)
+            // left a disconnect invisible to claim validation, so a
+            // mutation reply arriving after the connection dropped could
+            // still present a token that matched and republish sessions on
+            // a host that was no longer connected. Refresh publishes on one
+            // live connection carry the same client and therefore the same
+            // token, which is what keeps a claim valid for as long as the
+            // connection it was made on lasts, and not one moment longer.
+            if !same_connection(status.client.as_ref(), client.as_ref()) {
+                status.incarnation = self
+                    .incarnations
+                    .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            }
+            match (&contested, client.is_some()) {
+                (Some(contested), _) => status.contested = Arc::clone(contested),
+                // A host that is no longer connected takes its claims with
+                // it: nothing is reporting anything, so there is no
+                // standing collision left to assert. A FAILED refresh on a
+                // still-live connection keeps the previous set — it
+                // produced no evidence either way, and clearing on no
+                // evidence would be inventing an answer.
+                (None, false) => status.contested = Arc::new(Vec::new()),
+                (None, true) => {}
+            }
+            status.state = state;
+            status.client = client;
+            status.live_sessions = live_sessions;
+        });
     }
 
     /// Sleep for `wait`, or return the [`Nudge`] that cut it short.
@@ -2649,6 +4037,347 @@ mod tests {
     use farhelm_proto::io::{FrameReader, FrameWriter, parse_control};
     use farhelm_proto::{ControlMsg, PROTOCOL_VERSION, RestartOffer, SessionStatus};
     use tokio::sync::broadcast;
+
+    /// A row that has LEARNED an identity, met by a peer that reports none,
+    /// must freeze rather than connect.
+    ///
+    /// The hole this closes is the one the mismatch check structurally
+    /// cannot see: with no reported identity there is nothing to compare, so
+    /// the comparison never runs and the host connected live-only — with its
+    /// old identity-bound cache still in scope for the merged list, and an
+    /// unverified peer now answering for it. Old and new installs merge and
+    /// operations route through whatever is there, which is exactly the
+    /// silent merge SPEC.md forbids.
+    ///
+    /// The freeze is a state of its OWN rather than a mismatch, because the
+    /// remedy differs: nothing was presented, so there is nothing to adopt.
+    #[tokio::test(start_paused = true)]
+    async fn an_identified_row_meeting_an_identity_less_peer_freezes() {
+        let fixture = fixture(Cadence::default(), |store, transport| async move {
+            let host = store
+                .add_ssh_host("amnesiac.example", None, None)
+                .await
+                .unwrap();
+            record_contact(&store, host, "identity-known").await;
+            transport.set_script(
+                host,
+                Script {
+                    // Answers, speaks the protocol, will not say who it is.
+                    identity: None,
+                    sessions: vec![session("would-be-merged", 100)],
+                    ..Script::default()
+                },
+            );
+        })
+        .await;
+        let host = fixture.store.list_hosts().await.unwrap()[1].id;
+
+        let state = fixture
+            .manager
+            .wait_for_state(host, |state| {
+                matches!(state, HostState::IdentityUnverified { .. })
+            })
+            .await
+            .expect("actor is running");
+        assert!(
+            matches!(&state, HostState::IdentityUnverified { recorded }
+                if recorded == "identity-known"),
+            "the freeze must name the identity it could not confirm: {state:?}"
+        );
+        assert!(
+            !state.is_connected(),
+            "an unverified peer must not be routable"
+        );
+        assert!(
+            status_client(&fixture.manager, host).is_none(),
+            "and must have no client published for anything to route onto"
+        );
+        assert_eq!(
+            recorded_identity(&fixture.store, host).await,
+            Some("identity-known".to_string()),
+            "nothing is written: the row keeps the identity it already had"
+        );
+        assert!(
+            fixture
+                .store
+                .cached_sessions(host)
+                .await
+                .unwrap()
+                .is_empty(),
+            "and the unverified peer's sessions are cached nowhere at all"
+        );
+    }
+
+    /// A drain must refuse a list that names one session twice, BEFORE
+    /// either publication branch decides what to do with it.
+    ///
+    /// The durable path has always refused such a list, but the in-memory
+    /// path an identity-less host publishes through never touches the
+    /// store — so the same malformed reply was accepted there, and a merged
+    /// list could show one session twice under one host. Checking on the
+    /// drain covers both branches with one rule.
+    #[tokio::test]
+    async fn a_drain_refuses_a_list_that_names_one_session_twice() {
+        let malformed = Script {
+            // One id, twice — a list that contradicts itself.
+            sessions: vec![session("twice", 100), session("twice", 90)],
+            ..Script::default()
+        };
+        // The peer answers each request from the LIVE map, not from the
+        // hello snapshot, so the script has to be in the map too.
+        let scripts = Arc::new(Mutex::new(HashMap::from([(1, malformed.clone())])));
+        // The kill SENDER is held for the test's whole body: a peer whose
+        // kill channel has no sender left sees `recv` resolve immediately
+        // and returns before answering anything, which would fail this test
+        // for a reason that has nothing to do with it.
+        let (kill, kill_rx) = broadcast::channel(1);
+        let (ours, theirs) = tokio::io::duplex(256 * 1024);
+        let peer = tokio::spawn(run_peer(
+            theirs,
+            malformed,
+            PeerContext {
+                scripts,
+                requests: Arc::new(Mutex::new(Vec::new())),
+                closures: watch::Sender::new(Vec::new()),
+                id: 1,
+            },
+            kill_rx,
+        ));
+        let (r, w) = tokio::io::split(ours);
+        let client = SupervisorClient::start(r, w).await.expect("connect");
+
+        let error = drain_sessions(&client)
+            .await
+            .expect_err("a self-contradicting list must be refused whole");
+        assert!(
+            format!("{error:#}").contains("more than once"),
+            "the refusal must say what was wrong with the list: {error:#}"
+        );
+        peer.abort();
+        drop(kill);
+    }
+
+    /// A drain must be bounded by BYTES, not only by pages and rows.
+    ///
+    /// The other two bounds are both satisfied by a peer that sends few,
+    /// enormous pages — which is the shape that actually costs memory. A
+    /// host answering with near-frame-sized pages of fat records would
+    /// otherwise have this side retain gigabytes on the far end's say-so,
+    /// and a registered host is a machine the helm does not control.
+    ///
+    /// The refusal is an ordinary failed refresh: the previous cache stands,
+    /// as it does for every other way a walk can fail.
+    #[tokio::test]
+    async fn a_drain_refuses_a_list_that_exceeds_its_byte_cap() {
+        // Each session's title alone is a megabyte, so seventy of them pass
+        // both the page and the row bound and blow the byte one — which is
+        // the shape those two cannot catch. Pages stay well under
+        // `MAX_FRAME_LEN` so the walk fails at the bound under test rather
+        // than at the transport.
+        let fat: Vec<SessionInfo> = (0..70)
+            .map(|index| {
+                let mut info = session(&format!("fat-{index}"), 1_000 - index);
+                info.title = "x".repeat(1024 * 1024);
+                info
+            })
+            .collect();
+        let script = Script {
+            sessions: fat,
+            page_size: 4,
+            ..Script::default()
+        };
+        let scripts = Arc::new(Mutex::new(HashMap::from([(1, script.clone())])));
+        let (kill, kill_rx) = broadcast::channel(1);
+        let (ours, theirs) = tokio::io::duplex(16 * 1024 * 1024);
+        let peer = tokio::spawn(run_peer(
+            theirs,
+            script,
+            PeerContext {
+                scripts,
+                requests: Arc::new(Mutex::new(Vec::new())),
+                closures: watch::Sender::new(Vec::new()),
+                id: 1,
+            },
+            kill_rx,
+        ));
+        let (r, w) = tokio::io::split(ours);
+        let client = SupervisorClient::start(r, w).await.expect("connect");
+
+        let error = drain_sessions(&client)
+            .await
+            .expect_err("a list this large must be refused rather than retained");
+        assert!(
+            format!("{error:#}").contains("bytes"),
+            "the refusal must say which bound it was: {error:#}"
+        );
+        peer.abort();
+        drop(kill);
+    }
+
+    /// A drain must REFUSE a list that is not in the wire order — within a
+    /// page and across page boundaries alike.
+    ///
+    /// PLAN_M6.md fixes that order, and this side does not merely display
+    /// it: an identity-less host's list is binary-searched for a resume
+    /// point and merged in lockstep with the persisted page, and both are
+    /// simply wrong over an unsorted sequence. The failure would be silent —
+    /// pages that skip or repeat entries — which is exactly what a peer
+    /// should not be able to cause. The across-pages case is separate
+    /// because a per-page check passes a peer that restarts the order at
+    /// every page.
+    #[tokio::test]
+    async fn a_drain_refuses_a_list_that_is_not_in_the_wire_order() {
+        // Ascending time: the reverse of the contract, inside one page.
+        let within_a_page = vec![session("a", 100), session("b", 200)];
+        // Each page is internally ordered; the SECOND starts newer than the
+        // first ended.
+        let across_pages = vec![
+            session("a", 300),
+            session("b", 200),
+            session("c", 900),
+            session("d", 800),
+        ];
+        for (label, sessions, page_size) in [
+            ("within one page", within_a_page, 50),
+            ("across a page boundary", across_pages, 2),
+        ] {
+            let script = Script {
+                sessions,
+                page_size,
+                ..Script::default()
+            };
+            let scripts = Arc::new(Mutex::new(HashMap::from([(1, script.clone())])));
+            let (kill, kill_rx) = broadcast::channel(1);
+            let (ours, theirs) = tokio::io::duplex(256 * 1024);
+            let peer = tokio::spawn(run_peer(
+                theirs,
+                script,
+                PeerContext {
+                    scripts,
+                    requests: Arc::new(Mutex::new(Vec::new())),
+                    closures: watch::Sender::new(Vec::new()),
+                    id: 1,
+                },
+                kill_rx,
+            ));
+            let (r, w) = tokio::io::split(ours);
+            let client = SupervisorClient::start(r, w).await.expect("connect");
+
+            let error = drain_sessions(&client)
+                .await
+                .err()
+                .unwrap_or_else(|| panic!("{label}: an out-of-order list must be refused"));
+            assert!(
+                format!("{error:#}").contains("wire order"),
+                "the refusal must name the contract it enforces ({label}): {error:#}"
+            );
+            peer.abort();
+            drop(kill);
+        }
+    }
+
+    /// A session id too large to build a replayable cursor over must be
+    /// refused at ingress.
+    ///
+    /// An id near the frame limit produces a cursor no client could send
+    /// back — the request head would be refused before any handler saw it —
+    /// so the walk would advance to a position nothing could ever resume
+    /// from. Bounded where the value first enters this process rather than
+    /// at each of the places it is later embedded.
+    #[tokio::test]
+    async fn a_drain_refuses_an_unusably_long_session_id() {
+        let script = Script {
+            sessions: vec![session(&"x".repeat(MAX_SESSION_ID_BYTES + 1), 100)],
+            ..Script::default()
+        };
+        let scripts = Arc::new(Mutex::new(HashMap::from([(1, script.clone())])));
+        let (kill, kill_rx) = broadcast::channel(1);
+        let (ours, theirs) = tokio::io::duplex(256 * 1024);
+        let peer = tokio::spawn(run_peer(
+            theirs,
+            script,
+            PeerContext {
+                scripts,
+                requests: Arc::new(Mutex::new(Vec::new())),
+                closures: watch::Sender::new(Vec::new()),
+                id: 1,
+            },
+            kill_rx,
+        ));
+        let (r, w) = tokio::io::split(ours);
+        let client = SupervisorClient::start(r, w).await.expect("connect");
+
+        let error = drain_sessions(&client)
+            .await
+            .expect_err("an unusable session id must be refused");
+        assert!(
+            format!("{error:#}").contains("cursors"),
+            "the refusal must say what this side could not do with it: {error:#}"
+        );
+        peer.abort();
+        drop(kill);
+    }
+
+    /// A stderr stream with no newline in it must cost a BOUNDED amount of
+    /// memory, however much the far end writes.
+    ///
+    /// The shape this replaced buffered a whole newline-free segment before
+    /// any cap applied, so a remote that wrote megabytes without a newline —
+    /// a binary blob on stderr, a wedged pager, a deliberate flood — made
+    /// this process allocate every byte of it first. That is unbounded
+    /// allocation driven by the far end of an ssh channel, which for a
+    /// registered host is a machine the helm does not control.
+    ///
+    /// Multi-megabyte rather than merely large: the point is that the size
+    /// of the input does not appear in the size of what is retained at all.
+    #[tokio::test]
+    async fn a_newline_free_stderr_flood_stays_bounded() {
+        let flood = vec![b'x'; 4 * 1024 * 1024];
+        let mut reader = tokio::io::BufReader::new(std::io::Cursor::new(flood));
+        let line = super::next_capped_line(&mut reader, SSH_STDERR_LINE_CAP)
+            .await
+            .expect("a final segment with no newline is still a line");
+        assert_eq!(
+            line.bytes.len(),
+            SSH_STDERR_LINE_CAP,
+            "only the cap is retained, no matter how much arrived"
+        );
+        assert!(
+            line.truncated,
+            "and the caller is told the rest was dropped"
+        );
+    }
+
+    /// Ordinary lines survive intact, the cap applies per LINE, and the
+    /// stream ends when it ends.
+    ///
+    /// The bound above is only useful if the reader is otherwise a correct
+    /// line reader: a version that truncated every line, or lost the last
+    /// one, or never terminated, would satisfy the flood test and destroy
+    /// the diagnostics the relay exists to carry.
+    #[tokio::test]
+    async fn capped_line_reading_keeps_short_lines_whole() {
+        let long = "y".repeat(SSH_STDERR_LINE_CAP + 50);
+        let input = format!("first\nsecond\n{long}\nlast-with-no-newline");
+        let mut reader = tokio::io::BufReader::new(std::io::Cursor::new(input.into_bytes()));
+
+        let mut seen: Vec<(String, bool)> = Vec::new();
+        while let Some(line) = super::next_capped_line(&mut reader, SSH_STDERR_LINE_CAP).await {
+            seen.push((
+                String::from_utf8_lossy(&line.bytes).into_owned(),
+                line.truncated,
+            ));
+        }
+        assert_eq!(seen.len(), 4, "every line, including the unterminated tail");
+        assert_eq!(seen[0], ("first".to_string(), false));
+        assert_eq!(seen[1], ("second".to_string(), false));
+        assert_eq!(
+            (seen[2].0.len(), seen[2].1),
+            (SSH_STDERR_LINE_CAP, true),
+            "the cap is per line, and truncation is reported per line"
+        );
+        assert_eq!(seen[3], ("last-with-no-newline".to_string(), false));
+    }
 
     // ---- Scripted supervisor peers ---------------------------------
     //
@@ -3677,7 +5406,11 @@ mod tests {
             .await
             .expect("actor is running");
 
-        fixture.manager.adopt(host).await.expect("adopt");
+        fixture
+            .manager
+            .adopt(host, "identity-reinstalled")
+            .await
+            .expect("adopt");
 
         let state = fixture
             .manager
@@ -3743,10 +5476,73 @@ mod tests {
             .await
             .expect("actor is running");
 
-        let error = fixture.manager.adopt(host).await.expect_err("must refuse");
+        let error = fixture
+            .manager
+            .adopt(host, "identity-a")
+            .await
+            .expect_err("must refuse");
         assert!(
-            error.to_string().contains("connected"),
-            "the refusal must name the state the host is actually in: {error:#}"
+            matches!(
+                error.downcast_ref::<ManagerError>(),
+                Some(ManagerError::NotAwaitingAdoption { phase, .. }) if *phase == "connected"
+            ),
+            "the refusal must be TYPED and name the state the host is actually in — untyped, it \
+             reaches the REST edge as a 500: {error:#}"
+        );
+    }
+
+    /// Adopting must accept the identity the USER approved, not whatever the
+    /// host happens to be reporting when the request lands.
+    ///
+    /// The window is real: a re-probe between the mismatch being displayed
+    /// and the adopt arriving can change the reported identity, so an
+    /// empty-bodied "adopt current" would let a user shown "adopt install B?"
+    /// silently adopt install C. Nothing is written, and the caller's correct
+    /// response is to re-render and ask again about what is on offer now.
+    #[tokio::test(start_paused = true)]
+    async fn adopting_a_superseded_identity_is_refused_and_writes_nothing() {
+        let fixture = fixture(Cadence::default(), |store, transport| async move {
+            let host = store
+                .add_ssh_host("reinstalled.example", None, None)
+                .await
+                .unwrap();
+            record_contact(&store, host, "identity-original").await;
+            transport.set_script(
+                host,
+                Script {
+                    identity: Some("identity-now".to_string()),
+                    ..Script::default()
+                },
+            );
+        })
+        .await;
+        let host = fixture.store.list_hosts().await.unwrap()[1].id;
+        fixture
+            .manager
+            .wait_for_state(host, |state| {
+                matches!(state, HostState::IdentityMismatch { .. })
+            })
+            .await
+            .expect("actor is running");
+
+        let error = fixture
+            .manager
+            .adopt(host, "identity-the-user-was-shown-earlier")
+            .await
+            .expect_err("an adoption of a superseded identity must be refused");
+        assert!(
+            matches!(
+                error.downcast_ref::<ManagerError>(),
+                Some(ManagerError::AdoptionSuperseded { reported, .. })
+                    if reported == "identity-now"
+            ),
+            "the refusal must name what the host is reporting NOW so the caller can re-ask: \
+             {error:#}"
+        );
+        assert_eq!(
+            recorded_identity(&fixture.store, host).await,
+            Some("identity-original".to_string()),
+            "a refused adoption must write nothing at all"
         );
     }
 
@@ -3849,7 +5645,11 @@ mod tests {
             .transport
             .edit(host, |script| script.build = "after-retry".to_string());
 
-        fixture.manager.retry_now(host);
+        fixture
+            .manager
+            .retry_now(host)
+            .await
+            .expect("the host exists");
         fixture.transport.wait_for_closures(host, 1).await;
         fixture.transport.wait_for_attempts(host, 2).await;
         let state = fixture
@@ -3901,7 +5701,11 @@ mod tests {
         // The whole active window, and nothing after it yet.
         assert_eq!(fixture.transport.attempts(host).len(), 7);
 
-        fixture.manager.retry_now(host);
+        fixture
+            .manager
+            .retry_now(host)
+            .await
+            .expect("the host exists");
         let attempts = fixture.transport.wait_for_attempts(host, 8).await;
         assert_eq!(
             seconds(&attempts)[7],
@@ -4770,7 +6574,11 @@ mod tests {
         // shape rather than one implausible mega-page.
         fixture.transport.edit(host, |script| {
             script.sessions = (0..=REFRESH_SESSION_CAP)
-                .map(|n| session(&format!("many-{n}"), 100))
+                // Descending creation times, so the fixture itself obeys
+                // the wire order the drain now validates — an unordered
+                // fixture would trip that check instead of the ceiling this
+                // test is about.
+                .map(|n| session(&format!("many-{n}"), 1_000_000 - n as i64))
                 .collect();
             script.page_size = 500;
         });
@@ -5224,23 +7032,69 @@ mod tests {
             .await
             .expect("actor is running");
 
-        // Kill the connection and sample continuously while the actor
-        // notices, publishes, redials and reconnects.
-        fixture.transport.kill_connections();
-        let mut saw_connected = false;
-        let mut saw_disconnected = false;
-        for _ in 0..500 {
-            let status = fixture.manager.status(host).expect("actor is running");
+        // One sample of the connected side before anything is disturbed, so
+        // the straddle's first half is a fact rather than a hope.
+        //
+        // The coherence assertion itself lives in one place, applied to
+        // every sample: a client is published exactly while the state is
+        // connected, and nothing else is allowed to be observable.
+        fn sample(status: HostStatus) -> bool {
             assert_eq!(
                 status.client.is_some(),
                 status.state.is_connected(),
                 "a client must be published exactly while the state is connected: {:?}",
                 status.state
             );
-            if status.state.is_connected() {
-                saw_connected = true;
-            } else {
-                saw_disconnected = true;
+            status.state.is_connected()
+        }
+        let mut saw_connected = sample(fixture.manager.status(host).expect("actor is running"));
+        let mut saw_disconnected = false;
+        assert!(saw_connected, "the fixture starts connected");
+
+        // Hold the host DOWN across the kill, so the disconnected side
+        // cannot be over before the sampler has seen it.
+        //
+        // The blind version of this loop — kill, then sample a fixed number
+        // of times and hope — is what this replaces, and it failed on CI:
+        // an actor that noticed the close and redialled successfully
+        // between two of the sampler's own reads leaves the transition
+        // invisible, so the guard below fired on a run where the property
+        // it guards held perfectly. Gating the RECONNECT on the sampler
+        // having observed the disconnected state removes the scheduling
+        // luck without weakening anything: the per-sample assertion is
+        // untouched, and it now runs across a transition that is guaranteed
+        // to be sampled from both sides.
+        fixture
+            .transport
+            .edit(host, |script| script.reachable = false);
+        fixture.transport.kill_connections();
+
+        let mut released = false;
+        let mut reconnected = false;
+        // Bounded only so a genuine hang fails as a test rather than
+        // running forever; the loop's real exit is the reconnect below.
+        for _ in 0..50_000 {
+            let connected = sample(fixture.manager.status(host).expect("actor is running"));
+            saw_connected |= connected;
+            saw_disconnected |= !connected;
+            if released && connected {
+                reconnected = true;
+                break;
+            }
+            if saw_disconnected && !released {
+                // The disconnected side is now on the record, so the host
+                // may come back. `retry_now` rather than waiting out the
+                // backoff: the sampler's own yielding keeps this runtime
+                // busy, so the paused clock would never advance a sleep.
+                fixture
+                    .transport
+                    .edit(host, |script| script.reachable = true);
+                fixture
+                    .manager
+                    .retry_now(host)
+                    .await
+                    .expect("the host is registered");
+                released = true;
             }
             tokio::task::yield_now().await;
         }
@@ -5248,6 +7102,11 @@ mod tests {
             saw_connected && saw_disconnected,
             "the sampling must actually straddle the transition (connected: {saw_connected}, \
              disconnected: {saw_disconnected})"
+        );
+        assert!(
+            reconnected,
+            "the host must come back once it is released, so the sampling covers the return \
+             transition too"
         );
     }
 
@@ -5683,7 +7542,17 @@ mod tests {
                 let reply = ControlMsg::SessionList {
                     req_id,
                     sessions: (0..sessions_per_page)
-                        .map(|n| session(&format!("s{issued}-{n}"), 1))
+                        // Strictly descending across the whole walk, not
+                        // just within a page: the drain validates the wire
+                        // order, and a fixture that restarted its order at
+                        // every page would fail that check rather than the
+                        // bound under test.
+                        .map(|n| {
+                            session(
+                                &format!("s{issued}-{n}"),
+                                i64::MAX - (issued as i64 * 10_000 + n as i64),
+                            )
+                        })
                         .collect(),
                     total: u64::MAX,
                     // Never absent: the peer claims there is always more.

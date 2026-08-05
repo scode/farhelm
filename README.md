@@ -4,23 +4,28 @@ Run coding agents (Claude Code, Codex, other terminal agents) on machines you co
 interface, through their real TUIs. See SPEC.md for what this is and is not, SPEC_impl.md for how it is built and why,
 and PLAN.md for where the build currently stands.
 
-NOTE: This is milestone-5 software: several sessions at once, one host, argv-driven setup. Reopening a session lands at
-the tail of its history instead of replaying it as a scroll animation — for any replay within the client's buffering
-bounds, which is every ordinary one; an unusually large replay, or one that stalls part-way, falls back to showing the
-catch-up as it arrives instead of hiding it. A session can be renamed from either the list or its own view. Sessions
-survive a supervisor restart (persisted metadata, and a still-viewable terminal whenever the private tmux server
-survived too), a host reboot classifies previously-running sessions as interrupted rather than guessing, and a
-user-stopped session keeps its "stopped by user" qualifier durably. Restart is live too: an interrupted (or exited, or
-errored) session relaunches its agent — resuming its own Claude Code or Codex conversation where that conversation was
-captured, and saying plainly that it is launching fresh where it was not. On Linux hosts with a systemd user manager,
-stopping a session also kills its launch's own cgroup before the portable process sweep, which catches descendants that
-daemonized away from both (see SPEC_impl.md for what that does and does not promise). Usable for real work, minimal in
-everything else. Two caveats worth knowing before that real work: the helm's loopback API carries no authentication yet
-(the web token is a later milestone), so any local account on the helm's machine can drive your sessions — treat
-multi-user hosts accordingly; and every agent invocation (the startup one below, or one entered through the GUI's create
-dialog) is ordinary argv, visible to every local user via `ps`, so credentials do not belong in it.
+NOTE: This is mid-milestone-6 software: several sessions at once, across every host in a registry the helm keeps. Hosts
+are registered by SSH destination — through `--ensure-hosts` at startup or the API at runtime — and the machine running
+the helm is always one of them without being registered at all; one flat session list spans them, each row naming its
+host, with a host that goes dark keeping its sessions listed and marked stale. The UI surfaces for all of this — the
+hosts panel, the stale notices, the create dialog's host selector — are the next milestone step and are not built yet,
+so today a fleet is managed through the API and seen through those row labels. Reopening a session lands at the tail of
+its history instead of replaying it as a scroll animation — for any replay within the client's buffering bounds, which
+is every ordinary one; an unusually large replay, or one that stalls part-way, falls back to showing the catch-up as it
+arrives instead of hiding it. A session can be renamed from either the list or its own view. Sessions survive a
+supervisor restart (persisted metadata, and a still-viewable terminal whenever the private tmux server survived too), a
+host reboot classifies previously-running sessions as interrupted rather than guessing, and a user-stopped session keeps
+its "stopped by user" qualifier durably. Restart is live too: an interrupted (or exited, or errored) session relaunches
+its agent — resuming its own Claude Code or Codex conversation where that conversation was captured, and saying plainly
+that it is launching fresh where it was not. On Linux hosts with a systemd user manager, stopping a session also kills
+its launch's own cgroup before the portable process sweep, which catches descendants that daemonized away from both (see
+SPEC_impl.md for what that does and does not promise). Usable for real work, minimal in everything else. Two caveats
+worth knowing before that real work: the helm's loopback API carries no authentication yet (the web token is a later
+milestone), so any local account on the helm's machine can drive your sessions — treat multi-user hosts accordingly; and
+every agent invocation entered through the GUI's create dialog is ordinary argv, visible to every local user via `ps`,
+so credentials do not belong in it.
 
-## Trying it (M5)
+## Trying it (M6, in progress)
 
 Prerequisites: Rust with the `wasm32-unknown-unknown` target (`rustup target add wasm32-unknown-unknown`), tmux on every
 host involved, and `cargo binstall dioxus-cli@0.7.9` (or `cargo install dioxus-cli@0.7.9` — match the workspace's dioxus
@@ -40,12 +45,28 @@ Ubuntu 24.04 ships 3.4.
 
 - Build: `cargo build`, then `(cd crates/farhelm-ui && dx build --platform web --release)`.
 - On the host that will run the agent (or this machine): `target/debug/farhelm supervisor run`.
-- Locally, against a supervisor on this machine:
-  `target/debug/farhelm helm run --ui-dist target/dx/farhelm-ui/release/web/public --cwd ~/some/project --agent claude`
-- `--cwd` must be an absolute path — the supervisor rejects a relative one outright. Against a remote host (passwordless
-  ssh assumed; copy the binary there first): add `--ssh user@host --remote-farhelm /path/to/farhelm` to the helm
-  command. This matters even more there — it names a directory on the target host, and your local shell would expand a
-  `~` against the wrong home.
+- Locally: `target/debug/farhelm helm run --ui-dist target/dx/farhelm-ui/release/web/public`. The helm drives every host
+  in its registry at once, and the machine it runs on is always one of them — so a supervisor started on this machine
+  needs no registering at all.
+- To include a remote host (passwordless ssh assumed; copy the binary there first), write a JSON5 file listing it and
+  pass `--ensure-hosts <file>`. The helm guarantees those hosts are registered at startup, adding what is missing and
+  changing nothing else:
+
+  ```json5
+  {
+    hosts: [
+      // remote_farhelm and remote_state_dir are optional; omit them to use
+      // the remote's own defaults.
+      { ssh: "user@host", remote_farhelm: "/path/to/farhelm" },
+    ],
+  }
+  ```
+
+  A registered host that is switched off is not an error: it is registered anyway, and its connection state says what
+  was found.
+- Sessions are created in the UI, not on the command line. The working directory must be an absolute path on the host
+  you pick — the supervisor rejects a relative one outright, and against a remote host a `~` would be expanded by your
+  local shell against the wrong home.
 - Open the printed loopback URL in a browser: a session list (title, working directory, invocation, and a status —
   alive; exited with the code when known, qualified "stopped by user" when you stopped it; interrupted after a host
   reboot; error, with the reason, when the agent's own command could not start at all), refreshing on its own every few
@@ -55,10 +76,14 @@ Ubuntu 24.04 ships 3.4.
   the client's buffer, or that goes quiet part-way, degrades to showing the rest as it arrives — visible catch-up rather
   than a hidden terminal, and never dropped output.
 - "new session" opens an inline form (working directory and agent command required, title optional); submitting launches
-  the agent and takes you straight into its terminal. A bad working directory fails the create in place, with the
-  supervisor's own error shown next to the form and nothing created. A bad EXECUTABLE (a typo'd command, a path that
-  does not exist) is different: creation still succeeds — the working directory and terminal both exist — and the
-  session then reports error once its agent's own exec fails, with the reason shown right in the list.
+  the agent and takes you straight into its terminal. The form has no host selector yet, so it creates on the machine
+  running the helm; creating on a registered remote is an API call until the next milestone step adds the selector.
+  Paths are sent literally in both cases — nothing expands `~` or any variable at any point between the form and the
+  host — so a working directory must be written out in full as it exists on the host it names. A bad working directory
+  fails the create in place, with the supervisor's own error shown next to the form and nothing created. A bad
+  EXECUTABLE (a typo'd command, a path that does not exist) is different: creation still succeeds — the working
+  directory and terminal both exist — and the session then reports error once its agent's own exec fails, with the
+  reason shown right in the list.
 - Submitting the same form twice yields one session, not two. Every create from the form carries an idempotency key, so
   a submit retried after an ambiguous failure — the request landed but its reply did not, the supervisor restarted
   mid-create — returns the session the first attempt already made instead of launching a second agent, and a failed

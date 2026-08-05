@@ -177,12 +177,19 @@ pub struct SupervisorError {
 /// growth").
 ///
 /// A struct rather than a bare `Vec<SessionInfo>` specifically so `total`
-/// and `truncated` survive this call — the HTTP surface (PR6, PLAN_M2.md
-/// step 6) needs both to tell a user "showing N of M" instead of quietly
-/// truncating the list with no indication anything was cut. `GET
-/// /api/sessions` now serializes this whole struct as its JSON body
-/// (`sessions`/`total`/`truncated`), which is why `Serialize` is derived
-/// below: the field names are the wire contract, not a private detail.
+/// and `truncated` survive this call — a caller needs both to say "showing
+/// N of M" instead of quietly presenting a cut list as a whole one.
+///
+/// This is ONE HOST's answer, and as of PLAN_M6.md item 5 it is no longer
+/// what `GET /api/sessions` serializes: that body is the merged, multi-host
+/// page `crate::aggregate::SessionPageBody` describes, built from the cache
+/// rather than from a live call. What still reaches this type at serving
+/// time is the per-session detail route's live lookup, which asks the
+/// owning host directly (a reachable host's detail must never come from the
+/// cache — see `crate::get_session`). The names below are kept and
+/// `Serialize` is kept derived because the REST body's top-level field
+/// names were modelled on them and the two must not drift apart in
+/// spelling.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 pub struct SessionListing {
     pub sessions: Vec<SessionInfo>,
@@ -207,13 +214,15 @@ pub struct SessionListing {
     /// for the one degenerate case where a byte-budget cut leaves NOTHING
     /// kept (a single session too large to fit even alone; see that
     /// function's own docs), which the disjunction's second half is what
-    /// still catches. Keeping THIS struct's shape and name unchanged is
-    /// deliberate:
-    /// `list_sessions`'s docs explain why the REST/UI JSON body's TOP-LEVEL
-    /// pagination fields (`sessions`/`total`/`truncated`) stay
-    /// byte-for-byte identical through this PR even though the wire
-    /// underneath it changed — that parity does not extend to each
-    /// session's own JSON, which gained `created_at` in this same bump.
+    /// still catches.
+    ///
+    /// Note the two `truncated`s are now DIFFERENT claims, and neither is
+    /// derived from the other: this one means "the supervisor held entries
+    /// back from this reply", while the REST body's field of the same name
+    /// means "the merged list has a next page" (see
+    /// `crate::aggregate::SessionPageBody`). They share a name because the
+    /// REST one kept the name its M2 consumers already read, not because
+    /// one is the other one layer up.
     pub truncated: bool,
 }
 
@@ -1394,16 +1403,21 @@ impl SupervisorClient {
     /// byte budget — either one can drop entries, independently of the
     /// other, see `build_list_reply`'s docs), in no defined order, plus
     /// the full count and whether either cut actually truncated anything.
-    /// Always a live round trip — the helm caches no session state,
-    /// because SPEC.md makes supervisors the authority.
+    /// Always a live round trip: THIS call never consults a cache, and
+    /// answers only what the supervisor said just now. That is a claim
+    /// about this method, not about the helm — as of PLAN_M6.md item 5 the
+    /// helm does keep a durable last-known session cache per host, which is
+    /// what serves the stale list for a host that is down. Supervisors
+    /// remain the authority (SPEC.md); the cache is what "last we knew"
+    /// means once there is nobody to ask.
     ///
-    /// `cursor`/`limit` are sent as `None` unconditionally: this method is
-    /// still a single full-page fetch, not a page-by-page walk — the helm
-    /// draining a supervisor's real cursor to exhaustion is PLAN_M6.md item
-    /// 5's job, layered on top of this same per-request shape rather than
-    /// replacing it. `SessionListing`'s own `truncated` — this method's
-    /// REST-facing surface, unlike the wire's `next_cursor` — keeps its
-    /// pre-8 meaning by construction (see that field's own docs).
+    /// `cursor`/`limit` are sent as `None` unconditionally: this is a
+    /// single full-page fetch, not a page-by-page walk. The walk exists
+    /// separately as `crate::manager::drain_sessions`, which is what a
+    /// host's cache refresh uses; this method is what a caller uses when it
+    /// wants one host's list RIGHT NOW and a page is enough — the
+    /// per-session detail lookup, in practice, which must reach a reachable
+    /// host live rather than read the cache.
     pub async fn list_sessions(&self) -> anyhow::Result<SessionListing> {
         let req_id = self.req_id();
         match self

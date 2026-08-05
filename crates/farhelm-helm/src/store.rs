@@ -8,11 +8,12 @@
 //! must not stall an async worker) and there is no reason for a reader who
 //! already knows one to have to re-learn the other's idioms.
 //!
-//! This module is STORAGE ONLY (PLAN_M6.md's order of work splits it from
-//! the connection manager that will call it): schema, types, and CRUD, with
-//! nothing in the helm's serving path wired to it yet. SPEC_impl.md's
-//! "Helm internals" section carries the settled data model this schema
-//! implements.
+//! This module is STORAGE ONLY: schema, types, and CRUD. It holds no
+//! connections, makes no routing decisions, and knows nothing about which
+//! hosts are currently reachable — [`crate::manager`] owns all of that, and
+//! [`crate::aggregate`] is what joins the two into the served list.
+//! SPEC_impl.md's "Helm internals" section carries the settled data model
+//! this schema implements.
 //!
 //! ## Divergences from the supervisor store, and why
 //!
@@ -95,7 +96,7 @@ const BUSY_TIMEOUT: Duration = Duration::from_secs(5);
 
 /// The schema's current shape. See [`apply_schema`] for the version
 /// history and the ladder future migrations extend.
-const SCHEMA_VERSION: i64 = 2;
+const SCHEMA_VERSION: i64 = 3;
 
 /// Surrogate primary key of a `hosts` row.
 ///
@@ -203,6 +204,73 @@ pub struct CachedSession {
     pub info: SessionInfo,
 }
 
+/// One row of a [`HelmStore::cached_page`] scan: its ordering key always,
+/// its payload only when the stored JSON still decodes.
+///
+/// The split is the whole point. Display data can be skipped (a cache is
+/// last-known display data, not authority — see
+/// [`HelmStore::cached_sessions`]), but an ordering key cannot: a caller
+/// paging this order has to be able to advance past a row it cannot show,
+/// or that row becomes a permanent wall in front of everything after it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ScannedRow {
+    pub key: CacheKey,
+    /// `None` for a row whose `info_json` no longer decodes. Logged when it
+    /// happens; not an error.
+    pub info: Option<SessionInfo>,
+}
+
+/// What one [`HelmStore::cached_page`] scan found.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct CachePage {
+    /// Every row scanned, in order — decoded or not (see [`ScannedRow`]).
+    pub rows: Vec<ScannedRow>,
+    /// Whether the scan stopped because a bound was reached rather than
+    /// because the order ran out. Answered by the scan itself (it fetches
+    /// one row past the limit) rather than by a second query that could
+    /// disagree with it.
+    pub more: bool,
+    /// The key of the FIRST row this scan did not return, when `more` is
+    /// true — the fence a merger must not advance past.
+    ///
+    /// Load-bearing whenever the scan stops for its BYTE bound, which it can
+    /// do having returned fewer rows than asked for. The merge then still
+    /// has capacity, so it goes on taking items from the in-memory sources —
+    /// and every persisted row between here and wherever it stops is skipped
+    /// by a cursor that never named it. `None` when the order simply ran
+    /// out, which is the only case in which there is nothing beyond.
+    pub frontier: Option<CacheKey>,
+}
+
+/// One row's position in the cross-host merged order — the resume point
+/// [`HelmStore::cached_page`] pages from.
+///
+/// All three components, in this order: `created_at` DESCENDING, then
+/// `session_id` ascending, then `host_id` ascending. The third is what makes
+/// the order TOTAL rather than merely usually-total (see [`apply_schema`]'s
+/// version 3), and a resume point over a non-total order can skip or repeat
+/// rows — the one thing a cursor must never do.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CacheKey {
+    pub created_at: i64,
+    pub session_id: String,
+    pub host: HostId,
+}
+
+/// One host to guarantee registered — the `--ensure-hosts` entry as
+/// [`HelmStore::ensure_ssh_hosts`] consumes it.
+///
+/// A store-level type rather than the file's own deserialization target, so
+/// the batch write's contract does not depend on JSON5 or on where the
+/// entries came from: the same call would serve a future provisioning path
+/// that produced entries some other way.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct EnsureHost {
+    pub destination: String,
+    pub remote_farhelm: Option<String>,
+    pub remote_state_dir: Option<String>,
+}
+
 /// A `HelmStore` operation refused for a reason a caller may need to act
 /// on, distinctly from a bare I/O or SQL failure — the same reasoning as
 /// `SupervisorError` on the client side (`client.rs`'s own docs): carried
@@ -289,6 +357,26 @@ pub enum HostStoreError {
     /// points at. Nothing was written.
     #[error("host {host} has been reconfigured since this attempt was made")]
     StaleAttempt { host: HostId },
+    /// Two hosts' caches both claim one session id, so there is no honest
+    /// answer to "which host owns this session".
+    ///
+    /// The `session_cache_one_owner` index makes this UNCONSTRUCTIBLE for
+    /// any writer this build controls, and a lookup still checks for it,
+    /// because the database file is a trust boundary like any other input —
+    /// a downgrade or a hand edit can present rows no current writer could
+    /// have made. Failing closed is the only safe answer: routing an
+    /// operation to one of two candidate hosts would mean a stop or a
+    /// delete aimed at one machine landing on another. Names both hosts so
+    /// the user can remove whichever entry does not belong.
+    #[error(
+        "session {session} is cached under both host {first} and host {second}; refusing to \
+         guess which one owns it"
+    )]
+    SessionOwnerAmbiguous {
+        session: String,
+        first: HostId,
+        second: HostId,
+    },
 }
 
 /// The connection-defining fields an attempt was dialed under, carried
@@ -335,8 +423,23 @@ impl DialedAs {
 /// Whether `destination` is something `ssh` can be handed as a
 /// destination — see [`HostStoreError::InvalidDestination`] for why the
 /// leading-`-` half of this exists.
-fn destination_is_usable(destination: &str) -> bool {
-    !destination.is_empty() && !destination.starts_with('-')
+///
+/// Visible to the crate, not just to this module, because
+/// [`crate::ensure`] validates an entire `--ensure-hosts` file BEFORE
+/// writing any of it: the alternative is discovering the bad entry halfway
+/// through, having already registered the good ones. The write paths below
+/// still apply this themselves — this is a pre-check for a caller that
+/// wants all-or-nothing, never a substitute for the store's own refusal.
+///
+/// The NUL clause is not a stylistic third case. A destination becomes ssh
+/// ARGV, and argv is NUL-terminated by the kernel: an embedded NUL either
+/// fails the spawn with an opaque error or — worse, depending on how the
+/// value travels — silently truncates the destination to everything before
+/// it, so `good.example\0evil.example` registers as one thing and dials
+/// another. Refusing it at the registry boundary means the string that is
+/// stored is the string that will be dialed.
+pub(crate) fn destination_is_usable(destination: &str) -> bool {
+    !destination.is_empty() && !destination.starts_with('-') && !destination.contains('\0')
 }
 
 /// The non-error result of [`HelmStore::record_first_contact`] — a
@@ -424,6 +527,17 @@ pub struct HelmStore {
 ///   docs' own section on why that check-then-write shape loses hosts). The
 ///   migration also has DATA to resolve, since a version-1 database predates
 ///   the constraint and may already hold rows sharing an identity.
+/// - 3: the `session_cache_one_owner` unique index (at most one HOST may
+///   cache a given session id) and a `session_cache_order` widened to carry
+///   `host_id`. Both serve PLAN_M6.md item 5's merged list: the first makes
+///   cross-host session-id collision — a hostile or merely buggy supervisor
+///   reporting another host's session id — unconstructible rather than
+///   something every lookup has to defend against separately, and the
+///   second is the index the merged page query actually walks, so that
+///   ordering by the full `(created_at DESC, session_id ASC, host_id ASC)`
+///   key needs no sort step. Like version 2, this arrives with data that
+///   predates it and resolves it by the same rule: the lowest host id keeps
+///   the claim.
 fn apply_schema(conn: &mut Connection) -> anyhow::Result<()> {
     let tx = conn
         .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
@@ -521,13 +635,34 @@ fn apply_schema(conn: &mut Connection) -> anyhow::Result<()> {
                  info_json  TEXT NOT NULL,
                  PRIMARY KEY (host_id, session_id)
              ) STRICT;
-             -- Serves HelmStore::cached_sessions_all's cross-host merge —
-             -- the one read that legitimately spans every host, so it wants
-             -- exactly this order with no host_id prefix to skip past.
+             -- At most one HOST may cache a given session id (schema
+             -- version 3). Session ids are supervisor-minted UUIDs, so two
+             -- hosts naming the same one is either a bug or a hostile
+             -- supervisor claiming a session it does not own -- and the
+             -- consequence is not cosmetic: owner lookup would resolve one
+             -- host while the merged list showed another's row, so a stop
+             -- aimed at one machine could land on a different one. Enforced
+             -- in SQL rather than checked before writing, for the same
+             -- reason hosts_identity_claim is: a check-then-write shape has
+             -- a window, and this one is a routing decision.
+             -- HelmStore::replace_host_sessions's conditional insert turns
+             -- the refusal into a skipped row plus a warning (first claim
+             -- holds) rather than a failed refresh.
+             CREATE UNIQUE INDEX session_cache_one_owner
+                 ON session_cache (session_id);
+             -- Serves the merged page query (HelmStore::cached_page): the
+             -- full ordering key, in order, so a page is an index range
+             -- scan with no sort step and no rows touched beyond the page.
+             -- host_id is in the key even though session_id is already
+             -- unique above, so the order stays TOTAL even against a
+             -- database whose one-owner index is absent (a downgrade, a
+             -- hand edit) -- a pagination cursor over a non-total order can
+             -- skip or repeat rows, which is precisely what a resume point
+             -- must never do.
              CREATE INDEX session_cache_order
-                 ON session_cache (created_at DESC, session_id ASC);
+                 ON session_cache (created_at DESC, session_id ASC, host_id ASC);
              -- Serves HelmStore::cached_sessions's per-host read
-             -- separately: session_cache_order above has no host_id column,
+             -- separately: session_cache_order above has no host_id prefix,
              -- so \"WHERE host_id = ? ORDER BY created_at DESC, session_id
              -- ASC\" against it alone would still have to walk every row
              -- from every host to filter, not just this host's. Leading
@@ -535,7 +670,7 @@ fn apply_schema(conn: &mut Connection) -> anyhow::Result<()> {
              -- instead.
              CREATE INDEX session_cache_by_host_order
                  ON session_cache (host_id, created_at DESC, session_id ASC);
-             PRAGMA user_version = 2;",
+             PRAGMA user_version = 3;",
         )
         .context("creating schema")?;
         version = SCHEMA_VERSION;
@@ -574,6 +709,31 @@ fn apply_schema(conn: &mut Connection) -> anyhow::Result<()> {
         )
         .context("migrating helm.db to schema version 2")?;
         version = 2;
+    }
+    if version == 2 {
+        // Same shape as the version-2 migration above, and the same
+        // resolution rule for the data that predates the constraint: where
+        // two hosts cached one session id, the LOWEST host id keeps the
+        // claim and the later rows go. "Later" is the honest reading of the
+        // ambiguity — ids are assigned in registration order and never
+        // recycled — and dropping a duplicate row costs nothing real, since
+        // the owning host re-drains its whole list on its next refresh.
+        //
+        // The order-index rebuild is separate from the dedupe only because
+        // the unique index cannot be created until the duplicates are gone.
+        tx.execute_batch(
+            "DELETE FROM session_cache
+             WHERE host_id > (SELECT MIN(o.host_id) FROM session_cache o
+                              WHERE o.session_id = session_cache.session_id);
+             CREATE UNIQUE INDEX session_cache_one_owner
+                 ON session_cache (session_id);
+             DROP INDEX session_cache_order;
+             CREATE INDEX session_cache_order
+                 ON session_cache (created_at DESC, session_id ASC, host_id ASC);
+             PRAGMA user_version = 3;",
+        )
+        .context("migrating helm.db to schema version 3")?;
+        version = 3;
     }
     if version == SCHEMA_VERSION {
         // Nothing to change; commit the otherwise-empty transaction to
@@ -850,6 +1010,87 @@ impl HelmStore {
         })
         .await
         .context("add ssh host task panicked")?
+    }
+
+    /// Register every destination in `entries` that is not registered
+    /// already, in ONE transaction — the `--ensure-hosts` floor
+    /// (PLAN_M6.md item 5), applied atomically.
+    ///
+    /// Atomic because a half-applied guarantee is worse than a refused one:
+    /// a helm that came up with three of five guaranteed hosts looks
+    /// healthy, and the two that are missing look like hosts the user forgot
+    /// to add. Doing this as a loop of [`Self::add_ssh_host`] calls could
+    /// not offer that — each call is its own transaction, so a failure
+    /// halfway leaves the earlier ones committed. This is the same reason
+    /// the ingestion path validates every entry up front, and the two
+    /// together are what make the contract true rather than merely likely.
+    ///
+    /// ADDITIVE, never corrective: a destination already in the registry is
+    /// left exactly as it is, including its `remote_farhelm`,
+    /// `remote_state_dir`, and its learned identity. helm.db is the durable
+    /// authority and `/api/hosts` is how it is edited; a startup file that
+    /// overwrote user edits on every boot would make the two fight, and the
+    /// interactive one would lose. Returns the ids actually created, in
+    /// input order, so a caller can log what it added rather than what it
+    /// asked for.
+    ///
+    /// Refuses an unusable destination ([`destination_is_usable`]) and a
+    /// destination repeated within `entries` — two entries for one host
+    /// would disagree about its remote binary and state directory, and
+    /// silently letting the first win would make the file's meaning depend
+    /// on line order.
+    pub async fn ensure_ssh_hosts(&self, entries: Vec<EnsureHost>) -> anyhow::Result<Vec<HostId>> {
+        for (index, entry) in entries.iter().enumerate() {
+            anyhow::ensure!(
+                destination_is_usable(&entry.destination),
+                "entry {index} names {:?}, which is not a usable ssh destination (it must be \
+                 non-empty, must not start with '-', and must contain no NUL byte)",
+                entry.destination
+            );
+            anyhow::ensure!(
+                !entries[..index]
+                    .iter()
+                    .any(|earlier| earlier.destination == entry.destination),
+                "entry {index} repeats destination {:?}; a destination may appear once, since \
+                 two entries for one host would disagree about its remote farhelm and state \
+                 directory",
+                entry.destination
+            );
+        }
+        let conn = Arc::clone(&self.conn);
+        tokio::task::spawn_blocking(move || -> anyhow::Result<Vec<HostId>> {
+            let mut conn = conn.lock().expect("helm db mutex poisoned");
+            let tx = conn
+                .transaction()
+                .context("beginning the ensure-hosts transaction")?;
+            let mut added = Vec::new();
+            for entry in &entries {
+                // The same conditional insert `add_ssh_host` uses, for the
+                // same reason: "already registered" is the ordinary,
+                // expected outcome here, not an error to catch.
+                let inserted = tx
+                    .execute(
+                        "INSERT INTO hosts (kind, destination, remote_farhelm, remote_state_dir) \
+                         VALUES ('ssh', ?1, ?2, ?3) \
+                         ON CONFLICT (destination) WHERE kind = 'ssh' DO NOTHING",
+                        rusqlite::params![
+                            entry.destination,
+                            entry.remote_farhelm,
+                            entry.remote_state_dir
+                        ],
+                    )
+                    .with_context(|| {
+                        format!("registering guaranteed host {:?}", entry.destination)
+                    })?;
+                if inserted > 0 {
+                    added.push(tx.last_insert_rowid());
+                }
+            }
+            tx.commit().context("committing the ensure-hosts batch")?;
+            Ok(added)
+        })
+        .await
+        .context("ensure ssh hosts task panicked")?
     }
 
     /// Change an ssh host's destination in place, refusing the local row
@@ -1198,10 +1439,10 @@ impl HelmStore {
         host: HostId,
         identity: &str,
         entries: Vec<SessionInfo>,
-    ) -> anyhow::Result<()> {
+    ) -> anyhow::Result<Vec<String>> {
         let conn = Arc::clone(&self.conn);
         let identity = identity.to_string();
-        tokio::task::spawn_blocking(move || -> anyhow::Result<()> {
+        tokio::task::spawn_blocking(move || -> anyhow::Result<Vec<String>> {
             let mut conn = conn.lock().expect("helm db mutex poisoned");
             let tx = conn
                 .transaction()
@@ -1229,20 +1470,237 @@ impl HelmStore {
                 rusqlite::params![host],
             )
             .context("clearing the stale cache")?;
+            let mut contested: Vec<String> = Vec::new();
             for entry in &entries {
                 let json = serde_json::to_string(entry).context("serializing cached session")?;
-                tx.execute(
-                    "INSERT INTO session_cache (host_id, session_id, created_at, info_json) \
-                     VALUES (?1, ?2, ?3, ?4)",
-                    rusqlite::params![host, entry.id, entry.created_at, json],
-                )
-                .context("inserting cached session")?;
+                let inserted = tx
+                    .execute(
+                        // Conditional on the one-owner index rather than
+                        // fallible against it: a supervisor reporting a
+                        // session id another host already caches must cost
+                        // that ONE row, not the whole refresh — the rest of
+                        // this host's list is perfectly good data, and
+                        // failing the refresh would also mean keeping the
+                        // previous cache forever for as long as the
+                        // collision persisted. First claim holds; the
+                        // skipped row is announced below rather than
+                        // swallowed.
+                        "INSERT INTO session_cache (host_id, session_id, created_at, info_json) \
+                         VALUES (?1, ?2, ?3, ?4) \
+                         ON CONFLICT (session_id) DO NOTHING",
+                        rusqlite::params![host, entry.id, entry.created_at, json],
+                    )
+                    .context("inserting cached session")?;
+                if inserted == 0 {
+                    let owner: Option<HostId> = tx
+                        .query_row(
+                            "SELECT host_id FROM session_cache WHERE session_id = ?1",
+                            rusqlite::params![entry.id],
+                            |r| r.get(0),
+                        )
+                        .optional()
+                        .context("reading the host that already claims this session id")?;
+                    // Two very different situations reach one conflict, and
+                    // they get opposite treatment. This host's own rows were
+                    // deleted at the top of this transaction, so a conflict
+                    // against THIS host can only mean the peer listed one
+                    // session id twice in a single reply — a malformed list,
+                    // which fails the whole refresh and keeps the previous
+                    // cache, exactly as this method has always treated a
+                    // list it could not store whole. A conflict against
+                    // ANOTHER host is the cross-host collision: one row is
+                    // dropped, the first claim holds, and the rest of this
+                    // host's perfectly good list is still cached.
+                    if owner == Some(host) {
+                        anyhow::bail!(
+                            "the host listed session id {:?} more than once in a single reply; \
+                             refusing to cache a list that contradicts itself",
+                            entry.id
+                        );
+                    }
+                    // Reported rather than logged here. One line per
+                    // colliding row per refresh tick is a log a hostile (or
+                    // merely confused) host writes for you; the caller
+                    // coalesces these into one bounded summary per refresh,
+                    // and holds the set as the host's live contested state.
+                    contested.push(entry.id.clone());
+                }
             }
             tx.commit().context("committing cache replace")?;
-            Ok(())
+            Ok(contested)
         })
         .await
         .context("replace host sessions task panicked")?
+    }
+
+    /// Add ONE session to a host's cache slice, leaving the rest of it
+    /// alone — the seed a fresh create needs (PLAN_M6.md item 5).
+    ///
+    /// Exists because [`Self::replace_host_sessions`] is the wrong shape for
+    /// this and cannot be bent into it: it is a wholesale replacement, so
+    /// using it to add a row would mean reading the host's whole cache,
+    /// appending, and writing it back — a read-modify-write racing the
+    /// actor's own refresh, which is the one writer this table was designed
+    /// to have. This inserts exactly the row that is new.
+    ///
+    /// Carries the same identity binding as the wholesale write, for the
+    /// same reason: a create whose reply landed after a user adopted a new
+    /// identity describes the dead install, and seeding it under the new
+    /// identity's row would repopulate by a side door the very cache the
+    /// adoption purged. A stale `identity` is [`HostStoreError::IdentityMismatch`]
+    /// with nothing written.
+    ///
+    /// Idempotent for the SAME host (the row is replaced), and refused for a
+    /// DIFFERENT one: a session id another host already claims is
+    /// [`HostStoreError::SessionOwnerAmbiguous`], because a create cannot be
+    /// the thing that resolves a collision — see that variant's docs.
+    ///
+    /// The id is bounded like every other peer-supplied one
+    /// (`crate::manager::MAX_SESSION_ID_BYTES`): a create's reply is a peer
+    /// ingress point exactly as a drain's rows are, and an id this side
+    /// cannot build a replayable cursor over must not enter the cache
+    /// through either.
+    pub async fn remember_session(
+        &self,
+        host: HostId,
+        identity: &str,
+        entry: &SessionInfo,
+    ) -> anyhow::Result<()> {
+        anyhow::ensure!(
+            entry.id.len() <= crate::manager::MAX_SESSION_ID_BYTES,
+            "session id of {} bytes exceeds the {} this helm can build resumable cursors over",
+            entry.id.len(),
+            crate::manager::MAX_SESSION_ID_BYTES
+        );
+        let conn = Arc::clone(&self.conn);
+        let identity = identity.to_string();
+        let entry = entry.clone();
+        tokio::task::spawn_blocking(move || -> anyhow::Result<()> {
+            let mut conn = conn.lock().expect("helm db mutex poisoned");
+            let tx = conn
+                .transaction()
+                .context("beginning cache seed transaction")?;
+            let current: Option<Option<String>> = tx
+                .query_row(
+                    "SELECT host_identity FROM hosts WHERE id = ?1",
+                    rusqlite::params![host],
+                    |r| r.get(0),
+                )
+                .optional()
+                .context("reading current host identity")?;
+            let Some(current) = current else {
+                return Err(anyhow::Error::new(HostStoreError::HostNotFound(host)));
+            };
+            if current.as_deref() != Some(identity.as_str()) {
+                return Err(anyhow::Error::new(HostStoreError::IdentityMismatch {
+                    host,
+                    expected: identity,
+                    actual: current,
+                }));
+            }
+            let claimed: Option<(HostId, String)> = tx
+                .query_row(
+                    "SELECT host_id, info_json FROM session_cache WHERE session_id = ?1",
+                    rusqlite::params![entry.id],
+                    |r| Ok((r.get(0)?, r.get(1)?)),
+                )
+                .optional()
+                .context("reading the current owner of this session id")?;
+            if let Some((owner, _)) = &claimed
+                && *owner != host
+            {
+                return Err(anyhow::Error::new(HostStoreError::SessionOwnerAmbiguous {
+                    session: entry.id.clone(),
+                    first: *owner,
+                    second: host,
+                }));
+            }
+            // Read and merged INSIDE the transaction that overwrites it, so
+            // no refresh can land between "what did we know" and "what do
+            // we now record". A mutation's reply is authoritative about
+            // everything except liveness — see
+            // `crate::manager::merged_status` for why `Unknown` must not
+            // erase a definite status, and why the previous value is kept
+            // even at the cost of being briefly stale.
+            let mut entry = entry;
+            if let Some((_, previous)) = &claimed
+                && let Ok(previous) = serde_json::from_str::<SessionInfo>(previous)
+            {
+                entry.status = crate::manager::merged_status(&previous.status, entry.status);
+            }
+            let entry = &entry;
+            let json = serde_json::to_string(entry).context("serializing cached session")?;
+            tx.execute(
+                "INSERT INTO session_cache (host_id, session_id, created_at, info_json) \
+                 VALUES (?1, ?2, ?3, ?4) \
+                 ON CONFLICT (session_id) DO UPDATE SET \
+                     created_at = excluded.created_at, info_json = excluded.info_json",
+                rusqlite::params![host, entry.id, entry.created_at, json],
+            )
+            .context("seeding a cached session")?;
+            tx.commit().context("committing cache seed")?;
+            Ok(())
+        })
+        .await
+        .context("remember session task panicked")?
+    }
+
+    /// Drop ONE session from a host's cache slice — the delete's counterpart
+    /// to [`Self::remember_session`].
+    ///
+    /// A delete's reply carries no `SessionInfo`, but it carries the fact
+    /// that the session is gone, and the cache is what the merged list is
+    /// served from: leaving the row behind means the list keeps showing a
+    /// session that no longer exists until the owning host's next refresh.
+    /// That is not merely untidy — a client that deletes and immediately
+    /// re-creates sees BOTH, which is indistinguishable from a duplicate.
+    ///
+    /// Identity-bound like every other write here, for the same reason: a
+    /// delete whose reply landed after an adoption must not reach into the
+    /// new install's cache. Removing a row that is not there is success —
+    /// the caller asked for it to be gone, and it is.
+    pub async fn forget_session(
+        &self,
+        host: HostId,
+        identity: &str,
+        session_id: &str,
+    ) -> anyhow::Result<()> {
+        let conn = Arc::clone(&self.conn);
+        let identity = identity.to_string();
+        let session_id = session_id.to_string();
+        tokio::task::spawn_blocking(move || -> anyhow::Result<()> {
+            let mut conn = conn.lock().expect("helm db mutex poisoned");
+            let tx = conn
+                .transaction()
+                .context("beginning cache forget transaction")?;
+            let current: Option<Option<String>> = tx
+                .query_row(
+                    "SELECT host_identity FROM hosts WHERE id = ?1",
+                    rusqlite::params![host],
+                    |r| r.get(0),
+                )
+                .optional()
+                .context("reading current host identity")?;
+            let Some(current) = current else {
+                return Err(anyhow::Error::new(HostStoreError::HostNotFound(host)));
+            };
+            if current.as_deref() != Some(identity.as_str()) {
+                return Err(anyhow::Error::new(HostStoreError::IdentityMismatch {
+                    host,
+                    expected: identity,
+                    actual: current,
+                }));
+            }
+            tx.execute(
+                "DELETE FROM session_cache WHERE host_id = ?1 AND session_id = ?2",
+                rusqlite::params![host, session_id],
+            )
+            .context("forgetting a cached session")?;
+            tx.commit().context("committing cache forget")?;
+            Ok(())
+        })
+        .await
+        .context("forget session task panicked")?
     }
 
     /// One host's cached sessions, in the wire order (`created_at`
@@ -1314,54 +1772,348 @@ impl HelmStore {
         .context("cached sessions task panicked")?
     }
 
-    /// The cached sessions of EVERY host, merged into one wire-ordered
-    /// list — the persistence half of PLAN_M6.md item 5's cross-host
-    /// aggregation, which this same module's tests pin in isolation ahead
-    /// of the connection manager PR that will actually call it at serving
-    /// time. See [`CachedSession`]'s own docs for why the host id rides
-    /// alongside each entry here but not in [`Self::cached_sessions`].
+    /// ONE PAGE of the cross-host merged order, resuming strictly after
+    /// `after` — the substrate of PLAN_M6.md item 5's served session list.
     ///
-    /// Shares [`Self::cached_sessions`]'s skip-and-log posture on an
-    /// undecodable `info_json` — see that method's own docs for the
-    /// reasoning, which applies identically here since this is the same
-    /// last-known DISPLAY data, merely merged across hosts instead of
-    /// scoped to one.
-    pub async fn cached_sessions_all(&self) -> anyhow::Result<Vec<CachedSession>> {
+    /// The whole point is that it is a PAGE: the resume predicate, the row
+    /// limit, and the byte bound all apply during ONE indexed scan, so a
+    /// poll reads and JSON-decodes only the rows it is about to return. The
+    /// shape this replaced loaded and deserialized every session on every
+    /// host on every poll, which made a full page walk quadratic in the
+    /// fleet's size.
+    ///
+    /// `hosts` scopes the read to the hosts that currently have actors,
+    /// which is what "the merged view" means everywhere else; a cache row
+    /// whose host has none is not served and must not be counted (see
+    /// [`Self::cached_count`], which takes the same scope for exactly that
+    /// reason). An empty `hosts` is an empty answer rather than "all",
+    /// deliberately: the degenerate reading is the dangerous one.
+    ///
+    /// ## Every scanned row comes back, decoded or not
+    ///
+    /// This is the fix for a real and permanent data-loss bug, so it is
+    /// worth stating as a contract rather than as an implementation note. A
+    /// row whose `info_json` no longer decodes is SKIPPED for display (the
+    /// skip-and-log posture [`Self::cached_sessions`] documents) but is
+    /// still reported here, as a [`ScannedRow`] with no payload — because
+    /// its ORDERING KEY is what the caller's cursor has to advance past.
+    /// Returning only decoded rows meant a poisoned row at a page boundary
+    /// left the cursor pointing before it forever: the next page re-scanned
+    /// the same poisoned row, skipped it again, and every row after it in
+    /// the whole fleet became permanently unreachable. A fully poisoned
+    /// page did the same thing more obviously — an empty page with no
+    /// continuation, in the middle of a list.
+    ///
+    /// ## Two bounds, both applied while scanning
+    ///
+    /// `limit` bounds rows SCANNED (skipped ones included — otherwise a run
+    /// of poisoned rows would make one request walk the whole table), and
+    /// `byte_budget` bounds the stored bytes decoded, measured on the raw
+    /// `info_json` this scan already holds rather than by re-serializing.
+    /// The byte bound is a WORK bound: it stops this scan from decoding
+    /// thousands of fat blobs the reply could never carry. The reply's own
+    /// budget is the caller's, applied to the merged page (see
+    /// `crate::aggregate::apply_byte_budget`); the two use the same constant
+    /// but answer different questions, and this one is deliberately the
+    /// looser of the pair — it may over-deliver by a row, never under.
+    ///
+    /// At least one row is always scanned regardless of the byte bound: a
+    /// single blob larger than the budget must still make progress, or the
+    /// walk stalls on it forever.
+    pub async fn cached_page(
+        &self,
+        hosts: Vec<HostId>,
+        after: Option<CacheKey>,
+        limit: usize,
+        byte_budget: usize,
+    ) -> anyhow::Result<CachePage> {
+        if hosts.is_empty() || limit == 0 {
+            return Ok(CachePage::default());
+        }
         let conn = Arc::clone(&self.conn);
-        tokio::task::spawn_blocking(move || -> anyhow::Result<Vec<CachedSession>> {
+        tokio::task::spawn_blocking(move || -> anyhow::Result<CachePage> {
+            let conn = conn.lock().expect("helm db mutex poisoned");
+            // Built rather than constant because the host scope is an
+            // IN-list whose arity varies; every value is still bound, never
+            // interpolated.
+            let placeholders = host_placeholders(hosts.len(), 4);
+            let resume = match after {
+                None => "",
+                // The three-way disjunction IS the strict-successor test
+                // for a composite key, written out because SQLite has no
+                // row-value comparison this code can rely on across every
+                // bundled version. `created_at` is DESCENDING, so "after"
+                // means smaller.
+                Some(_) => {
+                    " AND (created_at < ?1                      OR (created_at = ?1 AND session_id > ?2)                      OR (created_at = ?1 AND session_id = ?2 AND host_id > ?3))"
+                }
+            };
+            // One row past the limit, so "is there more" is answered by the
+            // scan itself rather than by a second query that could disagree
+            // with it.
+            let fetch = limit.saturating_add(1);
+            let sql = format!(
+                "SELECT host_id, session_id, created_at, info_json FROM session_cache \
+                 WHERE host_id IN ({placeholders}){resume} \
+                 ORDER BY created_at DESC, session_id ASC, host_id ASC \
+                 LIMIT {fetch}"
+            );
+            let mut stmt = conn
+                .prepare(&sql)
+                .context("preparing the merged cache page query")?;
+            let mut params: Vec<Box<dyn rusqlite::ToSql>> = Vec::new();
+            // Bound 1..=3 unconditionally so the placeholder numbering in
+            // `resume` is stable whether or not it is present; unused binds
+            // are harmless, an off-by-one in the host list is not.
+            let key = after.unwrap_or(CacheKey {
+                created_at: 0,
+                session_id: String::new(),
+                host: 0,
+            });
+            params.push(Box::new(key.created_at));
+            params.push(Box::new(key.session_id));
+            params.push(Box::new(key.host));
+            for host in &hosts {
+                params.push(Box::new(*host));
+            }
+            let bound: Vec<&dyn rusqlite::ToSql> = params.iter().map(|p| p.as_ref()).collect();
+            let mut query = stmt
+                .query(bound.as_slice())
+                .context("querying the merged cache page")?;
+
+            let mut page = CachePage::default();
+            let mut bytes = 0usize;
+            while let Some(row) = query.next().context("reading merged cache page rows")? {
+                let host: HostId = row.get(0).context("reading a cached row's host")?;
+                let session_id: String = row.get(1).context("reading a cached row's id")?;
+                let created_at: i64 = row.get(2).context("reading a cached row's time")?;
+                let json: String = row.get(3).context("reading a cached row's payload")?;
+                let key = CacheKey {
+                    created_at,
+                    session_id,
+                    host,
+                };
+                if page.rows.len() == limit {
+                    // The extra row exists only to answer this question; it
+                    // is NOT part of the page and must not advance the
+                    // cursor. Its key IS the fence: the first row a caller
+                    // has not been shown.
+                    page.more = true;
+                    page.frontier = Some(key);
+                    break;
+                }
+                if !page.rows.is_empty() && bytes.saturating_add(json.len()) > byte_budget {
+                    page.more = true;
+                    page.frontier = Some(key);
+                    break;
+                }
+                bytes = bytes.saturating_add(json.len());
+                let info = match serde_json::from_str::<SessionInfo>(&json) {
+                    // A decoded row whose OWN id or timestamp disagrees
+                    // with the columns it was filed under is poison, not
+                    // data. The columns are what every order, cursor and
+                    // lookup here is built on, so a payload that says
+                    // otherwise cannot be shown without one surface
+                    // contradicting another — a row listed under one id and
+                    // routed under a different one. Treated exactly like an
+                    // undecodable payload: skipped for display, still
+                    // reported so the cursor passes it.
+                    Ok(info) if info.id != key.session_id || info.created_at != key.created_at => {
+                        tracing::warn!(
+                            host,
+                            session_id = key.session_id.as_str(),
+                            payload_id = info.id.as_str(),
+                            "skipping a cached session whose payload disagrees with the columns \
+                             it is filed under"
+                        );
+                        None
+                    }
+                    Ok(info) => Some(info),
+                    Err(error) => {
+                        // See this method's own docs: skipped for display,
+                        // still reported so the cursor can pass it.
+                        tracing::warn!(
+                            host,
+                            session_id = key.session_id.as_str(),
+                            error = %error,
+                            "skipping a cached session whose info_json no longer decodes"
+                        );
+                        None
+                    }
+                };
+                page.rows.push(ScannedRow { key, info });
+            }
+            Ok(page)
+        })
+        .await
+        .context("cached page task panicked")?
+    }
+
+    /// How many sessions the merged view holds across `hosts` — the `total`
+    /// a page reports.
+    ///
+    /// A separate cheap query rather than a by-product of the page, because
+    /// the page deliberately stops at its limit and therefore cannot know.
+    /// `COUNT(*)` over an indexed IN-list touches no `info_json` at all,
+    /// which is what keeps "how many are there" from costing what "show me
+    /// all of them" used to.
+    ///
+    /// Counts ROWS, including any whose payload no longer decodes. That is a
+    /// deliberate, documented divergence from the page, which skips them: a
+    /// count is an answer about the fleet, and quietly shrinking it to hide
+    /// a corrupt row would make "showing 4 of 5" read as data loss rather
+    /// than as the one unshowable entry it is.
+    pub async fn cached_count(&self, hosts: Vec<HostId>) -> anyhow::Result<u64> {
+        if hosts.is_empty() {
+            return Ok(0);
+        }
+        let conn = Arc::clone(&self.conn);
+        tokio::task::spawn_blocking(move || -> anyhow::Result<u64> {
+            let conn = conn.lock().expect("helm db mutex poisoned");
+            let placeholders = host_placeholders(hosts.len(), 1);
+            let sql =
+                format!("SELECT COUNT(*) FROM session_cache WHERE host_id IN ({placeholders})");
+            let params: Vec<Box<dyn rusqlite::ToSql>> = hosts
+                .iter()
+                .map(|host| Box::new(*host) as Box<dyn rusqlite::ToSql>)
+                .collect();
+            let bound: Vec<&dyn rusqlite::ToSql> = params.iter().map(|p| p.as_ref()).collect();
+            // `COUNT(*)` is non-negative by definition, so the widening
+            // below is a widening rather than a clamp that could hide
+            // anything. rusqlite has no `u64` column type (SQLite integers
+            // are signed), so the cast is where the two type systems meet.
+            let count: i64 = conn
+                .query_row(&sql, bound.as_slice(), |r| r.get(0))
+                .context("counting the merged cache")?;
+            Ok(count as u64)
+        })
+        .await
+        .context("cached count task panicked")?
+    }
+
+    /// One host's cached entry for `session_id`, if it has one and it still
+    /// decodes.
+    ///
+    /// The stale-detail read: what `GET /api/sessions/{id}` serves behind
+    /// SPEC.md's host-unreachable notice. Scoped to a host rather than
+    /// searching, because the caller has already resolved the owner
+    /// ([`Self::host_of_session`]) and asking again by session id alone
+    /// would be a second, independently-fallible answer to a question
+    /// already settled.
+    pub async fn cached_session(
+        &self,
+        host: HostId,
+        session_id: &str,
+    ) -> anyhow::Result<Option<SessionInfo>> {
+        let conn = Arc::clone(&self.conn);
+        let session_id = session_id.to_string();
+        tokio::task::spawn_blocking(move || -> anyhow::Result<Option<SessionInfo>> {
+            let conn = conn.lock().expect("helm db mutex poisoned");
+            let json: Option<String> = conn
+                .query_row(
+                    "SELECT info_json FROM session_cache WHERE host_id = ?1 AND session_id = ?2",
+                    rusqlite::params![host, session_id],
+                    |r| r.get(0),
+                )
+                .optional()
+                .context("reading one cached session")?;
+            Ok(json.and_then(|json| match serde_json::from_str::<SessionInfo>(&json) {
+                // The payload must AGREE with the id it was filed under.
+                // Serving a row whose own id says something else would show
+                // the caller one session's metadata under another's name —
+                // the same column/payload contradiction the page scan
+                // treats as poison, and the same answer: nothing is shown,
+                // and it is said out loud.
+                Ok(info) if info.id != session_id => {
+                    tracing::warn!(
+                        host,
+                        session_id = session_id.as_str(),
+                        payload_id = info.id.as_str(),
+                        "a cached session's payload names a different session; it cannot be shown"
+                    );
+                    None
+                }
+                Ok(info) => Some(info),
+                Err(error) => {
+                    tracing::warn!(
+                        host,
+                        session_id = session_id.as_str(),
+                        error = %error,
+                        "a cached session's info_json no longer decodes; it cannot be shown"
+                    );
+                    None
+                }
+            }))
+        })
+        .await
+        .context("cached session task panicked")?
+    }
+
+    /// Which host holds `session_id` in its cache — the owner lookup every
+    /// session operation routes through (PLAN_M6.md item 5).
+    ///
+    /// Deliberately does NOT read `info_json`. Routing is a question about
+    /// where to ask, not about what the session is, so a row whose payload
+    /// no longer decodes still routes correctly and a live session is never
+    /// made unreachable by a corrupt copy of its own metadata.
+    ///
+    /// `None` means the cache does not know this session. That is a 404 at
+    /// the REST edge for a session nobody has, and NOT the end of the
+    /// lookup for one that exists: an identity-less connected host caches
+    /// nothing at all, and its sessions are resolved from the manager's
+    /// in-memory list instead (see `crate::route_session`).
+    ///
+    /// FAILS CLOSED on two owners, with [`HostStoreError::SessionOwnerAmbiguous`].
+    /// The `session_cache_one_owner` index makes that unconstructible for
+    /// this build's writers, so the `LIMIT 2` here is defense against a
+    /// database this build did not write — and the alternative, picking the
+    /// lower host id, would mean silently routing a stop at whichever of two
+    /// machines sorted first.
+    pub async fn host_of_session(&self, session_id: &str) -> anyhow::Result<Option<HostId>> {
+        let conn = Arc::clone(&self.conn);
+        let session_id = session_id.to_string();
+        tokio::task::spawn_blocking(move || -> anyhow::Result<Option<HostId>> {
             let conn = conn.lock().expect("helm db mutex poisoned");
             let mut stmt = conn
                 .prepare(
-                    "SELECT host_id, session_id, info_json FROM session_cache \
-                     ORDER BY created_at DESC, session_id ASC",
+                    "SELECT host_id FROM session_cache WHERE session_id = ?1 \
+                     ORDER BY host_id ASC LIMIT 2",
                 )
-                .context("preparing cross-host cached session query")?;
-            let rows: Vec<(HostId, String, String)> = stmt
-                .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))
-                .context("querying cached sessions across hosts")?
+                .context("preparing the session owner query")?;
+            let owners: Vec<HostId> = stmt
+                .query_map(rusqlite::params![session_id], |r| r.get(0))
+                .context("looking up a cached session's host")?
                 .collect::<Result<_, _>>()
-                .context("reading cached session rows")?;
-            Ok(rows
-                .into_iter()
-                .filter_map(
-                    |(host, session_id, json)| match serde_json::from_str(&json) {
-                        Ok(info) => Some(CachedSession { host, info }),
-                        Err(error) => {
-                            tracing::warn!(
-                                host,
-                                session_id = session_id.as_str(),
-                                error = %error,
-                                "skipping a cached session whose info_json no longer decodes"
-                            );
-                            None
-                        }
-                    },
-                )
-                .collect())
+                .context("reading session owner rows")?;
+            match owners.as_slice() {
+                [] => Ok(None),
+                [only] => Ok(Some(*only)),
+                [first, second, ..] => {
+                    Err(anyhow::Error::new(HostStoreError::SessionOwnerAmbiguous {
+                        session: session_id,
+                        first: *first,
+                        second: *second,
+                    }))
+                }
+            }
         })
         .await
-        .context("cached sessions all task panicked")?
+        .context("session owner lookup task panicked")?
     }
+}
+
+/// `?4, ?5, ...` for an IN-list of `count` host ids starting at parameter
+/// index `first`.
+///
+/// The host scope is the one part of these queries whose arity is not known
+/// at compile time. Generating PLACEHOLDERS rather than values is what keeps
+/// that from becoming string interpolation of data: every id is still bound
+/// through rusqlite, and this function can only ever emit `?N`.
+fn host_placeholders(count: usize, first: usize) -> String {
+    (first..first + count)
+        .map(|index| format!("?{index}"))
+        .collect::<Vec<_>>()
+        .join(", ")
 }
 
 #[cfg(test)]
@@ -1456,6 +2208,52 @@ mod tests {
             .unwrap()
             .into_iter()
             .map(|s| s.id)
+            .collect()
+    }
+
+    /// Every cached session across `hosts`, walked page by page through the
+    /// production paging API.
+    ///
+    /// Deliberately a WALK rather than one big page: it is how the tests
+    /// below assert cross-host order and skip-and-log behavior, so making it
+    /// follow real cursors means those assertions also pin that the resume
+    /// predicate does not lose or repeat rows. A page size of two is small
+    /// enough that every fixture here spans several pages.
+    ///
+    /// The cursor advances past SKIPPED rows as well as served ones, which
+    /// is the contract [`ScannedRow`] exists for — a walker that resumed
+    /// from the last DECODED row would re-scan a poisoned one forever.
+    async fn walk_cached(store: &HelmStore, hosts: &[HostId]) -> Vec<CachedSession> {
+        let mut all = Vec::new();
+        let mut after: Option<CacheKey> = None;
+        loop {
+            let page = store
+                .cached_page(hosts.to_vec(), after.clone(), 2, usize::MAX)
+                .await
+                .expect("paged read");
+            let Some(last) = page.rows.last() else { break };
+            after = Some(last.key.clone());
+            all.extend(page.rows.into_iter().filter_map(|row| {
+                row.info.map(|info| CachedSession {
+                    host: row.key.host,
+                    info,
+                })
+            }));
+            if !page.more {
+                break;
+            }
+        }
+        all
+    }
+
+    /// Every host id in the registry — the scope the paged reads take.
+    async fn all_host_ids(store: &HelmStore) -> Vec<HostId> {
+        store
+            .list_hosts()
+            .await
+            .expect("list hosts")
+            .into_iter()
+            .map(|row| row.id)
             .collect()
     }
 
@@ -1664,7 +2462,6 @@ mod tests {
         let db_path = dir.path().join("helm.db");
         {
             let conn = plant_v1_database(&db_path);
-            let cached = serde_json::to_string(&session("ghost", 100)).unwrap();
             conn.execute_batch(
                 "INSERT INTO hosts (kind) VALUES ('local');
                  INSERT INTO hosts (kind, destination, host_identity)
@@ -1675,12 +2472,30 @@ mod tests {
                      VALUES ('ssh', 'unrelated@host', 'its-own-identity');",
             )
             .expect("plant two rows sharing one identity");
-            conn.execute(
-                "INSERT INTO session_cache (host_id, session_id, created_at, info_json)
-                 SELECT id, 'ghost', 100, ?1 FROM hosts WHERE host_identity IS NOT NULL",
-                rusqlite::params![cached],
-            )
-            .expect("give every identified row a cache");
+            // One session id PER HOST, deliberately distinct: this test is
+            // about duplicated IDENTITY claims, and giving three hosts one
+            // session id would additionally trip the version-3 migration's
+            // own one-owner dedupe, which would then be doing the deleting
+            // and the assertions below would be pinning the wrong rule.
+            let identified: Vec<HostId> = {
+                let mut stmt = conn
+                    .prepare("SELECT id FROM hosts WHERE host_identity IS NOT NULL ORDER BY id")
+                    .unwrap();
+                stmt.query_map([], |r| r.get(0))
+                    .unwrap()
+                    .collect::<Result<_, _>>()
+                    .unwrap()
+            };
+            for host in identified {
+                let cached =
+                    serde_json::to_string(&session(&format!("ghost-{host}"), 100)).unwrap();
+                conn.execute(
+                    "INSERT INTO session_cache (host_id, session_id, created_at, info_json)
+                     VALUES (?1, ?2, 100, ?3)",
+                    rusqlite::params![host, format!("ghost-{host}"), cached],
+                )
+                .expect("give every identified row a cache");
+            }
         }
 
         let store = HelmStore::open(&db_path).await.expect("migrate and open");
@@ -3271,7 +4086,7 @@ mod tests {
             "per-host read must tie-break equal created_at ascending by session_id"
         );
 
-        let all = store.cached_sessions_all().await.unwrap();
+        let all = walk_cached(&store, &all_host_ids(&store).await).await;
         let all_ids: Vec<&str> = all.iter().map(|c| c.info.id.as_str()).collect();
         assert_eq!(
             all_ids,
@@ -3299,7 +4114,7 @@ mod tests {
             .await
             .unwrap();
 
-        let all = store.cached_sessions_all().await.unwrap();
+        let all = walk_cached(&store, &all_host_ids(&store).await).await;
         let seen: Vec<(HostId, &str)> = all.iter().map(|c| (c.host, c.info.id.as_str())).collect();
         assert_eq!(
             seen,
@@ -3427,10 +4242,7 @@ mod tests {
             .unwrap();
         }
 
-        let all = store
-            .cached_sessions_all()
-            .await
-            .expect("a poisoned row on one host must not fail the whole cross-host read");
+        let all = walk_cached(&store, &all_host_ids(&store).await).await;
         let ids: Vec<&str> = all.iter().map(|c| c.info.id.as_str()).collect();
         assert_eq!(
             ids,
@@ -3451,6 +4263,142 @@ mod tests {
             Some(poisoned_host.to_string().as_str()),
             "the warning must name the host the poisoned row belongs to"
         );
+    }
+
+    /// A page whose LAST scanned row is poisoned must still advance the
+    /// cursor past it — and a page where EVERY row is poisoned must too.
+    ///
+    /// This is the regression test for permanent, silent data loss, not a
+    /// tidiness check. When continuation was derived from decoded rows, a
+    /// poisoned row at a page boundary left the resume point before it
+    /// forever: the next page re-scanned the same row, skipped it again,
+    /// and every session after it in the whole fleet became unreachable
+    /// through the API. The fully-poisoned case is the same bug wearing a
+    /// more obvious costume — an empty page with no continuation, in the
+    /// middle of a list.
+    #[tokio::test]
+    async fn a_page_ending_in_a_poisoned_row_still_advances_past_it() {
+        let (_dir, store) = fresh_store().await;
+        let host = host_with_identity(&store, "poison@host", "poison-identity").await;
+        // Descending by created_at: newest first. The second and third are
+        // poisoned below, so a two-row page ends on a poisoned row and a
+        // later two-row page contains nothing BUT poisoned rows.
+        store
+            .replace_host_sessions(
+                host,
+                "poison-identity",
+                vec![
+                    session("good-1", 500),
+                    session("bad-1", 400),
+                    session("bad-2", 300),
+                    session("good-2", 200),
+                ],
+            )
+            .await
+            .expect("seed the cache");
+        for id in ["bad-1", "bad-2"] {
+            let conn = Arc::clone(&store.conn);
+            tokio::task::spawn_blocking(move || {
+                conn.lock()
+                    .unwrap()
+                    .execute(
+                        "UPDATE session_cache SET info_json = 'not valid json' \
+                         WHERE session_id = ?1",
+                        rusqlite::params![id],
+                    )
+                    .unwrap();
+            })
+            .await
+            .unwrap();
+        }
+
+        // Page one ends ON a poisoned row.
+        let first = store
+            .cached_page(vec![host], None, 2, usize::MAX)
+            .await
+            .expect("first page");
+        assert_eq!(
+            first.rows.len(),
+            2,
+            "the limit counts rows SCANNED, so a skipped row still consumes one"
+        );
+        assert_eq!(first.rows[1].key.session_id, "bad-1");
+        assert!(
+            first.rows[1].info.is_none(),
+            "the poisoned row comes back with its key and no payload"
+        );
+        assert!(first.more, "two of four remain");
+
+        // Page two is ENTIRELY poisoned — it must still advance.
+        let second = store
+            .cached_page(vec![host], Some(first.rows[1].key.clone()), 1, usize::MAX)
+            .await
+            .expect("second page");
+        assert_eq!(second.rows.len(), 1);
+        assert_eq!(second.rows[0].key.session_id, "bad-2");
+        assert!(second.rows[0].info.is_none());
+        assert!(second.more);
+
+        // And the walk reaches the far side, which is the whole point.
+        let third = store
+            .cached_page(vec![host], Some(second.rows[0].key.clone()), 2, usize::MAX)
+            .await
+            .expect("third page");
+        assert_eq!(
+            third
+                .rows
+                .iter()
+                .filter_map(|row| row.info.as_ref())
+                .map(|info| info.id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["good-2"],
+            "the row after the poisoned run must be reachable"
+        );
+        assert!(!third.more, "and the order ends there");
+    }
+
+    /// The byte bound must stop the SCAN, not merely trim its result.
+    ///
+    /// The point is the decoding that never happens: a limit of five
+    /// thousand against fat blobs meant five thousand JSON parses before any
+    /// budget was consulted. A bound that only trimmed afterwards would
+    /// leave that cost exactly where it was.
+    #[tokio::test]
+    async fn the_byte_bound_stops_the_scan_and_still_makes_progress() {
+        let (_dir, store) = fresh_store().await;
+        let host = host_with_identity(&store, "fat@host", "fat-identity").await;
+        let fat = |id: &str, created_at: i64| {
+            let mut info = session(id, created_at);
+            info.title = "x".repeat(4096);
+            info
+        };
+        store
+            .replace_host_sessions(
+                host,
+                "fat-identity",
+                vec![fat("f1", 300), fat("f2", 200), fat("f3", 100)],
+            )
+            .await
+            .expect("seed the cache");
+
+        let page = store
+            .cached_page(vec![host], None, 10, 4_000)
+            .await
+            .expect("bounded page");
+        assert_eq!(
+            page.rows.len(),
+            1,
+            "the scan stops at the byte bound rather than decoding all ten it was allowed"
+        );
+        assert!(page.more, "and says so, so the walk continues");
+
+        // A single row larger than the whole budget must still be served,
+        // or the walk stalls on it forever.
+        let tiny = store
+            .cached_page(vec![host], None, 10, 1)
+            .await
+            .expect("degenerate budget");
+        assert_eq!(tiny.rows.len(), 1, "at least one row always makes progress");
     }
 
     // ---- Persistence ------------------------------------------------

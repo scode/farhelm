@@ -93,7 +93,7 @@ const SETTLE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(60);
 /// the suite is not entitled to create. CI seeds the key explicitly with
 /// `ssh-keyscan` (see `.github/workflows/ci.yml`), so the ssh path is still
 /// genuinely exercised there rather than skipped.
-async fn self_ssh_available() -> bool {
+pub(crate) async fn self_ssh_available() -> bool {
     tokio::process::Command::new("ssh")
         .args([
             "-o",

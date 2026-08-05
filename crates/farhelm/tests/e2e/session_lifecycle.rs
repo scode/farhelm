@@ -1035,18 +1035,23 @@ async fn create_with_nul_byte_in_cwd_is_invalid_request() {
     assert!(h.client.list_sessions().await.unwrap().sessions.is_empty());
 }
 
-/// The helm must claim its HTTP port before creating the argv-requested
-/// startup session. A busy port is a retryable local conflict; creating
-/// the agent first would strand a durable session on every failed retry.
+/// The helm must claim its HTTP port before it touches anything else.
+///
+/// A busy port is the likely startup failure — another helm is already
+/// running — and it is retryable, so it has to happen before any durable
+/// side effect. This test's subject moved with PLAN_M6.md item 5: the argv
+/// startup session it used to guard is gone, and what a premature failure
+/// would now strand is helm.db and whatever `--ensure-hosts` was about to
+/// register into it. The ordering rule is the same one, and it is asserted
+/// against the strongest observable there is — the database file must not
+/// exist at all.
 #[tokio::test]
-async fn helm_bind_failure_creates_no_startup_session() {
-    let _slot = SLOTS.acquire().await.expect("semaphore is never closed");
+async fn helm_bind_failure_happens_before_any_durable_setup() {
     let state = tempfile::tempdir().expect("state");
-    let work = tempfile::tempdir().expect("workdir");
-    let sup = Supervisor::new_with_exe(state.path(), farhelm_bin().into())
+    let ensure = state.path().join("ensure-hosts.json5");
+    tokio::fs::write(&ensure, r#"{ hosts: [{ ssh: "user@never-registered" }] }"#)
         .await
-        .expect("supervisor");
-    let _tmux = TmuxServerGuard(state.path().join("tmux.sock"));
+        .expect("write the ensure-hosts file");
     let occupied = tokio::net::TcpListener::bind(("127.0.0.1", 0))
         .await
         .expect("reserve loopback port");
@@ -1059,9 +1064,8 @@ async fn helm_bind_failure_creates_no_startup_session() {
             .arg(state.path())
             .arg("--port")
             .arg(port.to_string())
-            .arg("--cwd")
-            .arg(work.path())
-            .args(["--agent", "true"])
+            .arg("--ensure-hosts")
+            .arg(&ensure)
             .output(),
     )
     .await
@@ -1073,11 +1077,10 @@ async fn helm_bind_failure_creates_no_startup_session() {
         "bind failure should retain its context: {}",
         String::from_utf8_lossy(&output.stderr)
     );
-
-    let client = connect_client(&sup).await;
     assert!(
-        client.list_sessions().await.unwrap().sessions.is_empty(),
-        "bind failure must happen before startup session creation"
+        !state.path().join("helm.db").exists(),
+        "the bind must fail before helm.db is created, and therefore before --ensure-hosts \
+         registers anything into it"
     );
 }
 

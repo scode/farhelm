@@ -23,10 +23,13 @@ repository = "https://github.com/scode/farhelm"
 [workspace.dependencies]
 anyhow = "1"
 axum = { version = "0.8", features = ["ws"] }
-# Opaque encoding for the `ListSessions` pagination cursor
-# (farhelm-supervisor's `service::core`, PLAN_M6.md item 2) — URL-safe so a
-# cursor cannot break a caller that happens to embed it in a URL, even
-# though this protocol never requires that itself.
+# Opaque encoding for both pagination cursors — the `ListSessions` wire
+# cursor (farhelm-supervisor's `service::core`, PLAN_M6.md item 2) and the
+# helm's own REST cursor over the merged multi-host order
+# (farhelm-helm's `aggregate`, PLAN_M6.md item 5). URL-safe so a cursor
+# cannot break a caller that happens to embed it in a URL — which the REST
+# layer's callers genuinely do, since the helm's cursor travels as a query
+# parameter.
 base64 = "0.22"
 clap = { version = "4", features = ["derive"] }
 dioxus = "0.7.0"
@@ -36,6 +39,11 @@ futures-util = { version = "0.3", default-features = false }
 # actually has for this. Non-wasm32 targets use `tokio::time::sleep`
 # instead — see farhelm-ui/Cargo.toml's target-dependency comment.
 gloo-timers = { version = "0.3", features = ["futures"] }
+# The `--ensure-hosts` file's format (PLAN_M6.md item 5). JSON5 rather than
+# JSON because the file is hand-edited: comments and trailing commas are
+# what make a checked-in fleet description survivable, and it is otherwise
+# ordinary serde.
+json5 = "1"
 libc = "0.2"
 reqwest = { version = "0.12", default-features = false, features = ["json"] }
 # `bundled` compiles SQLite from source rather than linking the host's

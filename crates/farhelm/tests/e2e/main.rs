@@ -57,3 +57,4 @@ mod replay_marker;
 mod session_rename;
 
 mod host_connection;
+mod merged_hosts;

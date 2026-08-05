@@ -505,6 +505,113 @@ remains that can never be represented on any page.
   bounded by pages followed, by sessions accumulated (ten of the supervisor's own default pages), and by a refusal to
   follow a cursor identical to the one that produced it — each catching a shape the others cannot, and all three landing
   as an ordinary failed refresh that keeps the previous cache.
+- The served session list is a MERGE, and it is served from what the helm has already recorded rather than from the
+  hosts. Every connected host's actor drains its supervisor's paginated list to exhaustion into helm.db; the list
+  endpoint then merges what is there — live hosts' latest refresh and down hosts' last-known entries alike — into one
+  order, tagging each row with its host and marking it stale unless that host is connected right now. A host being
+  connected changes only that flag, never where its rows are read from.
+- The order is `created_at` DESCENDING, then session id ascending, then HOST ID ascending. The first two are the wire's
+  own total order; the third is what keeps the merged order total even in a database whose one-owner index is absent,
+  and a cursor over a non-total order can skip or repeat rows.
+- One host does not fit the cache rule and cannot be made to: a supervisor reporting NO identity, against a registry row
+  that has none on record either, has nothing for the identity-bound cache write to bind to. Its refreshes are kept in
+  the connection manager's memory and merged into the list and the owner lookup from there; they serve while it is
+  connected and vanish when it is not, because with no durable copy there is nothing to stand behind. A row that HAS a
+  recorded identity meeting an identity-less hello is a different situation entirely and fails closed — see below.
+- The REST list is paginated with a helm-level cursor that is deliberately DECOUPLED from the wire cursor underneath it.
+  Composing per-host wire cursors into the REST cursor would tie one browser page fetch to N live host round trips, so a
+  single flapping host would break a page walk that has nothing to do with it and a slow host would set every page's
+  latency. Draining into the cache first makes the REST cursor a plain resume point over local data — an opaque
+  base64url-JSON ordering key, resuming strictly after the last row a page returned, so pages are stable under
+  concurrent creation and deletion for the same reason the wire cursor is. The decoupling is enforced rather than
+  intended: the helm's cursor carries a domain-and-version tag and spells its key's components differently, so neither
+  decoder can read the other's tokens — without that they were byte-compatible and each silently resumed at a position
+  the other had named.
+- The page is a PAGE all the way down. The resume predicate and the limit go into one indexed query against helm.db's
+  merged-order index, so a poll reads and JSON-decodes only the rows it returns; the alternative, loading the whole
+  fleet's cache per request, made a full walk quadratic in the fleet's size. Two independent cuts apply, mirroring the
+  supervisor's own list discipline: the caller's limit (capped, with an over-large request refused rather than silently
+  clamped) and an encoded-byte budget that shrinks a page of fat records rather than oversizing the reply. The ordering
+  key carries the host id as its final component so the order is total even where the one-owner index below is absent —
+  a cursor over a non-total order can skip or repeat rows.
+- At most one HOST may cache a given session id, as a schema invariant. Session ids are supervisor-minted UUIDs, so two
+  hosts naming one is either a bug or a hostile supervisor claiming a session it does not own — and the consequence is a
+  routing decision, not a display one: owner lookup would resolve one host while the list showed another's row, so a
+  stop aimed at one machine could land on a different one. The first claim holds and the later claimant's row is
+  dropped, so the LIST stays coherent; but while both hosts keep reporting the id, ROUTING fails closed naming both,
+  because the helm has no basis for choosing which one the user meant. That contest is per-host REFRESH STATE,
+  reconstructed from each drain's own evidence rather than remembered: it clears itself when a claimant stops reporting
+  the id, goes with the host when it is removed, goes with the cache when an adoption purges it, and needs no schema to
+  survive a restart — a restart forgets the marker and the next drains re-observe the collision if it is still real,
+  which costs one refresh interval in which a genuine collision routes to the cached owner. A host that lists one
+  session id twice in a single reply is a different failure: a list that contradicts itself is refused whole, and the
+  previous cache is kept.
+- The wire order is VALIDATED, not assumed. A drain rejects a list that is not creation-time descending with the session
+  id ascending — within a page and across page boundaries — because this side does not merely display that order: an
+  identity-less host's list is binary-searched for a resume point and merged in lockstep with the persisted page, and
+  both are meaningless over an unsorted sequence. The failure would otherwise be silent pages that skip or repeat
+  entries. Session ids are bounded at every peer ingress for a related reason: an id near the frame limit produces a
+  cursor no client could replay, which would strand a walk at that row forever.
+- Every mutation whose result changes what the helm has RECORDED records it before answering: a create seeds its new
+  session, a restart and a rename store the reply's fresh `SessionInfo`, and a delete forgets the row. The merged list
+  and the owner lookup are both served from those records, so a mutation that recorded nothing leaves the list
+  contradicting the answer the caller just got — a session that cannot be operated on, a restart that still reads
+  `exited`, a deleted row sitting beside its replacement. All of it is best effort and none of it can fail the mutation:
+  the operation succeeded, and reporting a success as a failure is the one outcome SPEC.md's creation contract rules
+  out. Each write carries the CLAIM its operation was routed under — a manager-wide connection token that is never
+  reused, plus the identity — and is dropped if the connection has changed since, so a delayed reply cannot file one
+  install's session under another's name. Writes are serialized against the host's own refresh, and a refresh whose
+  drain predates one of them declines to commit rather than erasing it.
+- One field of such a reply is NOT taken as given: a status of `unknown` never overwrites a definite one. The protocol
+  is explicit that `ListSessions` is the only reply computing a real liveness answer and that everywhere else `unknown`
+  means "not yet known" rather than "not running" — a create's and a restart's replies carry it deliberately, because at
+  the instant they are built the pane exists but the agent's own exec inside it has not been observed. Recording that
+  verbatim answered a successful restart with a badge saying the helm had no idea, for a session it had definite
+  knowledge about a moment earlier. Keeping the previous value would leave it stale until the next refresh computes the
+  truth, so such a write also WAKES that host's refresh — a refresh-only wake that cuts short the wait between drains
+  and touches nothing else (distinct from the retry verb, which drops the connection and re-enters the retry ladder).
+  The definite answer then arrives in one `ListSessions` round trip rather than one cadence interval, which is what
+  keeps a restart of an exited session from reading `exited` afterwards. The wake is sent after the write's own epoch
+  bump, so the drain it provokes is a post-write one and commits rather than declining as a pre-write snapshot would.
+- Identity-less serving is only for a row with NO identity on record. A row that HAS one, meeting a peer that reports
+  none, FREEZES in its own non-connected state (`identity-unverified`) and connects nothing. There is no identity to
+  compare, so the mismatch check cannot see the situation at all — and connecting anyway would put an unverified peer in
+  charge of a host whose cache, written under the recorded identity and still in scope for the list, describes a
+  different install: the silent merge SPEC.md forbids, arriving through the one door that check cannot cover. The old
+  cache stays and serves stale like any other non-connected host's, which is the honest reading — it is still the last
+  thing this helm actually verified. Distinct from `identity-mismatch` because the remedy differs and offering the wrong
+  one would be worse than offering none: nothing was presented, so there is nothing to ADOPT, and the ways out are
+  fixing the host, retargeting the entry, or removing it. Re-probed automatically, unlike a mismatch, because there is
+  no human decision available to wait for.
+- Session operations route by OWNER LOOKUP in that merged view — from the cache's COLUMNS, never from the stored
+  metadata, so a row whose payload no longer decodes still routes and a live session is never made unreachable by a
+  corrupt copy of its own details. A session whose host is in any non-connected state is refused with the state named
+  and nothing queued. Unreachable is not special-cased; a version-skewed, identity- mismatched, duplicate, or retired
+  host refuses identically, because a caller that handled four of six would silently mis-handle the rest. The routing
+  decision reads the host's state and its live connection from a SINGLE borrow of the actor's published status — split
+  across two reads it could pair a fresh `Connected` with a dead connection, which is precisely how an operation gets
+  routed onto a corpse. Creation takes the target host in the body (defaulting to the local row, the tail of SPEC.md's
+  own creation default) and refuses a non-connected one as a precondition failure. Reading a session's DETAIL is the one
+  route a non-connected host does not refuse: SPEC.md requires a stale session's metadata to be viewable behind the
+  host-unreachable notice, so that read is served from the cache and marked stale, while a reachable host's detail is
+  always fetched live — the cache exists for the stale list, not as a general serving layer. The live path drains the
+  owner's list to exhaustion rather than reading one page, since a session sitting past the supervisor's default page is
+  exactly the case a busy host has most of.
+- Host management commits durably first and converges the live actors after, so each verb states how it fails closed:
+  add rolls its row back if no actor could be started (a registered host with no actor is invisible and un-dialed, while
+  its destination is taken); retarget converges instead of rolling back, because the durable write is what the user
+  asked for and the actor can be told to reconnect through a path that cannot fail; remove tears the actor down by the
+  id it just committed, needing no registry read that could fail. Retry reports whether it found a host, and a RETIRED
+  host's retry respawns its actor from the current row — nothing else ever restarts one, so without that an actor that
+  panicked left its host permanently dark. Adopting names the identity the user was shown and is refused if the host has
+  since started reporting a different one, because a re-probe between the decision and the request would otherwise adopt
+  something nobody approved.
+- `--ensure-hosts <file>` is a JSON5 floor under the registry, applied through the same registration path as a REST add
+  before serving begins and never consulted again. It adds what is missing and touches nothing else: an already
+  registered destination keeps its fields and its learned identity, because helm.db is the durable authority and a
+  startup file that overwrote user edits every boot would make the two fight. Validation is all-or-nothing — a malformed
+  file, an unusable destination, or a destination listed twice fails startup with the entry named and nothing written,
+  since a helm that came up with three of five guaranteed hosts looks healthy and is not.
 - axum serving: REST for CRUD (sessions, profiles, hosts), a WebSocket event stream for live session-list updates, a
   WebSocket per attached terminal, and the static UI bundle. Loopback bind enforced — refuses non-loopback per SPEC.md.
 - Web token: random 128-bit value, stored hashed; browser auth exchanges it once for a device-session cookie; rotation
@@ -543,7 +650,11 @@ property of the architecture instead of a discipline.
 
 clap (derive), one multi-call binary named `farhelm`, clean subcommand grammar. The user-facing surface:
 
-- `farhelm helm run` — run the helm (flags: `--port`, `--state-dir`, ...).
+- `farhelm helm run` — run the helm (flags: `--port`, `--state-dir`, `--ui-dist`, `--ensure-hosts <file>`). It takes no
+  session or transport flags: M1's `--ssh`, `--cwd`, `--agent`, `--title`, `--remote-farhelm`, and `--remote-state-dir`
+  were dropped with M6's registry (user decision 2026-08-04). A helm drives every registered host at once, so a flag
+  naming one of them could only ever have meant the wrong thing; the last two live on as per-host registry fields, and
+  creation is `POST /api/sessions`, which is where the host selection belongs.
 - `farhelm helm token show|rotate` — web-token bootstrap and rotation.
 - `farhelm supervisor run` — run the supervisor in the foreground; this is SPEC.md's "run the binary with arguments in a
   terminal" path.
