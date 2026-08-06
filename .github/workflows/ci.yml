@@ -121,6 +121,17 @@ jobs:
       # not cross-job. Wall-clock cost is modest; a green suite that runs
       # slightly longer beats a fast one that lies at random.
       - run: cargo test -- --show-output --test-threads=4
+      # The JS unit harness (PLAN_M6_5.md item 1) rides in this job rather
+      # than a new one: it is milliseconds of work, and a whole job's
+      # scheduling overhead would dwarf it. Node is preinstalled on this
+      # runner image (the e2e job below relies on the same fact for
+      # Playwright), so this adds no new provisioning. Running from inside
+      # js-tests/ rather than passing a glob from the repo root is
+      # deliberate: this pins no node version, and node's default
+      # no-argument discovery (every `*.test.js` in cwd) has worked since
+      # the test runner shipped, while quoted-glob CLI arguments are a
+      # newer addition an older-but-still-supported node would choke on.
+      - run: cd crates/farhelm-ui/js-tests && node --test
 
   # The desktop renderer is compiled by no other job: clippy/test build
   # with no renderer feature and e2e builds only the web one, so without

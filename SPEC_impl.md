@@ -720,6 +720,13 @@ constraint (see the GUI section's motivation), not an afterthought:
   Real-agent smoke testing stays manual.
 - Rust integration tests exercise supervisor+tmux directly (CI provides tmux) and the framing protocol with golden
   cases; farhelm-proto keeps wire compatibility testable.
+- **`node --test` unit-tests the asset-JS layer's pure functions**, under `crates/farhelm-ui/js-tests/` (outside
+  `assets/` for source/test separation — bundling itself is by explicit `asset!` registration, so placement alone
+  neither includes nor excludes a file). It currently covers `term-bytes.js`'s byte-domain conversion for
+  `term.onBinary` — the byte-for-byte contract pinned at the boundaries (0x00, 0x7f, 0x80, 0xff), empty input, and a
+  mouse-report-shaped sequence. Node's built-in runner over vitest/jest: node is already a CI requirement for
+  Playwright, so this is zero new dependencies, and the asset-JS layer has no bundler for a module-tooling-heavy runner
+  to pay for (PLAN_M6_5.md item 1).
 - The desktop shell's native glue is the acknowledged manual-test gap (see GUI risks); everything else must be coverable
   without a human.
 

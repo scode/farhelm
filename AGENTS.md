@@ -28,6 +28,11 @@ Before creating or updating a PR, or claiming work is done, run exactly what CI 
 - `cargo clippy --all-targets -- -D warnings`
 - `cargo test -- --show-output` — `--show-output` is what makes a loudly-skipped test's reason visible; the cgroup tests
   skip themselves where no systemd user manager exists, and libtest hides a passing test's output otherwise.
+- `cd crates/farhelm-ui/js-tests && node --test` — the JS unit harness for the asset-JS layer's pure functions
+  (PLAN_M6_5.md item 1); node is already a CI requirement for Playwright below, so this adds no dependency. Run from
+  inside the directory rather than as a glob from the repo root: node's no-argument default discovery (every `*.test.js`
+  in cwd) is the oldest, most version-portable form the test runner has, whereas quoted-glob CLI arguments are newer and
+  CI pins no node version.
 - `cargo check -p farhelm-ui --features desktop` — the desktop renderer compiles nowhere else; needs the webkit2gtk/gtk
   dev packages (see the CI job for the apt list).
 - `dprint check`

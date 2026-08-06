@@ -536,6 +536,12 @@ pub struct Tab {
 const VENDOR_XTERM_CSS: Asset = asset!("/assets/vendor/xterm.css");
 const VENDOR_XTERM_JS: Asset = asset!("/assets/vendor/xterm.js");
 const VENDOR_FIT_JS: Asset = asset!("/assets/vendor/addon-fit.js");
+// The `onBinary` byte-conversion helper terminal.js calls into (PLAN_M6_5.md
+// item 1) — a separate asset, registered ahead of terminal.js, purely so
+// `node --test` can load this exact file rather than a copy of its logic.
+// Registration order is not execution order (script injection is async);
+// terminal.js's mount readiness gate waits for the helper's global.
+const TERM_BYTES_JS: Asset = asset!("/assets/term-bytes.js");
 const TERMINAL_JS: Asset = asset!("/assets/terminal.js");
 const APP_CSS: Asset = asset!("/assets/app.css");
 
@@ -564,6 +570,7 @@ pub fn App() -> Element {
         document::Link { rel: "stylesheet", href: APP_CSS }
         document::Script { src: VENDOR_XTERM_JS }
         document::Script { src: VENDOR_FIT_JS }
+        document::Script { src: TERM_BYTES_JS }
         document::Script { src: TERMINAL_JS }
         // Above both views and outside the match, deliberately: a build
         // mismatch is a fact about this whole PAGE rather than about

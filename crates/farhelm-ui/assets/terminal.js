@@ -4,7 +4,9 @@
 // layer entirely (SPEC_impl.md: the bypass is load-bearing — PTY-rate
 // output through a vdom would be a performance disaster).
 //
-// Loaded as plain scripts (xterm.js, addon-fit.js, then this) — no
+// Loaded as plain scripts (xterm.js, addon-fit.js, term-bytes.js, this —
+// that is REGISTRATION order; Dioxus injects scripts asynchronously, so
+// mountWhenReady gates on the globals themselves, never on order) — no
 // bundler, no CDN: the UI must be fully self-contained.
 //
 // ## One island per terminal, reconciled declaratively (PLAN_M4.md item 6)
@@ -2011,9 +2013,23 @@
     },
 
     /**
-     * Wait for xterm's globals (`Terminal`, `FitAddon`) and `spec.el` to
-     * exist, then mount — owning the ENTIRE retry loop that used to live
-     * in the `document::eval` snippet calling this (lib.rs).
+     * Wait for xterm's globals (`Terminal`, `FitAddon`), the term-bytes
+     * helper (`window.farhelmTermBytes`), and `spec.el` to exist, then
+     * mount — owning the ENTIRE retry loop that used to live in the
+     * `document::eval` snippet calling this (lib.rs).
+     *
+     * The term-bytes check belongs here for the same reason session_view.rs
+     * documents for `window.farhelmTerm` itself (see its "sync-generation
+     * token" section): Dioxus injects `document::Script` assets
+     * asynchronously, so source order in lib.rs's `rsx!` is a request, not
+     * a guarantee — term-bytes.js's tag coming before terminal.js's says
+     * nothing about which one's script actually finishes executing first.
+     * Mounting before the helper has landed would leave `onBinary` calling
+     * into an undefined global the first time the agent sends a mouse
+     * report, silently dropping that input rather than throwing somewhere
+     * visible. Gating the mount on it — exactly like the `Terminal` and
+     * `FitAddon` globals already are — makes term-bytes.js's own loading a
+     * mount PRECONDITION instead of a hopeful ordering.
      *
      * That move closes a real bug (the "stale mount retry" finding): the
      * old loop was a bare `setTimeout` chain with no handle anything
@@ -2051,7 +2067,12 @@
       pendings.set(spec.el, attempt);
       const tryMount = () => {
         if (pendings.get(spec.el) !== attempt) return;
-        if (window.Terminal && window.FitAddon && document.getElementById(spec.el)) {
+        if (
+          window.Terminal &&
+          window.FitAddon &&
+          window.farhelmTermBytes &&
+          document.getElementById(spec.el)
+        ) {
           pendings.delete(spec.el);
           farhelmTerm.mount(spec, baseUrl, attach, ifUnowned);
         } else {
@@ -3247,12 +3268,14 @@
           () => ws.readyState === WebSocket.OPEN,
         );
         // onBinary carries mouse reports and other non-UTF8 input as a
-        // binary string; encode byte-for-byte.
+        // binary string; encode byte-for-byte. The conversion itself lives
+        // in term-bytes.js — a required global that mountWhenReady waits
+        // for, so it is guaranteed present here — letting `node --test`
+        // pin the byte-domain contract against the exact file the page
+        // runs, rather than a copy.
         term.onBinary((d) => {
           if (ws.readyState !== WebSocket.OPEN) return;
-          const bytes = new Uint8Array(d.length);
-          for (let i = 0; i < d.length; i++) bytes[i] = d.charCodeAt(i) & 0xff;
-          ws.send(bytes);
+          ws.send(window.farhelmTermBytes.binaryStringToBytes(d));
         });
 
         const sendResize = () => {
