@@ -202,7 +202,7 @@ pub(crate) const CONTROL_EXCHANGE_TIMEOUT: std::time::Duration = std::time::Dura
 /// avoiding a second CONTROL-mode one. The dead flag is what the `Attach`
 /// handler (service.rs) uses to decide whether to append the alt-screen
 /// stop snapshot.
-const PANE_MODE_FORMAT: &str = "#{alternate_on},#{bracket_paste_flag},#{mouse_any_flag},\
+const PANE_MODE_FORMAT: &str = "#{alternate_on},#{bracket_paste_flag},#{mouse_all_flag},\
                                 #{mouse_button_flag},#{mouse_standard_flag},#{mouse_sgr_flag},\
                                 #{cursor_flag},#{keypad_cursor_flag},#{cursor_x},#{cursor_y},\
                                 #{pane_dead}";
@@ -478,7 +478,15 @@ fn require_supported_tmux(output: &str) -> anyhow::Result<()> {
 pub struct PaneModes {
     pub alternate_on: bool,
     pub bracket_paste: bool,
-    pub mouse_any: bool,
+    /// DECSET 1003 (any-event mouse tracking), captured from tmux's own
+    /// `#{mouse_all_flag}` — NOT `#{mouse_any_flag}`, which despite its
+    /// name is an umbrella "some mouse protocol is active" bit that also
+    /// reads 1 whenever `mouse_button` or `mouse_standard` does; using it
+    /// here was audited and rejected (see `post_content_sequences`'s
+    /// historical note). `mouse_all_flag` is the field tmux dedicates to
+    /// this ONE protocol specifically, verified empirically (tmux 3.7b)
+    /// to read 1 only when 1003 alone is active.
+    pub mouse_all: bool,
     pub mouse_button: bool,
     pub mouse_standard: bool,
     pub mouse_sgr: bool,
@@ -514,7 +522,7 @@ impl PaneModes {
         };
         let alternate_on = flag(false);
         let bracket_paste = flag(false);
-        let mouse_any = flag(false);
+        let mouse_all = flag(false);
         let mouse_button = flag(false);
         let mouse_standard = flag(false);
         let mouse_sgr = flag(false);
@@ -532,7 +540,7 @@ impl PaneModes {
         PaneModes {
             alternate_on,
             bracket_paste,
-            mouse_any,
+            mouse_all,
             mouse_button,
             mouse_standard,
             mouse_sgr,
@@ -569,13 +577,34 @@ impl PaneModes {
         if self.bracket_paste {
             s.push_str("\x1b[?2004h");
         }
-        if self.mouse_standard {
-            s.push_str("\x1b[?1000h");
-        }
+        // Mouse tracking is one protocol slot in tmux's own model:
+        // `mouse_button`/`mouse_standard`/`mouse_all` are mutually
+        // exclusive by construction (verified empirically, tmux 3.7b —
+        // each of `?1000h`/`?1002h`/`?1003h` sent alone sets exactly one
+        // of the three), so at most one `if` below ever fires. The
+        // `else if` chain is belt-and-suspenders against an impossible
+        // mixed capture, not load-bearing precedence logic; kept anyway
+        // because "at most one" is an invariant of tmux's behavior, not
+        // of Rust's type system, and a defensive shape costs nothing here.
+        //
+        // Historical note: an earlier version of this struct captured
+        // `#{mouse_any_flag}` instead of `#{mouse_all_flag}` for this
+        // field, on the mistaken belief that "any" meant "DECSET 1003".
+        // It does not — `mouse_any_flag` is an UMBRELLA bit that reads 1
+        // whenever `mouse_button` OR `mouse_standard` does too, so restoring
+        // it as if it meant 1003 silently re-asserted any-event tracking on
+        // EVERY reattach, regardless of what the pane's application had
+        // actually requested (caught by `mouse-modes.spec.ts`'s
+        // `mouse-modes-restored-on-reattach`, PLAN_M6_5.md item 2: a plain
+        // `?1000h` pane came back from a detach/reattach cycle reporting
+        // motion the agent never asked for). `#{mouse_all_flag}` is the
+        // field tmux dedicates to 1003 specifically — use that one here,
+        // never `mouse_any_flag`.
         if self.mouse_button {
             s.push_str("\x1b[?1002h");
-        }
-        if self.mouse_any {
+        } else if self.mouse_standard {
+            s.push_str("\x1b[?1000h");
+        } else if self.mouse_all {
             s.push_str("\x1b[?1003h");
         }
         if self.mouse_sgr {
@@ -4843,6 +4872,53 @@ mod tests {
                 "{fields} did not restore {expected:?}: {output:?}"
             );
         }
+    }
+
+    /// One DECSET code per real tmux state, with the OTHER two mouse
+    /// codes asserted absent per case — that absence check is what
+    /// catches a reversion to additive (independent `if`-per-flag)
+    /// emission, which would satisfy a presence-only assertion just fine
+    /// (see `post_content_sequences`'s historical note).
+    #[test]
+    fn pane_modes_selects_one_mouse_protocol() {
+        // fields: (mouse_all, mouse_button, mouse_standard). expected:
+        // the one DECSET code that must appear; the other two mouse
+        // codes must not.
+        let cases: [(&str, &str, [&str; 2]); 3] = [
+            ("0,0,1", "\x1b[?1000h", ["\x1b[?1002h", "\x1b[?1003h"]), // standard-only
+            ("0,1,0", "\x1b[?1002h", ["\x1b[?1000h", "\x1b[?1003h"]), // button-only
+            ("1,0,0", "\x1b[?1003h", ["\x1b[?1000h", "\x1b[?1002h"]), // all-only
+        ];
+        for (mouse_fields, expected, absent) in cases {
+            let fields = format!("0,0,{mouse_fields},0,1,0,0,0");
+            let output = PaneModes::parse(&fields).post_content_sequences();
+            assert!(
+                output.contains(expected),
+                "{fields}: missing {expected:?} in {output:?}"
+            );
+            for code in absent {
+                assert!(
+                    !output.contains(code),
+                    "{fields}: wrongly also emitted {code:?} in {output:?}"
+                );
+            }
+        }
+
+        // None set: no mouse DECSET code at all.
+        let none = PaneModes::parse("0,0,0,0,0,0,1,0,0,0").post_content_sequences();
+        for code in ["\x1b[?1000h", "\x1b[?1002h", "\x1b[?1003h"] {
+            assert!(
+                !none.contains(code),
+                "no mouse flag set but emitted {code:?}: {none:?}"
+            );
+        }
+
+        // SGR is an independent encoding bit, not a fourth protocol
+        // state: it rides along with whichever protocol was selected.
+        let standard_plus_sgr = PaneModes::parse("0,0,0,0,1,1,1,0,0,0").post_content_sequences();
+        assert!(standard_plus_sgr.contains("\x1b[?1000h"));
+        assert!(standard_plus_sgr.contains("\x1b[?1006h"));
+        assert!(!standard_plus_sgr.contains("\x1b[?1003h"));
     }
 
     /// A pane on the normal screen must not emit the alt-screen switch —
