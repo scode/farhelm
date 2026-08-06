@@ -6,40 +6,49 @@
 //! handler owns exactly the connection-local state its message can
 //! mutate and otherwise leans on `Supervisor` methods (`service::core`)
 //! and the other `service` submodules for everything else.
+//!
+//! `handle_control` receives that connection-local state as one
+//! [`ConnectionCtx`] and hands each arm only the fields its message may
+//! touch — the bundle stops here deliberately, so a handler's signature
+//! still says what it is allowed to reach. The heavier arms delegate
+//! their substance too: `ListSessions` to `listing::list_page` and
+//! `DeleteSession` to `Supervisor::teardown_session`, leaving the handler
+//! with validation on the way in and reply shaping on the way out.
 
 use super::connection::{
-    Forwarder, notify_detached, reply_frame, send_reply, set_attachment_paused, spawn_admitted,
+    ConnectionCtx, Forwarder, notify_detached, reply_frame, send_reply, set_attachment_paused,
+    spawn_admitted,
 };
 use super::core::{
-    CreateInputs, LIST_BYTE_BUDGET, LIST_SESSION_CAP, SessionEntry, Supervisor, build_list_reply,
-    create_fingerprint, dead_pane_exit_code, decode_list_cursor, ensure_title_printable,
-    entry_info, error_kind, list_order_key, observation, truncate_for_error,
+    CreateInputs, SessionEntry, Supervisor, create_fingerprint, ensure_title_printable, error_kind,
+    truncate_for_error,
 };
 use super::launch_artifacts::{
-    cleanup_launch_artifacts, read_launch_sentinel, remove_fail_closed,
-    remove_launch_artifacts_for_session, sentinel_could_still_apply, wrapper_failure_detail,
+    cleanup_launch_artifacts, read_launch_sentinel, sentinel_could_still_apply,
+    wrapper_failure_detail,
 };
-use super::snapshots::{
-    capture_alt_screen_before_stop, publish_alt_screen_snapshot, snapshot_path,
+use super::listing::{
+    LIST_BYTE_BUDGET, LIST_SESSION_CAP, ListQuery, build_list_reply, decode_list_cursor, list_page,
 };
+use super::snapshots::{capture_alt_screen_before_stop, publish_alt_screen_snapshot};
+use super::status::{dead_pane_exit_code, entry_info, observe_entry};
 use super::sweep::{StopFailure, SweepTarget, reap_process_tree, stop_live_agent};
+use super::teardown::TeardownError;
 use super::terminals::{
     ActiveAttach, AttachmentKey, DETACH_REASON_REPLACED, DETACH_REASON_TAKEOVER, InputRoute,
     MAX_LEASE_BYTES, Terminal, TerminalId, displaced_by_attach, resolve_terminal,
 };
 use super::uploads::{
     MAX_UPLOADS_PER_CONNECTION, UPLOAD_CHUNK_QUEUE, UPLOAD_SIGNAL_QUEUE, UploadCommand,
-    UploadHandle, UploadOutcome, UploadRequest, UploadRoute, UploadSignal, abort_session_uploads,
-    commit_without_upload, run_upload,
+    UploadHandle, UploadOutcome, UploadRequest, UploadRoute, UploadSignal, commit_without_upload,
+    run_upload,
 };
 use crate::store::{IntentClaim, LastOutcome, Transition};
-use crate::tmux::PaneState;
 use anyhow::Context;
 use farhelm_proto::{
     AgentKind, ControlMsg, ErrorKind, Frame, RestartMode, SessionInfo, TerminalSelector,
 };
 use std::collections::HashMap;
-use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
 use tokio::sync::{mpsc, oneshot, watch};
@@ -206,141 +215,6 @@ async fn handle_create_session(
             .await;
         }
     }
-}
-
-/// What one pre-reply observation of a session concluded — the
-/// per-entry half of a `ListSessions` pass, hoisted out so a
-/// single-session reply can reach the same conclusions (PLAN_M5.md
-/// item 3's `SessionRenamed`, whose `SessionInfo` must be built the
-/// way a list builds one).
-struct EntryObservation {
-    /// A launch-sentinel or wrapper-failure detail found for this
-    /// entry NOW. Outranks whatever `session_status` would compute,
-    /// whether or not the matching transition also commits — see
-    /// [`entry_info`]'s `sentinel` parameter.
-    sentinel: Option<String>,
-    /// The transition this observation wants committed, or `None`
-    /// when nothing changed or this supervisor may not record.
-    transition: Option<Transition>,
-    /// This entry is ALREADY durably `Error`: there is nothing left to
-    /// witness, and its launch artifacts are due for the idempotent
-    /// cleanup a crash between an earlier commit and its cleanup can
-    /// leave behind.
-    settled_error: bool,
-}
-
-/// Look at one entry the way a `ListSessions` pass looks at it:
-/// classify what its pane and launch artifacts say, without
-/// committing anything.
-///
-/// Extracted from that pass rather than reimplemented, and shared
-/// with it, because the precedence here is subtle and duplicating it
-/// would eventually mean two different answers to "what happened to
-/// this session" depending on which request asked. The order is
-/// itself the contract (PLAN_M3.md items 2, 3 and 4): an entry
-/// already durably `Error` is settled; otherwise a launch sentinel —
-/// or the wrapper-failure shape that stands in for one — outranks
-/// every inference, because a failed exec leaves an ordinary dead
-/// pane that no probe can tell from a command that ran and finished;
-/// only then does the plain pane observation apply.
-///
-/// Deliberately does NOT commit: the list pass batches every entry's
-/// transition into ONE transaction, and taking that apart per entry
-/// would turn one poll into a write per session. Callers commit what
-/// they collect (`SessionStore::transition_many`) and then mirror
-/// what it reports.
-///
-/// An unreadable sentinel is an `Err`, never a fall-through: basing a
-/// reply on an inference the unreadable file might contradict is
-/// exactly the silent-wrong-answer this refuses to give. The error
-/// already names the session, so callers report it verbatim.
-async fn observe_entry(
-    sup: &Arc<Supervisor>,
-    entry: &Arc<SessionEntry>,
-    pane_states: &HashMap<String, PaneState>,
-) -> anyhow::Result<EntryObservation> {
-    let recorded = entry
-        .outcome
-        .lock()
-        .expect("outcome mutex poisoned")
-        .clone();
-    // Borrowed out of the caller's map rather than cloned: this runs once
-    // per entry on the polling path, and the pane state is only ever read.
-    let live: Option<&PaneState> = entry.terminal.as_ref().and_then(|terminal| {
-        pane_states
-            .get(&terminal.pane)
-            .filter(|state| state.session_name == terminal.tmux_name)
-    });
-    // Two different questions, deliberately not one: "no live
-    // process" (which a sentinel check needs) and "a pane that
-    // EXISTS and is dead" (which the wrapper-failure classifier
-    // needs — see its docs for why an absent pane must not qualify).
-    let dead_or_absent = live.is_none_or(|state| state.dead);
-    let pane_dead = live.is_some_and(|state| state.dead);
-
-    if matches!(recorded, LastOutcome::Error { .. }) {
-        return Ok(EntryObservation {
-            sentinel: None,
-            transition: None,
-            settled_error: true,
-        });
-    }
-
-    // A sentinel is READ regardless of whether this supervisor
-    // `may_record()` (item 2 of the review-swarm fix batch): a
-    // degraded supervisor still has standing to REPORT what it can
-    // read, even though it must not WRITE a conclusion it has no
-    // standing to store — which is why `sentinel` and `transition`
-    // below are set independently.
-    if sentinel_could_still_apply(&recorded) && dead_or_absent {
-        let found = read_launch_sentinel(&sup.state_dir, &entry.info.id, entry.generation)
-            .await
-            .with_context(|| {
-                format!("could not read session {}'s launch sentinel", entry.info.id)
-            })?;
-        let detail = match found {
-            Some(detail) => Some(detail),
-            // The wrapper-failure shape: no sentinel, a pane that is
-            // present and dead, and a launch spec nothing consumed.
-            None => {
-                wrapper_failure_detail(
-                    &sup.state_dir,
-                    &entry.info.id,
-                    entry.generation,
-                    entry.scope.is_some(),
-                    pane_dead,
-                )
-                .await
-            }
-        };
-        if let Some(detail) = detail {
-            // No pane to rediscover here (unlike `reload_sessions`'s
-            // by-name search): callers only visit sessions this
-            // process already tracks a `Terminal` for or explicitly
-            // does not, so there is nothing new for this transition
-            // to record beyond the outcome itself.
-            let transition = sup.may_record().then(|| Transition::SentinelError {
-                detail: detail.clone(),
-                pane: None,
-            });
-            return Ok(EntryObservation {
-                sentinel: Some(detail),
-                transition,
-                settled_error: false,
-            });
-        }
-    }
-
-    let transition = if sup.may_record() {
-        observation(&recorded, live)
-    } else {
-        None
-    };
-    Ok(EntryObservation {
-        sentinel: None,
-        transition,
-        settled_error: false,
-    })
 }
 
 /// One session's `SessionInfo` for a single-session reply, observed
@@ -552,241 +426,34 @@ async fn handle_list_sessions(
     let tx = tx.clone();
     spawn_admitted(&sup.admission, tasks, async move {
         let sup = sup2;
-        // `total` is captured, and the page sliced out, BEFORE a single
-        // entry is cloned further or status-annotated: cloning the WHOLE
-        // map (an `Arc` bump per entry, cheap — session counts are small
-        // enough that sorting a snapshot per request needs no index) is
-        // fine, but the PER-ENTRY status computation just below is not
-        // free, and doing it for entries outside this page wastes work
-        // proportional to however many sessions exist beyond one page.
-        //
-        // The lock's own critical section is just the snapshot — clone
-        // every `Arc<SessionEntry>` and read `total` — nothing more:
-        // sorting and partitioning the clone happen AFTER the guard drops,
-        // so a request sorting however many thousand entries never holds
-        // `sup.sessions` (and therefore blocks every OTHER connection's
-        // create/list/stop/delete) for the duration. Still no index over
-        // the map — PLAN_M6.md's "Pagination shape" explicitly rejects
-        // one, since session counts stay small enough that sorting a
-        // snapshot per request is cheaper than the bookkeeping an index
-        // would cost on every create and delete.
-        let (ordered, total): (Vec<Arc<SessionEntry>>, u64) = {
-            let sessions = sup.sessions.lock().await;
-            (sessions.values().cloned().collect(), sessions.len() as u64)
-        };
-        let (entries, more_beyond_page): (Vec<Arc<SessionEntry>>, bool) = {
-            let mut ordered = ordered;
-            ordered.sort_by(|a, b| list_order_key(&a.info).cmp(&list_order_key(&b.info)));
-            // `partition_point` is valid here because `ordered` is sorted
-            // by the SAME key the predicate compares against: "at or
-            // before the cursor" is true for a prefix and false
-            // afterward, so its boundary is exactly the first entry
-            // strictly after the cursor — resuming, never re-serving.
-            let start = match &cursor_key {
-                Some(key) => {
-                    let key = (std::cmp::Reverse(key.created_at), key.id.as_str());
-                    ordered.partition_point(|e| list_order_key(&e.info) <= key)
-                }
-                None => 0,
-            };
-            let remaining = ordered.len() - start;
-            let take_n = effective_limit.min(remaining);
-            let page: Vec<Arc<SessionEntry>> = ordered[start..start + take_n].to_vec();
-            let more_beyond_page = start + take_n < ordered.len();
-            (page, more_beyond_page)
-        };
-        // Before the reply is computed, so an identity claimed on
-        // this very pass is reflected in the `restart_offer` it
-        // carries rather than only in the next poll's. Cheap by
-        // construction for the steady state (see `capture_pass`'s
-        // cost envelope), single-flight, and over EVERY session
-        // rather than this reply's capped subset — see
-        // `Supervisor::capture_now` for why the cap must not bind
-        // the ambiguity rule.
-        //
-        // Note for whoever lands PLAN_M6.md item 5's helm-side drain loop:
-        // this sweep runs PER PAGE, not once per `ListSessions` walk — a
-        // caller paging through N pages to see the whole session set pays
-        // N whole-host capture sweeps, not one. Harmless today (nothing
-        // walks multiple pages in a tight loop), but the drain loop is
-        // exactly the caller that would, so its design needs to account
-        // for that multiplication rather than assume one sweep per walk.
-        sup.capture_now().await;
-        // ONE query for every session's liveness, not one per
-        // session (`TmuxDriver::pane_states`'s own docs on why
-        // that multiplies subprocess spawns under a polling UI) —
-        // and skipped altogether when it could not possibly
-        // change the answer: a terminal-less entry is decided
-        // entirely by its recorded outcome (`session_status` never
-        // consults the map for one), so a capped subset that is
-        // ALL terminal-less (including the empty list) is fully
-        // decidable without asking tmux anything. This matters
-        // beyond just saving a subprocess spawn: it is what keeps
-        // an authoritative "every session is a restart gap" (or
-        // simply empty) listing from being turned into a spurious
-        // `Internal` error by a private tmux server that happens
-        // to ALSO be down for an unrelated reason.
-        let pane_states = if entries.iter().any(|entry| entry.terminal.is_some()) {
-            match sup.tmux.pane_states().await {
-                Ok(states) => states,
-                // Reached only for a genuinely UNCLASSIFIED tmux
-                // failure: `TmuxDriver::pane_states` itself now
-                // tolerates a vanished private tmux server (the
-                // whole reason a dead-tmux-server `ListSessions`
-                // no longer lands here at all — see that method's
-                // own docs for why an empty pane-states map is
-                // honest, not fabricated, in that case).
-                Err(e) => {
-                    send_reply(
-                        &tx,
-                        &ControlMsg::Error {
-                            req_id,
-                            message: format!("{e:#}"),
-                            kind: ErrorKind::Internal,
-                        },
-                    )
-                    .await;
-                    return;
-                }
-            }
-        } else {
-            HashMap::new()
-        };
-        // A list request is one of the places this supervisor
-        // WITNESSES an exit (PLAN_M3.md item 2): the dead pane it
-        // just found may be gone entirely by the next reboot,
-        // taking its exit code with it, so the code is recorded
-        // now — while tmux still has it — rather than recomputed
-        // forever from a fact that expires. Every observation this
-        // pass produces commits in ONE transaction, and the store
-        // decides what each one means (`Transition::apply`), so a
-        // stop running concurrently cannot have its annotation
-        // erased by this list and this list cannot be misled by a
-        // stale reading of its own.
-        // A launch sentinel is READ regardless of whether this
-        // supervisor `may_record()` (item 2 of the review-swarm
-        // fix batch): a degraded supervisor (a handoff candidate,
-        // or one whose boot-id read failed) still has standing to
-        // REPORT what it can read, even though it must not WRITE a
-        // conclusion it has no standing to store — the two halves
-        // below are deliberately independent (`reply_status`
-        // always reflects a sentinel this pass found; only
-        // `observations` is gated on `may_record()`).
-        //
-        // A plain loop, not `observation()`'s pure `filter_map`
-        // closure, because the sentinel check below is real I/O
-        // (`read_launch_sentinel`) and therefore has to run
-        // between two lock scopes rather than inside one
-        // synchronous closure body: PLAN_M3.md item 3 wants the
-        // SAME observation offered here that `reload_sessions`
-        // offers — a non-terminal outcome whose pane is dead or
-        // gone entirely gets its sentinel checked before falling
-        // back to `observation()`'s plain exit inference, because
-        // the sentinel outranks that inference exactly as surely
-        // here as at reload, including (addition 18) for an entry
-        // ALREADY recorded as an inferred `Interrupted` or
-        // unannotated `Exited` — both are themselves only
-        // inferences a sentinel is defined to beat.
-        let mut observations: Vec<(String, i64, Transition)> = Vec::new();
-        // This pass's sentinel finds, id to detail — used both to
-        // gate post-commit file cleanup on the transition actually
-        // landing, and (`reply_status`, below) to surface the
-        // Error for THIS reply even when it could not be
-        // committed durably this pass (`may_record()` false, or
-        // the commit itself fails) — PLAN_M3.md item 3's
-        // write-inability note: retain the file, retry
-        // persistence on a later poll, but never let the reply
-        // itself regress to a stale `Exited` in the meantime.
-        let mut sentinel_hits: HashMap<String, String> = HashMap::new();
-        for entry in &entries {
-            let observed = match observe_entry(&sup, entry, &pane_states).await {
-                Ok(observed) => observed,
-                // Loud propagation, not fall-through (item 1): the
-                // WHOLE request fails rather than silently basing
-                // this — or any other — entry's reply on an
-                // inference the unreadable sentinel might
-                // contradict. Nothing gathered so far this pass is
-                // committed: this `return` happens before
-                // `transition_many` is ever called.
-                Err(e) => {
-                    send_reply(
-                        &tx,
-                        &ControlMsg::Error {
-                            req_id,
-                            message: format!("{e:#}"),
-                            kind: ErrorKind::Internal,
-                        },
-                    )
-                    .await;
-                    return;
-                }
-            };
-            if observed.settled_error {
-                cleanup_launch_artifacts(&sup.state_dir, &entry.info.id, entry.generation).await;
-                continue;
-            }
-            if let Some(detail) = observed.sentinel {
-                sentinel_hits.insert(entry.info.id.clone(), detail);
-            }
-            if let Some(transition) = observed.transition {
-                observations.push((entry.info.id.clone(), entry.generation, transition));
-            }
-        }
-        if !observations.is_empty() {
-            match sup.store.transition_many(observations).await {
-                Ok(committed) => {
-                    for entry in &entries {
-                        if let Some(outcome) = committed.get(&entry.info.id) {
-                            *entry.outcome.lock().expect("outcome mutex poisoned") =
-                                outcome.clone();
-                        }
-                    }
-                    // Cleanup folded into this successful arm
-                    // (item 7), not a separate loop afterward: see
-                    // `reload_sessions`'s identical step for the
-                    // full lifecycle rationale (both files are
-                    // cosmetic once the durable outcome already
-                    // says what happened; a failed write must
-                    // leave them for the next pass to retry
-                    // against, hence gating on `committed` here
-                    // rather than on `sentinel_hits` alone).
-                    for entry in &entries {
-                        if sentinel_hits.contains_key(&entry.info.id)
-                            && matches!(
-                                committed.get(&entry.info.id),
-                                Some(LastOutcome::Error { .. })
-                            )
-                        {
-                            cleanup_launch_artifacts(
-                                &sup.state_dir,
-                                &entry.info.id,
-                                entry.generation,
-                            )
-                            .await;
-                        }
-                    }
-                }
-                // Logged, not fatal: the reply below is computed
-                // from what this pass OBSERVED plus what is
-                // durably recorded, both of which are still honest
-                // when the write fails — and the next list retries.
-                Err(e) => warn!(
-                    error = %format!("{e:#}"),
-                    "could not record observed session outcomes; \
-                     the next list will retry"
-                ),
-            }
-        }
-        let sessions: Vec<SessionInfo> = entries
-            .iter()
-            .map(|entry| {
-                entry_info(
-                    entry,
-                    &pane_states,
-                    sentinel_hits.get(&entry.info.id).map(String::as_str),
+        let page = match list_page(
+            &sup,
+            ListQuery {
+                cursor: cursor_key,
+                limit: effective_limit,
+            },
+        )
+        .await
+        {
+            Ok(page) => page,
+            // Every failure the walk can hit — an unreadable launch
+            // sentinel, an unclassified tmux failure — is an `Internal`
+            // carrying the original error verbatim: see `list_page`'s own
+            // docs for why each of them fails the whole request rather
+            // than degrading one entry.
+            Err(e) => {
+                send_reply(
+                    &tx,
+                    &ControlMsg::Error {
+                        req_id,
+                        message: format!("{e:#}"),
+                        kind: ErrorKind::Internal,
+                    },
                 )
-            })
-            .collect();
+                .await;
+                return;
+            }
+        };
         // `Err` is `build_list_reply`'s degenerate-budget case (Theme B of
         // the M6.75 review-swarm batch): the byte budget kept ZERO
         // entries while at least one candidate remained, so there is no
@@ -795,18 +462,23 @@ async fn handle_list_sessions(
         // caller (a human, in practice — no client is expected to react
         // programmatically to a page-shaped answer becoming impossible)
         // can tell which record is the problem.
-        let reply =
-            match build_list_reply(req_id, sessions, total, LIST_BYTE_BUDGET, more_beyond_page) {
-                Ok(reply) => reply,
-                Err(unfit_id) => ControlMsg::Error {
-                    req_id,
-                    message: format!(
-                        "session {unfit_id} does not fit in a ListSessions reply even alone \
+        let reply = match build_list_reply(
+            req_id,
+            page.sessions,
+            page.total,
+            LIST_BYTE_BUDGET,
+            page.more_beyond_page,
+        ) {
+            Ok(reply) => reply,
+            Err(unfit_id) => ControlMsg::Error {
+                req_id,
+                message: format!(
+                    "session {unfit_id} does not fit in a ListSessions reply even alone \
                      ({LIST_BYTE_BUDGET}-byte budget); the page cannot be represented"
-                    ),
-                    kind: ErrorKind::Internal,
-                },
-            };
+                ),
+                kind: ErrorKind::Internal,
+            },
+        };
         send_reply(&tx, &reply).await;
     })
     .await;
@@ -1149,9 +821,10 @@ async fn handle_stop_session(
 /// same reason: everything this handler touches (`sessions`,
 /// `attachments`, `tmux`, `store`) is already designed to
 /// tolerate concurrent requests interleaving (see the
-/// `Supervisor` struct's lock-discipline docs, and this handler's
-/// own existing comments on why the sweep runs before any lock
-/// is held at all). Tracked and admitted exactly like
+/// `Supervisor` struct's lock-discipline docs, and
+/// `Supervisor::teardown_session`'s own comments on why the
+/// sweep runs before any lock is held at all). Tracked and
+/// admitted exactly like
 /// `ListSessions` above — see
 /// `HANDLER_ADMISSION_PERMITS`/`HANDLER_SHUTDOWN_TIMEOUT`.
 async fn handle_delete_session(
@@ -1189,338 +862,42 @@ async fn handle_delete_session(
             return;
         };
 
-        // In-flight uploads are cancelled FIRST — before the
-        // process sweep, not after it. The sweep is where a delete
-        // spends its seconds (a grace period plus several /proc
-        // walks), and a transfer left running through it goes on
-        // writing into the directory this delete is about to take
-        // away, for as long as the sweep lasts. Cancelling first
-        // costs nothing (the transfer is doomed either way) and
-        // bounds those writes to the instant it takes each task to
-        // notice.
+        // The teardown owns everything the delete DOES, including the
+        // detach notices its aborted forwarders leave owing (they have to
+        // be enqueued under the attachment lock — see that module's own
+        // docs). All that is left here is the reply.
         //
-        // `abort_session_uploads` also WAITS for each task to
-        // finish cleaning up, so from here on nothing can write
-        // into (or publish into) that directory, and the lifecycle
-        // claim this handler has held since its first line keeps a
-        // new transfer from staging into it (see `stage_upload`).
-        abort_session_uploads(&sup, &session_id, "the session was deleted").await;
-
-        // The process-tree sweep runs BEFORE any lock is held: it can
-        // take seconds (a grace period plus several /proc walks), and
-        // holding `attachments` for that long would stall every OTHER
-        // session's attach/input behind one slow delete — the map-
-        // wide mutex's already-documented coarseness (see the
-        // `Supervisor` struct's lock-discipline docs) made worse if a
-        // multi-second sweep sat inside it. A concurrent Attach can
-        // therefore install a fresh attachment WHILE this runs; the
-        // lock-held phase below tears down WHATEVER attachment exists
-        // by the time it runs, new or old, and gives it the deleted
-        // notice — that is the one acceptable consequence of not
-        // holding the lock here, not an oversight.
-        //
-        // Same dead/absent/terminal-less handling as `StopSession`:
-        // the marker sweep still runs even with no live pane pid, for
-        // the same leftover-reaping reason documented there.
-        let root_pid = match entry.terminal.as_ref() {
-            Some(terminal) => match sup
-                .tmux
-                .pane_process(&terminal.tmux_name, &terminal.pane)
-                .await
-            {
-                Ok(Some(pane)) if !pane.dead => Some(pane.pid),
-                Ok(_) => None,
-                Err(e) => {
-                    send_reply(
-                        &tx,
-                        &ControlMsg::Error {
-                            req_id,
-                            message: format!("querying pane process: {e:#}"),
-                            kind: ErrorKind::Internal,
-                        },
-                    )
-                    .await;
-                    return;
-                }
-            },
-            None => None,
-        };
-        // `WholeSession`: delete is the one lifecycle operation
-        // that takes tabs down with the agent (SPEC.md — stop
-        // leaves them running, delete and archive do not), so this
-        // sweep deliberately does NOT subtract tab processes. It
-        // needs no per-tab PPID root either: a tab's shell carries
-        // the session marker like everything else the session
-        // launched, and the marker scan finds it wherever it is.
-        // (Rediscovery below only needs the tab's WINDOW, which
-        // survives whether or not its shell already exited —
-        // `remain-on-exit` keeps a dead pane's window listed — so
-        // "the tmux teardown has not run yet" is what matters
-        // here, not that any pane is still alive.)
-        //
-        // Every tab's SCOPE, however, does have to be named: a
-        // cgroup kill can only reach what its own `systemd-run`
-        // placed there, so the agent's unit alone would leave a
-        // tab's environment-scrubbing double-fork behind — the one
-        // shape the marker sweep provably cannot find.
-        //
-        // Named from TWO independent sources, and the second is
-        // the load-bearing one. Rediscovering tabs from tmux
-        // covers the ordinary case, but the case that matters here
-        // is a tmux server that died BEFORE the delete: there are
-        // no windows left to read tab ids from, while a scrubbed
-        // tab daemon is still running inside a cgroup that
-        // outlived its pane. So the manager is also asked directly
-        // for every unit matching this session's tab glob, which
-        // needs no tmux at all. A failure to ENUMERATE fails the
-        // delete outright, row retained: publishing "deleted" over
-        // an unenumerated cgroup is exactly the unreapable,
-        // invisible agent lore/2026-07-27-m2-process-tree-stop.md
-        // ends on.
-        let mut units = entry.scope.clone().into_iter().collect::<Vec<_>>();
-        if let Some(terminal) = entry.terminal.as_ref() {
-            match sup.session_tabs(terminal).await {
-                Ok(tabs) => units.extend(
-                    tabs.iter()
-                        .filter_map(|tab| {
-                            crate::scope::tab_unit_name(&session_id, &tab.id)
-                        }),
+        // Errors are mapped back one for one onto what each failure site
+        // used to send inline, so the wire text is unchanged by the
+        // teardown living elsewhere. Every one of them is fail-closed —
+        // the row is retained for a retry — which is why they are all
+        // `Internal` rather than anything a caller could act on
+        // differently.
+        if let Err(e) = sup.teardown_session(&entry, &session_id).await {
+            let message = match e {
+                TeardownError::PaneProbe(e) => format!("querying pane process: {e:#}"),
+                TeardownError::TabRediscovery(e) => format!(
+                    "could not determine this session's terminal tabs, so                                          nothing was deleted: {e:#}"
                 ),
-                // Strict: "we could not ask tmux" is not "there
-                // are no tabs", and a delete that assumed the
-                // latter would skip live tab scopes.
-                Err(e) => {
-                    send_reply(
-                        &tx,
-                        &ControlMsg::Error {
-                            req_id,
-                            message: format!(
-                                "could not determine this session's terminal tabs, so                                          nothing was deleted: {e:#}"
-                            ),
-                            kind: ErrorKind::Internal,
-                        },
-                    )
-                    .await;
-                    return;
-                }
-            }
-        }
-        if let Some(glob) = crate::scope::tab_unit_glob(&session_id) {
-            match sup.seams.scopes.units_matching(&glob).await {
-                Ok(found) => units.extend(found),
-                // Only a host with a usable manager can be asked at
-                // all; where there is none this is not a failure,
-                // it is the sweep-only world M2 already lived in.
-                Err(e) if !sup.seams.scopes.available().await => debug!(
-                    session = %session_id, error = %format!("{e:#}"),
-                    "no systemd user manager to enumerate this session's tab scopes;                              the process-tree sweep is the whole mechanism"
+                TeardownError::TabScopeEnumeration(e) => format!(
+                    "this host has a systemd user manager but its terminal-\
+                     tab scopes could not be enumerated, so nothing was \
+                     deleted: {e:#}"
                 ),
-                Err(e) => {
-                    send_reply(
-                        &tx,
-                        &ControlMsg::Error {
-                            req_id,
-                            message: format!(
-                                "this host has a systemd user manager but its terminal-\
-                                 tab scopes could not be enumerated, so nothing was \
-                                 deleted: {e:#}"
-                            ),
-                            kind: ErrorKind::Internal,
-                        },
-                    )
-                    .await;
-                    return;
-                }
-            }
-        }
-        units.sort();
-        units.dedup();
-        if let Err(e) = reap_process_tree(
-            &sup.seams.scopes,
-            &units,
-            root_pid,
-            &session_id,
-            &SweepTarget::WholeSession,
-        )
-        .await
-        {
+                TeardownError::Sweep(e) => format!("killing process tree: {e:#}"),
+                TeardownError::FailClosed(message) => message,
+            };
             send_reply(
                 &tx,
                 &ControlMsg::Error {
                     req_id,
-                    message: format!("killing process tree: {e:#}"),
+                    message,
                     kind: ErrorKind::Internal,
                 },
             )
             .await;
             return;
         }
-
-        // Everything from here on is fast (one tmux round trip, a
-        // few fail-closed removals, one sqlite
-        // write) and runs under `attachments`, mirroring the Attach
-        // handler's takeover for the same reason: a concurrent Attach
-        // must not be able to install itself mid-teardown. This is
-        // also the one path that acquires BOTH locks at once — `map
-        // removal` below briefly takes `sessions` too, while still
-        // holding `attachments` — which is the ordering rule this
-        // establishes and the only one that needs to exist as long as
-        // nothing else ever needs both: `attachments` first,
-        // `sessions` second.
-        let mut attachments = sup.attachments.lock().await;
-        // EVERY terminal of the session, not just the agent's: a
-        // delete takes the whole session down, so every channel it
-        // has attached is about to be streaming something that no
-        // longer exists (PLAN_M4.md item 3's session-scoped
-        // ownership, on the teardown side). Restart is the
-        // deliberate contrast — see `detach_for_restart`.
-        //
-        // Abort the forwarders now, before they can race their own
-        // natural "session terminal ended" Detached against whatever
-        // truthful notice this handler sends once the real outcome
-        // below is known — but do not send that notice yet.
-        //
-        // ALL of them are aborted before ANY is awaited, exactly as
-        // the attach takeover does it: the awaits are sequential, so
-        // aborting inside the same loop would leave the later
-        // forwarders streaming (and able to emit their own detach)
-        // while the earlier ones are already gone.
-        let doomed: Vec<ActiveAttach> = attachments
-            .extract_if(|key, _| key.session == session_id)
-            .map(|(_, attachment)| attachment)
-            .collect();
-        for old in &doomed {
-            old.forwarder.abort();
-        }
-        let mut notify_detach = Vec::with_capacity(doomed.len());
-        // `..` drops each attachment's input client — killing its
-        // control-mode process via `kill_on_drop`, like every other
-        // teardown path — and its pause sender, which the aborted
-        // forwarder can no longer observe anyway.
-        for ActiveAttach {
-            channel,
-            notify,
-            forwarder,
-            ..
-        } in doomed
-        {
-            let _ = forwarder.await;
-            notify_detach.push((channel, notify));
-        }
-
-        // Fail-closed and sequenced deliberately: artifacts before the
-        // DB row (a leftover launch spec may hold credentials, and
-        // this is the last moment anything will ever come back to
-        // remove it — see `remove_fail_closed`'s docs), and the row
-        // only after the terminal and process tree are positively
-        // gone (a crash here leaves a listed-but-dead session,
-        // recoverable by the next delete or a manual cleanup, rather
-        // than an unlisted-but-running agent, invisible and
-        // unreapable — see lore/2026-07-27-m2-process-tree-stop.md's
-        // final paragraph). One `Result`-returning block with `?`
-        // rather than a hand-threaded `teardown_error` variable, now
-        // that none of these steps need to happen outside the lock.
-        // Where this session's attachments were parked, if it had
-        // any: filled in by the block below and discarded only
-        // once the row removal has committed (see the
-        // quarantining step's own comment).
-        let mut quarantined: Option<PathBuf> = None;
-        let teardown: Result<(), String> = async {
-            if let Some(terminal) = entry.terminal.as_ref() {
-                sup.tmux
-                    .kill_session(&terminal.tmux_name)
-                    .await
-                    .map_err(|e| format!("killing tmux session: {e:#}"))?;
-            }
-            // EVERY generation's launch files, not just the current
-            // one: they are named per launch now
-            // (`launch::spec_path_for_launch`), and a session that
-            // was restarted has one pair per launch it ever had.
-            // Delete is the last moment anything comes back for
-            // them, and a spec holds the agent's full command line
-            // — credentials included — so a missed generation is a
-            // credential leak, not untidiness. Fail-closed for that
-            // reason (`remove_fail_closed`), including the failure
-            // to LIST them: an unreadable directory is not evidence
-            // there was nothing in it.
-            remove_launch_artifacts_for_session(&sup.state_dir, &session_id).await?;
-            // Same fail-closed treatment as the launch artifacts
-            // above and for the same reason: the snapshot can hold
-            // secrets an agent echoed to an alt-screen app, and
-            // delete is the last moment anything will ever come
-            // back to remove it.
-            remove_fail_closed(
-                &snapshot_path(&sup.state_dir, &session_id),
-                "alt-screen snapshot",
-            )
-            .await?;
-            // SPEC.md: "attachment files are removed when their
-            // session is deleted". DETACHED here (an atomic
-            // rename into the reserved quarantine directory) and
-            // actually removed after the row is gone, which is
-            // what makes the crash window safe in the right
-            // direction: this step still fails the delete closed
-            // — with the row retained for a retry — while a crash
-            // between it and the commit leaves debris the next
-            // startup reconciles rather than a live session whose
-            // attachments have silently vanished.
-            //
-            // Nothing recreates the directory afterwards: every
-            // in-flight transfer was cancelled and joined above,
-            // and a new one cannot start while this handler holds
-            // the session's lifecycle claim.
-            quarantined =
-                crate::attachments::quarantine_session_dir(&sup.state_dir, &session_id)
-                    .await?;
-            // Settles this session's create reservations in the
-            // same transaction as the row removal, which is what
-            // turns them into TOMBSTONES rather than stale claims:
-            // a replay of one of those intent keys must report the
-            // gone-error, never a dead id and never a fresh
-            // duplicate (PLAN_M3.md item 6; the store method's own
-            // docs carry the argument).
-            sup.store
-                .delete_session_settling_reservations(&session_id)
-                .await
-                .map_err(|e| format!("{e:#}"))
-        }
-        .await;
-
-        if let Err(err_msg) = teardown {
-            for (channel, notify) in &notify_detach {
-                notify_detached(
-                    notify,
-                    *channel,
-                    format!("detached during a failed delete: {err_msg}"),
-                );
-            }
-            drop(attachments);
-            send_reply(
-                &tx,
-                &ControlMsg::Error {
-                    req_id,
-                    message: err_msg,
-                    kind: ErrorKind::Internal,
-                },
-            )
-            .await;
-            return;
-        }
-        sup.sessions.lock().await.remove(&session_id);
-        // The row is gone, so the quarantined attachments now
-        // belong to nothing and can be removed for real. Failure
-        // here is logged rather than reported: there is no row
-        // left to retain for a retry, the caller's delete
-        // genuinely succeeded, and the next startup reconciles
-        // whatever is left.
-        if let Some(parked) = quarantined {
-            crate::attachments::discard_quarantined(&parked).await;
-        }
-
-        for (channel, notify) in &notify_detach {
-            notify_detached(notify, *channel, "session deleted".to_string());
-        }
-        drop(attachments);
         send_reply(&tx, &ControlMsg::SessionDeleted { req_id }).await;
     })
     .await;
@@ -2641,20 +2018,15 @@ fn handle_abort_upload(upload_routes: &mut HashMap<u32, UploadRoute>, channel: u
 /// helm is driving, so request-local failure cannot be allowed to detach
 /// unrelated terminals.
 ///
-/// `tx` doubles as this connection's identity: `same_channel` against it
-/// is how the handlers tell "the connection that owns this attachment"
+/// `ctx.tx` doubles as this connection's identity: `same_channel` against
+/// it is how the handlers tell "the connection that owns this attachment"
 /// from any other, which channel ids alone cannot do.
-pub(crate) async fn handle_control(
-    sup: &Arc<Supervisor>,
-    msg: ControlMsg,
-    tx: &mpsc::Sender<Frame>,
-    // This connection's prioritized queue, for the upload family alone —
-    // see `send_upload`.
-    priority: &mpsc::Sender<Frame>,
-    input_routes: &mut HashMap<u32, InputRoute>,
-    upload_routes: &mut HashMap<u32, UploadRoute>,
-    tasks: &mut tokio::task::JoinSet<()>,
-) {
+///
+/// Every connection-local borrow arrives in [`ConnectionCtx`] rather than
+/// as its own parameter; each arm below still hands the per-message
+/// handler only the fields its message may touch. See that struct's docs
+/// for why the bundle stops at this function.
+pub(crate) async fn handle_control(sup: &Arc<Supervisor>, msg: ControlMsg, ctx: ConnectionCtx<'_>) {
     match msg {
         ControlMsg::CreateSession {
             req_id,
@@ -2669,7 +2041,7 @@ pub(crate) async fn handle_control(
         } => {
             handle_create_session(
                 sup,
-                tx,
+                ctx.tx,
                 req_id,
                 cwd,
                 invocation,
@@ -2686,12 +2058,12 @@ pub(crate) async fn handle_control(
             req_id,
             cursor,
             limit,
-        } => handle_list_sessions(sup, tx, tasks, req_id, cursor, limit).await,
+        } => handle_list_sessions(sup, ctx.tx, ctx.tasks, req_id, cursor, limit).await,
         ControlMsg::StopSession { req_id, session_id } => {
-            handle_stop_session(sup, tx, tasks, req_id, session_id).await
+            handle_stop_session(sup, ctx.tx, ctx.tasks, req_id, session_id).await
         }
         ControlMsg::DeleteSession { req_id, session_id } => {
-            handle_delete_session(sup, tx, tasks, req_id, session_id).await
+            handle_delete_session(sup, ctx.tx, ctx.tasks, req_id, session_id).await
         }
         ControlMsg::Attach {
             req_id,
@@ -2705,9 +2077,9 @@ pub(crate) async fn handle_control(
         } => {
             handle_attach(
                 sup,
-                tx,
-                input_routes,
-                upload_routes,
+                ctx.tx,
+                ctx.input_routes,
+                ctx.upload_routes,
                 req_id,
                 session_id,
                 channel,
@@ -2720,18 +2092,31 @@ pub(crate) async fn handle_control(
             .await
         }
         ControlMsg::PauseOutput { channel } => {
-            set_attachment_paused(sup, tx, channel, true).await;
+            set_attachment_paused(sup, ctx.tx, channel, true).await;
         }
         ControlMsg::ResumeOutput { channel } => {
-            set_attachment_paused(sup, tx, channel, false).await;
+            set_attachment_paused(sup, ctx.tx, channel, false).await;
         }
-        ControlMsg::Detach { channel } => handle_detach(sup, tx, input_routes, channel).await,
+        ControlMsg::Detach { channel } => {
+            handle_detach(sup, ctx.tx, ctx.input_routes, channel).await
+        }
         ControlMsg::Resize {
             session_id,
             channel,
             cols,
             rows,
-        } => handle_resize(sup, tx, input_routes, session_id, channel, cols, rows).await,
+        } => {
+            handle_resize(
+                sup,
+                ctx.tx,
+                ctx.input_routes,
+                session_id,
+                channel,
+                cols,
+                rows,
+            )
+            .await
+        }
         ControlMsg::Hello { .. } => {
             // A second hello is a protocol violation; ignore rather than
             // kill the connection over it.
@@ -2742,21 +2127,30 @@ pub(crate) async fn handle_control(
             mode,
             stop_if_running,
         } => {
-            handle_restart_session(sup, tx, tasks, req_id, session_id, mode, stop_if_running).await
+            handle_restart_session(
+                sup,
+                ctx.tx,
+                ctx.tasks,
+                req_id,
+                session_id,
+                mode,
+                stop_if_running,
+            )
+            .await
         }
         ControlMsg::RenameSession {
             req_id,
             session_id,
             title,
-        } => handle_rename_session(sup, tx, tasks, req_id, session_id, title).await,
+        } => handle_rename_session(sup, ctx.tx, ctx.tasks, req_id, session_id, title).await,
         ControlMsg::OpenTab { req_id, session_id } => {
-            handle_open_tab(sup, tx, tasks, req_id, session_id).await
+            handle_open_tab(sup, ctx.tx, ctx.tasks, req_id, session_id).await
         }
         ControlMsg::CloseTab {
             req_id,
             session_id,
             tab_id,
-        } => handle_close_tab(sup, tx, tasks, req_id, session_id, tab_id).await,
+        } => handle_close_tab(sup, ctx.tx, ctx.tasks, req_id, session_id, tab_id).await,
         ControlMsg::BeginUpload {
             req_id,
             session_id,
@@ -2766,10 +2160,10 @@ pub(crate) async fn handle_control(
         } => {
             handle_begin_upload(
                 sup,
-                tx,
-                priority,
-                input_routes,
-                upload_routes,
+                ctx.tx,
+                ctx.priority,
+                ctx.input_routes,
+                ctx.upload_routes,
                 req_id,
                 session_id,
                 channel,
@@ -2779,9 +2173,9 @@ pub(crate) async fn handle_control(
             .await
         }
         ControlMsg::CommitUpload { req_id, channel } => {
-            handle_commit_upload(tx, upload_routes, req_id, channel).await
+            handle_commit_upload(ctx.tx, ctx.upload_routes, req_id, channel).await
         }
-        ControlMsg::AbortUpload { channel } => handle_abort_upload(upload_routes, channel),
+        ControlMsg::AbortUpload { channel } => handle_abort_upload(ctx.upload_routes, channel),
         // Response/event messages arriving at the supervisor are peer
         // bugs; log and continue.
         other => warn!(?other, "unexpected control message at supervisor"),
@@ -2792,7 +2186,8 @@ pub(crate) async fn handle_control(
 mod tests {
     use super::super::connection::CONNECTION_WRITER_QUEUE;
     use super::super::core::tests::{StateDir, dummy_exe, no_uploads};
-    use super::super::core::{CaptureState, FirstInput, encode_list_cursor};
+    use super::super::core::{CaptureState, FirstInput};
+    use super::super::listing::encode_list_cursor;
     use super::super::terminals::Terminal;
     use super::*;
     use crate::agent_kind::IntegrationSnapshot;
@@ -2828,11 +2223,13 @@ mod tests {
                 mode: farhelm_proto::RestartMode::Fresh,
                 stop_if_running: false,
             },
-            &tx,
-            &tx,
-            &mut input_routes,
-            &mut no_uploads(),
-            &mut tasks,
+            ConnectionCtx {
+                tx: &tx,
+                priority: &tx,
+                input_routes: &mut input_routes,
+                upload_routes: &mut no_uploads(),
+                tasks: &mut tasks,
+            },
         )
         .await;
         while tasks.join_next().await.is_some() {}
@@ -2887,11 +2284,13 @@ mod tests {
                 agent_kind: None,
                 resume_template: None,
             },
-            &tx,
-            &tx,
-            &mut input_routes,
-            &mut no_uploads(),
-            &mut tasks,
+            ConnectionCtx {
+                tx: &tx,
+                priority: &tx,
+                input_routes: &mut input_routes,
+                upload_routes: &mut no_uploads(),
+                tasks: &mut tasks,
+            },
         )
         .await;
 
@@ -2967,11 +2366,13 @@ mod tests {
                     agent_kind: None,
                     resume_template: None,
                 },
-                &tx,
-                &tx,
-                &mut input_routes,
-                &mut no_uploads(),
-                &mut tasks,
+                ConnectionCtx {
+                    tx: &tx,
+                    priority: &tx,
+                    input_routes: &mut input_routes,
+                    upload_routes: &mut no_uploads(),
+                    tasks: &mut tasks,
+                },
             )
             .await;
             let frame = rx.try_recv().expect("a reply must have been sent");
@@ -3014,11 +2415,13 @@ mod tests {
                 agent_kind: None,
                 resume_template: None,
             },
-            &tx,
-            &tx,
-            &mut input_routes,
-            &mut no_uploads(),
-            &mut tasks,
+            ConnectionCtx {
+                tx: &tx,
+                priority: &tx,
+                input_routes: &mut input_routes,
+                upload_routes: &mut no_uploads(),
+                tasks: &mut tasks,
+            },
         )
         .await;
         let frame = rx.try_recv().expect("a reply must have been sent");
@@ -3073,11 +2476,13 @@ mod tests {
                     agent_kind: None,
                     resume_template: Some(template),
                 },
-                &tx,
-                &tx,
-                &mut input_routes,
-                &mut no_uploads(),
-                &mut tasks,
+                ConnectionCtx {
+                    tx: &tx,
+                    priority: &tx,
+                    input_routes: &mut input_routes,
+                    upload_routes: &mut no_uploads(),
+                    tasks: &mut tasks,
+                },
             )
             .await;
             let frame = rx.try_recv().expect("a reply must have been sent");
@@ -3119,8 +2524,8 @@ mod tests {
     /// empty-`sessions`, `next_cursor: None` "success" an earlier build
     /// answered (which the panel found indistinguishable from genuine
     /// exhaustion, and which made the rest of the walk unreachable).
-    /// `build_list_reply`'s own unit tests in `core` pin that outcome in
-    /// isolation; this test pins it through the REAL call site, so a
+    /// `build_list_reply`'s own unit tests in `listing` pin that outcome
+    /// in isolation; this test pins it through the REAL call site, so a
     /// future change that quietly dropped `build_list_reply` from this
     /// call site (reverting to plain, uncapped `Frame::control`) would
     /// pass every `reply_frame`/`build_list_reply` unit test — they call
@@ -3183,11 +2588,13 @@ mod tests {
                 cursor: None,
                 limit: None,
             },
-            &tx,
-            &tx,
-            &mut input_routes,
-            &mut no_uploads(),
-            &mut tasks,
+            ConnectionCtx {
+                tx: &tx,
+                priority: &tx,
+                input_routes: &mut input_routes,
+                upload_routes: &mut no_uploads(),
+                tasks: &mut tasks,
+            },
         )
         .await;
         // `ListSessions` is now spawned onto its own task (see that arm's
@@ -3232,11 +2639,13 @@ mod tests {
                 cursor: None,
                 limit: None,
             },
-            &tx,
-            &tx,
-            &mut input_routes,
-            &mut no_uploads(),
-            &mut tasks,
+            ConnectionCtx {
+                tx: &tx,
+                priority: &tx,
+                input_routes: &mut input_routes,
+                upload_routes: &mut no_uploads(),
+                tasks: &mut tasks,
+            },
         )
         .await;
         let reply2 = tokio::time::timeout(Duration::from_secs(5), rx.recv())
@@ -3414,11 +2823,13 @@ mod tests {
                 cursor: None,
                 limit: Some(0),
             },
-            &tx,
-            &tx,
-            &mut input_routes,
-            &mut no_uploads(),
-            &mut tasks,
+            ConnectionCtx {
+                tx: &tx,
+                priority: &tx,
+                input_routes: &mut input_routes,
+                upload_routes: &mut no_uploads(),
+                tasks: &mut tasks,
+            },
         )
         .await;
         assert_eq!(
@@ -3493,11 +2904,13 @@ mod tests {
                     cursor: Some(malformed.to_string()),
                     limit: None,
                 },
-                &tx,
-                &tx,
-                &mut input_routes,
-                &mut no_uploads(),
-                &mut tasks,
+                ConnectionCtx {
+                    tx: &tx,
+                    priority: &tx,
+                    input_routes: &mut input_routes,
+                    upload_routes: &mut no_uploads(),
+                    tasks: &mut tasks,
+                },
             )
             .await;
             assert_eq!(
@@ -3581,11 +2994,13 @@ mod tests {
                 cursor,
                 limit,
             },
-            &tx,
-            &tx,
-            &mut input_routes,
-            &mut no_uploads(),
-            &mut tasks,
+            ConnectionCtx {
+                tx: &tx,
+                priority: &tx,
+                input_routes: &mut input_routes,
+                upload_routes: &mut no_uploads(),
+                tasks: &mut tasks,
+            },
         )
         .await;
         let reply = tokio::time::timeout(Duration::from_secs(5), rx.recv())
@@ -3856,8 +3271,8 @@ mod tests {
     }
 
     /// The byte budget's real end-to-end path, through the handler rather
-    /// than `build_list_reply` in isolation (`core`'s own tests cover the
-    /// pure function): fat titles force a genuine mid-page cut, and the
+    /// than `build_list_reply` in isolation (`listing`'s own tests cover
+    /// the pure function): fat titles force a genuine mid-page cut, and the
     /// resulting `next_cursor` must resume correctly into a second page —
     /// the concatenation of every page still reproducing the full,
     /// unpaginated set with no duplicates and no gaps.
@@ -4061,11 +3476,13 @@ mod tests {
                 cursor: None,
                 limit: None,
             },
-            &tx,
-            &tx,
-            &mut input_routes,
-            &mut no_uploads(),
-            &mut tasks,
+            ConnectionCtx {
+                tx: &tx,
+                priority: &tx,
+                input_routes: &mut input_routes,
+                upload_routes: &mut no_uploads(),
+                tasks: &mut tasks,
+            },
         )
         .await;
         let reply = tokio::time::timeout(Duration::from_secs(5), rx.recv())

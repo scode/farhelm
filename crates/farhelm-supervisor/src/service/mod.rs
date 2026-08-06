@@ -28,9 +28,9 @@
 //! 2) — the agent exited
 //! (with the code, when something still holds it) versus the host rebooted
 //! and took every terminal with it, which is **interrupted**. The
-//! classification precedence lives on `core::session_status`, the recording
-//! rules on `Supervisor::record_outcome`/`record_stop`, and the boot
-//! comparison on `Supervisor::reload_sessions`.
+//! classification precedence lives on `status::session_status`, the
+//! recording rules on `Supervisor::record_outcome`/`record_stop`, and the
+//! boot comparison on `Supervisor::reload_sessions`.
 //!
 //! Every session carries an integration snapshot and, for the two
 //! integrated kinds, a captured conversation identity (PLAN_M3.md items 7
@@ -57,23 +57,40 @@
 //! This directory is the M4.5 split of what used to be one ~20k-line
 //! `service.rs` (a functional no-op — see PLAN.md's milestone ladder): each
 //! submodule below owns one cohesive slice, `core` holds the `Supervisor`
-//! struct/impl and the session-status/list-building logic that reads its
-//! state back out, and this file is a re-export shell so nothing outside
-//! `service` has to know the split happened.
+//! struct, its central lifecycle impl, and the state every other slice
+//! reads and writes, and this file is a re-export shell so nothing outside
+//! `service` has to know the split happened. A submodule may EXTEND
+//! `Supervisor` with an impl block of its own where the operation is
+//! genuinely a method on it (`teardown`'s `teardown_session` is the one
+//! that does today); `core` owns the type and the common lifecycle, not a
+//! monopoly on its methods.
+//!
+//! Three of those slices were carved out of `core` and `handlers` later,
+//! on the same functional-no-op terms, once each had grown into a contract
+//! of its own: `status` (how a session's liveness, restart offer, and
+//! reply-shaped `SessionInfo` are derived), `listing` (the `ListSessions`
+//! order, cursor, page cuts, and the walk itself), and `teardown` (the
+//! whole of what `DeleteSession` does, minus the reply). Each owns a
+//! sequence or a precedence whose parts have to agree with each other; see
+//! their own module docs for what each one is holding together.
 
 mod connection;
 mod core;
 mod handlers;
 mod launch_artifacts;
+mod listing;
 mod snapshots;
+mod status;
 mod sweep;
+mod teardown;
 mod terminals;
 mod uploads;
 
 pub use connection::handle_connection;
 pub use core::{
-    BootIdSource, CaptureStoreFault, CaptureWrite, CreateCrashSeam, CreateStage, LIST_SESSION_CAP,
+    BootIdSource, CaptureStoreFault, CaptureWrite, CreateCrashSeam, CreateStage,
     STALL_DETACH_TIMEOUT, SessionSnapshot, StateDirOwnership, Supervisor, SupervisorSeams,
     SupervisorTimeouts, TabOpenFault, TabOpenStage, UPLOAD_DISK_STAGE_TIMEOUT,
     UPLOAD_PROGRESS_TIMEOUT, WRITER_STALL_TIMEOUT, connect, run,
 };
+pub use listing::LIST_SESSION_CAP;

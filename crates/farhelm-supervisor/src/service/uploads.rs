@@ -1247,7 +1247,7 @@ async fn abandon_upload(sup: &Arc<Supervisor>, staged: crate::files::StagedStrea
 /// Callers must hold the session's lifecycle claim, which is what keeps a
 /// NEW transfer from staging into the directory between this call and the
 /// delete that follows it (see `stage_upload`).
-pub(crate) async fn abort_session_uploads(sup: &Arc<Supervisor>, session_id: &str, reason: &str) {
+pub(crate) async fn abort_session_uploads(sup: &Supervisor, session_id: &str, reason: &str) {
     let doomed: Vec<UploadHandle> = {
         let mut uploads = sup.uploads.lock().await;
         uploads

@@ -1,6 +1,5 @@
-//! The `Supervisor`: session bookkeeping, the create/restart/relaunch
-//! lifecycle, and the session-status/list-building logic that reads it
-//! back out.
+//! The `Supervisor`: session bookkeeping and the create/restart/relaunch
+//! lifecycle.
 //!
 //! This is the module every other `service` submodule ultimately answers
 //! to — sweep, uploads, terminals, and the rest each own one slice of
@@ -8,6 +7,17 @@
 //! what sessions exist, their durable outcome, and their conversation-
 //! capture identity lives here. See the crate-root `service` module doc
 //! (`mod.rs`) for the state model and the shape of the split.
+//!
+//! Reading that state back out does NOT live here. `status` derives a
+//! session's liveness, its restart offer, and the `SessionInfo` a reply
+//! carries; its classification core takes what it needs as plain arguments
+//! (an entry, a pane-state map), which is what keeps it out of this
+//! module's private fields and testable with no supervisor at all.
+//! `listing` owns the paged walk, and that one is NOT supervisor-free:
+//! `list_page` takes a `&Supervisor` because walking a page means locking
+//! the session map and probing tmux. What it does not do is reach into
+//! private fields — it goes through the same API any other submodule
+//! would.
 
 use super::connection::{handle_connection, notify_detached};
 use super::launch_artifacts::{
@@ -39,8 +49,7 @@ use crate::store::{
 use crate::tmux::{AGENT_WINDOW_OPTION, PaneState, TAB_WINDOW_OPTION, TmuxDriver};
 use anyhow::Context;
 use farhelm_proto::{
-    AgentKind, ControlMsg, ErrorKind, Frame, RestartMode, RestartOffer, SessionInfo, SessionStatus,
-    TabInfo,
+    AgentKind, ErrorKind, RestartMode, RestartOffer, SessionInfo, SessionStatus, TabInfo,
 };
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
@@ -1870,7 +1879,7 @@ impl CaptureState {
     /// what `RestartOffer::Resume` is computed from, and the offer is a
     /// promise that a stored identity exists for restart to fill in. A
     /// provisional match is not that promise, and a pending one is not yet.
-    fn committed_conversation(&self) -> Option<&str> {
+    pub(crate) fn committed_conversation(&self) -> Option<&str> {
         match self {
             CaptureState::Captured { conversation, .. } => Some(conversation.as_str()),
             _ => None,
@@ -6865,263 +6874,6 @@ impl Supervisor {
     }
 }
 
-/// `ListSessions`'s count cap (PLAN_M2.md's "Proto growth"). ~500 keeps a
-/// single reply's session count bounded before the byte budget below ever
-/// has to do the harder job of bounding fat, variable-length records.
-pub const LIST_SESSION_CAP: usize = 500;
-
-/// `ListSessions`'s encoded-size budget, independent of the count cap: a
-/// count alone cannot bound encoded bytes when each session's title, cwd,
-/// and invocation are caller-controlled strings of unbounded length — 500
-/// sessions with fat titles can still blow past `MAX_FRAME_LEN` on their
-/// own. Deliberately well under `MAX_FRAME_LEN` (half of it) rather than
-/// flush against it: `Frame::encoded_len` (what this budget is compared
-/// against, in `build_list_reply`) already accounts for the frame's own
-/// envelope — the header and the `SessionList` object's fixed fields —
-/// which is a few dozen bytes, negligible next to a multi-megabyte cap.
-/// The margin is headroom for a future additive `SessionList`/
-/// `SessionInfo` field instead: a number tuned flush against today's
-/// fields would need re-tuning the moment PLAN_M2.md adds another one.
-/// `reply_frame`'s oversize defusal stays as the last-resort backstop
-/// regardless — this budget is meant to make that backstop unreachable in
-/// practice, not to replace it.
-pub(crate) const LIST_BYTE_BUDGET: usize = (farhelm_proto::MAX_FRAME_LEN / 2) as usize;
-
-/// Total order `ListSessions` pages walk (PLAN_M6.md's "Pagination
-/// shape"): creation time descending, with session id ASCENDING as the
-/// tiebreak. Both halves are stable for a session's whole life — `id`
-/// never changes, and `created_at` is written once at insert
-/// (`StoredSession::created_at`'s own docs) — which is what lets a cursor
-/// resume a walk unaffected by concurrent creates or deletes: the key a
-/// cursor encodes still names the same place in the same order no matter
-/// what else in the session set changed since it was issued.
-///
-/// The tiebreak DIRECTION is pinned by the protocol contract, not a free
-/// choice of this build: `ControlMsg::SessionList`'s own docs
-/// (`farhelm-proto`) specify "session id ascending as the tiebreak", so
-/// this function's ordering must match that wording exactly, not merely
-/// produce SOME fixed relative order for same-second creations.
-///
-/// `std::cmp::Reverse` on `created_at` is what turns "descending time,
-/// ascending id" into a single ordinary ascending comparison other code
-/// can sort and binary-search by directly, rather than writing a
-/// hand-rolled `Ordering::then_with` at every call site.
-pub(crate) fn list_order_key(info: &SessionInfo) -> (std::cmp::Reverse<i64>, &str) {
-    (std::cmp::Reverse(info.created_at), info.id.as_str())
-}
-
-/// A `ListSessions` page cursor's decoded contents: the ordering key
-/// (`list_order_key`'s own shape, owned rather than borrowed since a
-/// decoded cursor outlives the request that carried it) of the last
-/// session a page actually returned. Resuming means "strictly after this
-/// key" (see `SessionList::next_cursor`'s own docs) — not "starting from
-/// this row" — which is what lets a cursor naming a since-deleted
-/// session's key still resume cleanly: nothing about decoding or
-/// resuming ever needs the named session to still exist.
-// Only `Serialize` (`encode_list_cursor`) and `Deserialize`
-// (`decode_list_cursor`) are exercised anywhere in this crate: every
-// caller reads `created_at`/`id` off a decoded value directly rather than
-// comparing, cloning, or printing the struct itself, so `Debug`, `Clone`,
-// `PartialEq`, and `Eq` would be dead derives.
-#[derive(serde::Serialize, serde::Deserialize)]
-pub(crate) struct ListCursor {
-    pub(crate) created_at: i64,
-    pub(crate) id: String,
-}
-
-/// Generous upper bound on one encoded `next_cursor`'s length, reserved
-/// unconditionally in `build_list_reply`'s byte-budget accounting — see
-/// that function's own docs for why a flat reserve, rather than an
-/// encode-then-recheck loop, is this build's chosen strategy. Every
-/// session id `ListSessions` can ever report is supervisor-minted via
-/// `uuid::Uuid::new_v4().to_string()` (every id-minting call site in this
-/// crate follows that same convention), a fixed 36 ASCII characters, so
-/// the raw `{"created_at":<i64>,"id":"<uuid>"}` JSON `encode_list_cursor`
-/// produces never exceeds roughly 80 bytes even at `i64::MIN`; base64
-/// inflates that by 4/3. This constant is set well past that real
-/// ceiling, so the reserve stays correct even if a future id-minting site
-/// used a slightly longer format.
-const LIST_CURSOR_RESERVE: usize = 200;
-
-/// Encode a page's last-returned entry into the opaque string
-/// `SessionList::next_cursor` carries — base64 of a compact JSON
-/// serialization, chosen (over, say, a raw `created_at:id` join) because
-/// it is self-describing at decode time: `decode_list_cursor` can reject
-/// a malformed value by construction (JSON parse failure) rather than by
-/// hand-rolled delimiter scanning that would have to guess whether a
-/// stray `:` came from a corrupted id or a value built by hand. URL-safe,
-/// unpadded base64 keeps the result a plain opaque token with no
-/// characters a caller might feel tempted to interpret — opaque as a
-/// USAGE convention (store and replay verbatim), not as an authority
-/// boundary: this cursor is an ordering key, nothing more, and carries no
-/// claim about who may present it (`decode_list_cursor`'s own docs cover
-/// what that means for a hand-built one).
-pub(crate) fn encode_list_cursor(created_at: i64, id: &str) -> String {
-    use base64::Engine;
-    let cursor = ListCursor {
-        created_at,
-        id: id.to_string(),
-    };
-    // Unwrap is safe: `ListCursor` has no map keys or non-UTF-8 bytes for
-    // JSON serialization to ever fail on.
-    let json = serde_json::to_vec(&cursor).expect("ListCursor is always serializable");
-    base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(json)
-}
-
-/// Decode a caller-supplied cursor into its ordering key, or `None` for
-/// anything that fails to decode cleanly — invalid base64, JSON that will
-/// not parse, or JSON of the wrong shape. Every failure mode collapses to
-/// this SAME `None`, deliberately not distinguishing which way decoding
-/// failed: `handle_list_sessions` turns any `None` into one
-/// `ErrorKind::InvalidRequest`, and a bit-flipped byte, a truncated
-/// value, and a string from nowhere are indistinguishable to an honest
-/// server — there is no differently-actionable response for a caller to
-/// receive for any of them, so there is nothing this function should try
-/// to tell them apart for. Never panics on caller input: `?` short-
-/// circuits through `Option`, not `unwrap`, at every fallible step.
-///
-/// What this function is NOT is an authority check: a `ListCursor` that
-/// decodes cleanly is accepted regardless of whether THIS supervisor ever
-/// encoded it — a hand-built or mutated-but-well-formed key is a valid
-/// resume position like any other, per `SessionList::next_cursor`'s own
-/// docs. That is deliberate, not an oversight this function should start
-/// closing: every `ListSessions` caller may already read every session (a
-/// single-user supervisor), so a forged key resumes at a position honest
-/// paging would reach anyway, and strictly-after resumption is what lets
-/// a cursor naming a since-deleted session still resume cleanly
-/// (`list_sessions_cursor_from_a_deleted_session_still_resumes` pins that
-/// as the feature it is). "Refuse the undecodable, trust every decodable
-/// key" is the whole contract — there is no third case to add.
-pub(crate) fn decode_list_cursor(cursor: &str) -> Option<ListCursor> {
-    use base64::Engine;
-    let bytes = base64::engine::general_purpose::URL_SAFE_NO_PAD
-        .decode(cursor)
-        .ok()?;
-    serde_json::from_slice(&bytes).ok()
-}
-
-/// Compute one session's liveness for a `ListSessions` reply. tmux is the
-/// truth (module docs); this function only ever reports what it can
-/// actually observe, never a guess.
-///
-/// Three cases all collapse into the same honest `Exited { exit_code:
-/// None }` rather than assuming alive:
-/// - no terminal at all (the restart-gap entry);
-/// - this pane id is entirely absent from `pane_states` (removed mid-
-///   query, or never existed on this server at all);
-/// - this pane id IS present, but for a DIFFERENT session name than the
-///   one this entry remembers creating it under. Pane ids reset to `%0`
-///   on a fresh tmux server (`PaneState::session_name`'s own docs), so a
-///   stale, never-reloaded entry's pane id can be silently recycled by an
-///   unrelated NEW session after a server restart; matching pane id alone
-///   would let that entry inherit the new session's liveness. Requiring
-///   BOTH identifiers to agree is also what a tmux-side rename of the
-///   session name (a rare, deliberately-provoked edge case, not a normal
-///   product flow) trips: this function has no positive way to confirm
-///   the renamed pane is still "the same session" rather than tmux having
-///   handed that pane to something else entirely, so it reports the same
-///   honest `Exited` rather than guessing either way.
-///
-/// Only a pane found under BOTH its remembered pane id and its remembered
-/// tmux session name gets to decide `Alive` vs. `Exited` from tmux's own
-/// dead flag and status.
-///
-/// ## Classification precedence (PLAN_M3.md items 2 and 3)
-///
-/// As of M3 the live probe is no longer the only input: the session's
-/// durable last-known outcome answers the questions a vanished tmux
-/// cannot. The order below is the precedence, and it is deliberate:
-///
-/// 1. A recorded **error** — the launch shim's exec-failure sentinel —
-///    outranks every inference, because "the agent never started" is a
-///    fact about THIS launch that no amount of pane probing can discover
-///    (an unexec'd command leaves an ordinary dead pane behind, exactly
-///    like a command that ran and exited). PLAN_M3.md item 3 owns the
-///    READER that ever writes this state; this PR only makes sure it
-///    already sits above the inference so item 3 has nothing to
-///    restructure. **The sentinel is deliberately not read here.**
-/// 2. A live pane decides `Alive` vs. `Exited` exactly as M2 did — a
-///    stored outcome never overrides something still observable. What the
-///    record still contributes to a DEAD pane is what the pane cannot
-///    hold: the stop annotation, and an exit code the pane has already
-///    forgotten (`known code wins`, matching the store's own monotonic
-///    enrichment rule — tmux publishes `pane_dead` before
-///    `pane_dead_status` is readable, so the live reading can be the
-///    poorer of the two).
-/// 3. With no pane to ask, the recorded outcome speaks: `Interrupted`
-///    (the reboot conversion) and `Exited` (a previously witnessed exit,
-///    with the code and annotation it was witnessed with) are RETAINED
-///    KNOWLEDGE, not guesses, and outrank M2's blanket exited-unknown.
-/// 4. A `Launching` row with no pane is `Unknown`, not `Exited`: SPEC.md's
-///    exited means the agent RAN, and a launch whose side effects were
-///    never found has not established that. It stays pending for item 3's
-///    sentinel (error) or item 6's reservation (retry) to resolve.
-/// 5. Anything else with no pane — `Running`, or a stop whose sweep is in
-///    flight — falls back to M2's honest `Exited { exit_code: None }`.
-///
-/// The annotation returned alongside the status is SPEC.md's user-legible
-/// qualifier ("stopped by user"), which lives with the recorded outcome
-/// and therefore survives restarts and reboots. It is returned only for a
-/// status that ends up `Exited`: a session that has since been relaunched
-/// into a live pane must not still be labelled with how its PREVIOUS run
-/// ended.
-pub(crate) fn session_status(
-    entry: &SessionEntry,
-    pane_states: &HashMap<String, PaneState>,
-) -> (SessionStatus, Option<String>) {
-    // The guard is held across the whole match rather than cloned out of:
-    // this function is synchronous (no await can intervene) and every arm
-    // only reads, so the clone would have bought nothing but an allocation
-    // on the hottest path the list reply has.
-    let recorded = entry.outcome.lock().expect("outcome mutex poisoned");
-    let live = entry.terminal.as_ref().and_then(|terminal| {
-        pane_states
-            .get(&terminal.pane)
-            .filter(|state| state.session_name == terminal.tmux_name)
-    });
-    match (&*recorded, live) {
-        (LastOutcome::Error { detail }, _) => (
-            SessionStatus::Error {
-                detail: detail.clone(),
-            },
-            None,
-        ),
-        (_, Some(state)) if !state.dead => (SessionStatus::Alive, None),
-        (recorded, Some(state)) => {
-            let (recorded_code, annotation) = match recorded {
-                LastOutcome::Exited {
-                    exit_code,
-                    annotation,
-                } => (*exit_code, annotation.clone()),
-                _ => (None, None),
-            };
-            (
-                SessionStatus::Exited {
-                    exit_code: state.exit_code.or(recorded_code),
-                },
-                annotation,
-            )
-        }
-        (LastOutcome::Interrupted, None) => (SessionStatus::Interrupted, None),
-        (
-            LastOutcome::Exited {
-                exit_code,
-                annotation,
-            },
-            None,
-        ) => (
-            SessionStatus::Exited {
-                exit_code: *exit_code,
-            },
-            annotation.clone(),
-        ),
-        (LastOutcome::Launching, None) => (SessionStatus::Unknown, None),
-        (LastOutcome::Running | LastOutcome::StopRequested, None) => {
-            (SessionStatus::Exited { exit_code: None }, None)
-        }
-    }
-}
-
 /// Record that input has been DELIVERED to this session's pane, if this
 /// is the first time (PLAN_M3.md item 8's correlator).
 ///
@@ -7223,82 +6975,6 @@ async fn persist_first_input(sup: &Supervisor, entry: &SessionEntry, at: i64) {
              this supervisor's lifetime and the next capture pass retries the write"
         ),
     }
-}
-
-/// What restarting this session would do to its conversation, computed
-/// fresh from the snapshot and whatever identity is DURABLY claimed right
-/// now.
-///
-/// Recomputed on every reply for the same reason `status` is: a capture
-/// pass can upgrade a session from `FreshOnly` to `Resume` at any moment,
-/// so the value stored in `SessionEntry::info` at create or reload is a
-/// starting point rather than an answer. Reads only the COMMITTED identity
-/// (`CaptureState::committed_conversation`), which is what keeps the offer
-/// from promising a resume that no stored value could fill.
-pub(crate) fn session_restart_offer(entry: &SessionEntry) -> RestartOffer {
-    let capture = entry.capture.lock().expect("capture mutex poisoned");
-    entry
-        .snapshot
-        .restart_offer(capture.committed_conversation())
-}
-
-/// One entry as a reply must describe it: the stored metadata plus the
-/// three fields that are NEVER stored and are therefore recomputed on
-/// every reply — live-probed `status` (with its annotation), rediscovered
-/// `tabs`, and a freshly derived `restart_offer`.
-///
-/// The single place that shape is defined, shared by `ListSessions` and by
-/// the single-session replies that must match it (`SessionRenamed`, whose
-/// own protocol docs promise a `SessionInfo` "built the same way
-/// `ListSessions` builds one"). Two copies would drift, and the drift
-/// would be invisible: both would still be `SessionInfo`s, differing only
-/// in which fields told the truth.
-///
-/// `sentinel` is a launch-sentinel (or wrapper-failure) detail the CALLER
-/// found for this entry in the pass it is replying from, and it OUTRANKS
-/// `session_status` — that is the whole point of PLAN_M3.md item 3's
-/// write-inability note: a failed exec is not something a pane can show,
-/// so a reply must surface it whether or not the transition could also be
-/// committed durably this pass. Callers that have not looked pass `None`.
-///
-/// `pane_states` must be the map the caller's own liveness probe returned;
-/// an empty map is correct only for an entry with no terminal (the restart
-/// gap), whose status comes entirely from its recorded outcome.
-pub(crate) fn entry_info(
-    entry: &SessionEntry,
-    pane_states: &HashMap<String, PaneState>,
-    sentinel: Option<&str>,
-) -> SessionInfo {
-    let mut info = entry.info.clone();
-    info.restart_offer = session_restart_offer(entry);
-    // Tabs are not stored anywhere at all (`SessionInfo::tabs`), so this
-    // rediscovery IS the tab list. A terminal-less entry has no tmux
-    // session and therefore no tabs, which the empty default states
-    // honestly.
-    info.tabs = entry
-        .terminal
-        .as_ref()
-        .map(|terminal| {
-            tabs_from_pane_states(pane_states, &terminal.tmux_name)
-                .into_iter()
-                .map(|tab| TabInfo { id: tab.id })
-                .collect()
-        })
-        .unwrap_or_default();
-    match sentinel {
-        Some(detail) => {
-            info.status = SessionStatus::Error {
-                detail: detail.to_string(),
-            };
-            info.annotation = None;
-        }
-        None => {
-            let (status, annotation) = session_status(entry, pane_states);
-            info.status = status;
-            info.annotation = annotation;
-        }
-    }
-    info
 }
 
 /// One conversation-capture rescan across every session this supervisor
@@ -7860,264 +7536,6 @@ async fn reverify_capture(
     }
 }
 
-/// The exit code tmux still holds for `terminal`'s pane, if the pane is
-/// dead and tmux could reduce its death to one.
-///
-/// `pane_states`, not `pane_process`: the latter answers "is it dead, and
-/// what pid did it have", and only the former carries
-/// `#{pane_dead_status}` at all. Used by `StopSession` at both of its
-/// exit-recording moments — a stop that found the agent already gone, and
-/// a stop whose kill sweep just finished — because in both the code is
-/// worth keeping for exactly as long as the pane survives to hold it, and
-/// nothing else will look again.
-///
-/// A failed query is logged and degrades to `None` rather than failing the
-/// stop: it costs the exit code, never the annotation, and the store's
-/// monotonic enrichment lets a later list fill the code in.
-pub(crate) async fn dead_pane_exit_code(
-    sup: &Supervisor,
-    terminal: Option<&Terminal>,
-    session_id: &str,
-) -> Option<i32> {
-    let terminal = terminal?;
-    match sup.tmux.pane_states().await {
-        Ok(states) => states
-            .get(&terminal.pane)
-            .filter(|state| state.session_name == terminal.tmux_name && state.dead)
-            .and_then(|state| state.exit_code),
-        Err(e) => {
-            warn!(
-                session = %session_id, error = %format!("{e:#}"),
-                "could not read the pane's exit code; recording the outcome without one"
-            );
-            None
-        }
-    }
-}
-
-/// What this observation should offer the durable record, or `None` when
-/// there is nothing worth telling the store.
-///
-/// Only the OBSERVATION is decided here; whether it changes anything is
-/// [`Transition::apply`]'s call, inside the transaction. Two cases produce
-/// nothing at all: a session whose outcome is already terminal (no probe
-/// can add to `Interrupted`, `Error`, or an exit that already has its
-/// code), and a `Launching` row with no pane — see `session_status`'s
-/// point 4 for why absence of side effects is not evidence of an exit.
-pub(crate) fn observation(recorded: &LastOutcome, live: Option<&PaneState>) -> Option<Transition> {
-    match live {
-        Some(state) if !state.dead => None,
-        Some(state) => {
-            let exit_code = state.exit_code;
-            match recorded {
-                // An already-recorded exit still accepts the code tmux may
-                // only now be able to report (monotonic enrichment).
-                LastOutcome::Exited {
-                    exit_code: recorded_code,
-                    ..
-                } if recorded_code.is_none() && exit_code.is_some() => {
-                    Some(Transition::ObservedExit { exit_code })
-                }
-                _ if recorded.is_terminal() => None,
-                _ => Some(Transition::ObservedExit { exit_code }),
-            }
-        }
-        None => matches!(recorded, LastOutcome::Running | LastOutcome::StopRequested)
-            .then_some(Transition::ObservedExit { exit_code: None }),
-    }
-}
-
-/// Byte-budget half of `ListSessions`'s two independent page cuts. The
-/// count/cursor cut is the CALLER's job, applied before this is ever
-/// reached — `handle_list_sessions` walks `list_order_key`'s order and
-/// slices out at most one page's worth of entries before cloning or
-/// status-annotating a single one of them (see that function's own
-/// comment for why paying that cost for entries this function would only
-/// drop anyway is wasteful to avoid in the first place). Because of that,
-/// this function cannot reconstruct the true pre-cut session count from
-/// `sessions.len()` — `total` is supplied by the caller instead, and is
-/// reported as-is.
-///
-/// `sessions` arrives ALREADY in page order (`list_order_key`'s walk), so
-/// truncation here drops only from the tail of that order — never
-/// reorders, never drops from the middle — which is what makes "the last
-/// entry actually kept" a meaningful resume point at all.
-///
-/// `page_continues_beyond_caller_cut` is whether the caller's own count/
-/// cursor cut already left sessions unreturned beyond what it handed to
-/// this function (i.e. `sessions.len()` is a page, not the full remaining
-/// walk). This function OR's that against whatever ITS OWN byte-budget cut
-/// does: `next_cursor` is `Some` (encoding the last entry actually kept)
-/// whenever either cut fired with more sessions left beyond the return,
-/// `None` only when the walk that produced `sessions` — after BOTH cuts —
-/// genuinely reached the end of the order. See `SessionList::next_cursor`'s
-/// own docs for the one case this function refuses outright rather than
-/// answering `None`: a single session too large to fit under `byte_budget`
-/// even alone leaves `kept` empty with no last entry to build a cursor
-/// from. Nothing bounds a record's size below the budget (a title is
-/// caller-controlled and unbounded), so this IS reachable, not merely
-/// theoretical — and `next_cursor: None` here would silently claim the
-/// walk was exhausted while sessions still remain, unreachable behind a
-/// cut this function can never resume past. So this returns `Err`
-/// instead, naming the session that could not be represented — but only
-/// once the EXACT reply that single candidate would produce has also been
-/// checked and still does not fit (see the next paragraph): the reserve-
-/// padded first pass can refuse a candidate the real wire size would have
-/// accepted, and that false refusal is not the "no honest reply exists"
-/// case this paragraph is about. Turning a genuine refusal into a wire
-/// reply is left to the caller (`handle_list_sessions` maps it to
-/// `ErrorKind::Internal`, matching `reply_frame`'s own precedent for "the
-/// honest answer does not fit on the wire").
-///
-/// Single-pass, exact size accounting, and the final reply is constructed
-/// exactly ONCE per candidate page — a previous version re-encoded a
-/// shrinking candidate on every dropped entry, which is quadratic in the
-/// number of entries eventually dropped. Instead: `envelope_len` is the
-/// encoded size of this SAME reply shape with an empty `sessions` array
-/// and no cursor, measured once via the real `Frame`/`ControlMsg` path
-/// (never hand-computed, so it can't drift from what `Frame::control`
-/// actually produces), PLUS [`LIST_CURSOR_RESERVE`] — a flat worst-case
-/// reserve for whatever `next_cursor` this call ends up emitting. That
-/// reserve is this function's chosen answer to the accounting problem a
-/// `Some` cursor creates: unlike the pre-8 `next_cursor: None` constant, a
-/// REAL cursor's encoded size varies with its ordering key, so the scan
-/// below needs to budget for it before it even knows whether one will be
-/// emitted at all. The alternative — encode the real reply on every
-/// iteration, and if it comes out oversized, drop the last-kept entry and
-/// retry — was considered and rejected for the ORDINARY (non-empty `kept`)
-/// case: it would still need a bound on the retry count and adds real
-/// branching for a saving ([`LIST_CURSOR_RESERVE`]'s 200 bytes) that is
-/// noise next to `LIST_BYTE_BUDGET`'s multi-megabyte scale. Each candidate
-/// entry is serialized exactly once (`serde_json::to_vec`) and its EXACT
-/// marginal contribution to the `sessions` JSON array — its own bytes,
-/// plus one comma separator once it is not the first surviving entry — is
-/// added to a running total seeded from `envelope_len`. An entry that
-/// would push the running total over `byte_budget` stops the scan;
-/// everything kept up to that point is the candidate answer, and
-/// `next_cursor` is then decided from it.
-///
-/// The one place this function DOES pay for a second, exact encoding is
-/// deliberately narrow: when the reserve-padded check rejects the FIRST
-/// candidate examined (`kept` still empty), rather than accept the
-/// reserve's pessimism as final, this recheck builds the exact reply that
-/// one candidate would produce — `next_cursor: None` if nothing remains
-/// beyond it (`page_continues_beyond_caller_cut` is false and the scan's
-/// iterator has nothing left), or its real encoded cursor if something
-/// does — and measures ITS true size instead of the worst-case reserve.
-/// Two shapes this closes: a final page's last entry that fits the raw
-/// budget cursorless but not budget-minus-reserve, and a continuing
-/// single entry whose real cursor (almost always well under
-/// [`LIST_CURSOR_RESERVE`]'s 200-byte ceiling) fits where the reserve
-/// would not. Bounded to ONE extra encode, exactly when `kept` is empty —
-/// never on a later, ordinary tail cut, which is what keeps the "single-
-/// pass in the common case" property above intact rather than reopening
-/// the quadratic-retry shape this function's docs already rejected once.
-///
-/// A `debug_assert!` re-encodes the actual returned reply as a sanity
-/// check that the accounting above never drifted from reality — reachable
-/// only via the ordinary (non-empty `kept`) return path, since the empty-
-/// page recheck above already measures its own candidate's true size
-/// directly, by construction, before ever returning it. Deliberately not
-/// a release-mode check: `reply_frame`'s `MAX_FRAME_LEN` defusal remains
-/// the real last-resort backstop in production; this assert exists only
-/// to catch an accounting bug in tests/debug builds before it could ever
-/// reach that backstop. `byte_budget.max(envelope_len)` tolerates the
-/// degenerate case of a budget smaller than the envelope itself (only
-/// reachable with a pathologically tiny `byte_budget`, never
-/// `LIST_BYTE_BUDGET` in production) — this function must still return
-/// SOMETHING even then, and the assert should not fire over a caller
-/// having chosen an unreasonable budget.
-///
-/// Returns `Err` instead of a reply exactly when the scan kept nothing,
-/// `sessions` was non-empty, AND the empty-page recheck above also
-/// rejected the exact reply its sole candidate would produce: the first
-/// (and, since the scan stops at the first entry it cannot afford, only)
-/// candidate examined does not fit even alone, at its true encoded size.
-/// There is no honest `SessionList` to build in that case — see the
-/// paragraph above — so the caller gets the rejected session's id back
-/// instead, to turn into whatever error reply its own transport
-/// conventions use.
-pub(crate) fn build_list_reply(
-    req_id: u64,
-    sessions: Vec<SessionInfo>,
-    total: u64,
-    byte_budget: usize,
-    page_continues_beyond_caller_cut: bool,
-) -> Result<ControlMsg, String> {
-    let candidate_len = sessions.len();
-    let envelope_len = Frame::control(&ControlMsg::SessionList {
-        req_id,
-        sessions: Vec::new(),
-        total,
-        next_cursor: None,
-    })
-    .encoded_len()
-        + LIST_CURSOR_RESERVE;
-
-    let mut kept: Vec<SessionInfo> = Vec::with_capacity(sessions.len());
-    let mut used = envelope_len;
-    // Peekable so the empty-page recheck below can tell "this candidate
-    // is the walk's last entry" (nothing left to peek, and no caller-side
-    // cut beyond it either) from "something else is still queued behind
-    // it" without consuming an extra entry to find out.
-    let mut sessions = sessions.into_iter().peekable();
-    while let Some(session) = sessions.next() {
-        let separator = if kept.is_empty() { 0 } else { 1 };
-        let entry_len = serde_json::to_vec(&session)
-            .expect("SessionInfo is always serializable")
-            .len()
-            + separator;
-        if used + entry_len > byte_budget {
-            if kept.is_empty() {
-                // The empty-page recheck (this function's own docs cover
-                // why it is scoped to exactly this case): the reserve-
-                // padded first pass rejected this candidate, but that
-                // reserve is a worst-case guess, not this reply's true
-                // size. Build the EXACT reply this one candidate would
-                // produce and measure it for real before concluding the
-                // session is genuinely unfittable.
-                let something_remains =
-                    page_continues_beyond_caller_cut || sessions.peek().is_some();
-                let exact_cursor =
-                    something_remains.then(|| encode_list_cursor(session.created_at, &session.id));
-                let exact_reply = ControlMsg::SessionList {
-                    req_id,
-                    sessions: vec![session.clone()],
-                    total,
-                    next_cursor: exact_cursor,
-                };
-                if Frame::control(&exact_reply).encoded_len() <= byte_budget {
-                    return Ok(exact_reply);
-                }
-                return Err(session.id);
-            }
-            break;
-        }
-        used += entry_len;
-        kept.push(session);
-    }
-
-    let more_beyond_this_reply = page_continues_beyond_caller_cut || kept.len() < candidate_len;
-    let next_cursor = if more_beyond_this_reply {
-        kept.last()
-            .map(|last| encode_list_cursor(last.created_at, &last.id))
-    } else {
-        None
-    };
-
-    let reply = ControlMsg::SessionList {
-        req_id,
-        sessions: kept,
-        total,
-        next_cursor,
-    };
-    debug_assert!(
-        Frame::control(&reply).encoded_len() <= byte_budget.max(envelope_len),
-        "build_list_reply's single-pass size accounting drifted from the real encoded size"
-    );
-    Ok(reply)
-}
-
 /// `farhelm supervisor run` in one call: build a supervisor on `state_dir`
 /// and serve its socket until the process dies. Returns only on a fatal
 /// error — a successful supervisor never returns.
@@ -8177,10 +7595,12 @@ pub async fn connect(state_dir: &Path) -> anyhow::Result<UnixStream> {
 
 #[cfg(test)]
 pub(crate) mod tests {
-    use super::super::connection::CONNECTION_WRITER_QUEUE;
+    use super::super::connection::{CONNECTION_WRITER_QUEUE, ConnectionCtx};
     use super::super::handlers::handle_control;
+    use super::super::status::session_status;
     use super::super::uploads::UploadRoute;
     use super::*;
+    use farhelm_proto::{ControlMsg, Frame};
     use tokio::sync::mpsc;
 
     /// An empty upload routing map, for the many tests that drive
@@ -8566,9 +7986,10 @@ pub(crate) mod tests {
     }
 
     /// A session entry with the given terminal and recorded outcome, for
-    /// the classification tests below — which are about how those two
-    /// inputs combine, and need no tmux, no store, and no session at all.
-    fn entry_with(terminal: Option<Terminal>, outcome: LastOutcome) -> SessionEntry {
+    /// the entry-replacement tests below and the classification tests in
+    /// `service::status` — which are about how those two inputs combine,
+    /// and need no tmux, no store, and no session at all.
+    pub(crate) fn entry_with(terminal: Option<Terminal>, outcome: LastOutcome) -> SessionEntry {
         SessionEntry {
             info: SessionInfo {
                 id: "s1".to_string(),
@@ -8696,188 +8117,13 @@ pub(crate) mod tests {
         ));
     }
 
-    /// The one terminal the classification tests below use.
-    fn a_terminal() -> Terminal {
+    /// The one terminal the entry-replacement tests above and
+    /// `service::status`'s classification tests use.
+    pub(crate) fn a_terminal() -> Terminal {
         Terminal {
             tmux_name: "fh-1".to_string(),
             pane: "%0".to_string(),
         }
-    }
-
-    /// A `pane_states` map containing exactly [`a_terminal`]'s pane in the
-    /// given state.
-    ///
-    /// Unmarked and at window index 0, which is what an ordinary agent
-    /// window looked like before markers existed — the classification
-    /// tests below are about liveness and the durable record, and read
-    /// neither the tab nor the agent marker.
-    fn pane_map(dead: bool, exit_code: Option<i32>) -> HashMap<String, PaneState> {
-        let state = PaneState::for_test("fh-1", "%0", "@0");
-        let state = if dead {
-            state.dead_with(exit_code)
-        } else {
-            state
-        };
-        HashMap::from([("%0".to_string(), state)])
-    }
-
-    /// The classification precedence PLAN_M3.md items 2 and 3 define, in
-    /// one place: what a live probe says, what the durable record says,
-    /// and which wins where. Table-driven because the RELATIONSHIPS are
-    /// the contract — each case in isolation looks obvious, and only side
-    /// by side do the two inversions stand out (a live pane beating a
-    /// recorded outcome, and a recorded outcome beating "no pane found").
-    #[test]
-    fn classification_precedence_between_live_probing_and_the_recorded_outcome() {
-        let live = pane_map(false, None);
-        let dead = pane_map(true, Some(3));
-        let empty = HashMap::new();
-
-        // A live pane outranks a stale record: what can still be observed
-        // is never overridden by what was once written down.
-        assert_eq!(
-            session_status(
-                &entry_with(Some(a_terminal()), LastOutcome::Launching),
-                &live
-            ),
-            (SessionStatus::Alive, None)
-        );
-
-        // A dead pane's own code is the answer, and the record supplies
-        // the annotation the pane cannot know.
-        assert_eq!(
-            session_status(
-                &entry_with(
-                    Some(a_terminal()),
-                    LastOutcome::Exited {
-                        exit_code: None,
-                        annotation: Some("stopped by user".to_string()),
-                    }
-                ),
-                &dead
-            ),
-            (
-                SessionStatus::Exited { exit_code: Some(3) },
-                Some("stopped by user".to_string())
-            )
-        );
-
-        // No pane to ask: the record answers, and interrupted is NOT
-        // flattened into exited-unknown — the whole point of the state.
-        assert_eq!(
-            session_status(&entry_with(None, LastOutcome::Interrupted), &empty),
-            (SessionStatus::Interrupted, None)
-        );
-        assert_eq!(
-            session_status(
-                &entry_with(
-                    None,
-                    LastOutcome::Exited {
-                        exit_code: Some(7),
-                        annotation: Some("stopped by user".to_string()),
-                    }
-                ),
-                &empty
-            ),
-            (
-                SessionStatus::Exited { exit_code: Some(7) },
-                Some("stopped by user".to_string())
-            ),
-            "a code and annotation witnessed before the terminal vanished are retained \
-             knowledge, not a guess"
-        );
-
-        // Nothing observed and nothing recorded: M2's honest fallback.
-        assert_eq!(
-            session_status(&entry_with(None, LastOutcome::Running), &empty),
-            (SessionStatus::Exited { exit_code: None }, None)
-        );
-
-        // The seam PLAN_M3.md item 3 slots into: a recorded error outranks
-        // every inference, including a pane tmux would call alive.
-        assert_eq!(
-            session_status(
-                &entry_with(
-                    Some(a_terminal()),
-                    LastOutcome::Error {
-                        detail: "Permission denied".to_string()
-                    }
-                ),
-                &live
-            ),
-            (
-                SessionStatus::Error {
-                    detail: "Permission denied".to_string()
-                },
-                None
-            )
-        );
-    }
-
-    /// What each observation OFFERS the store, which is the half
-    /// `session_status` does not decide. Two silences matter more than the
-    /// writes: a terminal outcome is not re-observed at all (nothing a
-    /// probe can see adds to it), and a `Launching` row with no pane
-    /// offers nothing — "no side effects found" is not evidence the agent
-    /// ran, and recording an exit for it would claim exactly that
-    /// (PLAN_M3.md item 2 sends that row to item 3/6 instead).
-    ///
-    /// The enrichment case is the one a naive "already terminal, skip it"
-    /// rule gets wrong: tmux publishes `pane_dead` before
-    /// `pane_dead_status` is readable, so the poll that first sees the
-    /// death routinely has no code while the next one does.
-    #[test]
-    fn observations_offered_to_the_store_cover_silence_and_enrichment() {
-        let dead_with_code = PaneState::for_test("fh-1", "%0", "@0").dead_with(Some(3));
-        let dead_without_code = PaneState::for_test("fh-1", "%0", "@0").dead_with(None);
-        let alive = PaneState::for_test("fh-1", "%0", "@0");
-
-        assert_eq!(observation(&LastOutcome::Running, Some(&alive)), None);
-        assert_eq!(
-            observation(&LastOutcome::Running, Some(&dead_with_code)),
-            Some(Transition::ObservedExit { exit_code: Some(3) })
-        );
-        assert_eq!(
-            observation(&LastOutcome::Running, None),
-            Some(Transition::ObservedExit { exit_code: None })
-        );
-        assert_eq!(
-            observation(&LastOutcome::StopRequested, None),
-            Some(Transition::ObservedExit { exit_code: None }),
-            "a stop whose terminal vanished still ended; the store decides it was the stop"
-        );
-        assert_eq!(
-            observation(&LastOutcome::Launching, None),
-            None,
-            "a launch with no side effects has not been shown to have run"
-        );
-        assert_eq!(
-            observation(&LastOutcome::Interrupted, None),
-            None,
-            "a reboot is never re-observed into something poorer"
-        );
-        assert_eq!(
-            observation(
-                &LastOutcome::Exited {
-                    exit_code: None,
-                    annotation: None
-                },
-                Some(&dead_with_code)
-            ),
-            Some(Transition::ObservedExit { exit_code: Some(3) }),
-            "a code tmux can only now report must still reach the record"
-        );
-        assert_eq!(
-            observation(
-                &LastOutcome::Exited {
-                    exit_code: Some(3),
-                    annotation: None
-                },
-                Some(&dead_without_code)
-            ),
-            None,
-            "a known code is never re-offered to be replaced by a missing one"
-        );
     }
 
     /// The launching row's OTHER reconciliation, and the one with no
@@ -9254,11 +8500,13 @@ pub(crate) mod tests {
                 req_id: 4,
                 session_id: "s1".to_string(),
             },
-            &tx,
-            &tx,
-            &mut input_routes,
-            &mut no_uploads(),
-            &mut tasks,
+            ConnectionCtx {
+                tx: &tx,
+                priority: &tx,
+                input_routes: &mut input_routes,
+                upload_routes: &mut no_uploads(),
+                tasks: &mut tasks,
+            },
         )
         .await;
         let reply = tokio::time::timeout(Duration::from_secs(5), rx.recv())
@@ -9528,11 +8776,13 @@ pub(crate) mod tests {
                 agent_kind: None,
                 resume_template: None,
             },
-            &tx,
-            &tx,
-            &mut input_routes,
-            &mut no_uploads(),
-            &mut tasks,
+            ConnectionCtx {
+                tx: &tx,
+                priority: &tx,
+                input_routes: &mut input_routes,
+                upload_routes: &mut no_uploads(),
+                tasks: &mut tasks,
+            },
         )
         .await;
 
@@ -9833,11 +9083,13 @@ pub(crate) mod tests {
         handle_control(
             &sup,
             request(1, None),
-            &tx,
-            &tx,
-            &mut input_routes,
-            &mut no_uploads(),
-            &mut tasks,
+            ConnectionCtx {
+                tx: &tx,
+                priority: &tx,
+                input_routes: &mut input_routes,
+                upload_routes: &mut no_uploads(),
+                tasks: &mut tasks,
+            },
         )
         .await;
         let ControlMsg::Error {
@@ -9858,11 +9110,13 @@ pub(crate) mod tests {
         handle_control(
             &sup,
             request(2, None),
-            &tx,
-            &tx,
-            &mut input_routes,
-            &mut no_uploads(),
-            &mut tasks,
+            ConnectionCtx {
+                tx: &tx,
+                priority: &tx,
+                input_routes: &mut input_routes,
+                upload_routes: &mut no_uploads(),
+                tasks: &mut tasks,
+            },
         )
         .await;
         let ControlMsg::Error { message, kind, .. } = reply(&mut rx) else {
@@ -9881,11 +9135,13 @@ pub(crate) mod tests {
         handle_control(
             &sup,
             request(3, Some(AgentKind::Claude)),
-            &tx,
-            &tx,
-            &mut input_routes,
-            &mut no_uploads(),
-            &mut tasks,
+            ConnectionCtx {
+                tx: &tx,
+                priority: &tx,
+                input_routes: &mut input_routes,
+                upload_routes: &mut no_uploads(),
+                tasks: &mut tasks,
+            },
         )
         .await;
         let ControlMsg::Error { message, kind, .. } = reply(&mut rx) else {
@@ -10393,11 +9649,13 @@ pub(crate) mod tests {
                     agent_kind: None,
                     resume_template: None,
                 },
-                &tx,
-                &tx,
-                &mut input_routes,
-                &mut no_uploads(),
-                &mut tasks,
+                ConnectionCtx {
+                    tx: &tx,
+                    priority: &tx,
+                    input_routes: &mut input_routes,
+                    upload_routes: &mut no_uploads(),
+                    tasks: &mut tasks,
+                },
             )
             .await;
             let frame = rx.try_recv().expect("a reply must have been sent");
@@ -10436,11 +9694,13 @@ pub(crate) mod tests {
                 agent_kind: None,
                 resume_template: None,
             },
-            &tx,
-            &tx,
-            &mut input_routes,
-            &mut no_uploads(),
-            &mut tasks,
+            ConnectionCtx {
+                tx: &tx,
+                priority: &tx,
+                input_routes: &mut input_routes,
+                upload_routes: &mut no_uploads(),
+                tasks: &mut tasks,
+            },
         )
         .await;
         let frame = rx.try_recv().expect("a reply must have been sent");
@@ -10490,11 +9750,13 @@ pub(crate) mod tests {
                 agent_kind: None,
                 resume_template: None,
             },
-            &tx,
-            &tx,
-            &mut input_routes,
-            &mut no_uploads(),
-            &mut tasks,
+            ConnectionCtx {
+                tx: &tx,
+                priority: &tx,
+                input_routes: &mut input_routes,
+                upload_routes: &mut no_uploads(),
+                tasks: &mut tasks,
+            },
         )
         .await;
         let frame = rx.try_recv().expect("a reply must have been sent");
@@ -10568,11 +9830,13 @@ pub(crate) mod tests {
         handle_control(
             &sup,
             request(1, "bad \u{1b} title"),
-            &tx,
-            &tx,
-            &mut input_routes,
-            &mut no_uploads(),
-            &mut tasks,
+            ConnectionCtx {
+                tx: &tx,
+                priority: &tx,
+                input_routes: &mut input_routes,
+                upload_routes: &mut no_uploads(),
+                tasks: &mut tasks,
+            },
         )
         .await;
         let ControlMsg::Error {
@@ -10594,11 +9858,13 @@ pub(crate) mod tests {
         handle_control(
             &sup,
             request(2, "bad \u{1b} title"),
-            &tx,
-            &tx,
-            &mut input_routes,
-            &mut no_uploads(),
-            &mut tasks,
+            ConnectionCtx {
+                tx: &tx,
+                priority: &tx,
+                input_routes: &mut input_routes,
+                upload_routes: &mut no_uploads(),
+                tasks: &mut tasks,
+            },
         )
         .await;
         let ControlMsg::Error { message, kind, .. } = reply(&mut rx) else {
@@ -10612,11 +9878,13 @@ pub(crate) mod tests {
         handle_control(
             &sup,
             request(3, "good title"),
-            &tx,
-            &tx,
-            &mut input_routes,
-            &mut no_uploads(),
-            &mut tasks,
+            ConnectionCtx {
+                tx: &tx,
+                priority: &tx,
+                input_routes: &mut input_routes,
+                upload_routes: &mut no_uploads(),
+                tasks: &mut tasks,
+            },
         )
         .await;
         let ControlMsg::Error { message, kind, .. } = reply(&mut rx) else {
@@ -10986,473 +10254,6 @@ pub(crate) mod tests {
             rendered.contains("writing launch spec"),
             "and must still carry the original failure: {rendered}"
         );
-    }
-
-    /// A minimal, distinct `SessionInfo` for `build_list_reply`'s own
-    /// tests — distinct ids so a truncation bug that drops the wrong
-    /// entries (rather than merely the wrong COUNT) would still be
-    /// caught.
-    fn fake_session(id: &str, title_len: usize) -> SessionInfo {
-        SessionInfo {
-            id: id.to_string(),
-            title: "x".repeat(title_len),
-            created_at: 1_700_000_000,
-            cwd: "/tmp".to_string(),
-            invocation: "agent".to_string(),
-            status: SessionStatus::Alive,
-            annotation: None,
-            restart_offer: RestartOffer::default(),
-            tabs: Vec::new(),
-        }
-    }
-
-    /// The common case: everything fits under the byte budget AND the
-    /// caller already handed over the whole remaining walk
-    /// (`page_continues_beyond_caller_cut: false`), so nothing is dropped
-    /// and there is nothing left to resume — `next_cursor` is `None`. The
-    /// OTHER tests below are what actually exercise a cut producing a real
-    /// cursor. `total` is passed explicitly here (as the real
-    /// `ListSessions` call site does — see that arm's own comment) rather
-    /// than derived from `sessions.len()`, since `build_list_reply` does
-    /// not own count/cursor cutting itself (the caller applies that before
-    /// this is ever reached; the handler-level walk is pinned by
-    /// `handlers`' own `ListSessions` tests).
-    #[test]
-    fn build_list_reply_keeps_everything_under_the_byte_budget() {
-        let sessions: Vec<SessionInfo> = (0..10).map(|i| fake_session(&i.to_string(), 4)).collect();
-        let reply = build_list_reply(1, sessions, 10, LIST_BYTE_BUDGET, false)
-            .expect("every session fits comfortably under the byte budget");
-        let ControlMsg::SessionList {
-            req_id,
-            sessions,
-            total,
-            next_cursor,
-        } = reply
-        else {
-            panic!("expected ControlMsg::SessionList, got {reply:?}");
-        };
-        assert_eq!(req_id, 1);
-        assert_eq!(sessions.len(), 10);
-        assert_eq!(total, 10);
-        assert_eq!(next_cursor, None);
-    }
-
-    /// The byte-budget's whole job: a count well under any cap can still
-    /// overflow a small budget if the records themselves are fat, and the
-    /// reply must keep dropping from the tail until it fits — and, since
-    /// the drop leaves sessions behind that this call's own candidate DID
-    /// include, `next_cursor` must now carry a real resume point even
-    /// though the caller passed `page_continues_beyond_caller_cut: false`
-    /// (the cut here is entirely `build_list_reply`'s own byte-budget cut,
-    /// not something the caller already knew about).
-    #[test]
-    fn build_list_reply_enforces_the_byte_budget_independent_of_count() {
-        // Large enough to survive `LIST_CURSOR_RESERVE`'s flat overhead
-        // (reserved unconditionally, whether or not this cut ends up
-        // needing a cursor — see `build_list_reply`'s own docs) and still
-        // leave room for at least one ~200-byte-titled entry, but well
-        // under what all 5 would need — the whole point being a REAL,
-        // non-degenerate cut: some entries kept, some dropped.
-        const BUDGET: usize = 1000;
-        let sessions: Vec<SessionInfo> =
-            (0..5).map(|i| fake_session(&i.to_string(), 200)).collect();
-        let reply = build_list_reply(1, sessions, 5, BUDGET, false)
-            .expect("BUDGET keeps at least the first entry, so this is an ordinary tail cut");
-        let ControlMsg::SessionList {
-            sessions,
-            total,
-            next_cursor,
-            ..
-        } = reply
-        else {
-            panic!("expected ControlMsg::SessionList, got {reply:?}");
-        };
-        assert_eq!(total, 5);
-        assert!(
-            sessions.len() < 5,
-            "fat records must be dropped even though the count never reached any cap"
-        );
-        let last_kept = sessions.last().expect("at least one entry must survive");
-        assert_eq!(
-            next_cursor,
-            Some(encode_list_cursor(last_kept.created_at, &last_kept.id)),
-            "a byte-budget cut must carry a real cursor resuming after the last kept entry"
-        );
-        assert!(
-            Frame::control(&ControlMsg::SessionList {
-                req_id: 1,
-                sessions,
-                total,
-                next_cursor,
-            })
-            .encoded_len()
-                <= BUDGET,
-            "the kept reply, cursor included, must actually respect the byte budget"
-        );
-    }
-
-    /// Exact-prefix pin for the single-pass accounting itself: a budget
-    /// derived from a REAL encoded reply — including the cursor this cut
-    /// now actually carries, via `Frame::control`, not by repeating
-    /// `build_list_reply`'s own per-entry/envelope arithmetic — for
-    /// EXACTLY `K` entries must keep exactly those `K` and drop the rest.
-    ///
-    /// The budget is derived from a reply already shaped WITH its cursor
-    /// (`next_cursor: Some(encode_list_cursor(...))` for entry `K-1`)
-    /// rather than `None`, because that is what `build_list_reply` itself
-    /// will actually produce for a cut page — `LIST_CURSOR_RESERVE`'s
-    /// worst-case reserve during the scan is deliberately conservative
-    /// (see that constant's own docs), so a budget derived from the
-    /// EXACT real cursor size, rather than the reserve, is what proves
-    /// the scan still keeps exactly `K` once the reserve is accounted
-    /// for rather than the exact bytes.
-    #[test]
-    fn build_list_reply_keeps_exactly_the_entries_a_derived_budget_fits() {
-        let sessions: Vec<SessionInfo> = (0..5).map(|i| fake_session(&i.to_string(), 20)).collect();
-        let total = sessions.len() as u64;
-        const K: usize = 3;
-
-        let k_cursor = encode_list_cursor(sessions[K - 1].created_at, &sessions[K - 1].id);
-        let k_reply = ControlMsg::SessionList {
-            req_id: 1,
-            sessions: sessions[..K].to_vec(),
-            total,
-            next_cursor: Some(k_cursor),
-        };
-        // The scan budgets `LIST_CURSOR_RESERVE` worst-case bytes for a
-        // cursor before it knows the real one, so the derived budget must
-        // give the scan that same headroom, or a real K-entry reply
-        // (whose actual cursor is smaller than the reserve) would come up
-        // short purely from the reserve's own conservatism, not from a
-        // bug in the per-entry accounting this test exists to pin.
-        let budget = Frame::control(&k_reply).encoded_len() + LIST_CURSOR_RESERVE;
-
-        let reply = build_list_reply(1, sessions.clone(), total, budget, false)
-            .expect("the derived budget keeps K entries, so this is an ordinary tail cut");
-        let ControlMsg::SessionList { sessions: kept, .. } = reply else {
-            panic!("expected ControlMsg::SessionList, got {reply:?}");
-        };
-        assert_eq!(
-            kept,
-            sessions[..K],
-            "a budget derived from a real K-entry reply must keep exactly those K"
-        );
-    }
-
-    /// (E5 of the M6.75 review-swarm batch: this test's name used to call
-    /// this boundary "exact-fit", which overstated it — `budget` below is
-    /// the cursor-less reply's own size PLUS the full `LIST_CURSOR_RESERVE`
-    /// padding, not the reply's true encoded size, so there is slack left
-    /// over even at the "boundary". What this actually pins: a budget
-    /// generous enough that `LIST_CURSOR_RESERVE`'s conservatism alone
-    /// (never the real per-entry accounting) decides whether all 5
-    /// sessions survive, and the walk truly reaching the end (so
-    /// `page_continues_beyond_caller_cut: false`) still yields no cursor —
-    /// not silently dropping the last entry. The boundary most likely to
-    /// regress if `build_list_reply`'s single-pass accounting ever drifts
-    /// from `Frame::control`'s real output again.
-    #[test]
-    fn build_list_reply_keeps_everything_at_a_reserve_padded_boundary() {
-        let sessions: Vec<SessionInfo> = (0..5).map(|i| fake_session(&i.to_string(), 20)).collect();
-        let total = sessions.len() as u64;
-
-        let full_reply = ControlMsg::SessionList {
-            req_id: 1,
-            sessions: sessions.clone(),
-            total,
-            next_cursor: None,
-        };
-        // Padded by `LIST_CURSOR_RESERVE`: the scan reserves that much
-        // headroom for a cursor unconditionally (see `build_list_reply`'s
-        // own docs on why), so a budget derived from the cursor-less
-        // reply's exact size alone would be `LIST_CURSOR_RESERVE` bytes
-        // short of what the scan needs to accept the last entry, even
-        // though the FINAL reply never ends up needing a cursor at all.
-        let budget = Frame::control(&full_reply).encoded_len() + LIST_CURSOR_RESERVE;
-
-        let reply = build_list_reply(1, sessions.clone(), total, budget, false)
-            .expect("a reserve-padded budget covering all 5 sessions keeps all 5");
-        let ControlMsg::SessionList {
-            sessions: kept,
-            next_cursor,
-            ..
-        } = reply
-        else {
-            panic!("expected ControlMsg::SessionList, got {reply:?}");
-        };
-        assert_eq!(
-            kept, sessions,
-            "a reserve-padded budget covering everything must not drop the last entry"
-        );
-        assert_eq!(
-            next_cursor, None,
-            "a page that genuinely reaches the end of the walk must not carry a cursor"
-        );
-    }
-
-    /// The degenerate case for the single-pass entry scan: an empty
-    /// `sessions` vec simply never enters the `for` loop at all, so this
-    /// pins that the empty case still produces a well-formed reply —
-    /// `total: 0`, `next_cursor: None` — through the ordinary path, not a
-    /// special case that could drift from it.
-    #[test]
-    fn build_list_reply_handles_zero_sessions() {
-        let reply = build_list_reply(1, Vec::new(), 0, LIST_BYTE_BUDGET, false)
-            .expect("an empty candidate list is never the degenerate too-large-to-fit case");
-        let ControlMsg::SessionList {
-            sessions,
-            total,
-            next_cursor,
-            ..
-        } = reply
-        else {
-            panic!("expected ControlMsg::SessionList, got {reply:?}");
-        };
-        assert!(sessions.is_empty());
-        assert_eq!(total, 0);
-        assert_eq!(next_cursor, None);
-    }
-
-    /// The degenerate byte-budget case named in `build_list_reply`'s own
-    /// docs: a budget too small to fit even ONE entry (alongside the
-    /// envelope and the cursor reserve) leaves `kept` empty. Before Theme B
-    /// of the M6.75 review-swarm batch this answered `next_cursor: None`
-    /// with an empty `sessions` list — a lie: `total: 1` alongside an empty
-    /// page and no cursor claims the walk is exhausted, when really one
-    /// session exists and can never be represented on any page at this
-    /// budget. The fix makes that unrepresentable state an explicit `Err`
-    /// instead, named by the session's id, rather than a fake empty
-    /// success. Not a scenario production ever reaches with the real
-    /// budget (`LIST_BYTE_BUDGET` has multi-megabyte headroom) — this pins
-    /// the degenerate-budget path itself; `build_list_reply_refuses_a_fat_single_record`
-    /// below pins the realistic trigger (an oversized field, not a starved
-    /// budget).
-    #[test]
-    fn build_list_reply_with_a_budget_too_small_for_one_entry_is_refused() {
-        let sessions = vec![fake_session("only", 4)];
-        let envelope_only_budget = Frame::control(&ControlMsg::SessionList {
-            req_id: 1,
-            sessions: Vec::new(),
-            total: 1,
-            next_cursor: None,
-        })
-        .encoded_len();
-        let unfit_id = build_list_reply(1, sessions, 1, envelope_only_budget, false)
-            .expect_err("no room for even one entry must be refused, not answered as empty");
-        assert_eq!(
-            unfit_id, "only",
-            "the refusal must name the session that could not fit"
-        );
-    }
-
-    /// The realistic trigger for the same refusal (Theme B): nothing bounds
-    /// a session record's size below `LIST_BYTE_BUDGET` on its own — tabs
-    /// accumulate per `OpenTab` without a cap, and a title is caller-
-    /// supplied — so a single fat record exceeding the budget by itself is
-    /// reachable in production, unlike the previous test's starved-budget
-    /// fixture. This is the scenario six review-swarm panelists converged
-    /// on: a fat first record must not silently look like an exhausted,
-    /// empty walk.
-    #[test]
-    fn build_list_reply_refuses_a_fat_single_record() {
-        let sessions = vec![fake_session(
-            "too-fat",
-            farhelm_proto::MAX_FRAME_LEN as usize,
-        )];
-        let unfit_id = build_list_reply(1, sessions, 1, LIST_BYTE_BUDGET, false)
-            .expect_err("a record fatter than the whole byte budget must be refused");
-        assert_eq!(
-            unfit_id, "too-fat",
-            "the refusal must name the session that could not fit"
-        );
-    }
-
-    /// PR 3 follow-up round, item 1: the reserve-padded first pass can
-    /// refuse the FIRST candidate examined even though the reply it would
-    /// actually belong to fits — the reserve is a flat, worst-case guess
-    /// for a cursor this page may not even end up emitting. This pins the
-    /// FINAL-page shape of the recheck `build_list_reply` now runs before
-    /// giving up on an empty `kept`: the one candidate is also the whole
-    /// remaining walk (`page_continues_beyond_caller_cut: false`, nothing
-    /// else in `sessions`), so its exact reply carries `next_cursor: None`
-    /// — cheaper than the reserve-padded pass assumed, which is exactly
-    /// why that pass alone would have wrongly refused it.
-    ///
-    /// The budget is set to the reply's own EXACT encoded size — the
-    /// tightest budget at which this candidate is still honestly
-    /// representable — so the test also pins the OTHER edge: one byte
-    /// under that true minimum, even the recheck must refuse it, since at
-    /// that point the reserve's pessimism is no longer the only thing
-    /// standing between the candidate and a real oversize.
-    #[test]
-    fn build_list_reply_zero_kept_recheck_admits_a_cursorless_final_page_at_its_exact_size() {
-        let solo = fake_session("solo-final", 40);
-        let exact_reply = ControlMsg::SessionList {
-            req_id: 1,
-            sessions: vec![solo.clone()],
-            total: 1,
-            next_cursor: None,
-        };
-        let exact_len = Frame::control(&exact_reply).encoded_len();
-
-        let reply = build_list_reply(1, vec![solo.clone()], 1, exact_len, false).expect(
-            "the exact cursorless reply fits at its own exact size, even though the \
-             reserve-padded pass alone (LIST_CURSOR_RESERVE bytes more demanding) would refuse it",
-        );
-        assert_eq!(
-            reply, exact_reply,
-            "the recheck must return the SAME reply a direct encode of the sole candidate produces"
-        );
-
-        let unfit_id = build_list_reply(1, vec![solo], 1, exact_len - 1, false)
-            .expect_err("one byte under the true minimum must still be refused");
-        assert_eq!(unfit_id, "solo-final");
-    }
-
-    /// The sibling boundary to the test above: a CONTINUING single-entry
-    /// page, whose reply carries `next_cursor: Some(..)` because
-    /// something remains beyond it (here, `page_continues_beyond_caller_
-    /// cut: true`, but an unconsumed second candidate in `sessions` would
-    /// trigger the same `sessions.peek().is_some()` branch of the
-    /// recheck). The REAL encoded cursor for a short id like this test's
-    /// is far under `LIST_CURSOR_RESERVE`'s 200-byte worst-case allowance
-    /// — the whole reason the reserve-padded pass refuses a candidate the
-    /// recheck's exact accounting then accepts.
-    ///
-    /// Same "one byte under the true minimum" companion assertion as the
-    /// cursorless sibling, so both recheck outcomes (cursorless and
-    /// `Some`-cursor) are pinned at both their admitting and their
-    /// refusing edge.
-    #[test]
-    fn build_list_reply_zero_kept_recheck_admits_a_continuing_single_entry_page_at_its_exact_size()
-    {
-        let solo = fake_session("solo-continuing", 40);
-        let cursor = encode_list_cursor(solo.created_at, &solo.id);
-        let exact_reply = ControlMsg::SessionList {
-            req_id: 1,
-            sessions: vec![solo.clone()],
-            total: 5,
-            next_cursor: Some(cursor),
-        };
-        let exact_len = Frame::control(&exact_reply).encoded_len();
-
-        let reply = build_list_reply(1, vec![solo.clone()], 5, exact_len, true).expect(
-            "the exact Some(cursor) reply fits at its own exact size, even though the \
-             reserve-padded pass alone would refuse it",
-        );
-        assert_eq!(
-            reply, exact_reply,
-            "the recheck must return the SAME reply a direct encode of the sole candidate produces"
-        );
-
-        let unfit_id = build_list_reply(1, vec![solo], 5, exact_len - 1, true)
-            .expect_err("one byte under the true minimum must still be refused");
-        assert_eq!(unfit_id, "solo-continuing");
-    }
-
-    /// `LIST_CURSOR_RESERVE`'s worst-case headroom must actually cover the
-    /// REAL worst case — not merely whatever short, hand-picked ids the
-    /// other `build_list_reply` tests above happen to use, which could all
-    /// pass while a genuine maximum-length cursor still overruns the
-    /// reserve in production. The maximum key `list_order_key` can ever
-    /// produce is `created_at` at `i64::MIN` (its widest decimal form) and
-    /// a 36-character UUID id (`LIST_CURSOR_RESERVE`'s own docs assume
-    /// this shape — every id this crate mints is `Uuid::new_v4().to_
-    /// string()`).
-    ///
-    /// Compares the REAL marginal cost `build_list_reply` pays for going
-    /// from `next_cursor: None` to this worst-case `Some` — the full JSON
-    /// delta (key, quoting, and value), via `Frame::control`, not the
-    /// cursor string's raw length alone, which would ignore everything the
-    /// reserve also has to cover besides the string itself.
-    #[test]
-    fn list_cursor_reserve_covers_the_maximum_encoded_cursor_delta() {
-        let max_id = uuid::Uuid::nil().to_string();
-        assert_eq!(
-            max_id.len(),
-            36,
-            "every id this crate mints (Uuid::new_v4().to_string()) is 36 characters; a nil \
-             UUID's string form is the same length and cheaper to construct as a fixture"
-        );
-        let max_cursor = encode_list_cursor(i64::MIN, &max_id);
-
-        let without_cursor = Frame::control(&ControlMsg::SessionList {
-            req_id: 1,
-            sessions: Vec::new(),
-            total: 0,
-            next_cursor: None,
-        })
-        .encoded_len();
-        let with_max_cursor = Frame::control(&ControlMsg::SessionList {
-            req_id: 1,
-            sessions: Vec::new(),
-            total: 0,
-            next_cursor: Some(max_cursor),
-        })
-        .encoded_len();
-        let delta = with_max_cursor - without_cursor;
-        assert!(
-            delta <= LIST_CURSOR_RESERVE,
-            "LIST_CURSOR_RESERVE ({LIST_CURSOR_RESERVE}) must cover the real worst-case cursor \
-             delta ({delta} bytes) for the maximum-length key this crate can ever emit, or \
-             build_list_reply's budget accounting could silently undercount"
-        );
-    }
-
-    /// `encode_list_cursor`/`decode_list_cursor` round trip exactly —
-    /// the ordinary path every valid `next_cursor`/`ListSessions::cursor`
-    /// pair takes.
-    #[test]
-    fn list_cursor_round_trips() {
-        let encoded = encode_list_cursor(1_700_000_042, "session-abc");
-        let decoded = decode_list_cursor(&encoded).expect("a freshly encoded cursor must decode");
-        assert_eq!(decoded.created_at, 1_700_000_042);
-        assert_eq!(decoded.id, "session-abc");
-    }
-
-    /// `handle_list_sessions`'s whole malformed-cursor contract rests on
-    /// `decode_list_cursor` never panicking and always collapsing every
-    /// UNDECODABLE shape to the same `None` — pinned directly here so a
-    /// regression is caught at the smallest possible unit rather than only
-    /// via the handler-level `InvalidRequest` tests. This is decoding
-    /// coverage, not forge-proofing: every fixture below is malformed at
-    /// the ENCODING level (bytes that cannot become a `ListCursor` at all),
-    /// never a well-formed key naming a session this supervisor never
-    /// issued one for — that shape decodes FINE and is accepted by design
-    /// (`list_sessions_cursor_from_a_deleted_session_still_resumes` pins
-    /// why: cursors carry no authority in a single-user supervisor). Three
-    /// distinct malformed shapes: a bit flip inside otherwise-valid base64,
-    /// base64 truncated mid-value, and a value that decodes to valid
-    /// base64/JSON but the WRONG shape (an unrelated JSON object) — the
-    /// last of which a naive "does it base64-decode" check would miss
-    /// entirely.
-    #[test]
-    fn list_cursor_decode_rejects_malformed_input_without_panicking() {
-        let valid = encode_list_cursor(1_700_000_000, "s1");
-
-        let mut flipped = valid.clone().into_bytes();
-        // Flip one bit in the middle of the encoded value — still the same
-        // length, still plausible base64 alphabet-wise for most flips, but
-        // no longer the bytes that were actually encoded.
-        let mid = flipped.len() / 2;
-        flipped[mid] ^= 0x01;
-        let flipped = String::from_utf8(flipped).unwrap_or_default();
-
-        let truncated = &valid[..valid.len() / 2];
-
-        for malformed in [flipped.as_str(), truncated, "not-base64-at-all!!", ""] {
-            assert!(
-                decode_list_cursor(malformed).is_none(),
-                "malformed cursor {malformed:?} must fail to decode, not panic or succeed"
-            );
-        }
-
-        // Valid base64 of valid JSON, but the wrong SHAPE — proves decoding
-        // checks the structure, not merely "is this base64 of some JSON".
-        use base64::Engine;
-        let wrong_shape = base64::engine::general_purpose::URL_SAFE_NO_PAD
-            .encode(serde_json::to_vec(&serde_json::json!({"unrelated": true})).unwrap());
-        assert!(decode_list_cursor(&wrong_shape).is_none());
     }
 
     /// "No supervisor is running here" is the single most common way this

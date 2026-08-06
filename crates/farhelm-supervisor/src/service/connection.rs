@@ -109,6 +109,49 @@ const WRITER_DRAIN_TIMEOUT: Duration = Duration::from_secs(5);
 /// docs for how the two windows interact.
 const HANDLER_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(30);
 
+/// The connection-local state a control message may reach, bundled into
+/// one value.
+///
+/// Passed to `handle_control` BY VALUE, not by `&mut`: it is a bundle of
+/// borrows, so moving it costs nothing, and every caller builds it as a
+/// single-use temporary at the call site. By value the dispatch can also
+/// move each field straight into the arm that needs it, rather than
+/// reborrowing out of a reference for no reason.
+///
+/// Everything here belongs to ONE connection and to no other: the two
+/// reply queues that identify it, the two channel-id route maps whose
+/// numbering is per-connection, and the `JoinSet` its slow handlers are
+/// tracked in. None of it is shared with the `Supervisor`, which is
+/// exactly the line this struct draws — `handle_control` takes the
+/// supervisor and this, and nothing else it could confuse for either.
+///
+/// A bundle rather than a positional parameter list because the list was
+/// the whole problem: five same-shaped borrows in a row (two
+/// `mpsc::Sender<Frame>`s that are NOT interchangeable, two `HashMap`s
+/// keyed by the same channel-id space) is a signature where a
+/// transposition compiles. Named fields do not make that impossible — a
+/// struct literal can still be filled in wrong — but they move the
+/// question to where a reader can answer it: `priority: &priority_tx` at
+/// the one construction site is checkable on sight, while the seventh
+/// argument of a call was not.
+///
+/// Deliberately NOT passed down to the per-message handlers. Each of them
+/// still takes exactly the pieces its message can touch, which is what
+/// makes "`ListSessions` never touches `input_routes`" a fact the
+/// signature enforces rather than a comment to be trusted.
+pub(crate) struct ConnectionCtx<'a> {
+    /// This connection's ordinary reply queue, which also serves as its
+    /// identity: `same_channel` against it is how a handler tells "the
+    /// connection that owns this attachment" from any other.
+    pub(crate) tx: &'a mpsc::Sender<Frame>,
+    /// This connection's prioritized queue, for the upload family alone —
+    /// see `send_upload`.
+    pub(crate) priority: &'a mpsc::Sender<Frame>,
+    pub(crate) input_routes: &'a mut HashMap<u32, InputRoute>,
+    pub(crate) upload_routes: &'a mut HashMap<u32, UploadRoute>,
+    pub(crate) tasks: &'a mut tokio::task::JoinSet<()>,
+}
+
 /// Serve one protocol connection. Generic over the byte stream so tests
 /// can drive it over an in-process duplex pipe with the same code path
 /// production uses over the unix socket.
@@ -407,11 +450,13 @@ where
                     handle_control(
                         &sup,
                         msg,
-                        &tx,
-                        &priority_tx,
-                        &mut input_routes,
-                        &mut upload_routes,
-                        &mut tasks,
+                        ConnectionCtx {
+                            tx: &tx,
+                            priority: &priority_tx,
+                            input_routes: &mut input_routes,
+                            upload_routes: &mut upload_routes,
+                            tasks: &mut tasks,
+                        },
                     )
                     .await;
                 }
@@ -1720,11 +1765,13 @@ mod tests {
                     cursor: None,
                     limit: None,
                 },
-                &tx,
-                &tx,
-                &mut input_routes,
-                &mut no_uploads(),
-                &mut tasks,
+                ConnectionCtx {
+                    tx: &tx,
+                    priority: &tx,
+                    input_routes: &mut input_routes,
+                    upload_routes: &mut no_uploads(),
+                    tasks: &mut tasks,
+                },
             )
             .await;
             let reply = tokio::time::timeout(Duration::from_secs(5), rx.recv())

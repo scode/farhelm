@@ -11,7 +11,8 @@
 //! PLAN_M3.md's process-tree-ownership section for why neither alone was
 //! ever enough.
 
-use super::core::{SessionEntry, Supervisor, dead_pane_exit_code};
+use super::core::{SessionEntry, Supervisor};
+use super::status::dead_pane_exit_code;
 use crate::store::Transition;
 use std::collections::{HashMap, HashSet};
 use std::time::Duration;
