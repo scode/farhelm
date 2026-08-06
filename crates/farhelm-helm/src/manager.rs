@@ -710,7 +710,7 @@ pub trait HostTransport: Send + Sync + 'static {
 ///
 /// The exact two paths `connect_supervisor` in `lib.rs` has taken since
 /// M1, generalized from "whatever argv said" to "whatever this row says".
-/// The ssh argv itself is still built by [`crate::ssh_args`] — shared
+/// The ssh argv itself is still built by [`crate::ssh::ssh_stdio_args`] — shared
 /// rather than reimplemented, because its quoting rules are the subtlest
 /// correctness surface in the transport and two copies would eventually
 /// disagree.
@@ -769,7 +769,7 @@ impl HostTransport for SystemTransport {
                     )?;
                     let control_path = self.state_dir.join("ssh-cm-%C");
                     let mut cmd = tokio::process::Command::new("ssh");
-                    cmd.args(crate::ssh_args(
+                    cmd.args(crate::ssh::ssh_stdio_args(
                         dest,
                         &control_path,
                         host.remote_farhelm.as_deref().unwrap_or("farhelm"),
@@ -3265,7 +3265,7 @@ impl HostActor {
                 // the M1 annotation is what turns it into advice; reused
                 // rather than re-derived so both paths say the same thing.
                 let error = match (&row.kind, row.destination.as_deref()) {
-                    (HostKind::Ssh, Some(dest)) => crate::annotate_ssh_handshake_eof(
+                    (HostKind::Ssh, Some(dest)) => crate::ssh::annotate_ssh_handshake_eof(
                         error,
                         dest,
                         row.remote_state_dir.as_deref(),

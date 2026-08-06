@@ -316,7 +316,7 @@ async fn recorded_identity(store: &HelmStore, host: HostId) -> Option<String> {
 /// real session list into helm.db.
 ///
 /// This is the transport truth the scripted-peer tests deliberately cannot
-/// give: `ssh_args`' quoting, the remote `farhelm internal stdio` proxy,
+/// give: `ssh_stdio_args`' quoting, the remote `farhelm internal stdio` proxy,
 /// the per-row `remote_farhelm`/`remote_state_dir` fields that replaced
 /// M1's argv flags, the handshake over an exec channel, and the identity
 /// crossing it — every one of which is invisible to an in-memory duplex.

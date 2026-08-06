@@ -974,25 +974,24 @@ impl SupervisorClient {
             }
             FrameKind::Control => {
                 let msg = parse_control(&frame)?;
-                match &msg {
-                    ControlMsg::SessionCreated { req_id, .. }
-                    | ControlMsg::SessionList { req_id, .. }
-                    | ControlMsg::SessionStopped { req_id, .. }
-                    | ControlMsg::SessionDeleted { req_id, .. }
-                    | ControlMsg::SessionRestarted { req_id, .. }
-                    | ControlMsg::SessionRenamed { req_id, .. }
-                    | ControlMsg::Attached { req_id, .. }
-                    | ControlMsg::TabOpened { req_id, .. }
-                    | ControlMsg::TabClosed { req_id, .. }
-                    | ControlMsg::UploadStarted { req_id, .. }
-                    | ControlMsg::UploadCommitted { req_id, .. }
-                    | ControlMsg::Error { req_id, .. }
-                        if *req_id != 0 =>
-                    {
-                        if let Some(tx) = self.pending.lock().await.map.remove(req_id) {
-                            let _ = tx.send(msg);
-                        }
+                // WHICH messages are replies is the protocol's question,
+                // not this client's: [`ControlMsg::reply_req_id`] answers
+                // it beside the enum, so a reply variant added there cannot
+                // arrive here unrouted and hang its caller forever. It
+                // deliberately answers `None` for the REQUESTS that carry a
+                // `req_id` too — a peer echoing one back must never be
+                // delivered as that request's answer.
+                //
+                // `req_id` 0 means "tied to no request" (an unsolicited
+                // `Error`); it has no pending entry to complete and falls
+                // through to the arms below, which log it.
+                if let Some(req_id) = msg.reply_req_id().filter(|req_id| *req_id != 0) {
+                    if let Some(tx) = self.pending.lock().await.map.remove(&req_id) {
+                        let _ = tx.send(msg);
                     }
+                    return Ok(());
+                }
+                match &msg {
                     ControlMsg::Detached { channel, reason } => {
                         if let Some(handle) = self.terminals.lock().await.remove(channel) {
                             signal_detached(&handle, reason.clone());
@@ -2554,6 +2553,102 @@ mod tests {
                 .expect("peer did not observe EOF after client drop")
                 .unwrap()
                 .is_none()
+        );
+    }
+
+    /// An `Error` carrying `req_id` 0 is tied to NO request
+    /// (`ControlMsg::Error`'s own contract), and the demultiplexer's whole
+    /// treatment of that case is one `.filter(|req_id| *req_id != 0)` —
+    /// small enough to lose in a refactor, and invisible when lost. Without
+    /// it the message is classified as a reply, looked up in a pending map
+    /// that has no entry 0, and dropped in silence: the supervisor said
+    /// something went wrong and nobody, not even the log, ever hears it.
+    ///
+    /// So the assertion is on the LOG, not just on the request. Both
+    /// directions have to hold, and only together do they pin the guard:
+    /// the unsolicited error must reach the unhandled-message arm and be
+    /// warned about, and the real reply that follows it must still complete
+    /// the waiting request. Ordering is deterministic rather than raced —
+    /// one reader loop dispatches frames in the order the peer wrote them,
+    /// so by the time the request resolves the error has already been
+    /// handled one way or the other.
+    ///
+    /// The capture buffer is process-global (see `test_capture`), hence the
+    /// sentinel: it is what distinguishes this test's event from every
+    /// other test's concurrent noise.
+    #[tokio::test]
+    async fn an_unsolicited_error_is_logged_rather_than_routed_as_a_reply() {
+        const SENTINEL: &str = "unsolicited-error-a41c7f";
+        let events = crate::test_capture::install();
+
+        let (client_side, peer_side) = tokio::io::duplex(64 * 1024);
+        let peer = tokio::spawn(async move {
+            let (r, w) = tokio::io::split(peer_side);
+            let mut reader = FrameReader::new(r);
+            let mut writer = FrameWriter::new(w);
+            handshake(&mut reader, &mut writer, "supervisor")
+                .await
+                .unwrap();
+            let request = parse_control(&reader.read_frame().await.unwrap().unwrap()).unwrap();
+            let ControlMsg::ListSessions { req_id, .. } = request else {
+                panic!("expected a ListSessions, got {request:?}");
+            };
+            // The unsolicited error goes FIRST, so a demultiplexer that
+            // mistook it for a reply would have consumed it before the real
+            // one arrived — the order in which the bug does the most damage.
+            writer
+                .write_control(&ControlMsg::Error {
+                    req_id: 0,
+                    message: SENTINEL.to_string(),
+                    kind: ErrorKind::Internal,
+                })
+                .await
+                .unwrap();
+            writer
+                .write_control(&ControlMsg::SessionList {
+                    req_id,
+                    sessions: vec![session("s1")],
+                    total: 1,
+                    next_cursor: None,
+                })
+                .await
+                .unwrap();
+        });
+        let (r, w) = tokio::io::split(client_side);
+        let client = SupervisorClient::start(r, w).await.unwrap();
+
+        let reply = client
+            .request(
+                101,
+                ControlMsg::ListSessions {
+                    req_id: 101,
+                    cursor: None,
+                    limit: None,
+                },
+            )
+            .await
+            .expect("the real reply must still complete the request");
+        assert!(
+            matches!(
+                &reply,
+                ControlMsg::SessionList { req_id: 101, sessions, .. } if sessions[0].id == "s1"
+            ),
+            "the request must be completed by its own reply, not by the unsolicited error: \
+             {reply:?}"
+        );
+        peer.await.unwrap();
+
+        let warned = crate::test_capture::matching(&events, "unexpected control message at helm")
+            .into_iter()
+            .any(|event| {
+                event
+                    .field("other")
+                    .is_some_and(|other| other.contains(SENTINEL))
+            });
+        assert!(
+            warned,
+            "an error tied to no request must fall through to the unhandled arm and be logged, \
+             not be swallowed by the reply lookup"
         );
     }
 

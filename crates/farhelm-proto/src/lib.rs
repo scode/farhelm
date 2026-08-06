@@ -1694,6 +1694,85 @@ impl ControlMsg {
             host_identity: None,
         }
     }
+
+    /// The request this message is a REPLY to, or `None` if it is not a
+    /// reply at all.
+    ///
+    /// What a demultiplexer needs to know before it hands a message to
+    /// whoever is waiting on a `req_id`. Living here rather than in each
+    /// client is what keeps that decision in step with the enum: a reply
+    /// variant added beside its request, in this file, is one edit away
+    /// from being routed, instead of silently hanging every caller whose
+    /// or-pattern was never extended.
+    ///
+    /// **The match below is exhaustive on purpose — no wildcard arm.** That
+    /// is the enforcement, and it is why this method is worth having at
+    /// all. A `_ => None` would classify a newly added reply variant as
+    /// "not a reply", which is precisely the silent hang this exists to
+    /// prevent, and no test could catch it without re-deriving the variant
+    /// list somewhere else. Listing every variant makes adding one a
+    /// compile error HERE, at the moment someone must decide what it is.
+    ///
+    /// **`None` for REQUESTS, even though most of them carry a `req_id`.**
+    /// That is the whole point of the distinction and not an oversight:
+    /// `req_id` means "this correlates with request N" in both directions,
+    /// so a peer that echoed a `CreateSession` back — through malice, a
+    /// crossed connection, or a loopback bug — would otherwise be handed to
+    /// the caller as if it were that request's ANSWER. Direction is not on
+    /// the wire; it is only ever inferable from the message type, which is
+    /// exactly what this method encodes.
+    ///
+    /// `Error` counts as a reply because it is the failure form of every
+    /// request — but it is also the ONE message that can arrive
+    /// uncorrelated, and it says so with `req_id` 0 (see that variant's
+    /// docs). That convention is `Error`'s alone: the other unsolicited
+    /// messages carry no `req_id` field at all and correlate by `channel`.
+    /// It is deliberately not special-cased here, because "is this a reply"
+    /// and "is this reply anybody's" are separate questions and only the
+    /// caller holding the pending-request table can answer the second.
+    pub fn reply_req_id(&self) -> Option<u64> {
+        match self {
+            ControlMsg::SessionCreated { req_id, .. }
+            | ControlMsg::SessionList { req_id, .. }
+            | ControlMsg::SessionStopped { req_id, .. }
+            | ControlMsg::SessionDeleted { req_id, .. }
+            | ControlMsg::SessionRestarted { req_id, .. }
+            | ControlMsg::SessionRenamed { req_id, .. }
+            | ControlMsg::Attached { req_id, .. }
+            | ControlMsg::TabOpened { req_id, .. }
+            | ControlMsg::TabClosed { req_id, .. }
+            | ControlMsg::UploadStarted { req_id, .. }
+            | ControlMsg::UploadCommitted { req_id, .. }
+            | ControlMsg::Error { req_id, .. } => Some(*req_id),
+            // Requests are listed one by one rather than swept up by a
+            // wildcard: each is a message a hostile or confused peer could
+            // echo back, and this `None` is what stops that echo from being
+            // delivered as an answer.
+            ControlMsg::CreateSession { .. }
+            | ControlMsg::ListSessions { .. }
+            | ControlMsg::StopSession { .. }
+            | ControlMsg::DeleteSession { .. }
+            | ControlMsg::RestartSession { .. }
+            | ControlMsg::RenameSession { .. }
+            | ControlMsg::OpenTab { .. }
+            | ControlMsg::CloseTab { .. }
+            | ControlMsg::Attach { .. }
+            | ControlMsg::BeginUpload { .. }
+            | ControlMsg::CommitUpload { .. } => None,
+            // The handshake, and the channel-correlated events: nothing
+            // here has a `req_id` field to return in the first place.
+            ControlMsg::Hello { .. }
+            | ControlMsg::Detach { .. }
+            | ControlMsg::Detached { .. }
+            | ControlMsg::ReplayComplete { .. }
+            | ControlMsg::Resize { .. }
+            | ControlMsg::PauseOutput { .. }
+            | ControlMsg::ResumeOutput { .. }
+            | ControlMsg::UploadAck { .. }
+            | ControlMsg::AbortUpload { .. }
+            | ControlMsg::UploadAborted { .. } => None,
+        }
+    }
 }
 
 #[cfg(test)]
@@ -4168,5 +4247,81 @@ mod tests {
             UPLOAD_ABORT_REASON_STALLED,
             "transfer stopped making progress (stalled)"
         );
+    }
+
+    /// [`ControlMsg::reply_req_id`] is what every demultiplexer routes
+    /// replies by, and getting its answer wrong has two failure modes that
+    /// are both silent at the call site: a reply variant it forgot returns
+    /// `None` and the caller waits forever, while a request variant it
+    /// admitted lets a peer's echo of a request be delivered as that
+    /// request's answer.
+    ///
+    /// Deliberately a handful of representative cases rather than a value
+    /// of every variant. COMPLETENESS is not this test's job and cannot be:
+    /// any fixture list here would be a second copy of the enum, kept in
+    /// step by the same discipline it claims to enforce. The accessor's own
+    /// match is exhaustive with no wildcard, so a new variant is a compile
+    /// error at the classification site — the guarantee is structural, and
+    /// what is left to assert is that the classification MEANS what the
+    /// docs say: the three groups map to Some/None as intended, and a
+    /// request is not merely absent from the reply list but actively
+    /// answered `None` while carrying a `req_id` of its own.
+    #[test]
+    fn reply_req_id_is_some_for_exactly_the_reply_variants() {
+        // Replies: the `req_id` comes back verbatim, including `Error`'s.
+        assert_eq!(
+            ControlMsg::SessionStopped { req_id: 7 }.reply_req_id(),
+            Some(7)
+        );
+        assert_eq!(ControlMsg::TabClosed { req_id: 9 }.reply_req_id(), Some(9));
+        assert_eq!(
+            ControlMsg::UploadStarted {
+                req_id: 11,
+                channel: 1
+            }
+            .reply_req_id(),
+            Some(11)
+        );
+        assert_eq!(
+            ControlMsg::Error {
+                req_id: 13,
+                message: "boom".to_string(),
+                kind: ErrorKind::Internal,
+            }
+            .reply_req_id(),
+            Some(13)
+        );
+
+        // Requests carry a `req_id` too, and must still answer `None` — a
+        // peer echoing one back must never complete the pending request it
+        // names.
+        for echoed in [
+            ControlMsg::StopSession {
+                req_id: 7,
+                session_id: "s1".to_string(),
+            },
+            ControlMsg::CommitUpload {
+                req_id: 11,
+                channel: 1,
+            },
+        ] {
+            assert_eq!(
+                echoed.reply_req_id(),
+                None,
+                "a request echoed back must never be routed as a reply: {echoed:?}"
+            );
+        }
+
+        // Unsolicited, channel-correlated events have no request to answer.
+        assert_eq!(ControlMsg::Detach { channel: 1 }.reply_req_id(), None);
+        assert_eq!(
+            ControlMsg::UploadAck {
+                channel: 1,
+                received: 3
+            }
+            .reply_req_id(),
+            None
+        );
+        assert_eq!(ControlMsg::hello("supervisor").reply_req_id(), None);
     }
 }

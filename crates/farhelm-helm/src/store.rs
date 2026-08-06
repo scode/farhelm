@@ -290,7 +290,7 @@ pub enum HostStoreError {
     /// all: empty, or shaped like an option (a leading `-`).
     ///
     /// The option-shaped case is a security refusal wearing a usability
-    /// coat. `crate::ssh_args` already terminates ssh's option parsing
+    /// coat. `crate::ssh::ssh_base_args` already terminates ssh's option parsing
     /// before the destination, which is what actually stops
     /// `-oProxyCommand=...` from executing; refusing it HERE means a user
     /// who pastes such a string gets told what is wrong with it at the
@@ -2970,7 +2970,7 @@ mod tests {
     /// The registry half of the ssh argv-injection fix: a destination that
     /// OpenSSH would read as an option (`-oProxyCommand=...` executes a
     /// local command) never becomes a registry row in the first place, and
-    /// neither does an empty one. `crate::ssh_args`' terminator placement
+    /// neither does an empty one. `crate::ssh::ssh_base_args`' terminator placement
     /// is the real guard — it protects callers that never touch this
     /// module — so what this pins is the OTHER half: the user finds out at
     /// registration time, with a typed error naming the value, instead of

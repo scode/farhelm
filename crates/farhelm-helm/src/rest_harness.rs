@@ -1,6 +1,7 @@
 //! A scripted fleet the REST tests stand the REAL serving path up on.
 //!
-//! Everything under test in `lib.rs`, `aggregate.rs`, and `hosts.rs` is
+//! Everything under test in `sessions.rs`, `uploads.rs`, `terminal.rs`,
+//! `aggregate.rs`, and `hosts.rs` is
 //! about what happens between a request and a host: the merged view, the
 //! cursor, owner-lookup routing, the refusals. None of that is exercised by
 //! calling a handler with a hand-made value, and all of it is exercised by
@@ -48,7 +49,7 @@ use std::future::Future;
 use std::pin::Pin;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
-use tokio::io::{AsyncRead, AsyncWrite, DuplexStream};
+use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt, DuplexStream};
 use tokio::sync::{broadcast, mpsc, watch};
 
 /// How long a harness waits for a host to reach the state a test needs.
@@ -971,4 +972,171 @@ pub(crate) async fn spliced_helm_listing(
     let local = local_id(&harness.store).await;
     harness.await_refreshed(local).await;
     harness
+}
+
+// The two peer/client doubles below are here for the same reason the fleet
+// is: more than one test module needs them. `silent_supervisor` is the far
+// end of every "the helm refused this by itself" assertion, and
+// `WsTestClient` is the near end of every terminal-socket test — and the
+// session-routing tests reach for both.
+
+/// A scripted supervisor that must be asked NOTHING.
+///
+/// The far side of every "the helm refused this by itself" assertion:
+/// it completes the handshake, so its host really is connected and
+/// routable, and then fails if any request arrives at all. Bounded
+/// silence rather than an EOF, because the harness holds the connection
+/// open for the whole test (`rest_harness`'s module docs) — so
+/// "nothing was forwarded" is only observable as nothing arriving. The
+/// window is generous on purpose: a leak would send its frame
+/// immediately, so a longer wait only costs time on the failing path.
+pub(crate) async fn silent_supervisor(peer_side: tokio::io::DuplexStream) {
+    use farhelm_proto::io::{FrameReader, FrameWriter, handshake};
+
+    let (r, w) = tokio::io::split(peer_side);
+    let mut reader = FrameReader::new(r);
+    let mut writer = FrameWriter::new(w);
+    handshake(&mut reader, &mut writer, "supervisor")
+        .await
+        .unwrap();
+    // Three outcomes, and only one of them is a failure. A timeout is
+    // the ordinary pass (nothing was sent). A clean EOF is also a pass:
+    // the harness tears connections down deliberately — a host taken
+    // down, a retry, a reconnect — and a closed stream is not a request.
+    // Only a FRAME means something reached a supervisor that must not
+    // have been asked anything.
+    let leaked = tokio::time::timeout(Duration::from_secs(2), reader.read_frame()).await;
+    assert!(
+        !matches!(leaked, Ok(Ok(Some(_)))),
+        "no request may reach this supervisor, but one arrived: {leaked:?}"
+    );
+}
+
+/// A deliberately minimal WebSocket client: enough to complete the
+/// upgrade, send text/binary frames, and — crucially — to STOP
+/// READING whenever a test wants to model a wedged browser.
+///
+/// Hand-rolled rather than pulled from a crate because no WebSocket
+/// client is a dependency of this workspace, and the two behaviors
+/// these tests need are precisely the ones a real client library goes
+/// out of its way to hide: never draining the socket, and observing
+/// the server's close. Only the subset actually used is implemented —
+/// client frames are always masked and always short, which is all a
+/// pause/resume message or a keystroke ever is.
+pub(crate) struct WsTestClient {
+    stream: tokio::net::TcpStream,
+    /// Bytes read from the socket but not yet parsed into a frame.
+    buffered: Vec<u8>,
+}
+
+impl WsTestClient {
+    pub(crate) async fn connect(addr: std::net::SocketAddr, path: &str) -> WsTestClient {
+        let mut stream = tokio::net::TcpStream::connect(addr).await.expect("connect");
+        // A fixed key is fine: nothing here verifies the accept hash,
+        // which exists to defend against caching proxies, not tests.
+        let request = format!(
+            "GET {path} HTTP/1.1\r\nHost: 127.0.0.1:{}\r\nConnection: Upgrade\r\n\
+             Upgrade: websocket\r\nSec-WebSocket-Version: 13\r\n\
+             Sec-WebSocket-Key: AAAAAAAAAAAAAAAAAAAAAA==\r\n\r\n",
+            addr.port()
+        );
+        stream
+            .write_all(request.as_bytes())
+            .await
+            .expect("send upgrade");
+        // Read exactly up to the end of the response headers, leaving
+        // any frame bytes that followed them in the buffer.
+        let mut buffered = Vec::new();
+        let mut byte = [0u8; 1];
+        while !buffered.ends_with(b"\r\n\r\n") {
+            let n = stream.read(&mut byte).await.expect("read upgrade response");
+            assert!(n > 0, "connection closed during the WebSocket upgrade");
+            buffered.push(byte[0]);
+        }
+        let response = String::from_utf8_lossy(&buffered).into_owned();
+        assert!(
+            response.starts_with("HTTP/1.1 101"),
+            "WebSocket upgrade refused: {response}"
+        );
+        WsTestClient {
+            stream,
+            buffered: Vec::new(),
+        }
+    }
+
+    /// Send one masked client frame. `opcode` is 1 for text, 2 for
+    /// binary — the only two this suite sends.
+    pub(crate) async fn send(&mut self, opcode: u8, payload: &[u8]) {
+        assert!(
+            payload.len() < 126,
+            "test frames stay in the short-length form"
+        );
+        let mask = [0x37u8, 0xfa, 0x21, 0x3d];
+        let mut frame = vec![0x80 | opcode, 0x80 | payload.len() as u8];
+        frame.extend_from_slice(&mask);
+        frame.extend(
+            payload
+                .iter()
+                .enumerate()
+                .map(|(i, byte)| byte ^ mask[i % 4]),
+        );
+        self.stream.write_all(&frame).await.expect("send ws frame");
+    }
+
+    pub(crate) async fn send_text(&mut self, text: &str) {
+        self.send(1, text.as_bytes()).await;
+    }
+
+    /// Read one server frame's (opcode, payload), or `None` once the
+    /// server closes. Server frames are never masked.
+    pub(crate) async fn recv(&mut self) -> Option<(u8, Vec<u8>)> {
+        loop {
+            if let Some(frame) = self.take_buffered_frame() {
+                return Some(frame);
+            }
+            let mut chunk = [0u8; 8192];
+            let n = self.stream.read(&mut chunk).await.ok()?;
+            if n == 0 {
+                return None;
+            }
+            self.buffered.extend_from_slice(&chunk[..n]);
+        }
+    }
+
+    /// Decode one complete frame out of `buffered`, if there is one.
+    /// Handles the two length forms axum actually emits for the sizes
+    /// these tests produce.
+    fn take_buffered_frame(&mut self) -> Option<(u8, Vec<u8>)> {
+        if self.buffered.len() < 2 {
+            return None;
+        }
+        let opcode = self.buffered[0] & 0x0f;
+        let short = (self.buffered[1] & 0x7f) as usize;
+        let (len, header) = match short {
+            126 => {
+                if self.buffered.len() < 4 {
+                    return None;
+                }
+                (
+                    u16::from_be_bytes([self.buffered[2], self.buffered[3]]) as usize,
+                    4,
+                )
+            }
+            127 => {
+                if self.buffered.len() < 10 {
+                    return None;
+                }
+                let mut bytes = [0u8; 8];
+                bytes.copy_from_slice(&self.buffered[2..10]);
+                (u64::from_be_bytes(bytes) as usize, 10)
+            }
+            other => (other, 2),
+        };
+        if self.buffered.len() < header + len {
+            return None;
+        }
+        let payload = self.buffered[header..header + len].to_vec();
+        self.buffered.drain(..header + len);
+        Some((opcode, payload))
+    }
 }
