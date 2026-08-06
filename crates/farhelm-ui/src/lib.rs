@@ -147,7 +147,7 @@ pub enum SessionStatus {
     Unknown,
     /// The agent is alive and appears to be working. See farhelm-proto's
     /// `SessionStatus::Running` for the transitional note that matters
-    /// here: until the supervisor's sampler lands, every live session
+    /// here: before the supervisor's first sample of a session, that live session
     /// arrives as this one.
     Running,
     /// The agent is alive and appears to be blocked on the user — a

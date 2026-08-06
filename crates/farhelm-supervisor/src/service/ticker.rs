@@ -64,28 +64,19 @@
 //!
 //! Sampling itself writes nothing durable — it reads panes and updates
 //! in-memory [`ActivitySample`] cells — so it is not a `may_record`
-//! question at all. The capture half is, but only PARTLY: a supervisor
-//! that may not record still scans the agents' record trees and still
-//! advances its in-memory capture state, because reading and concluding
-//! are not the thing it lacks standing for. What `may_record` gates is the
-//! durable write, inside the pass, where the conclusion would become a
-//! claim.
+//! question. The capture half of a tick is, and it is gated where it
+//! always was, inside the pass.
 //!
 //! # What the samples are for
 //!
 //! This module measures; it does not classify. `service::status`'s
-//! `live_status` reads exactly what is recorded here — how many of a
-//! session's own consecutive samples showed nothing new, and the tail it
-//! last showed — and turns it into running/waiting/idle, with the per-kind
-//! sharpeners matching a pending question or approval against that tail.
-//!
-//! Keeping the thresholds there rather than here is what lets the whole
-//! classification be unit-tested against hand-built entries. Keeping them
-//! expressed in SAMPLES rather than seconds is what keeps this task free
-//! to be late — under a budgeted round robin its cadence is a function of
-//! how many sessions are live, and a classification that read a clock
-//! would silently turn that population into a status. See
-//! [`ActivitySample`]'s own docs, which carry the argument.
+//! `live_status` reads exactly what is recorded here — how long a pane has
+//! been quiet, and the tail it last showed — and turns it into
+//! running/waiting/idle, with the per-kind sharpeners matching a pending
+//! question or approval against that tail. Keeping the thresholds there
+//! rather than here is what lets the whole classification be unit-tested
+//! against hand-built entries, and what keeps this task free to be late
+//! without being wrong.
 //!
 //! # Shutdown contract
 //!
@@ -131,28 +122,13 @@ use tracing::{debug, error, warn};
 /// How often the supervisor's periodic task fires in production.
 ///
 /// Chosen against the helm's own 3-second `ListSessions` drain rather than
-/// independently: a ticker SLOWER than the drain would leave drains
-/// answering from samples nothing had refreshed since the previous one,
-/// while a much faster one would spend subprocesses producing samples no
-/// reader ever gets to see.
-///
-/// ## What this interval is, and is not, a bound on
-///
-/// It is the period of the TASK, not of any one session's sampling. A
-/// live session is sampled once every `ceil(live / SAMPLE_TAIL_BUDGET)`
-/// ticks, so its own refresh period is
-/// `ceil(live / budget) × interval`, plus however long each round's work
-/// takes. An earlier version of this doc promised a drain would find a
-/// sample "no older than one interval"; that was only ever true below the
-/// budget, and it is not what anything depends on.
-///
-/// Nothing depends on it because the classification does not read a clock
-/// at all: `status::live_status` counts a session's OWN consecutive
-/// unchanged samples ([`ActivitySample`]), so a longer effective period
-/// makes a transition arrive later without ever making it wrong. Tail
-/// freshness — what a sharpener matches against — has the same
-/// population-dependent bound, with the same consequence: a prompt that
-/// appeared is noticed at the session's next sample, whenever that is.
+/// independently. PLAN_M6_75.md item 3 fixes the supervisor edge's
+/// staleness bound at one ticker interval plus one drain, so a ticker
+/// SLOWER than the drain would widen that bound for no saving, while a
+/// much faster one would spend subprocesses producing samples no reader
+/// ever gets to see. Sitting below the drain means every drain finds a
+/// sample no older than one interval without the two cadences locking into
+/// phase.
 ///
 /// Overridable per supervisor through [`crate::service::SupervisorSeams`],
 /// which is how tests get a cadence measured in milliseconds.
@@ -388,46 +364,18 @@ pub(crate) fn start_ticker(sup: &Arc<Supervisor>) -> TickerHandle {
         // supervisor means no shared state and no lock for a value only
         // this loop ever reads.
         let mut cursor: usize = 0;
-        // ANCHORED rather than a sleep at the end of each pass. A
-        // `sleep(interval)` after the work makes the real cadence
-        // `interval + work`, so every slow capture pass permanently pushes
-        // every later tick later — a drift that compounds for the life of
-        // the process and that no reader can see, since the only symptom
-        // is samples arriving less often than the interval anyone
-        // configured.
-        //
-        // The first tick is anchored one interval out because `serve` has
-        // just run a reload and a capture pass of its own; a tick at t=0
-        // would repeat that work before anything could have changed.
-        //
-        // SKIP rather than tokio's default burst: when a pass overruns its
-        // period the missed ticks are dropped and the next one lands on
-        // the next multiple of the interval from the anchor. Bursting
-        // would fire the backlog back to back — several sampling passes
-        // with no time between them for a pane to have changed, which is
-        // work for nothing — while `Delay` would re-anchor on the overrun
-        // and reintroduce exactly the drift this replaces.
-        let mut ticks = tokio::time::interval_at(tokio::time::Instant::now() + interval, interval);
-        ticks.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
         loop {
+            // Sleep FIRST. `serve` has just run a reload and a capture
+            // pass of its own, so a tick at t=0 would repeat that work
+            // before anything could have changed.
             tokio::select! {
                 _ = &mut stop_rx => break,
-                _ = ticks.tick() => {}
+                _ = tokio::time::sleep(interval) => {}
             }
             let Some(sup) = weak.upgrade() else {
                 break;
             };
             tick(&sup, &mut cursor, SAMPLE_TAIL_BUDGET, &mut stop_rx).await;
-            // A stop observed BETWEEN captures has already been taken out
-            // of the channel by `stop_requested`, and a `oneshot::Receiver`
-            // that has yielded its result panics when polled again — which
-            // the `select!` above would do on the next iteration. Breaking
-            // here is what keeps the cooperative stop from ending the task
-            // by panicking instead of by returning; `try_recv` itself is
-            // safe to repeat, so asking again costs nothing.
-            if stop_requested(&mut stop_rx) {
-                break;
-            }
         }
     });
     TickerHandle {
@@ -515,12 +463,6 @@ async fn tick(
 /// and new ones created — would make the first pass over the new
 /// population start partway in, permanently skipping the sessions before
 /// that offset on the pass that mattered most.
-///
-/// A FAILED liveness probe is the one early return that does not reset,
-/// and the difference is the point: "there are no live sessions" is an
-/// answer about the population, while "tmux could not be asked" is no
-/// answer at all, and rewinding the rotation on it would resample the head
-/// of the list every time a flaky tmux dropped a query.
 ///
 /// # Cancellation
 ///
@@ -614,10 +556,11 @@ mod tests {
     use super::super::core::tests::{StateDir, dummy_exe, entry_with, no_uploads};
     use super::super::core::{CreateInputs, SupervisorSeams, SupervisorTimeouts, note_first_input};
     use super::super::handlers::handle_control;
+    use super::super::status::session_status;
     use super::*;
     use crate::agent_kind::{CaptureWindowBounds, IntegrationSnapshot};
     use crate::store::{LastOutcome, StoredSession, now_unix};
-    use farhelm_proto::{AgentKind, ControlMsg};
+    use farhelm_proto::{AgentKind, ControlMsg, SessionStatus};
     use std::collections::HashMap;
     use std::sync::atomic::{AtomicBool, Ordering};
     use tokio::sync::mpsc;
@@ -723,6 +666,27 @@ mod tests {
         let tmux_name = format!("fh-{id}");
         let pane = spawn_pane(sup, &tmux_name, command).await;
         install_entry_of_kind(sup, id, Terminal { tmux_name, pane }, kind).await;
+    }
+
+    /// What a `ListSessions` reply would say about this session right now,
+    /// computed exactly the way one is: probe tmux once, then classify the
+    /// entry against the result.
+    ///
+    /// Going through the real [`session_status`] rather than reading the
+    /// sample cell is the entire point of the tests below — the unit tests
+    /// in `status` already pin the classifier against hand-built cells,
+    /// and what is left to prove is that a REAL pane, sampled by the REAL
+    /// ticker, reaches it.
+    async fn classify(sup: &Arc<Supervisor>, id: &str) -> SessionStatus {
+        let states = sup.tmux.pane_states().await.expect("pane states");
+        let entry = sup
+            .sessions
+            .lock()
+            .await
+            .get(id)
+            .cloned()
+            .expect("the session is in the map");
+        session_status(&entry, &states).0
     }
 
     /// This session's sample cell, cloned out so an assertion never holds
@@ -1627,5 +1591,136 @@ mod tests {
             served.await
         );
         served.abort();
+    }
+
+    /// The whole chain, against real panes: a pane that keeps printing
+    /// classifies `Running`, and one that prints nothing decays from the
+    /// unwatched default to `Idle` — both through the real sampler and the
+    /// real [`session_status`], with nothing hand-fed.
+    ///
+    /// The DECAY is what earns this test its cost. `status`'s own unit
+    /// tests pin the recency arithmetic exactly, but they build the sample
+    /// cell themselves; only here does the transition depend on the ticker
+    /// having genuinely watched a pane twice and concluded nothing moved.
+    /// The pre-ticker assertion is what makes it a transition rather than
+    /// a coincidence: before the first pass the same session classifies
+    /// `Running`, so `Idle` below can only have come from being watched.
+    #[tokio::test]
+    async fn a_busy_pane_classifies_running_and_a_quiet_one_decays_to_idle() {
+        let state = StateDir::new();
+        let sup = supervisor_with(&state, SupervisorSeams::default()).await;
+        // Distinct text per line, for the reason the sampling test above
+        // spells out: a constant would scroll an unchanging grid past and
+        // look quiet.
+        install_live_session(
+            &sup,
+            "busy",
+            "i=0; while true; do i=$((i+1)); echo \"tick $i\"; sleep 0.05; done",
+        )
+        .await;
+        install_live_session(&sup, "still", "sleep 300").await;
+
+        assert_eq!(
+            classify(&sup, "still").await,
+            SessionStatus::Running,
+            "premise: a live session nothing has sampled yet is running, not idle"
+        );
+
+        let busy = sample_of(&sup, "busy").await;
+        let still = sample_of(&sup, "still").await;
+        let ticker = start_ticker(&sup);
+        wait_until("the busy pane was seen to change", || {
+            busy.lock().expect("activity mutex").last_change.is_some()
+        })
+        .await;
+        wait_until("the still pane was sampled more than once", || {
+            still.lock().expect("activity mutex").samples > 1
+        })
+        .await;
+
+        // Re-classified in a loop rather than once: the busy pane is only
+        // `Running` while its last observed change is inside the recency
+        // window, and a runner that stalls between the wait above and the
+        // probe here would otherwise fail on the machine's scheduling
+        // rather than on the code.
+        let deadline = tokio::time::Instant::now() + TEST_DEADLINE;
+        loop {
+            if classify(&sup, "busy").await == SessionStatus::Running {
+                break;
+            }
+            assert!(
+                tokio::time::Instant::now() < deadline,
+                "a pane printing continuously never classified running"
+            );
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+        assert_eq!(
+            classify(&sup, "still").await,
+            SessionStatus::Idle,
+            "a pane watched twice with nothing printed is at rest"
+        );
+        ticker.shutdown().await;
+    }
+
+    /// A pending question on a real pane reaches the per-kind sharpener
+    /// and classifies `Waiting` — the end-to-end path PLAN_M6_75.md item
+    /// 2's user-visible promise rides on.
+    ///
+    /// Deliberately not the fake agent: these tests drive tmux directly
+    /// (see [`spawn_pane`]), so the shortest honest fixture is a shell that
+    /// prints the dialog and then waits, exactly as an agent blocked on an
+    /// approval does. What this adds over `agent_kind`'s recognition tests
+    /// is every step between them — capture-pane's rendering, the tail
+    /// bound, the sample cell, the snapshot lookup that decides which
+    /// sharpener applies.
+    ///
+    /// The pane is SILENT after printing, so its baseline has decayed to
+    /// idle by the time it is classified: `Waiting` here can only be a
+    /// promotion by the sharpener, never recency wearing a different name.
+    #[tokio::test]
+    async fn a_prompt_on_a_real_pane_classifies_waiting_through_the_sampler() {
+        let state = StateDir::new();
+        let sup = supervisor_with(&state, SupervisorSeams::default()).await;
+        install_live_session_of_kind(
+            &sup,
+            "asking",
+            "printf 'Do you want to proceed?\\n 1. Yes\\n 2. No, and tell Claude what to do \
+             differently\\n'; sleep 300",
+            AgentKind::Claude,
+        )
+        .await;
+        // The same screen on a session with no integration: the negative
+        // half, in the one place where "the tail really did reach the
+        // classifier" is not in question.
+        install_live_session(
+            &sup,
+            "unintegrated",
+            "printf 'Do you want to proceed?\\n 1. Yes\\n 2. No, and tell Claude what to do \
+             differently\\n'; sleep 300",
+        )
+        .await;
+
+        let asking = sample_of(&sup, "asking").await;
+        let unintegrated = sample_of(&sup, "unintegrated").await;
+        let ticker = start_ticker(&sup);
+        for (what, sample) in [("asking", &asking), ("unintegrated", &unintegrated)] {
+            wait_until(&format!("the {what} pane was sampled twice"), || {
+                sample.lock().expect("activity mutex").samples > 1
+            })
+            .await;
+        }
+        ticker.shutdown().await;
+
+        assert_eq!(
+            classify(&sup, "asking").await,
+            SessionStatus::Waiting,
+            "a claude-kind session showing an approval prompt is waiting; tail was {:?}",
+            asking.lock().expect("activity mutex").tail
+        );
+        assert_eq!(
+            classify(&sup, "unintegrated").await,
+            SessionStatus::Idle,
+            "the same screen without an integration keeps the generic baseline"
+        );
     }
 }

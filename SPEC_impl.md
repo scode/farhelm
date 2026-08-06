@@ -330,9 +330,20 @@ remains that can never be represented on any page.
   file set matches an SSH-and-type session, which is the contract. When `$SHELL` is unset (user-manager services on
   systemd older than 255 don't set it), the supervisor falls back to the passwd database, then `/bin/sh`.
 - Status heuristics: periodic sampling of tmux pane activity and captured tail content, sharpened per agent kind (see
-  below). Sampling must never sit on the attach/input path — SPEC.md forbids status from gating interaction.
+  below). Sampling must never sit on the attach/input path — SPEC.md forbids status from gating interaction. The
+  supervisor's own ticker takes the samples; classification is a pure read of the sample beside the durable outcome, and
+  sits BELOW the recorded-error and dead-pane rules in the existing precedence, so a heuristic can only ever choose
+  among the live statuses. The generic baseline is output recency alone — a screen that changed within a few sampling
+  intervals is running, a screen that has been watched and stayed still is idle — with a live session that has not been
+  sampled twice yet reported running, since that is what a session that just launched is. Waiting is never derived from
+  recency (a blocked agent and a finished one are equally quiet); it comes only from per-kind sharpening.
 - Agent-kind integrations live in the supervisor as a small trait (`AgentIntegration`; `AgentKind` is the wire enum
-  naming the kind itself): status regexes over captured tail, and conversation-identity capture. Claude Code: watch
+  naming the kind itself): status sharpening over the sampled tail, and conversation-identity capture. Sharpening is a
+  DEFAULTED trait method that may only promote a live baseline to waiting, never invent liveness, and never panic on
+  arbitrary terminal bytes; the default is "no sharpening", which is deliberately different from the no-integration case
+  (generic sessions still get the baseline). Recognition is conservative by design — a vendor question phrase AND a
+  rendered menu of numbered answers, both at the bottom of the screen — because a status that reads waiting at a working
+  session teaches users to ignore the column, while a missed prompt merely reads idle. Claude Code: watch
   `~/.claude/projects/<munged-cwd>/` for the session record. Audited specifics that shape this: the record appears at
   first prompt submission, not at launch, so correlation keys on first-input time and tolerates an unbounded
   launch-to-first-input gap; the cwd munging is non-injective (`/`, `.`, `_` all become `-`); and per-line JSON fields
