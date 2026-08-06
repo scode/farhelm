@@ -24,12 +24,11 @@ body,
   align-items: baseline;
 }
 
-/* Shrinkable and ellipsized, like `.meta` beside it and for a sharper
-   reason: the titlebar is a single non-wrapping flex row, and a title is
-   user data capped only by the supervisor's 64 KiB field limit — without
-   a `min-width: 0` floor override the row would size itself to the whole
-   name and push the rename control (and the field it opens) off the
-   viewport, out of reach of the only affordance that could fix it. */
+/* `min-width: 0` overrides a flex item's automatic minimum, which for
+   `white-space: nowrap` text defaults to the full min-content width —
+   without it, a title (sharing `CreateSession`'s 64 KiB combined field
+   cap with cwd and invocation, so a legal one can still run long) would
+   refuse to shrink and the row would overflow instead of ellipsizing. */
 .titlebar .title {
   font-weight: 600;
   flex: 0 1 auto;
@@ -39,12 +38,57 @@ body,
   white-space: nowrap;
 }
 
+/* No `min-width: 0` here, deliberately: `overflow: hidden` alone already
+   makes `.meta` a scroll container, which per the flexbox spec zeroes
+   its automatic minimum on its own, and while `.session-rename` is
+   CLOSED, `.meta` sits after it in the row's flex order, so it could
+   never reposition that control regardless of its own width. The M6.5
+   ledger's titlebar-overflow bug, in that closed state, does not
+   reproduce against this header — it was apparently a real bug in the
+   M4-era layout that the M5-era rename-affordance rebuild fixed
+   incidentally. The OPEN state (the rename form replacing the button) is
+   a different story — see `.titlebar .rename-form` below. */
 .titlebar .meta {
   color: #8a919e;
   font-size: 12px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/* The open-rename-form squeeze `long-invocation-titlebar-rename`
+   (e2e/tests/titlebar.spec.ts) now pins: the shared `.rename-form` rule
+   below sets `flex: 1 1 0`, i.e. a flex-BASIS of a literal `0`. A `0`
+   basis is fine for that rule's own host (a list row, PLAN_M5.md item
+   6) where the row has no competing item with a huge CONTENT-based
+   basis — but here, `.title` and `.meta` both use `flex-basis: auto`
+   (their own natural content width), and under a long invocation that
+   pair alone already exceeds the row's available width before the flex
+   algorithm ever gets to `.rename-form`. A flex item's basis is also its
+   weight in that shrink distribution: a `0` basis is a `0` WEIGHT, so
+   `.rename-form` is entitled to none of whatever space is left, no
+   matter how much its own children (the input, `save`, `cancel`) need —
+   it renders at essentially nothing, and those children overflow the
+   sliver they were given, which is the 18px input this test caught.
+   `flex: 0 0 auto` fixes this by giving `.rename-form` a real,
+   content-based basis of its own, the same kind `.title` and `.meta`
+   already use, so all three compete for the row's width on equal terms
+   — and `min-width` is a defensive floor under that, in case a future
+   engine computes the nested textarea's own auto-basis smaller than
+   expected. `.title` and `.meta` still carry `min-width: 0` (or its
+   `overflow: hidden` equivalent), so between the three, THEY are what
+   yield: the metadata line — already the more aggressively-shrinking of
+   the two on weight alone (its content is far longer) — absorbs most of
+   the pressure and truncates further, while the rename form keeps a
+   usable size. Scoped to `.titlebar` rather than edited on the shared
+   `.rename-form` rule: the list row's own use of that class
+   (`list::SessionRow`) intentionally wants ITS input to be the member
+   that gives (that host has no `.meta`-shaped neighbor competing for
+   the same space), and changing the shared rule would risk that layout
+   to fix this one. */
+.titlebar .rename-form {
+  flex: 0 0 auto;
+  min-width: 16em;
 }
 
 /* Shared secondary-button look: `.back-button`, `.new-session-button`,
