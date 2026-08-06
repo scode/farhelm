@@ -110,7 +110,17 @@ jobs:
       # on this runner (which has none), and libtest swallows a passing
       # test's output without it — so the cgroup coverage would silently
       # read as "ran and passed" instead of "skipped, here is why".
-      - run: cargo test -- --show-output
+      #
+      # `--test-threads=4` matches the runner's vCPU count instead of
+      # libtest's 16-thread default. The integration binaries spawn real
+      # tmux servers and supervisors per test; at 4x oversubscription those
+      # servers intermittently die under scheduler starvation ("%exit
+      # server exited unexpectedly" — caught by the suite's own pane
+      # instrumentation), which surfaced as one rotating test failure per
+      # run. Serial reruns reproduced it, so the pressure is within-run,
+      # not cross-job. Wall-clock cost is modest; a green suite that runs
+      # slightly longer beats a fast one that lies at random.
+      - run: cargo test -- --show-output --test-threads=4
 
   # The desktop renderer is compiled by no other job: clippy/test build
   # with no renderer feature and e2e builds only the web one, so without

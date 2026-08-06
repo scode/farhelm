@@ -1,7 +1,7 @@
 # Farhelm plan
 
 NOTE: This is the overall build plan: the motivation for how the work is ordered, and the coarse milestone ladder. Only
-the current milestone is ever planned in detail — see PLAN_M6.md (PLAN_M0.md through PLAN_M5.md are history). Later
+the current milestone is ever planned in detail — see PLAN_M6_5.md (PLAN_M0.md through PLAN_M6.md are history). Later
 milestones get their own PLAN_M*.md when their turn comes; pre-emptive detail would just be fiction that dogfooding
 invalidates.
 
