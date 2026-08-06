@@ -23,6 +23,15 @@
 //! because two consumers need one read: the panel, and the create dialog's
 //! host selector.
 //!
+//! ## Profiles reach this file in two places (PLAN_M6_75.md item 8)
+//!
+//! The create dialog gains an agent picker over the target host's catalog,
+//! and a row created from a profile names the profile it SNAPSHOTTED. Both
+//! rules — what a fresh dialog preselects, and how a snapshot reads once the
+//! catalog has moved on — live in `profiles` rather than here, so this file
+//! keeps the component, the state and the handlers, exactly as it does for
+//! the rename overlay and the count banner.
+//!
 //! ## The list is the WHOLE list
 //!
 //! `api::fetch_sessions` follows the helm's cursor to exhaustion and this
@@ -37,13 +46,17 @@ use std::collections::{HashMap, HashSet};
 use dioxus::prelude::*;
 
 use crate::api::{
-    SessionFilter, SessionListing, create_session, delete_session, fetch_hosts, fetch_sessions,
-    mint_intent_key, rename_session, stop_session,
+    self, CreateAgent, SessionFilter, SessionListing, create_session, delete_session, fetch_hosts,
+    fetch_sessions, mint_intent_key, rename_session, stop_session,
 };
 use crate::feed::{fallback_polls_now, fallback_sleep, use_feed_reader};
 use crate::hosts::{HostsPanel, HostsRead, host_incarnation, is_connected, phase_label};
 use crate::ops::{OpLock, ReadGate, use_op_lock};
 use crate::peer::{DetailPart, PeerLine, display_peer};
+use crate::profiles::{
+    AgentChoice, CatalogLookup, CatalogSurface, HostTarget, UNRESOLVED_VALUE, existence_word,
+    resolve_agent, seeded_choice, source_profile_label, use_catalog_surface,
+};
 use crate::reader::{SurfaceReader, Trigger, request_read};
 use crate::rename::RenameForm;
 use crate::rows::{
@@ -51,7 +64,7 @@ use crate::rows::{
     settle_optimistic_renames,
 };
 use crate::status::{confirm_consequence, status_badge};
-use crate::{ApiBase, HostId, HostKind, Session, SessionStatus};
+use crate::{ApiBase, Host, HostId, HostKind, Session, SessionStatus};
 
 /// The subset of `Session` `on_delete` actually needs, in `ListView` below:
 /// the id the API call targets, plus `status` to decide whether this click
@@ -99,6 +112,12 @@ struct HostOption {
     /// idempotency key is bound to, so that an id pointed at a different
     /// machine since the key was minted is a different intent.
     incarnation: String,
+    /// The helm's CONNECTION token for this host (`Host::incarnation`), which
+    /// a create hands back as its `expected_incarnation` so the helm can
+    /// refuse one prepared against an install that has since been replaced.
+    /// Distinct from the fingerprint above: that one describes the registry
+    /// ROW, this one the live connection behind it.
+    connection: u64,
 }
 
 impl HostOption {
@@ -127,6 +146,23 @@ impl HostOption {
 /// spinning is a worse answer than saying so.
 const MINT_ATTEMPTS: usize = 3;
 
+/// What one create would actually LAUNCH.
+///
+/// The two creation modes are mutually exclusive on the wire (PLAN_M6_75.md
+/// item 3) and they are mutually exclusive here for a second reason: they are
+/// part of the intent an idempotency key stands for. Keeping the typed
+/// command inside the `Command` arm rather than beside a nullable profile is
+/// what makes "a profile-backed create does not care what is in the command
+/// box" structural — a form field the user cannot reach in that mode can no
+/// longer change what the key is bound to.
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum LaunchIntent {
+    /// The invocation as typed into the form.
+    Command(String),
+    /// A profile from the target host's catalog, by id.
+    Profile(String),
+}
+
 /// Everything one intended create IS — the exact thing an idempotency key
 /// stands for.
 ///
@@ -144,18 +180,23 @@ const MINT_ATTEMPTS: usize = 3;
 /// - **The form's values, snapshotted.** They already start a new intent
 ///   when edited (each field's `oninput` is what clears the key), but that
 ///   rule has a gap the size of one await: minting is asynchronous and the
-///   inputs are only disabled once a rerender lands, so a keystroke queued
-///   at submit time can change a field while the key is being made. The
-///   binding is re-read after minting and compared against this, which
-///   turns that gap into another mint rather than a key that describes
-///   something the user did not submit.
+///   `disabled` attributes that make the form inert land one render after the
+///   submit, so a keystroke queued at submit time can change a field while the
+///   key is being made. The binding is re-read after minting and compared
+///   against this, which turns that gap into another mint rather than a key
+///   that describes something the user did not submit — the attributes are
+///   honesty about a create being in flight, not the guard.
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct IntentBinding {
     host: HostId,
     /// The target host's incarnation at submit time — see the type docs.
     incarnation: String,
     cwd: String,
-    invocation: String,
+    /// What this create launches — see [`LaunchIntent`]. Switching between
+    /// the two modes is a different intended create, and so is switching
+    /// profiles, which is why the mode lives inside the binding rather than
+    /// beside it.
+    agent: LaunchIntent,
     title: String,
 }
 
@@ -166,7 +207,7 @@ impl IntentBinding {
         selected: Option<HostId>,
         hosts: &[HostOption],
         cwd: String,
-        invocation: String,
+        agent: LaunchIntent,
         title: String,
     ) -> Option<IntentBinding> {
         let host = hosts.iter().find(|host| Some(host.id) == selected)?;
@@ -174,7 +215,7 @@ impl IntentBinding {
             host: host.id,
             incarnation: host.incarnation.clone(),
             cwd,
-            invocation,
+            agent,
             title,
         })
     }
@@ -244,6 +285,46 @@ const FILTERABLE_STATUSES: [&str; 6] = [
 ///   has its local row.
 fn default_create_host(hosts: &[HostOption]) -> Option<HostId> {
     hosts.iter().find(|host| host.local).map(|host| host.id)
+}
+
+/// The host a create would ACTUALLY go to: the user's choice while it still
+/// exists, and [`default_create_host`]'s answer otherwise.
+///
+/// Extracted because two places need the same answer and a second copy would
+/// be the one that drifted: the create dialog renders it (a selector must
+/// show the target that would be used, never one that has since left the
+/// registry) and `ListView` points the profile catalog's reader at it. A
+/// disagreement between those two would put one host's profiles under another
+/// host's create — the exact failure `profiles::CatalogRead` refuses to make
+/// possible from its side.
+fn effective_create_host(hosts: &[HostOption], chosen: Option<HostId>) -> Option<HostId> {
+    chosen
+        .filter(|chosen| hosts.iter().any(|host| host.id == *chosen))
+        .or_else(|| default_create_host(hosts))
+}
+
+/// Every registered host as the create dialog and the filter surface offer
+/// it.
+///
+/// A free function over the snapshot rather than an inline `map` in the
+/// render, because `ListView`'s target effect needs exactly the same reduction
+/// from inside an effect, where the render's local is not in scope. Every host
+/// is offered whatever phase it is in — see `ListView` for why filtering to
+/// connected ones would quietly rewrite SPEC.md's creation default.
+fn host_options(hosts: &[Host]) -> Vec<HostOption> {
+    hosts
+        .iter()
+        .map(|host| HostOption {
+            id: host.id,
+            name: host.name.clone(),
+            local: host.kind == HostKind::Local,
+            // Non-connected hosts are labelled with their phase, so choosing
+            // one is an informed choice rather than a surprise refusal.
+            phase: (!is_connected(&host.state)).then(|| phase_label(&host.state).to_string()),
+            incarnation: host_incarnation(host),
+            connection: host.incarnation,
+        })
+        .collect()
 }
 
 /// Whether a listing reply may touch this view at all.
@@ -319,6 +400,28 @@ fn accepts_listing(
 /// "polling stops while a terminal is open" (PLAN_M2.md) still falls out of
 /// Dioxus's own task lifecycle, and now so does "only the mounted page
 /// re-reads".
+///
+/// ## Two more reads, on demand (PLAN_M6_75.md item 8)
+///
+/// Profiles add two further surfaces, each with its own reader under exactly
+/// the same discipline (`profiles::use_catalog_surface`): the catalog behind
+/// the hosts panel's expanded profiles section, and the catalog behind the
+/// create dialog's agent picker. They are separate because they answer
+/// different questions at the same time — one is about the host whose row is
+/// expanded, the other about the host the dialog would create on — and each
+/// performs NO PROFILE REQUEST while its target is `None`, which is the state
+/// a collapsed section and a closed dialog are in. The surfaces themselves
+/// live as long as this page does (their hooks are here); what makes them free
+/// is the target, not the mounting.
+///
+/// Both targets are decided HERE and are `profiles::HostTarget`s — a registry
+/// row AND the install behind it — derived against the registry as it
+/// currently stands rather than taken from what the user last clicked. That is
+/// what makes a mutable host id safe to build on: a retarget or an adopt
+/// changes the incarnation, so the target changes, so every surface pointed at
+/// it is re-activated instead of continuing to act on a catalog that now
+/// belongs to a different supervisor. A removed row clears the target (and
+/// folds its section away) rather than leaving a reader retrying a dead id.
 ///
 /// ## Filtering is a query, not a render pass (PLAN_M6_75.md item 7)
 ///
@@ -446,6 +549,17 @@ pub(crate) fn ListView(on_open: EventHandler<Session>) -> Element {
     // would leave two vocabularies for one number.
     let mut poll_sequence = use_signal(|| 0_u64);
     let mut show_create = use_signal(|| false);
+    // The create dialog's explicit host choice, and which host row has its
+    // profiles section expanded (PLAN_M6_75.md item 8).
+    //
+    // Both live HERE rather than in the surfaces that show them, and for the
+    // same reason: each one decides which host a profile CATALOG is read for,
+    // and the reads on this page go through readers this component owns. A
+    // choice held inside the dialog would be invisible to the reader that has
+    // to follow it, and the two would drift into a picker offering one host's
+    // profiles for a create aimed at another.
+    let mut chosen_host = use_signal(|| None::<HostId>);
+    let mut profiles_open = use_signal(|| None::<HostId>);
     // The filter the reads are currently CARRYING, and the one the surface
     // is being edited into. Two signals rather than one because a filter is
     // applied on submit (see this component's docs): the draft changes with
@@ -462,6 +576,82 @@ pub(crate) fn ListView(on_open: EventHandler<Session>) -> Element {
     // which is the same independence the mount reads keep below.
     let listing_surface = use_signal(SurfaceReader::default);
     let hosts_surface = use_signal(SurfaceReader::default);
+
+    // The two PROFILE catalogs this page can be showing, each with its own
+    // one-door reader (`profiles::use_catalog_surface`, which wires the same
+    // mount / feed / fallback / retarget triggers the reads above run under).
+    //
+    // Two surfaces rather than one, because they answer different questions
+    // at the same time: the hosts panel's section is about the host whose row
+    // is expanded, and the create dialog's picker is about the host that
+    // dialog would create on. Collapsing them would make opening a profiles
+    // section silently re-point the picker beside it. Neither performs any
+    // profile request while its target is `None`, which is the state a
+    // collapsed section and a closed dialog are in.
+    //
+    // Both targets are `profiles::HostTarget`s — a registry row AND the
+    // install behind it — and both are DERIVED here, against the registry as
+    // it currently stands, rather than taken from what the user last clicked.
+    // That is the whole answer to a host id being mutable: a retarget or an
+    // adopt changes the incarnation, the target changes with it, and every
+    // surface pointed at it is re-activated instead of continuing to act on a
+    // catalog that belongs to another machine.
+    let mut panel_target = use_signal(|| None::<HostTarget>);
+    use_effect(move || {
+        let open = profiles_open();
+        let read = hosts.read();
+        let registry = read.hosts();
+        let wanted = open.and_then(|id| {
+            registry
+                .unwrap_or_default()
+                .iter()
+                .find(|host| host.id == id)
+                .map(HostTarget::of)
+        });
+        // A row that has LEFT the registry takes its section with it. Nothing
+        // else would: the id is dead, so every read against it 404s forever
+        // and the section would sit under a row that is not there, retrying.
+        // Only acted on once a registry is actually in hand — a first read
+        // that has not landed is not evidence that anything was removed.
+        if open.is_some() && wanted.is_none() && registry.is_some() {
+            profiles_open.set(None);
+        }
+        if *panel_target.peek() != wanted {
+            panel_target.set(wanted);
+        }
+    });
+    let host_profiles = use_catalog_surface(panel_target);
+
+    // Which install the create dialog's picker is about. Derived rather than
+    // chosen: it follows `effective_create_host`, so a chosen host leaving
+    // the registry re-points this too — and it is `None` whenever the dialog
+    // is closed, which is what stops it reading.
+    let mut create_target = use_signal(|| None::<HostTarget>);
+    use_effect(move || {
+        let wanted = show_create()
+            .then(|| {
+                let read = hosts.read();
+                let options = host_options(read.hosts().unwrap_or_default());
+                let effective = effective_create_host(&options, chosen_host());
+                options
+                    .into_iter()
+                    .find(|host| Some(host.id) == effective)
+                    // Both halves come off the OPTION: the fingerprint the
+                    // create's idempotency key is bound to, and the connection
+                    // its precondition names — one derivation each, so the
+                    // catalog the picker offers, the machine the key names and
+                    // the connection the request asserts cannot disagree.
+                    .map(|host| HostTarget::new(host.id, host.connection, host.incarnation))
+            })
+            .flatten();
+        // Compared before writing so an unrelated hosts refresh — the common
+        // case, several times a minute on a live fleet — does not restart the
+        // catalog read for a target that has not moved.
+        if *create_target.peek() != wanted {
+            create_target.set(wanted);
+        }
+    });
+    let create_catalog = use_catalog_surface(create_target);
 
     // Everything that happens to a listing reply once it is BACK, in one
     // place: decide whether this read still speaks for the view, reconcile
@@ -1194,21 +1384,7 @@ pub(crate) fn ListView(on_open: EventHandler<Session>) -> Element {
     // machine. A create against a non-connected host is a precondition
     // failure the helm explains in its own words, which is a better answer
     // than an option the user cannot even select to find out.
-    let host_options: Vec<HostOption> = hosts
-        .read()
-        .hosts()
-        .unwrap_or_default()
-        .iter()
-        .map(|host| HostOption {
-            id: host.id,
-            name: host.name.clone(),
-            local: host.kind == HostKind::Local,
-            // Non-connected hosts are labelled with their phase, so choosing
-            // one is an informed choice rather than a surprise refusal.
-            phase: (!is_connected(&host.state)).then(|| phase_label(&host.state).to_string()),
-            incarnation: host_incarnation(host),
-        })
-        .collect();
+    let host_options: Vec<HostOption> = host_options(hosts.read().hosts().unwrap_or_default());
 
     // Whether anything is currently being filtered on, for the clear
     // control and for the empty-result line. Read off the APPLIED filter
@@ -1235,7 +1411,14 @@ pub(crate) fn ListView(on_open: EventHandler<Session>) -> Element {
     let mut clear_filter = apply_filter;
 
     rsx! {
-        HostsPanel { hosts, ops, busy_host, on_changed: refresh_hosts }
+        HostsPanel {
+            hosts,
+            ops,
+            busy_host,
+            profiles_open,
+            profiles: host_profiles,
+            on_changed: refresh_hosts,
+        }
         // Filtering and search (PLAN_M6_75.md item 7): this builds the
         // QUERY, the helm answers it, and `rows::count_banner` says how many
         // matched. Nothing here narrows a list that was already fetched —
@@ -1413,7 +1596,18 @@ pub(crate) fn ListView(on_open: EventHandler<Session>) -> Element {
                     if ops.busy_now() {
                         return;
                     }
-                    show_create.set(!show_create());
+                    let opening = !show_create();
+                    if !opening {
+                        // Closing the dialog discards its host choice with
+                        // every other draft it holds. The signal lives up here
+                        // (the catalog reader has to follow it), which is
+                        // exactly why it would otherwise be the one piece of
+                        // form state that survived a cancel — and SPEC.md's
+                        // creation default is about a FRESH dialog, not about
+                        // where the last one was pointed.
+                        chosen_host.set(None);
+                    }
+                    show_create.set(opening);
                 },
                 "new session"
             }
@@ -1422,9 +1616,17 @@ pub(crate) fn ListView(on_open: EventHandler<Session>) -> Element {
             CreateSessionForm {
                 hosts: host_options,
                 hosts_loaded: hosts.read().hosts().is_some(),
+                chosen_host,
+                catalog: create_catalog,
                 ops,
                 on_created: move |session| {
                     show_create.set(false);
+                    // The other close path, and it clears the same state for
+                    // the same reason — this component is about to be
+                    // unmounted by the navigation below, but a future shape
+                    // that kept the list mounted would otherwise reopen on the
+                    // last create's host.
+                    chosen_host.set(None);
                     on_open.call(session);
                 },
             }
@@ -1563,15 +1765,16 @@ pub(crate) fn ListView(on_open: EventHandler<Session>) -> Element {
 /// stored WITH the host it was minted for and re-minted whenever the
 /// effective target no longer matches.
 ///
-/// The inputs are DISABLED while a create is in flight, which is what makes
-/// that lifecycle a rule rather than a race: key generation is itself
-/// asynchronous (`mint_intent_key` is an `await` on both renderers, even
-/// though only the wasm build's half of it actually yields), so without it
-/// a keystroke could land between minting a key and sending it, publishing
-/// a key that belongs to values the user has already changed. Disabling was
-/// chosen over reconciling generations afterwards because the form is inert
-/// for that window anyway — the submit button and both navigation controls
-/// are already disabled by the same flag.
+/// What makes that lifecycle a rule rather than a race is the SUBMIT PATH's
+/// own discipline, not the disabled attributes: the agent, the host and the
+/// text fields are resolved synchronously when the button is pressed and
+/// frozen across the minting await, and the binding is re-read afterwards so
+/// a keystroke that landed during it produces another mint rather than a key
+/// describing values nobody submitted. The inputs are disabled too, and that
+/// is worth having — an inert form is honest about a create being in flight —
+/// but it is cosmetic in the way every `disabled` on this page is: the
+/// attribute lands one render after the event that set it, so anything queued
+/// in that gap still reaches the handler.
 ///
 /// A create from this form ALWAYS carries a key. If the key cannot be
 /// generated the create is refused locally, with the failure shown like any
@@ -1613,6 +1816,28 @@ pub(crate) fn ListView(on_open: EventHandler<Session>) -> Element {
 /// A refused create — an unreachable host, a nonexistent directory —
 /// surfaces the helm's words in the same error line and leaves the form
 /// exactly as filled, host selection included.
+///
+/// ## The agent picker (PLAN_M6_75.md item 8)
+///
+/// The dialog offers the TARGET host's profiles and defaults to the one a
+/// session was last created from there, asking rather than guessing when that
+/// profile is gone — `profiles::resolve_agent` owns both halves of that rule
+/// and is where the reasoning lives. Two consequences show up here:
+///
+/// - Changing the host CLEARS the profile choice. A profile id is minted per
+///   supervisor and every fresh supervisor seeds the same starters, so an id
+///   carried across would not merely go stale — it would resolve over there,
+///   against a profile nobody chose.
+/// - The command field is disabled while a profile is selected, because the
+///   two creation modes are mutually exclusive on the wire and a body naming
+///   both is refused. Disabling it is also what keeps the intent binding
+///   honest: a field the user cannot reach cannot change what the key stands
+///   for.
+///
+/// The raw command path stays on the dialog rather than being replaced. It is
+/// what runs anything no profile describes, and the e2e harness's own creates
+/// go through it — a dialog that only offered profiles would make an ad-hoc
+/// command a trip to `curl`.
 #[component]
 fn CreateSessionForm(
     hosts: Vec<HostOption>,
@@ -1621,6 +1846,19 @@ fn CreateSessionForm(
     /// row) from "nothing has come back yet", which is what a submit has to
     /// be refused for.
     hosts_loaded: bool,
+    /// The user's explicit host choice, if they have made one. `None` means
+    /// "no choice yet", not "no host" — the effective target is
+    /// [`effective_create_host`]'s answer, recomputed per render against the
+    /// hosts that exist right now.
+    ///
+    /// `ListView`'s signal rather than this form's, because the profile
+    /// catalog is read for whatever this names and the reads on that page go
+    /// through readers it owns (see `ListView`).
+    mut chosen_host: Signal<Option<HostId>>,
+    /// The target host's profile catalog, read by `ListView` and rendered
+    /// here. Pointed at [`effective_create_host`]'s answer, so the picker and
+    /// the create can never describe different machines.
+    catalog: CatalogSurface,
     /// The page's live-operation token. Claimed at submit, released when the
     /// request completes — the exclusion against every host mutation, and
     /// against a second submit of this form (see `ops`).
@@ -1632,26 +1870,153 @@ fn CreateSessionForm(
     let mut invocation = use_signal(String::new);
     let mut title = use_signal(String::new);
     let mut error = use_signal(|| None::<String>);
-    // The user's explicit choice, if they have made one. `None` means "no
-    // choice yet", not "no host" — the effective target is
-    // `default_create_host`'s answer, recomputed per render against the
-    // hosts that exist right now.
-    let mut chosen_host = use_signal(|| None::<HostId>);
+    // The agent this dialog is going to use, once anything has decided it —
+    // the user picking, or the host's remembered default being CONSUMED (see
+    // the effect below). `None` means nobody has decided yet.
+    let mut chosen_profile = use_signal(|| None::<AgentChoice>);
     // Whether an explicit choice has been overtaken by reality. Derived per
     // render rather than written back into `chosen_host`, so it cannot
     // outlive the condition that produced it — and so a host that comes back
     // (a re-added destination) silently reinstates the user's choice.
     let choice_vanished =
         chosen_host().is_some_and(|chosen| !hosts.iter().any(|host| host.id == chosen));
-    let selected = chosen_host()
-        .filter(|_| !choice_vanished)
-        .or_else(|| default_create_host(&hosts));
+    let selected = effective_create_host(&hosts, chosen_host());
     // This form's current intended create, if one has been submitted yet
     // (PLAN_M3.md item 6), together with the BINDING it was minted for.
     // Minted at first submit, reused by every later submit of the same
     // intent, and superseded the moment any part of that binding changes.
     let mut intent_key = use_signal(|| None::<(String, IntentBinding)>);
     let busy = ops.busy();
+
+    // The agent choice is bound to an INSTALL, and this is what binds it.
+    //
+    // Two rules, and both are about not letting a decision outlive the thing
+    // it was made about:
+    //
+    // - A target change — the user picking another host, a chosen host
+    //   leaving the registry and the default taking over, or the SAME row
+    //   being retargeted, adopted or reconnected — discards the choice and the
+    //   intent key. A profile id means nothing on another supervisor, and
+    //   because every fresh supervisor seeds the same starters, carrying one
+    //   across does not fail loudly: it resolves, to a profile nobody picked.
+    // - The remembered default is CONSUMED ONCE per target, and `seeded_for`
+    //   is what records that it has been. Tracking consumption by "a choice
+    //   exists" is not enough and the gap is reachable: a first catalog with
+    //   NO remembered default, or one whose default was already deleted,
+    //   leaves no choice behind — so a later refresh would seed from whatever
+    //   the helm remembers BY THEN, and another client's create would move the
+    //   selection under an open dialog. Latching the first answer, whatever it
+    //   was, is what makes the default a decision this dialog made rather than
+    //   a value it follows.
+    let mut bound_target = use_signal(|| None::<HostTarget>);
+    let mut seeded_for = use_signal(|| None::<HostTarget>);
+    use_effect(move || {
+        let target = catalog.watch_target();
+        let read = catalog.catalog.read();
+        let previous = bound_target.peek().clone();
+        if previous != target {
+            bound_target.set(target.clone());
+            // The catalog must be re-seeded for ANY change, including a mere
+            // reconnection: it was read on a connection that is gone, and the
+            // helm now refuses reads that name it.
+            seeded_for.set(None);
+            // The CHOICE and the KEY, however, rotate only when the INSTALL
+            // changes. A reconnection to the same machine is precisely when a
+            // reply gets lost, and that is the case the idempotency key exists
+            // for — rotating it there would turn the user's retry into a
+            // second intended create and hand them two sessions for one press.
+            // A retarget or an adoption is the opposite and must rotate: the
+            // id now means another machine, where the key dedups against
+            // nothing and the profile id resolves to something else.
+            let same_install = match (&previous, &target) {
+                (Some(before), Some(now)) => before.same_install(now),
+                // Opening the dialog (None -> Some) and closing it are not
+                // reconnections; a fresh dialog starts fresh.
+                _ => false,
+            };
+            if !same_install {
+                chosen_profile.set(None);
+                intent_key.set(None);
+                // A refusal belongs to the host it came from. Left standing,
+                // host A's "directory does not exist" would sit under a form
+                // now aimed at host B, where it may not even be true.
+                error.set(None);
+            }
+        }
+        // Consumption is only meaningful once there IS a target: on the first
+        // render both are `None`, and reading that equality as "already
+        // seeded" would make an unread catalog indistinguishable from a
+        // deleted remembered profile — the dialog would open claiming
+        // something was gone before it had asked anything.
+        if target.is_some() && *seeded_for.peek() == target {
+            return;
+        }
+        // Only a catalog that answers the CURRENT question may seed a choice
+        // — `lookup` is what refuses one belonging to a previous activation
+        // or another install.
+        let CatalogLookup::Known { catalog: held, .. } = catalog.lookup(&read) else {
+            return;
+        };
+        seeded_for.set(target);
+        // The user may have answered while the read was in flight (picking a
+        // profile, or typing a command); an answer outranks a default.
+        if chosen_profile.peek().is_some() {
+            return;
+        }
+        // Three outcomes, decided in one place (`profiles::seeded_choice`):
+        // the remembered profile, the command path where nothing was ever
+        // remembered, or NO choice where the remembered one is gone — which is
+        // what leaves the dialog blocked and asking, told apart from "not read
+        // yet" by the latch this effect just set.
+        if let Some(choice) = seeded_choice(held) {
+            chosen_profile.set(Some(choice));
+        }
+    });
+
+    // What the picker may offer: this surface's catalog, and nothing at all
+    // until one has been read for the question it is asking right now
+    // (`CatalogSurface::lookup` refuses anything else, which is what stops
+    // one install's profiles being offered for a create aimed at another).
+    let catalog_read = catalog.catalog.read();
+    let held = catalog.lookup(&catalog_read);
+    let offered = match &held {
+        CatalogLookup::Known { catalog, .. } => Some(*catalog),
+        _ => None,
+    };
+    // Seeded only once a concrete target has been answered — see the effect
+    // above for why `None == None` must not read as consumption.
+    let seeded = bound_target.read().is_some() && *seeded_for.read() == *bound_target.read();
+    let agent = resolve_agent(chosen_profile.read().as_ref(), offered, seeded);
+    let by_profile = matches!(agent.choice, Some(AgentChoice::Profile(_)));
+    // Owned, because the picker's options compare against it inside a loop
+    // that also borrows the catalog guard this selection was derived from.
+    // The placeholder's value stands in for "nothing is selected", which is a
+    // state this dialog can genuinely be in — see `profiles::resolve_agent`.
+    let chosen_agent = agent
+        .choice
+        .as_ref()
+        .map(|choice| choice.value().to_string())
+        .unwrap_or_else(|| UNRESOLVED_VALUE.to_string());
+
+    // What a submit would launch, resolved SYNCHRONOUSLY inside the handler
+    // from the live signals and the catalog as it stands at that instant —
+    // never from a value the last render happened to compute.
+    //
+    // The distinction is one JavaScript turn wide and it decides what runs: a
+    // change to the picker followed by a submit in the same turn reaches the
+    // handler before any re-render, so a captured render-time value would send
+    // the PREVIOUS selection under a freshly minted key — a key that faithfully
+    // describes an intent nobody had. What is frozen is this resolution's
+    // result, held across the minting await (see the submit path).
+    let resolve_now = move || {
+        let read = catalog.catalog.peek();
+        let offered = match catalog.lookup(&read) {
+            CatalogLookup::Known { catalog, .. } => Some(catalog),
+            _ => None,
+        };
+        let seeded = bound_target.peek().is_some() && *seeded_for.peek() == *bound_target.peek();
+        resolve_agent(chosen_profile.peek().as_ref(), offered, seeded).choice
+    };
 
     rsx! {
         form {
@@ -1673,12 +2038,61 @@ fn CreateSessionForm(
                 if !ops.claim() {
                     return;
                 }
+                // No agent, no create. "Nothing is selected" is a real state
+                // rather than a gap to be filled — a profile that was chosen
+                // or remembered and has since been deleted leaves the dialog
+                // waiting for an answer, and the command field it would
+                // otherwise fall back to still holds whatever was typed into
+                // it earlier. Launching that would run something nobody
+                // picked while the note beside it said nothing was selected.
+                let Some(choice) = resolve_now() else {
+                    error.set(Some(
+                        "no agent is selected for this create — choose a profile, or choose \
+                         \"custom command\" to run the command below"
+                            .to_string(),
+                    ));
+                    ops.release();
+                    return;
+                };
+                // Frozen HERE, from what was just resolved, and not touched
+                // again: the minting await below can span a deletion or
+                // another client's remembered-default write, and re-resolving
+                // across it would let the request's MODE differ from the one
+                // the button was pressed on. A profile that goes away in that
+                // window is refused by the supervisor, by name.
+                let launch = match choice {
+                    AgentChoice::Command => LaunchIntent::Command(invocation.peek().clone()),
+                    AgentChoice::Profile(id) => LaunchIntent::Profile(id),
+                };
+                // The HOST is derived here too, from the live signal — never
+                // from what the last render computed. The same one-turn window
+                // the agent has: changing the selector and pressing create in
+                // one turn reaches this handler before any re-render, and a
+                // captured host would send the create to the PREVIOUS machine
+                // while the selector on screen names another.
+                let target_now = catalog.target();
+                let selected_now = effective_create_host(&hosts, chosen_host.peek().to_owned());
+                // And the catalog the agent was just resolved against has to
+                // be the catalog OF that host. When they disagree the target
+                // effect has not caught up with the selector yet — a window of
+                // one render — and a profile id resolved against the old
+                // host's catalog would be sent to the new one, where it means
+                // something else or nothing.
+                if selected_now != target_now.as_ref().map(|target| target.host) {
+                    error.set(Some(
+                        "the target host changed while this create was being submitted, so                          nothing was sent — check the agent and press create again"
+                            .to_string(),
+                    ));
+                    ops.release();
+                    return;
+                }
                 // No host, no create. The helm would default a hostless body
                 // to its local row — usually the right answer, and not one
                 // this form may reach by omission while its own selector is
                 // still blank. Saying so beats creating on a machine the
                 // user was never shown.
-                let Some(binding) = IntentBinding::of(selected, &hosts, cwd(), invocation(), title())
+                let Some(binding) =
+                    IntentBinding::of(selected_now, &hosts, cwd(), launch, title())
                 else {
                     error.set(Some(
                         if hosts_loaded {
@@ -1700,10 +2114,11 @@ fn CreateSessionForm(
                     // Mint until the key and the binding agree.
                     //
                     // Minting is an `await` (the wasm renderer asks the
-                    // browser for a UUID), and this form's inputs are only
-                    // DISABLED once a rerender lands — so a keystroke
-                    // already queued when submit fired can still change a
-                    // field while the key is being made. Publishing that key
+                    // browser for a UUID), and the `disabled` attributes that
+                    // make this form inert land one render AFTER the submit —
+                    // so a keystroke already queued when it fired can still
+                    // change a field while the key is being made. The
+                    // re-read below is what closes that, not the attribute. Publishing that key
                     // would bind it to values the user has since edited,
                     // which is the same wrong-intent failure a changed host
                     // causes, arriving through a narrower window. Re-reading
@@ -1751,26 +2166,53 @@ fn CreateSessionForm(
                                 return;
                             }
                         }
-                        // What the form says NOW. Identical on the ordinary
-                        // path; different exactly when a queued edit landed
-                        // during the mint.
+                        // What the form's TEXT says now. Identical on the
+                        // ordinary path; different exactly when a queued edit
+                        // landed during the mint.
+                        //
+                        // The agent is deliberately NOT re-read here. It was
+                        // frozen when the button was pressed, and re-resolving
+                        // it would let a deletion or another client's
+                        // remembered-default write — either of which can land
+                        // during this await — change which creation MODE the
+                        // request carries. A key that names one intent and a
+                        // body that carries another is the exact failure the
+                        // key exists to prevent, so the press wins and a
+                        // profile that has since gone is refused by the
+                        // supervisor, by name.
                         binding = IntentBinding {
                             cwd: cwd.peek().clone(),
-                            invocation: invocation.peek().clone(),
                             title: title.peek().clone(),
                             ..binding
                         };
                     };
-                    // Key, fields and host all travel from ONE value, so
-                    // there is no arrangement of edits or polls in which the
-                    // body describes a different intent than the key claims.
+                    // Key, fields, host AND creation mode all travel from ONE
+                    // value, so there is no arrangement of edits or reads in
+                    // which the body describes a different intent than the
+                    // key claims — including the mode itself, which the
+                    // supervisor folds into its own idempotency fingerprint
+                    // precisely so a retried create cannot flip it.
+                    let agent = match &bound.agent {
+                        LaunchIntent::Command(invocation) => CreateAgent::Command(invocation),
+                        LaunchIntent::Profile(id) => CreateAgent::Profile(id),
+                    };
+                    // The connection this create was prepared against. Read
+                    // from the surface's target rather than from the hosts
+                    // snapshot, because the target is what the picker's
+                    // catalog was read on — so the profile id in the body and
+                    // the connection in the precondition describe one moment.
+                    let expectation = target_now
+                        .as_ref()
+                        .map(|target| target.expectation())
+                        .unwrap_or_default();
                     match create_session(
                             &base,
                             &bound.cwd,
-                            &bound.invocation,
+                            agent,
                             &bound.title,
                             &key,
                             Some(bound.host),
+                            expectation,
                         )
                         .await
                     {
@@ -1792,16 +2234,40 @@ fn CreateSessionForm(
                             });
                         }
                         Err(e) => {
-                            // The key deliberately SURVIVES a failure:
-                            // this is exactly the case it exists for. A
-                            // failure whose cause was an ambiguous
-                            // transport error may have created a session
-                            // the user cannot see, and resubmitting
-                            // unchanged must reach that same session
-                            // rather than launch a second agent. A user
-                            // who instead fixes the form gets a new key,
-                            // because the binding no longer matches.
-                            error.set(Some(e));
+                            // Gated on the target this request was DISPATCHED
+                            // for still being the one on screen: a refusal
+                            // naming host A must not land under a form that
+                            // has since been re-pointed at host B, where it
+                            // would describe a machine the user is not looking
+                            // at and may not even be true.
+                            if catalog.target() == target_now {
+                                let (stale, prose) = api::precondition_of(&e);
+                                if stale {
+                                    // The world moved between preparing this
+                                    // create and routing it — the id now
+                                    // reaches another install, where the
+                                    // profile id would have resolved to
+                                    // something else. The binding is stale in
+                                    // every part, so the key goes with it (a
+                                    // retry must be a NEW intent, not a replay
+                                    // aimed at a machine that never saw the
+                                    // first) and the catalog is re-read, which
+                                    // is what supersedes this message.
+                                    intent_key.set(None);
+                                    chosen_profile.set(None);
+                                    catalog.request(Trigger::Explicit);
+                                }
+                                // The key otherwise deliberately SURVIVES a
+                                // failure: this is exactly the case it exists
+                                // for. A failure whose cause was an ambiguous
+                                // transport error may have created a session
+                                // the user cannot see, and resubmitting
+                                // unchanged must reach that same session
+                                // rather than launch a second agent. A user
+                                // who instead fixes the form gets a new key,
+                                // because the binding no longer matches.
+                                error.set(Some(prose));
+                            }
                             ops.release();
                         }
                     }
@@ -1842,6 +2308,14 @@ fn CreateSessionForm(
                     value: selected.map(|id| id.to_string()).unwrap_or_default(),
                     onchange: move |evt| {
                         chosen_host.set(evt.value().parse::<HostId>().ok());
+                        // A profile id belongs to ONE supervisor, so a choice
+                        // cannot follow the user to another host: carrying it
+                        // over would either name nothing there or — because
+                        // every fresh supervisor seeds the same starters —
+                        // resolve to a profile they never chose. Cleared
+                        // rather than remembered, so the new host's own
+                        // remembered default takes over.
+                        chosen_profile.set(None);
                         // A different host is a different intended create,
                         // exactly as a different directory is — so the key
                         // the last submit used stops applying (see this
@@ -1852,6 +2326,13 @@ fn CreateSessionForm(
                         option {
                             key: "{host.id}",
                             value: "{host.id}",
+                            // Marked on the OPTION as well as through the
+                            // select's `value` above, and that redundancy is
+                            // load-bearing rather than belt-and-braces — see
+                            // the agent picker below, where the same
+                            // arrangement is what makes a preselection appear
+                            // at all.
+                            selected: selected == Some(host.id),
                             "{host.label()}"
                         }
                     }
@@ -1867,6 +2348,107 @@ fn CreateSessionForm(
                 div { class: "create-session-host-note",
                     "the host you picked is no longer registered, so this create would go to the \
                      one selected now"
+                }
+            }
+            // The agent, offered from the TARGET host's catalog and defaulting
+            // to what a session was last created from there (SPEC.md's
+            // creation rule; `profiles::resolve_agent`). The empty option is
+            // the raw command path below rather than "no agent" — a create
+            // always launches something, and this select is which of the two
+            // mutually exclusive modes it uses.
+            label {
+                "agent"
+                select {
+                    class: "create-session-profile",
+                    // Inert for the whole round trip, exactly like the host
+                    // selector and for the same reason: the idempotency key
+                    // is bound to what is launched, so a selection that moved
+                    // between minting and sending would publish a key
+                    // belonging to a different create.
+                    disabled: busy,
+                    value: "{chosen_agent}",
+                    onchange: move |evt| {
+                        chosen_profile.set(AgentChoice::from_value(&evt.value()));
+                        // A different agent is a different intended create,
+                        // exactly as a different directory is.
+                        intent_key.set(None);
+                    },
+                    // The placeholder exists only while nothing is selected,
+                    // and it is what a blocked dialog SHOWS: a `size=1` select
+                    // always has one option selected, so "no answer yet" needs
+                    // an option of its own rather than borrowing the command
+                    // path's — borrowing it is exactly how a vanished profile
+                    // used to turn into a silent command launch.
+                    if agent.choice.is_none() {
+                        option {
+                            value: UNRESOLVED_VALUE,
+                            selected: true,
+                            "— choose an agent —"
+                        }
+                    }
+                    // Which option is CHOSEN is stated on the options
+                    // themselves, not only through the select's `value`
+                    // above, and that is a correctness fix rather than
+                    // belt-and-braces. A select's `value` is applied as a DOM
+                    // PROPERTY, which a browser silently ignores when no
+                    // option matches it yet — and this picker's options
+                    // arrive later than its value by construction, since the
+                    // catalog is read after the dialog opens. The property
+                    // set is then never retried (the framework only re-emits
+                    // an attribute whose value CHANGED), so the picker would
+                    // sit on "custom command" forever while this component
+                    // believed a profile was selected: the invisible
+                    // mismatch — a control showing one thing while the submit
+                    // sends another — that the host selector's own note calls
+                    // the failure worth preventing. An option's `selected` is
+                    // applied when the option itself is created, so it cannot
+                    // race its own list.
+                    option {
+                        value: "",
+                        // Selected only when the command path is what a
+                        // submit would actually use — never merely because
+                        // nothing else is, which is what the placeholder
+                        // above is for.
+                        selected: agent.choice == Some(AgentChoice::Command),
+                        "custom command (below)"
+                    }
+                    for profile in offered.map(|catalog| catalog.profiles.as_slice()).unwrap_or_default() {
+                        option {
+                            key: "{profile.id}",
+                            value: "{profile.id}",
+                            selected: chosen_agent == profile.id,
+                            // Escaped like every other rendering of
+                            // peer-supplied text: an option label is exactly
+                            // where a directional override could make one
+                            // profile read as another, and what is chosen
+                            // here decides what runs.
+                            "{display_peer(&profile.name)}"
+                        }
+                    }
+                }
+            }
+            // SPEC.md's ask-don't-guess fallback, said out loud. It appears
+            // only when a profile that WAS available is not anymore — a first
+            // create on a host has nothing to explain — and the thing it
+            // rules out is the silent substitution: another profile quietly
+            // preselected under the label of a remembered preference.
+            if let Some(note) = agent.note {
+                div { class: "create-session-profile-note", "{note.text()}" }
+            }
+            // A catalog that could not be READ is a third state, and it must
+            // not look like a host with no profiles: the usual cause is a
+            // host that is not connected, and the picker offering only the
+            // command path with nothing said would leave a user wondering
+            // where their profiles went — and then hitting the same refusal
+            // from the create itself. The helm's sentence names the phase,
+            // so it is printed as written.
+            if let CatalogLookup::Failed(error) = &held {
+                PeerLine {
+                    class: "create-session-profile-error".to_string(),
+                    parts: vec![
+                        DetailPart::text("this host's profiles could not be read: "),
+                        DetailPart::peer(*error),
+                    ],
                 }
             }
             label {
@@ -1890,19 +2472,37 @@ fn CreateSessionForm(
                     },
                 }
             }
+            // Present in both modes and INERT in one: a profile already says
+            // what to run, the wire refuses a create naming both, and a field
+            // that stayed live would invite a user to type a command that is
+            // not what launches. `required` follows the mode for the same
+            // reason — an empty command is exactly right when a profile
+            // supplies it.
             label {
-                "agent command"
+                if by_profile {
+                    "agent command (unused: the selected profile supplies it)"
+                } else {
+                    "agent command"
+                }
                 input {
                     r#type: "text",
-                    required: true,
+                    required: !by_profile,
                     autocomplete: "off",
                     autocorrect: "off",
                     autocapitalize: "none",
                     spellcheck: "false",
                     value: "{invocation}",
-                    disabled: busy,
+                    disabled: busy || by_profile,
                     oninput: move |evt| {
                         invocation.set(evt.value());
+                        // Typing a command IS choosing the command path, and
+                        // recording it here is what keeps a late arrival from
+                        // taking the choice away: without it, a catalog
+                        // landing a moment later could seed a remembered
+                        // profile, disable this very field, and leave what was
+                        // just typed on screen but unused. The user said what
+                        // they want by typing it.
+                        chosen_profile.set(Some(AgentChoice::Command));
                         // An edit makes the next submit a DIFFERENT
                         // intent, so the key the last one used stops
                         // applying here (this component's docs carry the
@@ -1938,7 +2538,12 @@ fn CreateSessionForm(
                 // not overlap a host mutation (see `ListView`'s operation
                 // gate), and a control that is inert for that window says so
                 // rather than silently dropping the click.
-                disabled: busy,
+                //
+                // Inert with no agent selected for a different reason: there
+                // is nothing to launch, and the handler refuses in words
+                // anyway (a `disabled` attribute is one render behind, so it
+                // is the visible half of that rule rather than the guard).
+                disabled: busy || agent.choice.is_none(),
                 "create"
             }
             if let Some(err) = error.read().clone() {
@@ -2201,6 +2806,23 @@ fn SessionRow(
                     span { class: "session-title", "{session.title}" }
                     span { class: "session-cwd", "{session.cwd}" }
                     span { class: "session-invocation", "{session.invocation}" }
+                    // The profile this session was CREATED from, as it
+                    // snapshotted the name — absent entirely for a
+                    // raw-created one, which is most of them. This is where
+                    // SPEC.md's snapshot rule becomes visible: the name never
+                    // moves under an existing session, and the qualifier
+                    // (`profiles::source_profile_label`) is what keeps that
+                    // from reading as a claim about today's catalog.
+                    // `data-profile-existence` is the browser suite's handle
+                    // on the half that does change.
+                    if let Some(source) = &session.source_profile {
+                        span {
+                            class: "session-profile peer-value",
+                            dir: "ltr",
+                            "data-profile-existence": "{existence_word(source.existence)}",
+                            "{source_profile_label(source)}"
+                        }
+                    }
                     // Beside the status badge rather than replacing it: the
                     // last-known status is still what the helm knows, and
                     // this says how old that knowledge is — two facts, not
@@ -2395,6 +3017,7 @@ mod tests {
             local,
             phase: None,
             incarnation: format!("incarnation-{id}"),
+            connection: 1,
         }
     }
 
@@ -2470,14 +3093,21 @@ mod tests {
     /// leaves the id untouched, so a key bound to the id alone survives into
     /// a retry aimed at a machine that has never seen it, where it dedups
     /// nothing and launches a second real agent.
+    ///
+    /// The CREATION MODE joins that list at M6.75, and it is the sharpest
+    /// case of the same rule: the same command line run from a profile and
+    /// typed by hand are two different intended creates, and the supervisor
+    /// folds the mode into its own idempotency fingerprint precisely so a
+    /// retry cannot flip between them.
     #[test]
     fn an_intent_binding_changes_with_the_host_incarnation_and_with_the_fields() {
         let hosts = vec![option(1, "this machine", true)];
+        let command = || LaunchIntent::Command("agent".to_string());
         let base = IntentBinding::of(
             Some(1),
             &hosts,
             "/tmp".to_string(),
-            "agent".to_string(),
+            command(),
             "title".to_string(),
         )
         .expect("the selected host is in the list");
@@ -2491,7 +3121,7 @@ mod tests {
             Some(1),
             &moved,
             "/tmp".to_string(),
-            "agent".to_string(),
+            command(),
             "title".to_string(),
         )
         .expect("still selectable");
@@ -2508,7 +3138,14 @@ mod tests {
                 ..base.clone()
             },
             IntentBinding {
-                invocation: "other-agent".to_string(),
+                agent: LaunchIntent::Command("other-agent".to_string()),
+                ..base.clone()
+            },
+            // A profile-backed create of the "same" thing is a DIFFERENT
+            // intent: what runs is the profile's definition, which nothing on
+            // this side can compare against a typed command.
+            IntentBinding {
+                agent: LaunchIntent::Profile("p-1".to_string()),
                 ..base.clone()
             },
             IntentBinding {
@@ -2527,7 +3164,7 @@ mod tests {
                 Some(1),
                 &hosts,
                 "/tmp".to_string(),
-                "agent".to_string(),
+                command(),
                 "title".to_string()
             )
             .expect("still selectable")
@@ -2541,20 +3178,42 @@ mod tests {
     #[test]
     fn no_selected_host_yields_no_binding() {
         let hosts = vec![option(1, "this machine", true)];
+        let nothing = || LaunchIntent::Command(String::new());
+        assert!(IntentBinding::of(None, &hosts, String::new(), nothing(), String::new()).is_none());
         assert!(
-            IntentBinding::of(None, &hosts, String::new(), String::new(), String::new()).is_none()
-        );
-        assert!(
-            IntentBinding::of(
-                Some(99),
-                &hosts,
-                String::new(),
-                String::new(),
-                String::new()
-            )
-            .is_none(),
+            IntentBinding::of(Some(99), &hosts, String::new(), nothing(), String::new()).is_none(),
             "a selection the option list no longer contains is not a target either"
         );
+    }
+
+    /// The effective create target is the user's choice while it exists and
+    /// the local row otherwise — one answer, used by both the dialog that
+    /// renders it and the reader that follows it.
+    ///
+    /// The middle case is why this is a function rather than two expressions:
+    /// a chosen host leaving the registry moves the target, and if the picker
+    /// and the catalog reader disagreed about when, the dialog would offer
+    /// one host's profiles for a create aimed at another — an id that names
+    /// nothing over there, or worse, a starter profile that resolves.
+    #[test]
+    fn the_effective_create_target_follows_a_choice_until_it_is_gone() {
+        let hosts = vec![
+            option(1, "this machine", true),
+            option(2, "user@box", false),
+        ];
+        assert_eq!(effective_create_host(&hosts, Some(2)), Some(2));
+        assert_eq!(
+            effective_create_host(&hosts, None),
+            Some(1),
+            "with no choice made, the target is SPEC.md's default"
+        );
+        assert_eq!(
+            effective_create_host(&hosts, Some(99)),
+            Some(1),
+            "a choice the registry no longer holds falls back to the default rather than staying \
+             on a host nothing can reach"
+        );
+        assert_eq!(effective_create_host(&[], Some(2)), None);
     }
 
     /// A non-connected option must SAY so in its label, and a connected one

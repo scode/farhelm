@@ -49,6 +49,12 @@
 //!   that turn one `HostPhase` into the sentences a user acts on (shared
 //!   with `session_view`, which puts the same wording behind a stale
 //!   session's notice).
+//! - `profiles`: agent profiles as this UI handles them (PLAN_M6_75.md item
+//!   8) — the per-host catalog read every profile surface goes through, the
+//!   hosts panel's profiles section (create/edit/delete), and the
+//!   renderer-free rules the create dialog's picker needs: which profile a
+//!   fresh dialog preselects, when it must ask instead of guessing, and how
+//!   a session's snapshotted profile reads once the catalog has moved on.
 //! - `peer`: how text this UI did not write is SHOWN — the escape rule for
 //!   invisible and directional characters, and the run split that keeps each
 //!   peer value in its own direction-isolated element. Used by every surface
@@ -105,6 +111,7 @@ mod hosts;
 mod list;
 mod ops;
 mod peer;
+mod profiles;
 mod reader;
 mod reconnect;
 mod rename;
@@ -370,6 +377,117 @@ pub struct Session {
     /// wrongly marked stale would hide its terminal.
     #[serde(default)]
     pub stale: bool,
+    /// The profile this session was CREATED from, as the session itself
+    /// remembers it (PLAN_M6_75.md item 3), or `None` for a raw-invocation
+    /// create.
+    ///
+    /// Absent is the ordinary case rather than a gap — every session made by
+    /// typing a command has no profile — and serde decodes a missing key on
+    /// an `Option` as `None`, which is also what a helm predating the field
+    /// sends. Both readings agree: no profile is known for this session.
+    pub source_profile: Option<SourceProfile>,
+}
+
+/// Mirror of the helm's `source_profile` object (farhelm-proto's
+/// `SourceProfile`): which profile a session was created from, as the session
+/// snapshotted it, plus what a catalog lookup on that id found when the reply
+/// was built.
+///
+/// The split is the whole contract and this UI must not blur it. `id` and
+/// `name` are IMMUTABLE — the choice as it was made — which is what keeps a
+/// list stable and filterable no matter what later happens to the catalog,
+/// while `existence` is recomputed for every reply and is therefore the only
+/// part that can change under a session nobody touched. Rendering the name is
+/// how SPEC.md's snapshot rule ("editing or deleting a profile affects future
+/// sessions only") becomes visible; rendering the existence beside it is what
+/// stops that name from reading as a claim about the catalog as it stands
+/// now.
+///
+/// Note what is deliberately NOT here: the profile's CURRENT name. A renamed
+/// profile's new name is knowable server-side and is withheld on purpose, so
+/// that there is exactly one copy of existence truth — a surface that needs
+/// today's name (the profiles section) reads the catalog, where it is
+/// authoritative.
+#[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
+pub struct SourceProfile {
+    /// The profile's immutable identity as snapshotted at creation: opaque,
+    /// never parsed, and never sent anywhere by this client.
+    ///
+    /// It is what the HELM derived `existence` from when it built this reply,
+    /// and what its filter matches server-side — the list's own profile filter
+    /// is free text the user types (a deleted profile's snapshotted NAME has
+    /// to remain searchable), so nothing here ever echoes this value back.
+    pub id: String,
+    /// The profile's name AS SNAPSHOTTED — not its current name.
+    pub name: String,
+    /// What the catalog held for `id` when this reply was built.
+    pub existence: ProfileExistence,
+}
+
+/// Mirror of the helm's `existence` vocabulary (farhelm-proto's
+/// `ProfileExistence`).
+///
+/// Tolerant of a word this build has never heard of, on the same terms as
+/// [`HostPhase::Unrecognized`] and for a sharper reason: this value rides on
+/// every session row, so a strict decode would turn one unknown existence
+/// state into an empty session LIST rather than into one row that says less
+/// than it might have.
+#[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum ProfileExistence {
+    /// The catalog still holds this id under the snapshotted name.
+    Present,
+    /// The catalog still holds this id, under a DIFFERENT name.
+    Renamed,
+    /// No profile with this id is in the catalog any more.
+    Deleted,
+    /// A state this build does not know. Deliberately not a `Default`:
+    /// nothing here may reach for an existence it was not given.
+    #[serde(other)]
+    Unrecognized,
+}
+
+/// Mirror of one entry in a host's profile catalog (farhelm-proto's
+/// `Profile`): a named, editable definition of how to launch an agent, and
+/// how to resume one.
+///
+/// Per-supervisor by construction — an id minted on one host means nothing on
+/// another (SPEC.md leaves profile syncing to post-v1) — which is why every
+/// surface here holds a catalog together with the host it came from, and why
+/// the create dialog drops a profile choice when its target host changes.
+///
+/// `agent_kind` stays the wire STRING rather than becoming an enum, unlike
+/// [`HostKind`], and the difference is what the value is FOR: a kind decides
+/// nothing in this UI (the supervisor selects its own heuristics from it) and
+/// is only displayed and echoed back on an edit. An enum with an
+/// `Unrecognized` catch-all would lose the actual word, so editing a profile
+/// whose kind a newer helm introduced would silently rewrite it to something
+/// else — the one outcome an editor must never produce.
+#[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
+pub struct Profile {
+    /// Supervisor-minted and stable across every rename: what a create names
+    /// and what a session's [`SourceProfile`] snapshots.
+    pub id: String,
+    /// The user's label, as the CATALOG holds it today: what the profiles
+    /// section lists and what the create dialog's picker offers.
+    ///
+    /// Deliberately not what a session row shows. A row renders the name its
+    /// session SNAPSHOTTED ([`SourceProfile::name`]), which this one can have
+    /// diverged from at any time — that divergence is SPEC.md's snapshot rule
+    /// working, and rendering today's label on a historical row would be the
+    /// rewrite the rule forbids.
+    pub name: String,
+    /// The launch command line, shell-split by the supervisor exactly as a
+    /// raw create's invocation is.
+    pub invocation: String,
+    /// Which integrated agent this profile IS, in the wire's own spelling
+    /// (`claude`, `codex`, `generic`) — see the type docs for why it stays a
+    /// string.
+    pub agent_kind: String,
+    /// The resume invocation as an argv vector, or absent. What absence means
+    /// is per kind (an integrated kind derives one, a generic one gets none),
+    /// which is the supervisor's rule and not this UI's.
+    pub resume_template: Option<Vec<String>>,
 }
 
 /// The helm's registry id for one host (farhelm-helm's `store::HostId`).
@@ -399,6 +517,23 @@ pub struct Host {
     pub remote_farhelm: Option<String>,
     pub remote_state_dir: Option<String>,
     pub state: HostPhase,
+    /// Which CONNECTION this host is on — the helm's own opaque, monotonic
+    /// token, which changes whenever the host's client does (a retarget, an
+    /// adoption, a reconnection, or the connection going away).
+    ///
+    /// Compared and echoed, never interpreted: it is handed back as
+    /// `expected_incarnation` on every profile mutation and profile-backed
+    /// create this UI sends, so the helm can refuse a request prepared against
+    /// an install that has since been replaced (farhelm-helm's `precondition`
+    /// module). `0` means never connected, which is nothing to assert — and
+    /// `#[serde(default)]` decodes a helm that predates the field to exactly
+    /// that, so an older helm simply gets requests carrying no expectation,
+    /// which is the behavior it already has.
+    ///
+    /// Never persisted anywhere: the number is a counter over one helm
+    /// process's connections and means nothing across a restart.
+    #[serde(default)]
+    pub incarnation: u64,
 }
 
 /// Which kind of registry row a host is (farhelm-helm's `HostKind`, as the
@@ -826,6 +961,85 @@ mod tests {
         });
         let decoded: Session = serde_json::from_value(json).unwrap();
         assert_eq!(decoded.status, SessionStatus::Unknown);
+    }
+
+    /// A session's source profile must decode with its snapshot INTACT and
+    /// its existence separate, and a session without one must stay ordinary.
+    ///
+    /// Both halves are load-bearing. Absence is the common case (every
+    /// raw-created session, and every session at all from a helm predating
+    /// the field), so a required field here would turn the whole listing into
+    /// a decode failure. And the snapshot/existence split is what the row
+    /// renders: a name that came out of the reply's `existence` instead of
+    /// its `name` would silently start showing the profile's CURRENT label,
+    /// which is precisely the promise SPEC.md's snapshot rule makes about
+    /// what an edit does not touch.
+    #[test]
+    fn a_sessions_source_profile_decodes_as_a_snapshot_plus_a_derived_existence() {
+        let raw_created: Session = serde_json::from_value(serde_json::json!({
+            "id": "s1", "title": "demo", "cwd": "/tmp", "invocation": "agent",
+        }))
+        .unwrap();
+        assert_eq!(raw_created.source_profile, None);
+
+        for (existence, expected) in [
+            ("present", ProfileExistence::Present),
+            ("renamed", ProfileExistence::Renamed),
+            ("deleted", ProfileExistence::Deleted),
+            // A later helm's word costs this row its existence detail and
+            // nothing else — the listing still decodes.
+            ("quarantined", ProfileExistence::Unrecognized),
+        ] {
+            let decoded: Session = serde_json::from_value(serde_json::json!({
+                "id": "s1", "title": "demo", "cwd": "/tmp", "invocation": "agent",
+                "source_profile": {
+                    "id": "p-1", "name": "Claude Code", "existence": existence,
+                },
+            }))
+            .unwrap_or_else(|e| panic!("`{existence}` must decode: {e}"));
+            let source = decoded.source_profile.expect("the snapshot is present");
+            assert_eq!(source.id, "p-1");
+            assert_eq!(source.name, "Claude Code");
+            assert_eq!(source.existence, expected);
+        }
+    }
+
+    /// A catalog entry decodes with the kind as the WORD the helm sent, and
+    /// with an absent resume template staying absent.
+    ///
+    /// The kind matters because an edit REPLACES a profile's whole
+    /// definition: a decode that mapped an unknown kind onto some known one
+    /// would make saving an untouched profile rewrite it to a different
+    /// agent. Absence matters for the same reason from the other side — an
+    /// absent template is a real state (the supervisor derives one per kind),
+    /// not an empty list to be sent back as an explicit "no resume".
+    #[test]
+    fn a_profile_decodes_with_its_kind_verbatim_and_its_template_optional() {
+        let profile: Profile = serde_json::from_value(serde_json::json!({
+            "id": "p-1", "name": "Claude Code", "invocation": "claude",
+            "agent_kind": "claude", "resume_template": ["claude", "--resume", "{conversation}"],
+        }))
+        .unwrap();
+        assert_eq!(profile.agent_kind, "claude");
+        assert_eq!(
+            profile.resume_template,
+            Some(vec![
+                "claude".to_string(),
+                "--resume".to_string(),
+                "{conversation}".to_string()
+            ])
+        );
+
+        let unknown_kind: Profile = serde_json::from_value(serde_json::json!({
+            "id": "p-2", "name": "Something New", "invocation": "novel",
+            "agent_kind": "novel-agent", "resume_template": null,
+        }))
+        .unwrap();
+        assert_eq!(
+            unknown_kind.agent_kind, "novel-agent",
+            "a kind this build does not know must survive verbatim, or an edit would rewrite it"
+        );
+        assert_eq!(unknown_kind.resume_template, None);
     }
 
     /// A `Session` JSON with no `restart_offer` (a helm predating

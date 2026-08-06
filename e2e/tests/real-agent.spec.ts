@@ -87,6 +87,15 @@ async function createSession(
   await page.locator(".new-session-button").click();
   const form = page.locator(".create-session-form");
   await expect(form).toBeVisible();
+  // The agent picker is told, explicitly, that this create means the command
+  // below. It is not a formality: the dialog defaults to the target host's
+  // last-used profile, and when that profile has since been DELETED — which
+  // is the state any run that exercised profiles leaves the shared stack in —
+  // it selects nothing at all and blocks the create until someone answers
+  // (SPEC.md's ask-don't-guess). Saying "custom command" here is what a user
+  // in that state would do, and it makes this helper independent of whatever
+  // the last profile-backed create left behind.
+  await form.locator(".create-session-profile").selectOption("");
   await form.locator('input[type="text"]').nth(0).fill(cwd);
   await form.locator('input[type="text"]').nth(1).fill(invocation);
   await form.locator('input[type="text"]').nth(2).fill(title);

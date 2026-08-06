@@ -4,6 +4,13 @@
 //! read-state model both this panel and the stale session view are drawn
 //! from.
 //!
+//! Each row also expands one host's PROFILES (PLAN_M6_75.md item 8). That
+//! surface lives in `profiles` and is only mounted from here, which is the
+//! right split for what it is: a profile is per-supervisor state, so the row
+//! that says whether a host is reachable is the row whose catalog can only be
+//! read while it is — but nothing about editing a catalog is this module's
+//! business.
+//!
 //! ## Why the state chip is the whole point
 //!
 //! SPEC.md: "Per-host connection state is always visible." Not behind a
@@ -59,6 +66,7 @@ use dioxus::prelude::*;
 use crate::api::{Commit, add_host, adopt_host, remove_host, retry_host, set_host_destination};
 use crate::ops::OpLock;
 use crate::peer::{DetailPart, PeerLine, display_peer};
+use crate::profiles::{CatalogSurface, ProfilesSection};
 use crate::{ApiBase, Host, HostId, HostKind, HostPhase, RefreshHealth};
 
 // ---------------------------------------------------------------------
@@ -635,11 +643,27 @@ type HostRequest = std::pin::Pin<Box<dyn std::future::Future<Output = Result<Com
 /// supervisor and every running agent carry on, and re-adding the
 /// destination rediscovers all of it — so a prompt threatening deletion
 /// would describe an operation this verb does not perform.
+///
+/// ## The profiles section (PLAN_M6_75.md item 8)
+///
+/// Each row can expand one, and this panel is where it belongs because a
+/// profile IS per-host state: the row that says whether a host is reachable
+/// is the row whose catalog can only be read while it is. One at a time, like
+/// the destination field and the removal prompt — `profiles_open` is
+/// `ListView`'s signal, since it is also what points the catalog surface at a
+/// host, and a section open while another host's read is in flight would be a
+/// section showing profiles that are not its own.
 #[component]
 pub(crate) fn HostsPanel(
     hosts: Signal<HostsRead>,
     mut ops: OpLock,
     mut busy_host: Signal<Option<HostId>>,
+    /// Which host's profiles section is expanded, if any — also the catalog
+    /// surface's target, which is what keeps "what is on screen" and "what is
+    /// being read" one fact rather than two.
+    mut profiles_open: Signal<Option<HostId>>,
+    /// The one-door reader behind that section (`profiles::CatalogSurface`).
+    profiles: CatalogSurface,
     on_changed: EventHandler<()>,
 ) -> Element {
     let base = use_context::<ApiBase>().0;
@@ -709,6 +733,23 @@ pub(crate) fn HostsPanel(
         true
     };
 
+    // Fold this host's profiles section away before a verb that can move the
+    // INSTALL behind its row (adopt, retarget) or remove the row outright.
+    //
+    // The section's own binding already discards its state when the target's
+    // incarnation changes (`profiles::ProfilesSection`), but that reconciliation
+    // waits for the hosts read to land and tell it. Closing the section here
+    // covers the window in between, where an editor draft or a delete
+    // confirmation would still be on screen aimed at a catalog that is about
+    // to belong to a different supervisor — and where starter profile ids
+    // collide by construction, so aiming at the wrong one is not a refusal but
+    // a wrong write.
+    let mut fold_profiles = move |host: HostId| {
+        if *profiles_open.peek() == Some(host) {
+            profiles_open.set(None);
+        }
+    };
+
     let retry_base = base.clone();
     let on_retry = move |host: HostId| {
         let base = retry_base.clone();
@@ -731,7 +772,7 @@ pub(crate) fn HostsPanel(
     // of the promise the helm checks (see `api::adopt_host`).
     let on_adopt = move |(host, reported): (HostId, String)| {
         let base = adopt_base.clone();
-        run(
+        let started = run(
             host,
             Box::pin(async move {
                 adopt_host(&base, host, &reported)
@@ -739,6 +780,14 @@ pub(crate) fn HostsPanel(
                     .map(|()| Commit::Confirmed)
             }),
         );
+        // An adopt binds this row to a different install, so whatever its
+        // profiles section is showing stops being about this host — but only
+        // once the adopt is actually OUT. A click refused by the operation
+        // token started nothing, and collapsing the section for it would throw
+        // away an editor draft over an action that never happened.
+        if started {
+            fold_profiles(host);
+        }
     };
 
     let remove_base = base.clone();
@@ -755,10 +804,16 @@ pub(crate) fn HostsPanel(
         // A removal has no host row to report back, so it confirms itself:
         // the 200 IS the whole answer, and there is no body for a decode to
         // fail on.
-        run(
+        let started = run(
             host,
             Box::pin(async move { remove_host(&base, host).await.map(|()| Commit::Confirmed) }),
         );
+        // The row is going away; its section goes with it rather than being
+        // left aimed at an id the registry will not have — once the removal is
+        // actually out (see the adopt above).
+        if started {
+            fold_profiles(host);
+        }
     };
 
     let edit_base = base.clone();
@@ -768,6 +823,13 @@ pub(crate) fn HostsPanel(
             host,
             Box::pin(async move { set_host_destination(&base, host, &destination).await }),
         );
+        // A retarget points this row at another machine — same id, different
+        // supervisor, and therefore a different catalog with colliding ids —
+        // so its profiles section folds away. Only once the request is out:
+        // the same rule the field below keeps, and for the same reason.
+        if started {
+            fold_profiles(host);
+        }
         // Closed once the request is actually OUT: its outcome lands in this
         // row's error line either way, so leaving the field open would only
         // invite a second submit of the same edit. A submit that was refused
@@ -790,11 +852,13 @@ pub(crate) fn HostsPanel(
                     r#type: "button",
                     class: "btn add-host-button",
                     // This control UNMOUNTS the add form, so it must not act
-                    // while anything is in flight: dropping the component
+                    // while a MUTATION is in flight: dropping the component
                     // mid-request strands the response with nothing left to
-                    // act on it. The token is read synchronously in the
-                    // handler for the same reason every other guard here is
-                    // — the attribute is one render behind.
+                    // act on it. Reads are not what the token covers — the
+                    // page reads constantly and none of those care whether
+                    // this form exists. The token is read synchronously in
+                    // the handler for the same reason every other guard here
+                    // is — the attribute is one render behind.
                     disabled: busy,
                     onclick: move |_| {
                         if ops.busy_now() {
@@ -858,6 +922,31 @@ pub(crate) fn HostsPanel(
                             busy: *busy_host.read() == Some(host.id) || busy,
                             confirming_remove: *confirming_remove.read() == Some(host.id),
                             editing: *editing.read() == Some(host.id),
+                            showing_profiles: *profiles_open.read() == Some(host.id),
+                            on_profiles_toggle: move |id: HostId| {
+                                // Collapsing a section UNMOUNTS it, so this
+                                // must not act mid-request for the same
+                                // reason the add-host toggle must not: the
+                                // response would be left with nothing to act
+                                // on it.
+                                if ops.busy_now() {
+                                    return;
+                                }
+                                confirming_remove.set(None);
+                                editing.set(None);
+                                let open = *profiles_open.peek() == Some(id);
+                                profiles_open.set((!open).then_some(id));
+                            },
+                            profiles_section: rsx! {
+                                if *profiles_open.read() == Some(host.id) {
+                                    ProfilesSection {
+                                        host: host.id,
+                                        host_name: host.name.clone(),
+                                        surface: profiles,
+                                        ops,
+                                    }
+                                }
+                            },
                             error: errors.read().get(&host.id).cloned(),
                             warning: warnings.read().get(&host.id).cloned(),
                             destination_draft,
@@ -915,15 +1004,27 @@ pub(crate) fn HostsPanel(
 /// `data-host-id`/`data-host-phase`/`data-host-kind` are the browser suite's
 /// handles, on the wrapper rather than on the chip so a test can find a row
 /// and then assert about anything inside it.
+///
+/// `profiles_section` arrives as already-built markup rather than as the
+/// several props the section would otherwise need threaded through here. The
+/// row's job is to own the toggle and the place the section hangs; deciding
+/// what a catalog surface is and how it reads is the panel's, one level up.
 #[component]
 fn HostRow(
     host: Host,
     busy: bool,
     confirming_remove: bool,
     editing: bool,
+    /// Whether THIS row's profiles section is the expanded one — the toggle's
+    /// own label depends on it, so the row needs the fact and not just the
+    /// markup.
+    showing_profiles: bool,
+    /// The expanded section, or nothing. Built by the panel.
+    profiles_section: Element,
     error: Option<String>,
     warning: Option<String>,
     destination_draft: Signal<String>,
+    on_profiles_toggle: EventHandler<HostId>,
     on_retry: EventHandler<HostId>,
     on_adopt: EventHandler<(HostId, String)>,
     on_edit_start: EventHandler<(HostId, String)>,
@@ -1019,6 +1120,18 @@ fn HostRow(
                         onclick: move |_| on_retry.call(id),
                         "retry"
                     }
+                    // Offered in every phase, exactly like retry and for a
+                    // related reason: a catalog read against a host that is
+                    // not connected is refused by the helm in words that name
+                    // the state, which is a better answer than a control that
+                    // is simply missing whenever a host is down.
+                    button {
+                        r#type: "button",
+                        class: "btn host-profiles-toggle",
+                        disabled: busy,
+                        onclick: move |_| on_profiles_toggle.call(id),
+                        if showing_profiles { "hide profiles" } else { "profiles" }
+                    }
                     if manageable {
                         button {
                             r#type: "button",
@@ -1062,6 +1175,11 @@ fn HostRow(
                     parts: vec![DetailPart::Peer(warning)],
                 }
             }
+            // Inside the row rather than after it, so the section is visibly
+            // attached to the host whose profiles it holds — on a fleet, a
+            // panel of profiles floating between two rows would belong to
+            // whichever the reader guessed.
+            {profiles_section}
         }
     }
 }
@@ -1276,6 +1394,7 @@ mod tests {
             remote_farhelm: None,
             remote_state_dir: None,
             state,
+            incarnation: 1,
         }
     }
 

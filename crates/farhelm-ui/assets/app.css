@@ -403,6 +403,36 @@ body,
   min-width: 8em;
 }
 
+/* The profile a session was created FROM, as it snapshotted the name
+   (PLAN_M6_75.md item 8). Present only on profile-created rows, which is why
+   it can afford the weakest shrink weight in the row: when it is squeezed
+   out, the row still carries the title, the directory and the invocation the
+   session actually launched. */
+.session-profile {
+  color: #8a919e;
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1 1 0;
+  min-width: 6em;
+}
+
+/* A profile that is NOT KNOWN to be present under this name: renamed since,
+   deleted since, or in a state this build cannot read. The group is that
+   negative on purpose — it is what the three share, and describing it as
+   "gone" would misdescribe the renamed case (still there, under another
+   label) and the unrecognized one (nothing is claimed either way).
+
+   Amber rather than red for the stale badge's reason: nothing has failed —
+   the session is unaffected and still runs what it snapshotted — but the
+   name beside it is no longer a statement about today's catalog. */
+.session-profile[data-profile-existence="renamed"],
+.session-profile[data-profile-existence="deleted"],
+.session-profile[data-profile-existence="unrecognized"] {
+  color: #d8b45f;
+}
+
 /* Status styling is deliberately minimal and honest (PLAN_M2.md): a
    color signals the coarse category, never a guess about what the
    session is doing. */
@@ -740,6 +770,163 @@ body,
   padding: 4px 10px;
 }
 
+/* One host's profiles, expanded inside its own row (PLAN_M6_75.md item 8).
+
+   Indented and ruled on the left rather than boxed: it belongs to the row
+   above it, and on a fleet a panel that looked free-standing would leave the
+   reader guessing which host's profiles they are editing. */
+.profiles-section {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 6px 0 8px 12px;
+  padding-left: 10px;
+  border-left: 2px solid #2a2f37;
+}
+
+.profiles-header {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+}
+
+.profiles-title {
+  font-size: 12px;
+  color: #8a919e;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.new-profile-button,
+.profile-edit,
+.profile-delete,
+.profile-save,
+.profile-cancel,
+.host-profiles-toggle {
+  font-size: 12px;
+  padding: 2px 8px;
+  flex-shrink: 0;
+}
+
+.profile-delete {
+  color: #e08080;
+}
+
+/* SPEC.md's snapshot rule, stated where profiles are edited. Quiet — it is
+   context rather than a warning — but never hidden: it is the one thing
+   about a profile edit that is not visible from its result. */
+.profiles-snapshot-note,
+.profiles-empty {
+  font-size: 12px;
+  color: #8a919e;
+}
+
+.profile-row {
+  display: flex;
+  flex-direction: column;
+  padding: 3px 0;
+}
+
+.profile-row-main {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+}
+
+/* Same shrink discipline the host and session rows keep: a profile name and
+   an invocation are unbounded user data, and without a floor plus ellipsis
+   they would push this row's edit and delete controls out of reach — which
+   for a mistyped invocation are the only affordances that could fix it. */
+.profile-name {
+  font-weight: 600;
+  font-size: 13px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1 1 0;
+  min-width: 8em;
+}
+
+.profile-kind {
+  font-size: 12px;
+  color: #8a919e;
+  flex-shrink: 0;
+}
+
+/* The host's remembered last-used profile, marked rather than reordered so
+   the catalog's order stays the supervisor's. Shape is shared with the
+   status badges above. */
+.profile-default {
+  font-size: 11px;
+  padding: 1px 6px;
+  border-radius: 8px;
+  background: #2a2f37;
+  color: #d8dee9;
+  flex-shrink: 0;
+}
+
+.profile-detail {
+  display: flex;
+  gap: 10px;
+  font-size: 12px;
+  color: #8a919e;
+  min-width: 0;
+}
+
+.profile-invocation,
+.profile-resume {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+
+/* The editor reuses the add-host form's shape entirely — same inline,
+   non-modal box, same field styling — so the surfaces that define things do
+   not look like they come from different applications. */
+.profile-form {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px 0 4px;
+}
+
+.profile-form label {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 12px;
+  color: #8a919e;
+}
+
+.profile-form input,
+.profile-kind-select {
+  background: #14161a;
+  border: 1px solid #3a3f47;
+  border-radius: 3px;
+  color: #d8dee9;
+  font: inherit;
+  font-size: 13px;
+  padding: 4px 8px;
+}
+
+.profile-kind-select {
+  align-self: flex-start;
+  min-width: 12em;
+}
+
+/* Two lines that mean different things, sharing one look because a user's
+   response to both is the same: read it, then look at the list below.
+   `.profiles-warning` says a change HAPPENED and could not be described;
+   `.profiles-notice` says the world moved under an editor (a precondition
+   refused, a profile deleted from elsewhere) and nothing was saved. Amber, not
+   red: neither is a failure of the thing the user asked for. */
+.profiles-warning,
+.profiles-notice {
+  font-size: 12px;
+  color: #d8b45f;
+}
+
 /* A stale session's notice (SPEC.md: metadata behind a clear notice, and
    no terminal). It takes the terminal's place in the layout rather than
    floating over it, which is why it can wrap freely and does not need the
@@ -845,7 +1032,8 @@ body,
 }
 
 .create-session-form input,
-.create-session-host {
+.create-session-host,
+.create-session-profile {
   background: #14161a;
   border: 1px solid #3a3f47;
   border-radius: 3px;
@@ -857,8 +1045,11 @@ body,
 
 /* Sized to its content rather than stretched like the text fields beside
    it: a host name is short and fixed, and a full-width select would read as
-   a field the user is expected to type into. */
-.create-session-host {
+   a field the user is expected to type into. The agent picker shares the
+   rule for the same reason — and shares it deliberately, so the two choices
+   a create makes before anything is typed look like one pair. */
+.create-session-host,
+.create-session-profile {
   align-self: flex-start;
   min-width: 12em;
 }
@@ -867,8 +1058,15 @@ body,
    registry and the effective target has therefore moved. Amber rather than
    red because nothing has failed — but visible, because the failure this
    prevents is exactly the invisible one, a selector showing host A while
-   the create carries host B. */
-.create-session-host-note {
+   the create carries host B.
+
+   The profile note shares it: it is the same kind of statement, made when a
+   remembered or chosen profile is gone (SPEC.md's ask-don't-guess), and the
+   failure it prevents is likewise a picker that appears to have remembered
+   something it has not. */
+.create-session-host-note,
+.create-session-profile-note,
+.create-session-profile-error {
   font-size: 12px;
   color: #d8b45f;
 }

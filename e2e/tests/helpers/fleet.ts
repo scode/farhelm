@@ -50,6 +50,18 @@ export interface SessionRow {
   id: string;
   title: string;
   status?: { state: string };
+  /**
+   * The profile this session was created from, absent for a raw-created one.
+   *
+   * `existence` is the field specs actually wait on: it is DERIVED per reply
+   * from the owning supervisor's catalog, so it changes under a session
+   * nobody touched — and it reaches the merged list only when the helm's
+   * session cache next refreshes. A spec that renames a profile and then
+   * asserts about a row has to settle on this value before it plays a
+   * notification, or it is telling the page to re-read a view that has not
+   * moved yet.
+   */
+  source_profile?: { id: string; name: string; existence: string };
 }
 
 /**
@@ -71,6 +83,53 @@ export interface SessionPage {
 export interface HostRow {
   id: number;
   kind: string;
+  /** The helm's connection token, which every guarded mutation echoes back as
+   * `expected_incarnation` — captured by the wire specs so they can assert the
+   * request carried THIS value rather than merely some value. */
+  incarnation: number;
+}
+
+/**
+ * One profile from `GET /api/hosts/{id}/profiles`, narrowed on the same
+ * terms as [`SessionRow`]: a field here is a field some assertion depends on.
+ *
+ * All of them are, now. The preservation spec reads the whole definition back
+ * to prove an edit of one field rewrote nothing else, so the type says so
+ * rather than leaving a reader to believe this suite only ever looks at names.
+ * `definitions` is not here because it belongs to the REPLY rather than to a
+ * profile — it is declared on [`ProfilesView`], where the wire specs read it.
+ */
+export interface ProfileRow {
+  id: string;
+  name: string;
+  invocation: string;
+  agent_kind: string;
+  resume_template: string[] | null;
+}
+
+/**
+ * The profiles reply: the catalog plus this helm's remembered default for
+ * that host.
+ *
+ * The pair travels together on the wire deliberately (the helm serves the
+ * remembered id RAW, even when it names a deleted profile), and it is what
+ * SPEC.md's ask-don't-guess fallback is keyed off — so a spec that wants to
+ * know which state the create dialog should be in reads both from here.
+ */
+export interface ProfilesView {
+  profiles: ProfileRow[];
+  default_profile: string | null;
+  /**
+   * Each profile's definition fingerprint, by id — what an editor echoes back
+   * as `expected_definition`.
+   *
+   * Declared because the wire specs DO assert on it: they capture what the
+   * helm served and compare it byte for byte against what the UI sent, which
+   * is the only assertion that can tell an echoed value apart from one the
+   * client computed itself (a client-computed one refuses forever with nothing
+   * actually wrong).
+   */
+  definitions: Record<string, string>;
 }
 
 /** Fail loudly rather than returning a half-decoded body: every caller here
@@ -181,6 +240,90 @@ export async function cleanupSession(request: APIRequestContext, id: string): Pr
         `cleanup: ${what} session ${id} failed (${response.status()}): ${await response.text()}`,
       );
     }
+  }
+}
+
+/** One host's profile catalog, as any client reads it. */
+export async function listProfiles(
+  request: APIRequestContext,
+  host: number,
+): Promise<ProfilesView> {
+  const response = await request.get(`/api/hosts/${host}/profiles`);
+  await ok(response, `reading host ${host}'s profiles`);
+  return await response.json();
+}
+
+/**
+ * Define a profile through the real API.
+ *
+ * Deliberately NOT through the panel, for [`createSession`]'s reason: a
+ * fixture built through the surface under test cannot distinguish "the page
+ * was told" from "the page did it itself", which is exactly what the
+ * feed-driven and snapshot tests set out to separate. The one spec that
+ * drives the panel does so as its subject, not as setup.
+ *
+ * `agent_kind` defaults to `generic` because the fake agent is not an
+ * integrated one — naming a kind here would ask the supervisor to apply
+ * Claude Code's or Codex's heuristics to a script that has neither shape.
+ */
+export async function createProfile(
+  request: APIRequestContext,
+  host: number,
+  body: { name: string; invocation?: string; agent_kind?: string; resume_template?: string[] },
+): Promise<ProfileRow> {
+  const response = await request.post(`/api/hosts/${host}/profiles`, {
+    data: {
+      name: body.name,
+      invocation: body.invocation ?? FAKE_AGENT,
+      agent_kind: body.agent_kind ?? "generic",
+      ...(body.resume_template ? { resume_template: body.resume_template } : {}),
+    },
+  });
+  await ok(response, `creating profile ${body.name} on host ${host}`);
+  return await response.json();
+}
+
+/**
+ * Replace a profile's definition — the whole definition, because the API
+ * replaces rather than merges and a partial body would clear what it omitted.
+ */
+export async function updateProfile(
+  request: APIRequestContext,
+  host: number,
+  id: string,
+  body: { name: string; invocation?: string; agent_kind?: string; resume_template?: string[] },
+): Promise<ProfileRow> {
+  const response = await request.post(`/api/hosts/${host}/profiles/${id}`, {
+    data: {
+      name: body.name,
+      invocation: body.invocation ?? FAKE_AGENT,
+      agent_kind: body.agent_kind ?? "generic",
+      ...(body.resume_template ? { resume_template: body.resume_template } : {}),
+    },
+  });
+  await ok(response, `updating profile ${id} on host ${host}`);
+  return await response.json();
+}
+
+/**
+ * Delete a profile, tolerating one that is already gone.
+ *
+ * Cleanup runs after a failed test and after tests that delete the profile
+ * themselves as part of what they prove, so "already gone" is a normal
+ * outcome rather than an error worth raising over the real failure. Leaving
+ * one behind is not an option: the stack is shared, and a live profile
+ * changes what the NEXT spec's create dialog preselects.
+ */
+export async function cleanupProfile(
+  request: APIRequestContext,
+  host: number,
+  id: string,
+): Promise<void> {
+  const response = await request.delete(`/api/hosts/${host}/profiles/${id}`);
+  if (!response.ok() && response.status() !== 404) {
+    throw new Error(
+      `cleanup: deleting profile ${id} failed (${response.status()}): ${await response.text()}`,
+    );
   }
 }
 

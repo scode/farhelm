@@ -418,6 +418,10 @@ mod tests {
             host: None,
             host_name: None,
             stale: false,
+            // Raw-created, like every session these helpers reason about: the
+            // rename overlay is about titles, and a source profile is neither
+            // read nor rewritten by any of it.
+            source_profile: None,
         }
     }
 

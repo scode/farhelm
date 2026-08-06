@@ -268,6 +268,15 @@ async function fillCreateForm(
   await page.locator(".new-session-button").click();
   const form = page.locator(".create-session-form");
   await expect(form).toBeVisible();
+  // The agent picker is told, explicitly, that this create means the command
+  // below. It is not a formality: the dialog defaults to the target host's
+  // last-used profile, and when that profile has since been DELETED — which
+  // is the state any run that exercised profiles leaves the shared stack in —
+  // it selects nothing at all and blocks the create until someone answers
+  // (SPEC.md's ask-don't-guess). Saying "custom command" here is what a user
+  // in that state would do, and it makes this helper independent of whatever
+  // the last profile-backed create left behind.
+  await form.locator(".create-session-profile").selectOption("");
   await form.locator('input[type="text"]').nth(0).fill(cwd);
   await form.locator('input[type="text"]').nth(1).fill(invocation);
   await form.locator('input[type="text"]').nth(2).fill(title);
@@ -13933,6 +13942,10 @@ test.describe("multi-host", () => {
       await page.locator(".new-session-button").click();
       const form = page.locator(".create-session-form");
       await form.locator(".create-session-host").selectOption(String(down));
+      // Command mode explicitly, as `fillCreateForm` does and for the same
+      // reason — and here it also has to follow the host change, which clears
+      // any agent choice (a profile id means nothing on another supervisor).
+      await form.locator(".create-session-profile").selectOption("");
       await form.locator('input[type="text"]').nth(0).fill("/tmp");
       await form.locator('input[type="text"]').nth(1).fill(FAKE_AGENT_INVOCATION);
       await form.locator('input[type="text"]').nth(2).fill(title);
@@ -14215,6 +14228,18 @@ test.describe("multi-host", () => {
           { timeout: 15_000, message: "waiting for the retargeted host to reach the panel" },
         )
         .toContain("identity-after-the-move");
+
+      // The retarget did not just rotate the intent key — it also discarded
+      // the form's agent choice (`list::CreateSessionForm`: a moved host is
+      // another machine, so the dialog re-asks rather than carrying an answer
+      // across). What the re-ask resolves to depends on suite history: in a
+      // full run the profile tests leave the host's remembered default
+      // pointing at a deleted profile, so the dialog blocks with nothing
+      // selected and the submit button is DISABLED — clicking it would wait
+      // forever. Answering "custom command" again is what a user in front of
+      // that dialog does, and it makes the second submit reachable in every
+      // state instead of only in a targeted run.
+      await form.locator(".create-session-profile").selectOption("");
 
       await form.locator('button[type="submit"]').click();
       await expect(form.locator(".create-session-error")).toBeVisible();

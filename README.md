@@ -4,30 +4,36 @@ Run coding agents (Claude Code, Codex, other terminal agents) on machines you co
 interface, through their real TUIs. See SPEC.md for what this is and is not, SPEC_impl.md for how it is built and why,
 and PLAN.md for where the build currently stands.
 
-NOTE: This is milestone-6 software: several sessions at once, across every host in a registry the helm keeps. Hosts are
-registered by SSH destination — through `--ensure-hosts` at startup, the API, or the UI's own hosts panel — and the
+NOTE: This is milestone-6.75 software: several sessions at once, across every host in a registry the helm keeps. Hosts
+are registered by SSH destination — through `--ensure-hosts` at startup, the API, or the UI's own hosts panel — and the
 machine running the helm is always one of them without being registered at all; one flat session list spans them, each
-row naming its host, with a host that goes dark keeping its sessions listed and marked stale. The hosts panel shows
-every host's connection state at all times and is where hosts are added, retargeted, removed, retried, and where an
-identity change is decided; opening a stale session shows its metadata behind a notice naming its host's actual state
-instead of a terminal, and the create dialog picks which host a session is launched on. Reopening a session lands at the
-tail of its history instead of replaying it as a scroll animation — for any replay within the client's buffering bounds,
-which is every ordinary one; an unusually large replay, or one that stalls part-way, falls back to showing the catch-up
-as it arrives instead of hiding it. A session can be renamed from either the list or its own view. Sessions survive a
-supervisor restart (persisted metadata, and a still-viewable terminal whenever the private tmux server survived too), a
-host reboot classifies previously-running sessions as interrupted rather than guessing, and a user-stopped session keeps
-its "stopped by user" qualifier durably. A terminal that loses its connection — a closed laptop, a network that went
-away — gets itself back without you closing and reopening the session. Restart is live too: an interrupted (or exited,
-or errored) session relaunches its agent — resuming its own Claude Code or Codex conversation where that conversation
-was captured, and saying plainly that it is launching fresh where it was not. On Linux hosts with a systemd user
-manager, stopping a session also kills its launch's own cgroup before the portable process sweep, which catches
-descendants that daemonized away from both (see SPEC_impl.md for what that does and does not promise). Usable for real
-work, minimal in everything else. Two caveats worth knowing before that real work: the helm's loopback API carries no
-authentication yet (the web token is a later milestone), so any local account on the helm's machine can drive your
-sessions — treat multi-user hosts accordingly; and every agent invocation entered through the GUI's create dialog is
-ordinary argv, visible to every local user via `ps`, so credentials do not belong in it.
+row naming its host, with a host that goes dark keeping its sessions listed and marked stale. The list is filtered and
+searched by host, directory, agent profile, status and title, and every client updates itself: a create, rename, stop,
+delete, status change or host going down shows up in every open browser without a refresh, and while that channel is
+healthy the browser polls for none of it (it falls back to refetching every few seconds while the channel is down).
+Agents are launched from named profiles — per host, editable, with starter definitions for Claude Code and Codex on
+every fresh supervisor — or from a command typed into the create dialog. The hosts panel shows every host's connection
+state at all times and is where hosts are added, retargeted, removed, retried, where an identity change is decided, and
+where each host's profiles are defined; opening a stale session shows its metadata behind a notice naming its host's
+actual state instead of a terminal, and the create dialog picks which host a session is launched on. Reopening a session
+lands at the tail of its history instead of replaying it as a scroll animation — for any replay within the client's
+buffering bounds, which is every ordinary one; an unusually large replay, or one that stalls part-way, falls back to
+showing the catch-up as it arrives instead of hiding it. A session can be renamed from either the list or its own view.
+Sessions survive a supervisor restart (persisted metadata, and a still-viewable terminal whenever the private tmux
+server survived too), a host reboot classifies previously-running sessions as interrupted rather than guessing, and a
+user-stopped session keeps its "stopped by user" qualifier durably. A terminal that loses its connection — a closed
+laptop, a network that went away — gets itself back without you closing and reopening the session. Restart is live too:
+an interrupted (or exited, or errored) session relaunches its agent — resuming its own Claude Code or Codex conversation
+where that conversation was captured, and saying plainly that it is launching fresh where it was not. On Linux hosts
+with a systemd user manager, stopping a session also kills its launch's own cgroup before the portable process sweep,
+which catches descendants that daemonized away from both (see SPEC_impl.md for what that does and does not promise).
+Usable for real work, minimal in everything else. Two caveats worth knowing before that real work: the helm's loopback
+API carries no authentication yet (the web token is a later milestone), so any local account on the helm's machine can
+drive your sessions — treat multi-user hosts accordingly; and every agent invocation entered through the GUI, whether
+typed into the create dialog or stored in a profile, is ordinary argv, visible to every local user via `ps`, so
+credentials do not belong in it.
 
-## Trying it (M6)
+## Trying it (M6.75)
 
 Prerequisites: Rust with the `wasm32-unknown-unknown` target (`rustup target add wasm32-unknown-unknown`), tmux on every
 host involved, and `cargo binstall dioxus-cli@0.7.9` (or `cargo install dioxus-cli@0.7.9` — match the workspace's dioxus
@@ -78,32 +84,55 @@ Ubuntu 24.04 ships 3.4.
   reporting an identity that does not match the one on record offers to adopt it. Removing forgets the host and the
   helm's cached view of its sessions — the supervisor and its agents keep running, and re-adding the destination finds
   them again.
-- Under it, the session list: which host each session lives on, its title, working directory, invocation, and a status.
-  A live session reads running (the agent is working), waiting (it has asked you something and nothing has answered) or
-  idle (it is at rest). The supervisor tells them apart by watching each session's terminal periodically: a screen that
-  keeps changing reads running, one that has stayed the same for several looks reads idle, and a screen showing a
-  recognized approval or question prompt from Claude Code or Codex reads waiting. It is a heuristic and it is allowed to
-  be wrong — a status never gates anything, and typing into a session that is mislabelled works exactly as it always
-  did. A finished one reads exited with the code when known, qualified "stopped by user" when you stopped it;
-  interrupted after a host reboot; or error, with the reason, when the agent's own command could not start at all. The
-  list refreshes on its own every few seconds. A session nothing has classified yet shows no status at all rather than
-  guessing. Sessions on a host that is not connected stay listed, dimmed and badged "stale"; their controls still work
-  and the helm refuses them by naming the host's state rather than failing silently, and opening one shows its metadata
-  behind a notice naming that state instead of a terminal. Click a row to open its terminal; a back control returns to
-  the list. Close the tab, reopen it later: same session, scrollback intact, the agent never noticed. Reopening shows a
-  brief "connecting — catching up" line instead of the history flying past: the terminal appears once, already at the
-  end of what you missed. A replay that outgrows the client's buffer, or that goes quiet part-way, degrades to showing
-  the rest as it arrives — visible catch-up rather than a hidden terminal, and never dropped output.
-- "new session" opens an inline form (host, working directory and agent command required, title optional); submitting
-  launches the agent and takes you straight into its terminal. The host selector lists every registered host, defaulting
-  to the one your open session runs on and otherwise to the machine running the helm; a host that is not connected is
-  offered too, labelled with its state, and the create against it fails in place with the helm's own explanation rather
-  than being hidden from the list. Paths are sent literally — nothing expands `~` or any variable at any point between
-  the form and the host — so a working directory must be written out in full as it exists on the host it names. A bad
-  working directory fails the create in place, with the supervisor's own error shown next to the form and nothing
-  created. A bad EXECUTABLE (a typo'd command, a path that does not exist) is different: creation still succeeds — the
-  working directory and terminal both exist — and the session then reports error once its agent's own exec fails, with
-  the reason shown right in the list.
+- Each host row also opens its "profiles": the named agent definitions sessions on that host are launched from. A
+  profile is a name, an invocation, an agent kind (Claude Code, Codex, or generic — the kind is what selects a
+  supervisor's status heuristics and conversation capture, and is not user-authored beyond picking one), and an optional
+  resume command. They belong to the supervisor, not to the helm, so each host has its own set and a fresh supervisor
+  already ships with editable starters for Claude Code and Codex. Editing or deleting one changes what future sessions
+  launch and nothing else: a session already created keeps the invocation and resume command it snapshotted, keeps
+  running, and keeps naming the profile it came from — marked in the list once that profile has been renamed or deleted.
+  A profile edited from another browser shows up here without a refresh, like everything else.
+- Under the panel, the session list: which host each session lives on, its title, working directory, invocation, and a
+  status. A live session reads running (the agent is working), waiting (it has asked you something and nothing has
+  answered) or idle (it is at rest). The supervisor tells them apart by watching each session's terminal periodically: a
+  screen that keeps changing reads running, one that has stayed the same for several looks reads idle, and a screen
+  showing a recognized approval or question prompt from Claude Code or Codex reads waiting. It is a heuristic and it is
+  allowed to be wrong — a status never gates anything, and typing into a session that is mislabelled works exactly as it
+  always did. A finished one reads exited with the code when known, qualified "stopped by user" when you stopped it;
+  interrupted after a host reboot; or error, with the reason, when the agent's own command could not start at all. A
+  session created from a profile also names it. While its update channel is healthy the browser polls for nothing: it
+  holds one connection the helm uses to say "something changed", and every open client re-reads when it hears that — a
+  status flip, a rename from another window, a host going down. Lose that connection and the page falls back to
+  refetching every few seconds until it is back, so the list is never stale for long either way. The helm itself is not
+  push-driven all the way down: it refreshes each host's sessions from that host's supervisor every few seconds, so a
+  status can be up to about that old before anyone is told. A session nothing has classified yet shows no status at all
+  rather than guessing. Sessions on a host that is not connected stay listed, dimmed and badged "stale"; their controls
+  still work and the helm refuses them by naming the host's state rather than failing silently, and opening one shows
+  its metadata behind a notice naming that state instead of a terminal. Click a row to open its terminal; a back control
+  returns to the list. Close the tab, reopen it later: same session, scrollback intact, the agent never noticed.
+  Reopening shows a brief "connecting — catching up" line instead of the history flying past: the terminal appears once,
+  already at the end of what you missed. A replay that outgrows the client's buffer, or that goes quiet part-way,
+  degrades to showing the rest as it arrives — visible catch-up rather than a hidden terminal, and never dropped output.
+- Above the list, filtering and search: host, working directory, agent profile, status, and a title search, applied when
+  you submit rather than on every keystroke. The helm answers the query — the whole fleet is filtered before it is
+  paginated, so the count above the rows ("N matching of M sessions") is about the fleet and not about the page you
+  happen to be holding. The profile field is free text rather than a menu on purpose: it matches a profile's id or the
+  name a session snapshotted at creation, which is what keeps a deleted profile's sessions findable.
+- "new session" opens an inline form: host, agent, working directory (required), title (optional, auto-generated when
+  omitted). Submitting launches the agent and takes you straight into its terminal. The host selector lists every
+  registered host and defaults to the machine running the helm (SPEC.md's rule names the host of the currently open
+  session first, but this UI shows the list and a session as alternatives rather than side by side, so there is never
+  one open while this dialog exists); a host that is not connected is offered too, labelled with its state, and the
+  create against it fails in place with the helm's own explanation rather than being hidden from the list. The agent
+  selector offers that host's profiles and preselects the one you last created a session from there; when that profile
+  has since been deleted it preselects nothing and says so rather than quietly picking another. Pick "custom command"
+  instead and the command field below is what runs — the two are exclusive, and choosing a profile greys the field out
+  because the profile already says what to launch. Paths are sent literally — nothing expands `~` or any variable at any
+  point between the form and the host — so a working directory must be written out in full as it exists on the host it
+  names. A bad working directory fails the create in place, with the supervisor's own error shown next to the form and
+  nothing created. A bad EXECUTABLE (a typo'd command, a path that does not exist) is different: creation still succeeds
+  — the working directory and terminal both exist — and the session then reports error once its agent's own exec fails,
+  with the reason shown right in the list.
 - Submitting the same form twice yields one session, not two. Every create from the form carries an idempotency key, so
   a submit retried after an ambiguous failure — the request landed but its reply did not, the supervisor restarted
   mid-create — returns the session the first attempt already made instead of launching a second agent, and a failed

@@ -1,8 +1,10 @@
 //! The helm's HTTP contract, as this UI speaks it: one `async fn` per
 //! endpoint — the session routes
-//! (fetch/create/stop/restart/rename/delete/tab-open/tab-close) and, since
-//! PLAN_M6.md item 5 froze them, the host registry's
-//! (list/add/retarget/remove/adopt/retry) — each flattening every failure
+//! (fetch/create/stop/restart/rename/delete/tab-open/tab-close), the host
+//! registry's (list/add/retarget/remove/adopt/retry) since PLAN_M6.md item 5
+//! froze them, and the per-host profile catalog's
+//! (list/create/update/delete) since PLAN_M6_75.md item 5 did the same —
+//! each flattening every failure
 //! — transport, status, or body-read — into a single displayable `String`
 //! rather than a typed error. That flattening is deliberate, not laziness:
 //! every caller (`list::ListView`, `list::CreateSessionForm`,
@@ -41,7 +43,7 @@
 //! failure-text builders) stay private to this module.
 
 use crate::skew;
-use crate::{Host, HostId, RestartOffer, Session, Tab};
+use crate::{Host, HostId, Profile, RestartOffer, Session, Tab};
 use serde::Deserialize;
 
 /// Mirror of one PAGE of the helm's `GET /api/sessions` response
@@ -900,6 +902,27 @@ pub(crate) async fn fetch_sessions(
 /// an untested cadence.
 pub(crate) const POLL_INTERVAL_MS: u64 = 3_000;
 
+/// What a create says to launch: a command line, or a profile from the
+/// target host's catalog (PLAN_M6_75.md item 3's two creation modes).
+///
+/// One argument rather than two optional ones, because the wire treats them
+/// as a CHOICE: a body naming both is refused (a profile already states what
+/// to run, so there is no honest merge) and a body naming neither is refused
+/// too. Two `Option` parameters would let a caller express both illegal
+/// shapes and find out over the network; this type lets it express neither.
+///
+/// Borrowed rather than owned: every caller already holds the string it is
+/// about to send, and a create is one request rather than something stored.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum CreateAgent<'a> {
+    /// A raw invocation, shell-split by the supervisor.
+    Command(&'a str),
+    /// A `Profile::id` from the TARGET host's own catalog — profiles are
+    /// per-supervisor, so an id from another host names nothing here and the
+    /// create fails its precondition rather than falling back to anything.
+    Profile(&'a str),
+}
+
 /// POST the create endpoint, returning the decoded `Session` on success or
 /// the response body's own text on failure.
 ///
@@ -930,32 +953,80 @@ pub(crate) const POLL_INTERVAL_MS: u64 = 3_000;
 /// single-machine setup. A host that is not connected fails the create as a
 /// precondition, and that refusal arrives here as the helm's own words like
 /// any other.
+///
+/// `agent` selects between the two creation modes PLAN_M6_75.md item 3 made
+/// mutually exclusive on the wire — see [`CreateAgent`] for why they arrive
+/// here as one argument rather than as two optional ones.
 pub(crate) async fn create_session(
     base: &str,
     cwd: &str,
-    invocation: &str,
+    agent: CreateAgent<'_>,
     title: &str,
     intent_key: &str,
     host: Option<HostId>,
+    expectation: Expectation<'_>,
 ) -> Result<Session, String> {
     let url = format!("{base}/api/sessions");
+    let resp = send(client().post(&url).json(&create_body(
+        cwd,
+        agent,
+        title,
+        intent_key,
+        host,
+        expectation,
+    )))
+    .await?;
+    if !resp.status().is_success() {
+        return Err(refusal_text("POST", &url, resp).await);
+    }
+    resp.json::<Session>().await.map_err(|e| e.to_string())
+}
+
+/// One create's request body.
+///
+/// Split from the request purely so the two rules it has to keep can be
+/// exercised without a helm: the title's absent-versus-empty distinction, and
+/// the creation mode's exclusivity — a body carrying both `invocation` and
+/// `profile_id`, or neither, is a 400 rather than a create, and the failure
+/// would arrive at the moment a user pressed the button.
+fn create_body(
+    cwd: &str,
+    agent: CreateAgent<'_>,
+    title: &str,
+    intent_key: &str,
+    host: Option<HostId>,
+    expectation: Expectation<'_>,
+) -> serde_json::Value {
     // `title` is the API's `Option<String>`, not a bare string: an empty
     // field means "auto-generate", per SPEC.md's "Title: optional;
     // auto-generated when omitted" — sending `Some("")` would instead ask
     // the supervisor to name the session the empty string.
     let title = (!title.trim().is_empty()).then_some(title);
-    let body = serde_json::json!({
+    let mut body = serde_json::json!({
         "cwd": cwd,
-        "invocation": invocation,
         "title": title,
         "intent_key": intent_key,
         "host": host,
     });
-    let resp = send(client().post(&url).json(&body)).await?;
-    if !resp.status().is_success() {
-        return Err(refusal_text("POST", &url, resp).await);
+    // Exactly one of the two mode fields is ever written. Building it from
+    // ONE value is what makes the exclusivity structural rather than a rule
+    // each caller has to remember, and there is no honest merge to fall back
+    // on: a profile already states what to run.
+    match agent {
+        CreateAgent::Command(invocation) => body["invocation"] = serde_json::json!(invocation),
+        CreateAgent::Profile(profile_id) => body["profile_id"] = serde_json::json!(profile_id),
     }
-    resp.json::<Session>().await.map_err(|e| e.to_string())
+    // The connection this create was prepared against. It matters most in
+    // PROFILE mode, where the id would otherwise resolve on whatever install
+    // now answers for that host — every fresh supervisor seeds the same
+    // starters, so the wrong install is a successful launch of the wrong
+    // thing rather than a refusal. Sent in raw mode too: the directory and
+    // the command were chosen for a machine, and the same substitution puts
+    // them on another one.
+    if let Some(incarnation) = expectation.incarnation {
+        body["expected_incarnation"] = serde_json::json!(incarnation);
+    }
+    body
 }
 
 /// The JavaScript the WEB (wasm) build's random client-side identifiers
@@ -1368,19 +1439,34 @@ pub(crate) enum Commit {
     Unvalidated(String),
 }
 
+/// The sentence a committed-but-unreadable reply produces.
+///
+/// `authority` names the surface that WILL say what happened — the read that
+/// follows this mutation — and it is a parameter rather than a constant
+/// because the answer differs per resource: a host verb is settled by the
+/// hosts list, a profile verb by that host's catalog. A message naming the
+/// wrong one is worse than a vague one, since it sends the user to a surface
+/// that has nothing to do with what they just did.
+fn unvalidated_note(error: impl std::fmt::Display, authority: &str) -> String {
+    format!(
+        "the helm accepted this change, but its reply could not be read by this build ({error}); \
+         {authority} is the authoritative view of what happened"
+    )
+}
+
 /// Classify a successful response by whether its body decoded.
 ///
 /// Shared by the two mutations that answer with a host row so both make the
 /// same call about the same situation — the alternative being one of them
 /// quietly reverting to "a bad body is a refusal" the next time it is
 /// touched.
-async fn commit_of<T: serde::de::DeserializeOwned>(resp: reqwest::Response) -> Commit {
+async fn commit_of<T: serde::de::DeserializeOwned>(
+    resp: reqwest::Response,
+    authority: &str,
+) -> Commit {
     match resp.json::<T>().await {
         Ok(_) => Commit::Confirmed,
-        Err(error) => Commit::Unvalidated(format!(
-            "the helm accepted this change, but its reply could not be read by this build \
-             ({error}); the hosts list below is the authoritative view of what happened"
-        )),
+        Err(error) => Commit::Unvalidated(unvalidated_note(error, authority)),
     }
 }
 
@@ -1424,7 +1510,7 @@ pub(crate) async fn add_host(
     if !resp.status().is_success() {
         return Err(refusal_text("POST", &url, resp).await);
     }
-    Ok(commit_of::<Host>(resp).await)
+    Ok(commit_of::<Host>(resp, "the hosts list below").await)
 }
 
 /// Retarget a registered host (`POST /api/hosts/{id}/destination`).
@@ -1450,7 +1536,7 @@ pub(crate) async fn set_host_destination(
     // and nothing more, because the caller repaints from the
     // generation-disciplined hosts refresh rather than from this one-off
     // snapshot.
-    Ok(commit_of::<Host>(resp).await)
+    Ok(commit_of::<Host>(resp, "the hosts list below").await)
 }
 
 /// Forget a registered host (`DELETE /api/hosts/{id}`).
@@ -1521,6 +1607,384 @@ pub(crate) async fn retry_host(base: &str, host: HostId) -> Result<(), String> {
     Ok(())
 }
 
+// ---------------------------------------------------------------------
+// Agent profiles (PLAN_M6_75.md items 5 and 8)
+//
+// Every route here is host-SCOPED, and that is the contract rather than a
+// URL style: a profile lives on one supervisor, its id means nothing on
+// another machine, and the helm proxies each request to that host's live
+// connection — so a profile operation against a host that is down is
+// refused exactly like a session operation against it, naming the state.
+// ---------------------------------------------------------------------
+
+/// What `GET /api/hosts/{id}/profiles` answers with: one host's catalog and
+/// this helm's remembered default for it, together (farhelm-helm's
+/// `ProfilesView`).
+///
+/// The pairing is the point rather than a convenience. SPEC.md's creation
+/// rule — default to the last-used profile, ASK when it is gone — is a
+/// question about two facts at once, and the moment that matters is exactly
+/// the one where a profile has just been deleted. Two separate reads would
+/// have to be reconciled by every client, at whichever moments they happened
+/// to land.
+#[derive(Debug, Clone, Deserialize, PartialEq, Eq, Default)]
+pub(crate) struct ProfileCatalog {
+    /// The catalog in the supervisor's own order (by id, stable across
+    /// renames). Not re-sorted here: the helm does not sort it either, and a
+    /// picker that reordered itself on every rename would move options out
+    /// from under a user mid-choice.
+    pub(crate) profiles: Vec<Profile>,
+    /// The id of the profile a session was last created from on this host,
+    /// or `None` if none ever was.
+    ///
+    /// May name a profile ABSENT from `profiles`, and that combination is
+    /// meaningful rather than a bug: it is a deleted default, which is
+    /// precisely what SPEC.md's ask-don't-guess fallback keys off. The helm
+    /// deliberately does not filter it out, and neither does this.
+    #[serde(default)]
+    pub(crate) default_profile: Option<String>,
+    /// Each profile's DEFINITION fingerprint, by profile id — the value an
+    /// editor hands back as `expected_definition` when it saves.
+    ///
+    /// Served by the helm rather than computed here, and echoed back opaque.
+    /// That asymmetry is the point: the comparison is exact string equality,
+    /// so a client building its own would have to reproduce the helm's
+    /// encoding byte for byte in another language, and any drift would show up
+    /// as guarded updates refusing forever with nothing actually wrong.
+    ///
+    /// `#[serde(default)]` for a helm that predates it: an editor with no
+    /// fingerprint to send simply sends no definition precondition, which is
+    /// the behavior that helm already has.
+    #[serde(default)]
+    pub(crate) definitions: std::collections::BTreeMap<String, String>,
+}
+
+/// A profile's whole definition, as a create or an edit sends it.
+///
+/// There is no partial-update shape and there deliberately is not one: an
+/// edit REPLACES the definition, because per-field optionality would make
+/// "clear the resume template" and "leave it alone" the same request. Every
+/// caller therefore has to have read what it is replacing, which is what the
+/// editor does.
+///
+/// Owned rather than borrowed, unlike [`CreateAgent`]: the editing surface
+/// assembles one of these from drafts it owns and hands it over.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct ProfileSpec {
+    pub(crate) name: String,
+    pub(crate) invocation: String,
+    /// The wire spelling of the kind (`claude`, `codex`, `generic`), echoed
+    /// verbatim — including one this build does not recognize, which is why
+    /// it is a string here as well as on [`Profile`].
+    pub(crate) agent_kind: String,
+    /// The resume argv, or absent — and absent is a real value rather than a
+    /// missing field, with an outcome that depends on the kind: an integrated
+    /// kind (`claude`, `codex`) has the supervisor DERIVE a template from the
+    /// invocation, while a generic one derives none at all and can therefore
+    /// only be restarted fresh. Never a synonym for the empty vector.
+    pub(crate) resume_template: Option<Vec<String>>,
+}
+
+impl ProfileSpec {
+    /// This spec as the request body both mutations take, with whatever
+    /// preconditions the caller can state attached.
+    ///
+    /// Written once because the two endpoints send exactly the same shape,
+    /// and a second copy is how one of them would eventually stop sending a
+    /// field — silently clearing it on every edit, since the far side
+    /// replaces the whole definition.
+    ///
+    /// Both preconditions are OMITTED rather than sent null when there is
+    /// nothing to assert (a host that has never connected, a catalog served by
+    /// a helm that predates fingerprints, a create — which has no prior
+    /// definition and is refused outright for carrying one).
+    fn body(&self, expectation: &Expectation<'_>) -> serde_json::Value {
+        let mut body = serde_json::json!({
+            "name": self.name,
+            "invocation": self.invocation,
+            "agent_kind": self.agent_kind,
+            "resume_template": self.resume_template,
+        });
+        if let Some(incarnation) = expectation.incarnation {
+            body["expected_incarnation"] = serde_json::json!(incarnation);
+        }
+        if let Some(definition) = expectation.definition {
+            body["expected_definition"] = serde_json::json!(definition);
+        }
+        body
+    }
+}
+
+/// What a mutation asserts about the world it was prepared against
+/// (farhelm-helm's `precondition` module).
+///
+/// A request carrying these cannot execute against a different install, and an
+/// update cannot silently overwrite a definition that changed under an open
+/// editor. Both are optional on the wire and both are optional here, for the
+/// same reason: a client with nothing to assert (a host that has never
+/// connected, a helm that predates the fields) must still be able to mutate,
+/// exactly as it always could.
+///
+/// The fingerprint is borrowed because every caller already holds one (from
+/// the catalog read) and nothing here stores it; the connection token is a
+/// `u64` and is simply copied — borrowing an integer would be ceremony.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub(crate) struct Expectation<'a> {
+    /// The connection this request was prepared against (`Host::incarnation`).
+    /// `None`, or a zero token, asserts nothing.
+    pub(crate) incarnation: Option<u64>,
+    /// The definition fingerprint an editor was seeded from
+    /// (`ProfileCatalog::definitions`). UPDATE ONLY — the helm refuses a
+    /// create that carries one, deliberately, so that a caller which believes
+    /// it sent a precondition is never quietly served without it.
+    ///
+    /// What it guards is STALENESS: an update whose stored definition has
+    /// moved since the editor opened is refused rather than silently reverting
+    /// somebody else's change. It says nothing about the bytes this request
+    /// carries — keeping an untouched field byte-identical to what was stored
+    /// is `profiles::ProfileDraft::spec`'s job, and no precondition could
+    /// check it, since the far side has only what was sent.
+    pub(crate) definition: Option<&'a str>,
+}
+
+impl<'a> Expectation<'a> {
+    /// The expectation for a connection token, treating the helm's "never
+    /// connected" zero as nothing to assert — which is what it means.
+    pub(crate) fn on(incarnation: u64) -> Expectation<'a> {
+        Expectation {
+            incarnation: (incarnation != 0).then_some(incarnation),
+            definition: None,
+        }
+    }
+
+    /// The same, plus the definition an update means to replace.
+    pub(crate) fn replacing(incarnation: u64, definition: Option<&'a str>) -> Expectation<'a> {
+        Expectation {
+            definition,
+            ..Expectation::on(incarnation)
+        }
+    }
+}
+
+/// The two markers farhelm-helm appends to a precondition refusal.
+///
+/// Kept as data rather than as a `Precondition` enum, and that is a decision
+/// worth recording because it looks like lost information: NEITHER consumer
+/// branches on WHICH precondition failed. The profiles section closes the
+/// editor, invalidates and re-reads; the create dialog drops the stale binding
+/// and re-reads. Both are answering the same question — "the world moved, so
+/// what you were shown is not what is there" — and the recovery is identical.
+/// An enum would be a distinction the code makes and nothing uses, which is
+/// the kind of thing that rots into a wrong branch later. If a consumer ever
+/// does need it (a definition conflict could reasonably offer "reapply my
+/// changes to the current definition" where an incarnation conflict cannot),
+/// the markers are already distinct here and the enum comes back with it.
+const PRECONDITION_MARKERS: [&str; 2] = [
+    "[farhelm:precondition/incarnation]",
+    "[farhelm:precondition/definition]",
+];
+
+/// Whether a refusal is a stale PRECONDITION, and the sentence without its
+/// marker.
+///
+/// The marker is API and the prose is for a person, so the two are separated
+/// here rather than at each render site — a user should not be shown a
+/// bracketed token they cannot act on, and no surface should have to know the
+/// token's spelling to strip it.
+///
+/// `false` is the important answer: a conflict carrying no marker is a
+/// different kind entirely (a host that is not connected, a supervisor's own
+/// refusal), and those are NOT fixed by re-reading and re-seeding — treating
+/// them as if they were would send a client round a loop that cannot converge.
+pub(crate) fn precondition_of(refusal: &str) -> (bool, String) {
+    for marker in PRECONDITION_MARKERS {
+        if let Some(prose) = refusal.trim_end().strip_suffix(marker) {
+            return (true, prose.trim_end().to_string());
+        }
+    }
+    (false, refusal.to_string())
+}
+
+/// Read one host's profile catalog and this helm's remembered default for it.
+///
+/// A live read from the owning supervisor — the helm holds no cache for it —
+/// so this fails while that host is not connected, with the helm's own words
+/// naming the state. That is the honest behavior for a picker: a cached
+/// catalog would let a user choose a profile from a machine that cannot be
+/// reached to launch it.
+pub(crate) async fn fetch_profiles(
+    base: &str,
+    host: HostId,
+    expectation: Expectation<'_>,
+) -> Result<ProfileCatalog, String> {
+    // The READ states its expectation too, in the query — a catalog fetched
+    // from an install that replaced this one mid-flight would be rendered as
+    // this host's, and its ids would RESOLVE against anything this client then
+    // did with them. A helm that does not know the parameter ignores it, which
+    // is the same posture every other precondition takes.
+    let guard = expectation
+        .incarnation
+        .map(|incarnation| format!("?expected_incarnation={incarnation}"))
+        .unwrap_or_default();
+    let url = format!("{base}/api/hosts/{host}/profiles{guard}");
+    let resp = send(client().get(&url)).await?;
+    if !resp.status().is_success() {
+        return Err(read_failure("GET", &url, resp).await);
+    }
+    resp.json::<ProfileCatalog>()
+        .await
+        .map_err(|e| e.to_string())
+}
+
+/// How a profile mutation the helm ACCEPTED came back.
+///
+/// [`Commit`]'s shape plus the one thing the host verbs have no use for: the
+/// profile as the supervisor now holds it. The caller needs it, and needs it
+/// synchronously — the authoritative catalog re-read is a round trip away,
+/// and until it lands this client would otherwise still be handing out the
+/// definition it just replaced (see `profiles::CatalogRead::absorb`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum ProfileCommit {
+    /// Accepted, and the reply described the result: the profile as the
+    /// supervisor now holds it, and — from a helm that serves it — the
+    /// fingerprint of that committed definition.
+    ///
+    /// The fingerprint travels with the profile rather than being fetched
+    /// afterwards because the two must not be able to describe different
+    /// moments: an editor reopened before the authoritative read lands is
+    /// seeded from this pair, and a definition paired with the PREVIOUS
+    /// fingerprint would send a precondition the helm refuses as stale — a
+    /// conflict reported over a change this client itself just made.
+    Confirmed(Profile, Option<String>),
+    /// Accepted, but the reply could not be read by this build. Carries the
+    /// decode failure, for a warning line — and, deliberately, nothing to
+    /// reconcile from: an unread reply is exactly the case where only the
+    /// catalog read that follows can say what happened.
+    Unvalidated(String),
+}
+
+/// Classify a profile mutation's successful response.
+///
+/// The catalog — not the hosts list — is what settles a profile change, and
+/// this is where that is said (see [`unvalidated_note`]).
+async fn profile_commit(resp: reqwest::Response) -> ProfileCommit {
+    match resp.json::<CommittedProfile>().await {
+        Ok(committed) => ProfileCommit::Confirmed(committed.profile, committed.fingerprint),
+        Err(error) => {
+            ProfileCommit::Unvalidated(unvalidated_note(error, "this host's profile list below"))
+        }
+    }
+}
+
+/// A profile mutation's success body: the profile, plus the fingerprint of the
+/// definition just committed.
+///
+/// Flattened and OPTIONAL so both shapes decode — a helm that serves the
+/// fingerprint and one that does not. The absent case is not a failure and
+/// must not be treated as one: it costs the next editor its definition
+/// precondition (it has nothing to name) and nothing else, which is exactly
+/// the posture the whole precondition feature takes toward callers that cannot
+/// state one.
+#[derive(Deserialize)]
+struct CommittedProfile {
+    #[serde(flatten)]
+    profile: Profile,
+    fingerprint: Option<String>,
+}
+
+/// Define a new profile on one host (`POST /api/hosts/{id}/profiles`).
+///
+/// Nothing is validated here. The name's control-character rule, the
+/// per-field size cap, the catalog bound and the `{conversation}` placeholder
+/// rule for an integrated kind's resume template are all the supervisor's,
+/// and its refusal is what the user acts on — a second copy of those rules in
+/// the client would be the one that drifted, and it could not check the
+/// catalog bound at all.
+///
+/// A 2xx whose body will not decode is [`ProfileCommit::Unvalidated`] rather
+/// than an error, on the same reasoning as the host mutations: the profile
+/// exists, and telling the user their change was rejected when it
+/// demonstrably happened is the worse failure. The catalog re-read that
+/// follows is the authoritative account either way.
+pub(crate) async fn create_profile(
+    base: &str,
+    host: HostId,
+    spec: &ProfileSpec,
+    expectation: Expectation<'_>,
+) -> Result<ProfileCommit, String> {
+    let url = format!("{base}/api/hosts/{host}/profiles");
+    let resp = send(client().post(&url).json(&spec.body(&expectation))).await?;
+    if !resp.status().is_success() {
+        return Err(refusal_text("POST", &url, resp).await);
+    }
+    Ok(profile_commit(resp).await)
+}
+
+/// Replace a profile's whole definition
+/// (`POST /api/hosts/{id}/profiles/{profile_id}`).
+///
+/// A POST to the resource rather than a PUT or PATCH, matching this API's own
+/// verb vocabulary (`/stop`, `/rename`, `/destination`) — and emphatically
+/// not a partial update: see [`ProfileSpec`].
+///
+/// Nothing this does touches the sessions already created from the profile.
+/// Their launch and resume snapshots are their own (SPEC.md's snapshot rule),
+/// and a rename simply starts showing up as `Renamed` on their
+/// `SourceProfile` — which is what the session list renders rather than
+/// silently adopting the new name.
+pub(crate) async fn update_profile(
+    base: &str,
+    host: HostId,
+    profile_id: &str,
+    spec: &ProfileSpec,
+    expectation: Expectation<'_>,
+) -> Result<ProfileCommit, String> {
+    let url = format!(
+        "{base}/api/hosts/{host}/profiles/{}",
+        encode_path_segment(profile_id)
+    );
+    let resp = send(client().post(&url).json(&spec.body(&expectation))).await?;
+    if !resp.status().is_success() {
+        return Err(refusal_text("POST", &url, resp).await);
+    }
+    Ok(profile_commit(resp).await)
+}
+
+/// Remove a profile from one host's catalog
+/// (`DELETE /api/hosts/{id}/profiles/{profile_id}`).
+///
+/// The reply is an empty object, exactly like `stop` and session `delete`, so
+/// a 200 IS the whole answer and there is nothing for a decode to fail on.
+///
+/// Existing sessions are untouched, including the one thing that looks like
+/// an exception: the helm deliberately does NOT clear a remembered default
+/// that named this profile, because a default outliving its profile is what
+/// lets the next create dialog say "the one you last used is gone, pick
+/// another" instead of quietly offering nothing.
+pub(crate) async fn delete_profile(
+    base: &str,
+    host: HostId,
+    profile_id: &str,
+    expectation: Expectation<'_>,
+) -> Result<(), String> {
+    // The precondition rides in the QUERY here rather than in a body, because
+    // this verb has no body — the helm's delete route reads
+    // `?expected_incarnation=` for exactly that reason.
+    let guard = expectation
+        .incarnation
+        .map(|incarnation| format!("?expected_incarnation={incarnation}"))
+        .unwrap_or_default();
+    let url = format!(
+        "{base}/api/hosts/{host}/profiles/{}{guard}",
+        encode_path_segment(profile_id)
+    );
+    let resp = send(client().delete(&url)).await?;
+    if !resp.status().is_success() {
+        return Err(refusal_text("DELETE", &url, resp).await);
+    }
+    Ok(())
+}
+
 /// The wire spelling of the restart mode this offer authorizes, and the
 /// ONLY mode the supervisor will accept for it.
 ///
@@ -1568,6 +2032,220 @@ mod tests {
             "trimming decides presence, never content"
         );
         assert_eq!(install_field("/srv/state"), Some("/srv/state".to_string()));
+    }
+
+    /// A create names exactly ONE of the two modes, never both and never
+    /// neither.
+    ///
+    /// The helm refuses both illegal shapes with a 400, so getting this wrong
+    /// fails at the moment a user presses create — and the "both" shape is
+    /// the one a client reaches by accident, by keeping a stale invocation
+    /// beside a freshly chosen profile. Asserting the ABSENCE of the other
+    /// key is therefore the load-bearing half of each case.
+    #[test]
+    fn a_create_body_carries_one_creation_mode_and_not_the_other() {
+        let raw = create_body(
+            "/tmp",
+            CreateAgent::Command("claude"),
+            "",
+            "key-1",
+            Some(7),
+            Expectation::on(11),
+        );
+        assert_eq!(raw["invocation"], serde_json::json!("claude"));
+        assert!(
+            raw.get("profile_id").is_none(),
+            "a raw create must not also name a profile"
+        );
+        assert_eq!(
+            raw["title"],
+            serde_json::Value::Null,
+            "an empty title asks the supervisor to generate one; an empty STRING would name the \
+             session that"
+        );
+        assert_eq!(raw["host"], serde_json::json!(7));
+
+        let by_profile = create_body(
+            "/tmp",
+            CreateAgent::Profile("p-1"),
+            "named",
+            "key-2",
+            Some(7),
+            Expectation::on(11),
+        );
+        assert_eq!(by_profile["profile_id"], serde_json::json!("p-1"));
+        assert!(
+            by_profile.get("invocation").is_none(),
+            "a profile already says what to run, and a body naming both is refused outright"
+        );
+        assert_eq!(by_profile["title"], serde_json::json!("named"));
+    }
+
+    /// An edit sends the profile's WHOLE definition, every field present.
+    ///
+    /// The far side replaces rather than merges, so a field this body omitted
+    /// would be cleared on every save — which for `resume_template` means an
+    /// editor that never showed the field would quietly strip a starter
+    /// profile's resume command the first time anyone renamed it. The
+    /// explicit `null` is how "no template" is stated rather than implied.
+    #[test]
+    fn a_profile_spec_sends_its_whole_definition_including_an_absent_template() {
+        let spec = ProfileSpec {
+            name: "Claude Code".to_string(),
+            invocation: "claude".to_string(),
+            agent_kind: "claude".to_string(),
+            resume_template: Some(vec![
+                "claude".into(),
+                "--resume".into(),
+                "{conversation}".into(),
+            ]),
+        };
+        let body = spec.body(&Expectation::replacing(4, Some("n3:old;")));
+        assert_eq!(body["name"], serde_json::json!("Claude Code"));
+        assert_eq!(body["invocation"], serde_json::json!("claude"));
+        assert_eq!(body["agent_kind"], serde_json::json!("claude"));
+        assert_eq!(
+            body["resume_template"],
+            serde_json::json!(["claude", "--resume", "{conversation}"])
+        );
+
+        let generic = ProfileSpec {
+            resume_template: None,
+            ..spec
+        };
+        assert_eq!(
+            generic.body(&Expectation::default())["resume_template"],
+            serde_json::Value::Null,
+            "absence is a value here, and it has to be SENT to replace a template that was there"
+        );
+    }
+
+    /// A mutation carries exactly the preconditions it can state, and omits
+    /// the ones it cannot.
+    ///
+    /// Both halves matter. Sending a precondition the caller cannot back up —
+    /// a zero connection token, meaning "never connected" — would assert
+    /// something about a world this client has not seen; and dropping one it
+    /// CAN state is the silent case, since the request then succeeds against
+    /// whatever install now answers, which for profile ids that collide across
+    /// installs is a successful mutation of the wrong thing.
+    #[test]
+    fn a_mutation_states_the_preconditions_it_has_and_omits_the_rest() {
+        let spec = ProfileSpec {
+            name: "Codex".to_string(),
+            invocation: "codex".to_string(),
+            agent_kind: "codex".to_string(),
+            resume_template: None,
+        };
+
+        let guarded = spec.body(&Expectation::replacing(9, Some("n5:Codex;")));
+        assert_eq!(guarded["expected_incarnation"], serde_json::json!(9));
+        assert_eq!(
+            guarded["expected_definition"],
+            serde_json::json!("n5:Codex;"),
+            "an update names the definition it means to replace, so the far side can refuse one \
+             that changed under the editor"
+        );
+
+        // A create has no prior definition, and the helm REFUSES one that
+        // carries the field rather than ignoring it — so it must not be sent.
+        let created = spec.body(&Expectation::on(9));
+        assert_eq!(created["expected_incarnation"], serde_json::json!(9));
+        assert!(created.get("expected_definition").is_none());
+
+        // Never connected: nothing to assert, and asserting zero would be a
+        // claim about a connection that has never existed.
+        let unguarded = spec.body(&Expectation::on(0));
+        assert!(unguarded.get("expected_incarnation").is_none());
+        assert!(unguarded.get("expected_definition").is_none());
+    }
+
+    /// A create carries the connection it was prepared against, in both modes.
+    #[test]
+    fn a_create_names_the_connection_it_was_prepared_against() {
+        let body = create_body(
+            "/tmp",
+            CreateAgent::Profile("starter-claude"),
+            "",
+            "key",
+            Some(3),
+            Expectation::on(12),
+        );
+        assert_eq!(body["expected_incarnation"], serde_json::json!(12));
+        let unguarded = create_body(
+            "/tmp",
+            CreateAgent::Command("claude"),
+            "",
+            "key",
+            Some(3),
+            Expectation::default(),
+        );
+        assert!(
+            unguarded.get("expected_incarnation").is_none(),
+            "a caller with nothing to assert must still be able to create, exactly as before \
+             these preconditions existed"
+        );
+    }
+
+    /// A precondition refusal is recognized by its MARKER, and the marker is
+    /// stripped before the sentence is shown.
+    ///
+    /// Both halves are contract. The marker is what tells a client "this is
+    /// the world moving, re-read and re-seed" apart from every other 409 (a
+    /// host that is not connected, a supervisor's own refusal) — which must
+    /// NOT be answered by re-reading. And it is a machine token: showing it to
+    /// a user would put a bracketed string they cannot act on at the end of an
+    /// otherwise actionable sentence.
+    #[test]
+    fn a_precondition_refusal_is_classified_by_marker_and_shown_without_it() {
+        let (stale, prose) = precondition_of(
+            "host 3 is not the connection this request was prepared against \
+             [farhelm:precondition/incarnation]",
+        );
+        assert!(stale);
+        assert!(prose.ends_with("prepared against"), "got {prose:?}");
+
+        let (stale, prose) = precondition_of(
+            "profile p-1 on host 3 has been changed since this editor was opened \
+             [farhelm:precondition/definition]",
+        );
+        assert!(stale, "both markers mean the same thing to every consumer");
+        assert!(!prose.contains("farhelm:precondition"));
+
+        // Every other refusal is left exactly as the helm wrote it, and is
+        // NOT a stale-precondition case: re-reading does not fix a host that
+        // is unreachable, so a client that retried on one would loop.
+        let plain = "host 3 is unreachable-reprobing, so this operation is refused";
+        assert_eq!(precondition_of(plain), (false, plain.to_string()));
+    }
+
+    /// A catalog with no remembered default decodes as "none ever", and one
+    /// whose default names a profile the catalog no longer holds decodes
+    /// intact.
+    ///
+    /// The second half is the case the whole shape exists for: a deleted
+    /// default is what SPEC.md's ask-don't-guess fallback keys off, so a
+    /// decoder that dropped it — or that helpfully filtered it against the
+    /// catalog — would turn "your last profile is gone, pick another" into a
+    /// silent nothing.
+    #[test]
+    fn a_catalog_keeps_a_remembered_default_that_no_longer_resolves() {
+        let fresh: ProfileCatalog = serde_json::from_value(serde_json::json!({
+            "profiles": [],
+        }))
+        .expect("a helm with nothing remembered still answers");
+        assert_eq!(fresh.default_profile, None);
+
+        let stale: ProfileCatalog = serde_json::from_value(serde_json::json!({
+            "profiles": [{
+                "id": "p-1", "name": "Codex", "invocation": "codex",
+                "agent_kind": "codex", "resume_template": null,
+            }],
+            "default_profile": "p-gone",
+        }))
+        .unwrap();
+        assert_eq!(stale.default_profile.as_deref(), Some("p-gone"));
+        assert_eq!(stale.profiles.len(), 1);
     }
 
     /// Each offer authorizes exactly one mode, and the wire spellings must

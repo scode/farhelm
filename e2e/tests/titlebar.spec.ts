@@ -156,6 +156,9 @@ test("long-invocation-titlebar-rename", async ({ page, request }) => {
     await page.locator(".new-session-button").click();
     const form = page.locator(".create-session-form");
     await expect(form).toBeVisible();
+    // Command mode, said out loud — see terminal.spec.ts's `fillCreateForm`
+    // for why a create that types a command must now select it.
+    await form.locator(".create-session-profile").selectOption("");
     await form.locator('input[type="text"]').nth(0).fill("/tmp");
     await form.locator('input[type="text"]').nth(1).fill(LONG_INVOCATION);
     await form.locator('input[type="text"]').nth(2).fill(title);
