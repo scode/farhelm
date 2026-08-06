@@ -700,6 +700,18 @@ pub enum AltScreenCapture {
 /// wasted allocation for the common case (a snapshot far under the cap).
 const ALT_SCREEN_READ_CHUNK: usize = 64 * 1024;
 
+/// Headroom `capture_pane_plain` retains beyond the caller's `max_bytes`
+/// while streaming a capture.
+///
+/// [`last_words`] trims trailing blank rows only AFTER the read has
+/// finished, so a window sized to `max_bytes` exactly could be filled
+/// entirely by the padding of a very tall, mostly-empty pane and push the
+/// real text out. 64 KiB covers tmux's 10,000-row ceiling with an order of
+/// magnitude to spare while keeping the peak allocation per capture in the
+/// tens of kilobytes rather than the tens of megabytes an unbounded read
+/// of that same pane would reach.
+const TAIL_RETAIN_ALLOWANCE: usize = 64 * 1024;
+
 /// Slack added on top of a caller's `max_bytes` cap before
 /// [`TmuxDriver::capture_alt_screen_if_active`] gives up and discards.
 ///
@@ -2045,6 +2057,20 @@ impl TmuxDriver {
         }
     }
 
+    /// Destroy one pane outright, leaving the rest of its session alone.
+    ///
+    /// Test-only, and it exists because no PRODUCTION path removes a
+    /// single pane — sessions end through `kill_session` and tabs through
+    /// `kill_window`. What needs provoking is the state in between: a
+    /// session whose agent pane is gone while a tab window survives, which
+    /// is what a sampler addressing a just-vanished pane actually meets.
+    /// Nothing but a deliberate `kill-pane` produces it, since a pane that
+    /// merely EXITS is kept around by this driver's `remain-on-exit`.
+    #[cfg(test)]
+    pub(crate) async fn kill_pane_for_test(&self, pane: &str) -> anyhow::Result<()> {
+        self.run(&["kill-pane", "-t", pane]).await.map(|_| ())
+    }
+
     /// Resize the window containing `pane`. `cols`/`rows` are clamped to
     /// tmux's accepted range: a browser reporting 0 columns (or an absurd
     /// value) must not turn into a tmux error, because callers treat
@@ -2361,35 +2387,212 @@ impl TmuxDriver {
     /// shell's actual output is one scroll back, in history, which
     /// [`LAST_WORDS_LINES`] reaches.
     ///
-    /// The TAIL is kept when the result is over `max_bytes`, not the head:
-    /// these are last words, and a shell that printed a wall of rc-file
-    /// noise before its real complaint would otherwise have the complaint
-    /// truncated away. Truncation lands on a CHARACTER boundary so the
-    /// result is always valid UTF-8, and the text is lossy-decoded rather
-    /// than refused for an exotic byte — mangling one beats declining to
-    /// explain the failure.
-    ///
-    /// The pane is paired with its session ([`pane_in_session`]) so a
-    /// stale pane id cannot quote a stranger's terminal into this
-    /// session's error message.
+    /// That is exactly the difference from [`Self::capture_pane_tail`],
+    /// whose subject is a LIVE pane and which therefore must not reach
+    /// back into history at all.
     pub async fn capture_pane_text(
         &self,
         session: &str,
         pane: &str,
         max_bytes: usize,
     ) -> anyhow::Result<String> {
-        let out = self
-            .run_bytes(&[
-                "capture-pane",
-                "-p",
-                "-t",
-                &pane_in_session(session, pane),
-                "-S",
-                &format!("-{LAST_WORDS_LINES}"),
-            ])
+        self.capture_pane_plain(session, pane, Some(LAST_WORDS_LINES), max_bytes)
+            .await
+    }
+
+    /// What `pane`'s screen shows RIGHT NOW, as plain text, bounded to
+    /// `max_bytes`.
+    ///
+    /// The status sampler's read (PLAN_M6_75.md item 1): each tick takes a
+    /// BUDGETED number of these — a round-robin slice of the live
+    /// sessions, not all of them — both to notice that output moved since
+    /// that session's previous sample and to hand the per-kind sharpeners
+    /// something to recognize a prompt or an approval request in.
+    ///
+    /// Visible grid only — no `-S`, and that is the whole point rather
+    /// than a saving. A running agent's question sits on the CURRENT
+    /// screen; scrollback would drag in text the agent has already moved
+    /// past, which for change detection means a tail that keeps growing
+    /// (every tick "different", so every session forever "running") and
+    /// for sharpening means matching a prompt shape that was answered
+    /// minutes ago. For a full-screen TUI this captures the alternate
+    /// screen, because that is what tmux considers the pane's current
+    /// grid — again what the sampler wants.
+    ///
+    /// Escape sequences are omitted (`-e`): both consumers read this as
+    /// prose, and SGR noise would make every redraw of an unchanged screen
+    /// look like new output.
+    pub async fn capture_pane_tail(
+        &self,
+        session: &str,
+        pane: &str,
+        max_bytes: usize,
+    ) -> anyhow::Result<String> {
+        self.capture_pane_plain(session, pane, None, max_bytes)
+            .await
+    }
+
+    /// The shared body of the two plain-text captures above:
+    /// `capture-pane -p` over `history_lines` of scrollback (or the
+    /// visible grid alone when `None`), reduced by [`last_words`].
+    ///
+    /// The TAIL is kept when the result is over `max_bytes`, not the head:
+    /// for the dead-pane caller these are last words, and a shell that
+    /// printed a wall of rc-file noise before its real complaint would
+    /// otherwise have the complaint truncated away; for the sampler the
+    /// bottom of the screen is where an agent's current question lives.
+    /// Truncation lands on a CHARACTER boundary so the result is always
+    /// valid UTF-8, and the text is lossy-decoded rather than refused for
+    /// an exotic byte — mangling one beats declining to answer.
+    ///
+    /// # Why this streams instead of calling [`Self::run_bytes`]
+    ///
+    /// `run_bytes` uses `Command::output()`, which buffers the child's
+    /// ENTIRE stdout before anything can truncate it. `capture-pane` is
+    /// the one command in this driver whose output is bounded by the
+    /// terminal grid rather than by a format string, and tmux's grid
+    /// ceiling is 10,000 columns by 10,000 rows — a caller asking for a
+    /// 4 KiB tail could transiently allocate a hundred megabytes on its
+    /// way to it. Reading incrementally and retaining only the last
+    /// [`TAIL_RETAIN_ALLOWANCE`] bytes past `max_bytes` makes the peak
+    /// proportional to the ANSWER rather than to the pane, which matters
+    /// because the sampler runs this on a schedule, once per live session
+    /// per rotation.
+    ///
+    /// The retention slack exists because [`last_words`] trims trailing
+    /// blank rows AFTER this point: a pane padded out with thousands of
+    /// empty rows would otherwise have its real text pushed out of a
+    /// window sized to `max_bytes` exactly.
+    ///
+    /// # The deadline
+    ///
+    /// Bounded by the same [`PANE_LIST_TIMEOUT`] budget the pane-listing
+    /// query uses — a wedged tmux must not park the sampler (or a tab
+    /// refusal's error path) indefinitely, and a test that loosens tmux
+    /// budgets for a loaded CI runner should loosen this one with them.
+    /// The child is killed and reaped on expiry rather than left to
+    /// finish writing into a pipe nobody is draining.
+    ///
+    /// # Pane identity
+    ///
+    /// The pane is paired with its session ([`pane_in_session`]), and
+    /// `capture-pane` REFUSES an unresolvable pairing rather than falling
+    /// back to some other pane: verified empirically against tmux 3.7b for
+    /// all three shapes that matter here — a pane id that no longer exists
+    /// ("can't find pane: %0"), one that never existed, and one that
+    /// exists but under a DIFFERENT session than the caller named. That
+    /// refusal is what makes it safe for the sampler to address a pane it
+    /// last saw a moment ago: an agent pane killed mid-pass yields an
+    /// error the caller skips, never a sibling tab's screen recorded as
+    /// the agent's. See this module's `pane_in_session` for the same
+    /// property as every other pane-scoped command relies on it.
+    async fn capture_pane_plain(
+        &self,
+        session: &str,
+        pane: &str,
+        history_lines: Option<u32>,
+        max_bytes: usize,
+    ) -> anyhow::Result<String> {
+        let target = pane_in_session(session, pane);
+        let start = history_lines.map(|lines| format!("-{lines}"));
+        let mut args: Vec<&str> = vec!["capture-pane", "-p", "-t", &target];
+        if let Some(start) = start.as_deref() {
+            args.extend_from_slice(&["-S", start]);
+        }
+        let tail = self
+            .run_bytes_tail(&args, max_bytes.saturating_add(TAIL_RETAIN_ALLOWANCE))
             .await
             .context("capturing a pane's text")?;
-        Ok(last_words(&String::from_utf8_lossy(&out), max_bytes))
+        Ok(last_words(&String::from_utf8_lossy(&tail), max_bytes))
+    }
+
+    /// Run one tmux command and return AT MOST the last `retain` bytes of
+    /// its stdout, killing it if it outlives [`PANE_LIST_TIMEOUT`].
+    ///
+    /// [`Self::run_bytes`]'s bounded cousin, for the one command whose
+    /// output size is the user's terminal rather than this driver's own
+    /// format string. Everything about the failure shape is deliberately
+    /// identical — a non-zero exit still returns a [`TmuxCommandFailure`]
+    /// root carrying tmux's raw stderr under the same rendered context —
+    /// so callers that classify diagnostics (`is_definitively_empty`) or
+    /// quote tmux's prose behave the same whichever one they went
+    /// through.
+    ///
+    /// The retained buffer is compacted only when it grows past twice
+    /// `retain`, so the amortized cost is one memmove per `retain` bytes
+    /// read rather than one per chunk.
+    async fn run_bytes_tail(&self, args: &[&str], retain: usize) -> anyhow::Result<Vec<u8>> {
+        let mut child = self
+            .command()
+            .args(args)
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .kill_on_drop(true)
+            .spawn()
+            .context("spawning tmux")?;
+        let mut stdout = child.stdout.take().expect("piped stdout");
+        let mut stderr = child.stderr.take().expect("piped stderr");
+        let stderr_task = tokio::spawn(async move {
+            let mut buf = Vec::new();
+            let _ = stderr.read_to_end(&mut buf).await;
+            buf
+        });
+        // Heap rather than a stack array, for the same future-size reason
+        // `capture_alt_screen_if_active` spells out: this buffer is held
+        // across an await and would otherwise inflate every future that
+        // composes this one.
+        let mut chunk = vec![0u8; ALT_SCREEN_READ_CHUNK];
+        let mut tail: Vec<u8> = Vec::new();
+        let drained = tokio::time::timeout(self.pane_list_timeout, async {
+            loop {
+                let n = stdout
+                    .read(&mut chunk)
+                    .await
+                    .context("reading tmux capture output")?;
+                if n == 0 {
+                    return anyhow::Ok(());
+                }
+                tail.extend_from_slice(&chunk[..n]);
+                if tail.len() > retain.saturating_mul(2) {
+                    tail.drain(..tail.len() - retain);
+                }
+            }
+        })
+        .await;
+        drop(stdout);
+        let Ok(drained) = drained else {
+            // Nobody is draining the pipe anymore, so a tmux still trying
+            // to write a large capture would block forever. Kill and reap
+            // here rather than relying on `kill_on_drop` to get to it
+            // eventually.
+            let _ = child.kill().await;
+            let _ = child.wait().await;
+            let _ = stderr_task.await;
+            anyhow::bail!(
+                "tmux {args:?} did not finish within {:?}",
+                self.pane_list_timeout
+            );
+        };
+        drained?;
+        if tail.len() > retain {
+            tail.drain(..tail.len() - retain);
+        }
+        let stderr_bytes = stderr_task.await.unwrap_or_default();
+        let status = child.wait().await.context("waiting for tmux to exit")?;
+        if !status.success() {
+            let context = format!(
+                "tmux {:?} failed ({}): {}",
+                args,
+                status,
+                String::from_utf8_lossy(&stderr_bytes).trim()
+            );
+            return Err(anyhow::Error::new(TmuxCommandFailure {
+                stderr: stderr_bytes,
+            }))
+            .context(context);
+        }
+        Ok(tail)
     }
 
     /// The tmux diagnostics that all mean "the window this names is
@@ -7275,5 +7478,146 @@ mod tests {
     #[test]
     fn parse_pane_facts_handles_empty_output() {
         assert!(parse_pane_facts("").is_empty());
+    }
+
+    /// Poll `capture_pane_tail` until the pane has actually rendered
+    /// `want`, rather than sampling once and racing tmux's own writes.
+    ///
+    /// Returns the tail that satisfied the wait so the caller can assert
+    /// on the same bytes it waited for — sampling twice would reintroduce
+    /// exactly the race this exists to close.
+    async fn tail_containing(driver: &TmuxDriver, session: &str, pane: &str, want: &str) -> String {
+        let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(30);
+        loop {
+            let tail = driver
+                .capture_pane_tail(session, pane, 64 * 1024)
+                .await
+                .expect("capture the pane's visible grid");
+            if tail.contains(want) {
+                return tail;
+            }
+            assert!(
+                tokio::time::Instant::now() < deadline,
+                "the pane never rendered {want:?}; last tail was:\n{tail}"
+            );
+            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        }
+    }
+
+    /// `capture_pane_tail` reads the VISIBLE grid and stops there, while
+    /// `capture_pane_text` reaches back into scrollback.
+    ///
+    /// The distinction is the whole reason the two exist separately, and
+    /// it is invisible in any single capture: both return plausible prose.
+    /// It matters because the status sampler compares consecutive tails to
+    /// decide whether output moved — a capture that dragged scrollback in
+    /// would return a strictly growing string, so every session would look
+    /// permanently busy — and because the per-kind sharpeners must match a
+    /// prompt that is on screen NOW, not one answered a hundred lines ago.
+    ///
+    /// Adding `-S` back to the tail capture makes this fail on its first
+    /// assertion, which is precisely the regression worth catching.
+    #[tokio::test]
+    async fn capture_pane_tail_reads_the_visible_grid_while_last_words_reaches_scrollback() {
+        let server = ScratchServer::start().await;
+        // The marker is printed first and then pushed off a 24-row screen
+        // by 40 further lines — far enough to leave the visible grid, near
+        // enough to stay inside `LAST_WORDS_LINES` of history.
+        let argv = [
+            "sh".to_string(),
+            "-c".to_string(),
+            "echo SCROLLED-AWAY-MARKER; i=1; while [ $i -le 40 ]; do echo \"line $i\"; \
+             i=$((i+1)); done; sleep 300"
+                .to_string(),
+        ];
+        let pane = server
+            .driver
+            .create_session("fh-scroll", "/", 80, 24, &[], &argv)
+            .await
+            .expect("create the fixture session");
+
+        let tail = tail_containing(&server.driver, "fh-scroll", &pane, "line 40").await;
+        assert!(
+            !tail.contains("SCROLLED-AWAY-MARKER"),
+            "the visible grid must not carry text that has scrolled into history:\n{tail}"
+        );
+
+        let last_words = server
+            .driver
+            .capture_pane_text("fh-scroll", &pane, 64 * 1024)
+            .await
+            .expect("capture the pane's last words");
+        assert!(
+            last_words.contains("SCROLLED-AWAY-MARKER"),
+            "test premise: the marker must still be within scrollback reach, or the assertion \
+             above proves nothing about WHERE the tail stopped:\n{last_words}"
+        );
+    }
+
+    /// A pane that dies mid-sample yields an ERROR, never some other live
+    /// pane's screen.
+    ///
+    /// The sampler addresses a pane it saw alive a moment earlier, so the
+    /// window between the liveness probe and the capture is real and is
+    /// hit whenever an agent exits under a poll. If tmux resolved an
+    /// unknown pane id to the session's current pane instead of refusing,
+    /// a session whose agent had just died would start reporting a
+    /// TERMINAL TAB's activity as the agent's — a wrong status produced
+    /// silently, and one that would survive every other test in this
+    /// suite. Verified against tmux 3.7b; pinned here so a future version
+    /// (or a future switch to a laxer target spelling) cannot change it
+    /// quietly.
+    #[tokio::test]
+    async fn capture_pane_tail_refuses_a_dead_pane_rather_than_quoting_a_sibling() {
+        let server = ScratchServer::start().await;
+        let agent = server
+            .driver
+            .create_session(
+                "fh-vanish",
+                "/",
+                80,
+                24,
+                &[],
+                &["sh".to_string(), "-c".to_string(), "sleep 300".to_string()],
+            )
+            .await
+            .expect("create the agent session");
+        let (_window, tab) = server
+            .driver
+            .new_window(
+                "fh-vanish",
+                "/",
+                &[],
+                &[
+                    "sh".to_string(),
+                    "-c".to_string(),
+                    "echo TAB-PANE-TEXT; sleep 300".to_string(),
+                ],
+            )
+            .await
+            .expect("open a tab window in the same session");
+        // The sibling must actually be rendering something distinctive, or
+        // a misattribution would return an empty string and look like a
+        // quiet agent rather than a wrong one.
+        tail_containing(&server.driver, "fh-vanish", &tab, "TAB-PANE-TEXT").await;
+
+        server
+            .driver
+            .kill_pane_for_test(&agent)
+            .await
+            .expect("kill the agent pane out from under the sampler");
+
+        let refused = server
+            .driver
+            .capture_pane_tail("fh-vanish", &agent, 4096)
+            .await;
+        let error = format!(
+            "{:#}",
+            refused.expect_err("a vanished pane must not capture anything at all")
+        );
+        assert!(
+            !error.contains("TAB-PANE-TEXT"),
+            "the refusal must not carry the sibling's screen either: {error}"
+        );
     }
 }

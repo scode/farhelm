@@ -451,18 +451,41 @@ pub(crate) async fn list_page(sup: &Supervisor, query: ListQuery) -> anyhow::Res
     // this very pass is reflected in the `restart_offer` it
     // carries rather than only in the next poll's. Cheap by
     // construction for the steady state (see `capture_pass`'s
-    // cost envelope), single-flight, and over EVERY session
-    // rather than this reply's capped subset — see
-    // `Supervisor::capture_now` for why the cap must not bind
-    // the ambiguity rule.
+    // cost envelope) and over EVERY session rather than this
+    // reply's capped subset — see `Supervisor::capture_now` for
+    // why the cap must not bind the ambiguity rule.
     //
-    // Note for whoever lands PLAN_M6.md item 5's helm-side drain loop:
-    // this sweep runs PER PAGE, not once per `ListSessions` walk — a
-    // caller paging through N pages to see the whole session set pays
-    // N whole-host capture sweeps, not one. Harmless today (nothing
-    // walks multiple pages in a tight loop), but the drain loop is
-    // exactly the caller that would, so its design needs to account
-    // for that multiplication rather than assume one sweep per walk.
+    // KEPT after PLAN_M6_75.md item 1 gave the supervisor its own
+    // ticker, deliberately: the ticker guarantees that capture
+    // PROGRESSES with nobody connected, while this call is what
+    // makes a REPLY fresh as of the request it answers. Proto v10
+    // gives the supervisor edge no push, so a drain's reply is the
+    // only way a client ever learns anything; the helm's
+    // post-write wake exists precisely so a create is followed
+    // immediately by a drain, and a drain answering from a sweep
+    // that predates its own request would describe the world
+    // before the write it is racing.
+    //
+    // That is why this is a `CaptureReason::Reply` pass and not
+    // the old single-flight skip. The skip was wrong here in both
+    // directions: it could reply from a PRE-COMMIT `restart_offer`
+    // (somebody else's pass was in flight, so this one gave up),
+    // and it did not actually make the two cadences free —
+    // skipping only ever collapses passes that OVERLAP, and a
+    // 2-second ticker beside a 3-second drain mostly does not.
+    // Suppression on the TICKER side is what buys that back; see
+    // `Supervisor::capture_pass_for` for the whole rule and its
+    // real cost envelope.
+    //
+    // The multiplication to keep in view: this sweep runs PER PAGE,
+    // not once per `ListSessions` walk — a caller paging through N
+    // pages to see the whole session set pays N whole-host capture
+    // sweeps, not one, and the `Reply` rule means each of those N
+    // genuinely runs rather than coalescing, because each page is a
+    // fresh request that no earlier pass can answer for. That is the
+    // correct behavior (a page must be as fresh as its own request)
+    // and it is the dominant term in this path's cost, so a future
+    // drain that pages aggressively should be designed knowing it.
     sup.capture_now().await;
     // ONE query for every session's liveness, not one per
     // session (`TmuxDriver::pane_states`'s own docs on why

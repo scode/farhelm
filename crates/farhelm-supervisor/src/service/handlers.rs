@@ -395,8 +395,9 @@ async fn handle_create_session(
 /// The capture pass runs first for the same reason the list runs it
 /// there: an identity claimed on this very pass belongs in the
 /// `restart_offer` this reply carries, not only in the next poll's.
-/// It is single-flight and cheap in the steady state (see
-/// `Supervisor::capture_now`).
+/// Like the list path it is a `CaptureReason::Reply` pass — so it can
+/// never be answered by a sweep older than this request — and cheap in the
+/// steady state (see `Supervisor::capture_pass_for`).
 ///
 /// The tmux round trip is skipped for a terminal-less entry (the
 /// restart gap): its status comes entirely from its recorded outcome
@@ -3160,6 +3161,7 @@ mod tests {
                     durable: true,
                 })),
                 capture: Arc::new(std::sync::Mutex::new(CaptureState::Unclaimed)),
+                activity: crate::service::ticker::ActivitySample::unsampled(),
                 generation: 0,
                 scope: None,
             }),
@@ -3558,6 +3560,7 @@ mod tests {
                 durable: true,
             })),
             capture: Arc::new(std::sync::Mutex::new(CaptureState::Unclaimed)),
+            activity: crate::service::ticker::ActivitySample::unsampled(),
             generation: 0,
             scope: None,
         })
@@ -4051,6 +4054,7 @@ mod tests {
                     durable: true,
                 })),
                 capture: Arc::new(std::sync::Mutex::new(CaptureState::Unclaimed)),
+                activity: crate::service::ticker::ActivitySample::unsampled(),
                 generation: 0,
                 scope: None,
             }),

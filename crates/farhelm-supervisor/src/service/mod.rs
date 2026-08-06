@@ -38,10 +38,16 @@
 //! What this module owns is the plumbing around it: resolving the snapshot
 //! during create validation, recording the first-input timestamp capture
 //! correlates on, and running the rescan that claims an identity. The
-//! rescan deliberately has no watcher thread and no inotify: it rides the
-//! `ListSessions` and reload passes this supervisor already performs (see
-//! `core::capture_pass` for the cost envelope and why polling is sufficient
-//! here), so nothing new has to be started, supervised, or torn down.
+//! rescan deliberately has no watcher thread and no inotify — it is a
+//! POLLED pass (see `core::capture_pass` for the cost envelope and why
+//! polling is sufficient here), driven from two cadences that answer
+//! different questions: the `ticker` task, which guarantees progress with
+//! nobody connected, and the `ListSessions`, restart, and reload passes,
+//! which guarantee a reply is fresh as of the request it answers. Which
+//! kind a given call is, and what each is allowed to skip, is
+//! `Supervisor::capture_pass_for`'s single scheduling rule; `ticker`'s own
+//! module doc owns the argument for why both cadences exist and what
+//! running both actually costs.
 //!
 //! A data channel has a second meaning beyond terminal bytes: attachment
 //! bytes flowing client-toward-supervisor (PLAN_M4.md item 4). Each accepted
@@ -84,6 +90,7 @@ mod status;
 mod sweep;
 mod teardown;
 mod terminals;
+mod ticker;
 mod uploads;
 
 pub use connection::handle_connection;

@@ -471,6 +471,7 @@ mod tests {
                     durable: true,
                 })),
                 capture: Arc::new(std::sync::Mutex::new(CaptureState::Unclaimed)),
+                activity: crate::service::ticker::ActivitySample::unsampled(),
                 generation: 0,
                 scope: None,
             }),

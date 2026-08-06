@@ -37,6 +37,7 @@ use super::terminals::{
     TAB_LAUNCH_SETTLE_STEP, Terminal, TerminalId, agent_pane_from_states, resolve_terminal,
     run_session_sink, tabs_from_pane_states,
 };
+use super::ticker::{ActivitySample, SAMPLING_ADMISSION_PERMITS, TICKER_INTERVAL, start_ticker};
 use super::uploads::UploadHandle;
 use crate::agent_kind::{
     CaptureVerdict, CaptureWindow, CaptureWindowBounds, IntegrationSnapshot, RecordStamp,
@@ -55,7 +56,7 @@ use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::AtomicU64;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use tokio::net::{UnixListener, UnixStream};
 use tokio::sync::{Mutex, watch};
 use tracing::{debug, error, info, warn};
@@ -347,6 +348,25 @@ pub enum CaptureWrite {
 /// none, so every call site is one `Option` check.
 pub type CaptureStoreFault = Arc<dyn Fn(CaptureWrite, &str) -> anyhow::Result<()> + Send + Sync>;
 
+/// A hook awaited at the START of every conversation-capture pass, after
+/// the pass has taken the coordination lock and committed to running.
+///
+/// The barrier the scheduling tests need, and there is no substitute for
+/// it: `capture_pass_for`'s whole contract is about what happens to a
+/// SECOND caller while a first pass is in flight, and a real pass over a
+/// small fixture tree finishes far too quickly to make that window
+/// observable. Holding the lock from a test would prove the mutual
+/// exclusion but not the freshness bookkeeping, which only a real pass
+/// records. Production installs none, so the cost is one `Option` clone
+/// per pass.
+///
+/// Returns a boxed future rather than being an `async` trait method
+/// because this is a plain `Fn` seam like every other one in
+/// [`SupervisorSeams`]; the box is paid once per pass, next to a
+/// filesystem scan.
+pub type CaptureGate =
+    Arc<dyn Fn() -> std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send>> + Send + Sync>;
+
 /// The injectable seams a `Supervisor` is built with. All default to
 /// production behavior; grouped into one struct so a new injection point
 /// does not grow the constructor's signature again.
@@ -377,6 +397,19 @@ pub struct SupervisorSeams {
     pub capture_window: CaptureWindowBounds,
     /// See [`CaptureStoreFault`]. `None` in production.
     pub capture_store_fault: Option<CaptureStoreFault>,
+    /// See [`CaptureGate`]. `None` in production.
+    pub capture_gate: Option<CaptureGate>,
+    /// How often the supervisor's own periodic task fires — see
+    /// [`crate::service::ticker`] for what rides that cadence and
+    /// [`TICKER_INTERVAL`] for why production picks the value it does.
+    ///
+    /// A seam rather than a [`SupervisorTimeouts`] entry because it is not
+    /// a "this consumer is gone, not merely slow" budget at all: nothing
+    /// fails when a tick is late, and shortening it does not loosen a
+    /// deadline, it makes the supervisor do MORE work per second. Tests
+    /// shorten it to milliseconds so proving "capture advances with nobody
+    /// polling" costs a moment rather than several production intervals.
+    pub ticker_interval: Duration,
     /// Extra environment entries every launch of every session in this
     /// supervisor starts with, injected into tmux (`-e`) so they reach the
     /// login shell before it sources anything.
@@ -480,6 +513,8 @@ impl Default for SupervisorSeams {
             agent_home: None,
             capture_window: CaptureWindowBounds::default(),
             capture_store_fault: None,
+            capture_gate: None,
+            ticker_interval: TICKER_INTERVAL,
             launch_env: Vec::new(),
             scopes: Arc::new(crate::scope::ScopeManager::systemd()),
             launch_shell: None,
@@ -1270,6 +1305,7 @@ fn renamed_entry(entry: &SessionEntry, title: String) -> Arc<SessionEntry> {
         canonical_cwd: entry.canonical_cwd.clone(),
         first_input: Arc::clone(&entry.first_input),
         capture: Arc::clone(&entry.capture),
+        activity: Arc::clone(&entry.activity),
         generation: entry.generation,
         scope: entry.scope.clone(),
     })
@@ -1335,6 +1371,12 @@ fn relaunched_entry(
         canonical_cwd: entry.canonical_cwd.clone(),
         first_input: Arc::new(std::sync::Mutex::new(first_input)),
         capture: Arc::new(std::sync::Mutex::new(capture)),
+        // Never carried over, whatever `reset_capture` says: the previous
+        // run's screen and its output recency describe a process that no
+        // longer exists, and inheriting them would report the replacement
+        // launch as busy (or quiet) on evidence gathered from its
+        // predecessor.
+        activity: ActivitySample::unsampled(),
         generation,
         scope,
     })
@@ -1748,8 +1790,8 @@ async fn sweep_tmux_config_temp_files(state_dir: &Path) {
 ///
 /// ## Two kinds of replacement, and why the mutable cells are `Arc`ed
 ///
-/// The three interior-mutable cells below (`outcome`, `first_input`,
-/// `capture`) are `Arc<Mutex<..>>` rather than plain `Mutex<..>` because
+/// The four interior-mutable cells below (`outcome`, `first_input`,
+/// `capture`, `activity`) are `Arc<Mutex<..>>` rather than plain `Mutex<..>` because
 /// the two replacement paths need OPPOSITE things from them, and the
 /// wrapper is what lets one type express both.
 ///
@@ -1823,6 +1865,27 @@ pub(crate) struct SessionEntry {
     /// two cells above — a capture pass mid-scan must be advancing the
     /// same state the published entry is read from.
     pub(crate) capture: Arc<std::sync::Mutex<CaptureState>>,
+    /// What the status sampler last saw on this session's agent pane
+    /// (PLAN_M6_75.md item 1). See [`ActivitySample`], and
+    /// [`crate::service::ticker`] for the cadence that fills it.
+    ///
+    /// Lives on the ENTRY rather than in a supervisor-held map for one
+    /// decisive reason: the consumer landing next is `status`'s
+    /// classifier, and `session_status` is a pure function of an entry
+    /// plus a pane map — no supervisor, no store, no I/O (see that
+    /// module's own docs, which make that purity a contract). A map on
+    /// `Supervisor` would have to be threaded into it, and the
+    /// classification tests would stop being buildable from hand-made
+    /// entries. The lifecycle argument agrees: a sample describes ONE
+    /// launch of one session, so it wants exactly the relaunch-isolates,
+    /// rename-shares behavior this struct's `Arc` cells already give,
+    /// and it wants to disappear with the entry on a delete rather than
+    /// leaving a map key for somebody to remember to evict.
+    ///
+    /// Not part of the `attachments`-then-`sessions` lock-ordering rule,
+    /// for the same reason `outcome` is not: a leaf `std::sync::Mutex`
+    /// held across no await and alongside no other lock.
+    pub(crate) activity: Arc<std::sync::Mutex<ActivitySample>>,
     /// Which LAUNCH of this session this entry describes
     /// (`store::StoredSession::generation`).
     ///
@@ -1983,9 +2046,10 @@ impl CaptureState {
     /// Move to `next` if the order allows it, returning whether it landed.
     ///
     /// This is the compare-and-set that makes a stale pass harmless. Two
-    /// things it protects, both of which the single-flight lock around
-    /// `capture_pass` makes rare rather than impossible (a reload runs
-    /// outside that lock, and a delete can interleave at any await):
+    /// things it protects, both of which the mutual exclusion around
+    /// `capture_pass` (`CaptureCoordination`) makes rare rather than
+    /// impossible — a delete can interleave at any await, and the entry a
+    /// pass is holding can be replaced under it:
     ///
     /// - **Nothing may regress.** A pass that computed `Provisional` from
     ///   evidence gathered before a newer pass found `Ambiguous` must not
@@ -2217,6 +2281,31 @@ pub struct Supervisor {
     /// globally would buy nothing and would entangle unrelated
     /// connections' teardowns.
     pub(crate) admission: Arc<tokio::sync::Semaphore>,
+    /// The periodic ticker's OWN bound, deliberately disjoint from
+    /// `admission` (PLAN_M6_75.md item 1's review found the shared version
+    /// to be a SPEC violation).
+    ///
+    /// Sharing the request semaphore looked right — the ticker consumes
+    /// the same tmux subprocesses the handlers do — and was wrong for a
+    /// reason that has nothing to do with tmux: a permit taken by periodic
+    /// work is a permit a REQUEST cannot have. With seven slow handlers in
+    /// flight the ticker would take the eighth, the next control request
+    /// would park inside `handle_control`, and `handle_connection`'s read
+    /// loop — the same loop that dispatches keystrokes — would stop
+    /// draining. SPEC.md's status rule is absolute that status detection
+    /// must never gate or delay interaction with the terminal, so no
+    /// sampling policy may be able to reach the input path at all, however
+    /// indirectly. A separate semaphore makes that structural rather than
+    /// a matter of tuning the permit count.
+    ///
+    /// One permit, because there is exactly one ticker and its passes are
+    /// sequential: what this actually bounds is a future second caller,
+    /// and what it BUYS today is a limiter a test can exhaust in order to
+    /// prove that request admission is unaffected by a wedged sampler.
+    /// Total tmux concurrency therefore becomes one more than
+    /// `HANDLER_ADMISSION_PERMITS` rather than exactly it, which is a
+    /// rounding error next to the failure mode it removes.
+    pub(crate) sampling_admission: Arc<tokio::sync::Semaphore>,
     /// Per-supervisor state purely so integration tests can shorten
     /// these; see [`SupervisorTimeouts`].
     pub(crate) timeouts: SupervisorTimeouts,
@@ -2291,21 +2380,95 @@ pub struct Supervisor {
     agent_home: Option<PathBuf>,
     /// See [`SupervisorSeams::capture_window`].
     capture_window: CaptureWindowBounds,
-    /// Serializes conversation-capture passes (PLAN_M3.md item 8).
+    /// Serializes and schedules conversation-capture passes (PLAN_M3.md
+    /// item 8, rescheduled by PLAN_M6_75.md item 1). See
+    /// [`CaptureCoordination`].
+    capture: CaptureCoordination,
+}
+
+/// Who is asking for a capture pass, and therefore what "recent enough"
+/// means for them.
+///
+/// The two callers want opposite things from a pass that is already in
+/// flight, and collapsing them into one policy is what made the original
+/// single-flight design wrong in both directions at once (PLAN_M6_75.md
+/// item 1's review): a reply-producing caller that SKIPPED could answer
+/// from evidence gathered before its own request, and a ticker that
+/// WAITED would serialize behind every poll and then sweep again anyway.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum CaptureReason {
+    /// A request whose REPLY describes what the pass concludes — the list
+    /// path's `restart_offer`, the restart handler's mode validation — or
+    /// a startup pass that must simply happen.
     ///
-    /// Single-flight rather than mutually-exclusive-and-queued: a
-    /// concurrent `ListSessions` that finds a pass already running
-    /// COALESCES into it (skips its own) rather than waiting, because a
-    /// capture arriving one poll interval later costs nothing while a list
-    /// reply queued behind somebody else's filesystem scan costs the UI.
+    /// These join an in-flight pass and then run their own if the pass
+    /// they joined began before they asked. Never skipping on that basis
+    /// is what the helm's post-write wake depends on: proto v10 puts no
+    /// push on the supervisor edge, so a create followed by a drain is the
+    /// ONLY way a client learns anything, and a drain replying off a
+    /// pre-request sweep would report the state of the world before the
+    /// write it is racing.
+    Reply,
+    /// The supervisor's own periodic tick, which owes freshness to nobody
+    /// in particular and only has to guarantee that capture keeps moving.
     ///
-    /// What serialization buys is that two passes can never interleave
-    /// between gathering evidence and acting on it — the window in which
-    /// one pass's `Provisional` could overwrite another's `Ambiguous`.
-    /// `CaptureState::advance`'s compare-and-set is the belt to this
-    /// suspenders, and is what still protects the reload passes, which run
-    /// outside any request and take this lock uncontended.
-    capture_lock: tokio::sync::Mutex<()>,
+    /// Skips outright when a pass is in flight (that pass does the work)
+    /// and suppresses itself when one COMPLETED within the tick interval,
+    /// so an actively polled supervisor pays for the polls it is already
+    /// answering rather than for both cadences.
+    Tick {
+        /// How recent a completed REPLY pass has to be for this tick to
+        /// have nothing to add. The ticker passes its own interval.
+        suppress_within: Duration,
+    },
+}
+
+/// The scheduling state behind [`Supervisor::capture_pass_for`].
+///
+/// Two locks with different jobs, deliberately. `lock` is the mutual
+/// exclusion that keeps two passes from interleaving between gathering
+/// evidence and acting on it — the window in which one pass's
+/// `Provisional` could overwrite another's `Ambiguous`
+/// (`CaptureState::advance`'s compare-and-set is the belt to this
+/// suspenders). `history` is a leaf mutex over the bookkeeping, held for a
+/// couple of field reads and never across an await, so a caller can decide
+/// whether it still needs a pass at all without holding the big one.
+struct CaptureCoordination {
+    lock: tokio::sync::Mutex<()>,
+    history: std::sync::Mutex<CaptureHistory>,
+}
+
+/// What the last capture pass did, in this process's monotonic time.
+///
+/// Both instants are needed and neither substitutes for the other:
+/// [`CaptureReason::Reply`] asks "did a pass BEGIN after my request", so
+/// that a pass which started before it cannot answer for it, while
+/// [`CaptureReason::Tick`] asks "did a pass COMPLETE recently", because a
+/// completed pass is what makes another one redundant.
+#[derive(Debug, Default)]
+struct CaptureHistory {
+    /// When the most recently COMPLETED pass started — whichever reason
+    /// ran it, because a tick's pass observes the world just as well as a
+    /// reply's and can therefore answer for a request that arrived before
+    /// it began.
+    started: Option<Instant>,
+    /// When the most recently completed REPLY pass finished.
+    ///
+    /// Deliberately not "any pass", and the distinction is what keeps the
+    /// ticker's own guarantee intact. Counting a tick's own completions
+    /// here would have the ticker suppress ITSELF: with nothing else
+    /// sweeping, the previous tick's pass is always about one interval old
+    /// when the next tick fires, so roughly every other tick would decide
+    /// it had nothing to add and the unattended capture cadence would
+    /// silently halve — breaking the very "one ticker interval" bound the
+    /// ticker exists to provide. Suppression is supposed to mean "a POLL
+    /// already did this work", so only a poll records it.
+    reply_completed: Option<Instant>,
+    /// How many passes have run to completion — the observable counter the
+    /// coalescing tests assert against, since nothing about the resulting
+    /// capture state can distinguish "one pass" from "two identical
+    /// passes".
+    completed_count: u64,
 }
 
 impl Supervisor {
@@ -2474,6 +2637,7 @@ impl Supervisor {
             pending_snapshots: Mutex::new(HashMap::new()),
             farhelm_exe,
             admission: Arc::new(tokio::sync::Semaphore::new(HANDLER_ADMISSION_PERMITS)),
+            sampling_admission: Arc::new(tokio::sync::Semaphore::new(SAMPLING_ADMISSION_PERMITS)),
             timeouts,
             seams,
             ownership,
@@ -2482,7 +2646,10 @@ impl Supervisor {
             lifecycle_locks: Arc::new(KeyedLocks::default()),
             agent_home,
             capture_window,
-            capture_lock: Mutex::new(()),
+            capture: CaptureCoordination {
+                lock: Mutex::new(()),
+                history: std::sync::Mutex::new(CaptureHistory::default()),
+            },
         });
         // Capture runs on the reload passes as well as the list path
         // (PLAN_M3.md item 8), and not merely for symmetry: a session whose
@@ -2491,17 +2658,21 @@ impl Supervisor {
         // identity gets its record re-verified before anything is served
         // from it. It runs HERE rather than inside `reload_sessions`
         // because the pass needs the finished supervisor — its seams, its
-        // store, and its single-flight lock.
+        // store, and its capture coordination. It is a `Reply`-shaped
+        // pass: nothing has swept yet, so it simply runs. (Note for
+        // anyone installing a `capture_gate` in a test: THIS is the pass
+        // it will meet first.)
         supervisor.capture_now().await;
         Ok(supervisor)
     }
 
-    /// Run one conversation-capture pass over every session, unless one is
-    /// already in flight.
+    /// Run one conversation-capture pass over every session, on behalf of
+    /// a caller whose reply depends on what it concludes.
     ///
-    /// The single-flight skip is the coalescing [`Supervisor::capture_lock`]
-    /// describes; every caller is a poll or a reload, so being skipped
-    /// simply means the pass that IS running does the work.
+    /// Joins a pass already in flight and then runs its own unless that
+    /// pass BEGAN after this call did — see [`CaptureReason::Reply`] for
+    /// why a reply may never be built on evidence older than the request
+    /// it answers, and [`Supervisor::capture_pass_for`] for the mechanism.
     ///
     /// Takes the whole session map rather than a caller-supplied subset,
     /// deliberately: the ambiguity rule is a statement about all sessions
@@ -2511,33 +2682,76 @@ impl Supervisor {
     /// a bail into a wrong capture, the one outcome this design exists to
     /// exclude.
     pub(crate) async fn capture_now(&self) {
-        self.capture_sweep(false).await;
+        self.capture_pass_for(CaptureReason::Reply).await;
     }
 
-    /// [`Supervisor::capture_now`], with the choice of WAITING for a pass
-    /// already in flight instead of skipping it.
+    /// Run a capture pass if `reason`'s freshness rule still wants one.
     ///
-    /// The list path skips (`wait: false`): a capture arriving one poll
-    /// interval later costs nothing, while a list reply queued behind
-    /// somebody else's filesystem scan costs the UI. A RESTART cannot skip
-    /// (`wait: true`): it is about to validate the requested mode against
-    /// the session's offer, and a pass running right now may be one commit
-    /// away from changing that offer — validating against the pre-commit
-    /// answer is exactly the staleness the restart contract exists to
-    /// exclude. Restarts are rare and user-initiated, so waiting out one
-    /// scan is free.
-    async fn capture_sweep(&self, wait: bool) {
+    /// The whole scheduling policy, in one place because the two reasons
+    /// are only correct RELATIVE to each other. The ordering below is
+    /// load-bearing:
+    ///
+    /// 1. A `Tick` gives up immediately if it cannot take the lock. The
+    ///    pass it would have queued behind is about to do its work, and a
+    ///    ticker that waited would serialize behind every poll and then
+    ///    sweep redundantly the moment it got in.
+    /// 2. A `Reply` WAITS for the lock, because giving up would mean
+    ///    answering from whatever the in-flight pass happens to have
+    ///    concluded so far.
+    /// 3. Once the lock is held, no pass is running, so the recorded
+    ///    history describes a COMPLETED one. A `Reply` skips only if that
+    ///    pass started at or after its own request — it observed
+    ///    everything this caller could have asked about. A `Tick` skips if
+    ///    a REPLY pass finished within `suppress_within` — its own earlier
+    ///    passes deliberately do not count, or the ticker would suppress
+    ///    itself into half its cadence (see
+    ///    `CaptureHistory::reply_completed`).
+    ///
+    /// The honest cost envelope, since the previous design's claim that
+    /// running both cadences "costs nothing" was false: single-flight
+    /// coalescing only ever collapsed passes that OVERLAP, and a 2-second
+    /// ticker beside a 3-second drain mostly does not overlap, so the old
+    /// shape paid for both. What suppression buys is that an actively
+    /// drained supervisor pays roughly the drain's cadence rather than the
+    /// sum, and an unattended one pays the ticker's. The worst case is
+    /// still one pass per ticker interval; what is excluded is paying for
+    /// a tick that a poll has just made redundant.
+    pub(crate) async fn capture_pass_for(&self, reason: CaptureReason) {
         if self.agent_home.is_none() {
             return;
         }
-        let _pass = if wait {
-            Some(self.capture_lock.lock().await)
-        } else {
-            match self.capture_lock.try_lock() {
-                Ok(guard) => Some(guard),
+        let requested_at = Instant::now();
+        let _pass = match reason {
+            CaptureReason::Tick { .. } => match self.capture.lock.try_lock() {
+                Ok(guard) => guard,
                 Err(_) => return,
-            }
+            },
+            CaptureReason::Reply => self.capture.lock.lock().await,
         };
+        {
+            let history = self
+                .capture
+                .history
+                .lock()
+                .expect("capture history poisoned");
+            let redundant = match reason {
+                CaptureReason::Reply => history
+                    .started
+                    .is_some_and(|started| started >= requested_at),
+                CaptureReason::Tick { suppress_within } => {
+                    history.reply_completed.is_some_and(|completed| {
+                        requested_at.duration_since(completed) < suppress_within
+                    })
+                }
+            };
+            if redundant {
+                return;
+            }
+        }
+        let started = Instant::now();
+        if let Some(gate) = self.seams.capture_gate.clone() {
+            gate().await;
+        }
         let entries: Vec<Arc<SessionEntry>> =
             self.sessions.lock().await.values().cloned().collect();
         // Boxed, not awaited inline: `capture_pass` is by far the largest
@@ -2549,6 +2763,31 @@ impl Supervisor {
         // future. One heap allocation per pass is nothing next to the
         // filesystem scan it wraps.
         Box::pin(capture_pass(self, &entries, self.may_record())).await;
+        let mut history = self
+            .capture
+            .history
+            .lock()
+            .expect("capture history poisoned");
+        history.started = Some(started);
+        history.completed_count += 1;
+        if matches!(reason, CaptureReason::Reply) {
+            history.reply_completed = Some(Instant::now());
+        }
+    }
+
+    /// How many capture passes have run to completion in this process.
+    ///
+    /// The only observable difference between correct coalescing and none
+    /// at all: two passes over the same evidence leave the same capture
+    /// state behind, so nothing about a session can tell them apart. Tests
+    /// assert against this; production never reads it.
+    #[cfg(test)]
+    pub(crate) fn capture_passes_completed(&self) -> u64 {
+        self.capture
+            .history
+            .lock()
+            .expect("capture history poisoned")
+            .completed_count
     }
 
     /// Rebuild the in-memory session map from SQLite plus one bulk tmux
@@ -3131,6 +3370,12 @@ impl Supervisor {
                         durable: row.first_input_at.is_some(),
                     })),
                     capture: Arc::new(std::sync::Mutex::new(capture)),
+                    // Activity samples are process-local and deliberately
+                    // not durable: a reloaded session has been observed by
+                    // nobody in THIS process, and inventing a recency for
+                    // it from a stored timestamp would claim knowledge of
+                    // what happened while the supervisor was down.
+                    activity: ActivitySample::unsampled(),
                     generation: row.generation,
                     // The SELECTION comes straight back out of the row
                     // rather than from this supervisor's own probe: the
@@ -3352,9 +3597,46 @@ impl Supervisor {
         // never discarded, and whole session directories whose session no
         // longer exists (see `attachments::reconcile_at_startup`).
         crate::attachments::reconcile_at_startup(&self.state_dir, &known_sessions).await;
+        // This supervisor's own cadence (PLAN_M6_75.md item 1), started
+        // last because this is where initialization ENDS: the session map
+        // is the one this process will serve, the socket is bound, and the
+        // startup reconciliation has already decided what on-disk state
+        // was debris. (An earlier version of this comment claimed the
+        // ticker had to follow the sweeps to avoid reading files they were
+        // unlinking; that was wrong and is worth recording as wrong — the
+        // capture pass scans the AGENTS' record roots under `agent_home`,
+        // while the sweeps unlink launch specs, snapshots, and tmux config
+        // temporaries under the state dir. The two never touch the same
+        // file. What the ordering actually buys is that no tick can
+        // observe a half-initialized supervisor.)
+        //
+        // Bound to a name rather than discarded: the handle owns the task,
+        // so `let _ = ...` would stop the ticker at the instant it started
+        // it. See `ticker`'s module doc for the shutdown contract; here
+        // the accept loop below never returns, so the ticker's lifetime is
+        // this call's.
+        let mut ticker = start_ticker(self);
         info!(socket = %path.display(), "supervisor listening");
         loop {
-            match listener.accept().await {
+            let accepted = tokio::select! {
+                // A ticker that ENDED while this process is still serving
+                // can only mean a panic (nothing else stops it while the
+                // handle is held), and a silently absent ticker is the
+                // worst shape this feature has: capture would quietly stop
+                // advancing for any session nobody happens to poll, with
+                // no symptom until a restart offered a fresh launch where
+                // a resume was expected. `watch` reports it loudly and
+                // then parks forever, so this arm fires at most once.
+                // Deliberately NOT fatal and deliberately not restarted:
+                // status and capture are both best-effort, and taking a
+                // whole host's sessions offline — or spinning up a
+                // replacement task that would panic on the same input —
+                // would be a worse answer than serving without a ticker
+                // and saying so.
+                () = ticker.watch() => continue,
+                accepted = listener.accept() => accepted,
+            };
+            match accepted {
                 Ok((stream, _)) => {
                     let sup = Arc::clone(self);
                     tokio::spawn(async move {
@@ -4575,6 +4857,10 @@ impl Supervisor {
                     durable: true,
                 })),
                 capture: Arc::new(std::sync::Mutex::new(CaptureState::Unclaimed)),
+                // The agent has printed nothing this supervisor has looked
+                // at yet; the ticker's next sample establishes the baseline
+                // every later one is compared against.
+                activity: ActivitySample::unsampled(),
                 // A create is a session's FIRST launch by definition
                 // (`store::StoredSession::generation`); only a restart ever
                 // moves this off zero.
@@ -4624,8 +4910,9 @@ impl Supervisor {
     ///   A mismatch is a `Conflict` naming what the offer is NOW, which is
     ///   what lets a client refresh and re-present rather than retry blindly
     ///   (`ControlMsg::RestartSession`'s staleness contract). The check is
-    ///   made ATOMIC with the relaunch by the capture pass being awaited
-    ///   (not skipped, as the list path's single-flight allows) and by the
+    ///   made ATOMIC with the relaunch by the capture pass being awaited —
+    ///   a `CaptureReason::Reply` pass, so it cannot be answered by a
+    ///   sweep that began before this request — and by the
     ///   generation claim being conditional on the same two fields the
     ///   validation read (`SessionStore::begin_relaunch`).
     /// - **A vanished or repointed working directory**, named in the error.
@@ -4682,13 +4969,15 @@ impl Supervisor {
             )
             .into());
         }
-        // AWAITED, not single-flight-skipped like the list path's
-        // `capture_now`: a pass that is running right now may be about to
-        // commit an identity, and validating the mode against the offer as
-        // it stands BEFORE that commit is exactly the staleness this whole
-        // contract exists to exclude. A restart is a rare, user-initiated
-        // operation; waiting out one filesystem scan is free.
-        self.capture_sweep(true).await;
+        // A `Reply` pass, exactly like the list path's: this is about to
+        // validate the requested mode against the session's offer, and a
+        // pass that began before this request cannot answer for it — a
+        // sweep still in flight may be one commit away from changing that
+        // offer, and validating against the pre-commit answer is the
+        // staleness this whole contract exists to exclude. A restart is a
+        // rare, user-initiated operation; waiting out one filesystem scan
+        // is free.
+        self.capture_now().await;
         let entry = self.sessions.lock().await.get(session_id).cloned();
         let Some(entry) = entry else {
             return Err(RequestError::new(
@@ -7075,16 +7364,27 @@ async fn persist_first_input(sup: &Supervisor, entry: &SessionEntry, at: i64) {
 /// ## Why polling, and what it costs
 ///
 /// SPEC_impl.md says "watch"; it does not mandate inotify, and this
-/// implementation deliberately rides the passes the supervisor already
-/// performs — every `ListSessions` (the UI's own poll cadence) and every
-/// reload. That buys correctness properties an event watcher would have to
-/// re-earn: nothing to start, supervise, or leak; no missed-event class
-/// (an inotify watch registered a moment too late, or one that hits the
-/// per-user watch limit, silently never fires); no per-directory
-/// registration for working directories that come and go; and identical
-/// behavior on a restart, since the rescan is the same code that runs at
-/// steady state. The cost of being late is one poll interval on a capture
-/// that is not on any interactive path.
+/// implementation deliberately polls — from the supervisor's own periodic
+/// ticker (PLAN_M6_75.md item 1, which is what makes progress independent
+/// of any caller) and from the passes it already performs anyway, every
+/// `ListSessions` and every reload. That buys correctness properties an
+/// event watcher would have to re-earn: one task to supervise rather than
+/// a watch registration per directory; no missed-event class (an inotify
+/// watch registered a moment too late, or one that hits the per-user watch
+/// limit, silently never fires); no per-directory registration for working
+/// directories that come and go; and identical behavior on a restart,
+/// since the rescan is the same code that runs at steady state.
+///
+/// The cost of being late is worth stating honestly, because "one poll
+/// interval" undersells it. For a capture that only the TICKER will ever
+/// drive, the bound is the ticker interval, PLUS however long a busy
+/// sampling limiter makes the tick wait for its permit, PLUS the pass's
+/// own duration — and a tick that finds a pass in flight defers to the
+/// next interval rather than queueing. None of that is on an interactive
+/// path, which is why an unbounded-in-principle delay is acceptable here
+/// and would not be anywhere else; a caller that needs an answer as fresh
+/// as its own request asks for one (`CaptureReason::Reply`) instead of
+/// waiting for a tick.
 ///
 /// The cost envelope, per pass:
 ///
@@ -8107,6 +8407,7 @@ pub(crate) mod tests {
                 durable: true,
             })),
             capture: Arc::new(std::sync::Mutex::new(CaptureState::Unclaimed)),
+            activity: ActivitySample::unsampled(),
             generation: 0,
             scope: None,
         }
@@ -8156,6 +8457,22 @@ pub(crate) mod tests {
                 CaptureState::Provisional { conversation } if conversation == "conv-x"
             ),
             "capture progress must not be split in two by a rename"
+        );
+
+        // The activity sample joins the same rule (PLAN_M6_75.md item 1).
+        // A rename describes the SAME run, so a session renamed between
+        // two ticks must not lose its baseline and read as freshly
+        // discovered — which, once the classifier consumes this, would
+        // show up as a status that resets every time somebody edits a
+        // title.
+        old.activity
+            .lock()
+            .unwrap()
+            .observe("screen".to_string(), Instant::now());
+        assert_eq!(
+            renamed.activity.lock().unwrap().samples,
+            1,
+            "a sample taken through the old entry must be what the published one reports"
         );
     }
 
@@ -8208,6 +8525,58 @@ pub(crate) mod tests {
             &*relaunched.capture.lock().unwrap(),
             CaptureState::Provisional { conversation } if conversation == "conv-old"
         ));
+    }
+
+    /// The activity sample is the one cell a relaunch resets outright
+    /// rather than carrying over, whatever the capture window decided.
+    ///
+    /// Separate from the test above because the RULE is different, not
+    /// merely the field: `first_input`/`capture` carry their VALUES across
+    /// a relaunch that kept its window, while a sample describes a process
+    /// that no longer exists. Inheriting it would hand the classifier the
+    /// dead run's screen and its output recency — reporting the
+    /// replacement launch as busy, or as quiet, on evidence gathered from
+    /// its predecessor, which is precisely the cross-generation
+    /// contamination the fence exists to prevent.
+    #[test]
+    fn a_relaunch_resets_the_activity_sample_rather_than_inheriting_the_dead_runs_screen() {
+        let old = entry_with(Some(a_terminal()), LastOutcome::Running);
+        old.activity
+            .lock()
+            .unwrap()
+            .observe("previous run's screen".to_string(), Instant::now());
+
+        let relaunched = relaunched_entry(
+            &old,
+            old.info.clone(),
+            old.terminal.clone(),
+            old.generation + 1,
+            None,
+            LastOutcome::Launching,
+            // `false` deliberately: even a relaunch that KEEPS its capture
+            // window — the case that carries the anchor over — must still
+            // start from an unsampled screen.
+            false,
+        );
+        {
+            let fresh = relaunched.activity.lock().unwrap();
+            assert_eq!(
+                fresh.samples, 0,
+                "the new generation has been seen by nobody"
+            );
+            assert_eq!(fresh.tail, None);
+        }
+
+        old.activity
+            .lock()
+            .unwrap()
+            .observe("a late sample of the dead run".to_string(), Instant::now());
+        assert_eq!(
+            relaunched.activity.lock().unwrap().samples,
+            0,
+            "a sampler still holding the previous entry must not reach the launch that \
+             replaced it"
+        );
     }
 
     /// The one terminal the entry-replacement tests above and
@@ -8312,6 +8681,20 @@ pub(crate) mod tests {
             sessions["live"].terminal.is_some(),
             "and it must be attachable again, which needs the rediscovered pane"
         );
+        // Activity samples are process-local (PLAN_M6_75.md item 1): a
+        // reload adopts sessions this process has never watched, so every
+        // reloaded entry must start unsampled rather than claiming a
+        // recency for a stretch of time nobody was looking at. Asserted on
+        // the real reload path because that is the only place the rule can
+        // be got wrong.
+        for (id, entry) in &sessions {
+            let sample = entry.activity.lock().unwrap();
+            assert_eq!(
+                sample.samples, 0,
+                "session {id} came back from the store, so nothing has observed its pane yet"
+            );
+            assert_eq!(sample.last_change, None);
+        }
         let dead = sessions["dead"].outcome.lock().unwrap().clone();
         match dead {
             LastOutcome::Exited { exit_code, .. } => {
