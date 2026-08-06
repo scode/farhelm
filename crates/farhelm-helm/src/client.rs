@@ -1382,7 +1382,14 @@ impl SupervisorClient {
                 ControlMsg::CreateSession {
                     req_id,
                     cwd: cwd.to_string(),
-                    invocation: invocation.to_string(),
+                    // Always the RAW mode: this client has no profile
+                    // catalog to resolve against and no picker to have
+                    // chosen from. Sending a profile-backed create is the
+                    // helm's proxying work (PLAN_M6_75.md item 5), and
+                    // naming both modes here would be a request the
+                    // supervisor refuses outright.
+                    invocation: Some(invocation.to_string()),
+                    profile_id: None,
                     title,
                     cols,
                     rows,
@@ -2520,10 +2527,11 @@ mod tests {
             created_at: 1_700_000_000,
             cwd: format!("/{id}"),
             invocation: "agent".into(),
-            status: farhelm_proto::SessionStatus::Alive,
+            status: farhelm_proto::SessionStatus::Running,
             annotation: None,
             restart_offer: farhelm_proto::RestartOffer::default(),
             tabs: Vec::new(),
+            source_profile: None,
         }
     }
 

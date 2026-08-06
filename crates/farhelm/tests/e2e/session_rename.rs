@@ -228,7 +228,7 @@ async fn a_rename_reply_reports_the_launch_sentinel_error_a_list_would() {
     h.client.send_input(chan, b"quit\r".to_vec()).await;
     // The sentinel path is only consulted for a pane that is dead or gone,
     // so the agent has to be genuinely finished before it means anything.
-    wait_for_non_alive_status(&h.client, &session.id, 30).await;
+    wait_for_non_live_status(&h.client, &session.id, 30).await;
 
     let detail = "exec failed: no such file or directory".to_string();
     let status_path = status_path_for_spec(&spec_path_for_launch(h.state.path(), &session.id, 0));
@@ -905,7 +905,7 @@ async fn a_rename_whose_reply_cannot_be_built_reports_that_it_landed_anyway() {
     let mut seen = Vec::new();
     wait_for(&mut rx, &mut seen, "FAKE-AGENT READY", 20).await;
     h.client.send_input(chan, b"quit\r".to_vec()).await;
-    wait_for_non_alive_status(&h.client, &session.id, 30).await;
+    wait_for_non_live_status(&h.client, &session.id, 30).await;
 
     let status_path = status_path_for_spec(&spec_path_for_launch(h.state.path(), &session.id, 0));
     std::fs::write(&status_path, "").expect("plant an empty (corrupt) sentinel");

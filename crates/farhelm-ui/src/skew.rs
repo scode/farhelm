@@ -287,6 +287,74 @@ mod tests {
         );
     }
 
+    /// The upgrade this module exists for, end to end: a bundle stamped
+    /// 0.0.1 (a tab left open across the M6.75 helm upgrade) meeting a helm
+    /// stamping 0.0.2 must produce the reload prompt AND withdraw every
+    /// unattended behavior.
+    ///
+    /// Written with those two literal versions rather than with abstract
+    /// ones because the pair is the point. `PROTOCOL_VERSION` 10 REPLACED
+    /// `SessionStatus::Alive`, so the stale bundle in this scenario cannot
+    /// decode `running` at all — its listing fails outright rather than
+    /// degrading — and the ONLY thing that can tell that user what happened
+    /// is a stamp that disagrees. Had the workspace version not moved with
+    /// the vocabulary (see Cargo.toml's own note on why it must), both
+    /// sides would have said 0.0.1, this comparison would have returned
+    /// `None`, and the user would have been left with a broken page and no
+    /// explanation.
+    ///
+    /// The two halves are composed here the way production composes them —
+    /// `skew_of` decides, `reconnect_policy` acts — with one link this test
+    /// cannot reach: `helm_is_current`, which reads the latched
+    /// `GlobalSignal`s and needs a Dioxus runtime. What it does instead is
+    /// pass that function's own definition (`seen && no skew`) into the
+    /// policy, so a regression in either end still fails here; the signal
+    /// plumbing between them is what the browser suite exercises.
+    #[test]
+    fn a_stale_bundle_across_the_m6_75_upgrade_prompts_and_stands_down() {
+        let stale_bundle = "0.0.1";
+        let upgraded_helm = "0.0.2";
+
+        let verdict = skew_of(stale_bundle, Some(upgraded_helm));
+        assert_eq!(
+            verdict,
+            Some(Skew::Reported(upgraded_helm.to_string())),
+            "an upgraded helm must be seen as a mismatch, or nothing downstream fires at all"
+        );
+
+        // The PROMPT: both builds named, and the remedy stated.
+        let notice = skew_notice(verdict.as_ref().expect("a mismatch was just asserted"));
+        let flat: String = notice
+            .iter()
+            .map(|part| match part {
+                DetailPart::Text(text) => text.as_str(),
+                DetailPart::Peer(value) => value.as_str(),
+            })
+            .collect();
+        assert!(
+            flat.contains(upgraded_helm) && flat.contains("reload"),
+            "the user must be told which build answers them and what to do: {flat}"
+        );
+
+        // The WITHDRAWAL: `helm_is_current`'s own rule, applied to this
+        // verdict, and the policy that rule gates.
+        let stamp_seen = true;
+        let capable = stamp_seen && verdict.is_none();
+        assert!(!capable, "a mismatched helm is never `current`");
+        let policy = crate::reconnect::reconnect_policy(capable);
+        assert_eq!(
+            policy["auto"],
+            serde_json::json!(false),
+            "a stale bundle must stop reconnecting on its own — its automatic attach would be \
+             aimed at a helm whose contract it no longer knows"
+        );
+        assert_eq!(
+            policy["heartbeat"],
+            serde_json::json!(null),
+            "and must stop probing a socket it can no longer interpret the silence of"
+        );
+    }
+
     /// A hostile or broken stamp cannot claim an unbounded amount of the
     /// user's screen. The header comes over a socket, and a value with a
     /// megabyte in it would otherwise be rendered in full on a banner that

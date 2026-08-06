@@ -89,7 +89,7 @@ async fn a_second_restart_cannot_reap_the_agent_the_first_one_just_launched() {
         ErrorKind::Conflict
     );
     // The whole point: something is still running when the dust settles.
-    wait_for_alive_status(&h.client, &session.id, 30).await;
+    wait_for_live_status(&h.client, &session.id, 30).await;
 }
 
 /// Delete racing a restart resolves to exactly one winner, with the loser
@@ -218,7 +218,7 @@ async fn a_failed_restart_restores_the_stop_annotation_it_had_cleared() {
         .restart_session(&session.id, farhelm_proto::RestartMode::Fresh, false)
         .await
         .expect("restart once the directory is writable again");
-    wait_for_alive_status(&h.client, &session.id, 30).await;
+    wait_for_live_status(&h.client, &session.id, 30).await;
 }
 
 /// A relaunch into a directory that no longer resolves where it did at
@@ -313,7 +313,7 @@ async fn a_fresh_relaunch_opens_a_new_capture_window_after_an_ambiguity() {
         .restart_session(&first.id, farhelm_proto::RestartMode::Fresh, true)
         .await
         .expect("fresh restart");
-    wait_for_alive_status(&h.client, &first.id, 30).await;
+    wait_for_live_status(&h.client, &first.id, 30).await;
 
     let after = snapshot_of(&h, &first.id).await;
     assert!(
@@ -403,7 +403,7 @@ async fn restarting_an_alt_screen_agent_carries_its_last_frame_into_the_new_run(
         .restart_session(&session.id, farhelm_proto::RestartMode::Fresh, true)
         .await
         .expect("restart a live alt-screen agent");
-    wait_for_alive_status(&h.client, &session.id, 30).await;
+    wait_for_live_status(&h.client, &session.id, 30).await;
 
     assert!(
         !snapshot_path.exists(),
@@ -463,7 +463,7 @@ async fn a_restart_respawns_only_its_own_pane() {
         .restart_session(&restarted.id, farhelm_proto::RestartMode::Fresh, true)
         .await
         .expect("restart");
-    wait_for_alive_status(&h.client, &restarted.id, 30).await;
+    wait_for_live_status(&h.client, &restarted.id, 30).await;
 
     // The bystander's agent must be untouched by another session's
     // respawn. Waited for rather than read once: this list lands moments
@@ -472,7 +472,7 @@ async fn a_restart_respawns_only_its_own_pane() {
     // pane map (see `wait_for_listing`). The pane-identity check below is
     // what actually carries "untouched"; this one only establishes it is
     // alive at all.
-    wait_for_alive_status(&h.client, &bystander.id, 30).await;
+    wait_for_live_status(&h.client, &bystander.id, 30).await;
     assert_eq!(
         pane_id_of(&sock, &format!("fh-{}", bystander.id)).await,
         bystander_pane,
@@ -530,9 +530,8 @@ async fn a_restart_respawns_only_its_own_pane() {
 async fn a_stale_generation_zero_sentinel_cannot_taint_generation_one() {
     let h = harness().await;
     let (session, _work) = basic_session(&h).await;
-    assert_eq!(
-        listed(&h.client, &session.id).await.status,
-        SessionStatus::Alive,
+    assert!(
+        listed(&h.client, &session.id).await.status.is_live(),
         "the session must start out genuinely healthy"
     );
 
@@ -540,7 +539,7 @@ async fn a_stale_generation_zero_sentinel_cannot_taint_generation_one() {
         .restart_session(&session.id, farhelm_proto::RestartMode::Fresh, true)
         .await
         .expect("restart onto generation 1");
-    wait_for_alive_status(&h.client, &session.id, 30).await;
+    wait_for_live_status(&h.client, &session.id, 30).await;
 
     // Planted AFTER the restart above, so the restart's own cleanup of
     // generation 0's real launch files (which never failed) cannot
@@ -550,8 +549,8 @@ async fn a_stale_generation_zero_sentinel_cannot_taint_generation_one() {
     std::fs::write(&stale_sentinel, "exec_failed argv0=/nope errno=2")
         .expect("plant a stale generation-0 sentinel");
 
-    // `Alive` only means the pane hasn't died yet, not that the shim's own
-    // `exec` chain has reached the real agent (`wait_for_alive_status`'s
+    // A live status only means the pane hasn't died yet, not that the shim's own
+    // `exec` chain has reached the real agent (`wait_for_live_status`'s
     // own docs) — killing on that signal alone would race the shim itself
     // and reproduce the WRAPPER-failure shape
     // (`a_failed_scope_wrapper_classifies_as_error_rather_than_a_plain_exit`),
@@ -656,7 +655,7 @@ async fn a_stale_generation_zero_sentinel_cannot_taint_generation_one() {
 /// per-restart override to give the second run a different command. A
 /// fixed sleep duration would race under load (generation 0 could exit
 /// naturally before the stop lands, or generation 1 could exit before
-/// `wait_for_alive_status` observes it), so both generations instead loop
+/// `wait_for_live_status` observes it), so both generations instead loop
 /// on a marker FILE the test controls: `until [ -e released ]; do sleep
 /// 0.2; done`, resolved against the session's own working directory.
 /// Generation 0 is stopped while the marker provably does not exist yet,
@@ -678,13 +677,13 @@ async fn stop_then_restart_then_natural_exit_carries_no_stale_annotation() {
         )
         .await
         .expect("create");
-    wait_for_alive_status(&h.client, &session.id, 30).await;
+    wait_for_live_status(&h.client, &session.id, 30).await;
 
     h.client
         .stop_session(&session.id)
         .await
         .expect("stop the running agent");
-    let stopped = wait_for_non_alive_status(&h.client, &session.id, 30).await;
+    let stopped = wait_for_non_live_status(&h.client, &session.id, 30).await;
     assert!(
         matches!(stopped.status, SessionStatus::Exited { .. }),
         "the stop must end generation 0: {stopped:?}"
@@ -712,7 +711,7 @@ async fn stop_then_restart_then_natural_exit_carries_no_stale_annotation() {
         restarted.annotation, None,
         "a fresh generation must never inherit the previous generation's annotation"
     );
-    wait_for_alive_status(&h.client, &session.id, 30).await;
+    wait_for_live_status(&h.client, &session.id, 30).await;
 
     // Release generation 1's loop deliberately, rather than leaving it to
     // a timer — this is the moment, and only this moment, at which it may

@@ -95,15 +95,91 @@ const INTENT_KEY_CAP: usize = 512;
 /// invocation (`claude --resume {conversation}` is three).
 const RESUME_TEMPLATE_ELEMENT_CAP: usize = 64;
 
-/// Validates the caller-supplied fields against the reply-size and
-/// idempotency-store caps, then hands off to [`Supervisor::create_session`].
+/// Which of `CreateSession`'s two creation modes a request selected, once
+/// it has been shown to select exactly one (PLAN_M6_75.md item 3).
+///
+/// A resolved value rather than the raw pair of `Option`s, so that
+/// everything downstream of [`create_mode`] is working from a request whose
+/// meaning is settled — there is deliberately no way to construct a
+/// `CreateMode` that names both modes or neither, which is the ambiguity
+/// the refusal exists to remove.
+enum CreateMode {
+    /// The caller gave a command line, and may have overridden what would
+    /// be derived from it (`agent_kind`, `resume_template`).
+    Raw { invocation: String },
+    /// The caller named one of this supervisor's profiles, which supplies
+    /// every launch-shaping value.
+    Profile { profile_id: String },
+}
+
+/// Decide which creation mode a `CreateSession` selected, or say why the
+/// request has no single meaning (PLAN_M6_75.md item 3).
+///
+/// The two modes are mutually exclusive on the wire by CONTRACT rather than
+/// by construction (see `ControlMsg::CreateSession`'s own docs), so this is
+/// where that contract is enforced — once, before anything reads either
+/// mode's fields, so that no half-interpreted request can reach a launch.
+///
+/// Three shapes are refused, all as `ErrorKind::InvalidRequest`, and the
+/// third is the one worth spelling out: a profile selection ALONGSIDE a
+/// raw-mode override (`agent_kind` or `resume_template`) is just as
+/// ambiguous as naming both an invocation and a profile. The profile
+/// already states its kind and its resume template, and there is no honest
+/// precedence rule to invent — a request that says "use this profile, but
+/// actually a different kind" has not decided what it wants, and the
+/// session's own durable snapshot would then no longer describe the profile
+/// it claims to have come from.
+///
+/// The `Err` is the user-facing message verbatim (SPEC.md's concrete,
+/// actionable errors), so each one names both what was sent and what would
+/// have been acceptable.
+fn create_mode(
+    invocation: Option<String>,
+    profile_id: Option<String>,
+    agent_kind: Option<AgentKind>,
+    resume_template: Option<&[String]>,
+) -> Result<CreateMode, String> {
+    match (invocation, profile_id) {
+        (Some(_), Some(_)) => Err(
+            "a create names either an invocation or a profile, never both; send one or the other"
+                .to_string(),
+        ),
+        (None, None) => Err(
+            "a create must name an invocation or a profile; this request named neither".to_string(),
+        ),
+        (Some(invocation), None) => Ok(CreateMode::Raw { invocation }),
+        (None, Some(profile_id)) => {
+            if agent_kind.is_some() || resume_template.is_some() {
+                return Err(
+                    "a profile-backed create cannot also carry agent_kind or resume_template \
+                     overrides; the profile supplies both"
+                        .to_string(),
+                );
+            }
+            Ok(CreateMode::Profile { profile_id })
+        }
+    }
+}
+
+/// Resolves the creation mode, validates the caller-supplied fields against
+/// the reply-size and idempotency-store caps, then hands off to
+/// [`Supervisor::create_session`].
+///
+/// The refusal ORDER is shape, then size, then capability: an ambiguous
+/// request has no meaning to measure, a request too large to store is
+/// refused before anything is stored, and only a well-formed, bounded
+/// request gets as far as asking whether this build can serve it. Every one
+/// of those refusals happens before a reservation is claimed, so none of
+/// them SPENDS an intent key — a corrected retry (or, for the profile mode,
+/// the same request against a later build) may still use it.
 #[allow(clippy::too_many_arguments)]
 async fn handle_create_session(
     sup: &Arc<Supervisor>,
     tx: &mpsc::Sender<Frame>,
     req_id: u64,
     cwd: String,
-    invocation: String,
+    invocation: Option<String>,
+    profile_id: Option<String>,
     title: Option<String>,
     cols: u16,
     rows: u16,
@@ -116,23 +192,60 @@ async fn handle_create_session(
     agent_kind: Option<AgentKind>,
     resume_template: Option<Vec<String>>,
 ) {
+    let mode = match create_mode(
+        invocation,
+        profile_id,
+        agent_kind,
+        resume_template.as_deref(),
+    ) {
+        Ok(mode) => mode,
+        Err(message) => {
+            send_reply(
+                tx,
+                &ControlMsg::Error {
+                    req_id,
+                    message,
+                    kind: ErrorKind::InvalidRequest,
+                },
+            )
+            .await;
+            return;
+        }
+    };
+    // Only the raw mode carries an invocation to charge against the cap;
+    // a profile-backed create's command line lives in the catalog, not in
+    // the request.
+    // Exactly one of these is `Some` — that is what `create_mode` just
+    // established — and BOTH are caller-supplied text this request can make
+    // the supervisor store, so both are charged against the same cap.
+    let (raw_invocation, selected_profile) = match &mode {
+        CreateMode::Raw { invocation } => (Some(invocation.as_str()), None),
+        CreateMode::Profile { profile_id } => (None, Some(profile_id.as_str())),
+    };
     // One accounting for every caller-supplied field that this
     // request can make the supervisor STORE — the reply-size
     // argument `CREATE_FIELD_CAP` was introduced for, plus item
     // 6's: the fingerprint holds a copy of all of them, in a
     // reservation row that is never pruned, so an unbounded
-    // override is an unbounded permanent write.
+    // override is an unbounded permanent write. `profile_id` is in
+    // the sum for both reasons at once: it goes into the fingerprint
+    // exactly as the raw fields do, and it is the mode's whole
+    // payload — leaving it out would have let a profile-mode create
+    // carry an 8 MiB "id" past a cap the raw mode cannot dodge.
     let template_bytes: usize = resume_template
         .iter()
         .flatten()
         .map(|element| element.len())
         .sum();
-    let field_len =
-        cwd.len() + invocation.len() + title.as_deref().map_or(0, str::len) + template_bytes;
+    let field_len = cwd.len()
+        + raw_invocation.map_or(0, str::len)
+        + selected_profile.map_or(0, str::len)
+        + title.as_deref().map_or(0, str::len)
+        + template_bytes;
     let refusal = if field_len > CREATE_FIELD_CAP {
         Some(format!(
-            "cwd, invocation, title, and resume template together are {field_len} bytes, \
-             exceeding the {CREATE_FIELD_CAP}-byte limit"
+            "cwd, invocation or profile, title, and resume template together are {field_len} \
+             bytes, exceeding the {CREATE_FIELD_CAP}-byte limit"
         ))
     } else if resume_template
         .as_ref()
@@ -175,21 +288,68 @@ async fn handle_create_session(
         .await;
         return;
     }
+    // ## The step-5 seam
+    //
+    // The wire shape of a profile-backed create ships with
+    // `PROTOCOL_VERSION` 10; the CATALOG it would resolve against is
+    // PLAN_M6_75.md's step 5. Until then this is the one honest answer: a
+    // clear refusal naming the gap, never a silent fall back to some
+    // invocation the caller did not ask for, and never a launch of
+    // something the profile might not have described.
+    //
+    // `InvalidRequest` rather than `Internal` because nothing failed — the
+    // supervisor is working exactly as built, and a different request (the
+    // raw mode) would have succeeded, which is precisely the line
+    // `ErrorKind`'s own docs draw between the two. Refused HERE, before any
+    // reservation is claimed, so the intent key survives for the retry that
+    // a later build will serve.
+    let invocation = match &mode {
+        CreateMode::Profile { profile_id } => {
+            send_reply(
+                tx,
+                &ControlMsg::Error {
+                    req_id,
+                    // Truncated, like every other echoed caller id in this
+                    // module: an error message travels back through the
+                    // helm into an HTTP body and a browser, and echoing an
+                    // arbitrary-length id verbatim turns a refusal into an
+                    // amplifier. The cap above bounds the id at all; this
+                    // bounds what a refusal REPEATS of it.
+                    message: format!(
+                        "this supervisor cannot yet create sessions from a profile (asked for \
+                         {:?}); create with an invocation instead",
+                        truncate_for_error(profile_id)
+                    ),
+                    kind: ErrorKind::InvalidRequest,
+                },
+            )
+            .await;
+            return;
+        }
+        CreateMode::Raw { invocation } => invocation.as_str(),
+    };
     let idempotency = intent_key.map(|intent_key| IntentClaim {
         intent_key,
         fingerprint: create_fingerprint(
             &cwd,
-            &invocation,
+            Some(invocation),
             title.as_deref(),
             agent_kind,
             resume_template.as_deref(),
+            // The profile half of the mode is `None` for everything that
+            // reaches here, because profile mode is refused directly above.
+            // Step 5 replaces that refusal with a real resolution and passes
+            // the id it resolved; the fingerprint's shape is already fixed
+            // for it, which is the whole point of binding the mode into the
+            // fingerprint at the bump rather than at the feature.
+            None,
         ),
     });
     match sup
         .create_session(
             CreateInputs {
                 cwd: &cwd,
-                invocation: &invocation,
+                invocation,
                 title,
                 cols,
                 rows,
@@ -2032,6 +2192,7 @@ pub(crate) async fn handle_control(sup: &Arc<Supervisor>, msg: ControlMsg, ctx: 
             req_id,
             cwd,
             invocation,
+            profile_id,
             title,
             cols,
             rows,
@@ -2045,6 +2206,7 @@ pub(crate) async fn handle_control(sup: &Arc<Supervisor>, msg: ControlMsg, ctx: 
                 req_id,
                 cwd,
                 invocation,
+                profile_id,
                 title,
                 cols,
                 rows,
@@ -2176,6 +2338,28 @@ pub(crate) async fn handle_control(sup: &Arc<Supervisor>, msg: ControlMsg, ctx: 
             handle_commit_upload(ctx.tx, ctx.upload_routes, req_id, channel).await
         }
         ControlMsg::AbortUpload { channel } => handle_abort_upload(ctx.upload_routes, channel),
+        // The profile catalog is PLAN_M6_75.md's step 5; `PROTOCOL_VERSION`
+        // 10 ships only the vocabulary. These four REQUESTS therefore get an
+        // explicit refusal rather than falling through to the log-and-drop
+        // arm below — that arm exists for messages nobody is waiting on
+        // (replies and events arriving at the wrong end), and dropping a
+        // request that carries a `req_id` hangs its caller forever instead.
+        // Answering is what turns "this build cannot do that yet" from a
+        // stall into a sentence.
+        ControlMsg::ListProfiles { req_id }
+        | ControlMsg::CreateProfile { req_id, .. }
+        | ControlMsg::UpdateProfile { req_id, .. }
+        | ControlMsg::DeleteProfile { req_id, .. } => {
+            send_reply(
+                ctx.tx,
+                &ControlMsg::Error {
+                    req_id,
+                    message: "this supervisor has no profile catalog yet".to_string(),
+                    kind: ErrorKind::InvalidRequest,
+                },
+            )
+            .await;
+        }
         // Response/event messages arriving at the supervisor are peer
         // bugs; log and continue.
         other => warn!(?other, "unexpected control message at supervisor"),
@@ -2193,6 +2377,405 @@ mod tests {
     use crate::agent_kind::IntegrationSnapshot;
     use farhelm_proto::{RestartOffer, SessionStatus};
     use std::time::Duration;
+
+    /// The create-mode contract (PLAN_M6_75.md item 3), driven through the
+    /// real dispatcher against a real supervisor rather than through
+    /// `create_mode` alone: what matters is not only that the resolver
+    /// returns an error, but that the error reaches the CALLER as a
+    /// correlated `InvalidRequest` and that NOTHING was created on the way.
+    ///
+    /// The four rows are the whole refusal set, and each is a distinct
+    /// mistake a client can make: naming both modes, naming neither, and
+    /// (twice) pairing a profile with a raw-mode override. The last two are
+    /// the subtle ones — a client that "helpfully" forwards a default
+    /// `agent_kind` alongside a profile selection has written a request
+    /// whose meaning nobody can defend, and the refusal is what stops that
+    /// from being resolved by an invented precedence rule at launch time.
+    ///
+    /// Every row carries an INTENT KEY, and the keys are asserted unclaimed
+    /// afterwards. That is the half a refusal test usually forgets: a
+    /// request refused for its shape must not spend the client's key on the
+    /// way out, or the corrected retry — the entire point of an idempotency
+    /// key — is answered with a stale `Conflict` forever. Checked with
+    /// `reservation(key)`, not with "the table is empty": a claim that was
+    /// wrongly settled is still a claim, and only asking for the key by
+    /// name can tell the difference.
+    #[tokio::test]
+    async fn an_ambiguous_create_mode_is_refused_before_anything_is_created() {
+        let state = StateDir::new();
+        let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
+            .await
+            .expect("supervisor construction touches only tmux, not the launch shim");
+        let (tx, mut rx) = mpsc::channel(CONNECTION_WRITER_QUEUE);
+        let mut input_routes = HashMap::new();
+        let mut tasks = tokio::task::JoinSet::new();
+
+        for (req_id, invocation, profile_id, agent_kind, resume_template, expected) in [
+            (
+                1u64,
+                Some("agent".to_string()),
+                Some("prof-1".to_string()),
+                None,
+                None,
+                "never both",
+            ),
+            (2, None, None, None, None, "named neither"),
+            (
+                3,
+                None,
+                Some("prof-1".to_string()),
+                Some(AgentKind::Claude),
+                None,
+                "the profile supplies both",
+            ),
+            (
+                4,
+                None,
+                Some("prof-1".to_string()),
+                None,
+                Some(vec!["claude".to_string(), "{conversation}".to_string()]),
+                "the profile supplies both",
+            ),
+        ] {
+            handle_control(
+                &sup,
+                ControlMsg::CreateSession {
+                    req_id,
+                    // A real, usable directory, so nothing about the
+                    // refusal can be attributed to the cwd check further
+                    // in — the mode is what is under test.
+                    cwd: state.path().to_string_lossy().to_string(),
+                    invocation,
+                    profile_id,
+                    title: None,
+                    cols: 80,
+                    rows: 24,
+                    intent_key: Some(format!("ambiguous-{req_id}")),
+                    agent_kind,
+                    resume_template,
+                },
+                ConnectionCtx {
+                    tx: &tx,
+                    priority: &tx,
+                    input_routes: &mut input_routes,
+                    upload_routes: &mut no_uploads(),
+                    tasks: &mut tasks,
+                },
+            )
+            .await;
+            let frame = rx.try_recv().expect("a reply must have been sent");
+            let decoded: ControlMsg = serde_json::from_slice(&frame.body).expect("decode");
+            let ControlMsg::Error {
+                req_id: got,
+                kind,
+                message,
+            } = decoded
+            else {
+                panic!("an ambiguous create mode must be refused: {decoded:?}");
+            };
+            assert_eq!(got, req_id);
+            assert_eq!(
+                kind,
+                ErrorKind::InvalidRequest,
+                "an ambiguous request is the caller's mistake, not a server fault"
+            );
+            assert!(
+                message.contains(expected),
+                "the refusal must say what was wrong: {message}"
+            );
+        }
+        assert!(
+            sup.sessions.lock().await.is_empty(),
+            "a refused request must create nothing"
+        );
+        assert!(
+            sup.store.load_all().await.expect("load").is_empty(),
+            "and must not have reached the store either"
+        );
+        for req_id in 1..=4u64 {
+            let key = format!("ambiguous-{req_id}");
+            assert!(
+                sup.store
+                    .reservation(&key)
+                    .await
+                    .expect("reservation lookup")
+                    .is_none(),
+                "a request refused for its SHAPE must leave its intent key unspent, so the \
+                 corrected retry can use it: {key}"
+            );
+        }
+    }
+
+    /// `profile_id` is charged against `CREATE_FIELD_CAP` like every other
+    /// caller-supplied field, and the refusal that names it does not echo
+    /// it whole.
+    ///
+    /// Two separate leaks, one request. The cap is what stops an 8 MiB
+    /// "profile id" from reaching the fingerprint — a permanent,
+    /// never-pruned row — through a mode the raw path's own cap does not
+    /// cover. The truncation is what stops the REFUSAL from repeating that
+    /// text back through the helm into an HTTP body: an error that quotes
+    /// its input verbatim turns a rejected request into an amplifier, and
+    /// this one is reachable by anyone who can reach the API.
+    ///
+    /// Both boundaries are exercised, not just the over-cap side: an id
+    /// exactly AT the cap must get through to the next check, or the cap
+    /// would be an off-by-one that quietly rejects legitimate requests.
+    #[tokio::test]
+    async fn an_oversized_profile_id_is_capped_and_never_echoed_whole() {
+        let state = StateDir::new();
+        let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
+            .await
+            .expect("supervisor construction touches only tmux, not the launch shim");
+        let (tx, mut rx) = mpsc::channel(CONNECTION_WRITER_QUEUE);
+        let mut input_routes = HashMap::new();
+        let mut tasks = tokio::task::JoinSet::new();
+        let cwd = state.path().to_string_lossy().to_string();
+
+        let create_with_profile = |profile_id: String, req_id: u64| ControlMsg::CreateSession {
+            req_id,
+            cwd: cwd.clone(),
+            invocation: None,
+            profile_id: Some(profile_id),
+            title: None,
+            cols: 80,
+            rows: 24,
+            intent_key: None,
+            agent_kind: None,
+            resume_template: None,
+        };
+        let reply = |rx: &mut mpsc::Receiver<Frame>| -> (ErrorKind, String) {
+            let frame = rx.try_recv().expect("a reply must have been sent");
+            let decoded: ControlMsg = serde_json::from_slice(&frame.body).expect("decode");
+            match decoded {
+                ControlMsg::Error { kind, message, .. } => (kind, message),
+                other => panic!("expected an Error reply, got {other:?}"),
+            }
+        };
+        // Over the cap: refused for SIZE, before the mode's own refusal.
+        handle_control(
+            &sup,
+            create_with_profile("p".repeat(CREATE_FIELD_CAP + 1 - cwd.len()), 1),
+            ConnectionCtx {
+                tx: &tx,
+                priority: &tx,
+                input_routes: &mut input_routes,
+                upload_routes: &mut no_uploads(),
+                tasks: &mut tasks,
+            },
+        )
+        .await;
+        let (kind, message) = reply(&mut rx);
+        assert_eq!(kind, ErrorKind::InvalidRequest);
+        assert!(
+            message.contains(&CREATE_FIELD_CAP.to_string()),
+            "the refusal must name the limit that was exceeded: {message}"
+        );
+        assert!(
+            message.len() < CREATE_FIELD_CAP,
+            "a size refusal must not echo the oversized input back: {} bytes",
+            message.len()
+        );
+
+        // At the cap: accepted by the size check, so it reaches the
+        // step-5 refusal — which must still not echo an id this long.
+        handle_control(
+            &sup,
+            create_with_profile("p".repeat(CREATE_FIELD_CAP - cwd.len()), 2),
+            ConnectionCtx {
+                tx: &tx,
+                priority: &tx,
+                input_routes: &mut input_routes,
+                upload_routes: &mut no_uploads(),
+                tasks: &mut tasks,
+            },
+        )
+        .await;
+        let (kind, message) = reply(&mut rx);
+        assert_eq!(kind, ErrorKind::InvalidRequest);
+        assert!(
+            message.contains("cannot yet"),
+            "an id exactly at the cap must pass the size check and reach the mode refusal: \
+             {message}"
+        );
+        assert!(
+            message.len() < 4096,
+            "the refusal must truncate the id it names rather than repeating it: {} bytes",
+            message.len()
+        );
+    }
+
+    /// Every profile CRUD request is ANSWERED, even though this build has
+    /// no catalog to answer it from (PLAN_M6_75.md item 3 ships the
+    /// vocabulary; item 4 builds the catalog).
+    ///
+    /// The failure this guards against is not a wrong answer but SILENCE: a
+    /// request carrying a `req_id` that the dispatcher merely logs leaves
+    /// its caller waiting on a reply that will never come, and a hung
+    /// request looks nothing like a version problem from either end. That
+    /// no production caller can currently send these is not a defence — it
+    /// is exactly the situation in which a dropped request would go
+    /// unnoticed until the PR that starts sending them.
+    #[tokio::test]
+    async fn every_profile_request_gets_a_correlated_reply_rather_than_silence() {
+        let state = StateDir::new();
+        let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
+            .await
+            .expect("supervisor construction touches only tmux, not the launch shim");
+        let (tx, mut rx) = mpsc::channel(CONNECTION_WRITER_QUEUE);
+        let mut input_routes = HashMap::new();
+        let mut tasks = tokio::task::JoinSet::new();
+
+        // Each row states its own `req_id` beside the message rather than
+        // having it dug back out afterwards: the id is what the reply must
+        // correlate against, so naming it here is both shorter and the
+        // thing being asserted.
+        let profile = farhelm_proto::Profile {
+            id: "prof-1".to_string(),
+            name: "Claude Code".to_string(),
+            invocation: "claude".to_string(),
+            agent_kind: AgentKind::Claude,
+            resume_template: None,
+        };
+        for (expected_req_id, msg) in [
+            (1, ControlMsg::ListProfiles { req_id: 1 }),
+            (
+                2,
+                ControlMsg::CreateProfile {
+                    req_id: 2,
+                    name: profile.name.clone(),
+                    invocation: profile.invocation.clone(),
+                    agent_kind: profile.agent_kind,
+                    resume_template: None,
+                },
+            ),
+            (
+                3,
+                ControlMsg::UpdateProfile {
+                    req_id: 3,
+                    profile: profile.clone(),
+                },
+            ),
+            (
+                4,
+                ControlMsg::DeleteProfile {
+                    req_id: 4,
+                    profile_id: profile.id.clone(),
+                },
+            ),
+        ] {
+            handle_control(
+                &sup,
+                msg,
+                ConnectionCtx {
+                    tx: &tx,
+                    priority: &tx,
+                    input_routes: &mut input_routes,
+                    upload_routes: &mut no_uploads(),
+                    tasks: &mut tasks,
+                },
+            )
+            .await;
+            let frame = rx
+                .try_recv()
+                .expect("a profile request must be answered, never dropped");
+            let decoded: ControlMsg = serde_json::from_slice(&frame.body).expect("decode");
+            let ControlMsg::Error {
+                req_id,
+                kind,
+                message,
+            } = decoded
+            else {
+                panic!("this build has no catalog to answer from: {decoded:?}");
+            };
+            assert_eq!(req_id, expected_req_id, "the reply must correlate");
+            assert_eq!(kind, ErrorKind::InvalidRequest);
+            assert!(
+                message.contains("profile catalog"),
+                "the refusal must name what is missing: {message}"
+            );
+        }
+    }
+
+    /// The step-5 seam (PLAN_M6_75.md items 3 and 5): a well-formed
+    /// profile-backed create is refused by THIS build with a clear
+    /// message, creates nothing, and — the part worth pinning hardest —
+    /// does not SPEND its intent key.
+    ///
+    /// The key matters because the refusal is temporary: the same request
+    /// will succeed once the catalog lands, and a client that had its key
+    /// consumed by a build that could not serve it would find its retry
+    /// answered with a stale failure forever. Refusing before the
+    /// reservation is claimed is what keeps that from happening, and the
+    /// empty reservation table below is how that is observable at all.
+    #[tokio::test]
+    async fn a_profile_backed_create_is_refused_without_spending_its_intent_key() {
+        let state = StateDir::new();
+        let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
+            .await
+            .expect("supervisor construction touches only tmux, not the launch shim");
+        let (tx, mut rx) = mpsc::channel(CONNECTION_WRITER_QUEUE);
+        let mut input_routes = HashMap::new();
+        let mut tasks = tokio::task::JoinSet::new();
+
+        handle_control(
+            &sup,
+            ControlMsg::CreateSession {
+                req_id: 7,
+                cwd: state.path().to_string_lossy().to_string(),
+                invocation: None,
+                profile_id: Some("prof-7".to_string()),
+                title: None,
+                cols: 80,
+                rows: 24,
+                intent_key: Some("intent-abc".to_string()),
+                agent_kind: None,
+                resume_template: None,
+            },
+            ConnectionCtx {
+                tx: &tx,
+                priority: &tx,
+                input_routes: &mut input_routes,
+                upload_routes: &mut no_uploads(),
+                tasks: &mut tasks,
+            },
+        )
+        .await;
+
+        let frame = rx.try_recv().expect("a reply must have been sent");
+        let decoded: ControlMsg = serde_json::from_slice(&frame.body).expect("decode");
+        let ControlMsg::Error {
+            req_id,
+            kind,
+            message,
+        } = decoded
+        else {
+            panic!("a profile-backed create is not servable by this build: {decoded:?}");
+        };
+        assert_eq!(req_id, 7);
+        assert_eq!(kind, ErrorKind::InvalidRequest);
+        assert!(
+            message.contains("prof-7") && message.contains("cannot yet"),
+            "the refusal must name the profile asked for and say the capability is missing, so a \
+             user is not left guessing whether their profile is broken: {message}"
+        );
+        assert!(
+            sup.sessions.lock().await.is_empty(),
+            "a refused create must launch nothing"
+        );
+        assert!(
+            // By NAME, not "no pending reservations": a key wrongly claimed
+            // and then settled would leave that list empty while the key
+            // itself was permanently spent, which is the exact failure this
+            // assertion is about.
+            sup.store
+                .reservation("intent-abc")
+                .await
+                .expect("reservation lookup")
+                .is_none(),
+            "the intent key must survive for the retry a later build will serve"
+        );
+    }
 
     /// `RestartSession` carries a `req_id` a caller genuinely blocks on
     /// (unlike `PauseOutput`/`ResumeOutput`'s fire-and-forget precedent),
@@ -2276,7 +2859,8 @@ mod tests {
             ControlMsg::CreateSession {
                 req_id,
                 cwd: "x".repeat(CREATE_FIELD_CAP),
-                invocation: "agent".to_string(),
+                invocation: Some("agent".to_string()),
+                profile_id: None,
                 title: None,
                 cols: 80,
                 rows: 24,
@@ -2358,7 +2942,8 @@ mod tests {
                 ControlMsg::CreateSession {
                     req_id,
                     cwd: "/".to_string(),
-                    invocation: "agent".to_string(),
+                    invocation: Some("agent".to_string()),
+                    profile_id: None,
                     title: None,
                     cols: 80,
                     rows: 24,
@@ -2407,7 +2992,8 @@ mod tests {
             ControlMsg::CreateSession {
                 req_id: 4,
                 cwd: "/nonexistent/definitely/not/here".to_string(),
-                invocation: "agent".to_string(),
+                invocation: Some("agent".to_string()),
+                profile_id: None,
                 title: None,
                 cols: 80,
                 rows: 24,
@@ -2468,7 +3054,8 @@ mod tests {
                 ControlMsg::CreateSession {
                     req_id,
                     cwd: "/".to_string(),
-                    invocation: "agent".to_string(),
+                    invocation: Some("agent".to_string()),
+                    profile_id: None,
                     title: None,
                     cols: 80,
                     rows: 24,
@@ -2556,6 +3143,7 @@ mod tests {
                     annotation: None,
                     restart_offer: RestartOffer::default(),
                     tabs: Vec::new(),
+                    source_profile: None,
                 },
                 terminal: Some(Terminal {
                     tmux_name: "fh-fake".to_string(),
@@ -2956,6 +3544,7 @@ mod tests {
                 annotation: None,
                 restart_offer: RestartOffer::default(),
                 tabs: Vec::new(),
+                source_profile: None,
             },
             terminal: None,
             outcome: Arc::new(std::sync::Mutex::new(LastOutcome::Running)),
@@ -3448,6 +4037,7 @@ mod tests {
                     annotation: None,
                     restart_offer: RestartOffer::default(),
                     tabs: Vec::new(),
+                    source_profile: None,
                 },
                 terminal: None,
                 outcome: Arc::new(std::sync::Mutex::new(LastOutcome::Running)),

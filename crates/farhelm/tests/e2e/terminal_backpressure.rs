@@ -1293,22 +1293,25 @@ async fn a_pause_past_the_stall_timeout_detaches_and_leaves_the_session_healthy(
         "the stall detach must use the reason both emitters share verbatim"
     );
 
-    // The session is unharmed: still listed alive...
-    let listed = h.client.list_sessions().await.expect("list after stall");
-    let found = listed
-        .sessions
-        .iter()
-        .find(|s| s.id == session.id)
-        .expect("the stalled client's session must still exist");
-    assert_eq!(
-        found.status,
-        SessionStatus::Alive,
-        "a stalled viewer must not affect the agent"
-    );
+    // The session is unharmed: still listed live. The await IS the
+    // assertion — `wait_for_live_status` panics if the session never
+    // reaches a live status inside its window — so a stalled viewer having
+    // harmed the agent fails right here.
+    //
+    // Waited for rather than read once, per that helper's own rationale: a
+    // single list can report `Exited { exit_code: None }` for a perfectly
+    // healthy session when tmux's `pane_states` degrades to an empty map,
+    // which under a loaded machine (the whole suite running in parallel) is
+    // frequent enough to have flaked a single-shot assertion here. Waiting
+    // is not the weaker claim — an agent the stall really killed never
+    // becomes live again, so this still fails, just after giving the truth
+    // a bounded number of chances to be observed.
+    wait_for_live_status(&h.client, &session.id, 10).await;
 
     // ...and, the part that actually matters, the AGENT IS RUNNING AGAIN.
-    // Metadata saying `Alive` plus a replay of pre-stall bytes proves
-    // neither: on the tmux behavior that throttles the pane, the agent's
+    // Metadata saying the session is live, plus a replay of pre-stall
+    // bytes, proves neither: on the tmux behavior that throttles the pane,
+    // the agent's
     // writes were blocked for the whole stall, and a detach that failed to
     // release the pane would leave them blocked forever while every
     // assertion above still passed. Requiring records strictly PAST the

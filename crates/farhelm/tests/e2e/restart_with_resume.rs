@@ -102,7 +102,7 @@ async fn restarting_a_live_session_stops_its_tree_and_reuses_the_terminal() {
     wait_until_pid_gone(child_pid, 15).await;
     wait_until_pid_gone(grandchild_pid, 15).await;
 
-    let alive = wait_for_alive_status(&h.client, &session.id, 30).await;
+    let alive = wait_for_live_status(&h.client, &session.id, 30).await;
     assert_eq!(
         alive.annotation, None,
         "a running session must never carry the previous run's annotation"
@@ -168,9 +168,8 @@ async fn restarting_a_live_session_without_consent_is_refused_and_kills_nothing(
         !process_is_gone(self_pid) && !process_is_gone(child_pid),
         "a refused restart must not have killed anything"
     );
-    assert_eq!(
-        listed(&h.client, &session.id).await.status,
-        SessionStatus::Alive,
+    assert!(
+        listed(&h.client, &session.id).await.status.is_live(),
         "and must leave the session exactly as it was"
     );
 }
@@ -203,7 +202,7 @@ async fn a_reused_terminal_keeps_the_prior_run_above_the_new_one() {
         .restart_session(&session.id, farhelm_proto::RestartMode::Fresh, true)
         .await
         .expect("restart");
-    wait_for_alive_status(&h.client, &session.id, 30).await;
+    wait_for_live_status(&h.client, &session.id, 30).await;
 
     // Read from tmux itself, and wait for the new run's own banner to
     // appear in the capture: the relaunched agent starts asynchronously,
@@ -286,7 +285,7 @@ async fn a_restart_reaps_a_daemon_left_by_a_self_exited_agent() {
         libc::kill(self_pid as libc::pid_t, libc::SIGKILL);
     }
     wait_until_pid_gone(self_pid, 10).await;
-    wait_for_non_alive_status(&h.client, &session.id, 20).await;
+    wait_for_non_live_status(&h.client, &session.id, 20).await;
     assert!(
         !process_is_gone(daemon_pid),
         "the daemon must outlive its parent, or this test proves nothing"
@@ -302,7 +301,7 @@ async fn a_restart_reaps_a_daemon_left_by_a_self_exited_agent() {
     // property of the handler (the sweep completes before the generation is
     // opened), not something this vantage point can witness.
     wait_until_pid_gone(daemon_pid, 15).await;
-    wait_for_alive_status(&h.client, &session.id, 30).await;
+    wait_for_live_status(&h.client, &session.id, 30).await;
 }
 
 /// M3 acceptance 9: a vanished working directory fails the restart with an
@@ -811,7 +810,7 @@ async fn a_configured_fallback_template_is_what_a_restart_runs() {
         )
         .await
         .expect("restart through the configured fallback");
-    wait_for_alive_status(&h.client, &session.id, 30).await;
+    wait_for_live_status(&h.client, &session.id, 30).await;
 
     h.client.detach(chan).await;
     let (_chan2, mut rx2) = h
@@ -948,7 +947,7 @@ async fn an_rc_file_change_between_launches_reaches_the_relaunched_agent() {
         .restart_session(&session.id, farhelm_proto::RestartMode::Fresh, true)
         .await
         .expect("restart");
-    wait_for_alive_status(&h.client, &session.id, 30).await;
+    wait_for_live_status(&h.client, &session.id, 30).await;
 
     // A restart detaches whatever was attached to the previous run (the
     // supervisor's `detach_for_restart`), so the client reattaches — which
@@ -1013,7 +1012,7 @@ async fn a_restart_clears_a_previous_launch_error() {
         .expect("create a session whose invocation cannot exec");
 
     wait_for_dead_pane(&sock, &format!("fh-{}", session.id)).await;
-    let errored = wait_for_non_alive_status(&h.client, &session.id, 30).await;
+    let errored = wait_for_non_live_status(&h.client, &session.id, 30).await;
     assert!(
         matches!(errored.status, SessionStatus::Error { .. }),
         "a launch that never execed is an error, not an exit: {errored:?}"
@@ -1028,7 +1027,7 @@ async fn a_restart_clears_a_previous_launch_error() {
         .await
         .expect("restart through the configured resume command");
 
-    let alive = wait_for_alive_status(&h.client, &session.id, 30).await;
+    let alive = wait_for_live_status(&h.client, &session.id, 30).await;
     assert!(
         !matches!(alive.status, SessionStatus::Error { .. }),
         "the previous launch's error describes a run this session no longer has"

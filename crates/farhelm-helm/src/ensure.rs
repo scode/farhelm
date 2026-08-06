@@ -350,10 +350,11 @@ mod tests {
                     created_at: 100,
                     cwd: "/tmp".to_string(),
                     invocation: "agent".to_string(),
-                    status: farhelm_proto::SessionStatus::Alive,
+                    status: farhelm_proto::SessionStatus::Running,
                     annotation: None,
                     restart_offer: farhelm_proto::RestartOffer::default(),
                     tabs: Vec::new(),
+                    source_profile: None,
                 }],
             )
             .await

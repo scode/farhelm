@@ -1701,7 +1701,7 @@ async fn adopted_tmux_server_gets_focus_events_explicitly_not_just_from_config()
 
 /// PLAN_M2.md's list-status contract: once an agent exits ON ITS OWN — no
 /// stop or delete involved — the next `ListSessions` must reflect that as
-/// `Exited` with the exact exit code tmux observed, not stay `Alive`
+/// `Exited` with the exact exit code tmux observed, not stay live
 /// forever. `exited_agent_leaves_a_viewable_terminal` already proves the
 /// terminal itself survives; this proves the status field tracks the same
 /// event. The basic fake agent's own `quit` path exits 0, which is what
@@ -2465,16 +2465,31 @@ async fn created_sessions_are_listed_with_a_derived_title() {
         session.status,
         SessionStatus::Unknown,
         "SessionCreated's own reply must carry the create-time placeholder, not a fabricated \
-         Alive — creation establishes only that the session and terminal exist, not that the \
+         live — creation establishes only that the session and terminal exist, not that the \
          agent's exec succeeded (see ControlMsg::SessionCreated's own docs)"
     );
 
     let listed = h.client.list_sessions().await.expect("list");
-    assert_eq!(
-        listed.sessions,
-        vec![with_status(session.clone(), SessionStatus::Alive)],
-        "a session that has never been touched must list Alive once ListSessions computes \
+    // Liveness and metadata are asserted SEPARATELY, deliberately: which
+    // live status a session reports is the sampler's business (and changes
+    // as it sharpens), while "every other field round-trips" is this
+    // test's. Comparing the whole record against one hard-coded live
+    // status would couple this test to a classification it is not about.
+    let [row] = listed.sessions.as_slice() else {
+        panic!(
+            "exactly one session must be listed, got {:?}",
+            listed.sessions
+        );
+    };
+    assert!(
+        row.status.is_live(),
+        "a session that has never been touched must list as live once ListSessions computes \
          the real answer from tmux — even though the create-time reply itself said Unknown"
+    );
+    assert_eq!(
+        *row,
+        with_status(session.clone(), row.status.clone()),
+        "and every other field must match what the create reply reported"
     );
     assert_eq!(listed.sessions[0].invocation, invocation);
 }
@@ -2904,19 +2919,25 @@ async fn persisted_sessions_survive_a_supervisor_restart() {
     let listed = wait_for_listing(
         &client2,
         30,
-        "the restarted supervisor lists the session as Alive",
+        "the restarted supervisor lists the session as live",
         |sessions| {
             sessions
                 .iter()
-                .any(|s| s.id == session.id && s.status == SessionStatus::Alive)
+                .any(|s| s.id == session.id && s.status.is_live())
         },
     )
     .await;
+    let [row] = listed.as_slice() else {
+        panic!("exactly one session must be listed, got {listed:?}");
+    };
+    assert!(
+        row.status.is_live(),
+        "a session whose tmux server survived the restart must still list as live"
+    );
     assert_eq!(
-        listed,
-        vec![with_status(session.clone(), SessionStatus::Alive)],
-        "session metadata must round-trip identically from SQLite, and a session whose \
-         tmux server survived the restart must still list Alive"
+        *row,
+        with_status(session.clone(), row.status.clone()),
+        "and its metadata must round-trip identically from SQLite"
     );
 
     let (chan, mut rx) = client2
@@ -3032,7 +3053,7 @@ async fn restart_gap_lists_sessions_without_a_terminal_and_attach_fails() {
 /// — recovery is M3 (PLAN.md). Until then the session simply reports
 /// `Exited`: a plain supervisor restart would reload its row
 /// terminal-less (the ordinary restart-gap case), still `Exited`, not
-/// "recovered" — there is no plain-restart path back to `Alive` for a
+/// "recovered" — there is no plain-restart path back to a live status for a
 /// session whose tmux is actually gone.
 #[tokio::test]
 async fn list_sessions_survives_when_the_tmux_server_is_gone() {
@@ -3104,7 +3125,7 @@ async fn list_sessions_survives_when_the_tmux_server_is_gone() {
 /// creates, so its pane is genuinely `%0`; killing the server and
 /// creating `new_session` right after gives it the exact same number on
 /// the freshly auto-started replacement server. Matching pane id alone
-/// would let `old_session` read as `Alive` off of `new_session`'s real
+/// would let `old_session` read as live off of `new_session`'s real
 /// liveness; `session_status`'s `session_name` cross-check
 /// (`TmuxDriver::pane_states`'s `#{session_name}` field) is what tells
 /// these two same-numbered panes apart.
@@ -3142,11 +3163,11 @@ async fn stale_pane_id_after_server_restart_does_not_inherit_a_new_sessions_stat
     let listed = wait_for_listing(
         &h.client,
         30,
-        "the new session lists Alive on its recycled pane id",
+        "the new session lists as live on its recycled pane id",
         |sessions| {
             sessions
                 .iter()
-                .any(|s| s.id == new_session.id && s.status == SessionStatus::Alive)
+                .any(|s| s.id == new_session.id && s.status.is_live())
         },
     )
     .await;
@@ -3163,9 +3184,8 @@ async fn stale_pane_id_after_server_restart_does_not_inherit_a_new_sessions_stat
         "the old session's tmux is really gone; it must not inherit the new session's \
          liveness just because both happen to reuse pane %0"
     );
-    assert_eq!(
-        find(&new_session.id).status,
-        SessionStatus::Alive,
+    assert!(
+        find(&new_session.id).status.is_live(),
         "the new session's own pane really is alive"
     );
 }
@@ -3216,27 +3236,47 @@ async fn restart_gap_is_decided_per_session() {
     let mut listed = wait_for_listing(
         &client2,
         30,
-        "the surviving session lists Alive after a partial restart gap",
+        "the surviving session lists as live after a partial restart gap",
         |sessions| {
             sessions
                 .iter()
-                .any(|s| s.id == alive_session.id && s.status == SessionStatus::Alive)
+                .any(|s| s.id == alive_session.id && s.status.is_live())
         },
     )
     .await;
     listed.sort_by(|a, b| a.id.cmp(&b.id));
-    let mut expected = vec![
-        with_status(alive_session.clone(), SessionStatus::Alive),
+    let find = |id: &str| {
+        listed
+            .iter()
+            .find(|s| s.id == id)
+            .unwrap_or_else(|| panic!("session {id} missing from the list: {listed:?}"))
+    };
+    // The surviving session's live status is asserted as LIVENESS while
+    // the dead one's is asserted exactly: which of running/waiting/idle a
+    // healthy agent reports is the sampler's call, but "exited with no
+    // code" is a specific claim about a session whose tmux really is gone.
+    let survivor = find(&alive_session.id);
+    assert!(
+        survivor.status.is_live(),
+        "the session whose tmux survived must still list as live: {survivor:?}"
+    );
+    assert_eq!(
+        *survivor,
+        with_status(alive_session.clone(), survivor.status.clone()),
+        "and the rest of its metadata must round-trip unchanged"
+    );
+    assert_eq!(
+        *find(&dead_session.id),
         with_status(
             dead_session.clone(),
             SessionStatus::Exited { exit_code: None },
         ),
-    ];
-    expected.sort_by(|a, b| a.id.cmp(&b.id));
+        "only the one whose tmux session actually died must list as exited"
+    );
     assert_eq!(
-        listed, expected,
-        "both sessions must remain listed regardless of which one's terminal died, and \
-         only the one whose tmux session actually died must list as exited"
+        listed.len(),
+        2,
+        "both sessions must remain listed regardless of which one's terminal died"
     );
 
     let (chan, mut rx) = client2
@@ -3333,7 +3373,7 @@ async fn stop_kills_the_whole_process_tree() {
     // list, item (e), says "assert exited, don't over-pin the code" —
     // a SIGKILL death's `pane_dead_status` is not pinned to one value
     // across tmux versions, so the code is deliberately left unasserted.
-    let found = wait_for_non_alive_status(&h.client, &session.id, 15).await;
+    let found = wait_for_non_live_status(&h.client, &session.id, 15).await;
     assert_eq!(found.id, session.id);
     assert_eq!(found.title, session.title);
     assert_eq!(found.cwd, session.cwd);
@@ -5181,7 +5221,7 @@ async fn a_failed_scope_wrapper_classifies_as_error_rather_than_a_plain_exit() {
     let spec = spec_path_for_launch(h.state.path(), &session.id, 0);
     std::fs::write(&spec, b"{}").expect("plant an unconsumed launch spec");
 
-    let found = wait_for_non_alive_status(&h.client, &session.id, 15).await;
+    let found = wait_for_non_live_status(&h.client, &session.id, 15).await;
     let SessionStatus::Error { detail } = &found.status else {
         panic!("a launch that never reached the shim must classify as error, got {found:?}");
     };
@@ -5439,10 +5479,10 @@ async fn delete_fails_closed_when_a_launch_artifact_cannot_be_removed() {
     // the artifact removal that actually failed — see the handler's
     // ordering), so the agent is already dead by the time the row is
     // still-listed here — but it must be a genuinely EXITED row, not
-    // `Alive`, even though the delete itself failed closed. Status is
+    // live, even though the delete itself failed closed. Status is
     // computed fresh from tmux at list time, so this polls rather than a
-    // single read (same reasoning as `wait_for_non_alive_status`'s docs).
-    let found = wait_for_non_alive_status(&client2, &session.id, 15).await;
+    // single read (same reasoning as `wait_for_non_live_status`'s docs).
+    let found = wait_for_non_live_status(&client2, &session.id, 15).await;
     assert_eq!(found.id, session.id);
     assert_eq!(found.title, session.title);
     assert_eq!(found.cwd, session.cwd);
@@ -5450,7 +5490,7 @@ async fn delete_fails_closed_when_a_launch_artifact_cannot_be_removed() {
     assert!(
         matches!(found.status, SessionStatus::Exited { .. }),
         "a delete that already killed the process tree before failing closed must still \
-         list the row as exited, not Alive, got {:?}",
+         list the row as exited, not live, got {:?}",
         found.status
     );
     assert_eq!(

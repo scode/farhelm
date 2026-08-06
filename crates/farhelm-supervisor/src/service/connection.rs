@@ -630,21 +630,20 @@ async fn drain_writer(
 /// close; better to fail loudly at the call site than send something that
 /// might carry no `req_id` for the substitute `Error` to correlate against.
 pub(crate) fn reply_frame(msg: &ControlMsg) -> Frame {
-    let req_id = match *msg {
-        ControlMsg::SessionCreated { req_id, .. }
-        | ControlMsg::SessionList { req_id, .. }
-        | ControlMsg::SessionStopped { req_id, .. }
-        | ControlMsg::SessionDeleted { req_id, .. }
-        | ControlMsg::SessionRestarted { req_id, .. }
-        | ControlMsg::SessionRenamed { req_id, .. }
-        | ControlMsg::Attached { req_id, .. }
-        | ControlMsg::TabOpened { req_id, .. }
-        | ControlMsg::TabClosed { req_id, .. }
-        | ControlMsg::UploadStarted { req_id, .. }
-        | ControlMsg::UploadCommitted { req_id, .. }
-        | ControlMsg::Error { req_id, .. } => req_id,
-        ref other => {
-            unreachable!("reply_frame called with a message that carries no req_id: {other:?}")
+    // Asked through `ControlMsg::reply_req_id` rather than by re-listing
+    // every reply variant here, which is what a second copy of that list
+    // had been until the version-10 profile replies were added to one of
+    // them and not the other. That copy could only ever be right by
+    // coincidence: the accessor's own match is exhaustive with no wildcard,
+    // so a new reply variant is a compile error THERE, while an omission
+    // here compiled fine and turned the first successful reply of a new
+    // kind into a panic that takes the connection down. The two questions
+    // are the same question — "is this a reply, and to what" — so they get
+    // one answer.
+    let req_id = match msg.reply_req_id() {
+        Some(req_id) => req_id,
+        None => {
+            unreachable!("reply_frame called with a message that carries no req_id: {msg:?}")
         }
     };
     let frame = Frame::control(msg);
@@ -1384,10 +1383,11 @@ mod tests {
                 created_at: 1_700_000_000,
                 cwd: "/tmp".to_string(),
                 invocation: "agent".to_string(),
-                status: SessionStatus::Alive,
+                status: SessionStatus::Running,
                 annotation: None,
                 restart_offer: RestartOffer::default(),
                 tabs: Vec::new(),
+                source_profile: None,
             }],
             total: 1,
             next_cursor: None,
@@ -1440,11 +1440,12 @@ mod tests {
                 cwd: "/tmp".to_string(),
                 invocation: "agent".to_string(),
                 // Matches real `create_session` output: `Unknown`, not
-                // `Alive` (see that function's own doc comment).
+                // a live status (see that function's own doc comment).
                 status: SessionStatus::Unknown,
                 annotation: None,
                 restart_offer: RestartOffer::default(),
                 tabs: Vec::new(),
+                source_profile: None,
             },
         };
         assert_eq!(reply_frame(&msg), Frame::control(&msg));
@@ -1467,10 +1468,11 @@ mod tests {
                 created_at: 1_700_000_000,
                 cwd: "/tmp".to_string(),
                 invocation: "agent".to_string(),
-                status: SessionStatus::Alive,
+                status: SessionStatus::Running,
                 annotation: None,
                 restart_offer: RestartOffer::Resume,
                 tabs: Vec::new(),
+                source_profile: None,
             },
         };
         assert_eq!(reply_frame(&msg), Frame::control(&msg));
@@ -1508,6 +1510,72 @@ mod tests {
         ] {
             assert_eq!(reply_frame(&msg), Frame::control(&msg));
         }
+    }
+
+    /// PLAN_M6_75.md item 3's four profile replies, table-driven exactly
+    /// like the tab/upload siblings above — including `ProfileList`, whose
+    /// OVERSIZE path is exercised too.
+    ///
+    /// The oversize case is not padding here. `ProfileList` is the one
+    /// version-10 reply that carries an unbounded collection of
+    /// user-authored strings, so it is the one that can plausibly outgrow
+    /// `MAX_FRAME_LEN` — and if it does, the substitution must still be a
+    /// correlated `Error` rather than a panic or an unsendable frame.
+    /// (PLAN_M6_75.md item 3's catalog bound, enforced at create/update,
+    /// is what makes that situation unreachable in practice; this is the
+    /// backstop for a catalog that got large some other way — an older
+    /// build, a hand-edited database.)
+    ///
+    /// The whole family failing to appear here at all was the shape of the
+    /// bug this test was added for: a reply variant absent from
+    /// `reply_frame`'s correlator compiles fine and panics the first time a
+    /// handler actually builds one, taking down every session sharing the
+    /// connection.
+    #[test]
+    fn reply_frame_accepts_the_profile_replies_including_an_oversized_list() {
+        let profile = |id: &str, name: String| farhelm_proto::Profile {
+            id: id.to_string(),
+            name,
+            invocation: "claude".to_string(),
+            agent_kind: farhelm_proto::AgentKind::Claude,
+            resume_template: None,
+        };
+        for msg in [
+            ControlMsg::ProfileList {
+                req_id: 20,
+                profiles: vec![profile("prof-1", "Claude Code".to_string())],
+            },
+            ControlMsg::ProfileCreated {
+                req_id: 21,
+                profile: profile("prof-1", "Claude Code".to_string()),
+            },
+            ControlMsg::ProfileUpdated {
+                req_id: 22,
+                profile: profile("prof-1", "Claude Code".to_string()),
+            },
+            ControlMsg::ProfileDeleted { req_id: 23 },
+        ] {
+            assert_eq!(reply_frame(&msg), Frame::control(&msg));
+        }
+
+        let oversized = ControlMsg::ProfileList {
+            req_id: 24,
+            profiles: vec![profile(
+                "prof-1",
+                "x".repeat(farhelm_proto::MAX_FRAME_LEN as usize),
+            )],
+        };
+        assert!(
+            Frame::control(&oversized).exceeds_max_len(),
+            "test fixture must actually exceed MAX_FRAME_LEN"
+        );
+        let decoded: ControlMsg =
+            serde_json::from_slice(&reply_frame(&oversized).body).expect("substituted reply");
+        let ControlMsg::Error { req_id, kind, .. } = decoded else {
+            panic!("an oversized ProfileList must degrade to a correlated Error: {decoded:?}");
+        };
+        assert_eq!(req_id, 24, "the substitution must still correlate");
+        assert_eq!(kind, ErrorKind::Internal);
     }
 
     /// `reply_frame` panics on a message with no `req_id` to correlate an

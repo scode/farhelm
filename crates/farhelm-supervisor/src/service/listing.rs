@@ -629,10 +629,11 @@ mod tests {
             created_at: 1_700_000_000,
             cwd: "/tmp".to_string(),
             invocation: "agent".to_string(),
-            status: SessionStatus::Alive,
+            status: SessionStatus::Running,
             annotation: None,
             restart_offer: RestartOffer::default(),
             tabs: Vec::new(),
+            source_profile: None,
         }
     }
 

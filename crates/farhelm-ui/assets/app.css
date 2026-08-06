@@ -411,7 +411,7 @@ body,
   padding: 2px 8px;
   border-radius: 3px;
   white-space: nowrap;
-  /* Every OTHER badge word is short and fixed ("alive", "exited (code
+  /* Every OTHER badge word is short and fixed ("running", "exited (code
      N)", ...), but `error`'s text embeds the shim's own detail — argv-
      derived, and therefore user/attacker-influenced length (review-swarm
      fix batch item 21). Without a cap, a long detail can widen this flex
@@ -427,18 +427,42 @@ body,
   text-overflow: ellipsis;
 }
 
-.status-badge.alive {
+/* The three live statuses (PLAN_M6_75.md item 3) are TWO groups, not three
+   equal ones, and the grouping is the whole design.
+
+   Running and idle are the same green in two weights: both mean "this
+   session is fine, leave it alone", and they differ only in how busy it is
+   — a distinction worth showing and not worth interrupting anyone for. A
+   list of healthy sessions therefore reads as one calm colour, which is
+   what makes the third stand out at all. */
+.status-badge.running {
   color: #7fd88f;
+}
+
+.status-badge.idle {
+  color: #5f8f6b;
+}
+
+/* Waiting deliberately leaves the green family. It is the one live status
+   that is a REQUEST — an agent has asked something and is getting nothing
+   back — and SPEC.md's promise for this milestone is exactly that such a
+   session is findable at a glance across a fleet. Blue rather than a
+   warning colour: nothing is wrong, somebody is just needed, and red or
+   amber here would compete with `error` and `interrupted`, which report
+   actual failures. */
+.status-badge.waiting {
+  color: #6fb8f0;
 }
 
 .status-badge.exited {
   color: #8a919e;
 }
 
-.status-badge.unknown {
-  color: #5a606b;
-  font-style: italic;
-}
+/* There is deliberately no `.status-badge.unknown` rule: an unclassified
+   session renders no badge ELEMENT at all (PLAN_M6_75.md item 3's
+   no-badge-until-classified rule, enforced in `status.rs` and pinned in
+   the browser suite), so a rule here could only ever style a regression
+   back into existence. */
 
 /* Interrupted (PLAN_M3.md item 2) is amber rather than `exited`'s grey:
    a session lost to a host reboot is something the user may still want to

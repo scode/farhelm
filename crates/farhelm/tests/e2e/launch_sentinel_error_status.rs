@@ -21,7 +21,7 @@ use crate::boot_id_durable_outcome::{
 /// conversion would otherwise produce.
 ///
 /// The sentinel is witnessed here through an ordinary `list_sessions`
-/// poll (`wait_for_non_alive_status`), which is the common case: most
+/// poll (`wait_for_non_live_status`), which is the common case: most
 /// exec failures WILL be listed at least once before anything restarts.
 /// [`a_reboot_never_interrupts_a_row_a_sentinel_already_claims_as_error`]
 /// below covers the harder case — a reboot landing before any list ever
@@ -51,7 +51,7 @@ async fn unexecutable_invocation_lists_as_error_and_outranks_a_reboot() {
     // immediately, well before any list has a chance to observe it.
     wait_for_dead_pane(&sock, &format!("fh-{}", session.id)).await;
 
-    let before = wait_for_non_alive_status(&h.client, &session.id, 30).await;
+    let before = wait_for_non_live_status(&h.client, &session.id, 30).await;
     let detail = match before.status {
         SessionStatus::Error { detail } => detail,
         other => panic!("expected Error, an exec failure must never read as {other:?}"),
@@ -206,9 +206,8 @@ async fn exec_that_succeeds_and_exits_126_or_127_is_exited_never_error() {
 async fn a_planted_malformed_spec_sentinel_classifies_error_with_its_detail() {
     let h = harness().await;
     let (session, _work) = basic_session(&h).await;
-    assert_eq!(
-        listed(&h.client, &session.id).await.status,
-        SessionStatus::Alive,
+    assert!(
+        listed(&h.client, &session.id).await.status.is_live(),
         "the session's real agent must still be genuinely alive throughout this test"
     );
 
@@ -434,10 +433,7 @@ async fn stop_before_any_list_on_an_exec_failed_session_still_ends_error() {
 async fn a_corrupt_sentinel_fails_the_whole_list_request_and_survives() {
     let h = harness().await;
     let (session, _work) = basic_session(&h).await;
-    assert_eq!(
-        listed(&h.client, &session.id).await.status,
-        SessionStatus::Alive
-    );
+    assert!(listed(&h.client, &session.id).await.status.is_live());
 
     // A genuinely alive pane never has its sentinel checked at all (the
     // dead-or-absent gate), so the pane is killed first — this is the
@@ -482,7 +478,7 @@ async fn a_corrupt_sentinel_fails_the_whole_list_request_and_survives() {
 
 /// Review-swarm fix batch item 13: the dead-or-absent gate itself, both
 /// directions in one test. A genuinely ALIVE pane must never have its
-/// sentinel even READ (`Alive` wins outright, and the planted file is left
+/// sentinel even READ (the live status wins outright, and the planted file is left
 /// untouched) — planting a sentinel behind a still-running agent is
 /// exactly the scenario that must NOT retroactively classify it error.
 /// Once the pane goes dead, the SAME planted file is read on the very next
@@ -491,18 +487,14 @@ async fn a_corrupt_sentinel_fails_the_whole_list_request_and_survives() {
 async fn the_dead_or_absent_gate_ignores_a_sentinel_behind_a_live_pane_until_the_pane_dies() {
     let h = harness().await;
     let (session, _work) = basic_session(&h).await;
-    assert_eq!(
-        listed(&h.client, &session.id).await.status,
-        SessionStatus::Alive
-    );
+    assert!(listed(&h.client, &session.id).await.status.is_live());
 
     let detail = "exec_failed argv0=/nope errno=2".to_string();
     let status_path = status_path_for_spec(&spec_path_for_launch(h.state.path(), &session.id, 0));
     std::fs::write(&status_path, &detail).expect("plant a sentinel behind a live pane");
 
-    assert_eq!(
-        listed(&h.client, &session.id).await.status,
-        SessionStatus::Alive,
+    assert!(
+        listed(&h.client, &session.id).await.status.is_live(),
         "a live pane must win outright; its sentinel is not even consulted"
     );
     assert!(

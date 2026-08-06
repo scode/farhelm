@@ -45,6 +45,27 @@ import os from "node:os";
 import { ChildProcess, spawn } from "node:child_process";
 import net from "node:net";
 
+// Any status a session's agent can carry while it is UP (PLAN_M6_75.md
+// item 3's live split: running / waiting / idle).
+//
+// Almost every assertion in this file that mentions a live badge is a
+// LIFECYCLE assertion — "the session survived that", "the restart brought
+// it back" — and does not care which of the three the classifier chose.
+// Naming one exact word there would tie the whole suite to today's
+// classification and turn the status sampler's arrival into a hundred
+// unrelated failures; worse, it would fail for a session that is perfectly
+// healthy and merely quiet.
+//
+// Exact words are still asserted, deliberately, in two places: the
+// dedicated badge-render test (which is ABOUT the vocabulary) and route
+// fixtures (which choose the status themselves and must see it rendered
+// back verbatim).
+const LIVE_BADGE = /^(running|waiting|idle)$/;
+
+// The same set as `LIVE_BADGE`, for the API-level assertions that read a
+// status out of `/api/sessions` rather than off the DOM.
+const LIVE_STATES = ["running", "waiting", "idle"];
+
 // Restore the stack to its canonical state — exactly one shared
 // "e2e-session", freshly launched — before each PROJECT's pass over this
 // file. The suite runs against ONE long-lived stack (see
@@ -802,11 +823,15 @@ test("renders the session and the agent's TUI output", async ({ page }) => {
 // metadata (e.g. a copy-paste bug swapping two fields) would still fail
 // this test even though every field it prints is individually non-blank.
 // The fake agent process backing "e2e-session" is long-running, so the
-// row's status must settle on "alive" rather than the create-time
-// "unknown" placeholder — `toHaveText` retries on its own, since the
+// row's status must settle on "running" rather than the create-time
+// unclassified placeholder — `toHaveText` retries on its own, since the
 // list computes status fresh from tmux on every fetch rather than
-// caching the placeholder forever.
-test("list renders the session row with title, cwd, invocation, and an alive badge", async ({
+// caching the placeholder forever. What that placeholder renders as while
+// it lasts is the separate no-badge rule (PLAN_M6_75.md item 3), pinned
+// by the route-controlled unknown-status test further down: an
+// unclassified session shows NO badge, so this assertion is waiting for a
+// badge to appear at all, not for one word to replace another.
+test("list renders the session row with title, cwd, invocation, and a running badge", async ({
   page,
   request,
 }) => {
@@ -820,7 +845,7 @@ test("list renders the session row with title, cwd, invocation, and an alive bad
   await expect(row.locator(".session-title")).toHaveText("e2e-session");
   await expect(row.locator(".session-cwd")).toHaveText(expected.cwd);
   await expect(row.locator(".session-invocation")).toHaveText(expected.invocation);
-  await expect(row.locator(".status-badge")).toHaveText("alive", {
+  await expect(row.locator(".status-badge")).toHaveText("running", {
     timeout: 10_000,
   });
 });
@@ -1813,11 +1838,11 @@ test("multi-session flow: create two, open and type in one, stop and delete the 
 
     // Both rows are back in the list, alive.
     await expect(rowByTitle(page, titleA).locator(".status-badge")).toHaveText(
-      "alive",
+      "running",
       { timeout: 10_000 },
     );
     await expect(rowByTitle(page, titleB).locator(".status-badge")).toHaveText(
-      "alive",
+      "running",
       { timeout: 10_000 },
     );
 
@@ -2096,7 +2121,7 @@ test("alive delete opens an inline confirming state with the is-still-running wo
     await page.locator(".back-button").click();
 
     const row = rowByTitle(page, title);
-    await expect(row.locator(".status-badge")).toHaveText("alive", {
+    await expect(row.locator(".status-badge")).toHaveText(LIVE_BADGE, {
       timeout: 10_000,
     });
     await row.locator(".session-row-delete").click();
@@ -2138,11 +2163,11 @@ test("alive delete opens an inline confirming state with the is-still-running wo
     await expect(row.locator(".session-row-delete")).toBeEnabled();
     await expect(row.locator(".session-row-open")).toBeEnabled();
     expect(deleteRequests).toBe(0);
-    await expect(row.locator(".status-badge")).toHaveText("alive");
+    await expect(row.locator(".status-badge")).toHaveText(LIVE_BADGE);
     const listing = await (await request.get("/api/sessions")).json();
     const session = listing.sessions.find((s: any) => s.title === title);
     expect(session).toBeTruthy();
-    expect(session.status.state).toBe("alive");
+    expect(LIVE_STATES).toContain(session.status.state);
   } finally {
     const id = await findSessionIdByTitle(request, title).catch(() => undefined);
     if (id) {
@@ -2181,7 +2206,7 @@ test("confirming an inline delete prompt deletes the session with exactly one DE
     await page.locator(".back-button").click();
 
     const row = rowByTitle(page, title);
-    await expect(row.locator(".status-badge")).toHaveText("alive", {
+    await expect(row.locator(".status-badge")).toHaveText(LIVE_BADGE, {
       timeout: 10_000,
     });
     await row.locator(".session-row-delete").click();
@@ -2293,7 +2318,7 @@ test("delete confirmation safely displays a title containing executable HTML wit
   try {
     await page.goto("/");
     const row = page.locator(`[data-session-id="${id}"]`);
-    await expect(row.locator(".status-badge")).toHaveText("alive", {
+    await expect(row.locator(".status-badge")).toHaveText(LIVE_BADGE, {
       timeout: 10_000,
     });
     await row.locator(".session-row-delete").click();
@@ -2354,7 +2379,7 @@ test("a legal multi-KB, unbroken title keeps the consequence text intact and cli
   try {
     await page.goto("/");
     const row = page.locator(`[data-session-id="${id}"]`);
-    await expect(row.locator(".status-badge")).toHaveText("alive", {
+    await expect(row.locator(".status-badge")).toHaveText(LIVE_BADGE, {
       timeout: 10_000,
     });
     await row.locator(".session-row-delete").click();
@@ -2462,7 +2487,7 @@ test("an inline confirming state survives a poll refresh; cancel still works aft
             title,
             cwd: "/tmp",
             invocation: markerArmed ? marker : "sleep 300",
-            status: { state: "alive" },
+            status: { state: "running" },
           },
         ],
         total: 1,
@@ -2474,7 +2499,7 @@ test("an inline confirming state survives a poll refresh; cancel still works aft
   try {
     await page.goto("/");
     const row = page.locator(`[data-session-id="${id}"]`);
-    await expect(row.locator(".status-badge")).toHaveText("alive", {
+    await expect(row.locator(".status-badge")).toHaveText(LIVE_BADGE, {
       timeout: 10_000,
     });
     await row.locator(".session-row-delete").click();
@@ -2497,7 +2522,7 @@ test("an inline confirming state survives a poll refresh; cancel still works aft
     // not have cleared it (nor silently deleted anything: no DELETE was
     // ever confirmed).
     await expect(row.locator(".confirm-title")).toHaveText(`"${title}"`);
-    await expect(row.locator(".status-badge")).toHaveText("alive");
+    await expect(row.locator(".status-badge")).toHaveText(LIVE_BADGE);
 
     await row.locator(".confirm-cancel").click();
     await expect(row.locator(".confirm-consequence")).toHaveCount(0);
@@ -2532,10 +2557,10 @@ test("one row's confirming state does not affect another row's controls", async 
     await page.goto("/");
     const rowA = page.locator(`[data-session-id="${idA}"]`);
     const rowB = page.locator(`[data-session-id="${idB}"]`);
-    await expect(rowA.locator(".status-badge")).toHaveText("alive", {
+    await expect(rowA.locator(".status-badge")).toHaveText(LIVE_BADGE, {
       timeout: 10_000,
     });
-    await expect(rowB.locator(".status-badge")).toHaveText("alive", {
+    await expect(rowB.locator(".status-badge")).toHaveText(LIVE_BADGE, {
       timeout: 10_000,
     });
 
@@ -2585,7 +2610,7 @@ test("an alive-to-exited status change under an open confirm prompt keeps confir
   try {
     await page.goto("/");
     const row = page.locator(`[data-session-id="${id}"]`);
-    await expect(row.locator(".status-badge")).toHaveText("alive", {
+    await expect(row.locator(".status-badge")).toHaveText(LIVE_BADGE, {
       timeout: 10_000,
     });
     await row.locator(".session-row-delete").click();
@@ -2665,7 +2690,7 @@ test("a failed poll fetch while confirming does not clear the confirming state",
   try {
     await page.goto("/");
     const row = page.locator(`[data-session-id="${id}"]`);
-    await expect(row.locator(".status-badge")).toHaveText("alive", {
+    await expect(row.locator(".status-badge")).toHaveText(LIVE_BADGE, {
       timeout: 10_000,
     });
     await row.locator(".session-row-delete").click();
@@ -2687,7 +2712,7 @@ test("a failed poll fetch while confirming does not clear the confirming state",
     await expect(row.locator(".confirm-title")).toHaveText(`"${title}"`, {
       timeout: 10_000,
     });
-    await expect(row.locator(".status-badge")).toHaveText("alive");
+    await expect(row.locator(".status-badge")).toHaveText(LIVE_BADGE);
   } finally {
     await page.unroute("**/api/sessions");
     await request.post(`/api/sessions/${id}/stop`).catch(() => {});
@@ -2708,6 +2733,141 @@ test("a failed poll fetch while confirming does not clear the confirming state",
 // `SessionStatus::Exited` in lib.rs), and ordinary `Alive`/`Exited` when
 // it did. Genuine `Unknown` only ever comes from `Session::status`'s
 // serde default kicking in on an old-shaped reply with no `status` field
+// PLAN_M6_75.md item 3's no-badge-until-classified rule, on the CREATE
+// path — the half with no prior status to fall back on.
+//
+// A create establishes that the session and its terminal exist, not that
+// anything has classified the agent inside it, so the first listings after
+// one can legitimately carry no status at all. What the row must show for
+// that window is NOTHING: no badge element, not the word "unknown", which
+// would read as a verdict about the agent rather than an admission that
+// the system has not looked yet. Then, when a status does arrive, the
+// badge appears.
+//
+// Route-controlled rather than driven through a real create, because the
+// window this is about is precisely the one a real stack closes as fast as
+// it can — a real create's row is classified within a poll or two, and a
+// test that raced that would pass by luck on a fast machine and fail on a
+// slow one. Holding the row unclassified for as long as the assertions
+// need is the only way to assert on the window at all.
+//
+// The RESTART path's counterpart is a different mechanism entirely (the
+// helm's never-overwrite-definite merge, which keeps the previous status
+// on screen) and gets its own real-stack test further down.
+test("create-shows-no-badge-until-a-status-is-classified", async ({ page }) => {
+  const sessionId = "unclassified-create-session";
+  let classified = false;
+  await page.route("**/api/sessions", async (route) => {
+    if (route.request().method() !== "GET") {
+      await route.continue();
+      return;
+    }
+    await fulfillAsHelm(route, {
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        sessions: [
+          {
+            id: sessionId,
+            title: sessionId,
+            cwd: "/tmp",
+            invocation: "agent",
+            // No "status" key at all until `classified` flips — exactly
+            // what a session nothing has looked at yet decodes as.
+            ...(classified ? { status: { state: "running" } } : {}),
+          },
+        ],
+        total: 1,
+        truncated: false,
+      }),
+    });
+  });
+
+  await page.goto("/");
+  const row = page.locator(`[data-session-id="${sessionId}"]`);
+  // The ROW renders fully — this is a missing badge, not a missing row,
+  // and the difference is the whole point: an unclassified session is
+  // still listed, still openable, still stoppable.
+  await expect(row.locator(".session-title")).toHaveText(sessionId);
+  await expect(row.locator(".session-cwd")).toHaveText("/tmp");
+  await expect(row.locator(".status-badge")).toHaveCount(0);
+  // Held across a listing refresh, so this is "no badge for as long as the
+  // status is unknown" rather than "no badge in the instant we looked".
+  await page.waitForTimeout(3_000);
+  await expect(row.locator(".status-badge")).toHaveCount(0);
+
+  classified = true;
+  await expect(row.locator(".status-badge")).toHaveText(LIVE_BADGE, {
+    timeout: 15_000,
+  });
+});
+
+// The stale SESSION VIEW's half of the same rule (PLAN_M6_75.md item 3).
+//
+// SPEC.md's metadata triple for a session on an unreachable host is
+// "title, directory, last-known status" — but a session whose status was
+// never classified has no last-known status to show, and the view must
+// then show the other two and no badge rather than inventing a word. The
+// fleet-level stale test further down covers the ordinary case (a status
+// the helm did observe before the host went away); this covers the case
+// that test deliberately waits past.
+//
+// Route-controlled for the same reason as its create-path sibling: the
+// real fleet test has to WAIT for a status precisely because provoking the
+// absence of one is not something a healthy stack does on request.
+test("stale-session-view-with-no-status-renders-metadata-and-no-badge", async ({
+  page,
+}) => {
+  const sessionId = "unclassified-stale-session";
+  const listing = {
+    sessions: [
+      {
+        id: sessionId,
+        title: sessionId,
+        cwd: "/tmp",
+        invocation: "sleep 600",
+        stale: true,
+        host_name: "far-host",
+        // Again: no status key at all.
+      },
+    ],
+    total: 1,
+    truncated: false,
+  };
+  await page.route("**/api/sessions", async (route) => {
+    if (route.request().method() !== "GET") {
+      await route.continue();
+      return;
+    }
+    await fulfillAsHelm(route, {
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify(listing),
+    });
+  });
+  await page.route(`**/api/sessions/${sessionId}`, async (route) => {
+    if (route.request().method() !== "GET") {
+      await route.continue();
+      return;
+    }
+    await fulfillAsHelm(route, {
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify(listing.sessions[0]),
+    });
+  });
+
+  await page.goto("/");
+  await page.locator(`[data-session-id="${sessionId}"] .session-row-open`).click();
+
+  await expect(page.locator(".titlebar .title")).toHaveText(sessionId);
+  await expect(page.locator(".titlebar .meta")).toHaveText("/tmp — sleep 600");
+  await expect(page.locator(".stale-metadata .status-badge")).toHaveCount(0);
+  // The notice itself still renders: the point is a MISSING badge inside a
+  // present stale surface, not a stale surface that failed to appear.
+  await expect(page.locator(".host-stale-notice")).toBeVisible();
+});
+
 // at all (see that derive's own docs) — i.e. an old PEER, not a restart of
 // this same build's own supervisor — which is not something this suite's
 // single, current-build stack can produce, hence the synthetic listing.
@@ -2749,7 +2909,13 @@ test("deleting a session with unknown status confirms first, with wording that a
 
   await page.goto("/");
   const row = page.locator(`[data-session-id="${sessionId}"]`);
-  await expect(row.locator(".status-badge")).toHaveText("unknown");
+  // PLAN_M6_75.md item 3's no-badge-until-classified rule, at the level
+  // that can actually see the DOM: an unclassified status paints NO badge
+  // element — not the word "unknown", not an empty box. The row is still
+  // fully rendered (its title is asserted below), so this is a missing
+  // badge rather than a missing row.
+  await expect(row.locator(".session-title")).toHaveText(sessionId);
+  await expect(row.locator(".status-badge")).toHaveCount(0);
   await row.locator(".session-row-delete").click();
 
   // Confirms before any DELETE: since there is no async eval in the way
@@ -2847,7 +3013,7 @@ test("stop and delete failures surface in the row's own error line, without dist
   try {
     await page.goto("/");
     const row = page.locator(`[data-session-id="${id}"]`);
-    await expect(row.locator(".status-badge")).toHaveText("alive", {
+    await expect(row.locator(".status-badge")).toHaveText(LIVE_BADGE, {
       timeout: 10_000,
     });
 
@@ -2864,7 +3030,7 @@ test("stop and delete failures surface in the row's own error line, without dist
     );
     // Scoped to this row and this action: no optimistic flip either way,
     // and the rest of the list keeps working normally.
-    await expect(row.locator(".status-badge")).toHaveText("alive");
+    await expect(row.locator(".status-badge")).toHaveText(LIVE_BADGE);
     await expect(page.locator(".session-list")).toBeVisible();
     await page.unroute(`**/api/sessions/${id}/stop`);
 
@@ -2922,10 +3088,10 @@ test("a failed action's error is keyed to its own session, not shared across row
     await page.goto("/");
     const rowA = page.locator(`[data-session-id="${idA}"]`);
     const rowB = page.locator(`[data-session-id="${idB}"]`);
-    await expect(rowA.locator(".status-badge")).toHaveText("alive", {
+    await expect(rowA.locator(".status-badge")).toHaveText(LIVE_BADGE, {
       timeout: 10_000,
     });
-    await expect(rowB.locator(".status-badge")).toHaveText("alive", {
+    await expect(rowB.locator(".status-badge")).toHaveText(LIVE_BADGE, {
       timeout: 10_000,
     });
 
@@ -3012,10 +3178,10 @@ test("stop's in-flight guard disables this row's stop, delete, and open, while a
     await page.goto("/");
     const rowA = page.locator(`[data-session-id="${idA}"]`);
     const rowB = page.locator(`[data-session-id="${idB}"]`);
-    await expect(rowA.locator(".status-badge")).toHaveText("alive", {
+    await expect(rowA.locator(".status-badge")).toHaveText(LIVE_BADGE, {
       timeout: 10_000,
     });
-    await expect(rowB.locator(".status-badge")).toHaveText("alive", {
+    await expect(rowB.locator(".status-badge")).toHaveText(LIVE_BADGE, {
       timeout: 10_000,
     });
 
@@ -3124,10 +3290,10 @@ test("rapid stop/delete clicks on the same row never let a confirmed delete sile
     await page.goto("/");
     const rowA = page.locator(`[data-session-id="${idA}"]`);
     const rowB = page.locator(`[data-session-id="${idB}"]`);
-    await expect(rowA.locator(".status-badge")).toHaveText("alive", {
+    await expect(rowA.locator(".status-badge")).toHaveText(LIVE_BADGE, {
       timeout: 10_000,
     });
-    await expect(rowB.locator(".status-badge")).toHaveText("alive", {
+    await expect(rowB.locator(".status-badge")).toHaveText(LIVE_BADGE, {
       timeout: 10_000,
     });
 
@@ -3208,7 +3374,7 @@ test("dispatching cancel and confirm in the same tick never deletes the session"
   try {
     await page.goto("/");
     const row = page.locator(`[data-session-id="${id}"]`);
-    await expect(row.locator(".status-badge")).toHaveText("alive", {
+    await expect(row.locator(".status-badge")).toHaveText(LIVE_BADGE, {
       timeout: 10_000,
     });
     await row.locator(".session-row-delete").click();
@@ -3263,7 +3429,7 @@ test("the confirm prompt focuses cancel on open; Enter closes it without deletin
   try {
     await page.goto("/");
     const row = page.locator(`[data-session-id="${id}"]`);
-    await expect(row.locator(".status-badge")).toHaveText("alive", {
+    await expect(row.locator(".status-badge")).toHaveText(LIVE_BADGE, {
       timeout: 10_000,
     });
     await row.locator(".session-row-delete").click();
@@ -3367,7 +3533,7 @@ test("list refreshes an existing row from alive to exited, then drops it on dele
   try {
     await page.goto("/");
     const row = page.locator(`[data-session-id="${id}"]`);
-    await expect(row.locator(".status-badge")).toHaveText("alive", {
+    await expect(row.locator(".status-badge")).toHaveText(LIVE_BADGE, {
       timeout: 10_000,
     });
 
@@ -4759,6 +4925,75 @@ test("an interrupted session's view leads with the resume offer, and declining c
 // Driven against a REAL session, so the request that finally goes out is
 // the real one — including `stop_if_running`, which is the whole point of
 // the confirmation and is asserted on the wire rather than assumed.
+// PLAN_M6_75.md item 3's no-badge rule on the RESTART path — the half its
+// create-path sibling explicitly does not cover, because the mechanism is
+// a different one.
+//
+// A restart puts a session briefly back into "nothing has classified this
+// yet", exactly as a create does. What must NOT happen is the badge
+// blinking out and back: the helm's merge rule refuses to let an unknown
+// status overwrite one it already knows definitely, so the PREVIOUS status
+// stays on screen across the whole restart. Eventual-running is not the
+// assertion — a badge that vanished for two seconds and came back would
+// satisfy that while being precisely the flicker this rule exists to
+// prevent — so the badge is sampled CONTINUOUSLY and every sample must
+// find one.
+//
+// Driven against the real stack, and the restart is issued through the API
+// rather than the view's own button: the property is about what the LIST
+// shows while a restart runs, and the button lives on the other page. What
+// restarts the session is irrelevant to it.
+test("restart-keeps-a-badge-on-screen-throughout", async ({ page, request }) => {
+  // The sampling window alone is 20 seconds, and it sits between a real
+  // create and a real restart — comfortably past the 60-second default.
+  test.setTimeout(120_000);
+  const title = `restart-badge-${Date.now()}`;
+  let id: string | undefined;
+  try {
+    const created = await request.post("/api/sessions", {
+      data: { cwd: "/tmp", invocation: FAKE_AGENT_INVOCATION, title },
+    });
+    expect(created.ok(), "creating the session under test").toBe(true);
+    id = (await created.json()).id;
+
+    await page.goto("/");
+    const badge = rowByTitle(page, title).locator(".status-badge");
+    // A DEFINITE status first: the rule under test is about not losing one,
+    // so there has to be one to lose.
+    await expect(badge).toHaveText(LIVE_BADGE, { timeout: 20_000 });
+
+    const restart = request.post(`/api/sessions/${id}/restart`, {
+      data: { mode: "fresh", stop_if_running: true },
+    });
+    // Sampled while the restart is in flight AND for a stretch afterwards,
+    // since the window this is about — the gap between the relaunch and
+    // the first classification of the new run — opens after the request
+    // returns, not during it.
+    const missing: number[] = [];
+    const deadline = Date.now() + 20_000;
+    let samples = 0;
+    while (Date.now() < deadline) {
+      if ((await badge.count()) === 0) missing.push(Date.now());
+      samples += 1;
+      await page.waitForTimeout(100);
+    }
+    const restarted = await restart;
+    expect(restarted.ok(), `restarting ${id}`).toBe(true);
+    expect(samples).toBeGreaterThan(50);
+    expect(
+      missing.length,
+      "the list must never blank a session's status badge across a restart: the helm holds " +
+        "the previous definite status precisely so this window shows something true rather " +
+        "than nothing",
+    ).toBe(0);
+    // And it is still a live status at the end — the restarted agent got
+    // classified, rather than the badge merely being stuck on a stale word.
+    await expect(badge).toHaveText(LIVE_BADGE, { timeout: 20_000 });
+  } finally {
+    if (id) await cleanupSession(request, id);
+  }
+});
+
 test("restarting a live session confirms first, and only then sends the request with consent", async ({
   page,
   request,
@@ -4976,7 +5211,7 @@ test("a restart whose response is lost still recovers the terminal", async ({
     const listing = await (await request.get("/api/sessions")).json();
     const session = listing.sessions.find((s: any) => s.title === title);
     expect(session).toBeTruthy();
-    expect(session.status.state).toBe("alive");
+    expect(LIVE_STATES).toContain(session.status.state);
   } finally {
     const id = await findSessionIdByTitle(request, title).catch(() => undefined);
     if (id) {
@@ -12884,7 +13119,12 @@ test.describe("multi-host", () => {
             message: "waiting for the helm to refresh the remote session's status",
           },
         )
-        .toBe("alive");
+        // Any LIVE status will do — the point is that the helm has probed
+        // this session at all, so its last-known status is a real
+        // observation rather than the create-time placeholder. Asserting
+        // one exact word here would fail the moment the classifier decided
+        // a quiet agent was idle.
+        .toMatch(LIVE_BADGE);
 
       // The one thing no API can do. SIGTERM rather than SIGKILL so the
       // supervisor unwinds; either way the helm loses its connection when
@@ -12970,7 +13210,7 @@ test.describe("multi-host", () => {
       // to have OBSERVED that before killing the host — so the last thing
       // the helm knew is that it was alive. Rendered with the list's own
       // badge, so the two surfaces cannot describe one session differently.
-      await expect(badge).toHaveText("alive");
+      await expect(badge).toHaveText(LIVE_BADGE);
 
       const notice = page.locator(".host-stale-notice");
       await expect(notice).toBeVisible();
@@ -13107,7 +13347,7 @@ test.describe("multi-host", () => {
       // had killed and relaunched things would produce exactly the same row.
       // `sleep 600` was never stopped, so anything other than alive means
       // the removal reached past the registry.
-      await expect(rediscovered.locator(".status-badge")).toHaveText("alive");
+      await expect(rediscovered.locator(".status-badge")).toHaveText(LIVE_BADGE);
       const listing = await (await request.get("/api/sessions")).json();
       const survivor = listing.sessions.find((s: any) => s.title === title);
       expect(

@@ -288,15 +288,20 @@ pub(crate) async fn basic_session(h: &Harness) -> (SessionInfo, tempfile::TempDi
     (session, work)
 }
 
-/// Poll `list_sessions` until `session_id`'s status is no longer `Alive`,
+/// Poll `list_sessions` until `session_id`'s status is no longer LIVE,
 /// returning the settled `SessionInfo`.
+///
+/// Liveness is asked through `SessionStatus::is_live` rather than compared
+/// against one variant: `PROTOCOL_VERSION` 10 split the single live status
+/// into running/waiting/idle, and an equality here would silently start
+/// treating a merely-idle agent as settled the moment the sampler lands.
 ///
 /// Status is computed fresh from tmux at LIST time, never pushed
 /// (`service.rs`'s `ListSessions` handler) — so observing a transition
 /// (an agent exiting on its own, a stop's kill sweep completing) needs a
 /// bounded poll rather than a single read racing tmux's own
 /// `pane_dead`/`pane_dead_status` bookkeeping.
-pub(crate) async fn wait_for_non_alive_status(
+pub(crate) async fn wait_for_non_live_status(
     client: &SupervisorClient,
     session_id: &str,
     secs: u64,
@@ -308,13 +313,13 @@ pub(crate) async fn wait_for_non_alive_status(
             .await
             .expect("list while polling for a status transition");
         if let Some(found) = listed.sessions.iter().find(|s| s.id == session_id)
-            && !matches!(found.status, SessionStatus::Alive)
+            && !found.status.is_live()
         {
             return found.clone();
         }
         assert!(
             tokio::time::Instant::now() < deadline,
-            "session {session_id} never left Alive status within {secs}s"
+            "session {session_id} never left a live status within {secs}s"
         );
         tokio::time::sleep(Duration::from_millis(100)).await;
     }
@@ -326,7 +331,7 @@ pub(crate) async fn wait_for_non_alive_status(
 /// Two separate reasons a single list is not enough, and this helper
 /// answers both at once.
 ///
-/// The first is the one [`wait_for_non_alive_status`] documents: status is
+/// The first is the one [`wait_for_non_live_status`] documents: status is
 /// computed fresh from tmux at LIST time rather than pushed, so any
 /// transition is only observable by polling for it.
 ///
@@ -336,10 +341,10 @@ pub(crate) async fn wait_for_non_alive_status(
 /// `is_definitively_empty`), and an entry whose pane is missing from that
 /// map honestly reports `Exited { exit_code: None }`. A loaded machine
 /// that catches a list at such a moment turns a genuinely alive session
-/// into an exited one, so a single-shot `assert_eq!(.., Alive)` fails on a
+/// into an exited one, so a single-shot "assert it is live" fails on a
 /// diagnostic the product is deliberately tolerant of. Waiting is not
 /// weaker than asserting: a session that has really exited never becomes
-/// Alive again, so the wait still fails — it just gets a bounded number of
+/// live again, so the wait still fails — it just gets a bounded number of
 /// chances to observe the truth first.
 ///
 /// Returning the whole listing, rather than only the entry that satisfied
@@ -376,12 +381,12 @@ pub(crate) async fn wait_for_listing(
     }
 }
 
-/// Poll `list_sessions` until `session_id` reports `Alive`, returning the
-/// settled `SessionInfo`.
+/// Poll `list_sessions` until `session_id` reports a LIVE status, returning
+/// the settled `SessionInfo`.
 ///
 /// The overwhelmingly common shape of [`wait_for_listing`], and the only
 /// status this suite ever waits for positively — every other settled state
-/// is either reached through [`wait_for_non_alive_status`] or asserted on
+/// is either reached through [`wait_for_non_live_status`] or asserted on
 /// a listing that a wait already settled. See [`wait_for_listing`] for why
 /// waiting rather than reading once is the right shape at all; reach for
 /// it directly when the assertion spans more than one row of the reply.
@@ -389,7 +394,7 @@ pub(crate) async fn wait_for_listing(
 /// A restart is the motivating case: its reply says the pane exists, not
 /// that the agent inside it has execed yet, so "the relaunch is running"
 /// is only ever observable by asking tmux again.
-pub(crate) async fn wait_for_alive_status(
+pub(crate) async fn wait_for_live_status(
     client: &SupervisorClient,
     session_id: &str,
     secs: u64,
@@ -397,12 +402,12 @@ pub(crate) async fn wait_for_alive_status(
     let alive = |sessions: &[SessionInfo]| {
         sessions
             .iter()
-            .any(|s| s.id == session_id && s.status == SessionStatus::Alive)
+            .any(|s| s.id == session_id && s.status.is_live())
     };
     wait_for_listing(
         client,
         secs,
-        &format!("session {session_id} became Alive"),
+        &format!("session {session_id} became live"),
         alive,
     )
     .await

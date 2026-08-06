@@ -1033,15 +1033,22 @@ mod tests {
                 req_id,
                 cwd,
                 invocation,
+                // Bound rather than swept into the `..` below: which MODE
+                // the helm forwards is exactly what the assertions here are
+                // about, and a `..` would let a future change start sending
+                // a profile selection alongside the invocation — the
+                // ambiguous request the supervisor refuses — with this test
+                // still green.
+                profile_id,
                 title,
                 cols,
                 rows,
                 agent_kind,
                 resume_template,
                 // Not under test here (the assertions below only check
-                // cwd/invocation/title/cols/rows/agent_kind/resume_template);
-                // PLAN_M3.md's `intent_key` is exercised by
-                // `create_session_forwards_the_bodys_extras_to_the_supervisor`
+                // cwd/invocation/profile/title/cols/rows/agent_kind/
+                // resume_template); PLAN_M3.md's `intent_key` is exercised
+                // by `create_session_forwards_the_bodys_extras_to_the_supervisor`
                 // instead.
                 ..
             } = request
@@ -1055,7 +1062,15 @@ mod tests {
             // non-optional fields during deserialization.)
             assert_eq!((cols, rows), (80, 24), "serde defaults must be 80x24");
             assert_eq!(cwd, "/some/dir");
-            assert_eq!(invocation, "some-agent");
+            // The RAW create mode, spelled out: the helm has no profile
+            // catalog of its own, so every create it forwards names an
+            // invocation and no profile (PLAN_M6_75.md item 3's
+            // exclusivity — a request naming both is refused).
+            assert_eq!(invocation, Some("some-agent".to_string()));
+            assert_eq!(
+                profile_id, None,
+                "the raw mode names no profile — a request naming both is refused outright"
+            );
             assert_eq!(title, None);
             assert_eq!(agent_kind, None);
             assert_eq!(resume_template, None);
@@ -1069,12 +1084,13 @@ mod tests {
                         cwd: "/some/dir".into(),
                         invocation: "some-agent".into(),
                         // Matches real `create_session` output: `Unknown`,
-                        // not `Alive` (creation does not establish the
+                        // not a live status (creation does not establish the
                         // agent's later exec succeeded).
                         status: farhelm_proto::SessionStatus::Unknown,
                         annotation: None,
                         restart_offer: farhelm_proto::RestartOffer::default(),
                         tabs: Vec::new(),
+                        source_profile: None,
                     },
                 }))
                 .await
@@ -1164,6 +1180,7 @@ mod tests {
                         annotation: None,
                         restart_offer: farhelm_proto::RestartOffer::default(),
                         tabs: Vec::new(),
+                        source_profile: None,
                     },
                 }))
                 .await
@@ -1734,6 +1751,7 @@ mod tests {
                         annotation: None,
                         restart_offer: farhelm_proto::RestartOffer::Resume,
                         tabs: Vec::new(),
+                        source_profile: None,
                     },
                 })
                 .await
@@ -1868,10 +1886,11 @@ mod tests {
                 created_at: 1_700_000_000,
                 cwd: "/distinctive/dir".into(),
                 invocation: "distinctive-agent --flag".into(),
-                status: SessionStatus::Alive,
+                status: SessionStatus::Running,
                 annotation: None,
                 restart_offer: RestartOffer::Resume,
                 tabs: vec![TabInfo { id: "tab-1".into() }],
+                source_profile: None,
             };
             let reply_session = expected_session.clone();
             let peer = tokio::spawn(async move {
@@ -2039,6 +2058,7 @@ mod tests {
                             annotation: None,
                             restart_offer: farhelm_proto::RestartOffer::default(),
                             tabs: Vec::new(),
+                            source_profile: None,
                         },
                     })
                     .await
@@ -4012,7 +4032,7 @@ mod tests {
         assert_eq!(status, axum::http::StatusCode::OK, "{body}");
         let (_, after) = get_json(&harness, "/api/sessions").await;
         assert_eq!(
-            after["sessions"][0]["status"]["state"], "alive",
+            after["sessions"][0]["status"]["state"], "running",
             "a completed restart must not leave the list showing the state it restarted FROM"
         );
 
@@ -4116,7 +4136,7 @@ mod tests {
         // so nothing but this restart can change what the list says.
         let harness = rest_harness::spliced_helm_listing(client_side, vec![alive]).await;
         let (_, before) = get_json(&harness, "/api/sessions").await;
-        assert_eq!(before["sessions"][0]["status"]["state"], "alive");
+        assert_eq!(before["sessions"][0]["status"]["state"], "running");
 
         let (status, body) = post_text(
             &harness,
@@ -4128,7 +4148,7 @@ mod tests {
 
         let (_, after) = get_json(&harness, "/api/sessions").await;
         assert_eq!(
-            after["sessions"][0]["status"]["state"], "alive",
+            after["sessions"][0]["status"]["state"], "running",
             "a reply that says 'not yet known' must not replace knowledge with its absence: \
              {after}"
         );
@@ -4247,7 +4267,7 @@ mod tests {
         let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(10);
         let after = loop {
             let (_, after) = get_json(&harness, "/api/sessions").await;
-            if after["sessions"][0]["status"]["state"] == "alive"
+            if after["sessions"][0]["status"]["state"] == "running"
                 || tokio::time::Instant::now() >= deadline
             {
                 break after;
@@ -4255,7 +4275,7 @@ mod tests {
             tokio::time::sleep(std::time::Duration::from_millis(25)).await;
         };
         assert_eq!(
-            after["sessions"][0]["status"]["state"], "alive",
+            after["sessions"][0]["status"]["state"], "running",
             "the definite status must arrive in one round trip, not one refresh interval: {after}"
         );
         peer.abort();

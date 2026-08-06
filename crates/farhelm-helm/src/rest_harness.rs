@@ -87,10 +87,11 @@ pub(crate) fn session(id: &str, created_at: i64) -> SessionInfo {
         created_at,
         cwd: format!("/{id}"),
         invocation: "agent".to_string(),
-        status: SessionStatus::Alive,
+        status: SessionStatus::Running,
         annotation: None,
         restart_offer: RestartOffer::default(),
         tabs: Vec::new(),
+        source_profile: None,
     }
 }
 

@@ -78,10 +78,13 @@ Ubuntu 24.04 ships 3.4.
   reporting an identity that does not match the one on record offers to adopt it. Removing forgets the host and the
   helm's cached view of its sessions — the supervisor and its agents keep running, and re-adding the destination finds
   them again.
-- Under it, the session list: which host each session lives on, its title, working directory, invocation, and a status —
-  alive; exited with the code when known, qualified "stopped by user" when you stopped it; interrupted after a host
-  reboot; error, with the reason, when the agent's own command could not start at all — refreshing on its own every few
-  seconds. Sessions on a host that is not connected stay listed, dimmed and badged "stale"; their controls still work
+- Under it, the session list: which host each session lives on, its title, working directory, invocation, and a status.
+  A live session reads running (the agent is working), waiting (it has asked you something and nothing has answered) or
+  idle (it is at rest) — today every live session reads running, and telling the three apart lands with the status
+  sampler. A finished one reads exited with the code when known, qualified "stopped by user" when you stopped it;
+  interrupted after a host reboot; or error, with the reason, when the agent's own command could not start at all. The
+  list refreshes on its own every few seconds. A session nothing has classified yet shows no status at all rather than
+  guessing. Sessions on a host that is not connected stay listed, dimmed and badged "stale"; their controls still work
   and the helm refuses them by naming the host's state rather than failing silently, and opening one shows its metadata
   behind a notice naming that state instead of a terminal. Click a row to open its terminal; a back control returns to
   the list. Close the tab, reopen it later: same session, scrollback intact, the agent never noticed. Reopening shows a

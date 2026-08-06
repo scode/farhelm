@@ -961,9 +961,14 @@ pub(crate) fn SessionView(session: Session, on_back: EventHandler<()>) -> Elemen
     // the restart offer describes what a relaunch would do rather than what
     // the session last WAS. Rendered through the list's own badge so the two
     // surfaces cannot describe one session differently.
+    // Flattened, not nested: a stale session whose last-known status was
+    // never classified has no badge to show (see `status_badge`'s
+    // no-badge-for-`Unknown` rule), which is the same absence as "not
+    // stale" as far as this render is concerned.
     let stale_badge = shown
         .stale
-        .then(|| status_badge(&shown.status, shown.annotation.as_deref()));
+        .then(|| status_badge(&shown.status, shown.annotation.as_deref()))
+        .flatten();
     rsx! {
         div { class: "layout",
             header { class: "titlebar",

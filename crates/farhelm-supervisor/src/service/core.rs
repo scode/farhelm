@@ -734,12 +734,58 @@ pub(crate) fn error_kind(e: &anyhow::Error) -> ErrorKind {
 ///
 /// Every SESSION-shaping field: `cwd`, `invocation`, `title` (as SENT —
 /// `None` means "auto-generate", which is a different request from an
-/// explicit title that happens to equal the derived one), and item 7's
-/// `agent_kind`/`resume_template` overrides. `cols`/`rows` are excluded by
+/// explicit title that happens to equal the derived one), item 7's
+/// `agent_kind`/`resume_template` overrides, and — as of PLAN_M6_75.md
+/// item 3 — the create MODE together with the profile it names.
+/// `cols`/`rows` are excluded by
 /// design: they shape the ATTACHMENT, not the session, so the same intent
 /// retried from a differently-sized client is still the same intent — a
 /// point the plan makes explicitly, and the reason this function takes no
 /// dimensions at all rather than taking and ignoring them.
+///
+/// ## The mode is encoded by which of two fields is present
+///
+/// `invocation` and `profile` are the raw and profile modes' respective
+/// identities, and exactly one is `Some` for any request that got this far
+/// (`handlers::create_mode` refuses both-or-neither before this is
+/// reached). So the pair encodes the MODE as well as its payload, and the
+/// property PLAN_M6_75.md item 3 asks for falls out: a retry under the same
+/// intent key that flips modes — or names a different profile — produces a
+/// different fingerprint and is refused as a key reuse, rather than
+/// quietly launching something other than what the first attempt did.
+///
+/// A retry MUST NOT be able to flip modes, and that is worth stating as a
+/// safety property rather than a consistency one: the two modes can resolve
+/// to entirely different agents in the same directory, and a create is not
+/// undoable.
+///
+/// ## The RAW encoding is frozen, byte for byte
+///
+/// A reservation row is a PERMANENT tombstone — nothing prunes it (see
+/// `store::Reservation`) — and every replay compares the stored string
+/// verbatim. So a stored fingerprint is not a cache that ages out: an
+/// encoding change re-reads every key a supervisor has ever seen as
+/// belonging to a DIFFERENT request, and the identical retry that should
+/// have replayed is refused as a key reuse (`Conflict`) instead. Forever,
+/// for that key, with no way for the client to recover except minting a new
+/// one — which is exactly the confusion an idempotency key exists to
+/// prevent.
+///
+/// That is why version 10 does NOT append its mode to the existing tuple.
+/// The raw mode's five elements are the encoding pre-M6.75 supervisors
+/// wrote, unchanged and unreordered, so a raw retry across the upgrade
+/// still matches its own tombstone and replays. `invocation` is `Option`
+/// now, but `Some("x")` and `"x"` serialize to the same JSON, so the bytes
+/// are identical rather than merely equivalent.
+///
+/// The PROFILE mode gets its own, structurally distinct encoding instead: a
+/// leading `"profile"` discriminant and a shorter tuple. Distinctness is
+/// what makes the mode unflippable, and it is stronger here than an
+/// appended element would have been — the two encodings differ in LENGTH as
+/// well as in content, so no raw request can collide with a profile one
+/// whatever any field happens to contain (a `cwd` literally named
+/// `profile`, say). The raw tuple carries no discriminant of its own
+/// precisely because it cannot: adding one would change the frozen bytes.
 ///
 /// The overrides are threaded in here BEFORE anything else reads them: as
 /// of this PR they shape nothing but the fingerprint (item 7 is what makes
@@ -778,22 +824,40 @@ pub(crate) fn error_kind(e: &anyhow::Error) -> ErrorKind {
 /// `store::Reservation`), and neither is owned here.
 pub(crate) fn create_fingerprint(
     cwd: &str,
-    invocation: &str,
+    invocation: Option<&str>,
     title: Option<&str>,
     agent_kind: Option<AgentKind>,
     resume_template: Option<&[String]>,
+    profile: Option<&str>,
 ) -> String {
+    // The raw-only fields cannot accompany a profile selection — a request
+    // naming both is refused by `handlers::create_mode` before anything
+    // reaches here — so their absence from the profile encoding below drops
+    // nothing a caller could legally have sent. Asserted rather than
+    // assumed, because the failure mode of a future caller getting this
+    // wrong is a fingerprint that silently ignores fields it was given.
+    debug_assert!(
+        profile.is_none() || (invocation.is_none() && agent_kind.is_none()),
+        "a profile-mode fingerprint cannot also carry raw-mode inputs"
+    );
     // Infallible in practice: every element is a string, an option, or an
     // array of strings, none of which can fail to serialize. The `expect`
     // documents that rather than inviting a caller to handle an error that
     // cannot occur.
-    serde_json::to_string(&(
-        cwd,
-        invocation,
-        title,
-        agent_kind.map(crate::store::agent_kind_column),
-        resume_template,
-    ))
+    match profile {
+        // FROZEN — see this function's own docs. Five elements, in this
+        // order, exactly as every pre-M6.75 supervisor wrote them.
+        None => serde_json::to_string(&(
+            cwd,
+            invocation,
+            title,
+            agent_kind.map(crate::store::agent_kind_column),
+            resume_template,
+        )),
+        // The profile mode's own encoding, discriminated and shorter, so it
+        // cannot collide with the frozen tuple above under any input.
+        Some(profile) => serde_json::to_string(&("profile", cwd, title, profile)),
+    }
     .expect("a fingerprint of strings and options always serializes")
 }
 
@@ -939,12 +1003,20 @@ fn new_session_identity() -> SessionIdentity {
 }
 
 /// What an existing reservation means for the request that found it.
+///
+/// Both variants are boxed, which is the only shape that stays balanced:
+/// `SessionInfo` is a wire record that keeps growing (`source_profile` at
+/// `PROTOCOL_VERSION` 10 was the addition that tipped it), so an inline
+/// `Answer` makes every `Resolution` as large as the biggest reply this
+/// protocol has ever carried. One allocation on a path that is already
+/// doing durable writes and process launches is not a cost worth
+/// measuring; a struct that silently widens with the protocol is.
 enum Resolution {
     /// This intent already has an answer — the session it created, the
     /// gone-error, the original failure, a key-reuse refusal, or an
     /// honest "cannot tell". Whatever it is, it is what the caller
     /// returns, unchanged.
-    Answer(anyhow::Result<SessionInfo>),
+    Answer(Box<anyhow::Result<SessionInfo>>),
     /// Nothing was ever launched under this reservation, so the caller
     /// performs the create under it — same key, same identities.
     Relaunch(Box<Reservation>),
@@ -2811,7 +2883,7 @@ impl Supervisor {
                         // from unreliable evidence — while the file
                         // survives for a later, repaired pass to read. Its
                         // pane still rides into `found_panes` so a
-                        // genuinely alive session keeps reporting `Alive`
+                        // genuinely alive session keeps reporting a live status
                         // regardless (`session_status`'s own live-probe
                         // precedence), but this pass proposes nothing for
                         // it either way.
@@ -3041,6 +3113,12 @@ impl Supervisor {
                         // is the honest "none known" value every reload
                         // reports.
                         tabs: Vec::new(),
+                        // Nothing stored has ever named a profile: the
+                        // catalog and the session columns that would
+                        // snapshot one arrive together in PLAN_M6_75.md's
+                        // step 5, so every reloaded session is raw-created
+                        // and says so.
+                        source_profile: None,
                     },
                     terminal,
                     outcome: Arc::new(std::sync::Mutex::new(outcome)),
@@ -3372,7 +3450,7 @@ impl Supervisor {
             .context("reading the create reservation for this intent key")?;
         let reserved = match existing {
             Some(reservation) => match self.resolve_reservation(reservation, &claim).await {
-                Resolution::Answer(answer) => return answer,
+                Resolution::Answer(answer) => return *answer,
                 Resolution::Relaunch(reservation) => Reserved::Retry(reservation),
             },
             None => Reserved::New {
@@ -3584,7 +3662,7 @@ impl Supervisor {
         claim: &IntentClaim,
     ) -> Resolution {
         if reservation.fingerprint != claim.fingerprint {
-            return Resolution::Answer(Err(RequestError::new(
+            return Resolution::Answer(Box::new(Err(RequestError::new(
                 ErrorKind::Conflict,
                 format!(
                     "intent key {} was already used for a different create request; \
@@ -3593,7 +3671,7 @@ impl Supervisor {
                     truncate_for_error(&claim.intent_key)
                 ),
             )
-            .into()));
+            .into())));
         }
         match &reservation.outcome {
             // Settled either way: the answer is whatever was recorded, and
@@ -3601,12 +3679,12 @@ impl Supervisor {
             // so every caller of it agrees (`ReservationOutcome::Failed`'s
             // own docs on why the kind rides along with the message).
             ReservationOutcome::Created | ReservationOutcome::Failed { .. } => {
-                Resolution::Answer(self.answer_from(&reservation).await)
+                Resolution::Answer(Box::new(self.answer_from(&reservation).await))
             }
             ReservationOutcome::Pending => {
                 match self.reserved_launch_evidence(&reservation).await {
                     LaunchEvidence::Present => {
-                        Resolution::Answer(self.settle_and_replay(&reservation).await)
+                        Resolution::Answer(Box::new(self.settle_and_replay(&reservation).await))
                     }
                     LaunchEvidence::Absent => Resolution::Relaunch(Box::new(reservation)),
                     // Neither relaunch nor replay: this process cannot tell
@@ -3615,13 +3693,12 @@ impl Supervisor {
                     // reservation stays pending, so a later retry — or the next
                     // reload, once whatever failed is readable again — resolves
                     // it against evidence instead of a guess.
-                    LaunchEvidence::Unresolved(why) => {
-                        Resolution::Answer(Err(why.context(format!(
+                    LaunchEvidence::Unresolved(why) => Resolution::Answer(Box::new(Err(why
+                        .context(format!(
                             "cannot tell whether intent key {}'s create ever launched, so it is \
                      neither replayed nor retried; try again once the cause is cleared",
                             truncate_for_error(&claim.intent_key)
-                        ))))
-                    }
+                        ))))),
                 }
             }
         }
@@ -3813,6 +3890,10 @@ impl Supervisor {
                     // Vocabulary only for now — see PLAN_M4.md step 4 for
                     // where tabs get real rediscovery.
                     tabs: Vec::new(),
+                    // Raw-created, like every session this build can make:
+                    // profile-backed creation is refused at the handler
+                    // until PLAN_M6_75.md's step 5 builds the catalog.
+                    source_profile: None,
                 })
             }
             None => Err(RequestError::new(
@@ -4302,7 +4383,7 @@ impl Supervisor {
             created_at,
             cwd: cwd.to_string(),
             invocation: invocation.to_string(),
-            // Create-time placeholder, deliberately NOT `Alive`:
+            // Create-time placeholder, deliberately NOT a live status:
             // `SessionCreated`'s own docs say creation establishes that
             // the session and terminal exist, not that the agent's later
             // `exec` inside it succeeded — a fast-exiting command (a
@@ -4326,6 +4407,12 @@ impl Supervisor {
             // A brand-new session has no tabs; real tab creation lands in
             // PLAN_M4.md step 4.
             tabs: Vec::new(),
+            // This build only ever reaches a launch through the RAW mode
+            // (the handler refuses profile mode until PLAN_M6_75.md's step
+            // 5), so there is no profile to snapshot. Step 5 fills this
+            // from the profile it resolved, at exactly this point — the
+            // snapshot is taken once, at creation, and never rewritten.
+            source_profile: None,
         };
 
         // Launch confirmed: the pane exists, so the durable record moves
@@ -5420,7 +5507,7 @@ impl Supervisor {
             created_at: entry.info.created_at,
             cwd: entry.info.cwd.clone(),
             invocation: entry.info.invocation.clone(),
-            // Deliberately not a fabricated `Alive`: the pane exists, but
+            // Deliberately not a fabricated live status: the pane exists, but
             // whether the agent's own `exec` inside it succeeds is a
             // separate question this reply cannot answer. `ListSessions`
             // computes the real status, and the UI refreshes after a
@@ -5435,6 +5522,11 @@ impl Supervisor {
             // why a post-restart query must not be allowed to report `[]`
             // for a session whose tabs the restart never touched.
             tabs,
+            // A restart never changes what a session was CREATED from, so
+            // this re-reports the creation-time snapshot — `None` for
+            // every session this build can create (see the create path's
+            // own note).
+            source_profile: None,
         };
         let published = relaunched_entry(
             entry,
@@ -8001,6 +8093,7 @@ pub(crate) mod tests {
                 annotation: None,
                 restart_offer: RestartOffer::default(),
                 tabs: Vec::new(),
+                source_profile: None,
             },
             terminal,
             outcome: Arc::new(std::sync::Mutex::new(outcome)),
@@ -8768,7 +8861,8 @@ pub(crate) mod tests {
             ControlMsg::CreateSession {
                 req_id: 1,
                 cwd: "/".to_string(),
-                invocation: "agent".to_string(),
+                invocation: Some("agent".to_string()),
+                profile_id: None,
                 title: None,
                 cols: 80,
                 rows: 24,
@@ -8819,32 +8913,48 @@ pub(crate) mod tests {
     /// `None`-vs-`Some` title case pins the other easy mistake: an omitted
     /// title asks the server to derive one, which is a different request
     /// from spelling out the same string by hand.
+    ///
+    /// The MODE cases (PLAN_M6_75.md item 3) are the newest ones with
+    /// teeth, and the reason they are here rather than only in a handler
+    /// test: the fingerprint is the ONLY thing standing between a retried
+    /// intent key and a create that launches something other than what the
+    /// first attempt did. A retry that flips raw-to-profile, or names a
+    /// different profile, must land on a different fingerprint and be
+    /// refused as a key reuse.
     #[test]
     fn the_create_fingerprint_covers_every_session_shaping_field() {
-        let base = create_fingerprint("/work", "agent --flag", Some("t"), None, None);
+        let base = create_fingerprint("/work", Some("agent --flag"), Some("t"), None, None, None);
         let cases = [
             (
-                create_fingerprint("/other", "agent --flag", Some("t"), None, None),
+                create_fingerprint("/other", Some("agent --flag"), Some("t"), None, None, None),
                 "cwd",
             ),
             (
-                create_fingerprint("/work", "agent --other", Some("t"), None, None),
+                create_fingerprint("/work", Some("agent --other"), Some("t"), None, None, None),
                 "invocation",
             ),
             (
-                create_fingerprint("/work", "agent --flag", Some("other"), None, None),
+                create_fingerprint(
+                    "/work",
+                    Some("agent --flag"),
+                    Some("other"),
+                    None,
+                    None,
+                    None,
+                ),
                 "title",
             ),
             (
-                create_fingerprint("/work", "agent --flag", None, None, None),
+                create_fingerprint("/work", Some("agent --flag"), None, None, None, None),
                 "an omitted title",
             ),
             (
                 create_fingerprint(
                     "/work",
-                    "agent --flag",
+                    Some("agent --flag"),
                     Some("t"),
                     Some(AgentKind::Claude),
+                    None,
                     None,
                 ),
                 "the agent-kind override",
@@ -8852,38 +8962,71 @@ pub(crate) mod tests {
             (
                 create_fingerprint(
                     "/work",
-                    "agent --flag",
+                    Some("agent --flag"),
                     Some("t"),
                     None,
                     Some(&["claude".to_string(), "{conversation}".to_string()]),
+                    None,
                 ),
                 "the resume-template override",
+            ),
+            (
+                create_fingerprint("/work", None, Some("t"), None, None, Some("prof-1")),
+                "the create MODE",
             ),
         ];
         for (fingerprint, what) in cases {
             assert_ne!(fingerprint, base, "{what} must change the fingerprint");
         }
         assert_eq!(
-            create_fingerprint("/work", "agent --flag", Some("t"), None, None),
+            create_fingerprint("/work", Some("agent --flag"), Some("t"), None, None, None),
             base,
             "the same request must fingerprint identically every time"
         );
         // Adjacent fields cannot bleed into one another: a delimiter-joined
         // encoding would make these two requests indistinguishable.
         assert_ne!(
-            create_fingerprint("/a", "bc", None, None, None),
-            create_fingerprint("/ab", "c", None, None, None),
+            create_fingerprint("/a", Some("bc"), None, None, None, None),
+            create_fingerprint("/ab", Some("c"), None, None, None, None),
         );
         // Distinct override VALUES are distinguished, not merely the
         // presence of an override: two integrated kinds are two different
         // requests, and so are two templates of the same length.
         assert_ne!(
-            create_fingerprint("/work", "a", None, Some(AgentKind::Claude), None),
-            create_fingerprint("/work", "a", None, Some(AgentKind::Codex), None),
+            create_fingerprint(
+                "/work",
+                Some("a"),
+                None,
+                Some(AgentKind::Claude),
+                None,
+                None
+            ),
+            create_fingerprint("/work", Some("a"), None, Some(AgentKind::Codex), None, None),
         );
         assert_ne!(
-            create_fingerprint("/work", "a", None, None, Some(&["x".to_string()])),
-            create_fingerprint("/work", "a", None, None, Some(&["y".to_string()])),
+            create_fingerprint(
+                "/work",
+                Some("a"),
+                None,
+                None,
+                Some(&["x".to_string()]),
+                None
+            ),
+            create_fingerprint(
+                "/work",
+                Some("a"),
+                None,
+                None,
+                Some(&["y".to_string()]),
+                None
+            ),
+        );
+        // Two profile-mode creates that differ only in WHICH profile are
+        // two different requests: same key, different profile, refused —
+        // never a replay of whichever one happened to run first.
+        assert_ne!(
+            create_fingerprint("/work", None, None, None, None, Some("prof-1")),
+            create_fingerprint("/work", None, None, None, None, Some("prof-2")),
         );
     }
 
@@ -8898,21 +9041,207 @@ pub(crate) mod tests {
     /// makes it impossible to perform by accident. In particular the kind
     /// is spelled with this module's own vocabulary, so a future rename of
     /// the WIRE representation fails here rather than in the field.
+    ///
+    /// The RAW strings below are the ones pre-M6.75 supervisors already
+    /// wrote, and they must never change again (PLAN_M6_75.md item 3, and
+    /// `create_fingerprint`'s own "frozen" section): a reservation is a
+    /// permanent tombstone, so an encoding change turns every key a
+    /// supervisor has ever seen into a `Conflict` on its next identical
+    /// retry — permanently, for that key. Version 10 therefore gave the
+    /// PROFILE mode a separate encoding rather than extending this one.
     #[test]
     fn the_persisted_fingerprint_encoding_is_pinned() {
         assert_eq!(
             create_fingerprint(
                 "/work",
-                "claude --flag",
+                Some("claude --flag"),
                 Some("title"),
                 Some(AgentKind::Claude),
                 Some(&["claude".to_string(), "{conversation}".to_string()]),
+                None,
             ),
             r#"["/work","claude --flag","title","claude",["claude","{conversation}"]]"#
         );
         assert_eq!(
-            create_fingerprint("/work", "agent", None, None, None),
+            create_fingerprint("/work", Some("agent"), None, None, None, None),
             r#"["/work","agent",null,null,null]"#
+        );
+        // The profile mode's own encoding: discriminated and SHORTER, so it
+        // is distinguishable from a raw fingerprint by shape alone — no
+        // `cwd`, title or profile id can make the two collide.
+        assert_eq!(
+            create_fingerprint("/work", None, Some("title"), None, None, Some("prof-7")),
+            r#"["profile","/work","title","prof-7"]"#
+        );
+    }
+
+    /// The upgrade property the frozen encoding exists for, stated as the
+    /// only thing that actually matters: a fingerprint a v9 supervisor
+    /// wrote must still be produced, byte for byte, by the same request
+    /// today.
+    ///
+    /// Written against a HARD-CODED legacy string rather than against
+    /// `create_fingerprint`'s current output on both sides, because the
+    /// latter would pass under any encoding change at all — including one
+    /// that broke every install in the field. This literal is the fixture;
+    /// its counterpart in the field is a row in somebody's SQLite file that
+    /// nothing will ever rewrite.
+    #[test]
+    fn a_v9_fingerprint_is_reproduced_exactly_by_the_same_request_today() {
+        // Exactly what `create_fingerprint(cwd, invocation, title,
+        // agent_kind, resume_template)` produced before the profile mode
+        // existed.
+        const V9_RAW: &str =
+            r#"["/work","claude --flag","title","claude",["claude","{conversation}"]]"#;
+        assert_eq!(
+            create_fingerprint(
+                "/work",
+                Some("claude --flag"),
+                Some("title"),
+                Some(AgentKind::Claude),
+                Some(&["claude".to_string(), "{conversation}".to_string()]),
+                None,
+            ),
+            V9_RAW,
+            "a raw create whose key was claimed before the upgrade must still match its own \
+             tombstone, or every such key conflicts forever"
+        );
+    }
+
+    /// The fingerprint a v9 supervisor stored for
+    /// `create_session_without_overrides("/", "agent", None, ..)` — the
+    /// simplest keyed create this module's tests make, spelled as the bytes
+    /// that are actually sitting in upgraded installs' reservation tables.
+    ///
+    /// A literal rather than a call to `create_fingerprint`: the point of
+    /// the two tests below is that a v10 binary agrees with a string it did
+    /// not produce, and computing both sides would prove only that the
+    /// function agrees with itself.
+    const V9_STORED_FINGERPRINT: &str = r#"["/","agent",null,null,null]"#;
+
+    /// A SETTLED reservation written before the upgrade still replays.
+    ///
+    /// This is the failure mode that would have been permanent: a
+    /// reservation is a tombstone nothing prunes, so a client retrying an
+    /// identical create with a key it claimed on the old binary would be
+    /// told `Conflict` — "this key already means something else" — for as
+    /// long as that database exists, with the session it created sitting
+    /// right there unreachable through its own intent key.
+    ///
+    /// The first create plants the legacy fingerprint the way a v9
+    /// supervisor did (the claim is caller-supplied, so the test can write
+    /// the exact bytes); the retry computes its own the way this build
+    /// does. Replaying to the SAME session id is the whole assertion.
+    #[tokio::test]
+    async fn a_settled_v9_reservation_replays_instead_of_conflicting() {
+        let state = StateDir::new();
+        let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
+            .await
+            .expect("supervisor");
+
+        let original = sup
+            .create_session_without_overrides(
+                "/",
+                "agent",
+                None,
+                80,
+                24,
+                Some(IntentClaim {
+                    intent_key: "v9-key".to_string(),
+                    fingerprint: V9_STORED_FINGERPRINT.to_string(),
+                }),
+            )
+            .await
+            .expect("the pre-upgrade create");
+
+        let replayed = sup
+            .create_session_without_overrides(
+                "/",
+                "agent",
+                None,
+                80,
+                24,
+                Some(IntentClaim {
+                    intent_key: "v9-key".to_string(),
+                    fingerprint: create_fingerprint("/", Some("agent"), None, None, None, None),
+                }),
+            )
+            .await
+            .expect("an identical retry across the upgrade must replay, not conflict");
+        assert_eq!(
+            replayed.id, original.id,
+            "the retry must answer with the session the key already made"
+        );
+        assert_eq!(
+            sup.store.load_all().await.expect("load").len(),
+            1,
+            "and must not have launched a second agent for the same intent"
+        );
+    }
+
+    /// The other half of the same upgrade: a PENDING reservation — a create
+    /// the old binary claimed but never settled (a crash, a kill) — must
+    /// still be recognized as this request's own, so the retry reconciles
+    /// it under the reserved identity instead of being refused as a reuse.
+    ///
+    /// Worth pinning separately from the settled case because the two take
+    /// different paths through `resolve_reservation`, and the fingerprint
+    /// check happens BEFORE either — a mismatch would short-circuit both
+    /// with `Conflict` and leave the reserved identity stranded forever,
+    /// which is worse than the settled case: there is not even a session to
+    /// point at.
+    #[tokio::test]
+    async fn a_pending_v9_reservation_is_reconciled_instead_of_conflicting() {
+        let state = StateDir::new();
+        let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
+            .await
+            .expect("supervisor");
+        sup.store
+            .insert_session(
+                StoredSession {
+                    id: "stranded".to_string(),
+                    title: "stranded".to_string(),
+                    created_at: now_unix(),
+                    cwd: "/".to_string(),
+                    invocation: "agent".to_string(),
+                    tmux_name: "fh-stranded".to_string(),
+                    pane: String::new(),
+                    outcome: LastOutcome::Launching,
+                    agent_kind: farhelm_proto::AgentKind::Generic,
+                    resume_template: None,
+                    canonical_cwd: None,
+                    captured_conversation: None,
+                    captured_record: None,
+                    capture_ambiguous: false,
+                    first_input_at: None,
+                    generation: 0,
+                    launch_scoped: false,
+                },
+                Some(IntentClaim {
+                    intent_key: "v9-key".to_string(),
+                    fingerprint: V9_STORED_FINGERPRINT.to_string(),
+                }),
+            )
+            .await
+            .expect("plant a pre-upgrade pending claim");
+
+        let session = sup
+            .create_session_without_overrides(
+                "/",
+                "agent",
+                None,
+                80,
+                24,
+                Some(IntentClaim {
+                    intent_key: "v9-key".to_string(),
+                    fingerprint: create_fingerprint("/", Some("agent"), None, None, None, None),
+                }),
+            )
+            .await
+            .expect("the retry must reconcile the pre-upgrade claim, not conflict with it");
+        assert_eq!(
+            session.id, "stranded",
+            "the reserved identity is what makes this a reconciliation rather than a new create"
         );
     }
 
@@ -9062,7 +9391,8 @@ pub(crate) mod tests {
         let request = |req_id: u64, agent_kind: Option<AgentKind>| ControlMsg::CreateSession {
             req_id,
             cwd: "/".to_string(),
-            invocation: "agent".to_string(),
+            invocation: Some("agent".to_string()),
+            profile_id: None,
             title: None,
             cols: 80,
             rows: 24,
@@ -9268,7 +9598,7 @@ pub(crate) mod tests {
                 24,
                 Some(IntentClaim {
                     intent_key: "key".to_string(),
-                    fingerprint: create_fingerprint("/", "agent", None, None, None),
+                    fingerprint: create_fingerprint("/", Some("agent"), None, None, None, None),
                 }),
             )
             .await
@@ -9303,7 +9633,7 @@ pub(crate) mod tests {
                 24,
                 Some(IntentClaim {
                     intent_key: "key".to_string(),
-                    fingerprint: create_fingerprint("/", "agent", None, None, None),
+                    fingerprint: create_fingerprint("/", Some("agent"), None, None, None, None),
                 }),
             )
             .await
@@ -9342,7 +9672,14 @@ pub(crate) mod tests {
         let cwd = work.to_string_lossy().to_string();
         let claim = |fingerprint_cwd: &str, invocation: &str| IntentClaim {
             intent_key: "one-intent".to_string(),
-            fingerprint: create_fingerprint(fingerprint_cwd, invocation, None, None, None),
+            fingerprint: create_fingerprint(
+                fingerprint_cwd,
+                Some(invocation),
+                None,
+                None,
+                None,
+                None,
+            ),
         };
 
         let first = sup
@@ -9450,7 +9787,7 @@ pub(crate) mod tests {
 
         // A pending reservation whose attempt never launched: the shape a
         // crash after the claim leaves, and the one a retry relaunches.
-        let fingerprint = create_fingerprint("/", "agent", None, None, None);
+        let fingerprint = create_fingerprint("/", Some("agent"), None, None, None, None);
         sup.store
             .insert_session(
                 StoredSession {
@@ -9527,7 +9864,7 @@ pub(crate) mod tests {
         let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
             .await
             .expect("supervisor");
-        let fingerprint = create_fingerprint("/", "agent", None, None, None);
+        let fingerprint = create_fingerprint("/", Some("agent"), None, None, None, None);
         sup.store
             .insert_session(
                 StoredSession {
@@ -9641,7 +9978,8 @@ pub(crate) mod tests {
                 ControlMsg::CreateSession {
                     req_id,
                     cwd: "/".to_string(),
-                    invocation: "agent".to_string(),
+                    invocation: Some("agent".to_string()),
+                    profile_id: None,
                     title: Some(title.clone()),
                     cols: 80,
                     rows: 24,
@@ -9686,7 +10024,8 @@ pub(crate) mod tests {
             ControlMsg::CreateSession {
                 req_id: 6,
                 cwd: "/".to_string(),
-                invocation: "agent".to_string(),
+                invocation: Some("agent".to_string()),
+                profile_id: None,
                 title: Some("🚀 デモ project — a normal title".to_string()),
                 cols: 80,
                 rows: 24,
@@ -9742,7 +10081,8 @@ pub(crate) mod tests {
             ControlMsg::CreateSession {
                 req_id: 1,
                 cwd: evil.to_str().expect("tempdir paths are UTF-8").to_string(),
-                invocation: "agent".to_string(),
+                invocation: Some("agent".to_string()),
+                profile_id: None,
                 title: None,
                 cols: 80,
                 rows: 24,
@@ -9814,7 +10154,8 @@ pub(crate) mod tests {
         let request = |req_id: u64, title: &str| ControlMsg::CreateSession {
             req_id,
             cwd: "/".to_string(),
-            invocation: "agent".to_string(),
+            invocation: Some("agent".to_string()),
+            profile_id: None,
             title: Some(title.to_string()),
             cols: 80,
             rows: 24,
@@ -9952,7 +10293,8 @@ pub(crate) mod tests {
                     intent_key: "key".to_string(),
                     fingerprint: create_fingerprint(
                         &work.path().to_string_lossy(),
-                        "sh -c 'sleep 300'",
+                        Some("sh -c 'sleep 300'"),
+                        None,
                         None,
                         None,
                         None,
@@ -10012,7 +10354,7 @@ pub(crate) mod tests {
         let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
             .await
             .expect("supervisor");
-        let fingerprint = create_fingerprint("/", "agent", None, None, None);
+        let fingerprint = create_fingerprint("/", Some("agent"), None, None, None, None);
         sup.store
             .insert_session(
                 StoredSession {
@@ -10096,7 +10438,7 @@ pub(crate) mod tests {
         let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
             .await
             .expect("supervisor");
-        let fingerprint = create_fingerprint("/", "agent", None, None, None);
+        let fingerprint = create_fingerprint("/", Some("agent"), None, None, None, None);
         sup.store
             .insert_session(
                 StoredSession {
@@ -10230,7 +10572,7 @@ pub(crate) mod tests {
                 24,
                 Some(IntentClaim {
                     intent_key: "key".to_string(),
-                    fingerprint: create_fingerprint("/", "agent", None, None, None),
+                    fingerprint: create_fingerprint("/", Some("agent"), None, None, None, None),
                 }),
             )
             .await

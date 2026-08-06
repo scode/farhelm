@@ -457,6 +457,7 @@ mod tests {
                     annotation: None,
                     restart_offer: RestartOffer::default(),
                     tabs: Vec::new(),
+                    source_profile: None,
                 },
                 terminal: None,
                 outcome: Arc::new(std::sync::Mutex::new(LastOutcome::Running)),

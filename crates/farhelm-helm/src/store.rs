@@ -96,7 +96,7 @@ const BUSY_TIMEOUT: Duration = Duration::from_secs(5);
 
 /// The schema's current shape. See [`apply_schema`] for the version
 /// history and the ladder future migrations extend.
-const SCHEMA_VERSION: i64 = 3;
+const SCHEMA_VERSION: i64 = 4;
 
 /// Surrogate primary key of a `hosts` row.
 ///
@@ -538,6 +538,15 @@ pub struct HelmStore {
 ///   key needs no sort step. Like version 2, this arrives with data that
 ///   predates it and resolves it by the same rule: the lowest host id keeps
 ///   the claim.
+/// - 4: PLAN_M6_75.md item 3's live-status split, as it lands in this
+///   table's PAYLOAD. `SessionStatus::Alive` was replaced rather than
+///   deprecated, so a v9-era cache row's `{"state":"alive"}` no longer
+///   decodes, and the read path's skip-and-log posture would silently drop
+///   exactly the rows the stale list exists to serve. The migration rewrites
+///   the stored spelling to `running`; it has no DDL at all, which is what
+///   makes it the first entry here that is purely about DATA FORMAT rather
+///   than about constraints. The `session_cache` DDL's own comment
+///   anticipated this case — it is the worked example of the rule it states.
 fn apply_schema(conn: &mut Connection) -> anyhow::Result<()> {
     let tx = conn
         .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
@@ -670,7 +679,7 @@ fn apply_schema(conn: &mut Connection) -> anyhow::Result<()> {
              -- instead.
              CREATE INDEX session_cache_by_host_order
                  ON session_cache (host_id, created_at DESC, session_id ASC);
-             PRAGMA user_version = 3;",
+             PRAGMA user_version = 4;",
         )
         .context("creating schema")?;
         version = SCHEMA_VERSION;
@@ -734,6 +743,59 @@ fn apply_schema(conn: &mut Connection) -> anyhow::Result<()> {
         )
         .context("migrating helm.db to schema version 3")?;
         version = 3;
+    }
+    if version == 3 {
+        // farhelm-proto's `PROTOCOL_VERSION` 10 REPLACED `SessionStatus::
+        // Alive` with `Running`/`Waiting`/`Idle` (PLAN_M6_75.md item 3), and
+        // a replaced tagged variant does not decode — so every cache row
+        // this helm wrote before the upgrade carries a `status` its new
+        // binary rejects outright.
+        //
+        // This is exactly the case the `session_cache` DDL above warns
+        // about, and the consequence is the one that makes it worth a
+        // migration rather than a shrug: the read path
+        // (`cached_sessions`/`cached_page`) SKIPS an undecodable row and
+        // logs it, so without this the sessions of every DOWN host would
+        // quietly VANISH from the list on the first start after an upgrade
+        // — the stale-list promise SPEC.md makes for an unreachable host,
+        // silently broken, with nothing on screen to say why.
+        //
+        // `running` is the target for the same reason the supervisor
+        // classifies every live pane that way at this step: it is the
+        // closest reading of what `alive` meant. A cached status is
+        // last-known-and-possibly-stale by construction, and the owning
+        // host's next successful drain replaces it wholesale.
+        //
+        // ## Why a substring rewrite is safe here
+        //
+        // `info_json` is `serde_json`'s compact encoding of `SessionInfo`,
+        // so the status field is the literal byte sequence below — no
+        // spaces, no reordering (serde emits struct fields in declaration
+        // order). The same bytes CANNOT occur inside any user-controlled
+        // string field (a title, a cwd, an invocation): serde escapes the
+        // quotes inside a string as `\"`, so a session titled
+        // `"status":{"state":"alive"}` is stored with backslashes and does
+        // not match. Anchoring on `"status":` rather than on the bare state
+        // object narrows it further, to the one field that is a
+        // `SessionStatus` at all.
+        //
+        // STORAGE ONLY. The WIRE must keep rejecting `alive` — that
+        // rejection is what makes a version skew visible at the handshake
+        // (see `PROTOCOL_VERSION`'s own docs, and the proto tests that pin
+        // the refusal). This rewrites rows already at rest in this helm's
+        // own database, which no handshake guards and no peer ever sees.
+        tx.execute_batch(
+            "UPDATE session_cache
+             SET info_json = replace(
+                 info_json,
+                 '\"status\":{\"state\":\"alive\"}',
+                 '\"status\":{\"state\":\"running\"}'
+             )
+             WHERE info_json LIKE '%\"status\":{\"state\":\"alive\"}%';
+             PRAGMA user_version = 4;",
+        )
+        .context("migrating helm.db to schema version 4")?;
+        version = 4;
     }
     if version == SCHEMA_VERSION {
         // Nothing to change; commit the otherwise-empty transaction to
@@ -2141,10 +2203,11 @@ mod tests {
             created_at,
             cwd: format!("/{id}"),
             invocation: "agent".to_string(),
-            status: farhelm_proto::SessionStatus::Alive,
+            status: farhelm_proto::SessionStatus::Running,
             annotation: None,
             restart_offer: farhelm_proto::RestartOffer::default(),
             tabs: Vec::new(),
+            source_profile: None,
         }
     }
 
@@ -2551,6 +2614,102 @@ mod tests {
             outcome,
             FirstContactOutcome::Collision { owner: first.id },
             "the demoted row's next contact must be a duplicate naming the survivor"
+        );
+    }
+
+    /// The version-4 migration, which is the whole reason a helm upgraded
+    /// across `PROTOCOL_VERSION` 10 does not silently lose the stale lists
+    /// it exists to serve.
+    ///
+    /// The failure without it is quiet in the worst way: a cache row
+    /// carrying the pre-v10 `{"state":"alive"}` no longer decodes, and the
+    /// read path is deliberately forgiving of an undecodable row (it skips
+    /// and logs, so one poisoned blob cannot take a whole list down) — so
+    /// the sessions of every host that is currently DOWN would simply stop
+    /// appearing, with the UI showing an empty list rather than any sign
+    /// that something went wrong. Exactly the SPEC.md promise (an
+    /// unreachable host's sessions stay listed) broken by an upgrade.
+    ///
+    /// Driven through a genuinely planted OLD database rather than by
+    /// hand-writing a row into a current one: the fixture is what a real
+    /// user's file looks like, and the whole ladder runs over it. All THREE
+    /// cache readers are exercised, because they decode independently and a
+    /// migration that fixed one would leave the others just as broken —
+    /// `cached_sessions` (the per-host stale list), `cached_page` (the
+    /// merged, paginated list), and `cached_session` (the stale detail view
+    /// behind an unreachable-host notice).
+    #[tokio::test]
+    async fn migrating_from_v3_rewrites_pre_split_cached_statuses() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let db_path = dir.path().join("helm.db");
+        // The exact bytes a v9-era helm wrote: `alive`, and a `SessionInfo`
+        // with none of the fields version 10 added. Hand-written rather
+        // than serialized from any current type — a fixture built from
+        // today's structs would stop being a fixture the moment they
+        // changed, which is the same argument `plant_v1_database` makes for
+        // the schema itself.
+        let legacy_row = r#"{"id":"old-1","title":"before the upgrade","created_at":100,
+             "cwd":"/work","invocation":"claude","status":{"state":"alive"},
+             "annotation":null,"restart_offer":"fresh_only","tabs":[]}"#
+            .replace('\n', "")
+            .replace("             ", "");
+        {
+            let conn = plant_v1_database(&db_path);
+            conn.execute_batch("INSERT INTO hosts (kind) VALUES ('local');")
+                .expect("plant the local row");
+            conn.execute(
+                "INSERT INTO session_cache (host_id, session_id, created_at, info_json)
+                 VALUES (1, 'old-1', 100, ?1)",
+                rusqlite::params![legacy_row],
+            )
+            .expect("plant a pre-split cache row");
+        }
+
+        let store = HelmStore::open(&db_path).await.expect("migrate and open");
+        // The reserved local row planted above; ids start at 1.
+        let host: HostId = 1;
+
+        let listed = store.cached_sessions(host).await.expect("stale list");
+        assert_eq!(
+            listed.len(),
+            1,
+            "an upgraded helm must still serve the session it cached before the upgrade"
+        );
+        assert_eq!(listed[0].id, "old-1");
+        assert_eq!(
+            listed[0].status,
+            farhelm_proto::SessionStatus::Running,
+            "the pre-split spelling maps to the status closest to what it meant"
+        );
+        // The rest of the record survives the rewrite untouched — a
+        // migration that mangled the payload while fixing the status would
+        // satisfy the assertion above and still be wrong.
+        assert_eq!(listed[0].title, "before the upgrade");
+        assert_eq!(listed[0].cwd, "/work");
+        assert_eq!(listed[0].created_at, 100);
+        assert_eq!(
+            listed[0].source_profile, None,
+            "a row written before the field existed reads as raw-created"
+        );
+
+        let page = store
+            .cached_page(vec![host], None, 10, usize::MAX)
+            .await
+            .expect("merged page");
+        assert_eq!(page.rows.len(), 1);
+        assert!(
+            page.rows[0].info.is_some(),
+            "the merged page must carry the row as DATA, not as a skipped hole"
+        );
+
+        let detail = store
+            .cached_session(host, "old-1")
+            .await
+            .expect("stale detail");
+        assert_eq!(
+            detail.map(|info| info.status),
+            Some(farhelm_proto::SessionStatus::Running),
+            "the stale detail view behind an unreachable-host notice must decode too"
         );
     }
 

@@ -565,7 +565,7 @@ pub(crate) fn ListView(on_open: EventHandler<Session>) -> Element {
                     // wording is decided from the `status` the LATEST
                     // listing carries, and without this, an instant
                     // delete right after this stop would still see the
-                    // stale pre-stop Alive (up to `POLL_INTERVAL_MS` old)
+                    // stale pre-stop live status (up to `POLL_INTERVAL_MS`)
                     // and confirm with the wrong "is still running"
                     // wording for a session that just got stopped.
                     //
@@ -591,7 +591,7 @@ pub(crate) fn ListView(on_open: EventHandler<Session>) -> Element {
     let delete_base = base.clone();
     // The actual DELETE call, shared by both ways a delete can be
     // decided on: immediately for an Exited session, or after the user
-    // hits "confirm delete" on the inline prompt for an Alive/Unknown
+    // hits "confirm delete" on the inline prompt for a live or `Unknown`
     // one (see `on_delete` and `confirm_delete` below, both of which
     // clone this closure rather than each reimplementing the request/
     // pending/error bookkeeping). Mirrors `on_stop`'s shape exactly,
@@ -637,7 +637,7 @@ pub(crate) fn ListView(on_open: EventHandler<Session>) -> Element {
     // SPEC.md's "Lifecycle operations": delete confirms first only when
     // the agent might still be alive — an Exited session deletes
     // immediately (see its own arm below for the residual risk that
-    // accepts). Alive and Unknown both confirm, entering the per-session
+    // accepts). The live statuses and Unknown all confirm, entering the per-session
     // `confirming` state that `SessionRow` reads to swap its action area
     // (see that component's doc) — this closure itself does nothing more
     // than flip that flag; `confirm_delete` below is what a confirmed
@@ -665,10 +665,11 @@ pub(crate) fn ListView(on_open: EventHandler<Session>) -> Element {
         }
         // The split is exactly `has_ended()` vs. everything else, which is
         // to say: a status the UI knows to be finished deletes straight
-        // away, and both of the remaining statuses — `Alive` and `Unknown`
-        // — go through a confirmation. Asking the status rather than
-        // listing the variants is what keeps this correct across M6.75's
-        // liveness split (see `SessionStatus::has_ended`).
+        // away, and the rest — the three live statuses and `Unknown` —
+        // go through a confirmation. Asking the status rather than
+        // listing the variants is what kept this correct THROUGH M6.75's
+        // liveness split, which added two live variants and needed no edit
+        // here (see `SessionStatus::has_ended`).
         if target.status.has_ended() {
             // Deliberately unconfirmed, a known residual: the AGENT
             // process has exited, but process-tree descendants it
@@ -679,8 +680,9 @@ pub(crate) fn ListView(on_open: EventHandler<Session>) -> Element {
             // after the fact — so there is nothing concrete to report
             // here, and always confirming "just in case" would make
             // deleting routine, already-finished sessions needlessly
-            // noisy. Revisit if M6.75's status work ever gives the UI a
-            // basis for a sharper answer.
+            // noisy. M6.75's status work sharpened what a LIVE session is
+            // doing, not what an ended one left behind, so this residual
+            // stands unchanged.
             // `Interrupted` joins `Exited` here for a stronger version of
             // the same argument: a host reboot is what produced this
             // status, and a reboot leaves no descendants at all — there
@@ -697,7 +699,7 @@ pub(crate) fn ListView(on_open: EventHandler<Session>) -> Element {
             // that could have left descendants never got the chance to.
             do_delete_on_confirm(target.id);
         } else {
-            // Unknown must not borrow Alive's "is still running" claim
+            // Unknown must not borrow a live status's "is still running" claim
             // it has no basis for — SPEC.md's no-guessing rule means an
             // unresolved status is presented as exactly that, uncertain,
             // never rounded up to a known-alive claim just because both
@@ -1561,7 +1563,11 @@ fn SessionRow(
     on_rename_submit: EventHandler<(String, String)>,
     on_rename_cancel: EventHandler<()>,
 ) -> Element {
-    let (badge_class, badge_text) = status_badge(&session.status, session.annotation.as_deref());
+    // `None` for a status nothing has classified yet, and the row then
+    // renders no badge ELEMENT at all rather than an empty one — see
+    // `status_badge`'s own docs for why an empty badge box would be the
+    // same mistake in CSS.
+    let badge = status_badge(&session.status, session.annotation.as_deref());
     let open_session = session.clone();
     let stop_id = session.id.clone();
     let delete_target = DeleteTarget {
@@ -1654,7 +1660,9 @@ fn SessionRow(
                     if session.stale {
                         span { class: "stale-badge", "stale" }
                     }
-                    span { class: "status-badge {badge_class}", "{badge_text}" }
+                    if let Some((badge_class, badge_text)) = badge {
+                        span { class: "status-badge {badge_class}", "{badge_text}" }
+                    }
                 }
                 if confirming {
                     // Called inline, not hoisted into a `let` above this

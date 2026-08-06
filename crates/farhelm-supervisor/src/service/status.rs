@@ -83,7 +83,7 @@ use tracing::warn;
 ///   honest `Exited` rather than guessing either way.
 ///
 /// Only a pane found under BOTH its remembered pane id and its remembered
-/// tmux session name gets to decide `Alive` vs. `Exited` from tmux's own
+/// tmux session name gets to decide live-versus-`Exited` from tmux's own
 /// dead flag and status.
 ///
 /// ## Classification precedence (PLAN_M3.md items 2 and 3)
@@ -100,7 +100,10 @@ use tracing::warn;
 ///    READER that ever writes this state; this PR only makes sure it
 ///    already sits above the inference so item 3 has nothing to
 ///    restructure. **The sentinel is deliberately not read here.**
-/// 2. A live pane decides `Alive` vs. `Exited` exactly as M2 did — a
+/// 2. A live pane decides live-versus-`Exited` exactly as M2 did (the
+///    live answer became three statuses at `PROTOCOL_VERSION` 10; see
+///    this function's own body for which one is reported until the
+///    sampler lands) — a
 ///    stored outcome never overrides something still observable. What the
 ///    record still contributes to a DEAD pane is what the pane cannot
 ///    hold: the stop annotation, and an exit code the pane has already
@@ -116,8 +119,10 @@ use tracing::warn;
 ///    exited means the agent RAN, and a launch whose side effects were
 ///    never found has not established that. It stays pending for item 3's
 ///    sentinel (error) or item 6's reservation (retry) to resolve.
-/// 5. Anything else with no pane — `Running`, or a stop whose sweep is in
-///    flight — falls back to M2's honest `Exited { exit_code: None }`.
+/// 5. Anything else with no pane — a stored `LastOutcome::Running` (the
+///    durable record's own vocabulary, not the wire status that now
+///    shares its name), or a stop whose sweep is in flight — falls back
+///    to M2's honest `Exited { exit_code: None }`.
 ///
 /// The annotation returned alongside the status is SPEC.md's user-legible
 /// qualifier ("stopped by user"), which lives with the recorded outcome
@@ -146,7 +151,17 @@ pub(crate) fn session_status(
             },
             None,
         ),
-        (_, Some(state)) if !state.dead => (SessionStatus::Alive, None),
+        // TRANSITIONAL (PLAN_M6_75.md item 3, sharpened by step 4): every
+        // live pane classifies as `Running`. That is the closest reading of
+        // the `Alive` this replaced — the pane is up and nothing says
+        // otherwise — and it is honest at this step precisely because
+        // nothing here samples activity yet: the ticker and the per-kind
+        // sharpeners are what will turn a quiet pane into `Idle` and a
+        // pending prompt into `Waiting`. Being wrong in the meantime is
+        // cosmetic by SPEC.md's own status rule; being SILENT (no live
+        // status at all) would not be, which is why this reports the
+        // baseline rather than waiting for the sampler.
+        (_, Some(state)) if !state.dead => (SessionStatus::Running, None),
         (recorded, Some(state)) => {
             let (recorded_code, annotation) = match recorded {
                 LastOutcome::Exited {
@@ -501,7 +516,7 @@ mod tests {
                 &entry_with(Some(a_terminal()), LastOutcome::Launching),
                 &live
             ),
-            (SessionStatus::Alive, None)
+            (SessionStatus::Running, None)
         );
 
         // A dead pane's own code is the answer, and the record supplies

@@ -99,7 +99,7 @@ pub mod io;
 /// connection loops treat that error as fatal — an unknown variant tears
 /// down an already-established connection instead of being ignored. A new
 /// variant is exactly the "cannot be additive" case that earns its own
-/// bump, per version 3's own docs above; `protocol_version_is_pinned_at_9`
+/// bump, per version 3's own docs above; `protocol_version_is_pinned_at_10`
 /// (renamed at every bump since `_at_4`) and
 /// `unknown_control_message_tag_fails_decode` below (plus the
 /// loop-level teardown test in the farhelm crate's e2e suite) pin both the
@@ -266,7 +266,58 @@ pub mod io;
 /// with decode defaults are fine WHEN ignoring one is harmless; a field
 /// whose omission changes behavior, a new tagged variant, a new REQUIRED
 /// field, or a field REMOVAL earns the next bump.
-pub const PROTOCOL_VERSION: u32 = 9;
+///
+/// Bumped to 10 for the complete M6.75 wire vocabulary (PLAN_M6_75.md item
+/// 3): the live-status split, agent profiles, and the source-profile
+/// snapshot. As with 5, 6 and 7, all of one milestone's vocabulary rides
+/// ONE bump rather than a version per change — "wire shapes never trickle"
+/// is that item's own standing rule, and every piece below independently
+/// earns a bump anyway:
+///
+/// - [`SessionStatus`] REPLACES `Alive` with `Running`/`Waiting`/`Idle`.
+///   That is a removal AND three new tagged variants at once, the two
+///   hardest cases this doc names: a v9 decoder fails outright on
+///   `{"state":"running"}` (no fallback for an unrecognized tag), and a v10
+///   decoder fed `{"state":"alive"}` fails the same way in reverse. Both
+///   directions are pinned below, and the hello refusal is what keeps
+///   either from ever happening in the field.
+/// - [`ControlMsg::CreateSession`] gains its profile-backed MODE:
+///   `invocation` becomes `Option<String>` and `profile_id` joins it,
+///   exactly one of the two per request. Making a REQUIRED field optional
+///   is decode-tolerant in only one direction: a v9 request still decodes
+///   here, while a v10 profile-mode request fails under a v9 decoder — and
+///   fails on an INVALID VALUE, not a missing key. This crate's encoder
+///   always emits an `Option` field, so what a v9 peer actually receives is
+///   `"invocation": null`, which its required `String` refuses. The
+///   distinction matters because absence is the case serde is lenient about
+///   and a null is not; the refusal here is the reliable half.
+/// - The profile CRUD family (`ListProfiles`/`ProfileList`,
+///   `CreateProfile`/`ProfileCreated`, `UpdateProfile`/`ProfileUpdated`,
+///   `DeleteProfile`/`ProfileDeleted`) is eight new tagged `ControlMsg`
+///   variants, each of which earns the bump on version 4's argument alone.
+/// - [`SessionInfo::source_profile`] is a new OPTIONAL field (absent =
+///   raw-created), additive on its own and riding this bump for the
+///   bundling reason above. [`Profile`], [`SourceProfile`] and
+///   [`ProfileExistence`] are new TYPES with no prior decoder to break,
+///   outside the variant count for the same reason `AgentKind` was at 5
+///   and `TerminalSelector` at 6.
+///
+/// What this bump deliberately does NOT carry, decided in PLAN_M6_75.md
+/// item 3 so it is not re-litigated per PR: any supervisor-edge PUSH
+/// channel. The helm keeps its 3-second drain plus the existing post-write
+/// wake, accepting one drain interval of status staleness; the push problem
+/// M6.75 solves is the CLIENT edge, where the helm coalesces revisions it
+/// would have had to build regardless. Also absent: remembered profile
+/// defaults, which the helm owns in helm.db and resolves into a concrete
+/// `profile_id` before it ever sends a create — there is nothing for this
+/// protocol to carry.
+///
+/// Within version 10 the additive discipline of every prior version
+/// continues to apply, with version 9's sharper reading intact: new
+/// optional fields with decode defaults are fine WHEN ignoring one is
+/// harmless; a field whose omission changes behavior, a new tagged variant,
+/// a new REQUIRED field, or a field REMOVAL earns the next bump.
+pub const PROTOCOL_VERSION: u32 = 10;
 
 /// The build version compiled into this binary, carried in the hello for
 /// diagnostics.
@@ -502,8 +553,8 @@ impl Frame {
     }
 }
 
-/// Whether a session's agent is running, and — once it is not — how it
-/// ended.
+/// What a session's agent is doing, and — once it is doing nothing ever
+/// again — how it ended.
 ///
 /// Additive within `PROTOCOL_VERSION` 3 (PLAN_M2.md's "Proto growth"):
 /// this enum, `SessionInfo::status`, and `SessionList::total`/`truncated`
@@ -515,6 +566,45 @@ impl Frame {
 /// say cannot be additive, which is why they ride the bump to 5 rather
 /// than landing as a same-version addition the way `total`/`truncated`
 /// did.
+///
+/// ## The live split (`PROTOCOL_VERSION` 10)
+///
+/// Version 10 REPLACES the single live status `Alive` with three:
+/// [`Running`](SessionStatus::Running), [`Waiting`](SessionStatus::Waiting)
+/// and [`Idle`](SessionStatus::Idle) (PLAN_M6_75.md item 3). All three mean
+/// the agent's process is up; they differ only in what it appears to be
+/// doing, which is SPEC.md's whole promise for this milestone — a fleet
+/// list where a user can see which agent needs them.
+///
+/// Two consequences a reader must hold onto:
+///
+/// - **Wrong is cosmetic, always.** SPEC.md fixes this: the waiting/idle
+///   boundary is heuristic by contract, and nothing about interaction may
+///   ever wait on a status. Typing into a mis-classified session works
+///   untouched. Consumers may render a status and may filter by one; none
+///   may gate a lifecycle decision on the difference between these three.
+///   The one question anybody is entitled to branch on is live-versus-
+///   ended, which is what every consumer's own liveness predicate answers.
+/// - **Replacement, not addition.** `Alive` is gone from the wire, so this
+///   is a removal alongside three new tagged variants — the two cases
+///   `PROTOCOL_VERSION`'s own docs say can never be additive, in one
+///   change. A v9 decoder cannot represent `running`; a v10 decoder cannot
+///   represent `alive`. The hello refusal is the machinery that makes
+///   neither reachable.
+///
+/// ## Where the three come from, and why no consumer may model it
+///
+/// A supervisor classifies a live session by SAMPLING its terminal
+/// periodically (PLAN_M6_75.md item 2): recent output means `Running`,
+/// quiet means `Idle`, and a captured screen matching a known per-agent
+/// prompt shape means `Waiting`. That is the mechanism today, and naming it
+/// here is documentation, not a promise: the heuristic is expected to be
+/// re-tuned as real agents change, and a peer that inferred timing or
+/// transition ORDER from it — "idle is always preceded by running", "a
+/// waiting session must have been running within N seconds" — would be
+/// building on something no version of this protocol guarantees. The
+/// guarantees are the ones above: all three mean alive, and which one it is
+/// is cosmetic.
 ///
 /// No longer `Copy` as of `Error { detail: String }`: an owned `String`
 /// cannot be duplicated bit-for-bit, so `Copy` and `String` are mutually
@@ -535,15 +625,76 @@ pub enum SessionStatus {
     /// the agent's later `exec` inside it succeeded (see
     /// `ControlMsg::SessionCreated`'s own docs) — a fast-exiting command
     /// can already be dead by the time that reply reaches the caller, so
-    /// claiming `Alive` there would itself be a fabricated liveness claim.
+    /// claiming a live status there would itself be a fabricated liveness
+    /// claim.
     /// `ListSessions` is the only reply that computes a REAL answer (from
     /// tmux, via `service.rs`'s `session_status`); every other place this
     /// value is produced is honestly saying "not yet known", not "known
     /// to be running".
+    ///
+    /// ## Internal/compat vocabulary: this variant MUST NEVER RENDER
+    ///
+    /// As of `PROTOCOL_VERSION` 10 (PLAN_M6_75.md item 3) `Unknown` is
+    /// plumbing, not a status a user is ever shown. It stays on the wire
+    /// because it has two jobs nothing else can do — decoding a sender that
+    /// predates the field, and letting a create-time reply refuse to
+    /// fabricate liveness — but "the system has not classified this yet" is
+    /// not information a badge can honestly carry, and a badge reading
+    /// `unknown` is worse than no badge: it looks like a verdict.
+    ///
+    /// So the rule is stated here, at the vocabulary, because two different
+    /// mechanisms enforce it in two different places and neither can see the
+    /// other:
+    ///
+    /// - **Restart** never surfaces it at all: the helm's merge rule
+    ///   (`manager::merged_status`) refuses to let an `Unknown` overwrite a
+    ///   status it already knows definitely, so the prior classification
+    ///   stays on screen across the gap.
+    /// - **Create** has no prior definite status to hold, so the client
+    ///   shows NO STATUS BADGE until the first classified status arrives
+    ///   (farhelm-ui's `status::status_badge` returns nothing for this
+    ///   variant, and the row renders no badge element at all).
+    ///
+    /// No latency is promised for that gap, and none can be: nothing in
+    /// this protocol orders a classification against the write that created
+    /// the session, so "until the first classified status arrives" is the
+    /// whole of what can honestly be said. The badge's ABSENCE is what
+    /// makes the gap harmless at any length — which is precisely why the
+    /// never-render rule, not a latency bound, is the contract.
     #[default]
     Unknown,
-    /// The agent's process is running (tmux's pane is not marked dead).
-    Alive,
+    /// The agent is alive and appears to be working — the baseline live
+    /// status, and the one a session gets whenever nothing more specific
+    /// has been established, including before it has ever been sampled.
+    ///
+    /// Alive-ness is tmux's pane being not-dead, exactly as `Alive` was
+    /// before version 10; what is NEW is the claim about activity, which is
+    /// sampled rather than observed and therefore heuristic. A consumer that
+    /// needs "is this session live" must ask that question directly (its own
+    /// liveness predicate over all three live variants), never by comparing
+    /// against this one variant — that comparison is exactly what the
+    /// version-10 split turned into a silent wrong answer.
+    Running,
+    /// The agent is alive and appears to be blocked on the user — a detected
+    /// question or an approval prompt sitting unanswered.
+    ///
+    /// This is the status the whole milestone exists for: SPEC.md's promise
+    /// is a fleet list where the sessions that need a human stand out.
+    /// Detection is per-agent-kind and best-effort by contract (the captured
+    /// tail matching a known prompt shape), so a `Waiting` that is really
+    /// idle, or an idle that is really waiting, is a cosmetic wrong answer
+    /// and never a functional one.
+    Waiting,
+    /// The agent is alive and at rest — no recent output, and nothing that
+    /// looks like a pending question.
+    ///
+    /// Deliberately distinct from `Waiting` rather than merged into one
+    /// not-running status: "finished, awaiting nothing" and "stuck on a
+    /// question nobody answered" call for opposite user actions, and
+    /// collapsing them would hide exactly the sessions the list is supposed
+    /// to surface. Distinct from `Exited` in the other direction: the agent
+    /// is still there, and typing into it still works.
+    Idle,
     /// The agent's process has ended. `exit_code` is tmux's own
     /// `#{pane_dead_status}` when parseable — `None` covers a signal
     /// death tmux cannot reduce to a plain code, and the restart-gap and
@@ -574,6 +725,39 @@ pub enum SessionStatus {
     /// nothing — including another supervisor restart on the same boot —
     /// clears it on its own.
     Interrupted,
+}
+
+impl SessionStatus {
+    /// Whether the agent behind this session is still there — the ONE
+    /// question a consumer of this enum is entitled to branch behavior on
+    /// (see the type's own docs: the live statuses differ cosmetically, and
+    /// nothing about interaction may wait on which one it is).
+    ///
+    /// Exists because `PROTOCOL_VERSION` 10 turned "is this session live"
+    /// from an equality against a single variant into a three-way question,
+    /// and every `== Alive` in the tree would otherwise have become a silent
+    /// `false` for a session that is very much alive — a wrong answer with
+    /// no compile error to announce it. Routing the question through one
+    /// predicate is what makes the NEXT such split a single edit.
+    ///
+    /// Written as an exhaustive `match` rather than a `matches!` for the
+    /// same reason farhelm-ui's mirror of this predicate is: `matches!`
+    /// would send every future variant to `false` by default, moving the
+    /// trap rather than removing it. Spelling out every arm makes a new
+    /// status a compile error here, which is where the decision belongs.
+    ///
+    /// `Unknown` is deliberately NOT live, matching SPEC.md's no-guessing
+    /// rule: an unclassified status is uncertainty, and rounding it up to a
+    /// liveness claim is precisely the guess that rule forbids.
+    pub fn is_live(&self) -> bool {
+        match self {
+            SessionStatus::Running | SessionStatus::Waiting | SessionStatus::Idle => true,
+            SessionStatus::Unknown
+            | SessionStatus::Exited { .. }
+            | SessionStatus::Error { .. }
+            | SessionStatus::Interrupted => false,
+        }
+    }
 }
 
 /// A session as the supervisor reports it. The supervisor is authoritative
@@ -617,7 +801,8 @@ pub struct SessionInfo {
     /// rejected at the boundary before a `SessionInfo` could exist.
     pub cwd: String,
     pub invocation: String,
-    /// `Unknown`/`Alive`/`Exited` are computed fresh by the supervisor on
+    /// `Unknown`, the live statuses (`Running`/`Waiting`/`Idle`), and
+    /// `Exited` are computed fresh by the supervisor on
     /// every `ListSessions` reply through LIVE tmux probing — that half of
     /// this field is never persisted, because tmux's own pane state is the
     /// only truth for a currently-reachable session, and it does not
@@ -678,6 +863,210 @@ pub struct SessionInfo {
     /// tabs known.
     #[serde(default)]
     pub tabs: Vec<TabInfo>,
+    /// The profile this session was CREATED from, if it was created from
+    /// one at all (PLAN_M6_75.md item 3). `None` means raw-created — the
+    /// session names an invocation and no profile ever shaped it — which is
+    /// also what a sender predating this field decodes to, and the two
+    /// readings agree: no profile is known for this session either way.
+    ///
+    /// See [`SourceProfile`] for the durability contract this field
+    /// implements (an immutable snapshot plus one derived existence state)
+    /// and for why the profile's CURRENT name is deliberately not here.
+    ///
+    /// Absent from EVERY session in the build that introduced it: the
+    /// supervisor's profile catalog is PLAN_M6_75.md's step 5, so at this
+    /// bump every session is raw-created and this field is `None`
+    /// everywhere on the wire. That is the same vocabulary-first shape
+    /// version 8 shipped `Hello::host_identity` under, and it makes the
+    /// absent case the one every current consumer must handle correctly.
+    pub source_profile: Option<SourceProfile>,
+}
+
+/// Which profile a session was created from, as the session itself
+/// remembers it (PLAN_M6_75.md item 3).
+///
+/// ## The snapshot rule: immutable identity, derived existence
+///
+/// SPEC.md requires that editing or deleting a profile does not disturb the
+/// sessions already created from it. This type is how that promise is kept
+/// with exactly ONE copy of the truth rather than two that could disagree:
+///
+/// - `id` and `name` are SNAPSHOTTED at creation and never rewritten. They
+///   describe what the user chose at the moment they chose it, so a session
+///   list stays stable — and filterable — under any later edit. Nothing
+///   MUTABLE lives in the snapshot.
+/// - `existence` is DERIVED when a reply is built, by one catalog lookup on
+///   `id`. Absent from the catalog means the profile was deleted; present
+///   under a different name means it was renamed.
+///
+/// The alternative — rewriting every historical session's row on a profile
+/// delete — was rejected: it destroys the record of what the session was
+/// actually created from, it is O(sessions) work on a user action that
+/// should be O(1), and it can half-fail. Deriving on read costs one catalog
+/// lookup per SNAPSHOT resolved (so a page of sessions costs one per
+/// profile-created row on it, not one for the reply) and cannot get out of
+/// step with the catalog, because it IS the catalog.
+///
+/// ## Why the CURRENT name is not carried
+///
+/// A renamed profile's new name is knowable at reply-build time, and is
+/// still deliberately absent. Carrying it would put a mutable copy of
+/// catalog state on every session row — precisely the second copy of
+/// existence truth this design exists to avoid — and it is not what a
+/// client should render anyway: a session created from "Claude Code" was
+/// created from "Claude Code", and SPEC.md's snapshot rule is a promise the
+/// list keeps saying so. A surface that genuinely needs today's name (a
+/// profile editor, say) reads the catalog, where it is authoritative.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SourceProfile {
+    /// The profile's immutable identity, as snapshotted at creation. This
+    /// is the key `existence` was derived by, and the key a client filters
+    /// or groups by — never `name`, which two profiles may share over time.
+    pub id: String,
+    /// The profile's name AS SNAPSHOTTED at creation — not its current
+    /// name, and never refreshed. See this type's own docs for why.
+    pub name: String,
+    /// What a catalog lookup on `id` found when this reply was built.
+    pub existence: ProfileExistence,
+}
+
+/// What became of the profile a session was created from, derived fresh on
+/// every reply that carries a [`SourceProfile`] (PLAN_M6_75.md item 3).
+///
+/// Never persisted anywhere: this is a statement about the catalog AT REPLY
+/// TIME, and a session row that stored it would be wrong the moment the
+/// catalog changed. A client caches it exactly as long as it caches the
+/// `SessionInfo` that carried it, and no longer.
+///
+/// Every variant is a unit variant, so — like [`RestartOffer`] and
+/// [`AgentKind`], and unlike [`SessionStatus`] — this serializes as a bare
+/// snake_case string rather than a tagged object.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ProfileExistence {
+    /// The profile still exists under the snapshotted name: what the
+    /// session says it came from is what the catalog still holds.
+    Present,
+    /// The profile still exists, under a DIFFERENT name than the one
+    /// snapshotted here. The session keeps showing its snapshotted name
+    /// (SPEC.md's rule that an edit does not touch existing sessions); this
+    /// variant is what lets a client say so honestly rather than implying
+    /// the snapshot is current.
+    Renamed,
+    /// No profile with this id is in the catalog any more. The session is
+    /// unaffected — it holds its own durable launch and resume snapshot,
+    /// which is what a restart runs — and still filters under its
+    /// snapshotted name; a client renders it as naming a profile that no
+    /// longer exists.
+    Deleted,
+}
+
+/// How many profiles one supervisor's catalog may hold (PLAN_M6_75.md items
+/// 3 and 4).
+///
+/// The bound is what makes [`ControlMsg::ListProfiles`]'s unpaginated reply
+/// SAFE rather than merely convenient: together with
+/// [`PROFILE_FIELD_CAP`] it puts a hard ceiling on `ProfileList`'s encoded
+/// size, so a catalog can never grow into a reply too large to send. That
+/// failure would be unrecoverable in the worst way — the listing is also
+/// how a client would find the profile it needs to DELETE, so a catalog
+/// that outgrew the frame limit could never be listed and therefore never
+/// be trimmed back. `profile_bounds_keep_a_full_catalog_sendable` pins the
+/// arithmetic.
+///
+/// 128 is far past any hand-curated set (SPEC.md's starter catalog is two,
+/// and a profile is something a person writes by hand), which is the point:
+/// a bound nobody legitimately reaches costs nothing and closes the hole
+/// anyway. The alternative — cursor pagination, as `ListSessions` has — was
+/// rejected as disproportionate: sessions accumulate on their own without a
+/// ceiling, while profiles do not, and paginating a picker that must show
+/// every option to be usable would buy complexity and lose nothing.
+///
+/// ENFORCEMENT is the supervisor's create/update handlers (PLAN_M6_75.md
+/// step 5): a create past this bound is refused with
+/// [`ErrorKind::InvalidRequest`] naming the limit, the same shape the
+/// supervisor's other caller-supplied bounds use. This bump only fixes the
+/// number both sides reason about — like [`DETACH_REASON_STALLED`] before
+/// its emitters existed.
+pub const MAX_PROFILES_PER_HOST: usize = 128;
+
+/// Combined byte cap on one profile's caller-supplied text — [`Profile`]'s
+/// `name` plus `invocation` plus every element of `resume_template`
+/// (PLAN_M6_75.md items 3 and 4).
+///
+/// The per-record half of the bound [`MAX_PROFILES_PER_HOST`] completes;
+/// neither alone is enough, since a catalog is oversized either by holding
+/// too many profiles or by holding a few enormous ones.
+///
+/// Deliberately SMALLER than the supervisor's `CREATE_FIELD_CAP` (64 KiB)
+/// for the equivalent per-session fields, and the asymmetry is the whole
+/// design: a session's fields are bounded because ONE reply carries them,
+/// while a profile's are multiplied by the catalog bound before they ever
+/// reach a reply. 8 KiB is still three orders of magnitude beyond a real
+/// profile (`claude --resume {conversation}` is 30 bytes), and the product
+/// with `MAX_PROFILES_PER_HOST` leaves `ProfileList` an order of magnitude
+/// of headroom under [`MAX_FRAME_LEN`] — pinned, by encoding an actual
+/// worst-case catalog rather than by multiplying, in
+/// `profile_bounds_keep_a_full_catalog_sendable`.
+pub const PROFILE_FIELD_CAP: usize = 8 * 1024;
+
+/// One agent profile as the supervisor holds it (PLAN_M6_75.md items 3 and
+/// 4): a named, editable definition of how to launch an agent, and how to
+/// resume one.
+///
+/// SPEC.md's "a fresh supervisor is not empty" makes profiles the ordinary
+/// way sessions get created — a user picks a profile rather than typing a
+/// command line — while the raw invocation path stays for the API, the e2e
+/// harness, and anyone who wants to run something a profile does not
+/// describe. Profiles are per-supervisor: they are not synced between hosts
+/// (post-v1), so a profile id only means anything to the host that minted
+/// it.
+///
+/// Deliberately NOT carrying an initial prompt: automatic prompt delivery is
+/// post-v1 and PLAN_M6_75.md keeps the field out of the schema on purpose,
+/// so that a later decision about how prompts are delivered is not
+/// pre-empted by a field nothing fills.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Profile {
+    /// Supervisor-minted opaque identity, stable across every rename. This
+    /// is what a create names ([`ControlMsg::CreateSession::profile_id`])
+    /// and what a session's [`SourceProfile`] snapshots; clients echo it
+    /// back and never parse it. Distinct from `name` on purpose: a name is
+    /// the user's label and changes, an id is the reference and does not.
+    pub id: String,
+    /// The user's label for this profile, shown in pickers and in the
+    /// session list. Mutable — an edit changes it, and every session
+    /// already created from this profile keeps the name it snapshotted.
+    pub name: String,
+    /// The launch invocation, as one shell-parsed command line — the same
+    /// spelling and the same parsing rules as
+    /// [`ControlMsg::CreateSession::invocation`], because that is exactly
+    /// what a profile-backed create resolves this into.
+    pub invocation: String,
+    /// Which integrated agent this profile IS, or [`AgentKind::Generic`]
+    /// for a profile that names no kind — SPEC.md's "profiles without a
+    /// kind get generic treatment", spelled explicitly.
+    ///
+    /// Required rather than `Option`, unlike
+    /// [`ControlMsg::CreateSession::agent_kind`]'s tri-state, and the
+    /// difference is real: `CreateSession`'s absence means "derive the kind
+    /// from the invocation's basename", which is a guess a raw caller may
+    /// want. A profile is never a guess — a user picked from a list, and
+    /// `Generic` is the wire spelling of "I picked none". Two ways to say
+    /// the same thing (an absent field AND a `Generic` value) would be one
+    /// way too many for a value that decides whether conversation capture
+    /// and per-kind status sharpening run at all.
+    pub agent_kind: AgentKind,
+    /// The resume invocation template, as an argv vector. `None` has TWO
+    /// outcomes, decided by `agent_kind`: for a kind with an integration
+    /// the supervisor derives that integration's default template, while
+    /// for `Generic` there is no integration to derive from and `None`
+    /// simply means no resume template — restart falls back to a fresh
+    /// launch per SPEC.md. Identical in its `{conversation}` placement
+    /// rule to [`ControlMsg::CreateSession::resume_template`] — see that
+    /// field for the exact-equality rule and for which kinds require a
+    /// placeholder.
+    pub resume_template: Option<Vec<String>>,
 }
 
 /// What restarting a session would do to the agent's conversation, as the
@@ -707,8 +1096,13 @@ pub struct SessionInfo {
 ///
 /// The other half of item 9's "know before asking" requirement — whether
 /// to SHOW a confirm-stop dialog because the agent looks still running —
-/// needed no new field here either: it is exactly `status ==
-/// SessionStatus::Alive`, already on this struct. That is deliberately
+/// needed no new field here either: it is exactly "is `status` one of the
+/// live variants", already answerable from this struct (as of
+/// `PROTOCOL_VERSION` 10 that is a three-variant question rather than an
+/// equality against `Alive` — see [`SessionStatus`]'s live split, and note
+/// that a consumer asking it by equality against ONE live variant is
+/// exactly the silent wrong answer that split introduced). That is
+/// deliberately
 /// only ever a UI-flow HINT, never an authorization, precisely because
 /// this same `SessionInfo` can go stale between being cached and a
 /// `RestartSession` actually being sent: the AUTHORIZATION to stop a
@@ -966,14 +1360,82 @@ pub enum ControlMsg {
     /// Create and launch a session. This is the one true creation path:
     /// the M1 CLI flags and any future UI dialog both land here
     /// (PLAN_M1.md: flags bypass the creation UI, never the creation API).
+    ///
+    /// ## Two modes, exactly one per request (`PROTOCOL_VERSION` 10)
+    ///
+    /// PLAN_M6_75.md item 3 gives this message a profile-backed mode
+    /// alongside the raw-invocation mode it has always had:
+    ///
+    /// - **Raw**: `invocation` names a command line, and `agent_kind` /
+    ///   `resume_template` optionally override what would be derived from
+    ///   it. `profile_id` is `None`. This mode stays — the API, the e2e
+    ///   harness, and the CLI use it, and a profile would be ceremony
+    ///   there.
+    /// - **Profile**: `profile_id` names one of the target host's profiles
+    ///   and the SUPERVISOR resolves every launch-shaping value from it.
+    ///   `invocation`, `agent_kind` and `resume_template` are all `None`.
+    ///
+    /// **A request naming BOTH modes is refused with
+    /// [`ErrorKind::InvalidRequest`], and so is one naming NEITHER.** The
+    /// exclusivity is stated here and enforced by the supervisor's create
+    /// handler rather than made structurally impossible by the type,
+    /// deliberately: a hybrid — a profile plus a hand-written override —
+    /// is exactly the request whose meaning nobody can pin down (does the
+    /// override win? does the session's snapshot then still belong to the
+    /// profile it names?), and the honest answer to an ambiguous request is
+    /// a refusal, not a precedence rule invented at the handler. Refusing
+    /// it explicitly also means the refusal has a MESSAGE, which a type
+    /// that simply could not express the request would not.
+    ///
+    /// The chosen mode and the profile identity BOTH join the idempotency
+    /// fingerprint (`intent_key` below): a retry that flips modes, or names
+    /// a different profile, is a different request and is refused as a key
+    /// reuse rather than silently launching the other thing.
+    ///
+    /// A profile-mode create names a profile that may have been deleted
+    /// between the picker read and the submit — a real race, not a
+    /// theoretical one — and that is a visible failure with no session
+    /// created, never a silent fall back to some other profile
+    /// (PLAN_M6_75.md item 4, checked before launch).
     CreateSession {
         req_id: u64,
         /// Working directory to launch the agent in. UTF-8-only (see the
         /// module-level "Paths are UTF-8-only" note); the sender must
         /// reject a non-UTF-8 host path before it ever reaches this
         /// field, not launder it through a lossy conversion.
+        ///
+        /// Required in BOTH modes: a profile says what to run, never where.
+        /// SPEC.md's session identity is an agent in a directory, and the
+        /// directory is always the caller's choice.
         cwd: String,
-        invocation: String,
+        /// The agent command line, in RAW mode. `None` selects profile
+        /// mode, where the profile supplies it — see this variant's own
+        /// docs for the exclusivity contract.
+        ///
+        /// Was a required `String` before `PROTOCOL_VERSION` 10, which is
+        /// part of what forced that bump. A profile-mode request reaches a
+        /// v9 peer as `"invocation": null` — the key is PRESENT, since this
+        /// crate's encoder never omits an `Option` — and a required
+        /// `String` refuses a null outright. (Absence would have been the
+        /// lenient case; this is not that case, which is what makes the
+        /// refusal dependable.) The other direction is safe: a v9 request
+        /// decoded here is a raw create exactly as it always was. The
+        /// handshake is what keeps the unsafe direction from happening at
+        /// all.
+        invocation: Option<String>,
+        /// The profile to create from, in PROFILE mode — a [`Profile::id`]
+        /// belonging to the supervisor being asked (profiles are
+        /// per-host and never synced, so an id from another host means
+        /// nothing here). `None` selects raw mode.
+        ///
+        /// A REMEMBERED default profile is not on this wire and never will
+        /// be: the helm owns per-host last-used defaults in helm.db and
+        /// resolves one into a concrete id before sending, so the
+        /// supervisor only ever sees a definite choice. That keeps
+        /// defaulting policy — including SPEC.md's ask-don't-guess rule
+        /// when the remembered profile is gone — in the one component that
+        /// can actually ask the user.
+        profile_id: Option<String>,
         title: Option<String>,
         cols: u16,
         rows: u16,
@@ -982,7 +1444,12 @@ pub enum ControlMsg {
         /// every session-shaping field (this struct's fields below
         /// included, but never `cols`/`rows` — those shape the
         /// attachment, not the session) replays the original outcome
-        /// instead of launching a second process. `None` preserves
+        /// instead of launching a second process. As of
+        /// `PROTOCOL_VERSION` 10 the SELECTED MODE and the profile
+        /// identity are part of that fingerprint too, which is what makes
+        /// a retry unable to flip a raw create into a profile create (or
+        /// into a different profile) under cover of the same key — it is
+        /// refused as a key reuse instead. `None` preserves
         /// pre-M3 behavior exactly: every request is its own create, with
         /// no deduplication — the safe default for raw API callers (curl,
         /// an older UI build) that never learned this field exists, so
@@ -997,14 +1464,20 @@ pub enum ControlMsg {
         /// wrapper script); `Some(Generic)` forces it OFF even when the
         /// basename would have matched — see `AgentKind::Generic`'s own
         /// docs for why that direction needs an explicit value rather
-        /// than reusing absence. No UI surface sends this yet — the UI
-        /// sends `None` and lets derivation run; this field exists for
-        /// the API and for M6.75's future profile system to feed richer
-        /// values through the same slot.
+        /// than reusing absence.
+        ///
+        /// RAW MODE ONLY. A profile already states its kind
+        /// ([`Profile::agent_kind`], where `Generic` is the explicit "no
+        /// kind" spelling), so this field alongside a `profile_id` is one
+        /// of the both-modes requests refused as invalid — see this
+        /// variant's own docs.
         agent_kind: Option<AgentKind>,
         /// Explicit override of the resume invocation template PLAN_M3.md
         /// item 7 would otherwise default from `invocation`'s first
-        /// token. Structured as an argv vector, not a shell string, so a
+        /// token. RAW MODE ONLY, for `agent_kind`'s reason directly above:
+        /// a profile carries its own [`Profile::resume_template`], and
+        /// naming both is a refused request rather than an override.
+        /// Structured as an argv vector, not a shell string, so a
         /// path containing spaces survives without quoting heroics, and
         /// `{conversation}` substitutes into its own argv slot rather
         /// than into a string that would need escaping.
@@ -1033,7 +1506,7 @@ pub enum ControlMsg {
     /// remain visible as terminal diagnostics for future classification.
     ///
     /// Consequently `session.status` here is `SessionStatus::Unknown`, not
-    /// `Alive` — a create-time placeholder consistent with the paragraph
+    /// a live status — a create-time placeholder consistent with the paragraph
     /// above, since a fast-exiting command can already be dead by the time
     /// this reply reaches the caller. `ListSessions` computes the real
     /// answer from tmux (`service.rs`'s `session_status`); nothing about
@@ -1185,8 +1658,10 @@ pub enum ControlMsg {
     /// sent.
     ///
     /// Deciding whether to SHOW a confirm-stop dialog is client-side UI
-    /// flow, derived from `status == SessionStatus::Alive` on whatever
-    /// `SessionInfo` the client last saw. But that derivation is only a
+    /// flow, derived from whether `status` is one of [`SessionStatus`]'s
+    /// live variants on whatever `SessionInfo` the client last saw (a
+    /// three-way question since version 10's live split, never an equality
+    /// against a single variant). But that derivation is only a
     /// hint, not an authorization: it can be stale by the time this
     /// message actually arrives (another client's action, or the agent
     /// exiting or relaunching in the interim), so `stop_if_running`
@@ -1300,6 +1775,96 @@ pub enum ControlMsg {
     /// echoing the rest of it stale would hand the caller a `SessionInfo`
     /// that lies about everything but the one field this request changed.
     SessionRenamed { req_id: u64, session: SessionInfo },
+    /// Every profile this supervisor holds (PLAN_M6_75.md item 3), ordered
+    /// by [`Profile::id`] ASCENDING.
+    ///
+    /// The order is stated rather than left to whatever the storage layer
+    /// happens to return: a contract-free order is one clients depend on
+    /// anyway and a query plan changes underneath them. By id rather than
+    /// by name because ids are immutable — the list does not reshuffle when
+    /// a profile is renamed — and a client wanting the user's alphabet
+    /// sorts locally, where it knows the locale.
+    ///
+    /// Unpaginated, unlike `ListSessions`, and that is arithmetic rather
+    /// than optimism: [`MAX_PROFILES_PER_HOST`] and [`PROFILE_FIELD_CAP`]
+    /// together cap what this reply can encode to, far below
+    /// [`MAX_FRAME_LEN`], so one page is ALWAYS enough. See
+    /// `MAX_PROFILES_PER_HOST`'s own docs for why pagination would be the
+    /// wrong trade for a hand-curated catalog, and for what an unbounded
+    /// one would cost: a catalog too large to list is also too large to
+    /// trim, since the listing is how a client finds what to delete.
+    ListProfiles { req_id: u64 },
+    /// Reply to `ListProfiles`.
+    ProfileList { req_id: u64, profiles: Vec<Profile> },
+    /// Define a new profile. The supervisor mints its [`Profile::id`] —
+    /// which is why this carries the fields rather than a whole [`Profile`]
+    /// with a placeholder id — exactly as `CreateSession` lets the
+    /// supervisor mint a session id.
+    ///
+    /// `name` is caller data and gets `RenameSession`'s treatment, for
+    /// `RenameSession`'s reasons: a control character is refused rather
+    /// than sanitized, and the field is capped. Names are NOT required to
+    /// be unique — two profiles may share a name, since `id` is what
+    /// anything actually references, and refusing a duplicate name would
+    /// turn a cosmetic collision into a workflow dead end.
+    ///
+    /// TWO BOUNDS apply here and to `UpdateProfile`, and both are refused
+    /// with [`ErrorKind::InvalidRequest`] naming the limit: this record's
+    /// own text against [`PROFILE_FIELD_CAP`], and — for a create, which is
+    /// the only verb that grows the catalog — the catalog's size against
+    /// [`MAX_PROFILES_PER_HOST`]. They are what keep `ProfileList`
+    /// sendable; see that variant's docs for why an unbounded catalog is a
+    /// trap rather than merely untidy.
+    CreateProfile {
+        req_id: u64,
+        name: String,
+        invocation: String,
+        agent_kind: AgentKind,
+        resume_template: Option<Vec<String>>,
+    },
+    /// Success reply to `CreateProfile`, carrying the profile as stored —
+    /// including the id the supervisor just minted, which the caller has no
+    /// other way to learn.
+    ProfileCreated { req_id: u64, profile: Profile },
+    /// Replace a profile's definition wholesale, keyed by
+    /// [`Profile::id`]. Every field except the id is mutable; the id is
+    /// what makes this an edit rather than a create, and a `profile` naming
+    /// an id the catalog does not hold is `NotFound`.
+    ///
+    /// A FULL replacement rather than a patch of changed fields: a profile
+    /// is small, a client editing one already holds all of it, and
+    /// per-field optionality would make "clear the resume template" and
+    /// "leave the resume template alone" the same request.
+    ///
+    /// Concurrent edits are last-write-wins with no version token, exactly
+    /// as `RenameSession` is and for the same reason — see that variant's
+    /// docs. **Nothing about an edit touches sessions already created from
+    /// this profile**: their launch and resume snapshots are their own
+    /// (SPEC.md's snapshot rule), and their [`SourceProfile`] keeps the
+    /// name it snapshotted, reporting [`ProfileExistence::Renamed`] once
+    /// this edit changes the name out from under it.
+    UpdateProfile { req_id: u64, profile: Profile },
+    /// Success reply to `UpdateProfile`, carrying the profile as stored.
+    /// Echoed back rather than acknowledged bare for `SessionRenamed`'s
+    /// reason: the caller gets the authoritative answer instead of an ack
+    /// it must follow with a read.
+    ProfileUpdated { req_id: u64, profile: Profile },
+    /// Remove a profile from the catalog. Deleting a profile NEVER touches
+    /// the sessions created from it — they keep running, keep their durable
+    /// launch and resume snapshots, and keep filtering under the name they
+    /// snapshotted; what changes is that their [`SourceProfile::existence`]
+    /// starts reporting [`ProfileExistence::Deleted`].
+    ///
+    /// Deleting an unknown id is `NotFound` rather than a silent success:
+    /// unlike `StopSession`'s "make sure nothing is running", there is no
+    /// weaker reading of "delete this profile" that an absent profile
+    /// already satisfies for the caller — a client asking to delete
+    /// something that is not there is working from a stale catalog and
+    /// should be told.
+    DeleteProfile { req_id: u64, profile_id: String },
+    /// Acknowledges `DeleteProfile`: the profile is gone from the catalog.
+    /// Carries no profile — there is nothing left to describe.
+    ProfileDeleted { req_id: u64 },
     /// Open a terminal tab: a plain shell in the session's working
     /// directory, as a new window on the session's tmux session
     /// (PLAN_M4.md item 2). Refused — with the session untouched — when
@@ -1738,6 +2303,10 @@ impl ControlMsg {
             | ControlMsg::SessionDeleted { req_id, .. }
             | ControlMsg::SessionRestarted { req_id, .. }
             | ControlMsg::SessionRenamed { req_id, .. }
+            | ControlMsg::ProfileList { req_id, .. }
+            | ControlMsg::ProfileCreated { req_id, .. }
+            | ControlMsg::ProfileUpdated { req_id, .. }
+            | ControlMsg::ProfileDeleted { req_id, .. }
             | ControlMsg::Attached { req_id, .. }
             | ControlMsg::TabOpened { req_id, .. }
             | ControlMsg::TabClosed { req_id, .. }
@@ -1754,6 +2323,10 @@ impl ControlMsg {
             | ControlMsg::DeleteSession { .. }
             | ControlMsg::RestartSession { .. }
             | ControlMsg::RenameSession { .. }
+            | ControlMsg::ListProfiles { .. }
+            | ControlMsg::CreateProfile { .. }
+            | ControlMsg::UpdateProfile { .. }
+            | ControlMsg::DeleteProfile { .. }
             | ControlMsg::OpenTab { .. }
             | ControlMsg::CloseTab { .. }
             | ControlMsg::Attach { .. }
@@ -2401,6 +2974,7 @@ mod tests {
             annotation: None,
             restart_offer: RestartOffer::default(),
             tabs: Vec::new(),
+            source_profile: None,
         };
         assert_eq!(
             serde_json::to_value(&info).unwrap()["created_at"],
@@ -2410,14 +2984,21 @@ mod tests {
 
     /// `PROTOCOL_VERSION` is a load-bearing constant (see the const's own
     /// docs for the M2 bump to 3, the M2.5 bump to 4, the M3 bump to 5,
-    /// the M4 bump to 6, the M5 bump to 7, the M6 bump to 8, and the
-    /// non-displacing attach's bump to 9): pinning its value here makes an
+    /// the M4 bump to 6, the M5 bump to 7, the M6 bump to 8, the
+    /// non-displacing attach's bump to 9, and the M6.75 bump to 10):
+    /// pinning its value here makes an
     /// accidental re-bump (or a forgotten one, if a later change needed
     /// it) a loud test failure rather than a silent drift discovered only
     /// by two builds refusing to talk to each other.
+    ///
+    /// The version-skew tests in the helm and the farhelm e2e suite are
+    /// deliberately written against `PROTOCOL_VERSION ± 1` rather than
+    /// against a literal, so they FOLLOW this constant instead of needing
+    /// an edit per bump; this test is the one place the number itself is
+    /// asserted.
     #[test]
-    fn protocol_version_is_pinned_at_9() {
-        assert_eq!(PROTOCOL_VERSION, 9);
+    fn protocol_version_is_pinned_at_10() {
+        assert_eq!(PROTOCOL_VERSION, 10);
     }
 
     /// Pins the decode half of the failure PLAN_M2_5.md's version bump
@@ -2663,49 +3244,159 @@ mod tests {
         );
     }
 
-    /// `SessionStatus`'s now FIVE variants and SIX distinct JSON shapes
+    /// `SessionStatus`'s now SEVEN variants and EIGHT distinct JSON shapes
     /// (`Exited` alone has two: `exit_code` present vs. `null`) are
-    /// PLAN_M2.md's and PLAN_M3.md's "Proto growth" wire additions, pinned
-    /// exactly like `ErrorKind`'s variants above: an `#[serde(tag = ...)]`
-    /// or variant-naming change here would compile and round-trip cleanly
-    /// while quietly producing bytes an unmodified peer cannot parse. All
-    /// shapes matter individually because `Exited` and `Error` both have
-    /// internally-tagged fields that flatten into the same object as the
-    /// `state` tag — a detail `serde_json::to_value` equality alone makes
-    /// visible, unlike a bare round-trip. `Error` and `Interrupted` are the
-    /// PLAN_M3.md item 3/2 additions that forced `PROTOCOL_VERSION` to 5.
+    /// PLAN_M2.md's, PLAN_M3.md's and PLAN_M6_75.md's "Proto growth" wire
+    /// changes, pinned exactly like `ErrorKind`'s variants above: an
+    /// `#[serde(tag = ...)]` or variant-naming change here would compile and
+    /// round-trip cleanly while quietly producing bytes an unmodified peer
+    /// cannot parse. All shapes matter individually because `Exited` and
+    /// `Error` both have internally-tagged fields that flatten into the same
+    /// object as the `state` tag — a detail `serde_json::to_value` equality
+    /// alone makes visible, unlike a bare round-trip. `Error` and
+    /// `Interrupted` are the PLAN_M3.md item 3/2 additions that forced
+    /// `PROTOCOL_VERSION` to 5; `Running`/`Waiting`/`Idle` are version 10's
+    /// live split, and `alive` is gone from this list entirely, which is the
+    /// half of that change no round-trip test can show.
+    ///
+    /// Structured as ONE match per value whose arms ARE the golden
+    /// assertions, the shape
+    /// `agent_kind_restart_and_terminal_selector_vocabulary_json_shapes_are_pinned`
+    /// settled on and for its reason: a separate fixture list plus a
+    /// separate exhaustive match lets a new variant be "covered" by an empty
+    /// arm with no golden value attached anywhere. Here the arm IS the
+    /// pinning, so the compiler's demand for an arm is a demand for a wire
+    /// shape.
     #[test]
     fn session_status_json_shapes_are_pinned() {
-        assert_eq!(
-            serde_json::to_value(SessionStatus::Alive).unwrap(),
-            serde_json::json!({ "state": "alive" })
-        );
-        assert_eq!(
-            serde_json::to_value(SessionStatus::Exited { exit_code: Some(3) }).unwrap(),
-            serde_json::json!({ "state": "exited", "exit_code": 3 })
-        );
-        assert_eq!(
-            serde_json::to_value(SessionStatus::Exited { exit_code: None }).unwrap(),
-            serde_json::json!({ "state": "exited", "exit_code": null })
-        );
-        assert_eq!(
-            serde_json::to_value(SessionStatus::Unknown).unwrap(),
-            serde_json::json!({ "state": "unknown" })
-        );
-        assert_eq!(
-            serde_json::to_value(SessionStatus::Error {
-                detail: "exec: no such file or directory".to_string()
-            })
-            .unwrap(),
-            serde_json::json!({
-                "state": "error",
-                "detail": "exec: no such file or directory",
-            })
-        );
-        assert_eq!(
-            serde_json::to_value(SessionStatus::Interrupted).unwrap(),
-            serde_json::json!({ "state": "interrupted" })
-        );
+        for status in [
+            SessionStatus::Unknown,
+            SessionStatus::Running,
+            SessionStatus::Waiting,
+            SessionStatus::Idle,
+            SessionStatus::Exited { exit_code: Some(3) },
+            SessionStatus::Exited { exit_code: None },
+            SessionStatus::Error {
+                detail: "exec: no such file or directory".to_string(),
+            },
+            SessionStatus::Interrupted,
+        ] {
+            let expected = match &status {
+                SessionStatus::Unknown => serde_json::json!({ "state": "unknown" }),
+                SessionStatus::Running => serde_json::json!({ "state": "running" }),
+                SessionStatus::Waiting => serde_json::json!({ "state": "waiting" }),
+                SessionStatus::Idle => serde_json::json!({ "state": "idle" }),
+                SessionStatus::Exited { exit_code } => {
+                    serde_json::json!({ "state": "exited", "exit_code": exit_code })
+                }
+                SessionStatus::Error { detail } => {
+                    serde_json::json!({ "state": "error", "detail": detail })
+                }
+                SessionStatus::Interrupted => serde_json::json!({ "state": "interrupted" }),
+            };
+            assert_eq!(serde_json::to_value(&status).unwrap(), expected);
+            // Both directions against the golden value itself: encoding it
+            // and decoding it are separate claims, and only the pair rules
+            // out a coordinated drift that still agrees with itself.
+            assert_eq!(
+                serde_json::from_value::<SessionStatus>(expected).unwrap(),
+                status
+            );
+        }
+    }
+
+    /// [`SessionStatus::is_live`] answers for every variant, once.
+    ///
+    /// A table rather than scattered asserts, mirroring farhelm-ui's
+    /// `status_truth_table`: the compiler already forces the predicate's
+    /// match to grow when a status is added, and this is what forces
+    /// someone to say out loud what the new status MEANS rather than
+    /// picking whichever arm compiles. The three live statuses answering
+    /// alike is the whole point — a consumer must never be able to tell
+    /// them apart through this predicate.
+    #[test]
+    fn is_live_answers_for_every_status() {
+        for (status, live) in [
+            (SessionStatus::Running, true),
+            (SessionStatus::Waiting, true),
+            (SessionStatus::Idle, true),
+            (SessionStatus::Unknown, false),
+            (SessionStatus::Exited { exit_code: Some(0) }, false),
+            (SessionStatus::Exited { exit_code: None }, false),
+            (
+                SessionStatus::Error {
+                    detail: "exec failed".to_string(),
+                },
+                false,
+            ),
+            (SessionStatus::Interrupted, false),
+        ] {
+            assert_eq!(
+                status.is_live(),
+                live,
+                "{status:?} must{} be live",
+                if live { "" } else { " not" }
+            );
+        }
+    }
+
+    /// The live split's REMOVAL half (PLAN_M6_75.md item 3), which the
+    /// golden test above cannot state: `alive` is no longer decodable at
+    /// all. A v9 peer's `SessionInfo` is the only thing that would ever
+    /// carry it, and such a peer is refused at the handshake — so this
+    /// pins the failure the bump exists to cause, exactly as
+    /// `interrupted_and_error_status_fail_under_a_legacy_v4_decoder` pins
+    /// the mirror-image failure for version 5's additions.
+    ///
+    /// The direction matters: a decoder that silently DEFAULTED an
+    /// unrecognized `alive` to `Unknown` would turn a version skew into a
+    /// fleet of sessions with no status at all, which reads as a product
+    /// bug rather than as the version problem it is.
+    #[test]
+    fn the_removed_alive_status_no_longer_decodes() {
+        serde_json::from_value::<SessionStatus>(serde_json::json!({ "state": "alive" }))
+            .expect_err("`alive` was REPLACED at version 10, not kept as a tolerated alias");
+    }
+
+    /// The other side of the same skew: a decoder shaped like a genuine v9
+    /// peer — one that only ever knew `alive` — must FAIL on each of the
+    /// three live statuses version 10 introduced, rather than defaulting or
+    /// ignoring them. Without this, "the split forced a bump" would be an
+    /// assertion rather than a tested property.
+    #[derive(Debug, Deserialize)]
+    #[serde(tag = "state", rename_all = "snake_case")]
+    enum LegacyV9SessionStatus {
+        Unknown,
+        Alive,
+        #[allow(dead_code)]
+        Exited {
+            exit_code: Option<i32>,
+        },
+        Error {
+            #[allow(dead_code)]
+            detail: String,
+        },
+        Interrupted,
+    }
+
+    #[test]
+    fn the_split_live_statuses_fail_under_a_legacy_v9_decoder() {
+        for status in [
+            SessionStatus::Running,
+            SessionStatus::Waiting,
+            SessionStatus::Idle,
+        ] {
+            let json = serde_json::to_value(status).unwrap();
+            serde_json::from_value::<LegacyV9SessionStatus>(json).unwrap_err();
+        }
+        // The unchanged statuses still cross that boundary, which is what
+        // makes the failures above about the SPLIT rather than about the
+        // shadow decoder being broken.
+        for status in [SessionStatus::Unknown, SessionStatus::Interrupted] {
+            let json = serde_json::to_value(status).unwrap();
+            serde_json::from_value::<LegacyV9SessionStatus>(json)
+                .expect("statuses that version 10 did not touch must still decode");
+        }
     }
 
     /// PLAN_M3 review batch item 28: proves the FAILURE the whole
@@ -2938,6 +3629,7 @@ mod tests {
                 annotation: None,
                 restart_offer: RestartOffer::default(),
                 tabs: Vec::new(),
+                source_profile: None,
             }],
             total: 3,
             next_cursor: Some("cursor-after-s1".to_string()),
@@ -2990,6 +3682,7 @@ mod tests {
             annotation: None,
             restart_offer: RestartOffer::default(),
             tabs: Vec::new(),
+            source_profile: None,
         };
         assert_eq!(
             serde_json::to_value(&bare).unwrap(),
@@ -3003,6 +3696,7 @@ mod tests {
                 "annotation": null,
                 "restart_offer": "fresh_only",
                 "tabs": [],
+                "source_profile": null,
             })
         );
 
@@ -3040,7 +3734,7 @@ mod tests {
             "title": "demo",
             "cwd": "/tmp",
             "invocation": "agent",
-            "status": { "state": "alive" },
+            "status": { "state": "running" },
         });
         let decoded: SessionInfo = serde_json::from_value(old_shape).unwrap();
         assert_eq!(decoded.annotation, None);
@@ -3073,7 +3767,7 @@ mod tests {
             created_at: 1_700_000_000,
             cwd: "/tmp".to_string(),
             invocation: "agent".to_string(),
-            status: SessionStatus::Alive,
+            status: SessionStatus::Running,
             annotation: None,
             restart_offer: RestartOffer::default(),
             tabs: vec![
@@ -3084,6 +3778,7 @@ mod tests {
                     id: "t2".to_string(),
                 },
             ],
+            source_profile: None,
         };
         assert_eq!(
             serde_json::to_value(&info).unwrap()["tabs"],
@@ -3117,7 +3812,7 @@ mod tests {
                         "title": "demo",
                         "cwd": "/tmp",
                         "invocation": "agent",
-                        "status": { "state": "alive" },
+                        "status": { "state": "running" },
                         "future_field_inside_session": "value from tomorrow",
                     }
                 ],
@@ -3134,7 +3829,7 @@ mod tests {
         };
         assert_eq!(sessions.len(), 1);
         assert_eq!(sessions[0].id, "s1");
-        assert_eq!(sessions[0].status, SessionStatus::Alive);
+        assert_eq!(sessions[0].status, SessionStatus::Running);
     }
 
     /// PLAN_M4.md item 1's `TerminalSelector` is itself a nested object
@@ -3291,7 +3986,7 @@ mod tests {
                         "title": "demo",
                         "cwd": "/tmp",
                         "invocation": "agent",
-                        "status": { "state": "alive" },
+                        "status": { "state": "running" },
                         "tabs": [{"id": "t1"}, {"id": "t2"}, {"id": "t3"}],
                     }
                 ],
@@ -3406,13 +4101,15 @@ mod tests {
     /// `CreateSession`'s three PLAN_M3.md additions (`intent_key`,
     /// `agent_kind`, `resume_template`) golden-pinned with every one of
     /// them present, matching the treatment every other message shape in
-    /// this file gets.
+    /// this file gets — now in the RAW mode `PROTOCOL_VERSION` 10 named,
+    /// with `profile_id` explicitly null beside a present `invocation`.
     #[test]
     fn create_session_snapshot_override_fields_json_shape_is_pinned() {
         let msg = ControlMsg::CreateSession {
             req_id: 1,
             cwd: "/some/dir".to_string(),
-            invocation: "/opt/bin/claude".to_string(),
+            invocation: Some("/opt/bin/claude".to_string()),
+            profile_id: None,
             title: None,
             cols: 80,
             rows: 24,
@@ -3431,6 +4128,7 @@ mod tests {
                 "req_id": 1,
                 "cwd": "/some/dir",
                 "invocation": "/opt/bin/claude",
+                "profile_id": null,
                 "title": null,
                 "cols": 80,
                 "rows": 24,
@@ -3439,6 +4137,88 @@ mod tests {
                 "resume_template": ["/opt/bin/claude", "--resume", "{conversation}"],
             })
         );
+    }
+
+    /// The PROFILE mode of the same message (PLAN_M6_75.md item 3),
+    /// golden-pinned as its own shape because it is the one this bump
+    /// actually introduces: `profile_id` present, and `invocation`,
+    /// `agent_kind` and `resume_template` all null — the request a client
+    /// sends when the user picked a profile rather than typing a command.
+    ///
+    /// Pinned in both directions against the golden value, since a
+    /// profile-mode create is the shape with no legacy sender to have
+    /// established it by precedent: encode must produce exactly this, and
+    /// this must decode back.
+    #[test]
+    fn create_session_profile_mode_json_shape_is_pinned() {
+        let msg = ControlMsg::CreateSession {
+            req_id: 2,
+            cwd: "/some/dir".to_string(),
+            invocation: None,
+            profile_id: Some("prof-7".to_string()),
+            title: Some("demo".to_string()),
+            cols: 80,
+            rows: 24,
+            intent_key: Some("intent-abc".to_string()),
+            agent_kind: None,
+            resume_template: None,
+        };
+        let expected = serde_json::json!({
+            "type": "create_session",
+            "req_id": 2,
+            "cwd": "/some/dir",
+            "invocation": null,
+            "profile_id": "prof-7",
+            "title": "demo",
+            "cols": 80,
+            "rows": 24,
+            "intent_key": "intent-abc",
+            "agent_kind": null,
+            "resume_template": null,
+        });
+        assert_eq!(serde_json::to_value(&msg).unwrap(), expected);
+        let golden_frame = Frame {
+            kind: FrameKind::Control,
+            channel: 0,
+            body: expected.to_string().into_bytes(),
+        };
+        assert_eq!(crate::io::parse_control(&golden_frame).unwrap(), msg);
+    }
+
+    /// The both-modes request EXISTS on the wire and decodes cleanly — it
+    /// is refused by the supervisor's create handler, not by the codec
+    /// (see `ControlMsg::CreateSession`'s own docs for why the exclusivity
+    /// is a handler rule with a message rather than a type that cannot
+    /// express the request).
+    ///
+    /// Worth pinning precisely because it is easy to "fix" in the wrong
+    /// place: a decoder that rejected this shape would move the refusal
+    /// from a correlated `InvalidRequest` a client can display into a
+    /// decode error that tears down the whole connection, taking every
+    /// unrelated session on it along. Same for the names-NEITHER shape.
+    #[test]
+    fn a_create_naming_both_modes_or_neither_still_decodes_for_the_handler_to_refuse() {
+        for (invocation, profile_id) in [
+            (Some("agent".to_string()), Some("prof-7".to_string())),
+            (None, None),
+        ] {
+            let msg = ControlMsg::CreateSession {
+                req_id: 3,
+                cwd: "/some/dir".to_string(),
+                invocation,
+                profile_id,
+                title: None,
+                cols: 80,
+                rows: 24,
+                intent_key: None,
+                agent_kind: None,
+                resume_template: None,
+            };
+            let json = serde_json::to_value(&msg).unwrap();
+            let decoded: ControlMsg = serde_json::from_value(json)
+                .expect("an ambiguous create is a request to REFUSE, not a frame to reject");
+            assert_eq!(decoded, msg);
+        }
     }
 
     /// One direction of `CreateSession`'s three new fields' additive-decode
@@ -3472,6 +4252,8 @@ mod tests {
         });
         let decoded: ControlMsg = serde_json::from_value(old_shape).unwrap();
         let ControlMsg::CreateSession {
+            invocation,
+            profile_id,
             intent_key,
             agent_kind,
             resume_template,
@@ -3483,6 +4265,20 @@ mod tests {
         assert_eq!(intent_key, None, "an old sender never had this field");
         assert_eq!(agent_kind, None, "an old sender never had this field");
         assert_eq!(resume_template, None, "an old sender never had this field");
+        // Version 10's mode selection read against a request that predates
+        // it: a bare `invocation` with no `profile_id` key IS the raw mode,
+        // which is what keeps every pre-10 caller meaning exactly what it
+        // always meant rather than becoming an ambiguous names-neither
+        // request the handler would refuse.
+        assert_eq!(
+            invocation,
+            Some("some-agent".to_string()),
+            "a required-then-optional field must still carry the value it always did"
+        );
+        assert_eq!(
+            profile_id, None,
+            "an absent profile_id selects raw mode, the only mode an older sender knows"
+        );
     }
 
     /// The REVERSE tolerance direction (PLAN_M3 review batch item 7),
@@ -3511,7 +4307,12 @@ mod tests {
         let new_msg = ControlMsg::CreateSession {
             req_id: 6,
             cwd: "/some/dir".to_string(),
-            invocation: "/opt/bin/claude".to_string(),
+            // RAW mode deliberately: a legacy decoder's `invocation` is a
+            // required `String`, so the PROFILE mode's `null` would fail
+            // this decode outright — which is a version-10 skew hazard the
+            // handshake closes, not a tolerance this test may claim.
+            invocation: Some("/opt/bin/claude".to_string()),
+            profile_id: None,
             title: Some("demo".to_string()),
             cols: 80,
             rows: 24,
@@ -3546,6 +4347,88 @@ mod tests {
         // `SessionList` sibling test does.
         let real_decoded: ControlMsg = serde_json::from_value(json).unwrap();
         assert_eq!(real_decoded, new_msg);
+    }
+
+    /// A decoder shaped like a genuine v9 peer: every field `CreateSession`
+    /// had at `PROTOCOL_VERSION` 9, with `invocation` still a REQUIRED
+    /// `String` — which is precisely the field version 10 loosened.
+    #[derive(Debug, Deserialize)]
+    #[serde(tag = "type", rename_all = "snake_case")]
+    enum LegacyV9ControlMsg {
+        // Every field is spelled out for SHAPE fidelity even though the
+        // test below reads only `invocation`: a decoder missing fields a
+        // real v9 peer had would be tolerant in ways that peer was not,
+        // and the whole point is to model what that peer would actually do
+        // with today's bytes.
+        #[allow(dead_code)]
+        CreateSession {
+            req_id: u64,
+            cwd: String,
+            invocation: String,
+            title: Option<String>,
+            cols: u16,
+            rows: u16,
+            intent_key: Option<String>,
+            agent_kind: Option<AgentKind>,
+            resume_template: Option<Vec<String>>,
+        },
+    }
+
+    /// The skew hazard version 10's `CreateSession` actually carries, in
+    /// both directions (PLAN_M6_75.md item 3).
+    ///
+    /// A RAW create still decodes under a v9 decoder — that is the control,
+    /// and it is what makes the second half meaningful rather than a test
+    /// of a broken fixture. A PROFILE-MODE create does NOT: `invocation` is
+    /// `null`, and a required `String` cannot take a null, so the decode
+    /// fails outright.
+    ///
+    /// Failing is the RIGHT outcome, and worth pinning precisely because
+    /// the alternative sounds harmless: a decoder that tolerated the null
+    /// (an `Option` with a default, say) would hand a v9 supervisor a
+    /// create with no invocation at all and no profile it knows how to
+    /// resolve — a request whose meaning it cannot see. The handshake is
+    /// what keeps this unreachable; this test states what would happen
+    /// without it, which is the argument for the bump.
+    #[test]
+    fn a_profile_mode_create_cannot_decode_under_a_legacy_v9_decoder() {
+        let raw = ControlMsg::CreateSession {
+            req_id: 1,
+            cwd: "/some/dir".to_string(),
+            invocation: Some("agent".to_string()),
+            profile_id: None,
+            title: None,
+            cols: 80,
+            rows: 24,
+            intent_key: None,
+            agent_kind: None,
+            resume_template: None,
+        };
+        let LegacyV9ControlMsg::CreateSession { invocation, .. } =
+            serde_json::from_value(serde_json::to_value(&raw).unwrap())
+                .expect("a RAW create must still decode under a v9 decoder");
+        assert_eq!(
+            invocation, "agent",
+            "the control: version 10 did not change what a raw create looks like on the wire"
+        );
+
+        let profile_mode = ControlMsg::CreateSession {
+            req_id: 2,
+            cwd: "/some/dir".to_string(),
+            invocation: None,
+            profile_id: Some("prof-7".to_string()),
+            title: None,
+            cols: 80,
+            rows: 24,
+            intent_key: None,
+            agent_kind: None,
+            resume_template: None,
+        };
+        serde_json::from_value::<LegacyV9ControlMsg>(serde_json::to_value(&profile_mode).unwrap())
+            .expect_err(
+                "a v9 decoder must REFUSE a profile-mode create rather than read it as a create \
+             with no invocation",
+            );
     }
 
     /// `RestartSession`/`SessionRestarted` round-tripped through the real
@@ -3586,10 +4469,11 @@ mod tests {
                 created_at: 1_700_000_000,
                 cwd: "/tmp".to_string(),
                 invocation: "claude".to_string(),
-                status: SessionStatus::Alive,
+                status: SessionStatus::Running,
                 annotation: None,
                 restart_offer: RestartOffer::Resume,
                 tabs: Vec::new(),
+                source_profile: None,
             },
         };
         let mut wire = Vec::new();
@@ -3675,10 +4559,11 @@ mod tests {
                 created_at: 1_700_000_000,
                 cwd: "/tmp".to_string(),
                 invocation: "claude".to_string(),
-                status: SessionStatus::Alive,
+                status: SessionStatus::Running,
                 annotation: None,
                 restart_offer: RestartOffer::Resume,
                 tabs: Vec::new(),
+                source_profile: None,
             },
         };
         assert_eq!(
@@ -3692,10 +4577,11 @@ mod tests {
                     "created_at": 1_700_000_000,
                     "cwd": "/tmp",
                     "invocation": "claude",
-                    "status": { "state": "alive" },
+                    "status": { "state": "running" },
                     "annotation": null,
                     "restart_offer": "resume",
                     "tabs": [],
+                    "source_profile": null,
                 },
             })
         );
@@ -3788,10 +4674,11 @@ mod tests {
                         created_at: 1_700_000_000,
                         cwd: "/tmp".to_string(),
                         invocation: "claude".to_string(),
-                        status: SessionStatus::Alive,
+                        status: SessionStatus::Running,
                         annotation: None,
                         restart_offer: RestartOffer::Resume,
                         tabs: Vec::new(),
+                        source_profile: None,
                     },
                 },
                 serde_json::json!({
@@ -3803,10 +4690,11 @@ mod tests {
                         "created_at": 1_700_000_000,
                         "cwd": "/tmp",
                         "invocation": "claude",
-                        "status": { "state": "alive" },
+                        "status": { "state": "running" },
                         "annotation": null,
                         "restart_offer": "resume",
                         "tabs": [],
+                        "source_profile": null,
                     },
                 }),
             ),
@@ -3910,6 +4798,579 @@ mod tests {
             decoded.expected_generation, None,
             "an absent future field must default, never fail the decode"
         );
+    }
+
+    /// A profile with every field populated, for the golden tests below.
+    ///
+    /// A helper rather than a repeated literal because the CRUD family
+    /// carries the same record through four messages, and a fixture that
+    /// differed between them would let a golden test pass while the shapes
+    /// disagreed. `resume_template` is `Some` here deliberately: its `None`
+    /// half is pinned separately, since an absent template is what a
+    /// generic profile normally has.
+    fn a_profile() -> Profile {
+        Profile {
+            id: "prof-7".to_string(),
+            name: "Claude Code".to_string(),
+            invocation: "claude".to_string(),
+            agent_kind: AgentKind::Claude,
+            resume_template: Some(vec!["claude".to_string(), "{conversation}".to_string()]),
+        }
+    }
+
+    /// The complete profile CRUD vocabulary (PLAN_M6_75.md item 3),
+    /// golden-pinned the way the tab-lifecycle and upload families below
+    /// are: every variant's exact JSON, since a serde attribute drift on
+    /// any one of them would compile and round-trip cleanly while quietly
+    /// producing bytes an unmodified peer cannot parse.
+    ///
+    /// Each row is checked in BOTH directions against the golden value —
+    /// encode must produce it, and the LITERAL golden bytes must parse back
+    /// through `parse_control` — plus one pass through the real frame
+    /// codec, matching `replay_complete_and_rename_json_shapes_are_pinned`'s
+    /// discipline and for its reason: a re-serialization would only prove
+    /// self-agreement, and a value-level assertion cannot see a framing
+    /// drift.
+    #[test]
+    fn profile_crud_json_shapes_are_pinned() {
+        let profile_json = serde_json::json!({
+            "id": "prof-7",
+            "name": "Claude Code",
+            "invocation": "claude",
+            "agent_kind": "claude",
+            "resume_template": ["claude", "{conversation}"],
+        });
+        for (msg, expected) in [
+            (
+                ControlMsg::ListProfiles { req_id: 60 },
+                serde_json::json!({
+                    "type": "list_profiles",
+                    "req_id": 60,
+                }),
+            ),
+            (
+                ControlMsg::ProfileList {
+                    req_id: 60,
+                    profiles: vec![a_profile()],
+                },
+                serde_json::json!({
+                    "type": "profile_list",
+                    "req_id": 60,
+                    "profiles": [profile_json],
+                }),
+            ),
+            (
+                ControlMsg::CreateProfile {
+                    req_id: 61,
+                    name: "Claude Code".to_string(),
+                    invocation: "claude".to_string(),
+                    agent_kind: AgentKind::Claude,
+                    resume_template: Some(vec!["claude".to_string(), "{conversation}".to_string()]),
+                },
+                serde_json::json!({
+                    "type": "create_profile",
+                    "req_id": 61,
+                    "name": "Claude Code",
+                    "invocation": "claude",
+                    "agent_kind": "claude",
+                    "resume_template": ["claude", "{conversation}"],
+                }),
+            ),
+            (
+                ControlMsg::ProfileCreated {
+                    req_id: 61,
+                    profile: a_profile(),
+                },
+                serde_json::json!({
+                    "type": "profile_created",
+                    "req_id": 61,
+                    "profile": profile_json,
+                }),
+            ),
+            (
+                ControlMsg::UpdateProfile {
+                    req_id: 62,
+                    profile: a_profile(),
+                },
+                serde_json::json!({
+                    "type": "update_profile",
+                    "req_id": 62,
+                    "profile": profile_json,
+                }),
+            ),
+            (
+                ControlMsg::ProfileUpdated {
+                    req_id: 62,
+                    profile: a_profile(),
+                },
+                serde_json::json!({
+                    "type": "profile_updated",
+                    "req_id": 62,
+                    "profile": profile_json,
+                }),
+            ),
+            (
+                ControlMsg::DeleteProfile {
+                    req_id: 63,
+                    profile_id: "prof-7".to_string(),
+                },
+                serde_json::json!({
+                    "type": "delete_profile",
+                    "req_id": 63,
+                    "profile_id": "prof-7",
+                }),
+            ),
+            (
+                ControlMsg::ProfileDeleted { req_id: 63 },
+                serde_json::json!({
+                    "type": "profile_deleted",
+                    "req_id": 63,
+                }),
+            ),
+        ] {
+            assert_eq!(serde_json::to_value(&msg).unwrap(), expected);
+            let golden_frame = Frame {
+                kind: FrameKind::Control,
+                channel: 0,
+                body: expected.to_string().into_bytes(),
+            };
+            assert_eq!(crate::io::parse_control(&golden_frame).unwrap(), msg);
+            let mut wire = Vec::new();
+            Frame::control(&msg).encode(&mut wire).unwrap();
+            let (frame, used) = Frame::decode(&wire).unwrap().unwrap();
+            assert_eq!(used, wire.len());
+            assert_eq!(
+                serde_json::from_slice::<ControlMsg>(&frame.body).unwrap(),
+                msg
+            );
+        }
+    }
+
+    /// The bound that makes `ListProfiles` safe to leave unpaginated
+    /// (PLAN_M6_75.md item 3): a catalog at BOTH limits — the maximum
+    /// number of profiles, each at the maximum field size — must still
+    /// encode to a sendable frame, with real headroom rather than a
+    /// technical fit.
+    ///
+    /// Built as an actual `ProfileList` and actually encoded, not as
+    /// arithmetic over the constants: JSON escaping, field names, the
+    /// per-record braces and the frame header are all real bytes, and a
+    /// hand-multiplied estimate is exactly the kind of reasoning that is
+    /// wrong by a factor nobody notices until a user's catalog stops
+    /// listing. The headroom assertion mirrors `upload_consts_are_pinned`'s
+    /// treatment of `UPLOAD_CHUNK_BYTES` for the same reason: a bound that
+    /// only just fits leaves nothing for a future field on `Profile`.
+    ///
+    /// The worst case is deliberately absurd (16 MiB of text spread over
+    /// 256 profiles), which is the point of a bound: it holds for a catalog
+    /// no user would ever author, so it holds for every catalog they would.
+    #[test]
+    fn profile_bounds_keep_a_full_catalog_sendable() {
+        // Every byte of the per-profile allowance spent on `name`, the one
+        // field with no shape of its own to limit it.
+        let fattest = |id: usize| Profile {
+            id: format!("prof-{id}"),
+            name: "x".repeat(PROFILE_FIELD_CAP),
+            invocation: String::new(),
+            agent_kind: AgentKind::Generic,
+            resume_template: None,
+        };
+        let full = ControlMsg::ProfileList {
+            req_id: 1,
+            profiles: (0..MAX_PROFILES_PER_HOST).map(fattest).collect(),
+        };
+        let frame = Frame::control(&full);
+        assert!(
+            !frame.exceeds_max_len(),
+            "a catalog at both bounds must still be sendable, got {} bytes against a \
+             {MAX_FRAME_LEN}-byte limit",
+            frame.encoded_len()
+        );
+        assert!(
+            frame.encoded_len() < MAX_FRAME_LEN as usize / 2,
+            "the bounds must leave real headroom for future Profile fields, not merely fit: \
+             {} bytes",
+            frame.encoded_len()
+        );
+    }
+
+    /// A generic profile — no integration, no resume-template override — is
+    /// the other half of [`Profile`]'s shape, and the half a fresh
+    /// hand-written profile normally has. Pinned separately because both
+    /// values are easy to get wrong in the same direction: `agent_kind`
+    /// must be the explicit string `"generic"` rather than a null or an
+    /// absent key (a profile always states its kind — see that field's
+    /// docs), while `resume_template` must be a real `null` — which for
+    /// THIS fixture's `Generic` kind means no resume template at all
+    /// (there is no integration to derive a default from; see the field's
+    /// two-outcome rule).
+    #[test]
+    fn a_generic_profile_states_its_kind_and_omits_no_field() {
+        let profile = Profile {
+            id: "prof-8".to_string(),
+            name: "my script".to_string(),
+            invocation: "./run-agent.sh".to_string(),
+            agent_kind: AgentKind::Generic,
+            resume_template: None,
+        };
+        let expected = serde_json::json!({
+            "id": "prof-8",
+            "name": "my script",
+            "invocation": "./run-agent.sh",
+            "agent_kind": "generic",
+            "resume_template": null,
+        });
+        assert_eq!(serde_json::to_value(&profile).unwrap(), expected);
+        assert_eq!(
+            serde_json::from_value::<Profile>(expected).unwrap(),
+            profile
+        );
+    }
+
+    /// `SessionInfo::source_profile` and its [`ProfileExistence`] states
+    /// (PLAN_M6_75.md item 3), golden-pinned per state through the arm-IS-
+    /// the-assertion shape `session_status_json_shapes_are_pinned` uses, so
+    /// a fourth existence state cannot be added without pinning its wire
+    /// spelling here.
+    ///
+    /// The nesting is the point: this rides inside every `SessionInfo` on
+    /// every reply, so its exact key (`source_profile`) and its bare
+    /// snake_case existence string are what a client's filter and its
+    /// no-longer-exists rendering both key off.
+    #[test]
+    fn session_info_source_profile_json_shapes_are_pinned() {
+        for existence in [
+            ProfileExistence::Present,
+            ProfileExistence::Renamed,
+            ProfileExistence::Deleted,
+        ] {
+            let expected_existence = match existence {
+                ProfileExistence::Present => "present",
+                ProfileExistence::Renamed => "renamed",
+                ProfileExistence::Deleted => "deleted",
+            };
+            let info = SessionInfo {
+                id: "s1".to_string(),
+                title: "demo".to_string(),
+                created_at: 1_700_000_000,
+                cwd: "/tmp".to_string(),
+                invocation: "claude".to_string(),
+                status: SessionStatus::Running,
+                annotation: None,
+                restart_offer: RestartOffer::default(),
+                tabs: Vec::new(),
+                source_profile: Some(SourceProfile {
+                    id: "prof-7".to_string(),
+                    name: "Claude Code".to_string(),
+                    existence,
+                }),
+            };
+            let encoded = serde_json::to_value(&info).unwrap();
+            assert_eq!(
+                encoded["source_profile"],
+                serde_json::json!({
+                    "id": "prof-7",
+                    "name": "Claude Code",
+                    "existence": expected_existence,
+                })
+            );
+            // Decode back through the whole `SessionInfo`, not just the
+            // nested value: the field's own key is half of what is being
+            // pinned, and a rename of it would leave the nested shape
+            // perfectly correct and completely unreachable.
+            let decoded: SessionInfo = serde_json::from_value(encoded).unwrap();
+            assert_eq!(decoded, info);
+        }
+    }
+
+    /// [`SourceProfile`] is a nested object on `SessionInfo`, so it needs
+    /// the same both-directions field tolerance every other nesting level
+    /// in this file has been given (`session_list_with_unknown_field_inside_session_decodes_through_parse_control`
+    /// for `SessionInfo`, `attach_with_unknown_field_inside_terminal_selector_decodes_through_parse_control`
+    /// for `TerminalSelector`, `tab_opened_with_unknown_field_inside_tab_info_decodes_through_parse_control`
+    /// for `TabInfo`). Additivity that holds at the outer level and fails
+    /// one object down is not additivity — and this object is the one most
+    /// likely to grow, since every future fact about a session's origin
+    /// belongs in it.
+    ///
+    /// Both directions, in one test because they are one property:
+    ///
+    /// - FUTURE SENDER → today's decoder: an unrecognized field inside
+    ///   `source_profile` must decode, through the REAL `parse_control`
+    ///   path rather than a hand-rolled `from_value::<SourceProfile>`,
+    ///   which would say nothing about whether `deny_unknown_fields` had
+    ///   crept in anywhere along the chain from frame bytes to
+    ///   `SessionInfo`.
+    /// - TODAY'S SENDER → future decoder: a later build that grew an
+    ///   optional field on this record must read today's bytes and default
+    ///   it, rather than refusing a snapshot that predates it.
+    #[test]
+    fn source_profile_tolerates_unknown_fields_in_both_directions() {
+        let frame = Frame {
+            kind: FrameKind::Control,
+            channel: 0,
+            body: serde_json::json!({
+                "type": "session_list",
+                "req_id": 80,
+                "sessions": [
+                    {
+                        "id": "s1",
+                        "title": "demo",
+                        "cwd": "/tmp",
+                        "invocation": "claude",
+                        "status": { "state": "running" },
+                        "source_profile": {
+                            "id": "prof-7",
+                            "name": "Claude Code",
+                            "existence": "present",
+                            "created_from_host": "value from tomorrow",
+                        },
+                    }
+                ],
+                "total": 1,
+                "next_cursor": null,
+            })
+            .to_string()
+            .into_bytes(),
+        };
+        let msg = crate::io::parse_control(&frame).expect(
+            "an unknown field nested inside a SourceProfile must decode, not error — an \
+             undecodable session list is a whole page of the fleet gone",
+        );
+        let ControlMsg::SessionList { sessions, .. } = msg else {
+            panic!("expected ControlMsg::SessionList, got {msg:?}");
+        };
+        assert_eq!(
+            sessions[0].source_profile,
+            Some(SourceProfile {
+                id: "prof-7".to_string(),
+                name: "Claude Code".to_string(),
+                existence: ProfileExistence::Present,
+            }),
+            "the fields it DOES know must survive alongside the one it ignored"
+        );
+
+        // The other direction: a later build's decoder, modelled by a
+        // shadow struct with an added optional field.
+        #[derive(serde::Deserialize)]
+        struct FutureSourceProfile {
+            id: String,
+            name: String,
+            existence: ProfileExistence,
+            #[serde(default)]
+            deleted_at: Option<i64>,
+        }
+        let today = serde_json::to_value(SourceProfile {
+            id: "prof-7".to_string(),
+            name: "Claude Code".to_string(),
+            existence: ProfileExistence::Deleted,
+        })
+        .unwrap();
+        let decoded: FutureSourceProfile = serde_json::from_value(today).unwrap();
+        assert_eq!(decoded.id, "prof-7");
+        assert_eq!(decoded.name, "Claude Code");
+        assert_eq!(decoded.existence, ProfileExistence::Deleted);
+        assert_eq!(
+            decoded.deleted_at, None,
+            "an absent future field must default, never fail the decode"
+        );
+    }
+
+    /// The absent case — which is EVERY session at this bump, since the
+    /// supervisor's profile catalog is a later step and nothing is
+    /// profile-created yet (see the field's own docs). Two spellings must
+    /// mean the same thing: an explicit `null` (what this crate's encoder
+    /// produces) and a key that never appears at all (what a sender
+    /// predating the field produces).
+    ///
+    /// This is the tolerance case the whole vocabulary-first shape rests
+    /// on: if absence decoded as anything but "raw-created", every session
+    /// in the fleet would acquire a phantom profile the day the field
+    /// shipped.
+    #[test]
+    fn an_absent_source_profile_decodes_as_raw_created_either_spelling() {
+        let with_null = serde_json::json!({
+            "id": "s1",
+            "title": "demo",
+            "created_at": 1_700_000_000,
+            "cwd": "/tmp",
+            "invocation": "agent",
+            "status": { "state": "running" },
+            "annotation": null,
+            "restart_offer": "fresh_only",
+            "tabs": [],
+            "source_profile": null,
+        });
+        let decoded: SessionInfo = serde_json::from_value(with_null).unwrap();
+        assert_eq!(decoded.source_profile, None);
+
+        // Hand-written so the key's ABSENCE is real, not an explicit null
+        // that merely renders the same in this crate's own serializer —
+        // the same reason
+        // `hello_json_decodes_with_host_identity_key_entirely_absent`
+        // exists.
+        let raw = r#"{
+            "id": "s1",
+            "title": "demo",
+            "cwd": "/tmp",
+            "invocation": "agent",
+            "status": {"state": "running"}
+        }"#;
+        let decoded: SessionInfo = serde_json::from_str(raw)
+            .expect("a SessionInfo with no source_profile key at all must still decode");
+        assert_eq!(
+            decoded.source_profile, None,
+            "an absent key must read as raw-created, exactly as an explicit null does"
+        );
+    }
+
+    /// Version 10's additive rule for FIELDS, both directions, applied to
+    /// the profile family — mirroring
+    /// `rename_session_with_future_extra_field_decodes_through_parse_control`
+    /// and `current_rename_session_decodes_under_a_future_v7_decoder_with_defaults`
+    /// for version 7's vocabulary, and pinned on ONE representative variant
+    /// for their reason: unknown-field tolerance is a property of the
+    /// enum's derive (no `deny_unknown_fields` anywhere on this path), not
+    /// of any single variant.
+    ///
+    /// `UpdateProfile` is the representative because it nests a whole
+    /// [`Profile`], which makes this cover the nesting level too — the
+    /// thing `session_list_with_unknown_field_inside_session_decodes_through_parse_control`
+    /// had to be written separately to cover for `SessionInfo`.
+    #[test]
+    fn profile_messages_tolerate_unknown_fields_in_both_directions() {
+        // Future sender -> current decoder, with the unknown field nested
+        // inside the `Profile` object rather than beside it.
+        let frame = Frame {
+            kind: FrameKind::Control,
+            channel: 0,
+            body: serde_json::json!({
+                "type": "update_profile",
+                "req_id": 70,
+                "profile": {
+                    "id": "prof-7",
+                    "name": "Claude Code",
+                    "invocation": "claude",
+                    "agent_kind": "claude",
+                    "resume_template": ["claude", "{conversation}"],
+                    "initial_prompt": "value from tomorrow",
+                },
+                "dry_run": true,
+            })
+            .to_string()
+            .into_bytes(),
+        };
+        let msg = crate::io::parse_control(&frame)
+            .expect("unknown fields, nested or not, must decode rather than error");
+        assert_eq!(
+            msg,
+            ControlMsg::UpdateProfile {
+                req_id: 70,
+                profile: a_profile(),
+            }
+        );
+
+        // Current sender -> future decoder: a later build that grew an
+        // optional field must accept today's bytes and default it.
+        #[derive(serde::Deserialize)]
+        struct FutureProfile {
+            id: String,
+            name: String,
+            #[serde(default)]
+            shared_with_hosts: Option<Vec<String>>,
+        }
+        let mut wire = Vec::new();
+        Frame::control(&ControlMsg::ProfileCreated {
+            req_id: 71,
+            profile: a_profile(),
+        })
+        .encode(&mut wire)
+        .unwrap();
+        let (frame, _) = Frame::decode(&wire).unwrap().unwrap();
+        let value: serde_json::Value = serde_json::from_slice(&frame.body).unwrap();
+        assert_eq!(value["type"], "profile_created");
+        let decoded: FutureProfile = serde_json::from_value(value["profile"].clone()).unwrap();
+        assert_eq!(decoded.id, "prof-7");
+        assert_eq!(decoded.name, "Claude Code");
+        assert_eq!(
+            decoded.shared_with_hosts, None,
+            "an absent future field must default, never fail the decode"
+        );
+    }
+
+    /// The profile family's own version-skew half: a decoder shaped like a
+    /// genuine v9 peer — which knew no profile messages at all — must FAIL
+    /// on every one of them rather than ignoring it, exactly as
+    /// `unknown_control_message_tag_fails_decode` pins for any unrecognized
+    /// tag. This is what makes "eight new tagged variants earn the bump" a
+    /// tested claim rather than a stated one; a tolerated no-op here would
+    /// mean a v9 supervisor silently swallowing profile CRUD and answering
+    /// nothing, hanging the caller.
+    ///
+    /// The POSITIVE CONTROL comes first, and it is what makes the rest of
+    /// this test mean anything: a shadow decoder that rejected everything —
+    /// a typo in its `rename_all`, a wrong tag name — would satisfy every
+    /// `expect_err` below while proving nothing at all. So the fixture is
+    /// first shown to decode a message the modelled peer DID know, with its
+    /// `req_id` read back out, before being asked to refuse the ones it did
+    /// not.
+    #[test]
+    fn profile_messages_fail_under_a_decoder_that_predates_them() {
+        // Scoped to this test and named for what it models: a decoder that
+        // knows the v9 message set and nothing else. Distinct from the
+        // module-level `LegacyV9ControlMsg`, which models the same peer's
+        // view of ONE message's fields rather than of the message set.
+        #[derive(Debug, Deserialize)]
+        #[serde(tag = "type", rename_all = "snake_case")]
+        enum V9MessageSet {
+            SessionStopped { req_id: u64 },
+        }
+
+        let known = serde_json::to_value(ControlMsg::SessionStopped { req_id: 99 }).unwrap();
+        let V9MessageSet::SessionStopped { req_id } = serde_json::from_value(known)
+            .expect("control: this decoder must accept a message the v9 peer really knew");
+        assert_eq!(
+            req_id, 99,
+            "and must read its fields, not merely match the tag — a decoder that accepted the \
+             shape while losing the contents would pass the refusals below just as vacuously"
+        );
+
+        for msg in [
+            ControlMsg::ListProfiles { req_id: 1 },
+            ControlMsg::ProfileList {
+                req_id: 1,
+                profiles: vec![a_profile()],
+            },
+            ControlMsg::CreateProfile {
+                req_id: 2,
+                name: "n".to_string(),
+                invocation: "i".to_string(),
+                agent_kind: AgentKind::Generic,
+                resume_template: None,
+            },
+            ControlMsg::ProfileCreated {
+                req_id: 2,
+                profile: a_profile(),
+            },
+            ControlMsg::UpdateProfile {
+                req_id: 3,
+                profile: a_profile(),
+            },
+            ControlMsg::ProfileUpdated {
+                req_id: 3,
+                profile: a_profile(),
+            },
+            ControlMsg::DeleteProfile {
+                req_id: 4,
+                profile_id: "prof-7".to_string(),
+            },
+            ControlMsg::ProfileDeleted { req_id: 4 },
+        ] {
+            let json = serde_json::to_value(&msg).unwrap();
+            serde_json::from_value::<V9MessageSet>(json).expect_err(
+                "a decoder predating the profile vocabulary must reject it, not ignore it",
+            );
+        }
     }
 
     /// `OpenTab`/`TabOpened` and `CloseTab`/`TabClosed` are PLAN_M4.md item
@@ -4275,6 +5736,10 @@ mod tests {
         );
         assert_eq!(ControlMsg::TabClosed { req_id: 9 }.reply_req_id(), Some(9));
         assert_eq!(
+            ControlMsg::ProfileDeleted { req_id: 10 }.reply_req_id(),
+            Some(10)
+        );
+        assert_eq!(
             ControlMsg::UploadStarted {
                 req_id: 11,
                 channel: 1
@@ -4303,6 +5768,10 @@ mod tests {
             ControlMsg::CommitUpload {
                 req_id: 11,
                 channel: 1,
+            },
+            ControlMsg::DeleteProfile {
+                req_id: 10,
+                profile_id: "prof-7".to_string(),
             },
         ] {
             assert_eq!(

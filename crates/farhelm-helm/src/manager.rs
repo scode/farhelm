@@ -1598,7 +1598,7 @@ impl Drop for AbortOnDrop {
 /// value means "not yet known" rather than "known not to be running" — so a
 /// restart's or a create's reply carries `Unknown` deliberately, because at
 /// the instant it is built the pane exists but the agent's own `exec`
-/// inside it has not been observed. Claiming `Alive` there would be a
+/// inside it has not been observed. Claiming liveness there would be a
 /// fabrication; the supervisor is right to refuse it.
 ///
 /// What follows for THIS side is that such a reply is not evidence about
@@ -4834,10 +4834,11 @@ mod tests {
             created_at,
             cwd: format!("/{id}"),
             invocation: "agent".to_string(),
-            status: SessionStatus::Alive,
+            status: SessionStatus::Running,
             annotation: None,
             restart_offer: RestartOffer::default(),
             tabs: Vec::new(),
+            source_profile: None,
         }
     }
 
