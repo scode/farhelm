@@ -59,12 +59,21 @@ use std::sync::Arc;
 use tracing::warn;
 
 /// Query parameters for `GET /api/sessions` — the helm-level page walk
-/// (PLAN_M6.md item 5).
+/// (PLAN_M6.md item 5) and, as of PLAN_M6_75.md item 5, its filters.
 ///
-/// Both absent is a fresh walk of the first [`aggregate::DEFAULT_PAGE_LIMIT`]
-/// entries, which is what every pre-M6 caller sends and what the UI in this
-/// tree still sends. That is the whole compatibility story for this route's
-/// query string: it gained two optional parameters and no required one.
+/// Everything here is absent-by-default, which is the whole compatibility
+/// story for this route's query string: it has only ever GAINED optional
+/// parameters, and a caller sending none gets a fresh unfiltered walk of the
+/// first [`aggregate::DEFAULT_PAGE_LIMIT`] entries — exactly what every
+/// pre-M6 caller sends.
+///
+/// The five filter parameters are SPEC.md's five session-list dimensions:
+/// host, directory, profile, status, title. Their match semantics live on
+/// [`store::SessionFilter`], which is also where both the persisted and the
+/// in-memory sources read them from, so there is one definition rather than
+/// one per source. A parameter present but EMPTY is treated as absent
+/// (`?title=` is what a cleared search box sends, and refusing it would make
+/// clearing the box an error).
 #[derive(Deserialize)]
 pub(crate) struct ListQuery {
     /// An opaque resume key from a previous reply's `next_cursor`. Replay
@@ -72,12 +81,100 @@ pub(crate) struct ListQuery {
     /// is a 400 rather than a silent restart from the front, because a
     /// restart would re-serve a page the caller already had while looking
     /// exactly like progress.
+    ///
+    /// A cursor and a filter travel TOGETHER on every page of one walk, and
+    /// this is ENFORCED rather than asked for: every cursor is bound to the
+    /// filter it was minted under, and replaying one under a changed, added
+    /// or cleared parameter is a 400 saying to start a fresh walk. The cursor
+    /// names a position in the order, not in a result set, so a walk whose
+    /// later pages moved the filter would resume mid-order through a
+    /// different sequence and drop every earlier match without a trace.
     cursor: Option<String>,
-    /// Maximum entries in this page. Deliberately uncapped: the merged list
-    /// is local data this process has already read, so a large page costs
-    /// serialization rather than a fan-out of host round trips. A limit of
-    /// zero is refused — it could never make progress through the pages.
+    /// Maximum entries in this page.
+    ///
+    /// Bounded twice, and the second bound is newer than this field's
+    /// original "a page is local data, so ask for what you like" reasoning:
+    /// [`aggregate::MAX_PAGE_LIMIT`] caps every request, and a FILTERED
+    /// request is capped lower again ([`aggregate::MAX_FILTERED_PAGE_LIMIT`]).
+    /// The difference is real work rather than tidiness — an unfiltered page
+    /// reads exactly the rows it returns, while a filtered one walks the
+    /// order until it has filled the page, so a big limit paired with a
+    /// selective filter is a request to scan the whole cache and decode
+    /// every row of it.
+    ///
+    /// A limit of zero is refused too — it could never make progress through
+    /// the pages.
     limit: Option<usize>,
+    /// Only sessions on this registered host (a `HostView::id`).
+    host: Option<store::HostId>,
+    /// Only sessions whose working directory CONTAINS this text, ignoring
+    /// case.
+    directory: Option<String>,
+    /// Only sessions created from this profile, named either by its id or
+    /// by the name they snapshotted at creation — which is what keeps a
+    /// DELETED profile's sessions findable. See [`store::SessionFilter`].
+    profile: Option<String>,
+    /// Only sessions in this status, spelled exactly as the wire spells it
+    /// (`running`, `waiting`, `idle`, `exited`, `error`, `interrupted`,
+    /// `unknown`). An unrecognized word is a 400 rather than an empty list:
+    /// a typo that answers "no sessions" is a lie the user will believe.
+    status: Option<String>,
+    /// Only sessions whose title CONTAINS this text, ignoring case.
+    title: Option<String>,
+}
+
+/// Build the merged view's predicate from one request's query string, or
+/// refuse it.
+///
+/// The one place the wire's spelling meets [`store::SessionFilter`].
+///
+/// The EXACTLY-EMPTY value is dropped rather than matched against, so a
+/// cleared search box widens the list instead of narrowing it to sessions
+/// whose title contains the empty string (which is all of them, but by
+/// accident rather than by intent — and would count as "filtered" for the
+/// two-totals reply).
+///
+/// Nothing else is dropped, and specifically not surrounding whitespace:
+/// a directory or a title may legitimately contain it, and a session in
+/// `/srv/my project/` or titled `fix  the  spacing` must stay findable by
+/// typing what is actually there. Trimming would also make two different
+/// searches — `" "` and `""` — into the same request, which is the one case
+/// a user can see: typing a space would silently clear the filter. The cost
+/// of not trimming is a search for `"drain "` that finds nothing, which the
+/// user can see and fix.
+fn list_filter(q: &ListQuery) -> anyhow::Result<store::SessionFilter> {
+    let present = |value: &Option<String>| -> Option<String> {
+        value
+            .as_deref()
+            .filter(|text| !text.is_empty())
+            .map(str::to_string)
+    };
+    let mut filter = store::SessionFilter::default();
+    if let Some(host) = q.host {
+        filter = filter.host(host);
+    }
+    if let Some(directory) = present(&q.directory) {
+        filter = filter.directory(&directory);
+    }
+    if let Some(profile) = present(&q.profile) {
+        filter = filter.profile(&profile);
+    }
+    if let Some(title) = present(&q.title) {
+        filter = filter.title(&title);
+    }
+    if let Some(status) = present(&q.status) {
+        let known = store::parse_status_key(&status).ok_or_else(|| {
+            anyhow::Error::new(SupervisorError {
+                kind: ErrorKind::InvalidRequest,
+                message: format!(
+                    "{status:?} is not a session status; this helm knows running, waiting, idle, \
+                     exited, error, interrupted, and unknown"
+                ),
+            })
+        })?;
+        filter = filter.status(known);
+    }
+    Ok(filter)
 }
 
 /// `GET /api/sessions` — one page of the MERGED, multi-host session list
@@ -90,11 +187,24 @@ pub(crate) struct ListQuery {
 /// the cache behind it, and nothing else.
 ///
 /// The body keeps its M2 shape (`sessions`/`total`/`truncated`) with the
-/// host fields added to each row and `next_cursor` added alongside, so the
-/// UI that predates multi-host keeps decoding it unchanged. `total` now
-/// counts the merged view rather than one supervisor's list, and
-/// `truncated` now means "there is a next page" rather than "entries were
-/// held back" — see [`aggregate::SessionPageBody`] for both.
+/// host fields added to each row and `next_cursor` and `matching` added
+/// alongside, so the UI that predates multi-host keeps decoding it
+/// unchanged. `matching` is present only for a FILTERED request — an
+/// unfiltered listing makes no matching claim, and a client that wants a
+/// number substitutes `total`, which is what it would have been handed
+/// anyway (see [`aggregate::SessionPageBody::matching`] for why equating the
+/// two would have been a small lie). `total` now counts the merged view
+/// rather than one supervisor's list, and `truncated` now means
+/// "there is a next page"
+/// rather than "entries were held back" — see [`aggregate::SessionPageBody`]
+/// for all of them, including why the filter's count is a SECOND number
+/// beside `total` rather than a redefinition of it.
+///
+/// The five filter parameters (PLAN_M6_75.md item 5) narrow the list
+/// server-side, before the page cut, which is what makes "N matching of M"
+/// coherent with a paged list at all: the alternative — a client filtering
+/// the page it was handed — hides matches beyond the cut while reporting a
+/// count that includes them.
 ///
 /// Served from what the helm has already RECORDED, never by asking hosts
 /// (see [`aggregate`]'s module docs for why the two cursor layers are
@@ -135,7 +245,39 @@ pub(crate) async fn list_sessions(
         }
         Some(limit) => limit,
     };
-    match aggregate::session_page(&state.manager, &state.store, q.cursor.as_deref(), limit).await {
+    let filter = match list_filter(&q) {
+        Ok(filter) => filter,
+        Err(e) => return http_error(e),
+    };
+    // The filtered cap, checked after the filter is known rather than
+    // guessed at from the query string: a filtered page does not read the
+    // rows it returns, it reads the order until it has filled itself, so the
+    // limit multiplies a scan rather than a slice. Refused rather than
+    // clamped, like the cap above and for the same reason — a caller that
+    // asked for 5,000 and got 500 with no way to tell has been answered
+    // dishonestly.
+    if !filter.is_empty() && limit > aggregate::MAX_FILTERED_PAGE_LIMIT {
+        return http_error(anyhow::Error::new(SupervisorError {
+            kind: ErrorKind::InvalidRequest,
+            message: format!(
+                "a filtered session list may ask for at most {} entries per page (an unfiltered \
+                 one may ask for {}); a filtered page scans the order rather than slicing it, so \
+                 the limit costs a walk rather than a copy",
+                aggregate::MAX_FILTERED_PAGE_LIMIT,
+                aggregate::MAX_PAGE_LIMIT
+            ),
+        }));
+    }
+    match aggregate::session_page(
+        &state.manager,
+        &state.store,
+        &state.counts,
+        q.cursor.as_deref(),
+        limit,
+        &filter,
+    )
+    .await
+    {
         Ok(page) => axum::Json(page).into_response(),
         Err(e) => http_error(e),
     }
@@ -352,7 +494,26 @@ fn refusal_text(host: store::HostId, state: &manager::HostState) -> String {
 #[derive(Deserialize)]
 pub(crate) struct CreateReq {
     cwd: String,
-    invocation: String,
+    /// The agent command line, in RAW mode. Absent selects PROFILE mode,
+    /// where `profile_id` supplies it (PLAN_M6_75.md item 3's two mutually
+    /// exclusive creation modes, as they reach this API).
+    ///
+    /// Optional only in the type: exactly one of `invocation` and
+    /// `profile_id` must be present, and a body naming both or neither is a
+    /// 400 (see [`create_mode`]). Kept as two fields rather than one tagged
+    /// union because that is the wire's own shape, and translating between
+    /// two spellings of the same choice would be one more place for them to
+    /// disagree.
+    invocation: Option<String>,
+    /// The profile to create from, in PROFILE mode — a `Profile::id` from
+    /// this host's own catalog (`GET /api/hosts/{id}/profiles`), since
+    /// profiles are per-supervisor and an id means nothing on another host.
+    ///
+    /// A successful profile-backed create is also what UPDATES this host's
+    /// remembered default (see [`create_session`]): "last used" means a
+    /// session was actually created from it, not that a picker was opened
+    /// on it.
+    profile_id: Option<String>,
     title: Option<String>,
     /// Which registered host to create on — a `HostView::id` from
     /// `GET /api/hosts` (PLAN_M6.md item 5).
@@ -398,6 +559,24 @@ pub(crate) struct CreateReq {
     /// derives none — only this explicit override can give one a
     /// (verbatim, placeholder-free) resume invocation.
     resume_template: Option<Vec<String>>,
+    /// Which CONNECTION the caller prepared this create against — a
+    /// `HostView::incarnation` read from `GET /api/hosts`.
+    ///
+    /// Optional, and absent means no claim is made (see
+    /// [`crate::precondition`], which carries the whole reasoning). Present,
+    /// and the create is refused with a 409 unless the host is still on that
+    /// connection when routing resolves it.
+    ///
+    /// It matters most in PROFILE mode, and that is worth stating rather than
+    /// leaving to be inferred: a profile id is minted per supervisor and every
+    /// fresh supervisor seeds the same starter profiles, so a create aimed at
+    /// `starter-claude` and landing on a host that was retargeted or adopted
+    /// mid-flight does not fail — it RESOLVES over there, launching a profile
+    /// the user never chose, and then records it as their remembered default.
+    /// Raw-mode creates accept the field too: an invocation is not
+    /// install-specific in the same way, but "run this on THAT machine" is
+    /// still a thing a caller can mean and be wrong about.
+    expected_incarnation: Option<u64>,
 }
 
 // Dimensions for a caller that has no terminal yet — the CLI, a script,
@@ -432,7 +611,13 @@ pub(crate) fn default_rows() -> u16 {
 /// helm.db lookup the owner search needs, and the manager's published status
 /// is behind a plain lock. Nothing here awaits, so nothing here should
 /// pretend it might.
-fn host_client(
+///
+/// Visible to the crate because profile CRUD (`crate::profiles`) routes the
+/// same way and for the same reasons: a profile lives on ONE supervisor, so
+/// every profile request is a request to a named host's live connection, and
+/// a second lookup path for it would be a second place to get the
+/// state-and-client pairing wrong.
+pub(crate) fn host_client(
     state: &AppState,
     host: store::HostId,
 ) -> anyhow::Result<(manager::SessionClaim, Arc<SupervisorClient>)> {
@@ -632,34 +817,217 @@ async fn forget_session(state: &AppState, claim: &manager::SessionClaim, session
 /// next refresh. It joins the LIST on that next refresh like any other
 /// session; the two are separate promises and only the first one is
 /// something a client can be surprised by.
+///
+/// ## Profile mode, and the remembered default
+///
+/// A body naming `profile_id` instead of `invocation` creates from the
+/// target host's own profile catalog (PLAN_M6_75.md item 3's second creation
+/// mode). Two consequences live here rather than on the supervisor:
+///
+/// - The helm REMEMBERS the profile as that host's last-used one, in
+///   helm.db, but only after the create SUCCEEDS. A create that failed its
+///   preconditions did not establish a preference — remembering an
+///   attempted profile would make a typo the default the next dialog
+///   suggests.
+/// - The write is best-effort and never turns a successful create into a
+///   failure. The session exists; reporting otherwise is the one outcome
+///   SPEC.md's creation contract rules out, and a lost preference costs the
+///   user one extra click.
+///
+/// A profile that no longer exists fails the create visibly, with no session
+/// anywhere, and this handler does nothing to soften that: SPEC.md's rule is
+/// to ask rather than guess, and a fallback to some other profile here would
+/// be exactly the guess it forbids.
+///
+/// ## Naming the install this create was written for
+///
+/// An optional `expected_incarnation` says which connection the caller
+/// prepared this body against, and the create is refused (409, with
+/// `crate::precondition`'s marker) unless the host is still on it. Absent
+/// means no claim, which is every pre-existing caller.
+///
+/// It exists for profile mode above all, and for a reason that makes the
+/// ordinary reading of "stale request" wrong here: profile ids are minted per
+/// supervisor and every fresh supervisor seeds the same starter profiles, so a
+/// create aimed at a profile the user picked, landing on a host that was
+/// retargeted or adopted in another tab, does not fail. It RESOLVES on the
+/// successor, launches a profile nobody chose, and records that as the
+/// remembered default. See [`crate::precondition`].
 pub(crate) async fn create_session(
     State(state): State<Arc<AppState>>,
-    axum::Json(req): axum::Json<CreateReq>,
+    axum::Json(mut req): axum::Json<CreateReq>,
 ) -> impl IntoResponse {
+    let mode = match create_mode(&mut req) {
+        Ok(mode) => mode,
+        Err(e) => return http_error(e),
+    };
     let (claim, client) = match create_target(&state, req.host) {
         Ok(target) => target,
         Err(e) => return http_error(e),
     };
-    match client
-        .create_session_with_extras(
-            &req.cwd,
-            &req.invocation,
-            req.title,
-            req.cols,
-            req.rows,
-            CreateExtras {
-                intent_key: req.intent_key,
-                agent_kind: req.agent_kind,
-                resume_template: req.resume_template,
-            },
-        )
-        .await
-    {
+    // Checked HERE, and once, because routing and claim-taking are one read
+    // for a create: `create_target` resolves the host, takes the connection,
+    // and mints the claim from the same borrow of the actor's status, so there
+    // is no interval between "which install" and "which connection" for
+    // anything to land in. What carries the check forward past the forward
+    // itself is the claim: every write this create goes on to make — the cache
+    // seed, the remembered default — revalidates it under the host's own
+    // write lock, so a connection replaced while the supervisor was answering
+    // records nothing. See `crate::precondition` on how the two compose.
+    if let Err(e) = crate::precondition::incarnation_holds(&claim, req.expected_incarnation) {
+        return http_error(e);
+    }
+    let created = match &mode {
+        CreateMode::Raw(invocation) => {
+            client
+                .create_session_with_extras(
+                    &req.cwd,
+                    invocation,
+                    req.title,
+                    req.cols,
+                    req.rows,
+                    CreateExtras {
+                        intent_key: req.intent_key,
+                        agent_kind: req.agent_kind,
+                        resume_template: req.resume_template,
+                    },
+                )
+                .await
+        }
+        CreateMode::Profile(profile_id) => {
+            client
+                .create_session_from_profile(
+                    &req.cwd,
+                    profile_id,
+                    req.title,
+                    req.cols,
+                    req.rows,
+                    req.intent_key,
+                )
+                .await
+        }
+    };
+    match created {
         Ok(session) => {
             record_session(&state, &claim, &session).await;
+            if let CreateMode::Profile(profile_id) = &mode {
+                remember_default_profile(&state, &claim, profile_id).await;
+            }
             axum::Json(session).into_response()
         }
         Err(e) => http_error(e),
+    }
+}
+
+/// Which of the two creation modes a request body selected — the choice
+/// PLAN_M6_75.md item 3 made mutually exclusive on the wire, resolved once
+/// at the REST edge.
+///
+/// Owned rather than borrowed from the body, because the mode outlives the
+/// request that produced it: it decides which call to make, and is consulted
+/// AGAIN after the reply lands (only a PROFILE create writes a remembered
+/// default), by which point the body's other fields have been moved into the
+/// call. Taken out of the body rather than cloned — nothing else reads them
+/// afterwards.
+enum CreateMode {
+    Raw(String),
+    Profile(String),
+}
+
+/// Resolve a create body's mode, refusing the two ambiguous shapes.
+///
+/// Both refusals are `InvalidRequest` — a 400 — and both are worth making
+/// loudly rather than picking a winner. A body naming BOTH has no honest
+/// reading (does the profile's invocation win, or the caller's?), which is
+/// the same reasoning that made the two mutually exclusive on the wire; a
+/// body naming NEITHER says nothing about what to run at all. Silently
+/// preferring one, or defaulting to some shell, would launch something the
+/// caller never asked for.
+/// The snapshot overrides are RAW-MODE ONLY, and a profile-mode body
+/// carrying either is refused rather than quietly served: a profile already
+/// states its kind and its resume template, the wire refuses a request that
+/// names both, and this API's shape makes it easy to send both by accident.
+/// Discarding them silently — which is what forwarding a profile create and
+/// dropping the fields amounts to — would launch a session under settings
+/// the caller believes it chose. The refusal names the fields so the caller
+/// knows which half to remove.
+fn create_mode(req: &mut CreateReq) -> anyhow::Result<CreateMode> {
+    match (req.invocation.take(), req.profile_id.take()) {
+        (Some(_), Some(_)) => Err(anyhow::Error::new(SupervisorError {
+            kind: ErrorKind::InvalidRequest,
+            message: "a create names either an invocation or a profile, never both: a profile \
+                      already says what to run, and there is no honest way to merge the two"
+                .to_string(),
+        })),
+        (None, None) => Err(anyhow::Error::new(SupervisorError {
+            kind: ErrorKind::InvalidRequest,
+            message: "a create must name either an invocation or a profile; this body names \
+                      neither, so there is nothing to launch"
+                .to_string(),
+        })),
+        (Some(invocation), None) => Ok(CreateMode::Raw(invocation)),
+        (None, Some(_)) if req.agent_kind.is_some() || req.resume_template.is_some() => {
+            Err(anyhow::Error::new(SupervisorError {
+                kind: ErrorKind::InvalidRequest,
+                message: "a profile-backed create cannot also send agent_kind or \
+                          resume_template: the profile states both, and the wire refuses a \
+                          request that names a profile alongside either override — edit the \
+                          profile, or create from a raw invocation instead"
+                    .to_string(),
+            }))
+        }
+        (None, Some(profile_id)) => Ok(CreateMode::Profile(profile_id)),
+    }
+}
+
+/// Record `profile_id` as this host's last-used profile, and invalidate.
+///
+/// Routed through the MANAGER rather than straight to the store, for
+/// `record_session`'s reasons plus one that is specific to profiles: an id
+/// only means anything on the supervisor that minted it, and every fresh
+/// supervisor seeds the same STARTER profiles, so ids genuinely collide
+/// across installs. A write that landed after the host was retargeted or
+/// adopted away could therefore record an id that resolves on the new
+/// install to a profile the user never picked — and the create dialog would
+/// then offer it as their own last choice. The claim is what makes that
+/// unconstructible; see [`manager::ConnectionManager::remember_profile_default`].
+///
+/// Best effort, on the same terms as [`record_session`]: the session has
+/// been created and the caller is about to be told so, and a preference that
+/// failed to persist costs one extra click at the next create dialog — where
+/// reporting a successful create as a failure would cost a session the user
+/// then has to find and clean up by hand.
+///
+/// Bumps the fleet's revision when the stored ROW actually CHANGED, which is
+/// what makes a create-dialog default arrive in a second client without
+/// polling. Creating from the same profile twice in a row changes nothing and
+/// wakes nobody.
+///
+/// "The row" rather than "the profile id", and the distinction has teeth: a
+/// create that rewrites the same id against an identity the stored row does
+/// not carry REPAIRS a binding that had made the default unreadable, so the
+/// default goes from absent back to present without the id ever moving. That
+/// is a change other clients must be told about, and the store is what decides
+/// it (`crate::store::HelmStore::remember_profile_default`).
+async fn remember_default_profile(
+    state: &AppState,
+    claim: &manager::SessionClaim,
+    profile_id: &str,
+) {
+    match state
+        .manager
+        .remember_profile_default(claim, profile_id)
+        .await
+    {
+        Ok(true) => state.manager.events().bump(),
+        Ok(false) => {}
+        Err(error) => warn!(
+            host = claim.host,
+            profile_id = manager::peer_text(profile_id).as_str(),
+            error = %error,
+            "the session was created but its profile could not be remembered as this host's \
+             default; the next create dialog will suggest the previous one"
+        ),
     }
 }
 
@@ -2420,6 +2788,112 @@ mod tests {
             "body must carry the supervisor's own message verbatim, not a substring of it"
         );
 
+        peer.await.unwrap();
+    }
+
+    /// A create prepared against a connection that is no longer this host's
+    /// reaches NO supervisor.
+    ///
+    /// Spec: `POST /api/sessions` with an `expected_incarnation` that does not
+    /// match the host's current connection is a 409 carrying
+    /// [`crate::precondition::INCARNATION_MARKER`], forwarded nowhere; the same
+    /// body naming the current connection is created normally.
+    ///
+    /// Profile mode is the case with teeth. A profile id means something only
+    /// on the supervisor that minted it, and every fresh supervisor seeds the
+    /// same starter profiles — so a create aimed at a profile the user picked
+    /// on one install does not FAIL when the host has been retargeted or
+    /// adopted underneath it. It resolves over there, launches something else,
+    /// and then records that as the user's remembered default. The client
+    /// checks before it sends; the window it cannot close is between its check
+    /// and this routing, which is what the precondition travels for.
+    ///
+    /// "Reaches no supervisor" is asserted by ORDER rather than by a timeout:
+    /// the peer asserts on the FIRST create it is sent, and a forwarded stale
+    /// create would arrive in that slot and fail there by name.
+    #[tokio::test]
+    async fn a_create_prepared_against_a_replaced_connection_reaches_no_supervisor() {
+        use farhelm_proto::io::{FrameReader, FrameWriter, handshake, parse_control};
+        use farhelm_proto::{ControlMsg, Frame, SessionInfo};
+
+        let (client_side, peer_side) = tokio::io::duplex(64 * 1024);
+        let peer = tokio::spawn(async move {
+            let (r, w) = tokio::io::split(peer_side);
+            let mut reader = FrameReader::new(r);
+            let mut writer = FrameWriter::new(w);
+            handshake(&mut reader, &mut writer, "supervisor")
+                .await
+                .unwrap();
+            let request = parse_control(&reader.read_frame().await.unwrap().unwrap()).unwrap();
+            let ControlMsg::CreateSession {
+                req_id, profile_id, ..
+            } = request
+            else {
+                panic!("expected CreateSession, got {request:?}");
+            };
+            assert_eq!(
+                profile_id,
+                Some("p-favorite".to_string()),
+                "the only create that may reach a supervisor is the one whose precondition held"
+            );
+            writer
+                .write_frame(&Frame::control(&ControlMsg::SessionCreated {
+                    req_id,
+                    session: SessionInfo {
+                        id: "sess-new".into(),
+                        title: "sess-new".into(),
+                        created_at: 1_700_000_500,
+                        cwd: "/work".into(),
+                        invocation: "claude".into(),
+                        status: farhelm_proto::SessionStatus::Unknown,
+                        annotation: None,
+                        restart_offer: farhelm_proto::RestartOffer::default(),
+                        tabs: Vec::new(),
+                        source_profile: None,
+                    },
+                }))
+                .await
+                .unwrap();
+        });
+
+        let harness = rest_harness::spliced_helm(client_side).await;
+        let local = rest_harness::local_id(&harness.store).await;
+        let current = harness
+            .manager
+            .status(local)
+            .expect("the local host has an actor")
+            .incarnation;
+
+        let (status, body) = post_text(
+            &harness,
+            "/api/sessions",
+            serde_json::json!({
+                "cwd": "/work",
+                "profile_id": "p-favorite",
+                "expected_incarnation": current - 1,
+            }),
+        )
+        .await;
+        assert_eq!(status, axum::http::StatusCode::CONFLICT);
+        assert!(
+            body.contains(crate::precondition::INCARNATION_MARKER),
+            "a client must be able to tell this from a host that is merely busy: {body}"
+        );
+
+        // The same body naming the connection this host is actually on goes
+        // through, which is what makes the refusal a precondition rather than
+        // a broken path.
+        let (status, _) = post_text(
+            &harness,
+            "/api/sessions",
+            serde_json::json!({
+                "cwd": "/work",
+                "profile_id": "p-favorite",
+                "expected_incarnation": current,
+            }),
+        )
+        .await;
+        assert_eq!(status, axum::http::StatusCode::OK);
         peer.await.unwrap();
     }
 
@@ -4323,5 +4797,723 @@ mod tests {
             value["stale"], true,
             "the metadata is last-known knowledge and must say so"
         );
+    }
+
+    // ---- Server-side filtering (PLAN_M6_75.md item 5) ----------------
+    //
+    // Every test below drives the REAL query string through the real
+    // handler, because the contract is the query string: the UI builds
+    // these parameters and the helm answers them, and a filter asserted
+    // only against `SessionFilter::matches` would prove the predicate
+    // works without proving anything reaches it.
+
+    /// A session with the fields the filters actually read.
+    ///
+    /// `rest_harness::session` fills everything with the id, which is fine
+    /// for ordering tests and useless here — a directory filter that
+    /// matched the title would pass against it.
+    fn filterable(
+        id: &str,
+        created_at: i64,
+        cwd: &str,
+        title: &str,
+        status: farhelm_proto::SessionStatus,
+        source_profile: Option<farhelm_proto::SourceProfile>,
+    ) -> farhelm_proto::SessionInfo {
+        farhelm_proto::SessionInfo {
+            cwd: cwd.to_string(),
+            title: title.to_string(),
+            status,
+            source_profile,
+            ..rest_harness::session(id, created_at)
+        }
+    }
+
+    /// The profile reference a session created from a profile carries.
+    ///
+    /// `existence` is a PARAMETER rather than a fixed `Present`, and the
+    /// reason is the property these fixtures exist to pin: a session's
+    /// snapshot (`id` and `name`) is durable and never rewritten, while
+    /// existence is DERIVED fresh by the supervisor on every reply. So a
+    /// cached row can legitimately carry `Deleted` beside a name no catalog
+    /// holds any more — which is exactly the row the profile filter must
+    /// still match, by that name. Fixing this field at `Present` would make
+    /// every fixture describe the easy case and leave the interesting one
+    /// unrepresentable.
+    fn source(
+        id: &str,
+        name: &str,
+        existence: farhelm_proto::ProfileExistence,
+    ) -> farhelm_proto::SourceProfile {
+        farhelm_proto::SourceProfile {
+            id: id.to_string(),
+            name: name.to_string(),
+            existence,
+        }
+    }
+
+    /// A two-host fleet whose four sessions differ along every filter
+    /// dimension at once, so that each single-dimension assertion below
+    /// distinguishes ONE property rather than accidentally selecting on
+    /// several.
+    ///
+    /// One session was created from a profile that has since been DELETED,
+    /// which is the case SPEC.md's snapshot rule makes load-bearing: it
+    /// still filters, under the name it snapshotted, because nothing
+    /// rewrote its row when the profile went away.
+    async fn filterable_fleet() -> (rest_harness::Harness, store::HostId, store::HostId) {
+        use farhelm_proto::{ProfileExistence, SessionStatus};
+
+        let (builder, alpha) = rest_harness::FleetBuilder::new()
+            .await
+            .local(rest_harness::HostScript {
+                identity: Some("identity-local".to_string()),
+                sessions: vec![
+                    filterable(
+                        "local-running",
+                        400,
+                        "/home/me/src/farhelm",
+                        "Refactor the drain",
+                        SessionStatus::Running,
+                        Some(source("p-claude", "Claude Code", ProfileExistence::Present)),
+                    ),
+                    filterable(
+                        "local-idle",
+                        300,
+                        "/home/me/notes",
+                        "Read the SPEC",
+                        SessionStatus::Idle,
+                        None,
+                    ),
+                ],
+                ..rest_harness::HostScript::default()
+            })
+            .await
+            .ssh(
+                "user@alpha",
+                rest_harness::HostScript {
+                    identity: Some("identity-alpha".to_string()),
+                    sessions: vec![
+                        filterable(
+                            "alpha-waiting",
+                            200,
+                            "/srv/alpha/work",
+                            "Nightly sweep",
+                            SessionStatus::Waiting,
+                            Some(source("p-gone", "Codex", ProfileExistence::Deleted)),
+                        ),
+                        filterable(
+                            "alpha-exited",
+                            100,
+                            "/srv/alpha/other",
+                            "Drain the queue",
+                            SessionStatus::Exited { exit_code: Some(0) },
+                            Some(source("p-claude", "Claude Code", ProfileExistence::Present)),
+                        ),
+                    ],
+                    ..rest_harness::HostScript::default()
+                },
+            )
+            .await;
+        let harness = builder.start().await;
+        let local = rest_harness::local_id(&harness.store).await;
+        for host in [local, alpha] {
+            harness.await_refreshed(host).await;
+        }
+        (harness, local, alpha)
+    }
+
+    /// Every dimension SPEC.md names — host, directory, profile, status,
+    /// title — narrows the list by itself, with the semantics
+    /// `store::SessionFilter` documents.
+    ///
+    /// One test rather than five because the fixture is the expensive part
+    /// and the assertions are one line each; what matters is that each
+    /// parameter selects a DIFFERENT subset, which is only visible with all
+    /// five side by side.
+    #[tokio::test]
+    async fn every_filter_dimension_narrows_the_list_on_its_own() {
+        let (harness, local, alpha) = filterable_fleet().await;
+
+        let (status, value) = get_json(&harness, &format!("/api/sessions?host={alpha}")).await;
+        assert_eq!(status, axum::http::StatusCode::OK);
+        assert_eq!(row_ids(&value), vec!["alpha-waiting", "alpha-exited"]);
+
+        // Substring, and case-insensitive: a user searching a path types a
+        // fragment of it, not the whole thing.
+        let (_, value) = get_json(&harness, "/api/sessions?directory=SRC/farhelm").await;
+        assert_eq!(row_ids(&value), vec!["local-running"]);
+
+        // Exact, on the state tag the wire uses.
+        let (_, value) = get_json(&harness, "/api/sessions?status=waiting").await;
+        assert_eq!(row_ids(&value), vec!["alpha-waiting"]);
+
+        // A status that carries a payload still filters by its tag alone —
+        // `exited` selects the session whatever its exit code was.
+        let (_, value) = get_json(&harness, "/api/sessions?status=exited").await;
+        assert_eq!(row_ids(&value), vec!["alpha-exited"]);
+
+        // By profile ID: exact, opaque, and rename-proof. Both hosts'
+        // sessions from that profile come back, in the merged order.
+        let (_, value) = get_json(&harness, "/api/sessions?profile=p-claude").await;
+        assert_eq!(row_ids(&value), vec!["local-running", "alpha-exited"]);
+
+        // Substring again, and case-insensitive again.
+        let (_, value) = get_json(&harness, "/api/sessions?title=drain").await;
+        assert_eq!(row_ids(&value), vec!["local-running", "alpha-exited"]);
+
+        // And the local host, so the host filter is shown selecting rather
+        // than merely excluding the other one.
+        let (_, value) = get_json(&harness, &format!("/api/sessions?host={local}")).await;
+        assert_eq!(row_ids(&value), vec!["local-running", "local-idle"]);
+    }
+
+    /// SPEC.md's snapshot rule, as the LIST sees it: a session created from
+    /// a profile that has since been deleted still filters — under the name
+    /// it snapshotted, because that is the only handle anyone still has.
+    ///
+    /// The alternative implementations all fail here in different ways:
+    /// matching only by id loses the session as soon as a user picks the
+    /// name they remember, and rewriting historical rows on a profile
+    /// delete (the shape PLAN_M6_75.md item 3 rejects) would have erased
+    /// the name this filter matches.
+    #[tokio::test]
+    async fn a_deleted_profiles_sessions_still_filter_under_their_snapshotted_name() {
+        let (harness, _local, _alpha) = filterable_fleet().await;
+
+        let (status, value) = get_json(&harness, "/api/sessions?profile=Codex").await;
+        assert_eq!(status, axum::http::StatusCode::OK);
+        assert_eq!(
+            row_ids(&value),
+            vec!["alpha-waiting"],
+            "a deleted profile's sessions stay findable by the name they snapshotted"
+        );
+        assert_eq!(value["matching"], 1);
+
+        // The id half of the same rule, for the same session: the id
+        // outlives the profile too, so a client holding one still resolves.
+        let (_, value) = get_json(&harness, "/api/sessions?profile=p-gone").await;
+        assert_eq!(row_ids(&value), vec!["alpha-waiting"]);
+
+        // A raw-created session matches NO profile filter — it was never
+        // shaped by one, and "sessions from profile X" must not quietly
+        // include sessions from no profile at all.
+        let (_, value) = get_json(&harness, "/api/sessions?profile=").await;
+        assert_eq!(
+            row_ids(&value).len(),
+            4,
+            "an empty profile parameter is a cleared search box, not a filter matching nothing"
+        );
+    }
+
+    /// Filters AND together, and the combination narrows further than
+    /// either alone.
+    ///
+    /// Pinned because the alternative (OR, or last-parameter-wins) reads
+    /// identically in a single-filter test: a client refining a search would
+    /// see the list GROW, which is the opposite of what refining means.
+    #[tokio::test]
+    async fn combined_filters_narrow_rather_than_widen() {
+        let (harness, _local, alpha) = filterable_fleet().await;
+
+        let (_, value) = get_json(&harness, "/api/sessions?title=drain").await;
+        assert_eq!(row_ids(&value), vec!["local-running", "alpha-exited"]);
+
+        let (status, value) = get_json(
+            &harness,
+            &format!("/api/sessions?title=drain&host={alpha}&status=exited"),
+        )
+        .await;
+        assert_eq!(status, axum::http::StatusCode::OK);
+        assert_eq!(row_ids(&value), vec!["alpha-exited"]);
+        assert_eq!(value["matching"], 1);
+        assert_eq!(
+            value["total"], 4,
+            "the fleet total is not a function of the filter"
+        );
+
+        // A combination nothing satisfies is an empty list with an honest
+        // pair of counts, never an error.
+        let (status, value) = get_json(&harness, "/api/sessions?title=drain&status=waiting").await;
+        assert_eq!(status, axum::http::StatusCode::OK);
+        assert!(row_ids(&value).is_empty());
+        assert_eq!(value["matching"], 0);
+        assert_eq!(value["total"], 4);
+    }
+
+    /// The two-totals contract under TRUNCATION, which is where the pair
+    /// earns its keep: the page cut is over the MATCHING rows, `matching`
+    /// describes every match in the fleet, and `total` goes on describing
+    /// the fleet itself.
+    ///
+    /// A client rendering "N matching of M sessions" needs all three facts
+    /// to stay independent — and needs the filter to apply BEFORE the cut,
+    /// or the second page would serve rows the first page's count already
+    /// excluded. The walk here is asserted end to end for exactly that
+    /// reason.
+    #[tokio::test]
+    async fn a_truncated_filtered_page_reports_both_totals_and_walks_only_matches() {
+        let (harness, _local, _alpha) = filterable_fleet().await;
+
+        let (status, first) = get_json(&harness, "/api/sessions?profile=p-claude&limit=1").await;
+        assert_eq!(status, axum::http::StatusCode::OK);
+        assert_eq!(row_ids(&first), vec!["local-running"]);
+        assert_eq!(
+            first["matching"], 2,
+            "the matching count describes the fleet's matches, not this page's rows"
+        );
+        assert_eq!(
+            first["total"], 4,
+            "the fleet total is what the list's coherence check has always been about"
+        );
+        assert_eq!(
+            first["truncated"], true,
+            "truncation is a statement about the MATCHING walk"
+        );
+
+        let cursor = first["next_cursor"]
+            .as_str()
+            .expect("a truncated page carries a resume point")
+            .to_string();
+        let (_, second) = get_json(
+            &harness,
+            &format!("/api/sessions?profile=p-claude&limit=1&cursor={cursor}"),
+        )
+        .await;
+        assert_eq!(
+            row_ids(&second),
+            vec!["alpha-exited"],
+            "the second page must skip the non-matching rows between the two matches"
+        );
+        assert_eq!(second["matching"], 2);
+        assert_eq!(second["total"], 4);
+        assert_eq!(
+            second["truncated"], false,
+            "the matching walk is finished even though two fleet rows were never shown"
+        );
+    }
+
+    /// A cursor a caller EDITED cannot make the helm report numbers of the
+    /// caller's choosing.
+    ///
+    /// Spec: a real cursor is decoded, its fields are rewritten, and it is
+    /// replayed. Every outcome is honest — the token is refused outright, or
+    /// it is answered with counts the server recomputed — and in no case does
+    /// a number the caller wrote into the token come back out.
+    ///
+    /// The shape this pins closed is specific and was live: the cursor
+    /// carried the matching count, the fleet revision, and a filter
+    /// fingerprint as unauthenticated base64 JSON, and the server reported
+    /// the carried count whenever the other two matched. The revision is
+    /// learnable from `/api/events` and the fingerprint is a deterministic
+    /// function of the query string, so a caller could name any total it
+    /// liked — including one larger than the fleet, and one large enough to
+    /// overflow the addition of the live-host component. Nothing in the reply
+    /// would have looked wrong.
+    ///
+    /// Every field is rewritten rather than only the count, because the test
+    /// has to survive the fix rather than describe it: whatever a future
+    /// cursor carries, none of it may become a claim about the fleet.
+    #[tokio::test]
+    async fn a_tampered_cursor_cannot_dictate_the_reported_counts() {
+        use base64::Engine;
+
+        let (harness, _local, _alpha) = filterable_fleet().await;
+
+        let (status, first) = get_json(&harness, "/api/sessions?profile=p-claude&limit=1").await;
+        assert_eq!(status, axum::http::StatusCode::OK);
+        assert_eq!(first["matching"], 2);
+        let cursor = first["next_cursor"]
+            .as_str()
+            .expect("a truncated page carries a resume point")
+            .to_string();
+
+        let decoded: serde_json::Value = serde_json::from_slice(
+            &base64::engine::general_purpose::URL_SAFE_NO_PAD
+                .decode(&cursor)
+                .expect("a cursor is base64url"),
+        )
+        .expect("a cursor is JSON");
+        let fields: Vec<String> = decoded
+            .as_object()
+            .expect("a cursor is a JSON object")
+            .keys()
+            .cloned()
+            .collect();
+        // Absurd values, so an implementation that echoed ANY of them would
+        // be caught by the assertions below rather than by luck.
+        for field in fields {
+            let mut tampered = decoded.clone();
+            tampered[&field] = match tampered[&field] {
+                serde_json::Value::Number(_) => serde_json::json!(u64::MAX),
+                _ => serde_json::json!("forged"),
+            };
+            let token =
+                base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(tampered.to_string());
+            let (status, value) = get_json(
+                &harness,
+                &format!("/api/sessions?profile=p-claude&limit=1&cursor={token}"),
+            )
+            .await;
+            if status == axum::http::StatusCode::BAD_REQUEST {
+                continue;
+            }
+            assert_eq!(
+                status,
+                axum::http::StatusCode::OK,
+                "a tampered cursor is either refused or answered honestly, never a 500: {value}"
+            );
+            assert_eq!(
+                value["matching"], 2,
+                "the matching count is the server's own, whatever the token says: {value}"
+            );
+            assert_eq!(value["total"], 4, "and so is the fleet total: {value}");
+        }
+
+        // And the walk still works from the untouched token, so the refusals
+        // above are a guard rather than a broken path.
+        let (status, second) = get_json(
+            &harness,
+            &format!("/api/sessions?profile=p-claude&limit=1&cursor={cursor}"),
+        )
+        .await;
+        assert_eq!(status, axum::http::StatusCode::OK);
+        assert_eq!(row_ids(&second), vec!["alpha-exited"]);
+        assert_eq!(second["matching"], 2);
+    }
+
+    /// A cursor replayed under a DIFFERENT filter is refused, rather than
+    /// resuming mid-order through a result set it never described.
+    ///
+    /// Spec: `GET /api/sessions?cursor=...` answers 400 whenever the
+    /// request's filter is not the one the cursor was minted under —
+    /// tightened, loosened, or cleared entirely.
+    ///
+    /// The failure this closes is silent, which is why it is worth a refusal.
+    /// The staged cases are chosen so the damage would be visible: each
+    /// replacement filter matches a session that sorts BEFORE the cursor's
+    /// position, so an implementation that applied the position anyway would
+    /// answer 200 with that match missing and nothing anywhere to say a row
+    /// had been skipped. The cleared filter is staged too, because "no
+    /// filter" is the widest result set rather than the absence of one.
+    #[tokio::test]
+    async fn a_cursor_replayed_under_a_different_filter_is_refused() {
+        let (harness, _local, _alpha) = filterable_fleet().await;
+
+        // A walk over the profile filter, whose first page ends after
+        // `local-running` — the newest session in the fleet, so anything the
+        // position is misapplied to loses it.
+        let (status, first) = get_json(&harness, "/api/sessions?profile=p-claude&limit=1").await;
+        assert_eq!(status, axum::http::StatusCode::OK);
+        assert_eq!(row_ids(&first), vec!["local-running"]);
+        let cursor = first["next_cursor"]
+            .as_str()
+            .expect("a truncated page carries a resume point")
+            .to_string();
+
+        for changed in [
+            format!("/api/sessions?limit=1&cursor={cursor}"),
+            format!("/api/sessions?status=running&limit=1&cursor={cursor}"),
+            format!("/api/sessions?profile=p-claude&status=exited&limit=1&cursor={cursor}"),
+        ] {
+            let (status, body) = get_json(&harness, &changed).await;
+            assert_eq!(
+                status,
+                axum::http::StatusCode::BAD_REQUEST,
+                "{changed} resumed a walk it does not belong to: {body}"
+            );
+            assert!(
+                body.as_str().unwrap_or_default().contains("fresh walk"),
+                "the refusal must tell the caller what to do instead: {body}"
+            );
+        }
+
+        // The unchanged filter still resumes, so the binding is a guard
+        // rather than a broken walk.
+        let (status, second) = get_json(
+            &harness,
+            &format!("/api/sessions?profile=p-claude&limit=1&cursor={cursor}"),
+        )
+        .await;
+        assert_eq!(status, axum::http::StatusCode::OK);
+        assert_eq!(row_ids(&second), vec!["alpha-exited"]);
+    }
+
+    /// An unfiltered list reports the fleet total and makes NO matching
+    /// claim — the `matching` key is absent from the body entirely.
+    ///
+    /// Reporting `total` there would have been the convenient answer and is
+    /// not a true one: `total` counts every cached row including any whose
+    /// payload can no longer be trusted as that row, while a matching count
+    /// deliberately excludes exactly those. Equating the two would make an
+    /// unshowable row count as a match only in the case where nobody
+    /// filtered, which is the one place the invariant was stated loudest.
+    ///
+    /// A client that wants a number has `total` in hand and substitutes it,
+    /// which is what it would have been handed anyway.
+    #[tokio::test]
+    async fn an_unfiltered_list_makes_no_matching_claim() {
+        let (harness, _local, _alpha) = filterable_fleet().await;
+
+        let (status, value) = get_json(&harness, "/api/sessions").await;
+        assert_eq!(status, axum::http::StatusCode::OK);
+        assert_eq!(value["total"], 4);
+        assert_eq!(
+            value.get("matching"),
+            None,
+            "an unfiltered listing reports no matching count at all"
+        );
+
+        // Including when the page is cut for its LIMIT rather than a filter:
+        // truncation says nothing about matching either way.
+        let (_, value) = get_json(&harness, "/api/sessions?limit=1").await;
+        assert_eq!(value["total"], 4);
+        assert_eq!(value.get("matching"), None);
+        assert_eq!(value["truncated"], true);
+    }
+
+    /// A status word this build does not know is a 400 naming the
+    /// vocabulary, never an empty list.
+    ///
+    /// The failure mode this prevents is a silent lie: a client (or a user
+    /// hand-editing a URL) that misspells a status would otherwise be told
+    /// there are no such sessions, which is indistinguishable from the truth
+    /// and far more likely to be believed.
+    #[tokio::test]
+    async fn an_unknown_status_filter_is_refused_rather_than_matching_nothing() {
+        let (harness, _local, _alpha) = filterable_fleet().await;
+
+        let (status, body) = get_json(&harness, "/api/sessions?status=alive").await;
+        assert_eq!(status, axum::http::StatusCode::BAD_REQUEST);
+        let text = body.as_str().unwrap_or_default();
+        assert!(
+            text.contains("running") && text.contains("interrupted"),
+            "the refusal must name the vocabulary it accepts, got {text:?}"
+        );
+    }
+
+    /// Whitespace is CONTENT, not noise: only the exactly-empty value clears
+    /// a filter.
+    ///
+    /// Trimming looks harmless and is not. Directories and titles genuinely
+    /// contain spaces, so a trimmed search cannot find `/srv/my project`
+    /// by what the user typed; and trimming makes `?title=%20` mean the same
+    /// as `?title=`, so typing a space would silently clear the filter and
+    /// show everything — a change the user can see and cannot explain.
+    #[tokio::test]
+    async fn only_an_empty_filter_value_clears_it_and_whitespace_is_content() {
+        use farhelm_proto::SessionStatus;
+
+        let harness = rest_harness::helm_listing(vec![
+            filterable(
+                "spaced",
+                200,
+                "/srv/my project",
+                "fix  the  spacing",
+                SessionStatus::Running,
+                None,
+            ),
+            filterable(
+                "plain",
+                100,
+                "/srv/plain",
+                "ordinary",
+                SessionStatus::Running,
+                None,
+            ),
+        ])
+        .await;
+
+        // Searchable by text that only exists WITH its whitespace.
+        let (status, value) = get_json(&harness, "/api/sessions?directory=my%20project").await;
+        assert_eq!(status, axum::http::StatusCode::OK);
+        assert_eq!(row_ids(&value), vec!["spaced"]);
+        let (_, value) = get_json(&harness, "/api/sessions?title=the%20%20spacing").await;
+        assert_eq!(row_ids(&value), vec!["spaced"]);
+
+        // A lone space is a real search that matches only what contains one
+        // — emphatically not a cleared filter.
+        let (_, value) = get_json(&harness, "/api/sessions?title=%20").await;
+        assert_eq!(row_ids(&value), vec!["spaced"]);
+        assert_eq!(value["matching"], 1);
+
+        // The exactly-empty value is what clears it — and a cleared filter is
+        // an unfiltered request, which makes no matching claim.
+        let (_, value) = get_json(&harness, "/api/sessions?title=").await;
+        assert_eq!(row_ids(&value), vec!["spaced", "plain"]);
+        assert_eq!(value["total"], 2);
+        assert_eq!(
+            value.get("matching"),
+            None,
+            "clearing the last filter parameter leaves an unfiltered listing"
+        );
+    }
+
+    /// A filtered page is capped lower than an unfiltered one, and the
+    /// refusal says which cap applied.
+    ///
+    /// The two limits bound different work: an unfiltered page reads the
+    /// rows it returns, a filtered one walks the order until it has filled
+    /// itself. Refused rather than clamped, like the unfiltered cap and for
+    /// the same reason — a caller that asked for 5,000 and silently received
+    /// 500 cannot tell it did not get what it asked for.
+    #[tokio::test]
+    async fn a_filtered_page_is_capped_lower_than_an_unfiltered_one() {
+        let (harness, _local, _alpha) = filterable_fleet().await;
+        let over = crate::aggregate::MAX_FILTERED_PAGE_LIMIT + 1;
+
+        let (status, body) = get_json(
+            &harness,
+            &format!("/api/sessions?status=running&limit={over}"),
+        )
+        .await;
+        assert_eq!(status, axum::http::StatusCode::BAD_REQUEST);
+        assert!(
+            body.as_str()
+                .unwrap_or_default()
+                .contains(&crate::aggregate::MAX_FILTERED_PAGE_LIMIT.to_string()),
+            "the refusal must name the filtered cap: {body:?}"
+        );
+
+        // The same limit is fine without a filter, which is what makes this
+        // a filtered cap rather than a lower cap for everyone.
+        let (status, _) = get_json(&harness, &format!("/api/sessions?limit={over}")).await;
+        assert_eq!(status, axum::http::StatusCode::OK);
+    }
+
+    /// A filtered walk's later pages report a count that is still TRUE: the
+    /// remembered number is reused while nothing has changed, and recomputed
+    /// the moment the fleet moves.
+    ///
+    /// The reuse exists so a `limit=1` walk does not rescan the fleet per
+    /// page (see `store::MatchingCount`), and its whole risk is staleness —
+    /// a number taken before a create, reported after it. This asserts the
+    /// OUTCOME on both paths, which is what a client sees. That a walk
+    /// actually reuses rather than quietly recounting is a separate claim
+    /// with a separate test, instrumented at the store
+    /// (`a_filtered_walk_counts_once_and_recounts_only_after_a_change`),
+    /// because an implementation that recounted every page would produce
+    /// these very same numbers.
+    #[tokio::test]
+    async fn a_filtered_walks_count_survives_paging_and_is_recomputed_when_the_fleet_moves() {
+        let (harness, local, _alpha) = filterable_fleet().await;
+
+        let (status, first) = get_json(&harness, "/api/sessions?profile=p-claude&limit=1").await;
+        assert_eq!(status, axum::http::StatusCode::OK);
+        assert_eq!(first["matching"], 2);
+        let cursor = first["next_cursor"]
+            .as_str()
+            .expect("a truncated page carries a resume point")
+            .to_string();
+
+        // Nothing changed: page two reports the same count.
+        let (_, second) = get_json(
+            &harness,
+            &format!("/api/sessions?profile=p-claude&limit=1&cursor={cursor}"),
+        )
+        .await;
+        assert_eq!(second["matching"], 2);
+        assert_eq!(row_ids(&second), vec!["alpha-exited"]);
+
+        // Now the fleet moves under the walk: a third matching session
+        // appears. The carried count is stale and must not be believed.
+        harness.fleet.edit(local, |script| {
+            script.sessions.push(filterable(
+                "local-latecomer",
+                50,
+                "/home/me/src/other",
+                "Late arrival",
+                farhelm_proto::SessionStatus::Running,
+                Some(source(
+                    "p-claude",
+                    "Claude Code",
+                    farhelm_proto::ProfileExistence::Present,
+                )),
+            ));
+        });
+        harness.manager.refresh_now(local);
+        harness
+            .await_state(local, |state| {
+                matches!(
+                    state,
+                    crate::manager::HostState::Connected {
+                        last_refresh: crate::manager::RefreshHealth::Ok { sessions: 3 },
+                        ..
+                    }
+                )
+            })
+            .await;
+
+        let (_, resumed) = get_json(
+            &harness,
+            &format!("/api/sessions?profile=p-claude&limit=1&cursor={cursor}"),
+        )
+        .await;
+        assert_eq!(
+            resumed["matching"], 3,
+            "a count taken before the change must not be reported after it"
+        );
+        assert_eq!(resumed["total"], 5);
+    }
+
+    /// An identity-less host's sessions live in the manager's MEMORY rather
+    /// than in helm.db, so they reach the merged list by a different path —
+    /// and the filter has to apply on that path too.
+    ///
+    /// The bug this pins is a silent one: with filtering implemented only in
+    /// the SQL scan, such a host's rows would flow through unfiltered, so a
+    /// search would return sessions that plainly do not match beside ones
+    /// that do, with `matching` counting them.
+    #[tokio::test]
+    async fn a_filter_applies_to_an_identity_less_hosts_in_memory_rows() {
+        use farhelm_proto::SessionStatus;
+
+        let harness = rest_harness::FleetBuilder::new()
+            .await
+            .local(rest_harness::HostScript {
+                // No identity: this host caches nothing, and its sessions
+                // are merged in from the actor's own memory.
+                identity: None,
+                sessions: vec![
+                    filterable(
+                        "memory-running",
+                        200,
+                        "/opt/work",
+                        "Live one",
+                        SessionStatus::Running,
+                        None,
+                    ),
+                    filterable(
+                        "memory-idle",
+                        100,
+                        "/opt/other",
+                        "Quiet one",
+                        SessionStatus::Idle,
+                        None,
+                    ),
+                ],
+                ..rest_harness::HostScript::default()
+            })
+            .await
+            .start()
+            .await;
+        let local = rest_harness::local_id(&harness.store).await;
+        harness.await_refreshed(local).await;
+
+        let (status, value) = get_json(&harness, "/api/sessions?status=idle").await;
+        assert_eq!(status, axum::http::StatusCode::OK);
+        assert_eq!(row_ids(&value), vec!["memory-idle"]);
+        assert_eq!(value["matching"], 1);
+        assert_eq!(
+            value["total"], 2,
+            "an identity-less host's rows count toward the fleet total like any other"
+        );
+
+        // And the page cut is over the matches here too: a limit of one
+        // against a single match is not a truncated walk.
+        let (_, value) = get_json(&harness, "/api/sessions?directory=/opt&limit=1").await;
+        assert_eq!(row_ids(&value), vec!["memory-running"]);
+        assert_eq!(value["matching"], 2);
+        assert_eq!(value["truncated"], true);
     }
 }

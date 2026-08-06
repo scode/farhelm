@@ -46,6 +46,70 @@
 //! The host id is in the key even though session ids are unique: it makes
 //! the order TOTAL unconditionally, and a cursor over a non-total order can
 //! skip or repeat rows. See [`store::CacheKey`].
+//!
+//! ## Filtering, and why it happens HERE (PLAN_M6_75.md item 5)
+//!
+//! SPEC.md's session list filters by host, directory, profile, status and
+//! title, and every one of those predicates is applied in this merged view
+//! — not in the drains, and not in the browser.
+//!
+//! Not in the DRAINS: a filtered drain would cache a partial list, and the
+//! cache's whole job is to be the complete last-known state of a host that
+//! may be gone by the time anyone asks. Host filters, identity-less
+//! sessions, and stale retained rows only exist merged anyway.
+//!
+//! Not in the BROWSER: predicates have to apply before the page cut, or "N
+//! matching" is a claim about rows the client cannot see. A page filtered
+//! after the fact hides matches beyond its own boundary while counting them.
+//!
+//! So both sources are narrowed by one predicate ([`store::SessionFilter`],
+//! which lives in the store precisely so the SQL scan and the in-memory
+//! merge cannot come to disagree), and a FILTERED reply carries TWO counts:
+//! how many matched, and how many the fleet holds. The second is not
+//! redundant — it is the number the list's own coherence check has always
+//! described, and a filtered list showing fewer rows than the fleet holds is
+//! a working filter rather than a missing page.
+//!
+//! An UNFILTERED reply carries only the fleet total and makes no matching
+//! claim at all (see [`SessionPageBody::matching`]).
+//!
+//! ## Counting once per walk, honestly (PLAN_M6_75.md item 5)
+//!
+//! Counting matches is a decode of every row in scope, so doing it per page
+//! makes a walk quadratic in the fleet — under the store's one mutex, which
+//! makes it everyone's problem rather than only the walker's. It therefore
+//! happens once per walk, and the machinery that achieves that is worth
+//! naming because an earlier shape got it dangerously wrong.
+//!
+//! The count lives HERE, in a bounded in-process cache ([`MatchingCounts`]),
+//! and never in the cursor. A cursor is a client-held string; a number
+//! carried in one is a number the client chooses, and the server would be
+//! reporting an arbitrary "N matching" back to whoever asked. What the cursor
+//! carries is a POSITION and a binding to the filter it was taken under
+//! ([`store::SessionFilter::digest`]) — neither of which is authority the
+//! caller does not already have.
+//!
+//! Only the PERSISTED half is ever cached, and that asymmetry is the whole
+//! safety argument. helm.db's rows are qualified by the store's mutation
+//! generation, sampled inside the same lock hold that produced the page
+//! ([`store::MergedRead::generation`]), so "the count and these rows describe
+//! one moment" is true by construction rather than by a check that could
+//! straddle a commit. The identity-less hosts' in-memory lists have no such
+//! token — nothing about them touches the store — so their share of the count
+//! is recomputed on every request, from the very snapshot the page's live rows
+//! are merged out of.
+//!
+//! A cheaper-looking arrangement was live for a while and was wrong: key the
+//! cache by the fleet REVISION as well, and reuse the live component while it
+//! stands still. The revision is published AFTER the change it describes
+//! becomes visible (`crate::manager`'s `HostActor::publish_refresh` swaps a
+//! host's list and only then bumps), so a request can read the old
+//! revision, snapshot the NEW list, and hit a cache entry filed under a count
+//! taken over the OLD one — reporting a matching number that disagrees with
+//! the rows it is returning beside it, with the store's generation unmoved
+//! because none of it ever touched the store. Recomputing costs a few string
+//! compares over a bounded in-memory list the request is already holding, and
+//! it buys coherence that does not depend on scheduling.
 
 use crate::manager::{ConnectionManager, HostSnapshot};
 use crate::store::{self, HelmStore, HostId, HostKind};
@@ -84,6 +148,43 @@ pub(crate) const DEFAULT_PAGE_LIMIT: usize = 500;
 /// caller that asked for 50,000 and received 5,000 with no `next_cursor`
 /// difference has no way to know it did not get what it asked for.
 pub(crate) const MAX_PAGE_LIMIT: usize = 5_000;
+
+/// The largest FILTERED page a caller may ask for.
+///
+/// Lower than [`MAX_PAGE_LIMIT`] because a filtered page is a different kind
+/// of work, not merely more of it. An unfiltered page reads exactly the rows
+/// it returns — its `limit` is a slice. A filtered one walks the merged order
+/// until it has filled itself, decoding every row it steps over, so a large
+/// limit paired with a selective filter asks this side to scan and decode the
+/// whole cache while holding the store's one mutex.
+///
+/// Set to the default page size deliberately: a filtering client is a person
+/// looking at a list, and nobody reads five thousand filtered rows at once.
+/// A caller that genuinely wants more pages the walk, which is what the
+/// cursor is for.
+///
+/// ## What this caps, and what it does NOT
+///
+/// It caps ROWS RETURNED, not work done. A filtered request decodes rows
+/// until it has filled its page or run out of scope, and the first page of
+/// any walk decodes the whole scope once regardless (that is the counting
+/// pass — see [`store::MatchingCount`]). So `limit=1` against a filter that
+/// matches nothing costs a full scan of the cache, and this constant does not
+/// change that by a single row. What the cache behind the count buys is that
+/// the REST of the walk is bounded; what this constant buys is that no single
+/// reply is enormous.
+///
+/// Two things would genuinely bound the work and are deliberately NOT here:
+/// a global scan or time budget across concurrent requests, and pushing the
+/// predicates into SQL so SQLite decides what to touch. Both are real
+/// options and both are being declined this milestone for the same reason:
+/// the helm listens on loopback and serves one user, the cache is bounded per
+/// host by `crate::manager::REFRESH_SESSION_CAP`, and the cost of the wrong
+/// abstraction here (a budget that silently truncates a count, or a filter
+/// vocabulary split between SQL and Rust that can come to disagree) is worse
+/// than the scan. Revisit when the helm serves more than one caller, which is
+/// also when M7's auth arrives.
+pub(crate) const MAX_FILTERED_PAGE_LIMIT: usize = DEFAULT_PAGE_LIMIT;
 
 /// How a host is NAMED on a session row.
 ///
@@ -147,11 +248,38 @@ pub(crate) struct SessionRow {
 pub(crate) struct SessionPageBody {
     pub(crate) sessions: Vec<SessionRow>,
     /// Every session in the MERGED view, across every host, before this
-    /// page's cut — not one supervisor's count. That is the number
+    /// page's cut and BEFORE any filter — not one supervisor's count, and
+    /// not a count of what the caller asked to see. That is the number
     /// SPEC.md's "showing N of M" is about once a fleet has more than one
-    /// host in it.
+    /// host in it, and it is deliberately the one the list's coherence check
+    /// has always been made against (PLAN_M6_75.md item 5): a filtered page
+    /// showing fewer rows than the fleet holds is not an incoherent list, it
+    /// is a working filter.
     pub(crate) total: u64,
-    /// Whether entries remain beyond this page. Retained under its M2 name
+    /// How many sessions match the request's filter, across the whole
+    /// merged view — the other half of "N matching of M sessions"
+    /// (PLAN_M6_75.md item 5).
+    ///
+    /// Counted before the page cut, so it describes the whole fleet rather
+    /// than this page: a client showing twenty rows of two hundred matches
+    /// needs the two hundred, and can derive nothing about it from the rows
+    /// it holds.
+    ///
+    /// ABSENT for an unfiltered listing, which makes no matching claim at
+    /// all. The obvious alternative — "no filter, so everything matches,
+    /// report `total`" — is not true of this list: `total` counts every
+    /// cached row including ones whose payload can no longer be trusted as
+    /// that row, while a matching count deliberately excludes exactly those
+    /// (`store::usable_cached_session`). Reporting `total` here would make an
+    /// unshowable row count as a match in precisely the case nobody filtered,
+    /// which is the one place the invariant was stated most loudly. A client
+    /// with no matching count has `total` in hand and substitutes it, which
+    /// is what it would have been handed anyway.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) matching: Option<u64>,
+    /// Whether entries remain beyond this page — of the MATCHING rows, once
+    /// a filter is set: the page walk is over what matched, so "there is a
+    /// next page" is a statement about that walk. Retained under its M2 name
     /// for the existing UI, but it no longer means "the supervisor held
     /// entries back and you cannot get them" — the honest reading now is
     /// "there is a next page", and `next_cursor` is how to ask for it.
@@ -159,9 +287,14 @@ pub(crate) struct SessionPageBody {
     /// The opaque resume key for the next page, absent exactly when this
     /// page reached the end of the order. Opaque as a USAGE convention:
     /// replay it verbatim or start a fresh walk, and never construct or
-    /// interpret one. It carries an ordering position and no authority (a
-    /// caller may already read every session), which is why a well-formed
-    /// value from nowhere resumes rather than being refused.
+    /// interpret one.
+    ///
+    /// It carries an ordering position and a binding to the filter it was
+    /// taken under, and no authority of any kind — a caller may already read
+    /// every session, and nothing the server reports is derived from a number
+    /// the cursor supplies. That is why a well-formed value naming a position
+    /// nobody has seen resumes rather than being refused, while one replayed
+    /// under a DIFFERENT filter is refused outright (see [`session_page`]).
     pub(crate) next_cursor: Option<String>,
 }
 
@@ -190,6 +323,16 @@ pub(crate) struct SessionPageBody {
 /// Resuming means "strictly after this key", never "starting at this row",
 /// which is what lets a cursor naming a session that has since been deleted
 /// (or whose host was removed) resume cleanly instead of erroring.
+///
+/// ## What it carries, and what it deliberately does not
+///
+/// A position and the filter it was taken under. Nothing else — in
+/// particular no COUNT. A cursor is a string the client holds, so a count
+/// carried in one is a count the client picks, and every number the reply
+/// derives from it becomes a number the caller dictated to the server about
+/// its own fleet. The matching count is kept server-side instead
+/// ([`MatchingCounts`]), where the only thing a client can influence is
+/// whether a cache entry is hit.
 #[derive(Serialize, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 struct ListCursor {
@@ -202,30 +345,48 @@ struct ListCursor {
     /// Host id, ascending — the third component that makes the order total
     /// even where the one-owner index is absent (see [`store::CacheKey`]).
     h: HostId,
+    /// The digest of the FILTER this position was taken under
+    /// ([`store::SessionFilter::digest`]) — required on every cursor, an
+    /// unfiltered walk's included.
+    ///
+    /// A position only means something within the result set it came from.
+    /// Replayed under a different filter it resumes mid-order through a
+    /// sequence it never described, so every match before that point is
+    /// silently skipped — which contradicts the cursor-and-filter-travel-
+    /// together contract in a way no client can detect. The digest is what
+    /// turns that into a 400.
+    ///
+    /// Fixed-size, so a cursor cannot grow with the search box: a first page
+    /// whose query string already sits near an HTTP head limit would
+    /// otherwise mint a follow-up cursor nobody could replay.
+    f: String,
 }
 
 /// The value [`ListCursor::fh`] must carry: the domain this cursor belongs
 /// to, and the version of its own shape.
 ///
-/// Versioned from the start so a future key change is a clean rejection of
-/// old tokens (400, "start a fresh walk") rather than a silent
-/// misinterpretation of them.
-const CURSOR_DOMAIN: &str = "farhelm/helm-sessions/1";
+/// Versioned so a key change is a clean rejection of old tokens (400, "start
+/// a fresh walk") rather than a silent misinterpretation of them. Version 2
+/// is the shape that stopped carrying a matching count and started requiring
+/// a filter digest; a version-1 token names neither correctly, and there is
+/// no reading of one that is safe to attempt.
+const CURSOR_DOMAIN: &str = "farhelm/helm-sessions/2";
 
-/// Encode one row's ordering key into the opaque token
-/// [`SessionPageBody::next_cursor`] carries.
+/// Encode one row's ordering key, bound to the filter it was taken under,
+/// into the opaque token [`SessionPageBody::next_cursor`] carries.
 ///
 /// Base64url-unpadded JSON: self-describing enough that [`decode_cursor`]
 /// can reject a malformed value by construction (a JSON parse failure)
 /// instead of by delimiter scanning, and free of characters that would need
 /// escaping in the query string this token actually travels in.
-fn encode_cursor(key: &store::CacheKey) -> String {
+fn encode_cursor(key: &store::CacheKey, digest: &str) -> String {
     use base64::Engine;
     let cursor = ListCursor {
         fh: CURSOR_DOMAIN.to_string(),
         at: key.created_at,
         sid: key.session_id.clone(),
         h: key.host,
+        f: digest.to_string(),
     };
     // Unwrap is safe: `ListCursor` has no map keys and no non-UTF-8 bytes
     // for JSON serialization to fail on.
@@ -233,27 +394,147 @@ fn encode_cursor(key: &store::CacheKey) -> String {
     base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(json)
 }
 
-/// Decode a caller-supplied cursor, or `None` for anything malformed —
-/// invalid base64, unparseable JSON, JSON of the wrong shape, or a token
-/// from a different domain (a supervisor's wire cursor, a future version of
-/// this one).
+/// Decode a caller-supplied cursor into its position and the filter digest
+/// it is bound to, or `None` for anything malformed — invalid base64,
+/// unparseable JSON, JSON of the wrong shape, or a token from a different
+/// domain (a supervisor's wire cursor, an older or newer version of this
+/// one).
 ///
 /// Every failure mode collapses to the same `None` on purpose: a
 /// bit-flipped byte, a truncated value, and a string from nowhere are
 /// indistinguishable to an honest server, and there is no differently
 /// actionable answer to give for any of them. Never panics on caller
 /// input; `?` short-circuits through `Option` at every fallible step.
-fn decode_cursor(cursor: &str) -> Option<store::CacheKey> {
+///
+/// Note what this does NOT do: it does not judge the digest. Deciding
+/// whether the bound filter is the request's filter belongs to
+/// [`session_page`], which is the only place that knows what was asked.
+fn decode_cursor(cursor: &str) -> Option<(store::CacheKey, String)> {
     use base64::Engine;
     let bytes = base64::engine::general_purpose::URL_SAFE_NO_PAD
         .decode(cursor)
         .ok()?;
     let decoded: ListCursor = serde_json::from_slice(&bytes).ok()?;
-    (decoded.fh == CURSOR_DOMAIN).then_some(store::CacheKey {
-        created_at: decoded.at,
-        session_id: decoded.sid,
-        host: decoded.h,
-    })
+    if decoded.fh != CURSOR_DOMAIN {
+        return None;
+    }
+    Some((
+        store::CacheKey {
+            created_at: decoded.at,
+            session_id: decoded.sid,
+            host: decoded.h,
+        },
+        decoded.f,
+    ))
+}
+
+/// How many distinct filters the matching-count cache remembers at once.
+///
+/// Sized for the shape it exists to serve rather than for a hit rate: a page
+/// WALK, which is one filter held still across a handful of requests, plus
+/// however many other surfaces happen to be open. A user typing in a search
+/// box mints a new entry per keystroke and evicts them just as fast, which is
+/// correct — those counts describe filters nobody is looking at any more.
+const MATCHING_COUNT_CACHE: usize = 64;
+
+/// The PERSISTED matching counts this helm has already computed, so a page
+/// walk pays for one scan of helm.db rather than one per page.
+///
+/// ## Why the count is HERE and not in the cursor
+///
+/// The obvious cheap answer is to carry the number in the opaque cursor and
+/// believe it on the way back. It is also wrong in a way that is easy to miss
+/// and hard to see once shipped: a cursor is a string the client holds, base64
+/// of JSON with nothing authenticating it, so a caller that edits the number
+/// makes the server report whatever total it likes — larger than the fleet,
+/// or large enough to overflow the addition of the live-host component.
+/// Nothing in a reply would look wrong. Keeping the count on this side means
+/// the only thing a caller can influence is whether it gets a cached answer
+/// or a fresh one, and both are honest.
+///
+/// ## What is cached, and what deliberately is NOT
+///
+/// Only helm.db's share of the count, keyed by the filter's digest and
+/// qualified by the STORE GENERATION it was taken at. The identity-less hosts'
+/// share is never cached at all: it is recounted on every request from the
+/// same snapshot the page's live rows are taken from, so the number reported
+/// and the rows returned cannot describe different moments.
+///
+/// The generation is not checked here. It is handed back to the store and
+/// compared inside the lock hold that produces the page
+/// ([`store::MatchingCount::ComputeUnless`]), because any comparison made out
+/// here can have a commit land between it and the read.
+///
+/// An earlier shape keyed entries by the FLEET REVISION too and cached the two
+/// components summed. That is unsound and worth remembering rather than
+/// rediscovering: the revision is bumped after the change it describes is
+/// already visible, so a request can sample the old revision, merge the new
+/// in-memory rows, and hit an entry whose live component predates them —
+/// while the store's generation, which never saw any of it, happily confirms.
+/// See this module's docs.
+///
+/// ## In memory, and empty after a restart
+///
+/// Deliberately: the filter digests it is keyed by are minted with a
+/// process-random key (see [`store::SessionFilter::digest`]) and the store
+/// generation restarts at zero, so nothing here could be carried across a
+/// restart without inventing a way for stale numbers to look fresh. An empty
+/// cache costs one count.
+#[derive(Default)]
+pub(crate) struct MatchingCounts {
+    /// Most-recently-used first, evicted from the back. A `Vec` scan rather
+    /// than a map plus a recency list: at [`MATCHING_COUNT_CACHE`] entries the
+    /// scan is a handful of string compares against work measured in whole
+    /// table decodes, and the ordering IS the eviction policy.
+    entries: std::sync::Mutex<Vec<CountEntry>>,
+}
+
+/// One remembered PERSISTED matching count, with what qualifies it.
+#[derive(Clone)]
+struct CountEntry {
+    /// The filter this count is about ([`store::SessionFilter::digest`]).
+    digest: String,
+    /// The store generation it was computed at — passed back to the store to
+    /// be validated under its own lock, never compared here.
+    generation: u64,
+    /// How many CACHED rows matched. Never a merged total: the live component
+    /// is not cacheable (see [`MatchingCounts`]).
+    persisted: u64,
+}
+
+impl MatchingCounts {
+    /// The persisted count remembered for this filter, if any.
+    ///
+    /// A hit is a CANDIDATE, not an answer: the store still has to confirm
+    /// that its own generation has not moved. Promoted to the front on the
+    /// way out, so a walk in progress cannot be evicted by unrelated traffic.
+    fn get(&self, digest: &str) -> Option<CountEntry> {
+        let mut entries = self.entries.lock().expect("matching count cache poisoned");
+        let found = entries.iter().position(|entry| entry.digest == digest)?;
+        let entry = entries.remove(found);
+        entries.insert(0, entry.clone());
+        Some(entry)
+    }
+
+    /// Remember a freshly computed persisted count, evicting the least
+    /// recently used entry once the cache is full.
+    ///
+    /// Replaces any entry for the same filter rather than adding a second:
+    /// two counts for one question would differ only in how stale they are,
+    /// and a lookup has no way to prefer the fresher one.
+    fn remember(&self, digest: &str, generation: u64, persisted: u64) {
+        let mut entries = self.entries.lock().expect("matching count cache poisoned");
+        entries.retain(|entry| entry.digest != digest);
+        entries.insert(
+            0,
+            CountEntry {
+                digest: digest.to_string(),
+                generation,
+                persisted,
+            },
+        );
+        entries.truncate(MATCHING_COUNT_CACHE);
+    }
 }
 
 /// The total order pages walk: creation time DESCENDING, then session id
@@ -263,7 +544,7 @@ fn decode_cursor(cursor: &str) -> Option<store::CacheKey> {
 /// ordinary ascending comparison, so a resume point is a plain `>` rather
 /// than a hand-written three-field comparison repeated at every call site.
 /// This must agree EXACTLY with the `ORDER BY` in
-/// [`HelmStore::cached_page`]: the page comes back sorted by SQL and the
+/// [`HelmStore::scan_page`]: the page comes back sorted by SQL and the
 /// in-memory rows below are merged into it by this comparison, so a
 /// disagreement between the two would interleave them wrongly.
 fn order_key(info: &SessionInfo, host: HostId) -> (std::cmp::Reverse<i64>, &str, HostId) {
@@ -311,6 +592,35 @@ struct MergeSource<'a> {
 }
 
 impl<'a> MergeSource<'a> {
+    /// Drop this source's leading LIVE entries that the filter excludes, so
+    /// everything a merge peeks at or takes is a row the caller asked for.
+    ///
+    /// Only the live side needs this: the persisted side was already
+    /// filtered inside its own scan ([`HelmStore::scan_page`]), which is
+    /// where a filter belongs for rows SQLite is walking anyway. Doing it
+    /// here rather than inside `peek`/`take` keeps both of those honest —
+    /// `peek` stays a pure look at the front — and it is what makes the
+    /// merge's ordering argument survive filtering: a source whose front
+    /// item is excluded would otherwise win the `min` comparison and then
+    /// yield nothing.
+    ///
+    /// The bound the merge otherwise enjoys (work proportional to the page,
+    /// not to the fleet) is genuinely weakened here: skipping is
+    /// proportional to how many non-matching entries a filter steps over. No
+    /// arrangement avoids that — the rows are in memory, unindexed, and
+    /// "which ones match" is the question being asked.
+    fn advance(&mut self, filter: &store::SessionFilter) {
+        let Some(snapshot) = self.snapshot else {
+            return;
+        };
+        let skip = self
+            .live
+            .iter()
+            .take_while(|info| !filter.matches(snapshot.id, info))
+            .count();
+        self.live = &self.live[skip..];
+    }
+
     /// This source's next ordering key, without consuming it.
     fn peek(&self) -> Option<(std::cmp::Reverse<i64>, &str, HostId)> {
         if let Some(scanned) = self.persisted.front() {
@@ -360,7 +670,7 @@ impl<'a> MergeSource<'a> {
 /// ## What this reads, and what it deliberately does not
 ///
 /// The persisted majority of the list comes from ONE indexed scan of ONE
-/// page ([`HelmStore::cached_page`]): the resume predicate, the row limit,
+/// page ([`HelmStore::merged_page`]): the resume predicate, the row limit,
 /// and a work-bounding byte cap all apply inside that scan, so a poll
 /// decodes only the rows it is about to return. The shape this replaced
 /// loaded and deserialized every session on every host on every poll, which
@@ -403,16 +713,121 @@ impl<'a> MergeSource<'a> {
 /// An undecodable cursor is an error rather than a silent restart from the
 /// front: restarting would hand a caller a page it had already seen while
 /// looking exactly like progress.
+///
+/// ## A cursor and its filter travel together, or not at all
+///
+/// Every cursor is bound to the filter it was minted under, and a request
+/// that replays one under a different filter — a changed parameter, a cleared
+/// one, an added one — is REFUSED with a 400 telling the caller to start a
+/// fresh walk. The position is meaningless outside its own result set:
+/// applied to a different one it resumes somewhere in the middle, and every
+/// match that sorts before that point is silently dropped from the walk. That
+/// failure is invisible to the client, which is exactly why it is worth a
+/// refusal rather than a best effort.
+///
+/// The binding is on unfiltered cursors too. "No filter" is a filter's worth
+/// of meaning here — it is the widest possible result set — and a walk
+/// resumed after a filter was cleared skips just as much as one resumed after
+/// it was tightened.
+///
+/// ## Filtering, and the counts
+///
+/// `filter` narrows BOTH sources by the same predicate ([`store::SessionFilter`],
+/// which lives in the store precisely so the two cannot come to disagree),
+/// and it applies before the page cut on each of them: the persisted side
+/// filters inside its own scan, the live side by skipping non-matching
+/// entries as the merge walks. A filtered reply therefore carries two
+/// counts — `matching` for the filter, `total` for the fleet — because "N
+/// matching of M sessions" needs both, and a client cannot derive either
+/// from a page it was handed. An unfiltered reply carries only `total` and
+/// claims nothing about matching (see [`SessionPageBody::matching`]).
+///
+/// The page and its totals come from ONE store read
+/// ([`HelmStore::merged_page`]), so they describe one moment: taken
+/// separately, a refresh landing between them can report more matches than
+/// the fleet holds. The live side is read from ONE snapshot for the same
+/// reason.
+///
+/// ## helm.db's share of the matching count is computed once per WALK
+///
+/// See [`MatchingCounts`] for the whole arrangement, and this module's docs
+/// for why the count is held here rather than carried in the cursor. What
+/// happens per request is short: the cached count for this filter names the
+/// store generation it was taken at, and the store decides under its own lock
+/// whether that generation still stands. A store that confirms costs nothing;
+/// a store that recounts replaces the entry.
+///
+/// The LIVE share is recounted every time, and that is not an oversight. Those
+/// rows exist only in the manager's memory, so no store generation can qualify
+/// a count of them, and the fleet revision cannot either — it is published
+/// after the rows it describes are already visible. Recounting from the very
+/// snapshot this page's live rows are merged from is what makes "N matching"
+/// and the rows beside it one answer rather than two. The price is a filter
+/// evaluation per in-memory row per page, over a list bounded by
+/// `crate::manager::REFRESH_SESSION_CAP` and already held by this request.
+///
+/// Every addition of two counts saturates. They are `u64` totals over a
+/// bounded cache and cannot realistically approach the ceiling, but "cannot
+/// realistically" is not a reason for a reply to be able to wrap.
 pub(crate) async fn session_page(
     manager: &ConnectionManager,
     store: &HelmStore,
+    counts: &MatchingCounts,
     cursor: Option<&str>,
     limit: usize,
+    filter: &store::SessionFilter,
 ) -> anyhow::Result<SessionPageBody> {
+    session_page_staged(
+        manager,
+        store,
+        counts,
+        cursor,
+        limit,
+        filter,
+        std::future::ready(()),
+    )
+    .await
+}
+
+/// [`session_page`], with a seam where a test can stage a concurrent fleet
+/// mutation.
+///
+/// `staged` is awaited after the cursor is decoded and BEFORE anything about
+/// the fleet is sampled, which makes it the barrier the live-count coherence
+/// property is stated against: whatever happens inside it is entirely in this
+/// request's past, so every number the reply carries must describe the world
+/// after it. Production passes a ready future, so the seam costs a poll.
+///
+/// It is placed here rather than deeper on purpose. The shape this replaced
+/// sampled the fleet revision above this point and keyed a cached count by it,
+/// which is exactly the arrangement a mutation landing at this barrier
+/// defeated (see [`MatchingCounts`]) — so a future edit that reintroduces a
+/// pre-snapshot sample of anything fleet-wide fails the test that stands here.
+async fn session_page_staged(
+    manager: &ConnectionManager,
+    store: &HelmStore,
+    counts: &MatchingCounts,
+    cursor: Option<&str>,
+    limit: usize,
+    filter: &store::SessionFilter,
+    staged: impl std::future::Future<Output = ()>,
+) -> anyhow::Result<SessionPageBody> {
+    let digest = filter.digest();
     let after = match cursor {
         None => None,
-        Some(raw) => Some(decode_cursor(raw).ok_or_else(malformed_cursor)?),
+        Some(raw) => {
+            let (key, bound) = decode_cursor(raw).ok_or_else(malformed_cursor)?;
+            if bound != digest {
+                return Err(cursor_filter_changed());
+            }
+            Some(key)
+        }
     };
+    staged.await;
+    // ONE snapshot, for the rows, the scope, and the live matching count
+    // alike. Nothing fleet-wide is sampled before it, and nothing this reply
+    // says about the live hosts comes from anywhere else — which is what makes
+    // the count and the rows one answer.
     let snapshots = manager.snapshots();
     let by_id: std::collections::HashMap<HostId, &HostSnapshot> = snapshots
         .iter()
@@ -433,9 +848,27 @@ pub(crate) async fn session_page(
         .map(|snapshot| snapshot.id)
         .collect();
 
-    let persisted = store
-        .cached_page(scope.clone(), after.clone(), limit, PAGE_BYTE_BUDGET)
+    // What this helm already knows about how many CACHED rows match, if
+    // anything. A hit is only a candidate — it names the store generation it
+    // was taken at, and the store is what decides whether that still holds.
+    let held = (!filter.is_empty()).then(|| counts.get(&digest)).flatten();
+    let read = store
+        .merged_page(
+            scope,
+            after.clone(),
+            limit,
+            PAGE_BYTE_BUDGET,
+            filter.clone(),
+            match (filter.is_empty(), &held) {
+                // An unfiltered listing makes no matching claim, so there is
+                // nothing to count.
+                (true, _) => store::MatchingCount::Skip,
+                (false, Some(held)) => store::MatchingCount::ComputeUnless(held.generation),
+                (false, None) => store::MatchingCount::Compute,
+            },
+        )
         .await?;
+    let persisted = read.page;
     let persisted_more = persisted.more;
     // The fence: with the persisted source incomplete, nothing at or past
     // this key has been seen, so the merge must not step over it on the
@@ -456,11 +889,43 @@ pub(crate) async fn session_page(
     // `manager::drain_sessions` — and one list is one host, so the third
     // key component is constant), so the resume point is a partition.
     let mut live_total: u64 = 0;
+    let mut live_matching: u64 = 0;
     for snapshot in &snapshots {
         let Some(live) = snapshot.live_sessions.as_ref() else {
             continue;
         };
-        live_total += live.len() as u64;
+        // Every identity-less host counts toward the FLEET total, host
+        // filter or not: `total` is what the fleet holds, and narrowing it
+        // to the filter's own scope would make "N matching of M" compare a
+        // number against itself.
+        live_total = live_total.saturating_add(live.len() as u64);
+        // A host the filter excludes contributes no matches and no rows, so
+        // it is skipped whole rather than walked and rejected item by item.
+        if filter
+            .host_scope()
+            .is_some_and(|wanted| wanted != snapshot.id)
+        {
+            continue;
+        }
+        // Counted over the WHOLE list rather than from the resume point:
+        // `matching` describes the fleet, not this page, so a walk already
+        // three pages in must still report the same number.
+        //
+        // And counted UNCONDITIONALLY, out of the same snapshot the rows
+        // below are taken from. Reusing a remembered live count is what an
+        // earlier shape did, keyed by the fleet revision, and the revision
+        // moves only after the list it describes is already visible — so the
+        // reuse could pair a stale count with fresh rows in the same reply.
+        // The cost is one filter evaluation per in-memory row per page,
+        // bounded by `REFRESH_SESSION_CAP` per host, and it is what makes the
+        // count true of the rows rather than true of a moment nearby.
+        if !filter.is_empty() {
+            live_matching = live_matching.saturating_add(
+                live.iter()
+                    .filter(|info| filter.matches(snapshot.id, info))
+                    .count() as u64,
+            );
+        }
         let start = match &after {
             None => 0,
             Some(after) => {
@@ -482,6 +947,12 @@ pub(crate) async fn session_page(
     let mut bytes = 0usize;
     let mut more = false;
     loop {
+        // Non-matching live entries are dropped before anything is compared:
+        // a source whose front item is excluded would otherwise win the
+        // comparison below and hand back nothing.
+        for source in &mut sources {
+            source.advance(filter);
+        }
         let next = sources
             .iter()
             .enumerate()
@@ -539,14 +1010,31 @@ pub(crate) async fn session_page(
     // column/payload mismatch is treated as poison for exactly this reason),
     // and a cursor built from the payload would resume somewhere the order
     // does not contain.
+    //
+    // It carries the filter's digest and nothing else. Everything a later
+    // page needs to know about the COUNT lives on this side.
     let next_cursor = more
-        .then(|| taken.last().map(|item| encode_cursor(&item.key)))
+        .then(|| taken.last().map(|item| encode_cursor(&item.key, &digest)))
         .flatten();
     let sessions: Vec<SessionRow> = taken.into_iter().filter_map(|item| item.row).collect();
-    let total = store.cached_count(scope).await? + live_total;
+    // Only the PERSISTED component is remembered; the live one is added on
+    // the way out, freshly counted above, on both the hit and the miss path.
+    let matching = match (filter.is_empty(), read.matching) {
+        (true, _) => None,
+        (false, Some(counted)) => {
+            counts.remember(&digest, read.generation, counted);
+            Some(counted.saturating_add(live_matching))
+        }
+        // The store confirmed its generation had not moved, so the cached
+        // count of CACHED rows still stands. `held` is `Some` whenever the
+        // store was handed a generation to check, which is the only way it
+        // answers `None` for a filtered read.
+        (false, None) => held.map(|held| held.persisted.saturating_add(live_matching)),
+    };
     Ok(SessionPageBody {
         sessions,
-        total,
+        total: read.total.saturating_add(live_total),
+        matching,
         truncated: next_cursor.is_some(),
         next_cursor,
     })
@@ -568,6 +1056,22 @@ fn malformed_cursor() -> anyhow::Error {
         kind: farhelm_proto::ErrorKind::InvalidRequest,
         message: "session list cursor could not be decoded; cursors are opaque — replay one \
                   exactly as a reply carried it, or start a fresh walk with no cursor at all"
+            .to_string(),
+    })
+}
+
+/// The refusal a cursor replayed under a DIFFERENT filter produces.
+///
+/// Named separately from [`malformed_cursor`] because the caller's mistake is
+/// different and so is the fix: the token is perfectly good, it just belongs
+/// to another walk. Answering it would resume mid-order through a result set
+/// it never described and silently drop every earlier match.
+fn cursor_filter_changed() -> anyhow::Error {
+    anyhow::Error::new(crate::SupervisorError {
+        kind: farhelm_proto::ErrorKind::InvalidRequest,
+        message: "this session list cursor was issued for a different filter; a resume point \
+                  only means something within the result set it came from, so changing, \
+                  clearing or adding a filter parameter requires a fresh walk with no cursor"
             .to_string(),
     })
 }
@@ -639,9 +1143,101 @@ mod tests {
                 host: 0,
             },
         ] {
-            let decoded = decode_cursor(&encode_cursor(&key)).expect("our own cursor decodes");
+            let digest = store::SessionFilter::default().title("drain").digest();
+            let (decoded, bound) =
+                decode_cursor(&encode_cursor(&key, &digest)).expect("our own cursor decodes");
             assert_eq!(decoded, key);
+            assert_eq!(
+                bound, digest,
+                "the filter binding must survive the round trip beside the position"
+            );
         }
+    }
+
+    /// A cursor carries a POSITION and a filter binding, and no count of any
+    /// kind.
+    ///
+    /// This is the property that makes the token unable to lie. A matching
+    /// count carried in a cursor is a number the client supplies — the token
+    /// is base64 of JSON with nothing authenticating it — so a server that
+    /// believed one would report whatever total the caller wrote into it.
+    /// Pinned on the encoded bytes rather than on the decoder, because the
+    /// decoder cannot show what was never put in.
+    #[test]
+    fn a_cursor_carries_no_count_a_caller_could_edit() {
+        use base64::Engine;
+
+        let token = encode_cursor(
+            &store::CacheKey {
+                created_at: 1_700_000_000,
+                session_id: "sess-1".to_string(),
+                host: 3,
+            },
+            &store::SessionFilter::default().title("drain").digest(),
+        );
+        let json: serde_json::Value = serde_json::from_slice(
+            &base64::engine::general_purpose::URL_SAFE_NO_PAD
+                .decode(&token)
+                .expect("our cursor is base64url"),
+        )
+        .expect("our cursor is JSON");
+        // Sorted, because `serde_json`'s object is a map rather than a
+        // sequence here — the SET of fields is what this is about, not the
+        // order they were written in.
+        let fields: Vec<&str> = json
+            .as_object()
+            .expect("a cursor is a JSON object")
+            .keys()
+            .map(String::as_str)
+            .collect();
+        assert_eq!(
+            fields,
+            vec!["at", "f", "fh", "h", "sid"],
+            "a cursor carries the domain tag, the ordering key and the filter binding — a count \
+             among these would be a number the caller gets to choose"
+        );
+    }
+
+    /// A cursor whose filter binding does not match the request's filter is
+    /// REFUSED by the decoder's caller, and the refusal is distinguishable
+    /// from a malformed token.
+    ///
+    /// The digest is a keyed hash of the filter's canonical encoding, so this
+    /// also pins that two different filters cannot share a binding — which is
+    /// what the refusal rests on.
+    #[test]
+    fn a_cursor_is_bound_to_the_filter_it_was_minted_under() {
+        let unfiltered = store::SessionFilter::default();
+        let filtered = store::SessionFilter::default().title("drain");
+        let narrower = store::SessionFilter::default()
+            .title("drain")
+            .status("idle");
+
+        assert_ne!(
+            unfiltered.digest(),
+            filtered.digest(),
+            "an unfiltered walk is its own result set, and a cursor from one must not replay in \
+             the other"
+        );
+        assert_ne!(filtered.digest(), narrower.digest());
+        assert_eq!(
+            filtered.digest(),
+            store::SessionFilter::default().title("drain").digest(),
+            "the same filter must recognize its own cursors, or no walk could ever continue"
+        );
+
+        let key = store::CacheKey {
+            created_at: 1,
+            session_id: "s".to_string(),
+            host: 1,
+        };
+        let (_, bound) = decode_cursor(&encode_cursor(&key, &filtered.digest()))
+            .expect("our own cursor decodes");
+        assert_ne!(
+            bound,
+            unfiltered.digest(),
+            "and the binding a decoded cursor reports is the one it was minted with"
+        );
     }
 
     /// The helm's cursor and the supervisor's wire cursor must not be
@@ -672,11 +1268,14 @@ mod tests {
             id: String,
         }
 
-        let helm = encode_cursor(&store::CacheKey {
-            created_at: 1_700_000_000,
-            session_id: "sess-1".to_string(),
-            host: 1,
-        });
+        let helm = encode_cursor(
+            &store::CacheKey {
+                created_at: 1_700_000_000,
+                session_id: "sess-1".to_string(),
+                host: 1,
+            },
+            &store::SessionFilter::default().digest(),
+        );
         let helm_json = base64::engine::general_purpose::URL_SAFE_NO_PAD
             .decode(&helm)
             .expect("our cursor is base64url");
@@ -701,31 +1300,214 @@ mod tests {
     /// refusal, never a panic and never a silent restart from the front — a
     /// restart would re-serve a page the caller already had while looking
     /// exactly like progress.
+    ///
+    /// A version-1 token is in the table because the domain tag is the ONLY
+    /// thing standing between the old shape and this one: v1 cursors carried
+    /// a matching count and no filter binding, and a decoder that shrugged at
+    /// the extra fields would resume a walk with neither guarantee in place.
     #[test]
     fn a_malformed_or_foreign_cursor_decodes_to_nothing() {
         use base64::Engine;
 
-        let foreign_domain = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(
-            serde_json::json!({"fh": "farhelm/helm-sessions/2", "at": 1, "sid": "s", "h": 1})
-                .to_string(),
+        let encode = |value: serde_json::Value| {
+            base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(value.to_string())
+        };
+        let foreign_domain = encode(
+            serde_json::json!({"fh": "farhelm/helm-sessions/3", "at": 1, "sid": "s",
+                                      "h": 1, "f": "0000000000000000"}),
         );
-        let extra_field = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(
-            serde_json::json!({"fh": CURSOR_DOMAIN, "at": 1, "sid": "s", "h": 1, "x": 1})
-                .to_string(),
+        let superseded_version = encode(
+            serde_json::json!({"fh": "farhelm/helm-sessions/1", "at": 1, "sid": "s",
+                                      "h": 1, "m": 99, "r": 1, "f": "h-;d-;t-;p-;s-;"}),
         );
+        let extra_field = encode(serde_json::json!({"fh": CURSOR_DOMAIN, "at": 1, "sid": "s",
+                                                    "h": 1, "f": "0000000000000000", "x": 1}));
+        // The binding is REQUIRED, not defaulted: a token without one names
+        // no result set, and inventing "the unfiltered walk" for it would
+        // resume exactly the way this refusal exists to prevent.
+        let no_binding = encode(serde_json::json!({"fh": CURSOR_DOMAIN, "at": 1, "sid": "s",
+                                                   "h": 1}));
         for malformed in [
             "not-base64!!",
             "",
             "YWJj",
             "e30",
             foreign_domain.as_str(),
+            superseded_version.as_str(),
             extra_field.as_str(),
+            no_binding.as_str(),
         ] {
             assert!(
                 decode_cursor(malformed).is_none(),
                 "cursor {malformed:?} must not decode"
             );
         }
+    }
+
+    /// The matching-count cache is BOUNDED and evicts by recency, so a walk
+    /// in progress cannot be pushed out by unrelated traffic.
+    ///
+    /// Spec: at capacity, one more entry evicts the least recently USED one —
+    /// not the least recently written — and a `get` is what counts as use.
+    ///
+    /// Both halves matter and neither is visible from the outside. Without the
+    /// bound, a search box mints an entry per keystroke and this map grows for
+    /// the life of the process. Without recency, a walk's own entry is evicted
+    /// by whatever a second browser tab happened to type, and every later page
+    /// of that walk rescans the whole cache — the exact cost the entry exists
+    /// to avoid.
+    #[test]
+    fn the_count_cache_is_bounded_and_evicts_the_least_recently_used_entry() {
+        let counts = MatchingCounts::default();
+        for n in 0..MATCHING_COUNT_CACHE {
+            counts.remember(&format!("digest-{n}"), 1, n as u64);
+        }
+        assert_eq!(
+            counts.entries.lock().expect("cache mutex").len(),
+            MATCHING_COUNT_CACHE,
+            "a full cache holds exactly its capacity"
+        );
+
+        // Reading the OLDEST entry makes it the newest, which is the whole
+        // difference between insertion order and recency order.
+        assert_eq!(
+            counts.get("digest-0").map(|entry| entry.persisted),
+            Some(0),
+            "every entry is still there before anything is evicted"
+        );
+        counts.remember("digest-fresh", 1, 999);
+
+        assert_eq!(
+            counts.entries.lock().expect("cache mutex").len(),
+            MATCHING_COUNT_CACHE,
+            "one insertion past capacity evicts exactly one entry"
+        );
+        assert!(
+            counts.get("digest-1").is_none(),
+            "the entry nobody has touched since it was written is the one that goes"
+        );
+        assert_eq!(
+            counts.get("digest-0").map(|entry| entry.persisted),
+            Some(0),
+            "and the entry a walk read moments ago survives the insertion that displaced it"
+        );
+        assert_eq!(
+            counts.get("digest-fresh").map(|entry| entry.persisted),
+            Some(999)
+        );
+    }
+
+    /// A change to an identity-less host's in-memory sessions, landing in a
+    /// request's PAST, is counted by the very page that returns those rows.
+    ///
+    /// Spec: with a cached persisted count already standing for this filter,
+    /// a page whose live rows changed before the request sampled anything
+    /// reports a `matching` that agrees with the rows it carries.
+    ///
+    /// This is the regression the count cache's shape was rebuilt around, and
+    /// it is invisible in any single number taken alone. The cache used to be
+    /// keyed by the FLEET REVISION and to hold both components summed; the
+    /// revision is bumped only after the new list is already published
+    /// (`manager`'s `HostActor::publish_refresh`), so a request could sample
+    /// the old revision, merge the NEW rows, and hit an entry whose live
+    /// component described the old ones — the store's generation confirming
+    /// happily, because none of it ever touched the store. The reply then
+    /// carried three rows beside "2 matching", which no client can detect.
+    ///
+    /// The mutation is staged through [`session_page_staged`]'s seam rather
+    /// than raced against a real request: the window it exercises is a few
+    /// instructions wide and would otherwise reproduce only under a
+    /// multi-threaded scheduler on a bad day. Staging it makes the assertion
+    /// deterministic AND keeps the barrier standing over the code — anything
+    /// that starts sampling the fleet before that point fails here.
+    #[tokio::test]
+    async fn a_live_change_before_the_snapshot_is_counted_by_the_page_that_returns_it() {
+        use crate::rest_harness;
+
+        let (builder, _cached) = rest_harness::FleetBuilder::new()
+            .await
+            .local(rest_harness::HostScript {
+                // No identity: this host caches nothing, so its rows and its
+                // share of the count come from the manager's memory.
+                identity: None,
+                sessions: vec![rest_harness::session("live-keep-1", 300)],
+                ..rest_harness::HostScript::default()
+            })
+            .await
+            .ssh(
+                "user@cached",
+                rest_harness::HostScript {
+                    identity: Some("identity-cached".to_string()),
+                    sessions: vec![rest_harness::session("cached-keep-1", 400)],
+                    ..rest_harness::HostScript::default()
+                },
+            )
+            .await;
+        let harness = builder.start().await;
+        let local = rest_harness::local_id(&harness.store).await;
+        harness.await_refreshed(local).await;
+        harness.await_refreshed(_cached).await;
+
+        let filter = store::SessionFilter::default().title("keep");
+        // The first walk is what puts a persisted count in the cache; without
+        // one, the second would recount and could not be wrong.
+        let first = session_page(
+            &harness.manager,
+            &harness.store,
+            &harness.state.counts,
+            None,
+            50,
+            &filter,
+        )
+        .await
+        .expect("the first page reads");
+        assert_eq!(first.sessions.len(), 2);
+        assert_eq!(first.matching, Some(2));
+
+        let second = session_page_staged(
+            &harness.manager,
+            &harness.store,
+            &harness.state.counts,
+            None,
+            50,
+            &filter,
+            async {
+                harness.fleet.edit(local, |script| {
+                    script
+                        .sessions
+                        .push(rest_harness::session("live-keep-2", 200));
+                });
+                harness.manager.refresh_now(local);
+                harness
+                    .await_state(local, |state| {
+                        matches!(
+                            state,
+                            crate::manager::HostState::Connected {
+                                last_refresh: crate::manager::RefreshHealth::Ok { sessions: 2 },
+                                ..
+                            }
+                        )
+                    })
+                    .await;
+            },
+        )
+        .await
+        .expect("the second page reads");
+
+        assert_eq!(
+            second.sessions.len(),
+            3,
+            "the new in-memory session is on the page"
+        );
+        assert_eq!(
+            second.matching,
+            Some(second.sessions.len() as u64),
+            "and the matching count describes the rows it is reported beside"
+        );
+        assert_eq!(
+            second.total, 3,
+            "the fleet total counts the same three sessions"
+        );
     }
 
     /// The ordering key must agree with the SQL `ORDER BY` it is merged

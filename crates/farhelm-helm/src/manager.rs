@@ -64,7 +64,8 @@
 
 use crate::client::{SupervisorClient, SupervisorError};
 use crate::store::{
-    DialedAs, FirstContactOutcome, HelmStore, HostId, HostKind, HostRow, HostStoreError,
+    CacheReplacement, DialedAs, FirstContactOutcome, HelmStore, HostId, HostKind, HostRow,
+    HostStoreError,
 };
 use anyhow::Context as _;
 use farhelm_proto::io::VersionSkew;
@@ -349,6 +350,17 @@ struct RefreshStep {
     /// or `None` for a refresh that produced no evidence either way (a
     /// failed one). See [`ActorStatus::contested`].
     contested: Option<Arc<Vec<String>>>,
+    /// Whether this refresh's committed cache write actually CHANGED a row
+    /// — the invalidation feed's changed-only rule, carried out of the
+    /// store's own transaction rather than guessed at here.
+    ///
+    /// False for every refresh that failed, was skipped, or wrote a row set
+    /// identical to what was already there, which in a settled fleet is
+    /// nearly all of them: a bump per refresh would wake every client every
+    /// few seconds per host. The in-memory (identity-less) path publishes
+    /// through [`HostActor::publish_refresh`]'s value comparison instead —
+    /// its "cache" IS the published status — so this stays false there.
+    cache_changed: bool,
 }
 
 /// What a refresh does to the in-memory session list a connected host
@@ -661,6 +673,21 @@ pub struct HostSnapshot {
     /// host, and read from the same borrow as everything else here so a
     /// routing decision cannot pair one host's claims with another's state.
     pub contested: Arc<Vec<String>>,
+    /// Which CONNECTION this snapshot describes — see
+    /// [`ActorStatus::incarnation`], and read from the same borrow as the
+    /// state beside it.
+    ///
+    /// Published so a CLIENT can name the connection it prepared a request
+    /// against (`crate::precondition`). Without it the token exists only
+    /// inside the helm, and a browser that read a host's catalog, showed a
+    /// dialog, and posted an edit has no way to say which install it meant —
+    /// which is exactly the window a retarget or an adoption in another tab
+    /// lands in, and colliding starter profile ids make the result RESOLVE
+    /// on the successor rather than fail.
+    ///
+    /// Zero means "never connected", so a client that has only ever seen a
+    /// down host has nothing to assert and must send no expectation.
+    pub incarnation: u64,
 }
 
 // ---- The transport seam ---------------------------------------------
@@ -1255,6 +1282,203 @@ pub async fn drain_sessions(client: &SupervisorClient) -> anyhow::Result<Vec<Ses
     )
 }
 
+// ---- The invalidation feed -------------------------------------------
+
+/// The fleet's revision counter: the helm's way of saying "something
+/// changed" without saying what (PLAN_M6_75.md item 5).
+///
+/// One monotonic number behind a `watch`, and every property this type has
+/// falls out of that choice:
+///
+/// - **It carries no data.** A subscriber learns only that the fleet moved,
+///   and re-reads whatever its own surface needs through the ordinary REST
+///   readers. That is what keeps one payload shape for every kind of change
+///   and reuses every consistency rule the REST layer already enforces —
+///   the alternative, a typed event per mutation, is a second serving path
+///   whose staleness rules would have to be got right twice.
+/// - **It coalesces for free.** A `watch` retains only the LATEST value, so
+///   a subscriber that was busy through fifty bumps wakes once and re-reads
+///   once. A lagged subscriber is therefore not a case to handle; it is the
+///   ordinary case observed at a different speed.
+/// - **Bumps are CHANGE-only, without exception, by contract of the
+///   callers.** Nothing here can tell a real change from a no-op, so every
+///   publisher is responsible for calling [`Self::bump`] only when something
+///   a client could observe actually differs. That rule is load-bearing
+///   rather than tidy: the session-cache refresh runs every few seconds per
+///   host and almost always writes an identical row set, so a
+///   bump-on-every-refresh feed would wake every open client in the fleet on
+///   a three-second timer and be strictly worse than the polling it
+///   replaces.
+///
+///   Every publisher meets it by comparing, not by assuming a mutation
+///   changed something: the cache writes compare stored rows inside their
+///   own transaction, the actor's publication compares the value it is about
+///   to publish, the remembered-default write compares the stored id, and
+///   profile edits compare the submitted definition against the catalog
+///   before forwarding (`crate::profiles::update_profile`). A caller that
+///   cannot tell must not bump.
+///
+/// Owned by the [`ConnectionManager`] because that is where the chokepoints
+/// are — actor state transitions, cache writes, registry reconciliation —
+/// and reachable from the REST edge through [`ConnectionManager::events`]
+/// for the publishers that live there (profile mutations and
+/// remembered-default writes).
+pub struct FleetEvents {
+    /// Starts at zero and only ever increases. Wrapping is not a case: at
+    /// one bump per nanosecond a `u64` lasts ~584 years.
+    revision: watch::Sender<u64>,
+    /// How many subscriptions are open right now — the admission bound's
+    /// only state (see [`Self::admit`]).
+    ///
+    /// Here rather than in the endpoint because it must be per-HELM: a
+    /// process-wide static would make one embedded helm's subscribers count
+    /// against another's, which is exactly the sort of coupling a global
+    /// makes invisible.
+    subscribers: std::sync::atomic::AtomicUsize,
+    /// Called at the very start of every [`Self::bump`], before the revision
+    /// moves — the seam the publication-ORDER tests observe through.
+    ///
+    /// Some invariants here are about what a client can see AT the instant of
+    /// an invalidation, and the publisher that bumps has, by design, no await
+    /// point between settling its state and bumping. That is what makes the
+    /// ordering safe and also what makes it invisible to any other task: a
+    /// subscriber woken by the bump is polled later, by which time the
+    /// ordering it was supposed to prove has already resolved either way. An
+    /// observer called synchronously is the only vantage point that can tell
+    /// the two orders apart.
+    ///
+    /// Test-only, so production carries neither the branch nor the mutex.
+    #[cfg(test)]
+    on_bump: std::sync::Mutex<Option<Box<dyn Fn() + Send + Sync>>>,
+}
+
+/// One admitted subscription, releasing its seat when dropped.
+///
+/// A guard rather than a manual release pair because the release has to
+/// survive every way a subscription can end — the peer closing, the write
+/// deadline expiring, the task being cancelled during shutdown — and only a
+/// destructor covers the last of those.
+pub struct FeedSeat {
+    events: Arc<FleetEvents>,
+}
+
+impl Drop for FeedSeat {
+    fn drop(&mut self) {
+        self.events
+            .subscribers
+            .fetch_sub(1, std::sync::atomic::Ordering::Relaxed);
+    }
+}
+
+impl Default for FleetEvents {
+    fn default() -> FleetEvents {
+        FleetEvents::new()
+    }
+}
+
+impl FleetEvents {
+    pub fn new() -> FleetEvents {
+        FleetEvents {
+            revision: watch::Sender::new(0),
+            subscribers: std::sync::atomic::AtomicUsize::new(0),
+            #[cfg(test)]
+            on_bump: std::sync::Mutex::new(None),
+        }
+    }
+
+    /// Watch every bump from INSIDE it — see [`Self::on_bump`].
+    ///
+    /// `observe` must not bump, and must not take any lock a publisher holds
+    /// while bumping. It runs on the publisher's own thread, in the middle of
+    /// the publisher's work.
+    #[cfg(test)]
+    pub fn observe_bumps(&self, observe: impl Fn() + Send + Sync + 'static) {
+        *self.on_bump.lock().expect("bump observer mutex poisoned") = Some(Box::new(observe));
+    }
+
+    /// Take one of `capacity` subscription seats, or `None` when they are
+    /// all taken.
+    ///
+    /// The feed is unauthenticated on loopback until M7, so "open sockets
+    /// until the helm stops coping" is a thing any local process can do; a
+    /// seat turns that into a refusal the caller can report. Compare-and-swap
+    /// rather than check-then-increment, because two upgrades arriving
+    /// together must not both see the last free seat.
+    ///
+    /// `capacity` is the CALLER's, not a constant here: the bound is a
+    /// property of the endpoint being protected, and this type is only
+    /// counting.
+    pub fn admit(self: &Arc<Self>, capacity: usize) -> Option<FeedSeat> {
+        self.subscribers
+            .fetch_update(
+                std::sync::atomic::Ordering::Relaxed,
+                std::sync::atomic::Ordering::Relaxed,
+                |held| (held < capacity).then_some(held + 1),
+            )
+            .ok()
+            .map(|_| FeedSeat {
+                events: Arc::clone(self),
+            })
+    }
+
+    /// Announce that something a client could observe has changed.
+    ///
+    /// `send_modify` rather than `send`: a `watch` send is a no-op when
+    /// nobody is subscribed, and this channel legitimately has no
+    /// subscribers whenever no client is connected. The counter must
+    /// advance regardless, or a client that subscribes a moment later would
+    /// be handed a revision that silently under-counts what already
+    /// happened — and would then sit still until the NEXT change.
+    pub fn bump(&self) {
+        #[cfg(test)]
+        if let Some(observe) = self
+            .on_bump
+            .lock()
+            .expect("bump observer mutex poisoned")
+            .as_ref()
+        {
+            observe();
+        }
+        self.revision.send_modify(|revision| *revision += 1);
+    }
+
+    /// The revision as it stands right now — what a fresh subscriber is
+    /// handed immediately, before anything else (see
+    /// [`crate::events`]'s handshake).
+    ///
+    /// ## It can NEVER qualify data in helm.db
+    ///
+    /// Tempting and wrong: "the revision has not moved, so the count I took
+    /// earlier still describes the rows". Every publisher bumps AFTER its
+    /// write commits — a cache replacement commits its transaction and then
+    /// calls [`Self::bump`] — so there is always a window in which the rows
+    /// are new and this number is old. A reader that trusted it would pair a
+    /// count from before a create with a page from after it, and nothing in
+    /// the reply would look wrong.
+    ///
+    /// It is also process-local and restarts at zero, so equality across a
+    /// helm restart means nothing at all.
+    ///
+    /// What it CAN qualify is state that lives in this process and is
+    /// published under the same discipline — the identity-less hosts'
+    /// in-memory session lists, which are only ever changed by a publication
+    /// that bumps this. `crate::aggregate` uses it for exactly that half and
+    /// takes the store's own generation for the other.
+    pub fn revision(&self) -> u64 {
+        *self.revision.borrow()
+    }
+
+    /// A receiver that yields every later revision, coalesced.
+    ///
+    /// The receiver starts out marked as having SEEN the current value, so
+    /// a caller must read [`Self::revision`] (or `borrow_and_update`) for
+    /// the starting point and then wait for changes. Subscribing does not
+    /// itself count as a change.
+    pub fn subscribe(&self) -> watch::Receiver<u64> {
+        self.revision.subscribe()
+    }
+}
+
 // ---- The manager -----------------------------------------------------
 
 /// What one actor publishes about itself, and the only channel through
@@ -1444,6 +1668,15 @@ pub struct ConnectionManager {
     store: HelmStore,
     transport: Arc<dyn HostTransport>,
     cadence: Cadence,
+    /// The fleet's "something changed" counter, shared with every actor
+    /// this manager spawns and with the REST edge (see [`FleetEvents`]).
+    ///
+    /// Held here rather than beside the manager in `AppState` because the
+    /// chokepoints that publish are mostly IN here — a state transition, a
+    /// committed cache change, a registry reconcile — and a counter the
+    /// actors could not reach would need a second path back out to whoever
+    /// held it.
+    events: Arc<FleetEvents>,
     /// Serializes [`Self::sync_registry`] end to end — the registry READ
     /// included, which is why it cannot be the actor-map mutex (that one is
     /// std, and is deliberately never held across an await).
@@ -1456,6 +1689,25 @@ pub struct ConnectionManager {
     /// unconstructible rather than unlikely.
     reconcile: tokio::sync::Mutex<()>,
     actors: Mutex<ActorMap>,
+    /// How many callers are waiting in [`ConnectionManager::host_write_lock`]
+    /// — instrumentation, see that method's counterpart
+    /// [`ConnectionManager::queued_host_writes`].
+    host_write_queue: std::sync::atomic::AtomicUsize,
+}
+
+/// Decrements [`ConnectionManager::host_write_queue`] however its waiter
+/// leaves — acquired, cancelled, or unwound.
+///
+/// A drop guard rather than a matching `fetch_sub`, because the wait it counts
+/// happens inside an axum handler whose future is dropped when its client
+/// disconnects; a plain decrement after the `await` would be skipped exactly
+/// then, and an instrument that only climbs is worse than none.
+struct QueuedHostWrite<'a>(&'a std::sync::atomic::AtomicUsize);
+
+impl Drop for QueuedHostWrite<'_> {
+    fn drop(&mut self) {
+        self.0.fetch_sub(1, std::sync::atomic::Ordering::SeqCst);
+    }
 }
 
 /// The running actors, plus the one bit that can retire the whole set.
@@ -1679,11 +1931,24 @@ impl ConnectionManager {
             store,
             transport,
             cadence,
+            events: Arc::new(FleetEvents::new()),
             reconcile: tokio::sync::Mutex::new(()),
             actors: Mutex::new(ActorMap::default()),
+            host_write_queue: std::sync::atomic::AtomicUsize::new(0),
         });
         manager.sync_registry().await?;
         Ok(manager)
+    }
+
+    /// The fleet's revision counter — what the invalidation socket
+    /// subscribes to, and what the REST edge's own publishers (profile
+    /// mutations, remembered-default writes) bump.
+    ///
+    /// Handed out as the `Arc` rather than as a borrow because a subscriber
+    /// outlives the request that created it: the socket task holds this for
+    /// as long as a browser stays connected.
+    pub fn events(&self) -> &Arc<FleetEvents> {
+        &self.events
     }
 
     /// Reconcile the running actors against the registry: start one for
@@ -1722,11 +1987,19 @@ impl ConnectionManager {
             info!("the connection manager is shut down; skipping registry reconciliation");
             return Ok(());
         }
+        // Whether this reconcile changed the fleet's SHAPE — a host gained
+        // or lost an actor, or one was retargeted. Accumulated rather than
+        // published per decision so a reconcile that touches five rows is
+        // one invalidation, and so a reconcile that changes NOTHING (the
+        // idempotent call every host mutation makes afterwards, including
+        // the ones that failed) wakes no client at all.
+        let mut shape_changed = false;
         let live: std::collections::HashSet<HostId> = rows.iter().map(|row| row.id).collect();
         map.actors.retain(|id, handle| {
             if live.contains(id) {
                 return true;
             }
+            shape_changed = true;
             // The row is gone. Aborting is safe mid-anything: see the
             // module docs on why an actor has no state that can be left
             // half-applied. Its cache rows are already gone too, cascaded
@@ -1774,6 +2047,7 @@ impl ConnectionManager {
                         }
                         let previous = existing.insert(replacement);
                         previous.task.abort();
+                        shape_changed = true;
                         continue;
                     }
                     if reconfigured(&handle.row, &row) {
@@ -1825,6 +2099,7 @@ impl ConnectionManager {
                             nudge.revision += 1;
                             nudge.fresh_window = true;
                         });
+                        shape_changed = true;
                     } else {
                         handle.row = row;
                     }
@@ -1835,6 +2110,7 @@ impl ConnectionManager {
                         started.push(start);
                     }
                     slot.insert(fresh);
+                    shape_changed = true;
                 }
             }
         }
@@ -1842,6 +2118,14 @@ impl ConnectionManager {
         // gone: an actor that started mid-reconcile could publish over a
         // handle this pass is about to replace.
         drop(map);
+        // Published after the lock is released and before the actors run:
+        // a client that re-reads on this revision sees the new host list
+        // (the registry write is already committed, and snapshots come off
+        // the map this pass has finished editing), and whatever the fresh
+        // actors go on to discover arrives as their own transitions.
+        if shape_changed {
+            self.events.bump();
+        }
         for start in started {
             let _ = start.send(());
         }
@@ -1887,6 +2171,7 @@ impl ConnectionManager {
             cache_lock: Arc::clone(&cache_lock),
             seed_epoch: Arc::clone(&seed_epoch),
             incarnations: Arc::clone(&self.incarnations),
+            events: Arc::clone(&self.events),
         };
         // One span per actor, entered for the task's whole life: SPEC.md
         // wants a reconnection trail whose every line names the host, and
@@ -1927,6 +2212,7 @@ impl ConnectionManager {
         // cancellation does.
         let supervised = Arc::clone(&status);
         let incarnations = Arc::clone(&self.incarnations);
+        let events = Arc::clone(&self.events);
         let task = tokio::spawn(async move {
             let _abort_actor = AbortOnDrop(actor_task.abort_handle());
             let reason = match actor_task.await {
@@ -1956,6 +2242,11 @@ impl ConnectionManager {
                 status.incarnation =
                     incarnations.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
             });
+            // A retirement is a state transition like any other, and one
+            // the hosts panel must not have to poll for: the entry stops
+            // being routable at this instant, and every open client is
+            // showing it as connected until told otherwise.
+            events.bump();
         });
         ActorHandle {
             row,
@@ -1993,6 +2284,7 @@ impl ConnectionManager {
                     state: published.state.clone(),
                     live_sessions: published.live_sessions.clone(),
                     contested: Arc::clone(&published.contested),
+                    incarnation: published.incarnation,
                 }
             })
             .collect();
@@ -2117,6 +2409,13 @@ impl ConnectionManager {
                 claim.host
             );
         }
+        // Whether this write left the serving path saying something
+        // different than it did a moment ago — the invalidation feed's
+        // changed-only rule applied to a single-row write. A retried create
+        // that re-records a byte-identical row is the case this exists for:
+        // it is a successful mutation that changed nothing anyone could
+        // observe, and waking every open client for it would be noise.
+        let mut changed = false;
         match &claim.identity {
             Some(identity) => {
                 // The durable path's second line of defense is the store's
@@ -2126,7 +2425,8 @@ impl ConnectionManager {
                 // session under an install that has since been adopted
                 // away. The check above narrows the window; the binding is
                 // what closes it.
-                self.store
+                changed = self
+                    .store
                     .remember_session(claim.host, identity, session)
                     .await?;
             }
@@ -2196,6 +2496,7 @@ impl ConnectionManager {
                             < (std::cmp::Reverse(session.created_at), session.id.as_str())
                     });
                     entries.insert(at, session.clone());
+                    changed = status.live_sessions.as_deref() != Some(&entries);
                     status.live_sessions = Some(Arc::new(entries));
                 });
                 if let Some(refused) = refused {
@@ -2209,6 +2510,13 @@ impl ConnectionManager {
         // AFTER the write, so a refresh that reads the epoch and then takes
         // the lock cannot see the bump without also seeing the write.
         seed_epoch.fetch_add(1, std::sync::atomic::Ordering::Release);
+        // A create, a restart, or a rename that actually recorded something
+        // is exactly what the goal promises arrives in every OTHER client
+        // without a refresh — the one that made the change already has the
+        // reply in hand.
+        if changed {
+            self.events.bump();
+        }
         // A status of `Unknown` is the one thing a reply cannot tell this
         // side anything with (see [`merged_status`]): it is declined when
         // something definite is already known, and recorded as the absence
@@ -2269,9 +2577,13 @@ impl ConnectionManager {
                 claim.host
             );
         }
+        // Same changed-only rule as a seed: forgetting a row that was not
+        // there is a successful delete that changed nothing observable.
+        let mut changed = false;
         match &claim.identity {
             Some(identity) => {
-                self.store
+                changed = self
+                    .store
                     .forget_session(claim.host, identity, session_id)
                     .await?;
             }
@@ -2283,6 +2595,7 @@ impl ConnectionManager {
                     if let Some(live) = status.live_sessions.as_ref() {
                         let mut entries = live.as_ref().clone();
                         entries.retain(|existing| existing.id != session_id);
+                        changed = entries.len() != live.len();
                         status.live_sessions = Some(Arc::new(entries));
                     }
                 });
@@ -2299,10 +2612,116 @@ impl ConnectionManager {
                     .cloned()
                     .collect();
                 status.contested = Arc::new(remaining);
+                changed = true;
             }
         });
         seed_epoch.fetch_add(1, std::sync::atomic::Ordering::Release);
+        if changed {
+            self.events.bump();
+        }
         Ok(())
+    }
+
+    /// Remember which profile a host's session was last created from —
+    /// against the connection the create actually used.
+    ///
+    /// The same claim discipline as [`Self::remember_session`], and it is
+    /// not ceremony borrowed from it: a profile id means something only on
+    /// the supervisor that minted it, and every fresh supervisor seeds
+    /// STARTER profiles, so ids collide across installs by construction.
+    /// A retarget, a reconnect, or an adoption between the create and this
+    /// write would therefore record one install's profile id as another
+    /// install's default — an id that may well RESOLVE over there, to a
+    /// profile the user never chose. Checking the claim under this host's
+    /// cache lock, and binding the write to the identity the claim carries,
+    /// closes two of the three halves of that window: the check narrows it,
+    /// the store's own identity binding closes the reconnect and adoption
+    /// cases. The RETARGET case needs the lock taken here to also be taken by
+    /// the retarget — an identity-less host pointed at another identity-less
+    /// install passes the binding check on every read — which is what
+    /// [`Self::host_write_lock`] exists for.
+    ///
+    /// Returns whether the stored ROW changed — profile id AND identity
+    /// binding, see `crate::store::HelmStore::remember_profile_default` — so a
+    /// caller can invalidate only when there is something new to see. A stale
+    /// claim is an error rather than a silent skip, because the caller's
+    /// correct response is to say nothing rather than to publish a change that
+    /// did not happen.
+    pub async fn remember_profile_default(
+        &self,
+        claim: &SessionClaim,
+        profile_id: &str,
+    ) -> anyhow::Result<bool> {
+        let (status, cache_lock) = {
+            let map = self.actors.lock().expect("actor map mutex poisoned");
+            let Some(handle) = map.actors.get(&claim.host) else {
+                return Err(anyhow::Error::new(ManagerError::NoSuchHost(claim.host)));
+            };
+            (Arc::clone(&handle.status), Arc::clone(&handle.cache_lock))
+        };
+        let _writing = cache_lock.lock().await;
+        if !self.claim_is_current(claim, &status) {
+            anyhow::bail!(
+                "host {}'s connection changed between the create and its remembered-default \
+                 write; the preference was not recorded",
+                claim.host
+            );
+        }
+        self.store
+            .remember_profile_default(claim.host, claim.identity.as_deref(), profile_id)
+            .await
+    }
+
+    /// Hold this host's cache-write lock — the one every writer of its
+    /// durable state already takes ([`Self::remember_session`],
+    /// [`Self::forget_session`], [`Self::remember_profile_default`], and the
+    /// actor's own refresh commit).
+    ///
+    /// Exists for the REGISTRY writes that invalidate what those writers are
+    /// allowed to record, which is one specific pair: a retarget deletes the
+    /// remembered default inside the store's transaction, and the reconcile
+    /// that follows is what invalidates outstanding claims. Between the two, a
+    /// remembered-default write already past its claim check can land its row
+    /// AFTER the delete removed it — and an identity-less host retargeted to
+    /// another identity-less install matches `NULL` against `NULL` on every
+    /// later read, so the residue is served as the new install's own last
+    /// choice. Taking this across the whole retarget puts the two on one
+    /// queue: the write commits before the delete and is erased by it, or it
+    /// waits and finds its claim superseded.
+    ///
+    /// `None` for a host with no actor — nothing can be recording anything
+    /// for an id the map does not hold, so there is nothing to serialize
+    /// against. The guard is OWNED so a caller can hold it across the awaits
+    /// its own transaction needs.
+    ///
+    /// Safe to hold across [`Self::sync_registry`]: reconciling takes the
+    /// reconcile lock and the actor map, never this one.
+    pub async fn host_write_lock(&self, host: HostId) -> Option<tokio::sync::OwnedMutexGuard<()>> {
+        let cache_lock = {
+            let map = self.actors.lock().expect("actor map mutex poisoned");
+            Arc::clone(&map.actors.get(&host)?.cache_lock)
+        };
+        self.host_write_queue
+            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        let _queued = QueuedHostWrite(&self.host_write_queue);
+        Some(cache_lock.lock_owned().await)
+    }
+
+    /// How many callers are currently BLOCKED in [`Self::host_write_lock`].
+    ///
+    /// Instrumentation, for the same reason the REST edge counts its profile
+    /// queue: "the retarget waited for the write already in flight" is the
+    /// entire content of the fence, and a `tokio::sync::Mutex` publishes no
+    /// waiter count of its own — so a test could otherwise only sleep, which
+    /// passes just as happily against a retarget that fences nothing.
+    ///
+    /// Counts only THIS entry point, never the actor's own commits or the
+    /// manager's session writes: what a test needs to observe is a registry
+    /// mutation queueing behind them, and folding every writer into one number
+    /// would make a refresh landing mid-test look like the thing under test.
+    pub fn queued_host_writes(&self) -> usize {
+        self.host_write_queue
+            .load(std::sync::atomic::Ordering::SeqCst)
     }
 
     /// Ask `host` to refresh NOW, without disturbing anything else.
@@ -2473,13 +2892,45 @@ impl ConnectionManager {
     /// Every refusal is TYPED ([`ManagerError`]) rather than formatted
     /// prose, so the REST edge can map it to a status a client can act on
     /// instead of turning "you fired the wrong verb" into a 500.
+    ///
+    /// ## What a client sees, and in what order
+    ///
+    /// The adoption publishes its own invalidation the moment it commits,
+    /// rather than leaving it to the reconnect that follows. The commit
+    /// itself is what a client must re-read for — the superseded identity's
+    /// cached sessions are GONE from the merged list at that instant — and
+    /// the reconnect is a separate, fallible thing: the `retry_now` below is
+    /// explicitly allowed to fail without undoing the decision, and the
+    /// actor's own next transition can be a re-probe interval away. Relying
+    /// on it would mean a durable change that no client hears about for as
+    /// long as the reconnect takes, or never.
+    ///
+    /// But the ORDER matters as much as the fact. The actor's published state
+    /// is settled to a coherent post-adoption one BEFORE the bump, never
+    /// after: a client woken by the bump re-reads the hosts list immediately,
+    /// and the actor cannot be relied on to have noticed anything yet (it is
+    /// frozen, waiting for the nudge below). Bumping first hands that client
+    /// a row whose top-level identity is the newly adopted one sitting beside
+    /// a stale `IdentityMismatch` — which renders as "this host reports an
+    /// identity you have not accepted" and offers to adopt what was just
+    /// adopted.
+    ///
+    /// So the mismatch is replaced with `Connecting` here, along with
+    /// everything else that described the superseded connection: its client,
+    /// its in-memory sessions, its contested claims, and its incarnation
+    /// token (which must not survive, or a mutation reply from the old
+    /// connection could still present a claim that validates).
     pub async fn adopt(&self, host: HostId, approved: &str) -> anyhow::Result<()> {
-        let (state, row) = {
+        let (state, row, status) = {
             let map = self.actors.lock().expect("actor map mutex poisoned");
             let Some(handle) = map.actors.get(&host) else {
                 return Err(anyhow::Error::new(ManagerError::NoSuchHost(host)));
             };
-            (handle.status.borrow().state.clone(), handle.row.clone())
+            (
+                handle.status.borrow().state.clone(),
+                handle.row.clone(),
+                Arc::clone(&handle.status),
+            )
         };
         let HostState::IdentityMismatch { recorded, reported } = state else {
             return Err(anyhow::Error::new(ManagerError::NotAwaitingAdoption {
@@ -2511,6 +2962,25 @@ impl ConnectionManager {
             adopted = peer_text(&reported).as_str(),
             "adopted a new host identity; the superseded identity's cached sessions were purged"
         );
+        // Settled BEFORE the bump — see this method's docs. A client woken by
+        // the invalidation re-reads at once, and must not find the adopted
+        // identity sitting beside the mismatch it just resolved.
+        status.send_modify(|status| {
+            status.state = HostState::Connecting {
+                attempt: 0,
+                last_error: None,
+            };
+            status.client = None;
+            status.live_sessions = None;
+            status.contested = Arc::new(Vec::new());
+            status.incarnation = self
+                .incarnations
+                .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        });
+        // Published against the COMMIT, not against whatever the reconnect
+        // below manages to do: the purge is already visible in the merged
+        // list, and every open client is still showing the rows it deleted.
+        self.events.bump();
         // The adoption is already durable; reconnecting is how it takes
         // effect. A failure to do so is worth saying out loud but must not
         // undo the decision the user just made — the actor reconnects on
@@ -2655,6 +3125,11 @@ impl ConnectionManager {
         if let Some(start) = start {
             let _ = start.send(());
         }
+        // A revival changes what the hosts surface says — a retired entry
+        // becomes one that is attempting again — and no later publication
+        // will say so: the replacement's initial status IS `connecting`, so
+        // the actor's own first publish compares equal and bumps nothing.
+        self.events.bump();
         info!(host, "respawned a host's connection actor on request");
         Ok(true)
     }
@@ -2683,15 +3158,27 @@ impl ConnectionManager {
     /// Returns whether an actor was actually stopped, so a caller can tell
     /// "removed" from "there was nothing there".
     pub async fn stop_actor(&self, host: HostId) -> bool {
-        let _reconcile = self.reconcile.lock().await;
-        let mut map = self.actors.lock().expect("actor map mutex poisoned");
-        match map.actors.remove(&host) {
-            Some(handle) => {
-                handle.task.abort();
-                true
+        let stopped = {
+            let _reconcile = self.reconcile.lock().await;
+            let mut map = self.actors.lock().expect("actor map mutex poisoned");
+            match map.actors.remove(&host) {
+                Some(handle) => {
+                    handle.task.abort();
+                    true
+                }
+                None => false,
             }
-            None => false,
+        };
+        // A removed host disappears from the hosts list and takes its
+        // sessions with it — a registry shape change, and the one that
+        // arrives by this path rather than through `sync_registry`'s
+        // reconcile. An aborted actor publishes nothing on its way out (its
+        // supervisor task is cancelled with it), so this is the only chance
+        // to say so.
+        if stopped {
+            self.events.bump();
         }
+        stopped
     }
 
     /// Stop every actor and drop every connection, permanently.
@@ -2773,6 +3260,14 @@ struct HostActor {
     /// connection draws the next token from it (see
     /// [`ActorStatus::incarnation`]).
     incarnations: Arc<std::sync::atomic::AtomicU64>,
+    /// The fleet's revision counter, shared by every actor.
+    ///
+    /// This actor is the busiest publisher in the helm and the one where
+    /// the CHANGED-ONLY rule earns its keep: it republishes its status on
+    /// every refresh tick, and almost every one of those ticks finds
+    /// nothing new. [`Self::publish_refresh`] is the single place that
+    /// decides whether a publication is worth waking clients for.
+    events: Arc<FleetEvents>,
 }
 
 /// What [`HostActor::reload_row`] found, distinguishing "removed" from
@@ -3484,6 +3979,7 @@ impl HostActor {
                 break;
             }
             let end_connection = step.end_connection;
+            let cache_changed = step.cache_changed;
             self.publish_refresh(
                 HostState::Connected {
                     identity: identity.clone(),
@@ -3494,6 +3990,18 @@ impl HostActor {
                 step.live,
                 step.contested,
             );
+            // AFTER the publish, so a client that re-reads on this
+            // revision sees a hosts list and a session list that already
+            // agree: the rows are committed (the store's transaction
+            // returned before this step was built) and the state beside
+            // them is now published too. The publish above may already have
+            // bumped for a state change; two bumps for one tick cost one
+            // extra coalesced wake, whereas ordering the cache's bump
+            // BEFORE the publish would let a client read the new rows
+            // beside the previous refresh's health.
+            if cache_changed {
+                self.events.bump();
+            }
             if let Some(reason) = end_connection {
                 ended = reason;
                 break;
@@ -3597,6 +4105,7 @@ impl HostActor {
                     end_connection: Some("the host stopped answering its session list"),
                     live: LiveSessions::Retain,
                     contested: None,
+                    cache_changed: false,
                 };
             }
             Ok(Ok(entries)) => entries,
@@ -3626,6 +4135,7 @@ impl HostActor {
                     end_connection: None,
                     live: LiveSessions::Retain,
                     contested: None,
+                    cache_changed: false,
                 };
             }
         };
@@ -3648,6 +4158,7 @@ impl HostActor {
                     end_connection: None,
                     live: LiveSessions::Retain,
                     contested: None,
+                    cache_changed: false,
                 };
             }
             return RefreshStep {
@@ -3655,6 +4166,7 @@ impl HostActor {
                 end_connection: None,
                 live: LiveSessions::Set(Arc::new(entries)),
                 contested: Some(Arc::new(Vec::new())),
+                cache_changed: false,
             };
         };
         let sessions = entries.len();
@@ -3679,6 +4191,7 @@ impl HostActor {
                 end_connection: None,
                 live: LiveSessions::Clear,
                 contested: None,
+                cache_changed: false,
             };
         }
         match self
@@ -3686,8 +4199,9 @@ impl HostActor {
             .replace_host_sessions(self.id, identity, entries)
             .await
         {
-            Ok(contested) => {
-                debug!(sessions, "replaced the host's cached session list");
+            Ok(replacement) => {
+                let CacheReplacement { contested, changed } = replacement;
+                debug!(sessions, changed, "replaced the host's cached session list");
                 if let Some(sample) = contested.first() {
                     // ONE bounded line per refresh, not one per colliding
                     // row per tick: a host reporting a thousand ids that
@@ -3717,6 +4231,7 @@ impl HostActor {
                     end_connection: None,
                     live: LiveSessions::Clear,
                     contested: Some(Arc::new(contested)),
+                    cache_changed: changed,
                 }
             }
             Err(error) => {
@@ -3743,6 +4258,7 @@ impl HostActor {
                         .then_some("this connection's identity is no longer the row's"),
                     live: LiveSessions::Clear,
                     contested: None,
+                    cache_changed: false,
                 }
             }
         }
@@ -3843,6 +4359,34 @@ impl HostActor {
     /// did not finish would be inventing an answer. A successful drain
     /// always supplies a set, empty or not, which is what makes the state
     /// reconstructed rather than remembered (see [`ActorStatus::contested`]).
+    ///
+    /// ## The changed-only rule lives here
+    ///
+    /// This is the one place an actor's publication meets [`FleetEvents`],
+    /// and the comparison is by VALUE rather than by "we published
+    /// something": a connected host republishes an identical
+    /// `Connected { last_refresh: Ok { .. } }` every refresh tick, so a
+    /// bump per publication would wake every open client in the fleet every
+    /// three seconds per host — strictly worse than the polling the feed
+    /// replaces. What counts as a change is exactly what a client can see
+    /// through the hosts read and the merged list: the state itself
+    /// (including a refresh's health and its session count) and the
+    /// in-memory list an identity-less host serves from. The CACHED
+    /// sessions of every other host are published separately, by the write
+    /// that committed them (see [`RefreshStep::cache_changed`]), because
+    /// nothing about the state says whether a replacement changed a row.
+    ///
+    /// ## The bump TRAILS the change, and readers must treat it that way
+    ///
+    /// The new status is visible the moment `send_modify` returns; the
+    /// revision moves after. So there is always an interval in which a reader
+    /// can see the new list beside the old revision, and a revision is
+    /// therefore a wake-up ("re-read"), never a token that qualifies what was
+    /// read. `crate::aggregate` records what happens when it is used as one:
+    /// a cached matching count keyed by the revision paired a stale live count
+    /// with fresh rows in the same reply. Closing the interval here would not
+    /// help — a reader that sampled the revision before this call would still
+    /// see the newer list — which is why the fix belongs on the reading side.
     fn publish_refresh(
         &self,
         state: HostState,
@@ -3873,7 +4417,16 @@ impl HostActor {
         // generation is the actor's running count of its own connections
         // and must survive a publish that is not about it, so it is read
         // and advanced in place rather than reconstructed from nothing.
+        let mut observable_change = false;
         self.status.send_modify(|status| {
+            // Captured BEFORE the match below, which `take`s on the retain
+            // path: comparing against the field afterwards would see the
+            // hole `take` left and call every retaining publish a change —
+            // so a failing refresh on an identity-less host would wake every
+            // client on its own cadence, forever. An `Arc` clone, so this
+            // costs a refcount rather than a list copy.
+            let published_live = status.live_sessions.clone();
+            let published_contested = Arc::clone(&status.contested);
             let live_sessions = match live {
                 LiveSessions::Retain => status.live_sessions.take(),
                 LiveSessions::Set(entries) => Some(entries),
@@ -3904,10 +4457,31 @@ impl HostActor {
                 (None, false) => status.contested = Arc::new(Vec::new()),
                 (None, true) => {}
             }
+            // Compared by VALUE, and only once every field this publish can
+            // touch has been settled — including `contested`, which the
+            // match above may have replaced.
+            //
+            // A fresh drain producing an identical list is a DIFFERENT
+            // allocation holding equal contents, so pointer comparison would
+            // call that a change on every single tick. And `contested` is in
+            // the comparison because it is not merely diagnostic: a session
+            // id moving into or out of that set changes which host
+            // `crate::sessions::resolve_owner` will route to — including to
+            // "neither, refuse". A SWAP of equal size (one collision
+            // resolving as another appears) is the case a length or an
+            // emptiness check would miss, and it is the case where a client
+            // holding the old answer sends an operation somewhere it must
+            // not go.
+            observable_change = status.state != state
+                || published_live.as_deref() != live_sessions.as_deref()
+                || *published_contested != *status.contested;
             status.state = state;
             status.client = client;
             status.live_sessions = live_sessions;
         });
+        if observable_change {
+            self.events.bump();
+        }
     }
 
     /// Sleep for `wait`, or return the [`Nudge`] that cut it short.

@@ -37,6 +37,36 @@
 //!   surface — add, retarget, remove, adopt, retry — and `--ensure-hosts`
 //!   ([`ensure`]) is the same registration path run once at startup.
 //!
+//! ## What M6.75 added (PLAN_M6_75.md item 5)
+//!
+//! Two things, and they are deliberately independent of each other:
+//!
+//! - **Clients CAN stop polling.** [`events`] serves a WebSocket that
+//!   carries a REVISION NUMBER and nothing else; every chokepoint that
+//!   changes what a client could read bumps it, and only when something
+//!   actually changed. A client re-reads through the same REST readers it
+//!   already had, so there is exactly one serving path and one set of
+//!   consistency rules — see that module for the changed-only rule and the
+//!   subscription handshake the fallback handover depends on. This is the
+//!   capability, not its consumption: retiring the UI's four periodic loops
+//!   is PLAN_M6_75.md item 6's work, against the contract this module
+//!   freezes.
+//! - **Narrowing happens here, not in the browser.** The merged list takes
+//!   SPEC.md's five filter dimensions as query parameters and answers a
+//!   filtered request with two counts (matching, and the fleet's own),
+//!   because a client that filtered the page it was handed would hide
+//!   matches beyond the page cut while reporting a count that included them.
+//!   The CACHED half of that count is computed once per page WALK and kept on
+//!   this side ([`aggregate::MatchingCounts`]) rather than carried in the
+//!   client's cursor — a count a caller can edit is a count the server would
+//!   be repeating back to whoever asked. The half that lives only in memory is
+//!   recounted per page, from the same snapshot the rows come from, because
+//!   nothing qualifies it that a page could check. [`profiles`] is the other half of that
+//!   surface: profile CRUD proxied to the owning supervisor, with the one
+//!   profile fact the helm owns — the remembered default per host — served
+//!   beside the catalog, and identity-bound so one install's preference can
+//!   never resolve on another's.
+//!
 //! M1's argv session flags (`--ssh`, `--cwd`, `--agent`, `--title`,
 //! `--remote-farhelm`, `--remote-state-dir`) are gone in this same PR: the
 //! registry and the create API are the mechanism now, and the last two live
@@ -79,6 +109,11 @@ mod aggregate;
 /// before serving starts.
 mod ensure;
 
+/// `/api/events` — the invalidation feed: a WebSocket carrying revision
+/// numbers and nothing else, which is what lets every client drop its
+/// polling loops (PLAN_M6_75.md item 5).
+mod events;
+
 /// `/api/hosts` — the registry's REST surface, and the JSON shape a UI
 /// renders a host chip from.
 mod hosts;
@@ -94,6 +129,15 @@ pub mod manager;
 /// build stamp, which every response passes through, plus the CORS headers
 /// scoped to the attachment route alone.
 mod middleware;
+
+/// The optional preconditions a mutation may carry — which install it was
+/// prepared against, and which definition it means to replace — so a request
+/// written for one moment cannot execute in another.
+mod precondition;
+
+/// `/api/hosts/{id}/profiles` — agent profile CRUD, proxied to the owning
+/// supervisor, plus the helm-owned remembered default served beside it.
+mod profiles;
 
 /// The session REST surface — the list, the owner-lookup routing behind
 /// every operation on one session, and the handlers themselves.
@@ -172,6 +216,142 @@ pub struct HelmArgs {
 struct AppState {
     manager: Arc<manager::ConnectionManager>,
     store: store::HelmStore,
+    /// Matching counts already computed, so a filtered page WALK pays for one
+    /// rather than one per page — see [`aggregate::MatchingCounts`], which
+    /// also carries why this must not live in the client's cursor.
+    ///
+    /// Per-helm rather than a process-wide static, like every other bound
+    /// here: an embedded second helm has its own store generations, and a
+    /// shared cache would qualify one helm's counts with another's data.
+    counts: aggregate::MatchingCounts,
+    /// How many `/api/events` subscriptions this helm admits at once.
+    ///
+    /// Held here rather than read from a constant at the call site purely so
+    /// a test can exhaust it through REAL sockets: a bound that could only be
+    /// reached by opening sixty-four connections would be tested against the
+    /// counter instead of against the endpoint, which is the half that can
+    /// actually forget to admit.
+    event_subscriber_cap: usize,
+    /// Serializes each host's catalog MUTATIONS — the read-compare-forward
+    /// edit ([`profiles::update_profile`]) and the delete that would otherwise
+    /// land inside one ([`profiles::delete_profile`]).
+    ///
+    /// Keyed by host and created on demand, because the interesting case is
+    /// two clients editing the SAME host's catalog; edits to different hosts
+    /// have nothing to serialize against each other.
+    ///
+    /// Entries are never removed, including for a host that is later
+    /// forgotten. That is only a bound because a lock is allocated exclusively
+    /// for a host the registry currently holds — see [`Self::profile_edit_lock`],
+    /// whose contract is what keeps a caller-supplied path id from minting
+    /// entries. Each entry is an empty mutex, so reclaiming them would cost a
+    /// lifetime rule (who may drop a lock another request is queued on?) to
+    /// save nothing measurable.
+    profile_edits:
+        std::sync::Mutex<std::collections::HashMap<store::HostId, Arc<tokio::sync::Mutex<()>>>>,
+    /// How many requests are currently BLOCKED waiting for some host's
+    /// profile-mutation lock, across the whole fleet.
+    ///
+    /// Instrumentation, and the only reason it exists is that the property it
+    /// exposes is otherwise untestable: "the second edit reached the queue
+    /// before the first released it" is the entire content of the
+    /// serialization contract, and without an observable for it a test can
+    /// only sleep and hope — which passes just as happily against a helm that
+    /// serializes nothing. A `tokio::sync::Mutex` publishes no waiter count of
+    /// its own, so this is counted where the wait happens
+    /// ([`Self::enter_profile_edit`]).
+    ///
+    /// The COUNTING is compiled in every build, for the reason
+    /// `store::HelmStore::counting_passes` records: a hook that exists only in
+    /// the test build lets the shape it guards drift in the build nobody
+    /// tests. Two atomic operations per mutation cost nothing beside a round
+    /// trip to a supervisor. Only the reader is `cfg(test)`, because
+    /// `AppState` is private to this crate and production has no question this
+    /// number answers.
+    profile_edit_queue: std::sync::atomic::AtomicUsize,
+}
+
+/// Decrements [`AppState::profile_edit_queue`] however its waiter leaves —
+/// acquired, cancelled, or unwound.
+///
+/// A drop guard rather than a matching `fetch_sub`, because the wait it
+/// counts is exactly the thing an axum handler's cancellation interrupts: a
+/// client disconnecting mid-queue would otherwise leave the counter high for
+/// the life of the process, and an instrument that only ever climbs is worse
+/// than none.
+struct QueuedEdit<'a>(&'a std::sync::atomic::AtomicUsize);
+
+impl Drop for QueuedEdit<'_> {
+    fn drop(&mut self) {
+        self.0.fetch_sub(1, std::sync::atomic::Ordering::SeqCst);
+    }
+}
+
+impl AppState {
+    /// The shared state as production builds it: the two halves of the
+    /// fleet, plus every bound and cache at its default.
+    ///
+    /// A constructor rather than a literal at each call site so the defaults
+    /// live in ONE place — the test harness stands this up too, and a
+    /// harness that quietly used a different subscriber cap or its own count
+    /// cache would be testing something the product does not do.
+    fn new(manager: Arc<manager::ConnectionManager>, store: store::HelmStore) -> AppState {
+        AppState {
+            manager,
+            store,
+            counts: aggregate::MatchingCounts::default(),
+            event_subscriber_cap: events::MAX_SUBSCRIBERS,
+            profile_edits: std::sync::Mutex::new(std::collections::HashMap::new()),
+            profile_edit_queue: std::sync::atomic::AtomicUsize::new(0),
+        }
+    }
+
+    /// The lock that makes one host's profile mutations a queue rather than a
+    /// race. See [`Self::profile_edits`].
+    ///
+    /// CALLERS MUST HAVE ESTABLISHED THAT `host` EXISTS. The map is documented
+    /// as bounded by the registry, and nothing here can enforce that: the id
+    /// arrives as a path segment, so calling this before routing turns any
+    /// stream of made-up ids into permanent entries — an unauthenticated
+    /// loopback caller growing this process's memory one `i64` at a time. Every
+    /// call site therefore routes first (`sessions::host_client`) and takes the
+    /// lock afterwards, then re-routes under it, because a host can be
+    /// forgotten while a request waits its turn.
+    fn profile_edit_lock(&self, host: store::HostId) -> Arc<tokio::sync::Mutex<()>> {
+        let mut locks = self
+            .profile_edits
+            .lock()
+            .expect("profile edit lock map poisoned");
+        Arc::clone(locks.entry(host).or_default())
+    }
+
+    /// Wait this request's turn to mutate `host`'s profile catalog, counting
+    /// the wait while it lasts (see [`Self::profile_edit_queue`]).
+    ///
+    /// The guard is OWNED so a caller can hand it to the task that finishes
+    /// the mutation — the lock must outlive the handler that took it, or a
+    /// cancelled request would release the queue while its edit is still in
+    /// flight (see [`profiles::committed`]).
+    ///
+    /// Callers must have routed `host` first; see [`Self::profile_edit_lock`].
+    async fn enter_profile_edit(&self, host: store::HostId) -> tokio::sync::OwnedMutexGuard<()> {
+        let serialized = self.profile_edit_lock(host);
+        self.profile_edit_queue
+            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        let _queued = QueuedEdit(&self.profile_edit_queue);
+        serialized.lock_owned().await
+    }
+
+    /// How many requests are queued on a profile-mutation lock right now.
+    ///
+    /// The observable the concurrency tests wait on instead of sleeping. The
+    /// counting itself ships in every build; only this reader is test-only —
+    /// see [`Self::profile_edit_queue`].
+    #[cfg(test)]
+    fn queued_profile_edits(&self) -> usize {
+        self.profile_edit_queue
+            .load(std::sync::atomic::Ordering::SeqCst)
+    }
 }
 
 /// Assemble the routes, optional static UI service, and loopback-origin
@@ -265,6 +445,25 @@ fn build_router(state: Arc<AppState>, ui_dist: Option<&std::path::Path>, port: u
             "/api/hosts/{id}/retry",
             axum::routing::post(hosts::retry_host),
         )
+        // Profiles hang off the HOST they belong to rather than sitting at
+        // a top-level `/api/profiles` (PLAN_M6_75.md item 5): a profile id
+        // only means anything on the supervisor that minted it, so a route
+        // that did not name a host would be one whose ids collide across the
+        // fleet with nothing to disambiguate them.
+        .route(
+            "/api/hosts/{id}/profiles",
+            get(profiles::list_profiles).post(profiles::create_profile),
+        )
+        .route(
+            "/api/hosts/{id}/profiles/{profile_id}",
+            axum::routing::post(profiles::update_profile).delete(profiles::delete_profile),
+        )
+        // The invalidation feed (PLAN_M6_75.md item 5). A WebSocket like the
+        // terminal routes, and served beside them for the same reason they
+        // are here at all — one process, one port, one origin guard — but
+        // with nothing else in common: it names no session, carries no data,
+        // and holds no attachment.
+        .route("/api/events", get(events::events_ws))
         .with_state(state);
 
     if let Some(dist) = ui_dist {
@@ -345,7 +544,7 @@ pub async fn run(args: HelmArgs) -> anyhow::Result<()> {
     .await?;
 
     let app = build_router(
-        Arc::new(AppState { manager, store }),
+        Arc::new(AppState::new(manager, store)),
         args.ui_dist.as_deref(),
         addr.port(),
     );

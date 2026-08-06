@@ -71,6 +71,19 @@ pub(crate) struct HostView {
     pub(crate) remote_farhelm: Option<String>,
     pub(crate) remote_state_dir: Option<String>,
     pub(crate) state: HostStateView,
+    /// Which CONNECTION this host is on — an opaque, monotonic token that
+    /// changes whenever the host's client does, including when it goes away
+    /// (see `manager::ActorStatus::incarnation`).
+    ///
+    /// Served so a client can hand it back as `expected_incarnation` on a
+    /// mutation and have the helm refuse one prepared against an install that
+    /// has since been replaced (`crate::precondition`). Opaque as a USAGE
+    /// convention: compare it, echo it, never interpret it — the number is a
+    /// counter over this helm's own connections and means nothing across a
+    /// restart, which is exactly why a client must not persist one.
+    ///
+    /// `0` is "never connected". A client holding that has nothing to assert.
+    pub(crate) incarnation: u64,
 }
 
 /// How one host's [`HostState`] crosses the REST boundary.
@@ -275,6 +288,7 @@ async fn host_views(state: &AppState) -> anyhow::Result<Vec<HostView>> {
                 remote_farhelm: registry.and_then(|row| row.remote_farhelm.clone()),
                 remote_state_dir: registry.and_then(|row| row.remote_state_dir.clone()),
                 state: (&snapshot.state).into(),
+                incarnation: snapshot.incarnation,
             }
         })
         .collect())
@@ -409,6 +423,20 @@ pub(crate) async fn add_host(
 /// hosts list may show the old destination until the next successful
 /// reconcile, which the error says.
 ///
+/// ## The retarget and this host's own writers are one queue
+///
+/// Two things happen here that must not be split by another writer: the store
+/// forgets the remembered default profile (inside its own transaction, because
+/// an id recorded against one install can RESOLVE on the next), and the
+/// reconcile invalidates every outstanding connection claim. A
+/// remembered-default write in flight for the old connection has already
+/// passed its claim check and can land its row in between — after the delete,
+/// before the invalidation — and an identity-less host retargeted to another
+/// identity-less install has nothing left to reject it with, since its stored
+/// `NULL` identity goes on matching the row's. So both steps are taken under
+/// this host's cache-write lock (`ConnectionManager::host_write_lock`), which
+/// is the lock that write already holds.
+///
 /// Refuses the reserved local row (409 — it has no destination to change),
 /// an unknown id (404), an unusable destination (400), and a destination
 /// another host holds (409).
@@ -417,6 +445,10 @@ pub(crate) async fn set_destination(
     AxPath(host): AxPath<HostId>,
     axum::Json(spec): axum::Json<HostSpec>,
 ) -> impl IntoResponse {
+    // Held across the write AND the reconcile: see this function's docs for
+    // the in-flight write it fences out. Dropped before the reply is built,
+    // which needs nothing from it.
+    let serialized = state.manager.host_write_lock(host).await;
     if let Err(e) = state.store.update_ssh_destination(host, &spec.ssh).await {
         return http_error(e);
     }
@@ -442,6 +474,11 @@ pub(crate) async fn set_destination(
              the next successful reconcile"
         )));
     }
+    // Released here rather than at the end of the function: the reply is
+    // built from the registry and the actor set, both already settled, and
+    // holding a host's write lock across a read would stall its next refresh
+    // commit for no reason.
+    drop(serialized);
     tracing::info!(host, destination = spec.ssh.as_str(), "host retargeted");
     match host_view(&state, host).await {
         Ok(view) => axum::Json(view).into_response(),
@@ -664,6 +701,60 @@ mod tests {
         );
     }
 
+    /// The hosts view publishes the CONNECTION token a mutation's
+    /// precondition names, and a reconnection changes it.
+    ///
+    /// Spec: every host row carries `incarnation`, equal to what the manager
+    /// has published for that host, and a host that drops and comes back
+    /// carries a larger one.
+    ///
+    /// This is the read side of `crate::precondition`, and without it the
+    /// whole feature is unusable: a client can only assert which install it
+    /// prepared a request against if it was told. The change-on-reconnect half
+    /// is what makes the assertion mean anything — a token that stayed put
+    /// across a retarget would let every stale request through while looking
+    /// like a guard.
+    #[tokio::test]
+    async fn the_hosts_view_publishes_the_connection_a_precondition_names() {
+        let harness = lone_local_helm().await;
+        let local = rest_harness::local_id(&harness.store).await;
+
+        let (status, body, _) = call(&harness, "GET", "/api/hosts", None).await;
+        assert_eq!(status, StatusCode::OK);
+        let before = body["hosts"][0]["incarnation"]
+            .as_u64()
+            .expect("every host row carries the connection it is on");
+        assert_eq!(
+            before,
+            harness
+                .manager
+                .status(local)
+                .expect("the local host has an actor")
+                .incarnation,
+            "the published number is the one a claim is validated against, not a second counter"
+        );
+        assert!(
+            before > 0,
+            "a connected host is on some connection; 0 means never connected"
+        );
+
+        harness.fleet.kill_connection(local);
+        harness
+            .await_state(local, |state| !state.is_connected())
+            .await;
+        harness.await_refreshed(local).await;
+
+        let (_, body, _) = call(&harness, "GET", "/api/hosts", None).await;
+        let after = body["hosts"][0]["incarnation"]
+            .as_u64()
+            .expect("still a number");
+        assert!(
+            after > before,
+            "a reconnection is a different connection ({before} then {after}), and a client \
+             holding the old number must be refused rather than served"
+        );
+    }
+
     /// Adding a host ALWAYS registers it, and the connection state — not
     /// the request's status — is what says whether anything answered.
     ///
@@ -833,6 +924,106 @@ mod tests {
         let (status, _, text) =
             call(&harness, "POST", &format!("/api/hosts/{taken}/retry"), None).await;
         assert_eq!(status, StatusCode::OK, "{text}");
+    }
+
+    /// A remembered-default write in flight across a RETARGET leaves no
+    /// residue behind it.
+    ///
+    /// Spec: `POST /api/hosts/{id}/destination` takes the host's write lock
+    /// before it touches the registry, so a write holding that lock either
+    /// commits and is erased by the retarget's own delete, or waits and finds
+    /// its claim superseded. Either way the retargeted host has no remembered
+    /// default.
+    ///
+    /// The residue is not merely stale, which is why this is worth fencing at
+    /// all: a profile id recorded against one install RESOLVES on the next —
+    /// every fresh supervisor seeds the same starter ids — so the user is
+    /// offered a profile they never chose as their own last choice. And the
+    /// binding stored beside it cannot catch this case: an identity-less host
+    /// retargeted to another identity-less install matches `NULL` against
+    /// `NULL` on every read.
+    ///
+    /// The interleaving is FORCED rather than raced. The test holds the host's
+    /// write lock exactly as an in-flight write does, waits until the retarget
+    /// has demonstrably queued behind it
+    /// (`ConnectionManager::queued_host_writes`), and only then lets the write
+    /// land. A retarget that took no lock never queues, so it fails at that
+    /// barrier rather than passing on a lucky schedule — and would then delete
+    /// nothing, because the row it was supposed to forget is written after it.
+    #[tokio::test]
+    async fn a_remembered_default_written_during_a_retarget_does_not_survive_it() {
+        let harness = lone_local_helm().await;
+        let (_, added, _) = call(
+            &harness,
+            "POST",
+            "/api/hosts",
+            Some(serde_json::json!({ "ssh": "user@before" })),
+        )
+        .await;
+        let host = added["id"].as_i64().unwrap();
+        harness.await_refreshed(host).await;
+
+        // Held for as long as an in-flight remembered-default write would
+        // hold it: from before its claim check to after its store write.
+        let writing = harness
+            .manager
+            .host_write_lock(host)
+            .await
+            .expect("the host has an actor");
+
+        let retarget = tokio::spawn({
+            let router = harness.router();
+            async move {
+                let request = axum::http::Request::builder()
+                    .method("POST")
+                    .uri(format!("/api/hosts/{host}/destination"))
+                    .header("host", "127.0.0.1:7433")
+                    .header("content-type", "application/json")
+                    .body(axum::body::Body::from(
+                        serde_json::json!({ "ssh": "user@after" }).to_string(),
+                    ))
+                    .unwrap();
+                tower::ServiceExt::oneshot(router, request)
+                    .await
+                    .unwrap()
+                    .status()
+            }
+        });
+        let queued = tokio::time::timeout(std::time::Duration::from_secs(10), async {
+            while harness.manager.queued_host_writes() == 0 {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await;
+        assert!(
+            queued.is_ok(),
+            "the retarget must queue behind this host's writers; one that takes no lock deletes \
+             the remembered default before the write that is about to land"
+        );
+
+        // The write lands INSIDE the retarget's window — the whole point.
+        harness
+            .store
+            .remember_profile_default(host, None, "starter-claude")
+            .await
+            .expect("the write is legal: this host reports no identity, and neither does its row");
+        drop(writing);
+
+        assert_eq!(retarget.await.unwrap(), StatusCode::OK);
+        assert_eq!(
+            harness.store.remembered_profile(host).await.unwrap(),
+            None,
+            "a preference recorded for the OLD endpoint must not be offered for the new one — a \
+             starter id resolves on both"
+        );
+        let rows = harness.store.list_hosts().await.unwrap();
+        assert_eq!(
+            rows.iter()
+                .find(|row| row.id == host)
+                .and_then(|row| row.destination.clone()),
+            Some("user@after".to_string()),
+            "and the retarget itself went through"
+        );
     }
 
     /// Retargeting a host must take effect on the CONNECTION, not just in
@@ -1019,6 +1210,98 @@ mod tests {
             ids,
             vec!["from-the-new-install"],
             "the superseded identity's cached sessions describe a dead install and must be gone"
+        );
+    }
+
+    /// The adoption's invalidation arrives AFTER the state it invalidates
+    /// has been settled, never before.
+    ///
+    /// Spec: by the time `/api/events` carries the bump an adoption
+    /// publishes, the host's own state has already stopped being an identity
+    /// mismatch — so a client that re-reads on that notification cannot see
+    /// the newly adopted identity sitting beside an offer to adopt it.
+    ///
+    /// The ordering is the entire content of this test, and the bug it
+    /// closes is a loop rather than a cosmetic glitch: the top-level identity
+    /// is read from the registry (already updated by the commit) while the
+    /// phase comes from the actor (not yet touched), so a client woken by the
+    /// bump would render "this host reports identity-after, which you have
+    /// not accepted" and offer the adopt verb again — for an adoption that
+    /// has already happened. Pressing it is refused, because the host is no
+    /// longer mismatched, so the offer is one the UI cannot honour.
+    ///
+    /// Observed from INSIDE the bump rather than from a subscriber, and that
+    /// is not a shortcut. There is no await point between the state publish
+    /// and the bump — which is exactly what makes the ordering safe — so a
+    /// woken subscriber is polled after both have happened and cannot tell
+    /// the two orders apart. See `manager::FleetEvents::on_bump`.
+    #[tokio::test]
+    async fn an_adoption_settles_the_hosts_state_before_it_invalidates() {
+        let harness = lone_local_helm().await;
+        let (_, added, _) = call(
+            &harness,
+            "POST",
+            "/api/hosts",
+            Some(serde_json::json!({ "ssh": "user@reinstalled" })),
+        )
+        .await;
+        let host = added["id"].as_i64().unwrap();
+        harness.fleet.edit(host, |script| {
+            script.identity = Some("identity-before".to_string());
+        });
+        harness
+            .manager
+            .retry_now(host)
+            .await
+            .expect("the host exists");
+        harness.await_refreshed_as(host, "identity-before", 0).await;
+
+        harness.fleet.edit(host, |script| {
+            script.identity = Some("identity-after".to_string());
+        });
+        harness.fleet.kill_connection(host);
+        harness
+            .await_state(host, |state| state.phase() == "identity-mismatch")
+            .await;
+
+        // Every phase published to the feed from here on, recorded at the
+        // instant the invalidation goes out. A `Weak` because the closure
+        // outlives nothing and the manager owns the events it is installed
+        // on — a strong handle would be a cycle that never drops.
+        let seen: std::sync::Arc<std::sync::Mutex<Vec<String>>> = Default::default();
+        harness.manager.events().observe_bumps({
+            let manager = std::sync::Arc::downgrade(&harness.manager);
+            let seen = std::sync::Arc::clone(&seen);
+            move || {
+                if let Some(manager) = manager.upgrade()
+                    && let Some(status) = manager.status(host)
+                {
+                    seen.lock()
+                        .expect("phase log poisoned")
+                        .push(status.state.phase().to_string());
+                }
+            }
+        });
+
+        let (status, _, text) = call(
+            &harness,
+            "POST",
+            &format!("/api/hosts/{host}/adopt"),
+            Some(serde_json::json!({ "reported": "identity-after" })),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{text}");
+
+        let seen = seen.lock().expect("phase log poisoned").clone();
+        assert!(
+            !seen.is_empty(),
+            "the adoption must publish its own invalidation rather than leaving it to the \
+             reconnect"
+        );
+        assert!(
+            !seen.contains(&"identity-mismatch".to_string()),
+            "the state a client is woken to re-read must not still be offering the adoption it \
+             was just told about: {seen:?}"
         );
     }
 

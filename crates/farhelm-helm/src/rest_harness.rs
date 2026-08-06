@@ -173,6 +173,12 @@ struct ListGate {
     /// How many `ListSessions` requests every host has received, so a test
     /// can wait for a refresh to have STARTED rather than sleep and hope.
     requests: watch::Sender<usize>,
+    /// The same count, PER HOST — what a test needs to reason about one
+    /// host's refresh loop while other hosts are also connected. The
+    /// fleet-wide counter above cannot distinguish "this host refreshed
+    /// again" from "some other host did", which is the difference between a
+    /// deterministic barrier and a coincidence.
+    per_host: watch::Sender<HashMap<HostId, usize>>,
     /// What each host's list currently contains, mirrored out of the
     /// scripts so a running peer can read it.
     ///
@@ -196,6 +202,7 @@ impl ScriptedFleet {
             gate: Arc::new(ListGate {
                 holds: Mutex::new(HashMap::new()),
                 requests: watch::Sender::new(0),
+                per_host: watch::Sender::new(HashMap::new()),
                 lists: Mutex::new(HashMap::new()),
             }),
         })
@@ -232,6 +239,25 @@ impl ScriptedFleet {
     pub(crate) async fn await_list_requests(&self, n: usize) {
         let mut rx = self.gate.requests.subscribe();
         let _ = rx.wait_for(|seen| *seen >= n).await;
+    }
+
+    /// How many `ListSessions` requests THIS host has received so far.
+    ///
+    /// Per-host rather than fleet-wide, and that is what makes it usable as a
+    /// BARRIER: a test asserting that something did not happen during one
+    /// host's refresh has to be able to tell that host's next request from
+    /// some other host's, which the fleet-wide counter above cannot do. See
+    /// [`Harness::refresh_to_completion`].
+    fn host_requests(&self, host: HostId) -> usize {
+        self.gate.per_host.borrow().get(&host).copied().unwrap_or(0)
+    }
+
+    /// Wait until `host` has received at least `n` list requests.
+    async fn await_host_requests(&self, host: HostId, n: usize) {
+        let mut rx = self.gate.per_host.subscribe();
+        let _ = rx
+            .wait_for(|seen| seen.get(&host).copied().unwrap_or(0) >= n)
+            .await;
     }
 
     /// How many times `host` has been dialed.
@@ -428,6 +454,8 @@ impl ListGate {
     /// it exists to stage.
     fn admit(&self, host: HostId) -> Option<tokio::sync::oneshot::Receiver<()>> {
         self.requests.send_modify(|seen| *seen += 1);
+        self.per_host
+            .send_modify(|seen| *seen.entry(host).or_insert(0) += 1);
         self.holds.lock().expect("hold mutex").remove(&host)
     }
 }
@@ -719,10 +747,7 @@ impl Harness {
         Harness {
             served: Vec::new(),
             store: store.clone(),
-            state: Arc::new(AppState {
-                manager: Arc::clone(&manager),
-                store,
-            }),
+            state: Arc::new(AppState::new(Arc::clone(&manager), store)),
             manager,
             fleet,
             port,
@@ -755,6 +780,37 @@ impl Harness {
             )
         })
         .await;
+    }
+
+    /// Drive one refresh of `host` all the way to COMPLETION — its cache
+    /// write committed and its status published — and return.
+    ///
+    /// The barrier a NEGATIVE assertion needs, and the reason it cannot be a
+    /// timeout. "A no-op refresh publishes nothing" is only provable against
+    /// a refresh that has actually finished: synchronizing on the list
+    /// REQUEST proves the drain started, and a test that then waits a couple
+    /// of hundred milliseconds for silence passes just as happily when the
+    /// refresh was slow and its bump lands afterwards — the exact false pass
+    /// a negative test exists to rule out.
+    ///
+    /// The happens-before is the actor's own loop, not a sleep: one actor
+    /// serves one host sequentially, and it does not ask for another session
+    /// list until the previous refresh has committed and published. So the
+    /// SECOND request arriving is proof that the FIRST refresh is done. That
+    /// is why this drives two.
+    ///
+    /// The second refresh is still in flight when this returns, deliberately
+    /// — waiting for a third would only move the same one-refresh tail — so
+    /// a caller asserting silence is asserting it about a completed no-op
+    /// plus an identical in-flight one, neither of which may publish
+    /// anything. A caller expecting a CHANGE should wait for the change
+    /// instead; this is the barrier for expecting nothing.
+    pub(crate) async fn refresh_to_completion(&self, host: HostId) {
+        let before = self.fleet.host_requests(host);
+        self.manager.refresh_now(host);
+        self.fleet.await_host_requests(host, before + 1).await;
+        self.manager.refresh_now(host);
+        self.fleet.await_host_requests(host, before + 2).await;
     }
 
     /// Wait until `host`'s state satisfies `predicate`, failing the test
@@ -791,6 +847,9 @@ pub(crate) struct FleetBuilder {
     /// kind of test that needs refreshes to actually recur — the ones about
     /// a refresh RACING something else.
     refresh: Option<Duration>,
+    /// Overrides `/api/events`'s subscriber bound, so a test can exhaust it
+    /// with a handful of real sockets instead of sixty-four.
+    event_subscriber_cap: Option<usize>,
 }
 
 impl FleetBuilder {
@@ -826,7 +885,20 @@ impl FleetBuilder {
             // against it, so it is part of what those tests exercise.
             port: 7433,
             refresh: None,
+            event_subscriber_cap: None,
         }
+    }
+
+    /// Admit at most `cap` event subscriptions, so the endpoint's refusal is
+    /// reachable through real sockets.
+    ///
+    /// The bound this replaces is sized for a browser population rather than
+    /// for a test (`crate::events::MAX_SUBSCRIBERS`), and reaching it by
+    /// opening that many connections would say more about the test's patience
+    /// than about the endpoint.
+    pub(crate) fn event_subscriber_cap(mut self, cap: usize) -> FleetBuilder {
+        self.event_subscriber_cap = Some(cap);
+        self
     }
 
     /// Refresh this fleet on `interval` instead of once an hour.
@@ -890,8 +962,13 @@ impl FleetBuilder {
             served: Vec::new(),
             store: self.store.clone(),
             state: Arc::new(AppState {
-                manager: Arc::clone(&manager),
-                store: self.store,
+                // The only override any fixture makes, and it exists so the
+                // feed's own bound can be exhausted through real sockets —
+                // see `AppState::event_subscriber_cap`.
+                event_subscriber_cap: self
+                    .event_subscriber_cap
+                    .unwrap_or(crate::events::MAX_SUBSCRIBERS),
+                ..AppState::new(Arc::clone(&manager), self.store)
             }),
             manager,
             fleet: self.fleet,
@@ -1024,6 +1101,37 @@ pub(crate) async fn silent_supervisor(peer_side: tokio::io::DuplexStream) {
 /// the server's close. Only the subset actually used is implemented —
 /// client frames are always masked and always short, which is all a
 /// pause/resume message or a keystroke ever is.
+/// The mask every client frame this suite sends is XORed with.
+///
+/// Fixed rather than random: masking is a proxy-cache defence, and a server
+/// that unmasks correctly does so for any key. A constant one keeps a failing
+/// frame reproducible byte for byte.
+const MASK: [u8; 4] = [0x37, 0xfa, 0x21, 0x3d];
+
+/// One client frame's header, in whichever of the protocol's three length
+/// forms `declared` needs, with the mask bit set.
+///
+/// Split from the payload so a test can send a header whose declared length
+/// is a LIE about what follows — see [`WsTestClient::send_frame_header`],
+/// which is the only way to observe a frame-size bound rejecting on the
+/// declaration rather than on bytes it has already buffered.
+fn frame_header(fin: bool, opcode: u8, declared: usize) -> Vec<u8> {
+    let mut header = vec![if fin { 0x80 | opcode } else { opcode }];
+    match declared {
+        len if len < 126 => header.push(0x80 | len as u8),
+        len if len <= u16::MAX as usize => {
+            header.push(0x80 | 126);
+            header.extend_from_slice(&(len as u16).to_be_bytes());
+        }
+        len => {
+            header.push(0x80 | 127);
+            header.extend_from_slice(&(len as u64).to_be_bytes());
+        }
+    }
+    header.extend_from_slice(&MASK);
+    header
+}
+
 pub(crate) struct WsTestClient {
     stream: tokio::net::TcpStream,
     /// Bytes read from the socket but not yet parsed into a frame.
@@ -1032,6 +1140,22 @@ pub(crate) struct WsTestClient {
 
 impl WsTestClient {
     pub(crate) async fn connect(addr: std::net::SocketAddr, path: &str) -> WsTestClient {
+        WsTestClient::try_connect(addr, path)
+            .await
+            .unwrap_or_else(|status| panic!("WebSocket upgrade refused with HTTP {status}"))
+    }
+
+    /// Attempt the upgrade, returning the HTTP status line's code instead of
+    /// panicking when the server refuses.
+    ///
+    /// Exists for the tests whose subject IS the refusal — a bound reached
+    /// BEFORE the upgrade answers an ordinary HTTP status, and the difference
+    /// between that and a socket that opens and immediately closes is the
+    /// whole point of admitting early.
+    pub(crate) async fn try_connect(
+        addr: std::net::SocketAddr,
+        path: &str,
+    ) -> Result<WsTestClient, u16> {
         let mut stream = tokio::net::TcpStream::connect(addr).await.expect("connect");
         // A fixed key is fine: nothing here verifies the accept hash,
         // which exists to defend against caching proxies, not tests.
@@ -1055,14 +1179,18 @@ impl WsTestClient {
             buffered.push(byte[0]);
         }
         let response = String::from_utf8_lossy(&buffered).into_owned();
-        assert!(
-            response.starts_with("HTTP/1.1 101"),
-            "WebSocket upgrade refused: {response}"
-        );
-        WsTestClient {
+        let code: u16 = response
+            .split_whitespace()
+            .nth(1)
+            .and_then(|code| code.parse().ok())
+            .unwrap_or_else(|| panic!("unreadable HTTP status line: {response}"));
+        if code != 101 {
+            return Err(code);
+        }
+        Ok(WsTestClient {
             stream,
             buffered: Vec::new(),
-        }
+        })
     }
 
     /// Send one masked client frame. `opcode` is 1 for text, 2 for
@@ -1072,16 +1200,50 @@ impl WsTestClient {
             payload.len() < 126,
             "test frames stay in the short-length form"
         );
-        let mask = [0x37u8, 0xfa, 0x21, 0x3d];
-        let mut frame = vec![0x80 | opcode, 0x80 | payload.len() as u8];
-        frame.extend_from_slice(&mask);
+        self.send_frame(true, opcode, payload).await;
+    }
+
+    /// Send one masked client frame in whatever length form its payload
+    /// needs, with `fin` under the caller's control.
+    ///
+    /// The general form [`Self::send`] is the short case of, and it exists
+    /// for exactly one kind of test: the ones about a server's INBOUND
+    /// bounds. Those need what a well-behaved client library goes out of its
+    /// way not to produce — a single frame far larger than any limit, and a
+    /// run of individually-legal fragments that assemble into an oversized
+    /// message. `fin: false` is what makes the second of those constructible
+    /// at all (a continuation frame carries opcode 0).
+    pub(crate) async fn send_frame(&mut self, fin: bool, opcode: u8, payload: &[u8]) {
+        let mask = MASK;
+        let mut frame = frame_header(fin, opcode, payload.len());
         frame.extend(
             payload
                 .iter()
                 .enumerate()
                 .map(|(i, byte)| byte ^ mask[i % 4]),
         );
-        self.stream.write_all(&frame).await.expect("send ws frame");
+        // Ignored rather than unwrapped: a server that refuses an oversized
+        // frame may close before this whole write lands, and that close IS
+        // the behaviour under test.
+        let _ = self.stream.write_all(&frame).await;
+    }
+
+    /// Send only a frame's HEADER, declaring `declared` payload bytes that
+    /// never arrive.
+    ///
+    /// The one shape that can tell a server's FRAME bound from its MESSAGE
+    /// bound. A server enforcing the frame bound refuses on the declared
+    /// length alone, before a single payload byte exists; one enforcing only
+    /// the message bound has nothing to measure yet and waits — which is
+    /// exactly the buffering the frame bound exists to prevent, and is
+    /// indistinguishable from correct behaviour if the test sends the body
+    /// too.
+    ///
+    /// No real client library will ever emit this, which is the point: it is
+    /// what a hostile or broken peer emits.
+    pub(crate) async fn send_frame_header(&mut self, opcode: u8, declared: usize) {
+        let header = frame_header(true, opcode, declared);
+        let _ = self.stream.write_all(&header).await;
     }
 
     pub(crate) async fn send_text(&mut self, text: &str) {

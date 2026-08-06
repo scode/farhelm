@@ -72,11 +72,33 @@
 //! [`HelmStore::adopt_identity`] resolve the claim inside the same
 //! transaction as the write, so whichever caller loses gets a typed answer
 //! naming the winner instead of a durable collision.
+//!
+//! ## The generation counter: how a reader knows its data has not moved
+//!
+//! One piece of state here is not in the database at all. [`HelmStore`]
+//! carries an in-memory counter advanced by every committed write that
+//! CHANGED a cached row, and [`HelmStore::merged_page`] reads it inside the
+//! same lock hold that produces a page — so a page, its totals and that
+//! number are true of each other by construction.
+//!
+//! It exists because "how many sessions match this filter" is a full decode
+//! of the scope, and a reader that had to repeat it per page would make a
+//! walk quadratic in the fleet under the one mutex everything else needs.
+//! `crate::aggregate` remembers the answer and names the generation it was
+//! taken at; this side is the only place that can decide whether that is
+//! still true, because it is the only place a write cannot slip past the
+//! comparison. Nothing published AFTER a commit — the fleet's invalidation
+//! revision, most temptingly — can serve that purpose.
+//!
+//! It is process-local and starts at zero on every open, which is safe
+//! precisely because its only consumer is an in-memory cache that a restart
+//! empties too.
 
 use anyhow::Context;
-use farhelm_proto::SessionInfo;
+use farhelm_proto::{SessionInfo, SessionStatus};
 use rusqlite::{Connection, OpenFlags, OptionalExtension};
 use std::path::Path;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -96,7 +118,7 @@ const BUSY_TIMEOUT: Duration = Duration::from_secs(5);
 
 /// The schema's current shape. See [`apply_schema`] for the version
 /// history and the ladder future migrations extend.
-const SCHEMA_VERSION: i64 = 4;
+const SCHEMA_VERSION: i64 = 6;
 
 /// Surrogate primary key of a `hosts` row.
 ///
@@ -204,7 +226,26 @@ pub struct CachedSession {
     pub info: SessionInfo,
 }
 
-/// One row of a [`HelmStore::cached_page`] scan: its ordering key always,
+/// What one [`HelmStore::replace_host_sessions`] call did.
+///
+/// Two facts a wholesale replacement can only report from inside its own
+/// transaction, and both are consumed by the connection actor: the ids it
+/// had to drop because another host already claims them, and whether the
+/// commit left this host's slice of the cache DIFFERENT than it found it.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct CacheReplacement {
+    /// Session ids another host's cache already claims, so this refresh's
+    /// rows for them were skipped (first claim holds). Empty for
+    /// essentially every refresh that ever runs.
+    pub contested: Vec<String>,
+    /// Whether any stored row actually differs from what was there before
+    /// — the invalidation feed's changed-only rule (PLAN_M6_75.md item 5).
+    /// See [`HelmStore::replace_host_sessions`] for why the answer belongs
+    /// to the write rather than to a comparison made afterwards.
+    pub changed: bool,
+}
+
+/// One row of a [`HelmStore::scan_page`] scan: its ordering key always,
 /// its payload only when the stored JSON still decodes.
 ///
 /// The split is the whole point. Display data can be skipped (a cache is
@@ -220,7 +261,7 @@ pub struct ScannedRow {
     pub info: Option<SessionInfo>,
 }
 
-/// What one [`HelmStore::cached_page`] scan found.
+/// What one [`HelmStore::scan_page`] scan found.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct CachePage {
     /// Every row scanned, in order — decoded or not (see [`ScannedRow`]).
@@ -242,8 +283,455 @@ pub struct CachePage {
     pub frontier: Option<CacheKey>,
 }
 
+/// The predicates a merged-view read is narrowed by — SPEC.md's "filtering
+/// and search by host, directory, agent profile, status, and title", as one
+/// value (PLAN_M6_75.md item 5).
+///
+/// ## Why it lives in the STORE
+///
+/// The persisted majority of the merged list is paged out of this module,
+/// while an identity-less host's sessions are merged in from memory by
+/// [`crate::aggregate`] — two sources, one answer. A filter defined in
+/// either one alone would have to be re-implemented in the other, and the
+/// failure mode of a disagreement is silent: a session that matches on one
+/// side and not on the other is simply missing from the page, with the
+/// count still claiming it. So the predicate is defined once, here, and
+/// BOTH sources call [`Self::matches`].
+///
+/// ## Match semantics, and why each is what it is
+///
+/// SPEC.md names five dimensions and calls the feature "filtering and
+/// search" without saying which is which. The split below follows the
+/// shape of the data rather than the wording:
+///
+/// - **host, status, profile — EXACT.** Each is chosen from a finite set
+///   the client already has in hand (the hosts list, the status vocabulary,
+///   the host's profile catalog), so a substring match would only ever
+///   create surprises: `error` matching nothing else today but matching a
+///   future `error_recovered`, or a profile named `claude` also selecting
+///   `claude-review`.
+/// - **directory, title — case-insensitive SUBSTRING.** These are free text
+///   the user types into a search box, and neither has a canonical prefix a
+///   user reliably remembers: a session in `/home/me/src/farhelm` is found
+///   by typing `farhelm`, and one titled "Refactor the drain" by typing
+///   `drain`. Case folding is Rust's `to_lowercase` (Unicode-aware, not
+///   ASCII-only) on both needle and haystack.
+/// - **profile matches the SNAPSHOT, by id OR by name.** A session carries
+///   the profile id and the name AS SNAPSHOTTED at creation
+///   (`SourceProfile`), and nothing rewrites those when the profile is
+///   edited or deleted. Matching the id is what makes a picker's selection
+///   exact and rename-proof; matching the snapshotted name is what keeps a
+///   DELETED profile's sessions filterable at all, since after the delete
+///   the name is the only handle anyone still has. Both are accepted in one
+///   parameter because a client has one search box and the two never
+///   collide in practice (an id is supervisor-minted opaque text).
+///
+/// A session with no `source_profile` — a raw-invocation create — never
+/// matches a profile filter. That is the honest reading of "sessions from
+/// profile X" and not merely a convenience: such a session was never shaped
+/// by any profile.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct SessionFilter {
+    host: Option<HostId>,
+    directory: Option<Folded>,
+    title: Option<Folded>,
+    /// The raw needle AND its folded form: the id half of the match is a
+    /// byte comparison against opaque text, the name half is case-folded,
+    /// and precomputing the fold here keeps the per-row cost to a
+    /// comparison rather than an allocation.
+    profile: Option<Folded>,
+    /// The `state` tag of [`SessionStatus`], as [`status_key`] spells it.
+    /// `&'static str` rather than an enum of this module's own: the
+    /// vocabulary is the protocol's, and a second copy of it here would be
+    /// a second thing to keep in step with the wire.
+    status: Option<&'static str>,
+}
+
+/// A search needle kept beside its case-folded form.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct Folded {
+    raw: String,
+    folded: String,
+}
+
+impl Folded {
+    fn new(raw: &str) -> Folded {
+        Folded {
+            raw: raw.to_string(),
+            folded: raw.to_lowercase(),
+        }
+    }
+
+    /// Whether `haystack` contains this needle, ignoring case.
+    fn contained_in(&self, haystack: &str) -> bool {
+        haystack.to_lowercase().contains(&self.folded)
+    }
+}
+
+/// The `state` tag one [`SessionStatus`] serializes under — the word a
+/// client filters by, and the same word the wire carries.
+///
+/// Written as a match rather than derived from serde so that adding a
+/// status variant fails to compile here, which is exactly the reminder a
+/// new status needs: a filter vocabulary that silently omitted a status
+/// would make those sessions unfindable with no error anywhere.
+pub fn status_key(status: &SessionStatus) -> &'static str {
+    match status {
+        SessionStatus::Unknown => "unknown",
+        SessionStatus::Running => "running",
+        SessionStatus::Waiting => "waiting",
+        SessionStatus::Idle => "idle",
+        SessionStatus::Exited { .. } => "exited",
+        SessionStatus::Error { .. } => "error",
+        SessionStatus::Interrupted => "interrupted",
+    }
+}
+
+/// The status vocabulary a `?status=` parameter may name, or `None` for a
+/// word this build does not know.
+///
+/// `unknown` is accepted even though it must never RENDER (see
+/// `SessionStatus::Unknown`'s own docs): the value exists in the cache
+/// while a freshly created session waits for its first classification, and
+/// a filter that could not name it would leave those rows unreachable
+/// rather than merely unbadged. Refusing an unrecognized word — rather
+/// than matching nothing — is what turns a typo into a 400 the user can
+/// read instead of an empty list they will believe.
+pub fn parse_status_key(text: &str) -> Option<&'static str> {
+    [
+        "unknown",
+        "running",
+        "waiting",
+        "idle",
+        "exited",
+        "error",
+        "interrupted",
+    ]
+    .into_iter()
+    .find(|known| *known == text)
+}
+
+impl SessionFilter {
+    /// Narrow to one host.
+    pub fn host(mut self, host: HostId) -> SessionFilter {
+        self.host = Some(host);
+        self
+    }
+
+    /// Narrow to sessions whose working directory contains `needle`.
+    pub fn directory(mut self, needle: &str) -> SessionFilter {
+        self.directory = Some(Folded::new(needle));
+        self
+    }
+
+    /// Narrow to sessions whose title contains `needle`.
+    pub fn title(mut self, needle: &str) -> SessionFilter {
+        self.title = Some(Folded::new(needle));
+        self
+    }
+
+    /// Narrow to sessions created from the profile named by `value` —
+    /// either its id or its snapshotted name (see this type's docs).
+    pub fn profile(mut self, value: &str) -> SessionFilter {
+        self.profile = Some(Folded::new(value));
+        self
+    }
+
+    /// Narrow to one status, by the tag [`status_key`] spells.
+    pub fn status(mut self, status: &'static str) -> SessionFilter {
+        self.status = Some(status);
+        self
+    }
+
+    /// Whether this filter narrows nothing, so a caller may take its
+    /// unfiltered fast path (an indexed `COUNT(*)`, a `LIMIT`ed scan)
+    /// instead of walking rows to find out.
+    pub fn is_empty(&self) -> bool {
+        *self == SessionFilter::default()
+    }
+
+    /// The one host this filter admits, if it names one.
+    ///
+    /// Exposed so the read can narrow its SQL SCOPE rather than decoding
+    /// every host's rows and rejecting them in Rust: the host dimension is
+    /// the only one the schema can answer by itself (it is an indexed
+    /// column, not a field inside the payload), and a fleet-wide scan to
+    /// serve "show me this host" is work nothing needs.
+    ///
+    /// [`Self::matches`] still checks the host independently. The scope is
+    /// an optimization; the predicate is the contract, and a caller that
+    /// forgot the scope must still get the right answer.
+    pub fn host_scope(&self) -> Option<HostId> {
+        self.host
+    }
+
+    /// The canonical encoding of what this filter selects — the input every
+    /// derived identity of a filter is built from.
+    ///
+    /// Length-prefixed per field rather than delimiter-joined, so no
+    /// combination of user text can spell another filter's encoding: a title
+    /// of `x|s=running` produces a different string than a title of `x`
+    /// beside a status of `running`, which a naive join would not.
+    ///
+    /// Compared, never parsed. It does NOT travel anywhere — it is unbounded
+    /// user text, and a cursor carrying it would grow with the search box
+    /// (see [`Self::digest`]).
+    pub fn fingerprint(&self) -> String {
+        fn field(out: &mut String, tag: char, value: Option<&str>) {
+            match value {
+                None => out.push_str(&format!("{tag}-;")),
+                Some(text) => out.push_str(&format!("{tag}{}:{text};", text.len())),
+            }
+        }
+        let mut out = String::new();
+        field(
+            &mut out,
+            'h',
+            self.host.map(|host| host.to_string()).as_deref(),
+        );
+        field(
+            &mut out,
+            'd',
+            self.directory.as_ref().map(|f| f.raw.as_str()),
+        );
+        field(&mut out, 't', self.title.as_ref().map(|f| f.raw.as_str()));
+        field(&mut out, 'p', self.profile.as_ref().map(|f| f.raw.as_str()));
+        field(&mut out, 's', self.status);
+        out
+    }
+
+    /// A fixed-size, PROCESS-LOCAL name for this filter — what a cursor is
+    /// BOUND to, and what a cached matching count is keyed by.
+    ///
+    /// ## Why a cursor carries this rather than the filter itself
+    ///
+    /// A resume point is only meaningful within the result set it was taken
+    /// from. Replayed against a different filter it names a position in a
+    /// sequence it never described, so the walk silently resumes mid-order
+    /// and every earlier match is skipped — no error, no gap a client can
+    /// see. Binding every cursor (an unfiltered one included) to its filter
+    /// is what turns that into a refusal.
+    ///
+    /// Fixed-size because the alternative is a cursor that grows with the
+    /// search box: a first page whose query string already sits near an HTTP
+    /// head limit would mint a follow-up cursor nobody could replay.
+    ///
+    /// ## Keyed, and exactly how much that is worth
+    ///
+    /// The key is a process-random [`std::collections::hash_map::RandomState`],
+    /// so the binding a cursor carries means something only within the process
+    /// that minted it: a token cannot be composed off-line, and one process's
+    /// cursors are not the next one's.
+    ///
+    /// It is NOT an authenticator, and calling it unforgeable — as an earlier
+    /// version of this comment did — would misdescribe what stands behind it.
+    /// `RandomState` is `SipHash-1-3` used as a hash-flooding defense, not as
+    /// a MAC; the output is 64 bits, so collisions are reachable by search;
+    /// and nothing here is constant-time. The threat this actually answers is
+    /// ACCIDENTAL reuse — a stale cursor from a previous walk, a token pasted
+    /// from another tab — plus casual tampering on an endpoint that listens on
+    /// loopback and serves one user. It buys a probabilistic, process-local
+    /// binding, which is proportionate to what a mismatch costs (a page walk
+    /// that resumes in the wrong result set, on data the caller may already
+    /// read in full). An authenticated adversary is not in scope here and does
+    /// not become so until M7's web token puts a real credential on this API.
+    ///
+    /// The price is that cursors do not survive a helm restart: the new
+    /// process has a new key, every old token fails to match, and the answer
+    /// is a 400 that says to start a fresh walk. That is the right side of
+    /// the trade — a restart drops every host connection and every client
+    /// re-reads anyway — and it is the same reason the count cache this keys
+    /// is in memory rather than at rest.
+    pub fn digest(&self) -> String {
+        use std::hash::{BuildHasher, Hasher};
+
+        // ONE key for the process, minted on first use. A key per call would
+        // make a digest unreproducible even for the same filter; a constant
+        // key would make one process's tokens replayable in every other.
+        static KEY: std::sync::OnceLock<std::collections::hash_map::RandomState> =
+            std::sync::OnceLock::new();
+        let mut hasher = KEY
+            .get_or_init(std::collections::hash_map::RandomState::new)
+            .build_hasher();
+        // The canonical encoding is hashed as ONE byte string, so the
+        // length-prefixing that makes it unambiguous carries straight through
+        // to the digest.
+        hasher.write(self.fingerprint().as_bytes());
+        format!("{:016x}", hasher.finish())
+    }
+
+    /// Whether one session, on `host`, satisfies every dimension set.
+    ///
+    /// AND across dimensions, deliberately: each parameter narrows, and a
+    /// client that wants a union asks twice. Nothing here is fallible —
+    /// an unmatched dimension is simply false — because a filter is a
+    /// question about a row, and there is no row this can fail to answer
+    /// for.
+    pub fn matches(&self, host: HostId, info: &SessionInfo) -> bool {
+        if let Some(wanted) = self.host
+            && wanted != host
+        {
+            return false;
+        }
+        if let Some(status) = self.status
+            && status != status_key(&info.status)
+        {
+            return false;
+        }
+        if let Some(directory) = &self.directory
+            && !directory.contained_in(&info.cwd)
+        {
+            return false;
+        }
+        if let Some(title) = &self.title
+            && !title.contained_in(&info.title)
+        {
+            return false;
+        }
+        if let Some(profile) = &self.profile {
+            let Some(source) = &info.source_profile else {
+                return false;
+            };
+            if source.id != profile.raw && source.name.to_lowercase() != profile.folded {
+                return false;
+            }
+        }
+        true
+    }
+}
+
+/// The PERSISTED half of `GET /api/sessions`, coherent within itself: the
+/// page and both of its counts, all produced by [`HelmStore::merged_page`]'s
+/// single read.
+///
+/// Not the whole answer, and the distinction matters to anyone reading this
+/// as a contract. `crate::aggregate::session_page` merges the in-memory rows
+/// of every connected host that reports no identity — hosts this cache holds
+/// nothing for — into the page, adds their share to both counts, and only
+/// then has something to serve. What this struct guarantees is that helm.db's
+/// contribution is one moment's worth: the rows, `total`, `matching` and
+/// `generation` all come from one hold of one mutex.
+///
+/// Bundled rather than returned as a tuple of three separate calls because
+/// the bundling IS the contract — see that method for what taking them
+/// apart produces.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct MergedRead {
+    pub page: CachePage,
+    /// Every cached row in the merged view, filter or no filter.
+    pub total: u64,
+    /// How many of them match the filter — present exactly when this read
+    /// COUNTED (see [`MatchingCount`]).
+    ///
+    /// `None` is never "zero" and never "unknown": it means this read was
+    /// told not to count, either because the caller wants no matching claim
+    /// at all or because the count it already holds is still true. Which of
+    /// the two it was is the caller's own question; [`MergedRead::generation`]
+    /// is what answers it.
+    pub matching: Option<u64>,
+    /// The store's mutation generation, read INSIDE this read's lock hold.
+    ///
+    /// The tie between a count and the data it describes. Everything in this
+    /// struct was produced under one hold of one mutex, so a count taken here
+    /// and this number are true of each other by construction; a later read
+    /// that finds the same generation is looking at the same rows. See
+    /// [`HelmStore::generation`] for why nothing sampled OUTSIDE the lock can
+    /// serve this purpose.
+    pub generation: u64,
+}
+
+/// What [`HelmStore::merged_page`] should do about the matching count.
+///
+/// ## Why a page read decides this at all
+///
+/// Counting matches means decoding every row in the scope: there is no index
+/// over a JSON payload, and "how many match" is exactly the question a
+/// stopping-early scan cannot answer. Done per page, a `limit=1` walk of the
+/// fleet is quadratic in it — under the one mutex every other request needs,
+/// which is what turns a cost into a stall for everybody.
+///
+/// So a walk counts ONCE and the caller remembers the number
+/// (`crate::aggregate`'s count cache). What it cannot do is decide on its own
+/// whether that number is still true: a write can commit between the caller
+/// sampling anything and this read starting. [`Self::ComputeUnless`] hands
+/// the decision to the only place that can make it safely — inside the lock
+/// hold that produces the page.
+///
+/// ## The count and the page are ONE pass
+///
+/// When this read does count, it counts in the same walk that collects the
+/// page rather than in a scan of its own. The shape this replaced decoded the
+/// whole scope twice for a zero-match request, both times under the mutex.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MatchingCount {
+    /// Count, unconditionally — a filtered read with nothing to reuse.
+    Compute,
+    /// Count only if the store has moved since this generation. The caller
+    /// holds a count taken at it and that count still stands otherwise, in
+    /// which case [`MergedRead::matching`] comes back `None`.
+    ComputeUnless(u64),
+    /// Do not count at all. An UNFILTERED listing makes no matching claim —
+    /// see [`HelmStore::merged_page`] — so there is nothing to compute.
+    Skip,
+}
+
+/// Decode one cached row's payload, or say why it cannot be trusted AS THAT
+/// ROW.
+///
+/// The single validation the page and the matching count are both decided
+/// by, and the sharing is load-bearing rather than tidy: they must agree
+/// exactly about which rows are usable, or "N matching" would count rows the
+/// page refuses to display and no page walk could ever reach N. Since
+/// [`HelmStore::scan_page`] answers both in one walk, that agreement is now
+/// structural rather than a discipline two functions have to keep.
+///
+/// Two ways a row fails, and the second is the subtle one. An undecodable
+/// payload is obvious. A payload that DECODES but whose own `id` or
+/// `created_at` disagrees with the columns it is filed under is poison too:
+/// the columns are what every order, cursor, and lookup here is built on, so
+/// showing such a row would list it under one identity and route it under
+/// another.
+///
+/// The `Err` carries a reason string for the caller to log. It is logged only
+/// where the PAGE would have shown the row: a counting walk covers the whole
+/// scope, and one warning per unreadable row per keystroke in a search box is
+/// a log the user writes by typing.
+fn usable_cached_session(key: &CacheKey, json: &str) -> Result<SessionInfo, String> {
+    let info: SessionInfo = serde_json::from_str(json)
+        .map_err(|error| format!("its info_json no longer decodes: {error}"))?;
+    if info.id != key.session_id || info.created_at != key.created_at {
+        return Err(format!(
+            "its payload names session {:?} at {}, but it is filed as {:?} at {}",
+            info.id, info.created_at, key.session_id, key.created_at
+        ));
+    }
+    Ok(info)
+}
+
+/// Whether `key` comes STRICTLY AFTER `after` in the merged order
+/// (`created_at` descending, then `session_id` ascending, then `host_id`
+/// ascending).
+///
+/// The Rust twin of the three-way disjunction [`HelmStore::scan_page`] hands
+/// SQLite, and it exists because a COUNTING scan cannot use that predicate at
+/// all: it has to see the rows before the cursor in order to count them. The
+/// two spellings must agree exactly — a page whose resume test disagreed with
+/// its own ORDER BY would skip or repeat rows, which is the one thing a
+/// cursor may never do.
+fn follows(key: &CacheKey, after: &CacheKey) -> bool {
+    (
+        std::cmp::Reverse(key.created_at),
+        key.session_id.as_str(),
+        key.host,
+    ) > (
+        std::cmp::Reverse(after.created_at),
+        after.session_id.as_str(),
+        after.host,
+    )
+}
+
 /// One row's position in the cross-host merged order — the resume point
-/// [`HelmStore::cached_page`] pages from.
+/// [`HelmStore::merged_page`] pages from.
 ///
 /// All three components, in this order: `created_at` DESCENDING, then
 /// `session_id` ascending, then `host_id` ascending. The third is what makes
@@ -493,6 +981,41 @@ pub enum FirstContactOutcome {
 #[derive(Clone, Debug)]
 pub struct HelmStore {
     conn: Arc<Mutex<Connection>>,
+    /// How many times a committed write actually CHANGED a cached row — the
+    /// token that says whether a count taken earlier still describes the data
+    /// (see [`MatchingCount`]).
+    ///
+    /// Advanced INSIDE the [`Self::conn`] lock hold that committed the
+    /// write, and read inside the lock hold that produced a page, which is
+    /// what makes `(generation, page, total, matching)` mutually coherent by
+    /// construction. Anything advanced after the lock is released — a fleet
+    /// revision published by a caller that has already committed, say —
+    /// cannot qualify a read, because a second write can land in the gap.
+    ///
+    /// "Changed" is decided by comparing STORED BYTES inside the writing
+    /// transaction, never by a caller's opinion that it wrote something. A
+    /// refresh writes back an identical row set every few seconds per host in
+    /// a settled fleet, and a counter that moved for those would make every
+    /// page of every walk recount — which is the cost this exists to avoid.
+    /// Rows that are byte-identical support exactly the same counts, so
+    /// standing still there is sound rather than merely convenient.
+    ///
+    /// Process-local and reset by a restart, deliberately: its only consumer
+    /// is an in-memory cache that a restart empties too, so there is nothing
+    /// a reused number could wrongly qualify. A durable counter would have to
+    /// be written on the same transaction as every mutation and read back on
+    /// every page, which is a row of contention bought for nothing.
+    generation: Arc<AtomicU64>,
+    /// How many times a read has actually walked the scope to COUNT matches
+    /// — instrumentation for the tests that pin "one count per walk, one
+    /// recount per invalidating write".
+    ///
+    /// A production counter rather than a test-only hook because the property
+    /// it measures is the design (see [`MatchingCount`]), and a hook compiled
+    /// only under `cfg(test)` would let the shape it guards drift in a build
+    /// nobody tests. One relaxed increment per filtered read costs nothing
+    /// against the scan it is counting.
+    counting_passes: Arc<AtomicU64>,
 }
 
 /// Bring the database up to [`SCHEMA_VERSION`], creating it from scratch
@@ -547,6 +1070,20 @@ pub struct HelmStore {
 ///   makes it the first entry here that is purely about DATA FORMAT rather
 ///   than about constraints. The `session_cache` DDL's own comment
 ///   anticipated this case — it is the worked example of the rule it states.
+/// - 5: PLAN_M6_75.md item 5's `remembered_profiles` — the last-used
+///   profile per host, which SPEC_impl.md's helm-internals section assigns
+///   to helm.db rather than to the wire. It is helm state by construction:
+///   the supervisor owns the catalog and knows nothing about which profile
+///   a particular user last picked, and a remembered default is per-HOST
+///   because a profile id only means anything on the host that minted it.
+/// - 6: `remembered_profiles.host_identity`, which makes that default
+///   identity-bound AT REST rather than only at write time. A version-5 row
+///   records no identity and therefore cannot be validated against the
+///   install the host currently is — and since starter profile ids collide
+///   across installs by construction, an unvalidatable default RESOLVES on a
+///   successor install rather than merely dangling. The migration drops the
+///   old rows for that reason; see [`HelmStore::remembered_profile`] for the
+///   read-time check the column exists to serve.
 fn apply_schema(conn: &mut Connection) -> anyhow::Result<()> {
     let tx = conn
         .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
@@ -659,7 +1196,7 @@ fn apply_schema(conn: &mut Connection) -> anyhow::Result<()> {
              -- holds) rather than a failed refresh.
              CREATE UNIQUE INDEX session_cache_one_owner
                  ON session_cache (session_id);
-             -- Serves the merged page query (HelmStore::cached_page): the
+             -- Serves the merged page query (HelmStore::merged_page): the
              -- full ordering key, in order, so a page is an index range
              -- scan with no sort step and no rows touched beyond the page.
              -- host_id is in the key even though session_id is already
@@ -679,7 +1216,36 @@ fn apply_schema(conn: &mut Connection) -> anyhow::Result<()> {
              -- instead.
              CREATE INDEX session_cache_by_host_order
                  ON session_cache (host_id, created_at DESC, session_id ASC);
-             PRAGMA user_version = 4;",
+             -- The last profile a session was created from, per host
+             -- (schema version 5). At most one row per host by
+             -- construction: host_id IS the primary key, because
+             -- \"remembered default\" is a single value and a table that
+             -- could hold two would need a rule for which one wins.
+             -- CASCADE for session_cache's reason: forgetting a host
+             -- forgets everything the helm knew about it, in one statement.
+             -- The profile id is NOT a foreign key to anything -- the
+             -- catalog lives on the supervisor, so this side cannot
+             -- validate it and deliberately does not try: a remembered
+             -- default naming a profile that has since been deleted is a
+             -- state the product HAS (SPEC.md's ask-don't-guess fallback),
+             -- and the client resolves it against the catalog it is served
+             -- in the same reply.
+             -- host_identity is the identity the host was reporting when
+             -- the default was recorded (NULL for a host that reports
+             -- none), and it is what makes the row identity-bound AT REST
+             -- rather than merely at write time. Starter profile ids
+             -- collide across installs by construction, so a row that
+             -- outlived the install it was recorded against would RESOLVE
+             -- on the successor and be offered back as the user's own last
+             -- choice. Adoption and retarget delete the row outright; this
+             -- column is what refuses any row that escapes both.
+             CREATE TABLE remembered_profiles (
+                 host_id       INTEGER PRIMARY KEY
+                               REFERENCES hosts (id) ON DELETE CASCADE,
+                 profile_id    TEXT NOT NULL,
+                 host_identity TEXT
+             ) STRICT;
+             PRAGMA user_version = 6;",
         )
         .context("creating schema")?;
         version = SCHEMA_VERSION;
@@ -754,7 +1320,7 @@ fn apply_schema(conn: &mut Connection) -> anyhow::Result<()> {
         // This is exactly the case the `session_cache` DDL above warns
         // about, and the consequence is the one that makes it worth a
         // migration rather than a shrug: the read path
-        // (`cached_sessions`/`cached_page`) SKIPS an undecodable row and
+        // (`cached_sessions`/`merged_page`) SKIPS an undecodable row and
         // logs it, so without this the sessions of every DOWN host would
         // quietly VANISH from the list on the first start after an upgrade
         // — the stale-list promise SPEC.md makes for an unreachable host,
@@ -796,6 +1362,54 @@ fn apply_schema(conn: &mut Connection) -> anyhow::Result<()> {
         )
         .context("migrating helm.db to schema version 4")?;
         version = 4;
+    }
+    if version == 4 {
+        // Pure DDL with no data to resolve: nothing before this version
+        // remembered a default, so the table starts empty and every host
+        // simply has no remembered profile until the first profile-backed
+        // create on it. See the fresh-create branch above for the shape and
+        // for why the profile id references nothing.
+        tx.execute_batch(
+            "CREATE TABLE remembered_profiles (
+                 host_id    INTEGER PRIMARY KEY
+                            REFERENCES hosts (id) ON DELETE CASCADE,
+                 profile_id TEXT NOT NULL
+             ) STRICT;
+             PRAGMA user_version = 5;",
+        )
+        .context("migrating helm.db to schema version 5")?;
+        version = 5;
+    }
+    if version == 5 {
+        // The remembered default becomes identity-bound at rest. A
+        // version-5 row records only (host_id, profile_id), so there is
+        // nothing in it to validate against the install the host currently
+        // is — and "no identity recorded" cannot be told apart from "this
+        // host reports no identity", which is a value the new column
+        // legitimately stores.
+        //
+        // So the old rows GO rather than being carried forward with a NULL
+        // that would validate against every identity-less host. The cost is
+        // one create dialog per host asking which profile to use instead of
+        // defaulting — exactly SPEC.md's ask-don't-guess fallback, which is
+        // the safe direction — and the next profile-backed create restores
+        // the default with an identity attached.
+        //
+        // Rebuilt rather than `ALTER TABLE ... ADD COLUMN`, so the stored
+        // DDL is byte-identical to the fresh-create branch's (pinned by
+        // `a_migrated_database_matches_a_freshly_created_one`).
+        tx.execute_batch(
+            "DROP TABLE remembered_profiles;
+             CREATE TABLE remembered_profiles (
+                 host_id       INTEGER PRIMARY KEY
+                               REFERENCES hosts (id) ON DELETE CASCADE,
+                 profile_id    TEXT NOT NULL,
+                 host_identity TEXT
+             ) STRICT;
+             PRAGMA user_version = 6;",
+        )
+        .context("migrating helm.db to schema version 6")?;
+        version = 6;
     }
     if version == SCHEMA_VERSION {
         // Nothing to change; commit the otherwise-empty transaction to
@@ -950,7 +1564,16 @@ impl HelmStore {
         .context("helm store open task panicked")??;
         Ok(HelmStore {
             conn: Arc::new(Mutex::new(conn)),
+            generation: Arc::new(AtomicU64::new(0)),
+            counting_passes: Arc::new(AtomicU64::new(0)),
         })
+    }
+
+    /// How many times this store has walked a scope to count matches — see
+    /// [`Self::counting_passes`].
+    #[cfg(test)]
+    pub fn counting_passes(&self) -> u64 {
+        self.counting_passes.load(Ordering::Relaxed)
     }
 
     /// Every registered host, local row included, ordered by [`HostId`] —
@@ -1178,6 +1801,40 @@ impl HelmStore {
     /// as capable of introducing an unusable destination as an add, and a
     /// registry that validated only one of the two paths would be
     /// validating nothing.
+    ///
+    /// ## What a retarget FORGETS
+    ///
+    /// The remembered default profile, whenever the destination actually
+    /// moved. Retargeting points a registry row at a different install, and a
+    /// profile id means nothing away from the supervisor that minted it —
+    /// except that starter ids collide across installs by construction, so
+    /// the id would RESOLVE on the new endpoint and be offered back as the
+    /// user's own last choice. The identity binding alone does not cover this
+    /// case: an identity-less host retargeted to another identity-less
+    /// install matches `NULL` against `NULL` and the row would survive.
+    ///
+    /// A byte-identical destination update KEEPS it, deliberately: that is a
+    /// caller re-affirming what the row already says (a resubmitted form, a
+    /// reconcile), and forgetting a preference over a write that changed
+    /// nothing would be a user-visible loss with no cause behind it.
+    ///
+    /// The learned identity and the session cache are NOT cleared here, and
+    /// the asymmetry is the point: those are facts about an install, and the
+    /// next handshake against the new endpoint decides what happens to them
+    /// (a mismatch freezes, and adoption is what purges). A remembered
+    /// default is a PREFERENCE, and there is no later moment at which anyone
+    /// re-examines it.
+    ///
+    /// That forgetting is only complete if no write can land after it. This
+    /// transaction fences its own readers, but the write it races is a
+    /// `remember_profile_default` that has ALREADY passed its claim check and
+    /// is about to commit — a claim the retarget invalidates only afterwards,
+    /// through the manager's reconcile. Callers therefore hold the host's
+    /// write lock across both (`crate::hosts::set_destination`, and
+    /// `ConnectionManager::host_write_lock` for why that is the right lock).
+    /// The identity binding cannot substitute: an identity-less host
+    /// retargeted to another identity-less install matches `NULL` against
+    /// `NULL` on every later read.
     pub async fn update_ssh_destination(
         &self,
         host: HostId,
@@ -1195,21 +1852,30 @@ impl HelmStore {
             let tx = conn
                 .transaction()
                 .context("beginning update destination transaction")?;
-            let kind: Option<String> = tx
+            // The current destination comes back with the kind, in the same
+            // read and therefore the same transaction: "did this retarget
+            // actually move the row" decides whether the remembered default
+            // survives, and a second read for it could straddle another
+            // writer.
+            let current: Option<(String, Option<String>)> = tx
                 .query_row(
-                    "SELECT kind FROM hosts WHERE id = ?1",
+                    "SELECT kind, destination FROM hosts WHERE id = ?1",
                     rusqlite::params![host],
-                    |r| r.get(0),
+                    |r| Ok((r.get(0)?, r.get(1)?)),
                 )
                 .optional()
                 .context("looking up host before updating its destination")?;
-            let kind = kind.map(|k| HostKind::from_column(&k)).transpose()?;
-            match kind {
+            let current = current
+                .map(|(kind, destination)| {
+                    HostKind::from_column(&kind).map(|kind| (kind, destination))
+                })
+                .transpose()?;
+            match current {
                 None => Err(anyhow::Error::new(HostStoreError::HostNotFound(host))),
-                Some(HostKind::Local) => {
+                Some((HostKind::Local, _)) => {
                     Err(anyhow::Error::new(HostStoreError::LocalHostImmutable))
                 }
-                Some(HostKind::Ssh) => {
+                Some((HostKind::Ssh, previous)) => {
                     let changed = tx
                         .execute(
                             "UPDATE OR IGNORE hosts SET destination = ?2 WHERE id = ?1",
@@ -1220,6 +1886,16 @@ impl HelmStore {
                         return Err(anyhow::Error::new(HostStoreError::DuplicateDestination(
                             destination,
                         )));
+                    }
+                    // Only when the row genuinely moved — see this method's
+                    // docs for why a re-affirming write keeps the preference
+                    // and a real retarget must not.
+                    if previous.as_deref() != Some(destination.as_str()) {
+                        tx.execute(
+                            "DELETE FROM remembered_profiles WHERE host_id = ?1",
+                            rusqlite::params![host],
+                        )
+                        .context("forgetting the retargeted host's remembered default profile")?;
                     }
                     tx.commit().context("committing destination update")?;
                     Ok(())
@@ -1243,6 +1919,7 @@ impl HelmStore {
     /// id nothing currently holds.
     pub async fn remove_ssh_host(&self, host: HostId) -> anyhow::Result<()> {
         let conn = Arc::clone(&self.conn);
+        let generation = Arc::clone(&self.generation);
         tokio::task::spawn_blocking(move || -> anyhow::Result<()> {
             let conn = conn.lock().expect("helm db mutex poisoned");
             let kind: Option<String> = conn
@@ -1262,6 +1939,12 @@ impl HelmStore {
                 Some(HostKind::Ssh) => {
                     conn.execute("DELETE FROM hosts WHERE id = ?1", rusqlite::params![host])
                         .context("removing ssh host")?;
+                    // The `ON DELETE CASCADE` took this host's cached rows
+                    // with it, so every matching count taken before now
+                    // describes sessions that are gone. Bumped while the
+                    // connection lock is still held — see
+                    // [`Self::generation`].
+                    generation.fetch_add(1, Ordering::Release);
                     Ok(())
                 }
             }
@@ -1363,11 +2046,12 @@ impl HelmStore {
 
     /// Compare-and-swap a host's identity: succeeds ONLY when the currently
     /// stored value equals `expected_old`, replacing it with `new` and
-    /// purging that host's `session_cache` rows in the SAME transaction —
-    /// PLAN_M6.md item 4's user-initiated adoption of an identity-mismatched
-    /// host (SPEC.md: the helm never silently merges; this is the explicit
-    /// acknowledgment that performs the merge the user chose after seeing
-    /// [`FirstContactOutcome::Mismatch`]).
+    /// erasing everything the OLD install left behind — that host's
+    /// `session_cache` rows and its remembered default profile — in the SAME
+    /// transaction. PLAN_M6.md item 4's user-initiated adoption of an
+    /// identity-mismatched host (SPEC.md: the helm never silently merges;
+    /// this is the explicit acknowledgment that performs the merge the user
+    /// chose after seeing [`FirstContactOutcome::Mismatch`]).
     ///
     /// The purge is IN the transaction, never a follow-up call: a different
     /// identity at a known destination means the install that produced the
@@ -1376,6 +2060,15 @@ impl HelmStore {
     /// NEW identity would misattribute a dead install's history to a live
     /// one. A separate follow-up call could leave the two writes torn by a
     /// crash or a concurrent reader between them; one transaction cannot.
+    ///
+    /// The REMEMBERED DEFAULT goes for a sharper version of the same reason,
+    /// and it is the one an adoption is most likely to get wrong. Profile ids
+    /// are minted per supervisor AND every fresh supervisor seeds the same
+    /// starter profiles, so an id recorded against the superseded install
+    /// does not merely go stale on the successor — it RESOLVES there, to a
+    /// profile the user never chose, offered back as their own last choice.
+    /// Purging costs one create dialog that asks instead of guessing, which
+    /// is exactly SPEC.md's fallback.
     ///
     /// A STALE `expected_old` (the stored value has already moved on — a
     /// second adoption, or a first contact that landed first) is refused as
@@ -1400,6 +2093,7 @@ impl HelmStore {
         new: &str,
     ) -> anyhow::Result<()> {
         let conn = Arc::clone(&self.conn);
+        let generation = Arc::clone(&self.generation);
         let expected_old = expected_old.to_string();
         let new = new.to_string();
         let dialed = dialed.clone();
@@ -1438,7 +2132,13 @@ impl HelmStore {
                 rusqlite::params![host],
             )
             .context("purging the superseded identity's cached sessions")?;
+            tx.execute(
+                "DELETE FROM remembered_profiles WHERE host_id = ?1",
+                rusqlite::params![host],
+            )
+            .context("purging the superseded identity's remembered default profile")?;
             tx.commit().context("committing identity adoption")?;
+            generation.fetch_add(1, Ordering::Release);
             Ok(())
         })
         .await
@@ -1496,15 +2196,29 @@ impl HelmStore {
     ///   adoption exists to prevent, just arriving by a side door. A stale
     ///   `identity` is refused as [`HostStoreError::IdentityMismatch`] with
     ///   the existing cache left untouched.
+    ///
+    /// ## Reports whether it CHANGED anything
+    ///
+    /// [`CacheReplacement::changed`] is the invalidation feed's changed-only
+    /// rule at its source (PLAN_M6_75.md item 5), and it is answered here
+    /// rather than by a caller comparing lists afterwards because only this
+    /// transaction can see both sides atomically. A refresh runs every few
+    /// seconds per host and, in a settled fleet, writes back exactly what
+    /// was already there; a feed that treated every committed replacement as
+    /// a change would wake every open client on that timer and be strictly
+    /// worse than the polling it replaces. The comparison is over this
+    /// host's stored payloads before and after, so a row that was DROPPED as
+    /// contested is correctly not a change (it was not written either time).
     pub async fn replace_host_sessions(
         &self,
         host: HostId,
         identity: &str,
         entries: Vec<SessionInfo>,
-    ) -> anyhow::Result<Vec<String>> {
+    ) -> anyhow::Result<CacheReplacement> {
         let conn = Arc::clone(&self.conn);
+        let generation = Arc::clone(&self.generation);
         let identity = identity.to_string();
-        tokio::task::spawn_blocking(move || -> anyhow::Result<Vec<String>> {
+        tokio::task::spawn_blocking(move || -> anyhow::Result<CacheReplacement> {
             let mut conn = conn.lock().expect("helm db mutex poisoned");
             let tx = conn
                 .transaction()
@@ -1527,12 +2241,48 @@ impl HelmStore {
                     actual: current,
                 }));
             }
+            // Read BEFORE the delete, inside the same transaction as the
+            // rewrite: this is the "what did we have" half of the
+            // changed-only answer, and any read outside the transaction
+            // could be describing a different moment than the write.
+            //
+            // BOTH stored halves, not just the payload: `created_at` is a
+            // column of its own (the ordering key every page and cursor is
+            // built on), so a row whose payload is unchanged while its
+            // timestamp is repaired IS a change — and reporting otherwise
+            // would starve the feed of exactly the reordering a client needs
+            // to re-read for.
+            //
+            // ONE map, consumed as the rewrite goes: entries are removed as
+            // they are matched, so this holds the host's cache once rather
+            // than twice at the peak. What remains at the end is what
+            // DISAPPEARED, which no per-row comparison of the new list could
+            // notice on its own. The transient cost is one host's slice at
+            // the refresh ceiling (`crate::manager::REFRESH_SESSION_CAP`
+            // rows, `REFRESH_BYTE_CAP` bytes), which is the same data the
+            // caller already holds in `entries`.
+            let mut previous: std::collections::HashMap<String, (i64, String)> = {
+                let mut stmt = tx
+                    .prepare(
+                        "SELECT session_id, created_at, info_json FROM session_cache \
+                         WHERE host_id = ?1",
+                    )
+                    .context("preparing the pre-replace cache read")?;
+                let rows = stmt
+                    .query_map(rusqlite::params![host], |r| {
+                        Ok((r.get(0)?, (r.get(1)?, r.get(2)?)))
+                    })
+                    .context("reading the cache this refresh is replacing")?;
+                rows.collect::<Result<_, _>>()
+                    .context("collecting the cache this refresh is replacing")?
+            };
             tx.execute(
                 "DELETE FROM session_cache WHERE host_id = ?1",
                 rusqlite::params![host],
             )
             .context("clearing the stale cache")?;
             let mut contested: Vec<String> = Vec::new();
+            let mut changed = false;
             for entry in &entries {
                 let json = serde_json::to_string(entry).context("serializing cached session")?;
                 let inserted = tx
@@ -1586,10 +2336,34 @@ impl HelmStore {
                     // coalesces these into one bounded summary per refresh,
                     // and holds the set as the host's live contested state.
                     contested.push(entry.id.clone());
+                    continue;
+                }
+                // A row that was already stored EXACTLY as it is being
+                // written back is not a change; anything else — a new id, a
+                // repaired timestamp, a different payload — is.
+                match previous.remove(&entry.id) {
+                    Some((created_at, stored))
+                        if created_at == entry.created_at && stored == json => {}
+                    _ => changed = true,
                 }
             }
+            // Whatever is left in `previous` was cached a moment ago and is
+            // not any more: a session that ended, was deleted, or moved
+            // hosts. Folded in before the commit so the generation below and
+            // the reported answer are the same judgement.
+            let changed = changed || !previous.is_empty();
             tx.commit().context("committing cache replace")?;
-            Ok(contested)
+            if changed {
+                generation.fetch_add(1, Ordering::Release);
+            }
+            // SORTED, so the set is compared by CONTENT rather than by the
+            // order a peer happened to list its sessions in. The published
+            // set is compared against the previous one to decide whether to
+            // invalidate every client (`crate::manager::FleetEvents`), and a
+            // peer that merely permuted its reply would otherwise look like a
+            // routing change and wake the fleet on every refresh tick.
+            contested.sort_unstable();
+            Ok(CacheReplacement { changed, contested })
         })
         .await
         .context("replace host sessions task panicked")?
@@ -1622,12 +2396,17 @@ impl HelmStore {
     /// ingress point exactly as a drain's rows are, and an id this side
     /// cannot build a replayable cursor over must not enter the cache
     /// through either.
+    ///
+    /// Returns whether the stored row actually CHANGED — the same
+    /// changed-only rule [`Self::replace_host_sessions`] answers, applied to
+    /// one row. A retried create that re-records a byte-identical session is
+    /// a successful write that invalidates nothing.
     pub async fn remember_session(
         &self,
         host: HostId,
         identity: &str,
         entry: &SessionInfo,
-    ) -> anyhow::Result<()> {
+    ) -> anyhow::Result<bool> {
         anyhow::ensure!(
             entry.id.len() <= crate::manager::MAX_SESSION_ID_BYTES,
             "session id of {} bytes exceeds the {} this helm can build resumable cursors over",
@@ -1635,9 +2414,10 @@ impl HelmStore {
             crate::manager::MAX_SESSION_ID_BYTES
         );
         let conn = Arc::clone(&self.conn);
+        let generation = Arc::clone(&self.generation);
         let identity = identity.to_string();
         let entry = entry.clone();
-        tokio::task::spawn_blocking(move || -> anyhow::Result<()> {
+        tokio::task::spawn_blocking(move || -> anyhow::Result<bool> {
             let mut conn = conn.lock().expect("helm db mutex poisoned");
             let tx = conn
                 .transaction()
@@ -1660,15 +2440,20 @@ impl HelmStore {
                     actual: current,
                 }));
             }
-            let claimed: Option<(HostId, String)> = tx
+            // `created_at` comes back too, for the changed-only comparison
+            // at the bottom: it is a column of its own and part of the
+            // ordering key, so a row whose payload matches while its
+            // timestamp does not is a change like any other.
+            let claimed: Option<(HostId, i64, String)> = tx
                 .query_row(
-                    "SELECT host_id, info_json FROM session_cache WHERE session_id = ?1",
+                    "SELECT host_id, created_at, info_json FROM session_cache \
+                     WHERE session_id = ?1",
                     rusqlite::params![entry.id],
-                    |r| Ok((r.get(0)?, r.get(1)?)),
+                    |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
                 )
                 .optional()
                 .context("reading the current owner of this session id")?;
-            if let Some((owner, _)) = &claimed
+            if let Some((owner, _, _)) = &claimed
                 && *owner != host
             {
                 return Err(anyhow::Error::new(HostStoreError::SessionOwnerAmbiguous {
@@ -1685,7 +2470,7 @@ impl HelmStore {
             // erase a definite status, and why the previous value is kept
             // even at the cost of being briefly stale.
             let mut entry = entry;
-            if let Some((_, previous)) = &claimed
+            if let Some((_, _, previous)) = &claimed
                 && let Ok(previous) = serde_json::from_str::<SessionInfo>(previous)
             {
                 entry.status = crate::manager::merged_status(&previous.status, entry.status);
@@ -1701,7 +2486,23 @@ impl HelmStore {
             )
             .context("seeding a cached session")?;
             tx.commit().context("committing cache seed")?;
-            Ok(())
+            // Compared against BOTH stored halves this host already held,
+            // AFTER the status merge above: the merge is what makes a
+            // restart's `Unknown`-carrying reply a no-op for an unchanged
+            // session, and comparing before it would report a change the row
+            // does not actually show. The timestamp is in the comparison for
+            // the same reason it is in the wholesale write's — it is the
+            // ordering column, not a copy of something in the payload.
+            let changed = match &claimed {
+                Some((_, created_at, stored)) => {
+                    *created_at != entry.created_at || stored.as_str() != json.as_str()
+                }
+                None => true,
+            };
+            if changed {
+                generation.fetch_add(1, Ordering::Release);
+            }
+            Ok(changed)
         })
         .await
         .context("remember session task panicked")?
@@ -1721,16 +2522,21 @@ impl HelmStore {
     /// delete whose reply landed after an adoption must not reach into the
     /// new install's cache. Removing a row that is not there is success —
     /// the caller asked for it to be gone, and it is.
+    ///
+    /// Returns whether a row was actually removed, which is what the
+    /// invalidation feed's changed-only rule needs: "it was already gone" is
+    /// a success that changes nothing observable.
     pub async fn forget_session(
         &self,
         host: HostId,
         identity: &str,
         session_id: &str,
-    ) -> anyhow::Result<()> {
+    ) -> anyhow::Result<bool> {
         let conn = Arc::clone(&self.conn);
+        let generation = Arc::clone(&self.generation);
         let identity = identity.to_string();
         let session_id = session_id.to_string();
-        tokio::task::spawn_blocking(move || -> anyhow::Result<()> {
+        tokio::task::spawn_blocking(move || -> anyhow::Result<bool> {
             let mut conn = conn.lock().expect("helm db mutex poisoned");
             let tx = conn
                 .transaction()
@@ -1753,13 +2559,21 @@ impl HelmStore {
                     actual: current,
                 }));
             }
-            tx.execute(
-                "DELETE FROM session_cache WHERE host_id = ?1 AND session_id = ?2",
-                rusqlite::params![host, session_id],
-            )
-            .context("forgetting a cached session")?;
+            let removed = tx
+                .execute(
+                    "DELETE FROM session_cache WHERE host_id = ?1 AND session_id = ?2",
+                    rusqlite::params![host, session_id],
+                )
+                .context("forgetting a cached session")?;
             tx.commit().context("committing cache forget")?;
-            Ok(())
+            // Removing a row that was not there is still success (see
+            // above), but it is not a CHANGE: nothing any client could read
+            // says anything different than it did before — including the
+            // generation, which is why the bump is conditional too.
+            if removed > 0 {
+                generation.fetch_add(1, Ordering::Release);
+            }
+            Ok(removed > 0)
         })
         .await
         .context("forget session task panicked")?
@@ -1847,7 +2661,7 @@ impl HelmStore {
     /// `hosts` scopes the read to the hosts that currently have actors,
     /// which is what "the merged view" means everywhere else; a cache row
     /// whose host has none is not served and must not be counted (see
-    /// [`Self::cached_count`], which takes the same scope for exactly that
+    /// [`Self::count_rows`], which takes the same scope for exactly that
     /// reason). An empty `hosts` is an empty answer rather than "all",
     /// deliberately: the degenerate reading is the dangerous one.
     ///
@@ -1868,147 +2682,213 @@ impl HelmStore {
     ///
     /// ## Two bounds, both applied while scanning
     ///
-    /// `limit` bounds rows SCANNED (skipped ones included — otherwise a run
-    /// of poisoned rows would make one request walk the whole table), and
-    /// `byte_budget` bounds the stored bytes decoded, measured on the raw
+    /// `limit` bounds rows RETURNED — which, with no filter, is the same as
+    /// rows scanned, poisoned ones included (otherwise a run of poisoned
+    /// rows would make one request walk the whole table); see the filtering
+    /// section below for what changes when a filter is set. `byte_budget`
+    /// bounds the stored bytes carried, measured on the raw
     /// `info_json` this scan already holds rather than by re-serializing.
     /// The byte bound is a WORK bound: it stops this scan from decoding
     /// thousands of fat blobs the reply could never carry. The reply's own
     /// budget is the caller's, applied to the merged page (see
-    /// `crate::aggregate::apply_byte_budget`); the two use the same constant
+    /// `crate::aggregate::PAGE_BYTE_BUDGET`); the two use the same constant
     /// but answer different questions, and this one is deliberately the
     /// looser of the pair — it may over-deliver by a row, never under.
     ///
     /// At least one row is always scanned regardless of the byte bound: a
     /// single blob larger than the budget must still make progress, or the
     /// walk stalls on it forever.
-    pub async fn cached_page(
-        &self,
-        hosts: Vec<HostId>,
+    ///
+    /// ## Filtering happens BEFORE the page cut
+    ///
+    /// A non-empty `filter` (PLAN_M6_75.md item 5) narrows what counts as a
+    /// row of this page: `limit` and `byte_budget` then bound MATCHING rows,
+    /// and non-matching ones are stepped over without consuming either. That
+    /// ordering is the whole reason filtering is server-side at all — a
+    /// client filtering the page it was handed would show "3 of 500" while
+    /// hiding matches that sit past the cut, and no amount of paging would
+    /// reconcile the two.
+    ///
+    /// The cost is stated rather than hidden: with a filter set, this scan
+    /// is no longer bounded by `limit` rows. It walks the order until it has
+    /// filled the page or run out of rows, so a filter that matches nothing
+    /// reads every row in scope. That is inherent to answering "which rows
+    /// match" over a payload SQLite is not indexing, and it is bounded in
+    /// practice by the cache itself (`crate::manager::REFRESH_SESSION_CAP`
+    /// per host). The unfiltered path keeps its `LIMIT` and is untouched.
+    ///
+    /// A row whose payload does not decode is TAKEN either way — the cursor
+    /// contract above outranks the filter, since a row nobody can judge must
+    /// still be a row the walk can get past — but it is never COUNTED as
+    /// matching, because claiming a match for a payload this build cannot
+    /// read would be inventing one.
+    ///
+    /// ## Counting rides along, when it is wanted
+    ///
+    /// With `count` set this same walk also answers "how many rows in scope
+    /// match", and that fusion is the point rather than a convenience: the
+    /// shape it replaced ran a counting scan and then a paging scan, so a
+    /// zero-match `limit=1` request decoded the whole scope TWICE under the
+    /// one mutex. One decode per row per request is the floor for an exact
+    /// count, and this is it.
+    ///
+    /// Counting changes what the SQL may do, in one direction: a count has to
+    /// see the rows BEFORE the resume point too, so the resume predicate
+    /// moves out of the `WHERE` clause and into the loop. The page still
+    /// contains exactly the rows that follow the cursor.
+    ///
+    /// Poisoned rows are reported only where the PAGE would have shown them.
+    /// A count walks the whole scope, and one warning per unreadable row per
+    /// keystroke in a search box is a log the user writes by typing.
+    ///
+    /// Takes a borrowed connection rather than `&self` because it is half of
+    /// [`Self::merged_page`]'s single read and must run inside that read's
+    /// transaction: a page fetched under its own lock hold could describe a
+    /// different moment than the counts reported beside it.
+    fn scan_page(
+        conn: &Connection,
+        hosts: &[HostId],
         after: Option<CacheKey>,
         limit: usize,
         byte_budget: usize,
-    ) -> anyhow::Result<CachePage> {
-        if hosts.is_empty() || limit == 0 {
-            return Ok(CachePage::default());
+        filter: &SessionFilter,
+        count: bool,
+    ) -> anyhow::Result<(CachePage, Option<u64>)> {
+        if hosts.is_empty() {
+            return Ok((CachePage::default(), count.then_some(0)));
         }
-        let conn = Arc::clone(&self.conn);
-        tokio::task::spawn_blocking(move || -> anyhow::Result<CachePage> {
-            let conn = conn.lock().expect("helm db mutex poisoned");
-            // Built rather than constant because the host scope is an
-            // IN-list whose arity varies; every value is still bound, never
-            // interpolated.
-            let placeholders = host_placeholders(hosts.len(), 4);
-            let resume = match after {
-                None => "",
-                // The three-way disjunction IS the strict-successor test
-                // for a composite key, written out because SQLite has no
-                // row-value comparison this code can rely on across every
-                // bundled version. `created_at` is DESCENDING, so "after"
-                // means smaller.
-                Some(_) => {
-                    " AND (created_at < ?1                      OR (created_at = ?1 AND session_id > ?2)                      OR (created_at = ?1 AND session_id = ?2 AND host_id > ?3))"
+        // Built rather than constant because the host scope is an IN-list
+        // whose arity varies; every value is still bound, never interpolated.
+        let placeholders = host_placeholders(hosts.len(), 4);
+        let resume = match (&after, count) {
+            (None, _) | (Some(_), true) => "",
+            // The three-way disjunction IS the strict-successor test for a
+            // composite key, written out because SQLite has no row-value
+            // comparison this code can rely on across every bundled version.
+            // `created_at` is DESCENDING, so "after" means smaller.
+            (Some(_), false) => {
+                " AND (created_at < ?1                      OR (created_at = ?1 AND session_id > ?2)                      OR (created_at = ?1 AND session_id = ?2 AND host_id > ?3))"
+            }
+        };
+        // One row past the limit, so "is there more" is answered by the scan
+        // itself rather than by a second query that could disagree with it.
+        // Neither a FILTERED scan nor a COUNTING one can use that bound — how
+        // many rows either must read is exactly what it is trying to find out
+        // — so they walk the order and stop themselves in the loop below.
+        let fetch = limit.saturating_add(1);
+        let bound_rows = if filter.is_empty() && !count {
+            format!(" LIMIT {fetch}")
+        } else {
+            String::new()
+        };
+        let sql = format!(
+            "SELECT host_id, session_id, created_at, info_json FROM session_cache \
+             WHERE host_id IN ({placeholders}){resume} \
+             ORDER BY created_at DESC, session_id ASC, host_id ASC{bound_rows}"
+        );
+        let mut stmt = conn
+            .prepare(&sql)
+            .context("preparing the merged cache page query")?;
+        let mut params: Vec<Box<dyn rusqlite::ToSql>> = Vec::new();
+        // Bound 1..=3 unconditionally so the placeholder numbering in
+        // `resume` is stable whether or not it is present; unused binds are
+        // harmless, an off-by-one in the host list is not.
+        let placeholder_key = CacheKey {
+            created_at: 0,
+            session_id: String::new(),
+            host: 0,
+        };
+        let bind_key = after.as_ref().unwrap_or(&placeholder_key);
+        params.push(Box::new(bind_key.created_at));
+        params.push(Box::new(bind_key.session_id.clone()));
+        params.push(Box::new(bind_key.host));
+        for host in hosts {
+            params.push(Box::new(*host));
+        }
+        let bound: Vec<&dyn rusqlite::ToSql> = params.iter().map(|p| p.as_ref()).collect();
+        let mut query = stmt
+            .query(bound.as_slice())
+            .context("querying the merged cache page")?;
+
+        let mut page = CachePage::default();
+        let mut matching = 0u64;
+        let mut bytes = 0usize;
+        // Set once the page has taken everything it will take. The walk goes
+        // on from there only while there is still counting to do.
+        let mut page_closed = false;
+        while let Some(row) = query.next().context("reading merged cache page rows")? {
+            let host: HostId = row.get(0).context("reading a cached row's host")?;
+            let session_id: String = row.get(1).context("reading a cached row's id")?;
+            let created_at: i64 = row.get(2).context("reading a cached row's time")?;
+            let json: String = row.get(3).context("reading a cached row's payload")?;
+            let key = CacheKey {
+                created_at,
+                session_id,
+                host,
+            };
+            // ONE validation predicate for both answers (see
+            // [`usable_cached_session`]): a row this scan would refuse to
+            // show must not be a row the count claims as a match, or "N
+            // matching" would promise pages that can never display N rows.
+            let usable = usable_cached_session(&key, &json);
+            if count && usable.as_ref().is_ok_and(|info| filter.matches(host, info)) {
+                matching = matching.saturating_add(1);
+            }
+            // The resume test, for the counting walk whose SQL carries none.
+            if count && after.as_ref().is_some_and(|after| !follows(&key, after)) {
+                continue;
+            }
+            if page_closed {
+                if count {
+                    continue;
+                }
+                break;
+            }
+            let info = match usable {
+                Ok(info) => Some(info),
+                Err(reason) => {
+                    tracing::warn!(
+                        host,
+                        session_id = key.session_id.as_str(),
+                        reason = reason.as_str(),
+                        "skipping a cached session that cannot be trusted as this row"
+                    );
+                    None
                 }
             };
-            // One row past the limit, so "is there more" is answered by the
-            // scan itself rather than by a second query that could disagree
-            // with it.
-            let fetch = limit.saturating_add(1);
-            let sql = format!(
-                "SELECT host_id, session_id, created_at, info_json FROM session_cache \
-                 WHERE host_id IN ({placeholders}){resume} \
-                 ORDER BY created_at DESC, session_id ASC, host_id ASC \
-                 LIMIT {fetch}"
-            );
-            let mut stmt = conn
-                .prepare(&sql)
-                .context("preparing the merged cache page query")?;
-            let mut params: Vec<Box<dyn rusqlite::ToSql>> = Vec::new();
-            // Bound 1..=3 unconditionally so the placeholder numbering in
-            // `resume` is stable whether or not it is present; unused binds
-            // are harmless, an off-by-one in the host list is not.
-            let key = after.unwrap_or(CacheKey {
-                created_at: 0,
-                session_id: String::new(),
-                host: 0,
-            });
-            params.push(Box::new(key.created_at));
-            params.push(Box::new(key.session_id));
-            params.push(Box::new(key.host));
-            for host in &hosts {
-                params.push(Box::new(*host));
+            // Filtered out BEFORE the page's own cuts, so a non-matching row
+            // costs neither a row slot nor a byte of the budget — that is
+            // what "the predicate applies before the page cut" means
+            // concretely. A row that could not be decoded is never filtered
+            // out: nothing can judge it, and the cursor still has to get past
+            // it.
+            if let Some(info) = &info
+                && !filter.matches(host, info)
+            {
+                continue;
             }
-            let bound: Vec<&dyn rusqlite::ToSql> = params.iter().map(|p| p.as_ref()).collect();
-            let mut query = stmt
-                .query(bound.as_slice())
-                .context("querying the merged cache page")?;
-
-            let mut page = CachePage::default();
-            let mut bytes = 0usize;
-            while let Some(row) = query.next().context("reading merged cache page rows")? {
-                let host: HostId = row.get(0).context("reading a cached row's host")?;
-                let session_id: String = row.get(1).context("reading a cached row's id")?;
-                let created_at: i64 = row.get(2).context("reading a cached row's time")?;
-                let json: String = row.get(3).context("reading a cached row's payload")?;
-                let key = CacheKey {
-                    created_at,
-                    session_id,
-                    host,
-                };
-                if page.rows.len() == limit {
-                    // The extra row exists only to answer this question; it
-                    // is NOT part of the page and must not advance the
-                    // cursor. Its key IS the fence: the first row a caller
-                    // has not been shown.
-                    page.more = true;
-                    page.frontier = Some(key);
-                    break;
+            // Both cuts leave the same mark: `more`, plus the key of the
+            // first row a caller has NOT been shown. That key is the fence a
+            // merge needs — with a filter set it is the first MATCHING row
+            // withheld, which is the only fence that means anything to a
+            // merge that would not show the others either — and the row
+            // itself is not part of the page.
+            let over_rows = page.rows.len() == limit;
+            let over_bytes =
+                !page.rows.is_empty() && bytes.saturating_add(json.len()) > byte_budget;
+            if over_rows || over_bytes {
+                page.more = true;
+                page.frontier = Some(key);
+                page_closed = true;
+                if count {
+                    continue;
                 }
-                if !page.rows.is_empty() && bytes.saturating_add(json.len()) > byte_budget {
-                    page.more = true;
-                    page.frontier = Some(key);
-                    break;
-                }
-                bytes = bytes.saturating_add(json.len());
-                let info = match serde_json::from_str::<SessionInfo>(&json) {
-                    // A decoded row whose OWN id or timestamp disagrees
-                    // with the columns it was filed under is poison, not
-                    // data. The columns are what every order, cursor and
-                    // lookup here is built on, so a payload that says
-                    // otherwise cannot be shown without one surface
-                    // contradicting another — a row listed under one id and
-                    // routed under a different one. Treated exactly like an
-                    // undecodable payload: skipped for display, still
-                    // reported so the cursor passes it.
-                    Ok(info) if info.id != key.session_id || info.created_at != key.created_at => {
-                        tracing::warn!(
-                            host,
-                            session_id = key.session_id.as_str(),
-                            payload_id = info.id.as_str(),
-                            "skipping a cached session whose payload disagrees with the columns \
-                             it is filed under"
-                        );
-                        None
-                    }
-                    Ok(info) => Some(info),
-                    Err(error) => {
-                        // See this method's own docs: skipped for display,
-                        // still reported so the cursor can pass it.
-                        tracing::warn!(
-                            host,
-                            session_id = key.session_id.as_str(),
-                            error = %error,
-                            "skipping a cached session whose info_json no longer decodes"
-                        );
-                        None
-                    }
-                };
-                page.rows.push(ScannedRow { key, info });
+                break;
             }
-            Ok(page)
-        })
-        .await
-        .context("cached page task panicked")?
+            bytes = bytes.saturating_add(json.len());
+            page.rows.push(ScannedRow { key, info });
+        }
+        Ok((page, count.then_some(matching)))
     }
 
     /// How many sessions the merged view holds across `hosts` — the `total`
@@ -2021,36 +2901,174 @@ impl HelmStore {
     /// all of them" used to.
     ///
     /// Counts ROWS, including any whose payload no longer decodes. That is a
-    /// deliberate, documented divergence from the page, which skips them: a
-    /// count is an answer about the fleet, and quietly shrinking it to hide
-    /// a corrupt row would make "showing 4 of 5" read as data loss rather
-    /// than as the one unshowable entry it is.
-    pub async fn cached_count(&self, hosts: Vec<HostId>) -> anyhow::Result<u64> {
+    /// deliberate, documented divergence from the page and from the matching
+    /// count, both of which skip them: a total is an answer about the fleet,
+    /// and quietly shrinking it to hide a corrupt row would make "showing 4
+    /// of 5" read as data loss rather than as the one unshowable entry it is.
+    ///
+    /// Borrows a connection rather than taking `&self`, so it runs inside
+    /// [`Self::merged_page`]'s read transaction. There is deliberately no
+    /// standalone async wrapper: production has exactly one reason to ask how
+    /// big the merged view is — to answer `GET /api/sessions` — and that
+    /// answer must come from the same moment as the page beside it.
+    fn count_rows(conn: &Connection, hosts: &[HostId]) -> anyhow::Result<u64> {
         if hosts.is_empty() {
             return Ok(0);
         }
+        let placeholders = host_placeholders(hosts.len(), 1);
+        let sql = format!("SELECT COUNT(*) FROM session_cache WHERE host_id IN ({placeholders})");
+        let params: Vec<Box<dyn rusqlite::ToSql>> = hosts
+            .iter()
+            .map(|host| Box::new(*host) as Box<dyn rusqlite::ToSql>)
+            .collect();
+        let bound: Vec<&dyn rusqlite::ToSql> = params.iter().map(|p| p.as_ref()).collect();
+        // `COUNT(*)` is non-negative by definition, so the widening below is
+        // a widening rather than a clamp that could hide anything. rusqlite
+        // has no `u64` column type (SQLite integers are signed), so the cast
+        // is where the two type systems meet.
+        let count: i64 = conn
+            .query_row(&sql, bound.as_slice(), |r| r.get(0))
+            .context("counting the merged cache")?;
+        Ok(count as u64)
+    }
+
+    /// The page AND both of its counts, from ONE read — what
+    /// `GET /api/sessions` is answered out of (PLAN_M6_75.md item 5).
+    ///
+    /// ## Why one read rather than three
+    ///
+    /// The three answers are a single claim about the fleet — "here are
+    /// these rows, of N matching, of M sessions" — and taken separately they
+    /// stop being one: a refresh committing between the page and the counts
+    /// can produce `matching > total`, or counts describing rows the page
+    /// does not contain, or a page whose rows were already deleted by the
+    /// time the totals were taken. None of those is a crash; all of them
+    /// reach the user as a list that visibly does not add up. One
+    /// transaction, one lock hold, one moment.
+    ///
+    /// (This store has exactly one connection behind one mutex, so holding
+    /// the lock would already serialize these reads against every writer.
+    /// The transaction is still explicit, because that property is an
+    /// implementation detail of this struct and the coherence requirement is
+    /// not — a future connection pool must not silently reintroduce the
+    /// split.)
+    ///
+    /// ## The two scopes are different, deliberately
+    ///
+    /// `scope` is the merged view: every host with an actor, which is what
+    /// `total` counts. The PAGE and the MATCHING count are computed over
+    /// `scope` intersected with the filter's host, so a host-filtered
+    /// request never decodes another host's rows at all — while `total` goes
+    /// on describing the whole fleet, because "N matching of M sessions" is
+    /// a comparison against the fleet and not against the filter's own
+    /// scope.
+    ///
+    /// ## Whether it COUNTS is decided here, inside the lock
+    ///
+    /// See [`MatchingCount`]. A caller that already holds a matching count
+    /// names the generation it was taken at, and this read — holding the
+    /// mutex, so no write can be in flight — compares that against the
+    /// generation it actually finds. Only inside this hold is the comparison
+    /// sound: a caller sampling anything beforehand can have a write land in
+    /// the gap and pair an old count with new rows.
+    ///
+    /// A read that does count does so in the page's own scan
+    /// ([`Self::scan_page`]), not in a second one.
+    ///
+    /// ## An unfiltered read makes NO matching claim
+    ///
+    /// Callers pass [`MatchingCount::Skip`] for an empty filter and
+    /// [`MergedRead::matching`] comes back absent. The tempting shortcut —
+    /// "unfiltered means everything matches, so report `total`" — is not
+    /// true here: `total` counts rows including those whose payload cannot be
+    /// trusted as that row, and the matching count deliberately excludes
+    /// exactly those. Reporting `total` as a matching count would make an
+    /// unshowable row count as a match only when nobody filtered.
+    pub async fn merged_page(
+        &self,
+        scope: Vec<HostId>,
+        after: Option<CacheKey>,
+        limit: usize,
+        byte_budget: usize,
+        filter: SessionFilter,
+        matching: MatchingCount,
+    ) -> anyhow::Result<MergedRead> {
         let conn = Arc::clone(&self.conn);
-        tokio::task::spawn_blocking(move || -> anyhow::Result<u64> {
+        let store_generation = Arc::clone(&self.generation);
+        let counting_passes = Arc::clone(&self.counting_passes);
+        tokio::task::spawn_blocking(move || -> anyhow::Result<MergedRead> {
             let conn = conn.lock().expect("helm db mutex poisoned");
-            let placeholders = host_placeholders(hosts.len(), 1);
-            let sql =
-                format!("SELECT COUNT(*) FROM session_cache WHERE host_id IN ({placeholders})");
-            let params: Vec<Box<dyn rusqlite::ToSql>> = hosts
-                .iter()
-                .map(|host| Box::new(*host) as Box<dyn rusqlite::ToSql>)
-                .collect();
-            let bound: Vec<&dyn rusqlite::ToSql> = params.iter().map(|p| p.as_ref()).collect();
-            // `COUNT(*)` is non-negative by definition, so the widening
-            // below is a widening rather than a clamp that could hide
-            // anything. rusqlite has no `u64` column type (SQLite integers
-            // are signed), so the cast is where the two type systems meet.
-            let count: i64 = conn
-                .query_row(&sql, bound.as_slice(), |r| r.get(0))
-                .context("counting the merged cache")?;
-            Ok(count as u64)
+            // Read-only and never committed: dropping it rolls back, which
+            // is the correct end for a transaction that wrote nothing.
+            let tx = conn
+                .unchecked_transaction()
+                .context("beginning the merged read transaction")?;
+            // Sampled INSIDE the lock, with the rows below: that is the whole
+            // basis on which a count and the data it describes are true of
+            // each other. See [`HelmStore::generation`].
+            let generation = store_generation.load(Ordering::Acquire);
+            // `total` is the whole merged scope's, so it is taken FIRST and
+            // the scope is then consumed rather than cloned: the unfiltered
+            // case is the common one and its page scope is the same list.
+            let total = Self::count_rows(&tx, &scope)?;
+            // A host filter naming a host outside the merged view selects
+            // nothing — not everything, which is what an empty IN-list would
+            // silently mean if it reached the scan.
+            let page_scope: Vec<HostId> = match filter.host_scope() {
+                None => scope,
+                Some(host) if scope.contains(&host) => vec![host],
+                Some(_) => Vec::new(),
+            };
+            let count = match matching {
+                MatchingCount::Skip => false,
+                MatchingCount::Compute => true,
+                MatchingCount::ComputeUnless(held) => held != generation,
+            };
+            if count {
+                counting_passes.fetch_add(1, Ordering::Relaxed);
+            }
+            let (page, matching) =
+                Self::scan_page(&tx, &page_scope, after, limit, byte_budget, &filter, count)?;
+            Ok(MergedRead {
+                page,
+                total,
+                matching,
+                generation,
+            })
         })
         .await
-        .context("cached count task panicked")?
+        .context("merged page task panicked")?
+    }
+
+    /// The PAGE alone, for the tests whose subject is the scan rather than
+    /// the counts served beside it.
+    ///
+    /// Test-only because production has exactly one reason to read this
+    /// table for a list — to answer `GET /api/sessions` — and that answer
+    /// needs the counts in the same breath ([`Self::merged_page`]). Offering
+    /// a page-only read to production code would be offering a way to
+    /// reintroduce the split those counts were pulled into one transaction
+    /// to close.
+    #[cfg(test)]
+    async fn cached_page(
+        &self,
+        hosts: Vec<HostId>,
+        after: Option<CacheKey>,
+        limit: usize,
+        byte_budget: usize,
+        filter: SessionFilter,
+    ) -> anyhow::Result<CachePage> {
+        Ok(self
+            .merged_page(
+                hosts,
+                after,
+                limit,
+                byte_budget,
+                filter,
+                MatchingCount::Skip,
+            )
+            .await?
+            .page)
     }
 
     /// One host's cached entry for `session_id`, if it has one and it still
@@ -2161,6 +3179,170 @@ impl HelmStore {
         })
         .await
         .context("session owner lookup task panicked")?
+    }
+
+    /// The profile a session was last created from on `host`, if any
+    /// ever was (PLAN_M6_75.md item 5).
+    ///
+    /// Deliberately NOT validated against the host's catalog here, and the
+    /// omission is the feature: the catalog lives on the supervisor, so
+    /// this side could only check it by making a round trip that may fail
+    /// or may be answered by a host that is currently down — and a
+    /// remembered default naming a profile that has since been deleted is
+    /// a state the product HAS. SPEC.md's rule is to ASK rather than guess
+    /// when the last-used profile is gone, which needs the id to survive
+    /// the deletion long enough to be recognized as missing. The profiles
+    /// read serves this id beside the catalog in one reply, so a client has
+    /// both facts in hand and can act on their disagreement — which is not
+    /// a claim that the two were read atomically (they cannot be; one comes
+    /// from this database and the other from a supervisor over the wire).
+    /// No such claim is needed: the client's answer to any mismatch is the
+    /// same single behavior, ask instead of guess.
+    ///
+    /// ## Validated against the host's identity, at READ time
+    ///
+    /// The stored row carries the identity it was recorded against, and a row
+    /// whose identity is not the host's current one is answered as `None` —
+    /// the same as never having had a default, which is exactly the state it
+    /// describes.
+    ///
+    /// This is the third of three defences and the only one that covers a row
+    /// nobody deleted. Adoption erases the default in its own transaction and
+    /// a genuine retarget erases it in its; both are point-in-time actions,
+    /// and neither can account for a row written by a request that was
+    /// already in flight, a future path that moves a host some other way, or
+    /// a database edited by hand. Since a starter profile id RESOLVES on the
+    /// successor install rather than merely dangling, "probably fine" is not
+    /// a safe posture — so the identity travels with the row and is checked
+    /// every time it is read.
+    ///
+    /// One statement, joined against `hosts`, so the row and the identity it
+    /// is judged against come from one moment. A `NULL` on both sides matches
+    /// (a host that reports no identity may still have a remembered default);
+    /// that is the one case this check cannot sharpen, and it is why the two
+    /// deletions above exist rather than being left to this.
+    pub async fn remembered_profile(&self, host: HostId) -> anyhow::Result<Option<String>> {
+        let conn = Arc::clone(&self.conn);
+        tokio::task::spawn_blocking(move || -> anyhow::Result<Option<String>> {
+            let conn = conn.lock().expect("helm db mutex poisoned");
+            conn.query_row(
+                "SELECT remembered.profile_id \
+                 FROM remembered_profiles AS remembered \
+                 JOIN hosts ON hosts.id = remembered.host_id \
+                 WHERE remembered.host_id = ?1 \
+                   AND ((remembered.host_identity IS NULL AND hosts.host_identity IS NULL) \
+                        OR remembered.host_identity = hosts.host_identity)",
+                rusqlite::params![host],
+                |r| r.get(0),
+            )
+            .optional()
+            .context("reading a host's remembered default profile")
+        })
+        .await
+        .context("remembered profile task panicked")?
+    }
+
+    /// Remember `profile_id` as `host`'s last-used profile, replacing
+    /// whatever was there.
+    ///
+    /// Written by a successful profile-backed create and by nothing else:
+    /// "last used" means a session was actually created from it, not that
+    /// a picker was opened on it. Returns whether the stored ROW changed, so
+    /// the invalidation feed does not wake every client each time a user
+    /// creates from the same profile twice in a row.
+    ///
+    /// "Changed" means the whole `(profile_id, host_identity)` pair, compared
+    /// NULL-safely, and the identity half is not bookkeeping. Consider the
+    /// natural sequence: an identity-less host remembers P, the host later
+    /// learns an identity, and the stored row — bound to `NULL` — stops being
+    /// readable ([`Self::remembered_profile`] revalidates the binding, so the
+    /// default silently disappears from every create dialog). The next
+    /// profile-backed create on P REPAIRS it, rewriting the row against the
+    /// learned identity, and the remembered default flips from absent back to
+    /// P. Comparing the profile id alone calls that "unchanged" and publishes
+    /// nothing, so the repair reaches no open client until something unrelated
+    /// happens to bump.
+    ///
+    /// IDENTITY-BOUND, exactly like every session-cache write here, and for
+    /// a sharper reason than symmetry: a profile id is minted per supervisor
+    /// and the STARTER profiles every fresh supervisor seeds collide across
+    /// installs by construction. So a create whose reply landed after the
+    /// row was retargeted or adopted away would not merely record a stale
+    /// preference — it could record an id that RESOLVES on the new host to a
+    /// completely different profile, and the next create dialog would offer
+    /// it as the user's own last choice. `identity` is what the caller
+    /// believed this host was when it made the request: `Some` for an
+    /// ordinary host, `None` for one that reports no identity at all (which
+    /// must still match — a host that has since LEARNED one is not the host
+    /// the caller was talking to either).
+    ///
+    /// The identity is also STORED beside the default, not merely checked on
+    /// the way in, so the binding survives at rest and every read revalidates
+    /// it (see [`Self::remembered_profile`]). Checking only the write leaves
+    /// a row whose host has moved on since perfectly readable.
+    ///
+    /// [`HostStoreError::HostNotFound`] for an unregistered host rather
+    /// than a silent no-op: the foreign key would refuse the insert anyway,
+    /// and a typed refusal is what the REST edge maps to a 404. A stale
+    /// identity is [`HostStoreError::IdentityMismatch`], with nothing
+    /// written.
+    pub async fn remember_profile_default(
+        &self,
+        host: HostId,
+        identity: Option<&str>,
+        profile_id: &str,
+    ) -> anyhow::Result<bool> {
+        let conn = Arc::clone(&self.conn);
+        let identity = identity.map(str::to_string);
+        let profile_id = profile_id.to_string();
+        tokio::task::spawn_blocking(move || -> anyhow::Result<bool> {
+            let mut conn = conn.lock().expect("helm db mutex poisoned");
+            let tx = conn
+                .transaction()
+                .context("beginning remembered-default transaction")?;
+            // ONE statement for both facts this write is judged against: the
+            // host's identity (the outer row — its absence IS the unknown
+            // host) and the row being replaced (the LEFT JOIN — its columns
+            // are NULL when there is no prior default). Two statements would
+            // read the same transaction twice to answer one question.
+            let known: Option<(Option<String>, Option<String>, Option<String>)> = tx
+                .query_row(
+                    "SELECT hosts.host_identity, remembered.profile_id, remembered.host_identity \
+                     FROM hosts \
+                     LEFT JOIN remembered_profiles AS remembered ON remembered.host_id = hosts.id \
+                     WHERE hosts.id = ?1",
+                    rusqlite::params![host],
+                    |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+                )
+                .optional()
+                .context("checking the host a remembered default names")?;
+            let Some((current, previous_profile, previous_identity)) = known else {
+                return Err(anyhow::Error::new(HostStoreError::HostNotFound(host)));
+            };
+            if current.as_deref() != identity.as_deref() {
+                return Err(anyhow::Error::new(HostStoreError::IdentityMismatch {
+                    host,
+                    expected: identity.unwrap_or_default(),
+                    actual: current,
+                }));
+            }
+            // Both halves of the row, so an identity REPAIR under an unchanged
+            // profile id counts as a change — see this method's docs.
+            let changed = previous_profile.as_deref() != Some(profile_id.as_str())
+                || previous_identity.as_deref() != identity.as_deref();
+            tx.execute(
+                "INSERT INTO remembered_profiles (host_id, profile_id, host_identity) \
+                 VALUES (?1, ?2, ?3) \
+                 ON CONFLICT (host_id) DO UPDATE SET profile_id = excluded.profile_id, \
+                     host_identity = excluded.host_identity",
+                rusqlite::params![host, profile_id, identity],
+            )
+            .context("remembering a host's default profile")?;
+            tx.commit().context("committing the remembered default")?;
+            Ok(changed)
+        })
+        .await
+        .context("remember profile default task panicked")?
     }
 }
 
@@ -2291,7 +3473,13 @@ mod tests {
         let mut after: Option<CacheKey> = None;
         loop {
             let page = store
-                .cached_page(hosts.to_vec(), after.clone(), 2, usize::MAX)
+                .cached_page(
+                    hosts.to_vec(),
+                    after.clone(),
+                    2,
+                    usize::MAX,
+                    SessionFilter::default(),
+                )
                 .await
                 .expect("paged read");
             let Some(last) = page.rows.last() else { break };
@@ -2340,10 +3528,14 @@ mod tests {
 
     /// Every "skipped a cached session" warning captured so far.
     fn skip_warnings() -> Vec<crate::test_capture::CapturedEvent> {
-        crate::test_capture::matching(
-            &crate::test_capture::install(),
-            "info_json no longer decodes",
-        )
+        // The shared PREFIX of every skip warning this module writes, rather
+        // than one reader's exact sentence: the per-host read explains the
+        // decode failure inline, while the page scan carries the reason in a
+        // field (its predicate is shared with the matching count, which
+        // reports nothing). What both must always do — and what these tests
+        // are actually about — is say that a row was skipped, and name the
+        // host and session it belonged to.
+        crate::test_capture::matching(&crate::test_capture::install(), "skipping a cached session")
     }
 
     // ---- Schema and the version mechanism ----------------------------
@@ -2635,7 +3827,7 @@ mod tests {
     /// user's file looks like, and the whole ladder runs over it. All THREE
     /// cache readers are exercised, because they decode independently and a
     /// migration that fixed one would leave the others just as broken —
-    /// `cached_sessions` (the per-host stale list), `cached_page` (the
+    /// `cached_sessions` (the per-host stale list), `merged_page` (the
     /// merged, paginated list), and `cached_session` (the stale detail view
     /// behind an unreachable-host notice).
     #[tokio::test]
@@ -2693,7 +3885,7 @@ mod tests {
         );
 
         let page = store
-            .cached_page(vec![host], None, 10, usize::MAX)
+            .cached_page(vec![host], None, 10, usize::MAX, SessionFilter::default())
             .await
             .expect("merged page");
         assert_eq!(page.rows.len(), 1);
@@ -2739,6 +3931,76 @@ mod tests {
             migrated.unwrap(),
             fresh.unwrap(),
             "the migration ladder and the fresh-create path must agree on the final schema"
+        );
+    }
+
+    /// The version-6 migration DROPS the remembered defaults it inherits.
+    ///
+    /// Spec: a database whose `remembered_profiles` rows predate the
+    /// identity column comes up with no default for any host.
+    ///
+    /// Carrying them forward would have been the polite migration and is the
+    /// unsafe one. A version-5 row records nothing about which install it was
+    /// chosen on, and a `NULL` in the new column is a value that legitimately
+    /// MEANS "a host reporting no identity" — so a preserved row would
+    /// validate against every identity-less host, and starter profile ids
+    /// collide across installs by construction. Dropping costs one create
+    /// dialog that asks instead of defaulting, which is SPEC.md's own
+    /// fallback and the direction that cannot be wrong.
+    ///
+    /// The v5 state is constructed by downgrading a real database rather than
+    /// hand-building one, so the row this asserts about sits in the schema
+    /// the previous release actually shipped.
+    #[tokio::test]
+    async fn the_identity_migration_forgets_defaults_it_cannot_validate() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("helm.db");
+        let host = {
+            let store = HelmStore::open(&path).await.expect("create");
+            let host = store.add_ssh_host("user@host", None, None).await.unwrap();
+            store
+                .remember_profile_default(host, None, "starter-claude")
+                .await
+                .unwrap();
+            host
+        };
+
+        // Back to the shape version 5 shipped: no identity column, and a row
+        // recorded under it.
+        {
+            let conn = Connection::open(&path).expect("reopen raw");
+            conn.execute_batch(
+                "DROP TABLE remembered_profiles;
+                 CREATE TABLE remembered_profiles (
+                     host_id    INTEGER PRIMARY KEY
+                                REFERENCES hosts (id) ON DELETE CASCADE,
+                     profile_id TEXT NOT NULL
+                 ) STRICT;
+                 PRAGMA user_version = 5;",
+            )
+            .expect("downgrade the table");
+            conn.execute(
+                "INSERT INTO remembered_profiles (host_id, profile_id) VALUES (?1, 'starter-claude')",
+                rusqlite::params![host],
+            )
+            .expect("plant a version-5 remembered default");
+        }
+
+        let migrated = HelmStore::open(&path).await.expect("migrate");
+        assert_eq!(
+            migrated.remembered_profile(host).await.unwrap(),
+            None,
+            "a default nothing can validate must be forgotten rather than served"
+        );
+        // And the host itself survives — this is a forgotten preference, not
+        // a lost registry.
+        assert!(
+            migrated
+                .list_hosts()
+                .await
+                .unwrap()
+                .iter()
+                .any(|row| row.id == host)
         );
     }
 
@@ -4473,7 +5735,7 @@ mod tests {
 
         // Page one ends ON a poisoned row.
         let first = store
-            .cached_page(vec![host], None, 2, usize::MAX)
+            .cached_page(vec![host], None, 2, usize::MAX, SessionFilter::default())
             .await
             .expect("first page");
         assert_eq!(
@@ -4490,7 +5752,13 @@ mod tests {
 
         // Page two is ENTIRELY poisoned — it must still advance.
         let second = store
-            .cached_page(vec![host], Some(first.rows[1].key.clone()), 1, usize::MAX)
+            .cached_page(
+                vec![host],
+                Some(first.rows[1].key.clone()),
+                1,
+                usize::MAX,
+                SessionFilter::default(),
+            )
             .await
             .expect("second page");
         assert_eq!(second.rows.len(), 1);
@@ -4500,7 +5768,13 @@ mod tests {
 
         // And the walk reaches the far side, which is the whole point.
         let third = store
-            .cached_page(vec![host], Some(second.rows[0].key.clone()), 2, usize::MAX)
+            .cached_page(
+                vec![host],
+                Some(second.rows[0].key.clone()),
+                2,
+                usize::MAX,
+                SessionFilter::default(),
+            )
             .await
             .expect("third page");
         assert_eq!(
@@ -4541,7 +5815,7 @@ mod tests {
             .expect("seed the cache");
 
         let page = store
-            .cached_page(vec![host], None, 10, 4_000)
+            .cached_page(vec![host], None, 10, 4_000, SessionFilter::default())
             .await
             .expect("bounded page");
         assert_eq!(
@@ -4554,7 +5828,7 @@ mod tests {
         // A single row larger than the whole budget must still be served,
         // or the walk stalls on it forever.
         let tiny = store
-            .cached_page(vec![host], None, 10, 1)
+            .cached_page(vec![host], None, 10, 1, SessionFilter::default())
             .await
             .expect("degenerate budget");
         assert_eq!(tiny.rows.len(), 1, "at least one row always makes progress");
@@ -4632,5 +5906,1381 @@ mod tests {
                 .collect::<Vec<_>>(),
             vec!["remote-1".to_string()]
         );
+    }
+
+    /// The changed-only rule at its source: a wholesale replacement that
+    /// writes the row set already stored reports no change.
+    ///
+    /// This is what stops the invalidation feed from being a per-host,
+    /// per-refresh-interval wakeup for every open client (PLAN_M6_75.md item
+    /// 5) — in a settled fleet nearly every drain writes back exactly what
+    /// was there. Both directions are asserted from ONE store, because
+    /// "reports no change" is only meaningful beside a comparable write that
+    /// does.
+    #[tokio::test]
+    async fn a_replacement_reports_a_change_only_when_a_row_actually_differs() {
+        let (_dir, store) = fresh_store().await;
+        let host = host_with_identity(&store, "user@host", "identity-1").await;
+
+        let first = store
+            .replace_host_sessions(host, "identity-1", vec![session("s-1", 100)])
+            .await
+            .unwrap();
+        assert!(
+            first.changed,
+            "filling an empty cache is a change by any reading"
+        );
+
+        let repeat = store
+            .replace_host_sessions(host, "identity-1", vec![session("s-1", 100)])
+            .await
+            .unwrap();
+        assert!(
+            !repeat.changed,
+            "a drain that writes back an identical row set must wake nobody"
+        );
+
+        // A payload difference that leaves the ordering columns alone is
+        // still a change: the comparison is over what is STORED, not over
+        // the key it is filed under, and a status flip is exactly the
+        // milestone's motivating case.
+        let flipped = SessionInfo {
+            status: farhelm_proto::SessionStatus::Waiting,
+            ..session("s-1", 100)
+        };
+        let changed = store
+            .replace_host_sessions(host, "identity-1", vec![flipped])
+            .await
+            .unwrap();
+        assert!(changed.changed, "a status flip is a change");
+
+        // And so is losing a session, which no per-row comparison of the
+        // NEW list against itself would ever notice.
+        let emptied = store
+            .replace_host_sessions(host, "identity-1", Vec::new())
+            .await
+            .unwrap();
+        assert!(emptied.changed, "a session disappearing is a change");
+    }
+
+    /// A rewrite that repairs the ORDERING COLUMN is a change, even though
+    /// the payload beside it is untouched.
+    ///
+    /// `created_at` is a column of its own — the key every page, cursor and
+    /// merge is built on — extracted from the payload at write time. The two
+    /// can therefore disagree in a database this build did not write (a hand
+    /// edit, a downgrade, an older writer), and the rewrite that repairs the
+    /// disagreement MOVES the row in the merged order while leaving every
+    /// byte of its payload alone. Comparing payloads only would report that
+    /// as "nothing changed", and the feed would starve: the row would sit in
+    /// its new position with no client ever told to look again.
+    #[tokio::test]
+    async fn a_repaired_ordering_column_counts_as_a_change() {
+        let (_dir, store) = fresh_store().await;
+        let host = host_with_identity(&store, "user@host", "identity-1").await;
+        store
+            .replace_host_sessions(host, "identity-1", vec![session("s-1", 100)])
+            .await
+            .unwrap();
+
+        // The column drifts away from the payload, which is only reachable
+        // by writing behind this module's back — exactly the provenance the
+        // schema's own comments say the read path must tolerate.
+        {
+            let conn = Arc::clone(&store.conn);
+            tokio::task::spawn_blocking(move || {
+                conn.lock()
+                    .unwrap()
+                    .execute(
+                        "UPDATE session_cache SET created_at = 999 WHERE session_id = 's-1'",
+                        [],
+                    )
+                    .unwrap();
+            })
+            .await
+            .unwrap();
+        }
+
+        let repaired = store
+            .replace_host_sessions(host, "identity-1", vec![session("s-1", 100)])
+            .await
+            .unwrap();
+        assert!(
+            repaired.changed,
+            "the row moved in the merged order, so clients must be told to look again"
+        );
+        // And the write that follows it, with nothing left to repair, is a
+        // no-op again — so this is a comparison rather than a permanent
+        // "changed" latch.
+        let settled = store
+            .replace_host_sessions(host, "identity-1", vec![session("s-1", 100)])
+            .await
+            .unwrap();
+        assert!(!settled.changed);
+    }
+
+    /// The single-row writes answer the same question, so a mutation that
+    /// re-records what the cache already says invalidates nothing.
+    ///
+    /// The case this exists for is a RETRIED create under an idempotency
+    /// key: the supervisor replays the same session, the helm re-records it,
+    /// and nothing about the fleet is different than it was.
+    #[tokio::test]
+    async fn single_row_writes_report_change_the_same_way() {
+        let (_dir, store) = fresh_store().await;
+        let host = host_with_identity(&store, "user@host", "identity-1").await;
+
+        assert!(
+            store
+                .remember_session(host, "identity-1", &session("s-1", 100))
+                .await
+                .unwrap(),
+            "seeding a session nobody had is a change"
+        );
+        assert!(
+            !store
+                .remember_session(host, "identity-1", &session("s-1", 100))
+                .await
+                .unwrap(),
+            "re-recording an identical session must wake nobody"
+        );
+        assert!(
+            store
+                .forget_session(host, "identity-1", "s-1")
+                .await
+                .unwrap(),
+            "removing a row that was there is a change"
+        );
+        assert!(
+            !store
+                .forget_session(host, "identity-1", "s-1")
+                .await
+                .unwrap(),
+            "forgetting a session that was already gone succeeds, but changes nothing"
+        );
+
+        // The single-row write compares the ordering column too, for the
+        // wholesale write's reason: a seed that repairs a drifted
+        // `created_at` moves the row in the merged order while leaving its
+        // payload untouched.
+        store
+            .remember_session(host, "identity-1", &session("s-2", 100))
+            .await
+            .unwrap();
+        {
+            let conn = Arc::clone(&store.conn);
+            tokio::task::spawn_blocking(move || {
+                conn.lock()
+                    .unwrap()
+                    .execute(
+                        "UPDATE session_cache SET created_at = 999 WHERE session_id = 's-2'",
+                        [],
+                    )
+                    .unwrap();
+            })
+            .await
+            .unwrap();
+        }
+        assert!(
+            store
+                .remember_session(host, "identity-1", &session("s-2", 100))
+                .await
+                .unwrap(),
+            "a seed that moves the row in the merged order is a change"
+        );
+    }
+
+    /// The remembered default is per-host, replaceable, durable, and — like
+    /// every other helm-owned fact about a host — forgotten with it.
+    ///
+    /// Durability is the point of storing it in helm.db at all rather than
+    /// in memory: SPEC.md's create dialog defaults to the last-used profile,
+    /// and a default that evaporated on every helm restart would send the
+    /// user back to picking one by hand exactly when they had just
+    /// established a habit.
+    #[tokio::test]
+    async fn a_remembered_default_is_per_host_replaceable_durable_and_cascades() {
+        let (dir, store) = fresh_store().await;
+        let local = all_host_ids(&store).await[0];
+        let ssh = store.add_ssh_host("user@host", None, None).await.unwrap();
+
+        assert_eq!(store.remembered_profile(local).await.unwrap(), None);
+        // `None` throughout: neither of these hosts has ever reported an
+        // identity, which is itself the value the write must match.
+        assert!(
+            store
+                .remember_profile_default(local, None, "p-1")
+                .await
+                .unwrap(),
+            "the first remembered default is a change"
+        );
+        assert!(
+            !store
+                .remember_profile_default(local, None, "p-1")
+                .await
+                .unwrap(),
+            "creating from the same profile twice changes nothing observable"
+        );
+        assert!(
+            store
+                .remember_profile_default(local, None, "p-2")
+                .await
+                .unwrap()
+        );
+        assert_eq!(
+            store.remembered_profile(local).await.unwrap(),
+            Some("p-2".to_string()),
+            "the latest choice replaces the previous one rather than accumulating"
+        );
+        assert_eq!(
+            store.remembered_profile(ssh).await.unwrap(),
+            None,
+            "a default is per host: a profile id means nothing on another supervisor"
+        );
+
+        // Durable across a genuine reopen of the same file.
+        drop(store);
+        let reopened = HelmStore::open(&dir.path().join("helm.db"))
+            .await
+            .expect("reopen");
+        assert_eq!(
+            reopened.remembered_profile(local).await.unwrap(),
+            Some("p-2".to_string())
+        );
+
+        // And forgotten with its host: removing a host forgets everything
+        // the helm knew about it, in one statement (the same CASCADE the
+        // session cache rides).
+        reopened
+            .remember_profile_default(ssh, None, "p-3")
+            .await
+            .unwrap();
+        reopened.remove_ssh_host(ssh).await.unwrap();
+        assert_eq!(reopened.remembered_profile(ssh).await.unwrap(), None);
+    }
+
+    /// REPAIRING a remembered default's identity binding — same profile id,
+    /// newly learned identity — counts as a CHANGE.
+    ///
+    /// Spec: `remember_profile_default` compares the whole stored
+    /// `(profile_id, host_identity)` pair, so writing the same id against an
+    /// identity the row does not carry answers `true`.
+    ///
+    /// The sequence is ordinary rather than contrived, which is what makes the
+    /// naive comparison dangerous: an identity-less host remembers P; the host
+    /// later learns an identity, at which point the stored row stops being
+    /// readable and the default silently vanishes from every create dialog;
+    /// the next profile-backed create on P rewrites the binding and brings it
+    /// back. Comparing the profile id alone calls that "no change", so the
+    /// caller publishes no invalidation and the default's return reaches no
+    /// open client — a create dialog somewhere else goes on offering nothing
+    /// until something unrelated happens to wake it.
+    #[tokio::test]
+    async fn repairing_a_remembered_defaults_identity_binding_is_a_change() {
+        let (_dir, store) = fresh_store().await;
+        let host = store
+            .add_ssh_host("user@learner", None, None)
+            .await
+            .unwrap();
+
+        // Recorded while the host reported no identity at all.
+        assert!(
+            store
+                .remember_profile_default(host, None, "starter-claude")
+                .await
+                .unwrap()
+        );
+        assert_eq!(
+            store.remembered_profile(host).await.unwrap(),
+            Some("starter-claude".to_string())
+        );
+
+        // The host's first successful hello teaches the registry an identity.
+        // The stored row is bound to NULL, so it is no longer readable.
+        store
+            .record_first_contact(host, &dialed_as(&store, host).await, "identity-1")
+            .await
+            .unwrap();
+        assert_eq!(
+            store.remembered_profile(host).await.unwrap(),
+            None,
+            "a row bound to no identity is not this install's preference"
+        );
+
+        assert!(
+            store
+                .remember_profile_default(host, Some("identity-1"), "starter-claude")
+                .await
+                .unwrap(),
+            "the same id under a different binding is a different row, and the default going from \
+             absent back to present is exactly what other clients must be told about"
+        );
+        assert_eq!(
+            store.remembered_profile(host).await.unwrap(),
+            Some("starter-claude".to_string())
+        );
+
+        // And a genuinely idempotent write — same id, same binding — is still
+        // no change, which is the property this must not have traded away.
+        assert!(
+            !store
+                .remember_profile_default(host, Some("identity-1"), "starter-claude")
+                .await
+                .unwrap()
+        );
+    }
+
+    /// ADOPTION erases the remembered default, and a write made against the
+    /// superseded install is refused.
+    ///
+    /// This is not symmetry with the session-cache writes; it is the case
+    /// that makes profiles different. Profile ids are minted per supervisor
+    /// AND every fresh supervisor seeds the same starter profiles, so an id
+    /// carried across an adoption does not merely dangle — it RESOLVES on the
+    /// successor install, to a profile the user never chose, offered back as
+    /// their own last choice. Both halves therefore have to hold: the stored
+    /// row goes with the install it described, and a write still in flight
+    /// across that moment is refused rather than stored.
+    ///
+    /// The purge is asserted from the same transaction that purges the
+    /// session cache, because a follow-up call could be torn by a crash or
+    /// observed half-done by a concurrent reader — and the half a reader
+    /// would catch is exactly the one that resolves wrongly.
+    #[tokio::test]
+    async fn adoption_forgets_the_superseded_installs_remembered_default() {
+        let (_dir, store) = fresh_store().await;
+        let host = host_with_identity(&store, "user@host", "identity-1").await;
+
+        assert!(
+            store
+                .remember_profile_default(host, Some("identity-1"), "starter-claude")
+                .await
+                .unwrap()
+        );
+
+        // The install this host points at was replaced, and the user adopted
+        // the new identity. A create that was in flight across that moment
+        // still carries the OLD one.
+        store
+            .adopt_identity(
+                host,
+                &dialed_as(&store, host).await,
+                "identity-1",
+                "identity-2",
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            store.remembered_profile(host).await.unwrap(),
+            None,
+            "the adopted install has no last-used profile, and the superseded install's id would \
+             resolve here rather than dangle"
+        );
+
+        let error = store
+            .remember_profile_default(host, Some("identity-1"), "starter-codex")
+            .await
+            .expect_err("a write made against the superseded install must not land");
+        assert!(matches!(
+            error.downcast_ref::<HostStoreError>(),
+            Some(HostStoreError::IdentityMismatch { .. })
+        ));
+        assert_eq!(
+            store.remembered_profile(host).await.unwrap(),
+            None,
+            "and nothing was written"
+        );
+
+        // A host that has LEARNED an identity is not the identity-less host
+        // an earlier caller was talking to either, so `None` is refused too
+        // rather than treated as "do not care".
+        assert!(
+            store
+                .remember_profile_default(host, None, "starter-codex")
+                .await
+                .is_err()
+        );
+    }
+
+    /// A default recorded against one install must never be served for
+    /// another, even when the two mint the SAME id.
+    ///
+    /// Spec: after an adoption, `remembered_profile` answers `None` for a
+    /// starter id both installs happen to define — the id resolving on the
+    /// successor is precisely what makes carrying it forward dangerous rather
+    /// than merely stale, and SPEC.md's rule is to ask rather than guess.
+    ///
+    /// Staged with a shared starter id specifically because the tempting
+    /// wrong fix — "a stale default is harmless, it just will not be found in
+    /// the catalog" — is exactly the assumption this breaks.
+    #[tokio::test]
+    async fn a_shared_starter_id_does_not_survive_an_adoption() {
+        let (_dir, store) = fresh_store().await;
+        let host = host_with_identity(&store, "user@host", "identity-1").await;
+        // The id every fresh supervisor seeds, so it means something on both
+        // sides of the adoption.
+        store
+            .remember_profile_default(host, Some("identity-1"), "starter-claude")
+            .await
+            .unwrap();
+
+        store
+            .adopt_identity(
+                host,
+                &dialed_as(&store, host).await,
+                "identity-1",
+                "identity-2",
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(
+            store.remembered_profile(host).await.unwrap(),
+            None,
+            "an id that resolves on the new install must not be offered as the user's own last \
+             choice there"
+        );
+        // And the new install can establish its own, which is what makes this
+        // a purge rather than a permanent hole.
+        store
+            .remember_profile_default(host, Some("identity-2"), "starter-claude")
+            .await
+            .unwrap();
+        assert_eq!(
+            store.remembered_profile(host).await.unwrap(),
+            Some("starter-claude".to_string())
+        );
+    }
+
+    /// RETARGETING a host forgets its remembered default — including when
+    /// neither install reports an identity at all.
+    ///
+    /// Spec: a destination change that actually moves the row deletes the
+    /// default; a byte-identical destination update keeps it.
+    ///
+    /// The identity-less case is the one that needs its own staging. The
+    /// identity binding cannot help there — `NULL` matches `NULL`, so two
+    /// entirely different installs look alike to it — and starter profile ids
+    /// collide by construction, so the default would resolve on whatever the
+    /// row now points at. The re-affirming half is asserted beside it because
+    /// a resubmitted form or an idempotent reconcile must not cost the user a
+    /// preference over a write that changed nothing.
+    #[tokio::test]
+    async fn retargeting_forgets_the_remembered_default_even_with_no_identity() {
+        let (_dir, store) = fresh_store().await;
+        let host = store.add_ssh_host("user@first", None, None).await.unwrap();
+        // No identity on either side of the move: the case the binding cannot
+        // distinguish.
+        store
+            .remember_profile_default(host, None, "starter-claude")
+            .await
+            .unwrap();
+
+        // Re-affirming the SAME destination keeps it.
+        store
+            .update_ssh_destination(host, "user@first")
+            .await
+            .unwrap();
+        assert_eq!(
+            store.remembered_profile(host).await.unwrap(),
+            Some("starter-claude".to_string()),
+            "a write that changed nothing must not cost a preference"
+        );
+
+        // A genuine retarget does not.
+        store
+            .update_ssh_destination(host, "user@second")
+            .await
+            .unwrap();
+        assert_eq!(
+            store.remembered_profile(host).await.unwrap(),
+            None,
+            "the row now points at a different install, whose starter ids collide with the old \
+             one's by construction"
+        );
+    }
+
+    /// A remembered default whose stored identity is not the host's current
+    /// one is answered as `None` — the last defence, for a row neither the
+    /// adoption purge nor the retarget purge deleted.
+    ///
+    /// Spec: `remembered_profile` validates the identity it stored against
+    /// the identity the host currently holds, and refuses on disagreement.
+    ///
+    /// Staged by moving the HOST's identity directly rather than through
+    /// adoption, because the point is a row that escaped both deletions — a
+    /// write already in flight, a future path that moves a host some other
+    /// way, a hand-edited database. Since a starter id resolves on the
+    /// successor rather than dangling, "probably fine" is not a posture this
+    /// can take.
+    #[tokio::test]
+    async fn a_remembered_default_from_a_superseded_identity_is_not_served() {
+        let (_dir, store) = fresh_store().await;
+        let host = host_with_identity(&store, "user@host", "identity-1").await;
+        store
+            .remember_profile_default(host, Some("identity-1"), "starter-claude")
+            .await
+            .unwrap();
+
+        // The host's identity moves without the row being touched.
+        {
+            let conn = Arc::clone(&store.conn);
+            tokio::task::spawn_blocking(move || {
+                conn.lock()
+                    .unwrap()
+                    .execute(
+                        "UPDATE hosts SET host_identity = 'identity-2' WHERE id = ?1",
+                        rusqlite::params![host],
+                    )
+                    .unwrap();
+            })
+            .await
+            .unwrap();
+        }
+
+        assert_eq!(
+            store.remembered_profile(host).await.unwrap(),
+            None,
+            "a row recorded against an install this host no longer is must not be served"
+        );
+    }
+
+    /// Remembering a default for a host that does not exist is a TYPED
+    /// refusal, not a silent no-op and not a raw foreign-key message.
+    ///
+    /// The REST edge maps `HostNotFound` to a 404; without the typed value
+    /// a caller would get a 500 for naming a host that was removed a moment
+    /// ago, which is a normal race rather than a helm fault.
+    #[tokio::test]
+    async fn remembering_a_default_for_an_unknown_host_is_a_typed_not_found() {
+        let (_dir, store) = fresh_store().await;
+        let error = store
+            .remember_profile_default(9_999, None, "p-1")
+            .await
+            .expect_err("an unregistered host cannot have a default");
+        assert!(matches!(
+            error.downcast_ref::<HostStoreError>(),
+            Some(HostStoreError::HostNotFound(9_999))
+        ));
+    }
+
+    /// A row the page refuses to SHOW must not be a row the count claims as
+    /// a MATCH — the two share one validation predicate, and this is what
+    /// that sharing buys.
+    ///
+    /// Without it the counts promise pages that cannot exist: "3 matching"
+    /// against a walk that can only ever display 2, with the third
+    /// permanently invisible and nothing to explain the gap. The two ways a
+    /// row fails are both staged, because they took different code paths
+    /// before they were unified: an undecodable payload, and one that
+    /// decodes but disagrees with the columns it is filed under.
+    ///
+    /// The FLEET total still counts both, deliberately — see
+    /// [`HelmStore::count_rows`]. A count of what is there and a count of
+    /// what matches are different questions, and hiding a corrupt row from
+    /// the first would make "showing 2 of 3" read as data loss rather than
+    /// as the one unshowable entry it is.
+    #[tokio::test]
+    async fn an_unshowable_row_is_never_counted_as_a_match() {
+        let (_dir, store) = fresh_store().await;
+        let host = host_with_identity(&store, "poison@host", "poison-identity").await;
+        store
+            .replace_host_sessions(
+                host,
+                "poison-identity",
+                vec![
+                    SessionInfo {
+                        title: "keeper".to_string(),
+                        ..session("good-1", 500)
+                    },
+                    SessionInfo {
+                        title: "keeper".to_string(),
+                        ..session("undecodable", 400)
+                    },
+                    SessionInfo {
+                        title: "keeper".to_string(),
+                        ..session("mislabelled", 300)
+                    },
+                ],
+            )
+            .await
+            .expect("seed the cache");
+        {
+            let conn = Arc::clone(&store.conn);
+            tokio::task::spawn_blocking(move || {
+                let conn = conn.lock().unwrap();
+                conn.execute(
+                    "UPDATE session_cache SET info_json = 'not valid json' \
+                     WHERE session_id = 'undecodable'",
+                    [],
+                )
+                .unwrap();
+                // Decodes perfectly, and names a DIFFERENT session than the
+                // row it is filed as — the poison a naive decode misses.
+                let impostor = serde_json::to_string(&SessionInfo {
+                    title: "keeper".to_string(),
+                    ..SessionInfo {
+                        id: "somebody-else".to_string(),
+                        ..session("mislabelled", 300)
+                    }
+                })
+                .unwrap();
+                conn.execute(
+                    "UPDATE session_cache SET info_json = ?1 WHERE session_id = 'mislabelled'",
+                    rusqlite::params![impostor],
+                )
+                .unwrap();
+            })
+            .await
+            .unwrap();
+        }
+
+        let read = store
+            .merged_page(
+                vec![host],
+                None,
+                10,
+                usize::MAX,
+                SessionFilter::default().title("keeper"),
+                MatchingCount::Compute,
+            )
+            .await
+            .expect("filtered read");
+        assert_eq!(
+            read.matching,
+            Some(1),
+            "only the row a page can actually show counts as a match"
+        );
+        assert_eq!(
+            read.page
+                .rows
+                .iter()
+                .filter(|row| row.info.is_some())
+                .count(),
+            1,
+            "and the page shows exactly that one"
+        );
+        assert_eq!(
+            read.total, 3,
+            "while the fleet total counts every row, unshowable or not"
+        );
+    }
+
+    /// The page and both counts describe ONE moment.
+    ///
+    /// The property is about a read that cannot interleave with a write, so
+    /// what this can pin directly is the arithmetic that a torn read
+    /// violates: `matching` never exceeds `total`, and both agree with the
+    /// rows the same call returned. The structural half — one transaction,
+    /// one lock hold — is enforced by `merged_page` being the only way to
+    /// ask, which is why the page-only reader beside it is `#[cfg(test)]`.
+    #[tokio::test]
+    async fn one_read_answers_the_page_and_both_counts_coherently() {
+        let (_dir, store) = fresh_store().await;
+        let host = host_with_identity(&store, "user@host", "identity-1").await;
+        store
+            .replace_host_sessions(
+                host,
+                "identity-1",
+                vec![
+                    SessionInfo {
+                        cwd: "/keep/one".to_string(),
+                        ..session("s-1", 300)
+                    },
+                    SessionInfo {
+                        cwd: "/keep/two".to_string(),
+                        ..session("s-2", 200)
+                    },
+                    SessionInfo {
+                        cwd: "/other".to_string(),
+                        ..session("s-3", 100)
+                    },
+                ],
+            )
+            .await
+            .expect("seed the cache");
+
+        let read = store
+            .merged_page(
+                vec![host],
+                None,
+                1,
+                usize::MAX,
+                SessionFilter::default().directory("/keep"),
+                MatchingCount::Compute,
+            )
+            .await
+            .expect("filtered read");
+        assert_eq!(read.total, 3);
+        assert_eq!(read.matching, Some(2));
+        assert!(read.matching.is_some_and(|matching| matching <= read.total));
+        assert_eq!(read.page.rows.len(), 1, "the page cut is over the matches");
+        assert!(read.page.more, "and there is another match beyond it");
+
+        // An UNFILTERED read makes no matching claim at all — see
+        // `merged_page`'s docs for why "no filter, so everything matches" is
+        // not a truth this list can state.
+        let unfiltered = store
+            .merged_page(
+                vec![host],
+                None,
+                10,
+                usize::MAX,
+                SessionFilter::default(),
+                MatchingCount::Skip,
+            )
+            .await
+            .expect("unfiltered read");
+        assert_eq!(unfiltered.total, 3);
+        assert_eq!(
+            unfiltered.matching, None,
+            "an unfiltered listing reports a fleet total and claims nothing about matching"
+        );
+    }
+
+    /// A count is qualified by the store's GENERATION, and the comparison
+    /// happens where no write can slip past it.
+    ///
+    /// Spec: `ComputeUnless(g)` answers `matching: None` — "the count you
+    /// hold still stands" — exactly while the store's generation is still
+    /// `g`, and recomputes otherwise. A committed change between the caller
+    /// sampling a generation and the read running must therefore produce a
+    /// FRESH count beside the new rows, never the old count beside them.
+    ///
+    /// This is the pairing the previous design could not make: the count rode
+    /// in the client's cursor qualified by the fleet revision, which is
+    /// published AFTER a write commits, so committed rows and an unmoved
+    /// revision routinely coexisted. The ordering here is staged explicitly
+    /// rather than raced — the write lands strictly between the sample and
+    /// the read — because a property about a window is only pinned by a test
+    /// that puts something in the window every time it runs.
+    #[tokio::test]
+    async fn a_count_cannot_be_paired_with_rows_committed_after_it() {
+        let (_dir, store) = fresh_store().await;
+        let host = host_with_identity(&store, "user@host", "identity-1").await;
+        let matching = |cwd: &str, id: &str, at: i64| SessionInfo {
+            cwd: cwd.to_string(),
+            ..session(id, at)
+        };
+        store
+            .replace_host_sessions(
+                host,
+                "identity-1",
+                vec![
+                    matching("/keep/one", "s-1", 300),
+                    matching("/other", "s-2", 200),
+                ],
+            )
+            .await
+            .expect("seed the cache");
+
+        // What a caller holds after a first page: a count, and the generation
+        // it was taken at.
+        let first = store
+            .merged_page(
+                vec![host],
+                None,
+                10,
+                usize::MAX,
+                SessionFilter::default().directory("/keep"),
+                MatchingCount::Compute,
+            )
+            .await
+            .expect("first page");
+        assert_eq!(first.matching, Some(1));
+        let sampled = first.generation;
+
+        // Unchanged store: the held count is confirmed rather than recounted,
+        // which is what makes a walk linear.
+        let confirmed = store
+            .merged_page(
+                vec![host],
+                None,
+                10,
+                usize::MAX,
+                SessionFilter::default().directory("/keep"),
+                MatchingCount::ComputeUnless(sampled),
+            )
+            .await
+            .expect("second page");
+        assert_eq!(
+            confirmed.matching, None,
+            "an unmoved generation means the caller's count still describes these rows"
+        );
+        assert_eq!(confirmed.generation, sampled);
+
+        // The write that lands in the window. It commits strictly after the
+        // generation above was sampled and strictly before the read below.
+        store
+            .replace_host_sessions(
+                host,
+                "identity-1",
+                vec![
+                    matching("/keep/one", "s-1", 300),
+                    matching("/other", "s-2", 200),
+                    matching("/keep/two", "s-3", 100),
+                ],
+            )
+            .await
+            .expect("commit a third session");
+
+        let after = store
+            .merged_page(
+                vec![host],
+                None,
+                10,
+                usize::MAX,
+                SessionFilter::default().directory("/keep"),
+                MatchingCount::ComputeUnless(sampled),
+            )
+            .await
+            .expect("page after the write");
+        assert_ne!(
+            after.generation, sampled,
+            "a committed change must move the generation, or nothing else here can work"
+        );
+        assert_eq!(
+            after.matching,
+            Some(2),
+            "the stale generation must force a recount, so the count describes the rows beside it"
+        );
+        assert_eq!(after.page.rows.len(), 2, "and the page holds both of them");
+    }
+
+    /// A write that changed NOTHING must not move the generation.
+    ///
+    /// Spec: a refresh writing back a byte-identical row set leaves the
+    /// generation where it was, so a walk in progress goes on reusing its
+    /// count.
+    ///
+    /// This is what keeps the count cache useful at all rather than merely
+    /// correct. Every connected host rewrites its whole list every few
+    /// seconds, and in a settled fleet writes back exactly what was already
+    /// there; a generation that moved for those would make every page of
+    /// every walk recount, which is the cost the design exists to avoid.
+    /// Sameness is judged on the STORED BYTES inside the writing
+    /// transaction, so rows that support identical counts are recognized as
+    /// such.
+    #[tokio::test]
+    async fn a_no_op_write_leaves_the_generation_alone() {
+        let (_dir, store) = fresh_store().await;
+        let host = host_with_identity(&store, "user@host", "identity-1").await;
+        let entries = vec![session("s-1", 300), session("s-2", 200)];
+        store
+            .replace_host_sessions(host, "identity-1", entries.clone())
+            .await
+            .expect("seed the cache");
+        let before = store
+            .merged_page(
+                vec![host],
+                None,
+                10,
+                usize::MAX,
+                SessionFilter::default().title("s-1"),
+                MatchingCount::Compute,
+            )
+            .await
+            .expect("first read")
+            .generation;
+
+        store
+            .replace_host_sessions(host, "identity-1", entries)
+            .await
+            .expect("write the same list back");
+        // And the same for the single-row paths, which have their own
+        // changed-only comparisons.
+        store
+            .remember_session(host, "identity-1", &session("s-1", 300))
+            .await
+            .expect("re-seed an unchanged row");
+        store
+            .forget_session(host, "identity-1", "never-existed")
+            .await
+            .expect("forget a row that is not there");
+
+        let after = store
+            .merged_page(
+                vec![host],
+                None,
+                10,
+                usize::MAX,
+                SessionFilter::default().title("s-1"),
+                MatchingCount::ComputeUnless(before),
+            )
+            .await
+            .expect("second read");
+        assert_eq!(after.generation, before, "nothing observable changed");
+        assert_eq!(
+            after.matching, None,
+            "so a held count is confirmed rather than recomputed"
+        );
+    }
+
+    /// Counting and paging are ONE decode pass, and a walk pays for the count
+    /// once.
+    ///
+    /// Spec: a filtered read that must count walks the scope exactly once —
+    /// not once to count and again to page — and a walk whose later pages
+    /// hand back a still-valid generation performs no counting pass at all.
+    /// An invalidating write earns exactly one more.
+    ///
+    /// Instrumented rather than inferred from output, and that is the whole
+    /// point of the test: an implementation that recounted on every page
+    /// would produce identical numbers on every page, so nothing about the
+    /// answers can tell the two apart. The counter is what can.
+    #[tokio::test]
+    async fn a_filtered_walk_counts_once_and_recounts_only_after_a_change() {
+        let (_dir, store) = fresh_store().await;
+        let host = host_with_identity(&store, "user@host", "identity-1").await;
+        let entries: Vec<SessionInfo> = (0..6)
+            .map(|index| SessionInfo {
+                cwd: "/keep".to_string(),
+                ..session(&format!("s-{index}"), 600 - index)
+            })
+            .collect();
+        store
+            .replace_host_sessions(host, "identity-1", entries.clone())
+            .await
+            .expect("seed the cache");
+
+        let filter = SessionFilter::default().directory("/keep");
+        let baseline = store.counting_passes();
+        // Page one: nothing held, so this counts.
+        let mut read = store
+            .merged_page(
+                vec![host],
+                None,
+                2,
+                usize::MAX,
+                filter.clone(),
+                MatchingCount::Compute,
+            )
+            .await
+            .expect("first page");
+        assert_eq!(read.matching, Some(6));
+        assert_eq!(
+            store.counting_passes() - baseline,
+            1,
+            "one pass answers the page and the count together"
+        );
+
+        // The rest of the walk, each page resuming after the last and naming
+        // the generation the count was taken at.
+        let generation = read.generation;
+        let mut pages = 1;
+        while read.page.more {
+            let after = read
+                .page
+                .rows
+                .last()
+                .map(|row| row.key.clone())
+                .expect("a page that reports more has rows");
+            read = store
+                .merged_page(
+                    vec![host],
+                    Some(after),
+                    2,
+                    usize::MAX,
+                    filter.clone(),
+                    MatchingCount::ComputeUnless(generation),
+                )
+                .await
+                .expect("a later page");
+            assert_eq!(
+                read.matching, None,
+                "a later page of an unchanged walk must reuse the count, not recompute it"
+            );
+            pages += 1;
+        }
+        assert_eq!(pages, 3, "six matches at two per page is a three-page walk");
+        assert_eq!(
+            store.counting_passes() - baseline,
+            1,
+            "an unchanged walk counts exactly once, however many pages it takes"
+        );
+
+        // One invalidating write, then one recount — not one per page after
+        // it either, since the fresh read hands back a new generation.
+        store
+            .replace_host_sessions(
+                host,
+                "identity-1",
+                entries
+                    .iter()
+                    .cloned()
+                    .chain([SessionInfo {
+                        cwd: "/keep".to_string(),
+                        ..session("s-6", 100)
+                    }])
+                    .collect(),
+            )
+            .await
+            .expect("commit a seventh session");
+        let recounted = store
+            .merged_page(
+                vec![host],
+                None,
+                2,
+                usize::MAX,
+                filter.clone(),
+                MatchingCount::ComputeUnless(generation),
+            )
+            .await
+            .expect("page after the write");
+        assert_eq!(recounted.matching, Some(7));
+        assert_eq!(
+            store.counting_passes() - baseline,
+            2,
+            "exactly one recount for the change"
+        );
+        let _ = store
+            .merged_page(
+                vec![host],
+                None,
+                2,
+                usize::MAX,
+                filter,
+                MatchingCount::ComputeUnless(recounted.generation),
+            )
+            .await
+            .expect("and the walk is linear again");
+        assert_eq!(store.counting_passes() - baseline, 2);
+    }
+
+    /// A host filter narrows the SQL scope, while the fleet total does not.
+    ///
+    /// Two properties in one read, and they pull in opposite directions:
+    /// the page and the matching count must describe one host, and `total`
+    /// must go on describing every host — otherwise "N matching of M" would
+    /// compare a number against itself and always read as "all of them".
+    #[tokio::test]
+    async fn a_host_filter_narrows_the_page_but_not_the_fleet_total() {
+        let (_dir, store) = fresh_store().await;
+        let alpha = host_with_identity(&store, "user@alpha", "identity-alpha").await;
+        let beta = host_with_identity(&store, "user@beta", "identity-beta").await;
+        store
+            .replace_host_sessions(alpha, "identity-alpha", vec![session("a-1", 300)])
+            .await
+            .unwrap();
+        store
+            .replace_host_sessions(
+                beta,
+                "identity-beta",
+                vec![session("b-1", 200), session("b-2", 100)],
+            )
+            .await
+            .unwrap();
+
+        let read = store
+            .merged_page(
+                vec![alpha, beta],
+                None,
+                10,
+                usize::MAX,
+                SessionFilter::default().host(beta),
+                MatchingCount::Compute,
+            )
+            .await
+            .expect("host-filtered read");
+        assert_eq!(read.total, 3, "the fleet is still three sessions");
+        assert_eq!(read.matching, Some(2));
+        assert_eq!(
+            read.page
+                .rows
+                .iter()
+                .map(|row| row.key.session_id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["b-1", "b-2"]
+        );
+
+        // A host filter naming a host OUTSIDE the merged view selects
+        // nothing — not everything, which is what an unguarded empty
+        // IN-list would quietly mean.
+        let outside = store
+            .merged_page(
+                vec![alpha],
+                None,
+                10,
+                usize::MAX,
+                SessionFilter::default().host(beta),
+                MatchingCount::Compute,
+            )
+            .await
+            .expect("out-of-scope host filter");
+        assert_eq!(outside.matching, Some(0));
+        assert!(outside.page.rows.is_empty());
+        assert_eq!(outside.total, 1, "and the fleet total is unaffected by it");
+    }
+
+    /// The filter's match semantics, pinned where they are defined.
+    ///
+    /// The REST tests cover the query string and the two totals; this covers
+    /// the predicate itself, including the three rules a reader is most
+    /// likely to get wrong when touching it: substring versus exact per
+    /// dimension, the profile filter's id-OR-snapshotted-name reading, and
+    /// the fact that dimensions AND together.
+    #[test]
+    fn the_session_filter_matches_by_the_documented_rules() {
+        use farhelm_proto::{ProfileExistence, SessionStatus, SourceProfile};
+
+        let info = SessionInfo {
+            cwd: "/home/Me/src/Farhelm".to_string(),
+            title: "Refactor the Drain".to_string(),
+            status: SessionStatus::Waiting,
+            source_profile: Some(SourceProfile {
+                id: "p-7".to_string(),
+                name: "Claude Code".to_string(),
+                // Deliberately deleted: existence is DERIVED at reply time
+                // and says nothing about whether a filter matches, because
+                // the snapshot is what the session actually carries.
+                existence: ProfileExistence::Deleted,
+            }),
+            ..session("s-1", 100)
+        };
+
+        // Free text: substring, case-insensitive, on both dimensions.
+        assert!(
+            SessionFilter::default()
+                .directory("src/farhelm")
+                .matches(1, &info)
+        );
+        assert!(SessionFilter::default().title("DRAIN").matches(1, &info));
+        assert!(
+            !SessionFilter::default()
+                .title("drainpipe")
+                .matches(1, &info)
+        );
+
+        // Enumerable: exact.
+        assert!(SessionFilter::default().status("waiting").matches(1, &info));
+        assert!(!SessionFilter::default().status("running").matches(1, &info));
+        assert!(SessionFilter::default().host(1).matches(1, &info));
+        assert!(!SessionFilter::default().host(2).matches(1, &info));
+
+        // Profile: by id (exact, opaque) or by snapshotted name
+        // (case-insensitive), and never by prefix.
+        assert!(SessionFilter::default().profile("p-7").matches(1, &info));
+        assert!(
+            SessionFilter::default()
+                .profile("claude code")
+                .matches(1, &info)
+        );
+        assert!(!SessionFilter::default().profile("claude").matches(1, &info));
+        assert!(!SessionFilter::default().profile("p-").matches(1, &info));
+
+        // A raw-created session matches no profile filter at all.
+        let raw = SessionInfo {
+            source_profile: None,
+            ..info.clone()
+        };
+        assert!(!SessionFilter::default().profile("p-7").matches(1, &raw));
+
+        // Dimensions AND: adding one can only ever narrow.
+        assert!(
+            !SessionFilter::default()
+                .title("drain")
+                .status("running")
+                .matches(1, &info)
+        );
+        assert!(
+            SessionFilter::default().is_empty(),
+            "an unset filter must take the unfiltered fast paths"
+        );
+        assert!(!SessionFilter::default().title("x").is_empty());
+    }
+
+    /// A filter's canonical encoding distinguishes filters that select
+    /// differently, including the shapes a delimiter-joined encoding would
+    /// confuse.
+    ///
+    /// A collision here is not cosmetic. The encoding is what every derived
+    /// identity of a filter is built from — the digest a cursor is bound to,
+    /// and the key the matching count is cached under — so two different
+    /// filters sharing one would let a cursor replay across them and let one
+    /// filter's count be reported as another's. The field values are user
+    /// text, so the encoding has to survive a user writing the separator.
+    ///
+    /// Asserted on the encoding rather than on the digest because the digest
+    /// is keyed with a process-random key: it says nothing readable about WHY
+    /// two filters differ, and this is the property that has to be readable.
+    #[test]
+    fn a_filter_fingerprint_cannot_be_forged_by_field_content() {
+        let plain = SessionFilter::default().title("x").status("running");
+        // The same two dimensions, and a title that spells out what a
+        // delimiter-joined encoding would emit for the pair.
+        let forged = SessionFilter::default().title("x|s=running");
+        assert_ne!(plain.fingerprint(), forged.fingerprint());
+
+        // Adjacent fields must not be able to borrow each other's text.
+        assert_ne!(
+            SessionFilter::default()
+                .title("ab")
+                .profile("c")
+                .fingerprint(),
+            SessionFilter::default()
+                .title("a")
+                .profile("bc")
+                .fingerprint()
+        );
+
+        // Same filter, same fingerprint — a walk's later pages must be able
+        // to recognize their own.
+        assert_eq!(
+            SessionFilter::default().directory("/srv").fingerprint(),
+            SessionFilter::default().directory("/srv").fingerprint()
+        );
+        // And an absent dimension is distinguishable from an empty one.
+        assert_ne!(
+            SessionFilter::default().fingerprint(),
+            SessionFilter::default().title("").fingerprint()
+        );
+
+        // The digest inherits both properties — it is what actually travels,
+        // so a distinction the encoding makes and the digest loses would be
+        // no distinction at all.
+        assert_ne!(plain.digest(), forged.digest());
+        assert_eq!(
+            SessionFilter::default().directory("/srv").digest(),
+            SessionFilter::default().directory("/srv").digest(),
+            "a walk's later pages must recognize their own cursors"
+        );
+        assert_eq!(
+            plain.digest().len(),
+            16,
+            "fixed-size, so a cursor cannot grow with the search box"
+        );
+    }
+
+    /// The filter both halves of the cross-process digest test speak about.
+    ///
+    /// Every dimension is set, and every value is a constant: the point of the
+    /// test is that two processes handed the SAME filter still disagree, so
+    /// nothing here may vary between them.
+    fn probe_filter() -> SessionFilter {
+        SessionFilter::default()
+            .host(7)
+            .directory("/srv/work")
+            .title("nightly")
+            .profile("starter-claude")
+            .status("running")
+    }
+
+    /// Print this process's digest for [`probe_filter`], one line, and exit.
+    ///
+    /// Not a test: it is the CHILD half of
+    /// [`a_filter_digest_belongs_to_the_process_that_minted_it`], which
+    /// re-executes this binary to obtain a digest minted under a genuinely
+    /// different process key. `#[ignore]` is what keeps an ordinary run from
+    /// executing it, and the parent passes `--ignored` to get it back.
+    ///
+    /// A subprocess rather than something cheaper because the key is a
+    /// `OnceLock` minted once per process (see [`SessionFilter::digest`]) —
+    /// there is no in-process way to obtain a second one, and a test that
+    /// reached for one would be testing a seam the product does not have.
+    #[test]
+    #[ignore = "the child half of a_filter_digest_belongs_to_the_process_that_minted_it"]
+    fn digest_probe() {
+        println!("FH-DIGEST {}", probe_filter().digest());
+    }
+
+    /// A filter digest belongs to the PROCESS that minted it: a fresh helm
+    /// computes a different one for the same filter, and therefore refuses
+    /// every cursor the previous one issued.
+    ///
+    /// Spec: two fresh processes digesting [`probe_filter`] produce three
+    /// distinct values between them and this one, none matching any other.
+    ///
+    /// The refusal is what this is really about. `crate::aggregate`'s page
+    /// walk compares a cursor's carried binding against the digest of the
+    /// filter the request actually names, and answers 400 when they differ —
+    /// so "the digests differ" IS "the cursor is rejected", in both directions
+    /// at once, since the comparison is symmetric. What would break it is a
+    /// constant key: cursors would then be minted by anyone, off-line, and a
+    /// helm would resume a walk under a binding it never issued. That failure
+    /// is invisible in-process, which is why this pays for two subprocesses.
+    ///
+    /// The counterpart property — that ONE process recognizes its own filters
+    /// — is pinned in `a_filter_fingerprint_cannot_be_forged_by_field_content`
+    /// above; without it, this test would pass on a digest that was simply
+    /// random per call and no walk could ever continue.
+    #[test]
+    fn a_filter_digest_belongs_to_the_process_that_minted_it() {
+        /// Run this test binary again, in a fresh process, and read the
+        /// digest it prints.
+        fn digest_from_a_fresh_process() -> String {
+            let exe = std::env::current_exe().expect("a test binary knows its own path");
+            let run = std::process::Command::new(&exe)
+                .args([
+                    "--exact",
+                    "store::tests::digest_probe",
+                    "--ignored",
+                    "--nocapture",
+                ])
+                .output()
+                .unwrap_or_else(|error| panic!("re-running {exe:?}: {error}"));
+            let text = String::from_utf8_lossy(&run.stdout).into_owned();
+            assert!(
+                run.status.success(),
+                "the digest probe must run cleanly: {text}{}",
+                String::from_utf8_lossy(&run.stderr)
+            );
+            text.lines()
+                .find_map(|line| line.strip_prefix("FH-DIGEST "))
+                .map(str::to_string)
+                .unwrap_or_else(|| panic!("the probe must print exactly one digest line: {text}"))
+        }
+
+        let mine = probe_filter().digest();
+        let first = digest_from_a_fresh_process();
+        let second = digest_from_a_fresh_process();
+
+        assert_ne!(
+            first, second,
+            "two fresh helms must not agree on a filter's digest, or a cursor minted by one would \
+             resume a walk in the other"
+        );
+        assert_ne!(
+            first, mine,
+            "and neither of them agrees with this process, which is what makes a restarted helm \
+             refuse the cursors it handed out before"
+        );
+        assert_ne!(second, mine);
+    }
+
+    /// Every status the wire can carry has a filter word, and nothing else
+    /// is accepted.
+    ///
+    /// The round trip is what matters: a status whose key could not be
+    /// parsed back would make those sessions unfilterable, and a word
+    /// accepted that no status produces would silently match nothing.
+    #[test]
+    fn every_status_key_round_trips_and_unknown_words_are_refused() {
+        use farhelm_proto::SessionStatus;
+
+        for status in [
+            SessionStatus::Unknown,
+            SessionStatus::Running,
+            SessionStatus::Waiting,
+            SessionStatus::Idle,
+            SessionStatus::Exited { exit_code: Some(3) },
+            SessionStatus::Error {
+                detail: "no such file".to_string(),
+            },
+            SessionStatus::Interrupted,
+        ] {
+            let key = status_key(&status);
+            assert_eq!(
+                parse_status_key(key),
+                Some(key),
+                "{key} must parse back to itself"
+            );
+        }
+        for unknown in ["alive", "", "Running", "waiting "] {
+            assert_eq!(
+                parse_status_key(unknown),
+                None,
+                "{unknown:?} is not a status"
+            );
+        }
     }
 }
