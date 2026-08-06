@@ -42,6 +42,19 @@
 //!   that turn one `HostPhase` into the sentences a user acts on (shared
 //!   with `session_view`, which puts the same wording behind a stale
 //!   session's notice).
+//! - `peer`: how text this UI did not write is SHOWN — the escape rule for
+//!   invisible and directional characters, and the run split that keeps each
+//!   peer value in its own direction-isolated element. Used by every surface
+//!   that mixes our words with a host's, a supervisor's, or the helm's, which
+//!   is why it is not part of `hosts`.
+//! - `rows`: what the session list SHOWS, derived from what the helm sent —
+//!   the optimistic-rename overlay and the pruning rule that retires it, plus
+//!   the count banner's wording. Pure functions of a listing reply, so `list`
+//!   is left holding only the component, the state, and the handlers.
+//! - `status`: what a session's status SAYS — the badge both the list and
+//!   the session view render it as, and the consequence sentence a delete
+//!   confirmation opens with. Wording only; what a status MEANS is
+//!   `SessionStatus`'s own business, right here.
 //! - `tabs`: the tab-domain half of terminal tabs (PLAN_M4.md item 6) —
 //!   the renderer-free derivations (which tabs to show, their labels and
 //!   DOM ids, the WebSocket path) plus the strip's one presentational
@@ -83,10 +96,13 @@ mod attachments;
 mod hosts;
 mod list;
 mod ops;
+mod peer;
 mod reconnect;
 mod rename;
+mod rows;
 mod session_view;
 mod skew;
+mod status;
 mod tabs;
 
 use list::ListView;
@@ -144,6 +160,76 @@ pub enum SessionStatus {
     /// identical to tmux, and only the supervisor's own sentinel read
     /// tells them apart (see farhelm-proto's `SessionStatus::Error`).
     Error { detail: String },
+}
+
+impl SessionStatus {
+    /// Whether the agent behind this session is still running.
+    ///
+    /// A predicate rather than `== SessionStatus::Alive` at each site, and
+    /// that is about the FUTURE shape of this enum, not about brevity.
+    /// M6.75's status work replaces the single live status with a
+    /// running/waiting/idle discrimination (PLAN.md's M6.75 entry) — three
+    /// statuses that are ALL live, differing only in what the agent is doing.
+    /// On the day that lands, every `== Alive` comparison in the tree
+    /// silently starts answering `false` for a session that is very much
+    /// alive, and nothing fails to compile to say so. Routing the question
+    /// through here turns that into one edit in one place.
+    ///
+    /// Written as an exhaustive `match` rather than a `matches!`, and that is
+    /// the half that actually holds the line: `matches!` would send every
+    /// future variant to `false` by default, which is the exact silent
+    /// mis-answer this predicate exists to prevent — it would move the trap
+    /// rather than remove it. Spelling out all five arms makes a new status a
+    /// compile error here, and here is where the decision belongs.
+    ///
+    /// The motivating site is `session_view`'s restart gate, which decides
+    /// whether a restart click opens a confirmation or restarts outright.
+    /// A stale `false` there would restart a live agent WITHOUT asking —
+    /// killing it — which is precisely what the confirmation exists to
+    /// prevent.
+    ///
+    /// `Unknown` is deliberately NOT live. SPEC.md's no-guessing rule says
+    /// an unresolved status is presented as uncertain, and rounding it up
+    /// to a liveness claim is precisely the guess that rule forbids.
+    pub(crate) fn is_live(&self) -> bool {
+        match self {
+            SessionStatus::Alive => true,
+            SessionStatus::Unknown => false,
+            SessionStatus::Exited { .. } => false,
+            SessionStatus::Interrupted => false,
+            SessionStatus::Error { .. } => false,
+        }
+    }
+
+    /// Whether the agent behind this session is definitively finished —
+    /// exited, lost to a reboot, or never started at all.
+    ///
+    /// The complement of [`SessionStatus::is_live`] over the KNOWN states,
+    /// not its logical negation: `Unknown` is neither, for the same
+    /// no-guessing reason. Callers that must do something for every status
+    /// therefore still need a third branch, which is the point — a status
+    /// nobody has resolved yet is a real case, and a two-way split would
+    /// quietly file it under one of the answers.
+    ///
+    /// Exhaustive for the same reason `is_live` is, with one extra edge: a
+    /// default-`false` here reads as "not finished", which for a delete
+    /// confirmation means a new status would start prompting rather than
+    /// silently skipping the prompt. That is the safe direction, which is
+    /// exactly why it would go unnoticed — so this side gets the compile
+    /// error too, not just the side whose failure is loud.
+    ///
+    /// Exists alongside `is_live` so that the M6.75 status split is a
+    /// single edit for both questions rather than one that fixes the
+    /// live-side call sites and leaves the ended-side matches stale.
+    pub(crate) fn has_ended(&self) -> bool {
+        match self {
+            SessionStatus::Exited { .. } => true,
+            SessionStatus::Interrupted => true,
+            SessionStatus::Error { .. } => true,
+            SessionStatus::Alive => false,
+            SessionStatus::Unknown => false,
+        }
+    }
 }
 
 /// Mirror of the helm's restart-offer JSON (farhelm-proto `RestartOffer`):
@@ -506,6 +592,83 @@ mod tests {
     /// a one-liner rather than a builder.
     fn tab(id: &str) -> Tab {
         Tab { id: id.into() }
+    }
+
+    /// Every `SessionStatus` variant, once, with the answer both predicates
+    /// owe it.
+    ///
+    /// A table rather than scattered asserts so that adding a status forces
+    /// a row here — the compiler already forces the two `match`es to grow,
+    /// and this is what forces someone to say out loud what the new status
+    /// MEANS rather than picking whichever arm compiles.
+    fn status_truth_table() -> Vec<(SessionStatus, bool, bool)> {
+        vec![
+            (SessionStatus::Alive, true, false),
+            (SessionStatus::Unknown, false, false),
+            (SessionStatus::Exited { exit_code: Some(0) }, false, true),
+            (SessionStatus::Exited { exit_code: None }, false, true),
+            (SessionStatus::Interrupted, false, true),
+            (
+                SessionStatus::Error {
+                    detail: "exec_failed".to_string(),
+                },
+                false,
+                true,
+            ),
+        ]
+    }
+
+    /// Pins both predicates against every variant, because the whole reason
+    /// they exist is that a WRONG answer here is silent everywhere else.
+    ///
+    /// `is_live` gates `session_view`'s restart confirmation: a false
+    /// negative restarts a running agent without asking, killing it.
+    /// `has_ended` gates `list`'s delete confirmation: a false positive
+    /// deletes a live session with no prompt at all. Neither failure shows
+    /// up as a crash or a failed request — the UI just quietly does the
+    /// destructive thing — so the table is the only place either is caught.
+    #[test]
+    fn each_status_answers_both_liveness_predicates() {
+        for (status, live, ended) in status_truth_table() {
+            assert_eq!(
+                status.is_live(),
+                live,
+                "{status:?} must{} be live",
+                if live { "" } else { " not" }
+            );
+            assert_eq!(
+                status.has_ended(),
+                ended,
+                "{status:?} must{} have ended",
+                if ended { "" } else { " not" }
+            );
+        }
+    }
+
+    /// The two predicates are not each other's negation, and that gap is
+    /// deliberate: `Unknown` answers `false` to BOTH.
+    ///
+    /// SPEC.md's no-guessing rule is what puts it there — an unresolved
+    /// status is presented as uncertain rather than rounded toward either
+    /// answer. A future refactor that "simplifies" one predicate into
+    /// `!other()` would erase exactly that, and would do it silently, since
+    /// every other variant agrees. Asserting the gap explicitly is what
+    /// makes such a change fail here instead of in a confirmation prompt.
+    #[test]
+    fn an_unresolved_status_is_neither_live_nor_ended() {
+        assert!(!SessionStatus::Unknown.is_live());
+        assert!(!SessionStatus::Unknown.has_ended());
+        // And no OTHER variant shares that gap: every resolved status
+        // answers exactly one of the two.
+        for (status, live, ended) in status_truth_table() {
+            if status == SessionStatus::Unknown {
+                continue;
+            }
+            assert!(
+                live != ended,
+                "{status:?} is resolved, so exactly one predicate must claim it"
+            );
+        }
     }
 
     /// A `Session` JSON with no `annotation` key (every session that was

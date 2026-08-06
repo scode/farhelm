@@ -218,7 +218,7 @@ fn terminal_ws_path_on(session_id: &str, tab_id: Option<&str>, lease: &str, rout
 }
 
 /// The safety-critical half of the inline close-tab confirmation, the
-/// counterpart to `list::confirm_consequence` for sessions and worded from
+/// counterpart to `status::confirm_consequence` for sessions and worded from
 /// the same rule: say what the click actually destroys before naming the
 /// thing.
 ///

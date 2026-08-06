@@ -39,12 +39,12 @@ use crate::api::{
     POLL_INTERVAL_MS, SessionListing, create_session, delete_session, fetch_hosts, fetch_sessions,
     mint_intent_key, rename_session, stop_session,
 };
-use crate::hosts::{
-    DetailPart, HostsPanel, HostsRead, PeerLine, display_peer, host_incarnation, is_connected,
-    phase_label,
-};
+use crate::hosts::{HostsPanel, HostsRead, host_incarnation, is_connected, phase_label};
 use crate::ops::{OpLock, ReadGate, use_op_lock};
+use crate::peer::{DetailPart, PeerLine, display_peer};
 use crate::rename::RenameForm;
+use crate::rows::{apply_optimistic_renames, count_banner, prune_optimistic_renames};
+use crate::status::{confirm_consequence, status_badge};
 use crate::{ApiBase, HostId, HostKind, Session, SessionStatus};
 
 /// The subset of `Session` `on_delete` actually needs, in `ListView` below:
@@ -356,6 +356,79 @@ pub(crate) fn ListView(on_open: EventHandler<Session>) -> Element {
     let mut poll_sequence = use_signal(|| 0_u64);
     let mut show_create = use_signal(|| false);
 
+    // Everything that happens to a listing reply once it is BACK, in one
+    // place: decide whether this read still speaks for the view, reconcile
+    // the view-local state a fresh listing settles, and paint it. A reply
+    // the gate rejects leaves every one of those untouched.
+    //
+    // Hoisted rather than inlined because there are two readers of the
+    // session listing — the poll below and `on_stop`'s immediate refetch —
+    // and a second hand-rolled copy of the gate decision is exactly the kind
+    // of divergence that shows up as a stale row nobody can reproduce.
+    //
+    // What it deliberately does NOT do is claim the generation. That claim
+    // has to happen synchronously at the point the request is ISSUED (see
+    // `ops::ReadGate::start`), so that the order reads are gated in is the
+    // order they were asked for rather than the order their tasks happened
+    // to be polled. Taking an already-claimed `generation` keeps that
+    // property with the caller, where the `await` is.
+    //
+    // `poll_index` is `Some` only for a poll tick, carrying that tick's own
+    // position in the view's poll order. The reconciliation below is gated
+    // on it in full: `on_stop`'s refetch exists to show ONE session's new
+    // status at once and has no standing in the poll order, so it can
+    // neither date an optimistic rename nor be read as evidence that some
+    // other session has left the listing.
+    let mut commit_listing = move |generation: u64,
+                                   fetched: Result<SessionListing, String>,
+                                   poll_index: Option<u64>| {
+        // Superseded reads are dropped before they can touch
+        // anything — including the optimistic-correction pruning
+        // below, which would otherwise retire a rename on the
+        // authority of a walk that predates it.
+        let accepted = match &fetched {
+            Ok(_) => listing_reads.write().accept_success(generation),
+            Err(_) => listing_reads.peek().accept_failure(generation),
+        };
+        if !accepted {
+            return;
+        }
+        // Drop any `confirming` entry whose session is gone from
+        // this fetch entirely — the counterpart to the "a poll
+        // refresh must not clear an in-progress confirmation"
+        // rule just above: that rule protects a row that is
+        // still LISTED, not one that has vanished (deleted from
+        // another client while this one sat mid-confirmation, an
+        // externally-imposed departure the `retain` below cannot
+        // distinguish from the id simply never having existed).
+        // Left off a failed fetch on purpose: an error reply
+        // carries no session ids at all, and a transient fetch
+        // failure is not evidence any session actually left.
+        if let (Ok(listing), Some(index)) = (&fetched, poll_index) {
+            let live_ids: HashSet<&str> = listing.sessions.iter().map(|s| s.id.as_str()).collect();
+            confirming
+                .write()
+                .retain(|id| live_ids.contains(id.as_str()));
+            // An open rename field for a session that has left the
+            // listing entirely goes with it, the same tidiness the
+            // `confirming` retain above performs — there is no row
+            // left for it to sit in.
+            let renaming_vanished = renaming
+                .read()
+                .as_ref()
+                .is_some_and(|id| !live_ids.contains(id.as_str()));
+            if renaming_vanished {
+                renaming.set(None);
+            }
+            // Same "only a successful fetch is evidence" rule as
+            // the two above, for the same reason: an error carries
+            // no titles at all, so it can neither confirm nor
+            // contradict an optimistic rename.
+            prune_optimistic_renames(&mut renamed.write(), &listing.sessions, index);
+        }
+        listing.set(Some(fetched));
+    };
+
     // Cloned once up front rather than moved into the poll loop below: a
     // `move ||` closure takes ownership of everything it captures, and
     // `on_stop`/`on_delete` need their own copy of `base` afterward.
@@ -372,53 +445,7 @@ pub(crate) fn ListView(on_open: EventHandler<Session>) -> Element {
                 poll_sequence += 1;
                 let generation = listing_reads.write().start();
                 let fetched = fetch_sessions(&base).await;
-                // Superseded reads are dropped before they can touch
-                // anything — including the optimistic-correction pruning
-                // below, which would otherwise retire a rename on the
-                // authority of a walk that predates it.
-                let accepted = match &fetched {
-                    Ok(_) => listing_reads.write().accept_success(generation),
-                    Err(_) => listing_reads.peek().accept_failure(generation),
-                };
-                if !accepted {
-                    sleep_one_interval().await;
-                    continue;
-                }
-                // Drop any `confirming` entry whose session is gone from
-                // this fetch entirely — the counterpart to the "a poll
-                // refresh must not clear an in-progress confirmation"
-                // rule just above: that rule protects a row that is
-                // still LISTED, not one that has vanished (deleted from
-                // another client while this one sat mid-confirmation, an
-                // externally-imposed departure the `retain` below cannot
-                // distinguish from the id simply never having existed).
-                // Left off a failed fetch on purpose: an error reply
-                // carries no session ids at all, and a transient fetch
-                // failure is not evidence any session actually left.
-                if let Ok(listing) = &fetched {
-                    let live_ids: HashSet<&str> =
-                        listing.sessions.iter().map(|s| s.id.as_str()).collect();
-                    confirming
-                        .write()
-                        .retain(|id| live_ids.contains(id.as_str()));
-                    // An open rename field for a session that has left the
-                    // listing entirely goes with it, the same tidiness the
-                    // `confirming` retain above performs — there is no row
-                    // left for it to sit in.
-                    let renaming_vanished = renaming
-                        .read()
-                        .as_ref()
-                        .is_some_and(|id| !live_ids.contains(id.as_str()));
-                    if renaming_vanished {
-                        renaming.set(None);
-                    }
-                    // Same "only a successful fetch is evidence" rule as
-                    // the two above, for the same reason: an error carries
-                    // no titles at all, so it can neither confirm nor
-                    // contradict an optimistic rename.
-                    prune_optimistic_renames(&mut renamed.write(), &listing.sessions, index);
-                }
-                listing.set(Some(fetched));
+                commit_listing(generation, fetched, Some(index));
                 sleep_one_interval().await;
             }
         }
@@ -551,13 +578,10 @@ pub(crate) fn ListView(on_open: EventHandler<Session>) -> Element {
                     // back and undo exactly what this call is for.
                     let generation = listing_reads.write().start();
                     let fetched = fetch_sessions(&base).await;
-                    let accepted = match &fetched {
-                        Ok(_) => listing_reads.write().accept_success(generation),
-                        Err(_) => listing_reads.peek().accept_failure(generation),
-                    };
-                    if accepted {
-                        listing.set(Some(fetched));
-                    }
+                    // `None`: this read is not a poll tick, so it settles
+                    // nothing about optimistic renames or about which
+                    // sessions still exist — see `commit_listing`.
+                    commit_listing(generation, fetched, None);
                     pending.write().remove(&id);
                 }
             }
@@ -639,7 +663,13 @@ pub(crate) fn ListView(on_open: EventHandler<Session>) -> Element {
         {
             return;
         }
-        match target.status {
+        // The split is exactly `has_ended()` vs. everything else, which is
+        // to say: a status the UI knows to be finished deletes straight
+        // away, and both of the remaining statuses — `Alive` and `Unknown`
+        // — go through a confirmation. Asking the status rather than
+        // listing the variants is what keeps this correct across M6.75's
+        // liveness split (see `SessionStatus::has_ended`).
+        if target.status.has_ended() {
             // Deliberately unconfirmed, a known residual: the AGENT
             // process has exited, but process-tree descendants it
             // spawned (a stray MCP server, a dev server) can outlive it,
@@ -665,9 +695,8 @@ pub(crate) fn ListView(on_open: EventHandler<Session>) -> Element {
             // spawned. There is no lingering process tree to worry about,
             // not because nothing ever ran, but because the one thing
             // that could have left descendants never got the chance to.
-            SessionStatus::Exited { .. }
-            | SessionStatus::Interrupted
-            | SessionStatus::Error { .. } => do_delete_on_confirm(target.id),
+            do_delete_on_confirm(target.id);
+        } else {
             // Unknown must not borrow Alive's "is still running" claim
             // it has no basis for — SPEC.md's no-guessing rule means an
             // unresolved status is presented as exactly that, uncertain,
@@ -678,9 +707,7 @@ pub(crate) fn ListView(on_open: EventHandler<Session>) -> Element {
             // captured here, since a status that changes while a
             // confirmation sits open (a session stopped from another
             // client, say) should be reflected in the prompt too.
-            SessionStatus::Alive | SessionStatus::Unknown => {
-                confirming.write().insert(target.id);
-            }
+            confirming.write().insert(target.id);
         }
     };
 
@@ -878,36 +905,20 @@ pub(crate) fn ListView(on_open: EventHandler<Session>) -> Element {
                 if listing.sessions.is_empty() && listing.total == 0 {
                     div { class: "status", "no sessions" }
                 } else {
-                    // The count ALWAYS renders. PLAN_M2.md acceptance 5 asks
-                    // for the shortfall to be shown rather than plumbed, and
-                    // a line that appears only when something is wrong makes
-                    // its own absence carry meaning nobody can read: a user
-                    // seeing no banner cannot tell "this is all of them"
-                    // from "this UI forgot to say".
-                    //
-                    // The WORDING is what varies, and "showing N of M" is
-                    // reserved for a walk that did not finish — the client
-                    // walks the cursor to exhaustion
-                    // (`api::fetch_sessions`), so an incomplete list means a
-                    // ceiling was hit, the helm reported more behind its
-                    // last page, or the counts came back incoherent. Both
-                    // count conditions are checked because they can
-                    // disagree: totals can differ under concurrent creation
-                    // without `truncated` being set, and a ceiling sets
-                    // `truncated` without the totals having to differ.
-                    if listing.truncated || (listing.sessions.len() as u64) < listing.total {
-                        div { class: "banner truncation-banner",
-                            "showing {listing.sessions.len()} of {listing.total} sessions"
-                            // Named separately from a plain shortfall: the
-                            // rows and the count disagree in a direction
-                            // that means the list CHANGED under the walk,
-                            // not that there is more of it.
-                            if listing.incoherent {
-                                " — the list changed while it was being read; refreshing"
+                    // The count ALWAYS renders, and which of the two
+                    // wordings it carries is `rows::count_banner`'s
+                    // decision — see there for why an absent banner would
+                    // itself be a claim nobody can read.
+                    {
+                        let banner = count_banner(listing);
+                        rsx! {
+                            div { class: "{banner.class}",
+                                "{banner.text}"
+                                if let Some(note) = banner.incoherence {
+                                    "{note}"
+                                }
                             }
                         }
-                    } else {
-                        div { class: "banner session-count", "{listing.total} sessions" }
                     }
                     div { class: "session-list",
                         // The rows are the server's listing with this
@@ -1383,7 +1394,7 @@ fn CreateSessionForm(
                 // The helm's own words, which for a create refused by a
                 // host's state quote that host and its identities — so the
                 // same escaping and isolation every other peer string gets
-                // (see `hosts::PeerLine`).
+                // (see `peer::PeerLine`).
                 PeerLine {
                     class: "create-session-error".to_string(),
                     parts: vec![DetailPart::Peer(err)],
@@ -1751,211 +1762,9 @@ fn SessionRow(
     }
 }
 
-/// The listing as it should be RENDERED: the server's rows with this
-/// view's own just-landed renames painted over them (PLAN_M5.md item 6).
-///
-/// The same optimistic-rendering bargain `tabs::visible_tabs` makes, for
-/// the same reason — a title refreshed only by a 3-second poll would take
-/// up to a full interval to show the user the result of their own rename —
-/// and applied at RENDER time rather than by mutating the stored listing,
-/// so the correction cannot outlive `prune_optimistic_renames`' judgement
-/// about it. A rename for an id the listing does not carry is simply not
-/// applied: there is no row to paint, and inventing one would claim a
-/// session the server did not list.
-///
-/// Only the title is overridden. Everything else in the row — status,
-/// annotation, tabs — is whatever the listing says, because a rename
-/// changes nothing else about a session and a stale copy of those fields
-/// is exactly what the poll exists to replace.
-fn apply_optimistic_renames(
-    sessions: &[Session],
-    renamed: &HashMap<String, (String, u64)>,
-) -> Vec<Session> {
-    sessions
-        .iter()
-        .map(|session| match renamed.get(&session.id) {
-            Some((title, _)) => Session {
-                title: title.clone(),
-                ..session.clone()
-            },
-            None => session.clone(),
-        })
-        .collect()
-}
-
-/// Retire the optimistic renames this listing reply settles, leaving the
-/// ones it says nothing about.
-///
-/// `index` is the reply's own poll sequence number and is the whole point
-/// of the exercise: a reply that STARTED before the rename's own response
-/// completed is not evidence about it either way, so its old title cannot
-/// be read as the server disagreeing. Without that distinction "the server
-/// disagrees" and "the server has not told this client yet" look
-/// identical, and the row would flip back to the old title until the next
-/// poll — the wobble this scheme exists to prevent
-/// (`session_view::SessionView`'s `opened_tabs` carries the same argument
-/// for tabs).
-///
-/// The comparison is a CONSERVATIVE bound, not a claim about when the
-/// server changed: the durable write lands before the rename's reply is
-/// read, so a poll launched earlier may perfectly well observe the new
-/// title. That only ever makes this hold a correction slightly longer than
-/// strictly necessary, which is the harmless direction.
-///
-/// Three outcomes, in the order they are decided:
-///
-/// - The server now reports the same title: the rename graduated, and the
-///   correction has nothing left to correct.
-/// - This reply is one that is GUARANTEED to postdate the rename and it
-///   reports something else — a different title, or no such session at
-///   all: the server is authoritative and wins, whether that is another
-///   client's later rename or this view being wrong about what landed.
-/// - This reply may predate the rename: keep the correction untouched.
-fn prune_optimistic_renames(
-    renamed: &mut HashMap<String, (String, u64)>,
-    server: &[Session],
-    index: u64,
-) {
-    renamed.retain(|id, (title, observed_from)| {
-        match server.iter().find(|session| &session.id == id) {
-            Some(session) if &session.title == title => false,
-            _ => index < *observed_from,
-        }
-    });
-}
-
-/// Map a status — and, for an ended session, its annotation — to the
-/// badge's CSS modifier class and display text. Kept as one function so
-/// every case stays next to its siblings instead of drifting apart across
-/// separate match arms in the render tree.
-///
-/// The annotation is a QUALIFIER on the exited status, never a
-/// replacement for it: SPEC.md is explicit that "stopped" is not a
-/// distinct status, so a user-stopped session reads "exited — stopped by
-/// user (code 0)". An earlier version rendered the annotation alone, which
-/// read as a fourth status word and quietly dropped the one fact every
-/// row's badge is supposed to state. The annotation is ignored for every
-/// other status — it describes how a run ENDED, and a live session has
-/// not.
-///
-/// `pub(crate)`, not private: the session view renders the same badge behind
-/// a stale session's notice (SPEC.md's "title, directory, last-known
-/// status"), and two copies of this mapping would let one surface describe a
-/// session differently from the other.
-pub(crate) fn status_badge(
-    status: &SessionStatus,
-    annotation: Option<&str>,
-) -> (&'static str, String) {
-    match status {
-        SessionStatus::Alive => ("alive", "alive".to_string()),
-        SessionStatus::Exited { exit_code } => {
-            let mut text = "exited".to_string();
-            if let Some(annotation) = annotation {
-                text.push_str(" — ");
-                text.push_str(annotation);
-            }
-            if let Some(code) = exit_code {
-                text.push_str(&format!(" (code {code})"));
-            }
-            ("exited", text)
-        }
-        SessionStatus::Interrupted => ("interrupted", "interrupted".to_string()),
-        // The shim's exec-failure sentinel (PLAN_M3.md item 3): the agent
-        // never ran at all, which is a different claim from `Exited`'s
-        // "it ran and finished" — so it gets its own word and its own
-        // red-family color (`app.css`'s `.status-badge.error`), the one
-        // case in this match that IS reporting a failure. `detail` (the
-        // shim's own errno/argv0 report) rides straight into the badge
-        // text rather than being tucked behind a tooltip or a separate
-        // element: it is usually short, and it is the one piece of
-        // information that actually explains why the row needs attention.
-        SessionStatus::Error { detail } => ("error", format!("error — {detail}")),
-        SessionStatus::Unknown => ("unknown", "unknown".to_string()),
-    }
-}
-
-/// The safety-critical half of the inline delete-confirmation prompt:
-/// what deleting THIS session will actually do, worded so the risk reads
-/// on its own without depending on the title. Rendered into its own
-/// untruncatable DOM element (`SessionRow`'s `.confirm-consequence`, never
-/// ellipsized) AHEAD of the title, which gets a separate, deliberately
-/// truncatable element instead — a legal title can be tens of KB with no
-/// whitespace at all, and the earlier single-string design (title
-/// embedded mid-sentence, the whole thing ellipsized as one span) would
-/// clip whichever half landed at the tail once a title ran long enough,
-/// which for that wording was always this one: the actual consequence, is
-/// still running and will be killed. Splitting the two apart, consequence
-/// first, is what makes that unclippable regardless of title length.
-///
-/// Only ever OPENED from `Alive`/`Unknown` (see `on_delete`'s own match) —
-/// but is written total over `SessionStatus` rather than partial, because
-/// `confirming` is `ListView`'s own state, decoupled from any single
-/// render: a session that was `Alive` when the user opened this prompt
-/// can flip to `Exited` under it (stopped from another client, say)
-/// before either button is clicked, and this function re-runs on every
-/// render off whatever status the row's LATEST prop carries. The
-/// `Exited`, `Interrupted`, AND `Error` arms are all that residual case's
-/// fallback, not wordings SPEC.md's confirm-contract actually specifies —
-/// and `Error` is not merely a defensive completeness case: a session
-/// that was genuinely `Alive` when this prompt opened, whose agent then
-/// turns out never to have execed at all (the launch shim's sentinel is
-/// read only once the pane goes dead-or-absent — `service.rs`'s
-/// dead-or-absent gate), can flip straight from `Alive` to `Error` under
-/// an already-open prompt exactly like the `Exited` case above, just with
-/// a narrower window.
-///
-/// `Interrupted`'s wording is deliberately NOT a killing warning
-/// (PLAN_M3.md item 2): the status exists only because the HOST rebooted,
-/// which took the agent and every descendant of it with it, so there is
-/// nothing left for a delete to kill and claiming otherwise would be the
-/// mirror image of the fabricated-liveness mistake `Unknown`'s wording
-/// exists to avoid. What deleting actually costs is the session itself —
-/// worth saying, because an interrupted session is the one case where the
-/// record outlives everything it described and is all that is left to
-/// lose (and, since restart landed, the only route back into that
-/// conversation).
-fn confirm_consequence(status: &SessionStatus) -> &'static str {
-    match status {
-        SessionStatus::Alive => "still running — deleting kills the agent:",
-        SessionStatus::Unknown => {
-            "status unknown — the agent may still be running and will be killed:"
-        }
-        SessionStatus::Exited { .. } => "delete anyway:",
-        SessionStatus::Interrupted => {
-            "interrupted by a host reboot — nothing left to kill; deleting discards the session:"
-        }
-        // `Error` never OPENS this prompt (see `on_delete`'s own match),
-        // but a prompt already open for an `Alive` session CAN land here —
-        // see this function's own docs — so this arm is reachable, not
-        // merely a defensive completeness case.
-        SessionStatus::Error { .. } => {
-            "the agent never started — nothing to kill; deleting discards the session:"
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    /// A session with the given id and title; every other field is
-    /// whatever is cheapest, since only those two matter to the rename
-    /// helpers below.
-    fn session(id: &str, title: &str) -> Session {
-        Session {
-            id: id.into(),
-            title: title.into(),
-            cwd: "/tmp".into(),
-            invocation: "agent".into(),
-            status: SessionStatus::Unknown,
-            annotation: None,
-            restart_offer: crate::RestartOffer::FreshOnly,
-            tabs: Vec::new(),
-            host: None,
-            host_name: None,
-            stale: false,
-        }
-    }
 
     /// A CONNECTED host as the create dialog would be offered it —
     /// `phase: None` is what "connected" means to an option.
@@ -2148,226 +1957,6 @@ mod tests {
         assert_eq!(
             option(3, "user@\u{202E}box", false).label(),
             "user@<U+202E>box"
-        );
-    }
-
-    /// The rename's user-visible promise is that the new title shows up at
-    /// once, everywhere the row shows a title — so the overlay has to
-    /// reach the rendered `Session` itself rather than only the one span
-    /// the row happens to print, and it must leave every other row and
-    /// every other field alone (a rename changes nothing but the title,
-    /// and the poll's status is fresher than anything this view holds).
-    #[test]
-    fn optimistic_renames_replace_only_the_renamed_row_s_title() {
-        let listing = vec![session("a", "old-a"), session("b", "b")];
-        let renamed: HashMap<String, (String, u64)> = [("a".to_string(), ("new-a".to_string(), 7))]
-            .into_iter()
-            .collect();
-
-        let rendered = apply_optimistic_renames(&listing, &renamed);
-        assert_eq!(rendered[0].title, "new-a");
-        assert_eq!(rendered[0].cwd, listing[0].cwd, "only the title is ours");
-        assert_eq!(rendered[1], listing[1], "an untouched row stays identical");
-
-        let unknown: HashMap<String, (String, u64)> =
-            [("gone".to_string(), ("ghost".to_string(), 0))]
-                .into_iter()
-                .collect();
-        assert_eq!(
-            apply_optimistic_renames(&listing, &unknown),
-            listing,
-            "a correction for a session the listing does not carry invents no row"
-        );
-    }
-
-    /// The sequence check is the load-bearing half: a listing reply that
-    /// was already in flight when the rename landed reports the OLD title
-    /// truthfully and must not be read as the server disagreeing, or the
-    /// row visibly flips back for a whole poll interval. A reply that
-    /// postdates the rename is authoritative in both directions —
-    /// agreement retires the correction, and disagreement (another
-    /// client's later rename, or a session that has left the listing)
-    /// retires it too, because the server wins.
-    #[test]
-    fn optimistic_renames_retire_only_on_a_reply_that_could_have_seen_them() {
-        let mut renamed: HashMap<String, (String, u64)> =
-            [("a".to_string(), ("new-a".to_string(), 5))]
-                .into_iter()
-                .collect();
-
-        prune_optimistic_renames(&mut renamed, &[session("a", "old-a")], 4);
-        assert!(
-            renamed.contains_key("a"),
-            "a poll that started before the rename says nothing about it"
-        );
-
-        let mut graduated = renamed.clone();
-        prune_optimistic_renames(&mut graduated, &[session("a", "new-a")], 4);
-        assert!(
-            graduated.is_empty(),
-            "the server now reports our title, even on an early poll: nothing left to correct"
-        );
-
-        let mut contradicted = renamed.clone();
-        prune_optimistic_renames(&mut contradicted, &[session("a", "someone-else")], 6);
-        assert!(
-            contradicted.is_empty(),
-            "a reply that could have seen the rename and reports another title wins"
-        );
-
-        let mut vanished = renamed.clone();
-        prune_optimistic_renames(&mut vanished, &[], 6);
-        assert!(
-            vanished.is_empty(),
-            "a session the listing no longer carries has no row to correct"
-        );
-    }
-
-    /// Pins BOTH the badge's display text and its CSS modifier class per
-    /// status — not just the text — since a class regression (e.g. an
-    /// `Exited` row silently keeping the `alive` class) would only
-    /// otherwise surface as a wrong-COLORED row in the browser, which no
-    /// text-only assertion here would ever catch.
-    #[test]
-    fn status_badge_matches_text_and_class_for_each_status() {
-        assert_eq!(
-            status_badge(&SessionStatus::Alive, None),
-            ("alive", "alive".to_string())
-        );
-        assert_eq!(
-            status_badge(&SessionStatus::Exited { exit_code: Some(7) }, None),
-            ("exited", "exited (code 7)".to_string())
-        );
-        assert_eq!(
-            status_badge(&SessionStatus::Exited { exit_code: None }, None),
-            ("exited", "exited".to_string())
-        );
-        assert_eq!(
-            status_badge(&SessionStatus::Unknown, None),
-            ("unknown", "unknown".to_string())
-        );
-        assert_eq!(
-            status_badge(&SessionStatus::Interrupted, None),
-            ("interrupted", "interrupted".to_string())
-        );
-        assert_eq!(
-            status_badge(
-                &SessionStatus::Error {
-                    detail: "exec_failed argv0=/nope errno=2".to_string()
-                },
-                None
-            ),
-            (
-                "error",
-                "error — exec_failed argv0=/nope errno=2".to_string()
-            ),
-            "the shim's own recorded detail must reach the badge text, not just its class"
-        );
-    }
-
-    /// SPEC.md: "'stopped' is not a distinct status" — a user-stopped
-    /// session is an EXITED session carrying a qualifier, so the badge
-    /// must still SAY exited and add the supervisor's own wording after
-    /// it, with the exit code still visible when there is one. Rendering
-    /// the annotation alone (an earlier shape of this) reads as a fourth
-    /// status word and drops the one fact the badge exists to state. The
-    /// `exited` CSS class is asserted alongside the text for the same
-    /// reason: a stopped session must still LOOK like an ended one.
-    ///
-    /// The live-session case is the one a naive implementation gets
-    /// wrong: an annotation describes how a run ENDED, so it must never
-    /// leak onto a session that is running — which is exactly what a
-    /// stopped-then-restarted session is.
-    #[test]
-    fn stop_annotation_qualifies_the_exited_badge_without_replacing_it() {
-        assert_eq!(
-            status_badge(
-                &SessionStatus::Exited { exit_code: None },
-                Some("stopped by user")
-            ),
-            ("exited", "exited — stopped by user".to_string())
-        );
-        assert_eq!(
-            status_badge(
-                &SessionStatus::Exited { exit_code: Some(0) },
-                Some("stopped by user")
-            ),
-            ("exited", "exited — stopped by user (code 0)".to_string())
-        );
-        assert_eq!(
-            status_badge(&SessionStatus::Alive, Some("stopped by user")),
-            ("alive", "alive".to_string()),
-            "an annotation must never describe a session that is running"
-        );
-    }
-
-    /// Pins the exact two confirm-prompt wordings SPEC.md's no-guessing
-    /// rule requires to stay distinct: `Alive` must claim the agent IS
-    /// running, while `Unknown` must only ever admit uncertainty — a
-    /// regression that quietly reused one string for both (or rounded
-    /// `Unknown` up to `Alive`'s wording) is exactly what this guards
-    /// against. Scoped to `confirm_consequence`'s own string-building
-    /// alone — it says nothing about how `SessionRow` later renders the
-    /// result, nor about the SEPARATE title element sitting next to it
-    /// (both exercised by the Playwright suite instead, not by anything
-    /// callable from this unit test).
-    #[test]
-    fn confirm_consequence_wording_differs_between_alive_and_unknown() {
-        assert_eq!(
-            confirm_consequence(&SessionStatus::Alive),
-            "still running — deleting kills the agent:"
-        );
-        assert_eq!(
-            confirm_consequence(&SessionStatus::Unknown),
-            "status unknown — the agent may still be running and will be killed:"
-        );
-    }
-
-    /// An interrupted session is NOT alive (a host reboot is what made it
-    /// interrupted), so its consequence line must not claim anything will
-    /// be killed — the same no-fabrication rule that keeps `Unknown` from
-    /// borrowing `Alive`'s wording, applied in the opposite direction.
-    /// Asserted as properties rather than as one exact string so the
-    /// wording can be improved without the test having to be rewritten
-    /// each time; what must not change is that it stops promising a kill
-    /// and starts naming what deleting actually costs.
-    #[test]
-    fn interrupted_consequence_promises_no_kill() {
-        let wording = confirm_consequence(&SessionStatus::Interrupted);
-        assert!(
-            !wording.contains("kills") && !wording.contains("will be killed"),
-            "nothing survives a reboot for a delete to kill: {wording}"
-        );
-        assert!(
-            wording.contains("reboot") && wording.contains("discard"),
-            "the honest consequence is losing the session record itself: {wording}"
-        );
-    }
-
-    /// Review-swarm fix batch item 22: `confirm_consequence`'s `Error` arm
-    /// is reachable — not a defensive completeness case — via the exact
-    /// same residual race `Interrupted`'s own test above exercises in
-    /// prose: a confirm prompt opened while a session was `Alive` stays
-    /// open under a LATER render whose status has since moved on, and
-    /// `Error` is one of the statuses it can have moved to. The wording
-    /// must match `Error`'s actual meaning (never started, not merely
-    /// "finished"), not borrow `Interrupted`'s reboot-specific phrasing.
-    #[test]
-    fn error_consequence_promises_no_kill_and_names_no_reboot() {
-        let wording = confirm_consequence(&SessionStatus::Error {
-            detail: "exec_failed argv0=/nope errno=2".to_string(),
-        });
-        assert!(
-            !wording.contains("kills") && !wording.contains("will be killed"),
-            "an agent that never started leaves nothing for a delete to kill: {wording}"
-        );
-        assert!(
-            !wording.contains("reboot"),
-            "an exec failure is not a reboot; the wording must not borrow that framing: {wording}"
-        );
-        assert!(
-            wording.contains("discard"),
-            "the honest consequence is losing the session record itself: {wording}"
         );
     }
 }

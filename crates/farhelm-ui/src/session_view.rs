@@ -17,10 +17,11 @@ use crate::api::{
     restart_mode_for, restart_session,
 };
 use crate::attachments::{attachment_policy, attachment_status_element_id};
-use crate::hosts::{HostLookup, HostsRead, PeerLine, is_connected, stale_session_notice};
-use crate::list::status_badge;
+use crate::hosts::{HostLookup, HostsRead, is_connected, stale_session_notice};
+use crate::peer::PeerLine;
 use crate::reconnect::reconnect_policy;
 use crate::rename::RenameForm;
+use crate::status::status_badge;
 use crate::tabs::{
     AGENT_BANNER_ELEMENT_ID, AGENT_CONNECTING_ELEMENT_ID, AGENT_TERMINAL_ELEMENT_ID,
     CLOSE_TAB_CONSEQUENCE, MAX_MOUNTED_TAB_ISLANDS, TAB_OPEN_ERROR_KEY, TabStripItem,
@@ -335,6 +336,78 @@ pub(crate) fn SessionView(session: Session, on_back: EventHandler<()>) -> Elemen
     // Scoped to a `use_future` owned by this component, so it stops for
     // free when the view unmounts — the same lifecycle `ListView`'s poll
     // relies on.
+    // Everything that happens to a detail reply once it is BACK: decide
+    // whether it still speaks for this view, retire the optimistic
+    // corrections it settles, and paint it.
+    //
+    // Hoisted out of the loop so the poll body reads as what it is — a
+    // fetch and a commit — rather than as forty lines in which the two are
+    // interleaved. The counters it needs are PARAMETERS rather than reads
+    // of their own, and that is the load-bearing part: both must be sampled
+    // synchronously at the point the request is issued, BEFORE the `await`,
+    // or they stop describing the request they are supposed to version.
+    // `restart_epoch` is read a second time INSIDE, after the await, and
+    // that one has to stay here: it is the current value that `started_at`
+    // is compared against.
+    let mut commit_detail =
+        move |fetched: Result<Option<Session>, String>, started_at: u32, index: u64| {
+            // A 404 is surfaced rather than absorbed, and deliberately
+            // NOT acted on: the view keeps everything it has —
+            // metadata, tabs, live terminals — and merely stops
+            // claiming to be current. `fetch_session`'s docs carry the
+            // reason this is not "the session was deleted"; a
+            // transport error is left silent because a poll that
+            // failed to reach the helm says nothing about the session
+            // at all, and one dropped request every few seconds is not
+            // worth a banner.
+            if matches!(fetched, Ok(None)) {
+                refresh_stale.set(true);
+            }
+            if let Ok(Some(fresh)) = fetched
+                && *restart_epoch.peek() == started_at
+            {
+                refresh_stale.set(false);
+                // Prune the optimistic corrections this reply settles.
+                // Deliberately NOT done on a failed or 404 fetch — an
+                // error carries no tab list at all, and a transient
+                // failure is not evidence about what exists
+                // (`ListView`'s poll makes the same call for the same
+                // reason).
+                let live: HashSet<&str> = fresh.tabs.iter().map(|tab| tab.id.as_str()).collect();
+                // An optimistic open retires two ways: the server now
+                // lists it (it graduated to the real list), or this
+                // poll STARTED after the open and still does not
+                // mention it (it is genuinely gone — closed from
+                // another client between creation and this view's
+                // first sight of it). A poll that predates the open
+                // says nothing either way and leaves it alone.
+                opened_tabs.write().retain(|(id, observed_from)| {
+                    !live.contains(id.as_str()) && index < *observed_from
+                });
+                closed_tabs.write().retain(|id| live.contains(id.as_str()));
+                // The optimistic rename retires on exactly the two
+                // reads that settle it — the server now reports this
+                // title (it graduated), or a reply GUARANTEED to have
+                // started after the rename's response completed
+                // reports a different one (another client renamed it
+                // afterwards, and the server wins). A reply that may
+                // predate it says nothing either way and leaves it
+                // alone; that bound is conservative rather than exact
+                // (see `on_rename_submit`), which can only hold a
+                // correction a little longer than needed.
+                let settled = renamed
+                    .peek()
+                    .as_ref()
+                    .is_some_and(|(title, observed_from)| {
+                        &fresh.title == title || index >= *observed_from
+                    });
+                if settled {
+                    renamed.set(None);
+                }
+                current.set(fresh);
+            }
+        };
+
     let refresh_base = base.clone();
     let refresh_id = session.id.clone();
     use_future(move || {
@@ -353,62 +426,7 @@ pub(crate) fn SessionView(session: Session, on_back: EventHandler<()>) -> Elemen
                 let index = poll_sequence.peek().to_owned();
                 poll_sequence += 1;
                 let fetched = fetch_session(&base, &id).await;
-                // A 404 is surfaced rather than absorbed, and deliberately
-                // NOT acted on: the view keeps everything it has —
-                // metadata, tabs, live terminals — and merely stops
-                // claiming to be current. `fetch_session`'s docs carry the
-                // reason this is not "the session was deleted"; a
-                // transport error is left silent because a poll that
-                // failed to reach the helm says nothing about the session
-                // at all, and one dropped request every few seconds is not
-                // worth a banner.
-                if matches!(fetched, Ok(None)) {
-                    refresh_stale.set(true);
-                }
-                if let Ok(Some(fresh)) = fetched
-                    && *restart_epoch.peek() == started_at
-                {
-                    refresh_stale.set(false);
-                    // Prune the optimistic corrections this reply settles.
-                    // Deliberately NOT done on a failed or 404 fetch — an
-                    // error carries no tab list at all, and a transient
-                    // failure is not evidence about what exists
-                    // (`ListView`'s poll makes the same call for the same
-                    // reason).
-                    let live: HashSet<&str> =
-                        fresh.tabs.iter().map(|tab| tab.id.as_str()).collect();
-                    // An optimistic open retires two ways: the server now
-                    // lists it (it graduated to the real list), or this
-                    // poll STARTED after the open and still does not
-                    // mention it (it is genuinely gone — closed from
-                    // another client between creation and this view's
-                    // first sight of it). A poll that predates the open
-                    // says nothing either way and leaves it alone.
-                    opened_tabs.write().retain(|(id, observed_from)| {
-                        !live.contains(id.as_str()) && index < *observed_from
-                    });
-                    closed_tabs.write().retain(|id| live.contains(id.as_str()));
-                    // The optimistic rename retires on exactly the two
-                    // reads that settle it — the server now reports this
-                    // title (it graduated), or a reply GUARANTEED to have
-                    // started after the rename's response completed
-                    // reports a different one (another client renamed it
-                    // afterwards, and the server wins). A reply that may
-                    // predate it says nothing either way and leaves it
-                    // alone; that bound is conservative rather than exact
-                    // (see `on_rename_submit`), which can only hold a
-                    // correction a little longer than needed.
-                    let settled = renamed
-                        .peek()
-                        .as_ref()
-                        .is_some_and(|(title, observed_from)| {
-                            &fresh.title == title || index >= *observed_from
-                        });
-                    if settled {
-                        renamed.set(None);
-                    }
-                    current.set(fresh);
-                }
+                commit_detail(fetched, started_at, index);
                 // Same per-target sleep split as `ListView`'s poll — see
                 // its own comment for why each target gets its own idiom.
                 #[cfg(target_arch = "wasm32")]
@@ -894,7 +912,7 @@ pub(crate) fn SessionView(session: Session, on_back: EventHandler<()>) -> Elemen
     });
 
     let shown = current.read().clone();
-    let alive = shown.status == SessionStatus::Alive;
+    let alive = shown.status.is_live();
     let tabs = visible_tabs(&shown.tabs, &opened_tabs.read(), &closed_tabs.read());
     // Both of these are DERIVED rather than written back to their signals
     // when they go stale, and that is safe precisely because tab ids are
@@ -1185,7 +1203,7 @@ pub(crate) fn SessionView(session: Session, on_back: EventHandler<()>) -> Elemen
                 // it to take over. Consequence first, then the label, then the
                 // buttons — the same reading order (and the same untruncatable
                 // consequence / truncatable name split) the delete prompt uses;
-                // see `list::confirm_consequence`'s docs for why that order is
+                // see `status::confirm_consequence`'s docs for why that order is
                 // the safety-critical part.
                 if let Some(tab_id) = confirming_tab {
                     div { class: "tab-confirm",

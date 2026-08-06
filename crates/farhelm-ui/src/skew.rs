@@ -33,7 +33,7 @@
 
 use dioxus::prelude::*;
 
-use crate::hosts::{DetailPart, PeerLine};
+use crate::peer::{DetailPart, PeerLine};
 
 /// The build this bundle was compiled from — the workspace version, which
 /// is the same number the helm and every supervisor carry (Cargo.toml's
