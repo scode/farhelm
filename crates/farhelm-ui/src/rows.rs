@@ -9,15 +9,25 @@
 //!
 //! ## The optimistic-rename bargain
 //!
-//! A title refreshed only by the 3-second poll would take up to a full
-//! interval to show a user the result of their own rename, so a landed
-//! rename is painted over the server's rows immediately (PLAN_M5.md item 6)
+//! A title refreshed only by the server's next word on the subject would
+//! take a round trip to show a user the result of their own rename, so a
+//! landed rename is painted over the server's rows immediately
+//! (PLAN_M5.md item 6)
 //! — the same bargain `tabs::visible_tabs` makes for tabs. What makes it
 //! safe rather than a second source of truth is the pairing:
 //! [`apply_optimistic_renames`] paints at RENDER time and never mutates the
-//! stored listing, and [`prune_optimistic_renames`] retires each correction
-//! the moment a reply that could have seen it arrives. Neither is meaningful
+//! stored listing, and the two pruning halves retire each correction the
+//! moment a reply that could have seen it arrives. Neither is meaningful
 //! without the other, which is why they live together.
+//!
+//! The pruning is two functions rather than one because the two rest on
+//! different evidence, and only one of them is available to every read.
+//! [`settle_optimistic_renames`] compares TITLES on the rows a reply
+//! returned, which any successful read can do; [`retire_vanished_renames`]
+//! reads a session's ABSENCE as departure, which is only true of a walk that
+//! speaks for the whole fleet. Fusing them (as this module once did) makes
+//! the weaker requirement govern both, and a filtered read then cannot even
+//! graduate a rename the server is already reporting back.
 //!
 //! ## The banner is not decoration
 //!
@@ -35,18 +45,19 @@ use crate::api::SessionListing;
 /// view's own just-landed renames painted over them (PLAN_M5.md item 6).
 ///
 /// The same optimistic-rendering bargain `tabs::visible_tabs` makes, for
-/// the same reason — a title refreshed only by a 3-second poll would take
-/// up to a full interval to show the user the result of their own rename —
+/// the same reason — a title refreshed only by the next listing read would
+/// take a round trip to show the user the result of their own rename —
 /// and applied at RENDER time rather than by mutating the stored listing,
-/// so the correction cannot outlive `prune_optimistic_renames`' judgement
-/// about it. A rename for an id the listing does not carry is simply not
+/// so the correction cannot outlive the pruning halves' judgement about it
+/// ([`settle_optimistic_renames`], [`retire_vanished_renames`]).
+/// A rename for an id the listing does not carry is simply not
 /// applied: there is no row to paint, and inventing one would claim a
 /// session the server did not list.
 ///
 /// Only the title is overridden. Everything else in the row — status,
 /// annotation, tabs — is whatever the listing says, because a rename
 /// changes nothing else about a session and a stale copy of those fields
-/// is exactly what the poll exists to replace.
+/// is exactly what the next listing read exists to replace.
 pub(crate) fn apply_optimistic_renames(
     sessions: &[Session],
     renamed: &HashMap<String, (String, u64)>,
@@ -63,35 +74,44 @@ pub(crate) fn apply_optimistic_renames(
         .collect()
 }
 
-/// Retire the optimistic renames this listing reply settles, leaving the
-/// ones it says nothing about.
+/// Retire the optimistic renames this reply's ROWS settle, leaving every
+/// other correction alone.
 ///
-/// `index` is the reply's own poll sequence number and is the whole point
-/// of the exercise: a reply that STARTED before the rename's own response
-/// completed is not evidence about it either way, so its old title cannot
-/// be read as the server disagreeing. Without that distinction "the server
-/// disagrees" and "the server has not told this client yet" look
-/// identical, and the row would flip back to the old title until the next
-/// poll — the wobble this scheme exists to prevent
-/// (`session_view::SessionView`'s `opened_tabs` carries the same argument
-/// for tabs).
+/// Runs after every successful read, filtered or not, because nothing it
+/// decides needs the reply to speak for the whole fleet: it only ever looks
+/// at rows that came back, and a row that came back is the server's word on
+/// that session whatever query produced it. The companion
+/// [`retire_vanished_renames`] is the half that reads ABSENCE, which only a
+/// walk with authority may do.
+///
+/// `index` is the reply's own read sequence number and is the whole point of
+/// the exercise: a reply that STARTED before the rename's own response
+/// completed is not evidence about it either way, so its old title cannot be
+/// read as the server disagreeing. Without that distinction "the server
+/// disagrees" and "the server has not told this client yet" look identical,
+/// and the row would flip back to the old title until the next read — the
+/// wobble this scheme exists to prevent (`session_view::SessionView`'s
+/// `opened_tabs` carries the same argument for tabs).
 ///
 /// The comparison is a CONSERVATIVE bound, not a claim about when the
 /// server changed: the durable write lands before the rename's reply is
-/// read, so a poll launched earlier may perfectly well observe the new
+/// read, so a read launched earlier may perfectly well observe the new
 /// title. That only ever makes this hold a correction slightly longer than
 /// strictly necessary, which is the harmless direction.
 ///
 /// Three outcomes, in the order they are decided:
 ///
 /// - The server now reports the same title: the rename graduated, and the
-///   correction has nothing left to correct.
-/// - This reply is one that is GUARANTEED to postdate the rename and it
-///   reports something else — a different title, or no such session at
-///   all: the server is authoritative and wins, whether that is another
-///   client's later rename or this view being wrong about what landed.
-/// - This reply may predate the rename: keep the correction untouched.
-pub(crate) fn prune_optimistic_renames(
+///   correction has nothing left to correct. Accepted from ANY read, even
+///   one that predates the rename — a server already reporting this title
+///   cannot be disagreeing with it.
+/// - This reply is GUARANTEED to postdate the rename and reports a
+///   DIFFERENT title: the server is authoritative and wins, whether that is
+///   another client's later rename or this view being wrong about what
+///   landed.
+/// - The reply does not carry this session at all, or may predate the
+///   rename: the correction stands.
+pub(crate) fn settle_optimistic_renames(
     renamed: &mut HashMap<String, (String, u64)>,
     server: &[Session],
     index: u64,
@@ -99,9 +119,117 @@ pub(crate) fn prune_optimistic_renames(
     renamed.retain(|id, (title, observed_from)| {
         match server.iter().find(|session| &session.id == id) {
             Some(session) if &session.title == title => false,
-            _ => index < *observed_from,
+            Some(_) => index < *observed_from,
+            // Absence proves nothing here — see `retire_vanished_renames`.
+            None => true,
         }
     });
+}
+
+/// Retire the corrections for sessions this reply says are GONE.
+///
+/// Split from [`settle_optimistic_renames`] because the two rest on
+/// different evidence, and only one of them is available to every read. This
+/// one treats a session's absence from the reply as departure, which is only
+/// true of a walk that speaks for the whole fleet: a FILTERED listing omits
+/// every session that did not match, and "did not match" is not "went away".
+/// Calling this on a filtered reply would retire a correction on the
+/// authority of a query that never asked about that row — and, since the
+/// rename overlay is what keeps the user's own rename on screen, would drop
+/// it back to the old title for as long as any filter is applied.
+///
+/// The `index` bound is the same conservative one, and matters for the same
+/// reason: a walk that started before the rename can be missing the session
+/// for reasons that have nothing to do with it.
+pub(crate) fn retire_vanished_renames(
+    renamed: &mut HashMap<String, (String, u64)>,
+    server: &[Session],
+    index: u64,
+) {
+    renamed.retain(|id, (_, observed_from)| {
+        server.iter().any(|session| &session.id == id) || index < *observed_from
+    });
+}
+
+/// Whether the list should say "no sessions" and nothing else.
+///
+/// The plain empty-fleet line replaces the banner, the rows, and every
+/// explanation around them, which is right for a fleet that genuinely has
+/// nothing in it and wrong for everything else. In particular it must not
+/// swallow a FILTERED reply over an empty fleet, which satisfies both counts
+/// just as well: a user who has just searched would get a bare "no sessions"
+/// where the two facts they need — that a filter is applied, and that it
+/// matched nothing — are exactly what disappeared. "The fleet is empty" and
+/// "your search found nothing" call for opposite reactions, and the filtered
+/// case keeps its banner and its no-match line to tell them apart.
+///
+/// Both counts are checked rather than only the rows, because a walk that
+/// returned no rows against a non-zero total is a truncation, not an empty
+/// fleet — that one belongs in the banner's "showing 0 of N" wording.
+pub(crate) fn is_empty_fleet(listing: &SessionListing) -> bool {
+    listing.sessions.is_empty()
+        && listing.total == 0
+        && !listing.filtered
+        // A COMPLETE, COHERENT reply, or the shortcut is a claim the reply
+        // does not support. A truncated walk with no rows says "I could not
+        // read this list", not "there is nothing in it" — and an incoherent
+        // one, or a `matching` the fleet total contradicts, is precisely
+        // what `count_banner` exists to report. Skipping the banner here
+        // would swallow every one of those and print the calmest possible
+        // sentence over a reply that is telling the client something is
+        // wrong.
+        && !listing.truncated
+        && !listing.incoherent
+        && matches!(listing.matching, None | Some(0))
+}
+
+/// Whether a reply's ABSENCES may be read as departures.
+///
+/// The question `list::ListView` asks before retiring an optimistic rename,
+/// closing a rename editor, or dropping a delete confirmation for a session
+/// that is not in this reply. Two facts have to hold, and only one of them
+/// was being checked:
+///
+/// - **The reply speaks for the whole fleet.** A filtered listing omits
+///   every session that did not match, and "did not match" is not "went
+///   away".
+/// - **The walk actually finished.** A truncated walk stops at a ceiling —
+///   pages, rows, bytes, time — and every session past that cutoff is
+///   missing for a reason that has nothing to do with existing. Reading
+///   those absences as departures silently discards work on a large fleet:
+///   a rename the user just made retires, an open editor closes under them,
+///   a confirmation they are mid-decision on disappears. `truncated` also
+///   carries the incoherent case (`api::fetch_sessions` sets it), which is
+///   the same argument with the counts disagreeing.
+///
+/// The caller ANDs this with its own standing, because one more kind of read
+/// has none: a mutation's immediate refetch exists to show ONE session and
+/// is not a statement about the rest.
+pub(crate) fn absence_is_evidence(listing: &SessionListing) -> bool {
+    !listing.filtered && !listing.truncated
+}
+
+/// Whether the list should say, in words, that this filter matched nothing.
+///
+/// The claim is about the FLEET, not about the page: "no sessions match this
+/// filter" is only true when the helm counted the matches and counted zero.
+/// An empty row vector is not the same statement, and reading it as one gets
+/// two cases wrong in the direction that misinforms:
+///
+/// - A walk that matched something and collected none of it (a ceiling hit
+///   on its first page, a time-bounded walk) would tell the user their
+///   search found nothing while the banner beside it reports how many it
+///   found.
+/// - An IGNORED filter (`matching` absent — see `api::matching_count`)
+///   would produce the line on the strength of a count nobody computed, on
+///   a helm that never filtered at all.
+///
+/// Paired with the rows being empty as well, because `matching == 0` over a
+/// non-empty row vector is a contradiction the banner is already reporting
+/// (see [`count_banner`]) — printing "nothing matched" above visible rows
+/// would be the UI arguing with itself.
+pub(crate) fn no_matches(listing: &SessionListing) -> bool {
+    listing.filtered && listing.matching == Some(0) && listing.sessions.is_empty()
 }
 
 /// The count line above the rows, decided but not rendered.
@@ -124,6 +252,24 @@ pub(crate) struct CountBanner {
     pub(crate) incoherence: Option<&'static str>,
 }
 
+/// The suffix a banner carries when the rows and the counts disagree in a
+/// direction that means the list CHANGED under the walk, rather than that
+/// there is more of it.
+///
+/// A constant because two conditions raise it — the helm's own fleet-level
+/// incoherence and this module's filter-level one — and a second copy of the
+/// sentence would let the two drift into meaning slightly different things.
+const INCOHERENCE_NOTE: &str = " — the list changed while it was being read; refreshing";
+
+/// The clause a filtered banner carries when the helm never answered the
+/// filter (`api::matching_count` returning `None`).
+///
+/// Said plainly rather than dressed as a count, because the alternative is
+/// the UI vouching for a filter that did not run: the rows on screen are the
+/// whole fleet, and any "N matching" over them is a number nobody computed.
+const FILTER_UNSUPPORTED_NOTE: &str =
+    " — this helm does not support filtering, so the filter was ignored";
+
 /// What the count line says about this listing.
 ///
 /// The count ALWAYS renders. PLAN_M2.md acceptance 5 asks for the shortfall
@@ -132,35 +278,122 @@ pub(crate) struct CountBanner {
 /// user seeing no banner cannot tell "this is all of them" from "this UI
 /// forgot to say".
 ///
-/// The WORDING is what varies, and "showing N of M" is reserved for a walk
-/// that did not finish — the client walks the cursor to exhaustion
-/// (`api::fetch_sessions`), so an incomplete list means a ceiling was hit,
-/// the helm reported more behind its last page, or the counts came back
-/// incoherent. Both count conditions are checked because they can disagree:
-/// totals can differ under concurrent creation without `truncated` being
-/// set, and a ceiling sets `truncated` without the totals having to differ.
+/// The WORDING varies along independent axes, which is why this is a table
+/// rather than an if/else:
+///
+/// - **Truncation.** "showing N of …" is reserved for a walk that did not
+///   finish — the client walks the cursor to exhaustion
+///   (`api::fetch_sessions`), so an incomplete list means a ceiling was hit,
+///   the helm reported more behind its last page, or the counts came back
+///   incoherent. Every condition is checked because they can disagree:
+///   totals can differ under concurrent creation without `truncated` being
+///   set, and a ceiling sets `truncated` without the totals having to
+///   differ. The shortfall is measured against MATCHING, because the page
+///   walk is over what matched — comparing against the fleet total instead
+///   would report every working filter as a truncated list.
+/// - **Filtering.** A filtered list says "N matching of M sessions"
+///   (PLAN_M6_75.md item 7), which is the distinction the second count
+///   exists to make: without it, a filter that hid 690 of 700 rows and a
+///   walk that could only read 10 of them look identical on screen, and only
+///   one of those means "there is more to see". The filtered wording is
+///   chosen from the REQUEST rather than by comparing the two counts, so a
+///   filter that happens to match everything still says so — a banner that
+///   silently reverted to the unfiltered sentence would leave a user unsure
+///   whether their filter took at all.
+/// - **A filter the helm did not answer.** `matching` is absent only where
+///   substituting a number would be a fabrication (`api::matching_count`),
+///   and that case gets the unfiltered sentence plus a clause saying why —
+///   the honest description of a screen full of unfiltered rows.
+///
+/// ## Contradictions the helm's own flags cannot express
+///
+/// `api::fetch_sessions` measures incoherence against the FLEET total, which
+/// is the helm's own reading of the two numbers and stays that way. Two
+/// contradictions live below that check and have to be caught here, because
+/// both produce a confident banner that the rows underneath it disprove:
+///
+/// - **More rows than matched.** A walk can hold more rows than the final
+///   page's refreshed `matching` while still sitting under the fleet total —
+///   neither short nor fleet-incoherent — so the flags alone would print "3
+///   matching of 700" above five visible rows.
+/// - **More matched than exist.** `matching > total` cannot be true of any
+///   fleet; it is what a list changing under a multi-page walk looks like
+///   when the two counts come from different moments.
+///
+/// Both mean the same thing as the fleet-scoped version (the list moved
+/// under the walk), so both raise the same note and take the same truncated
+/// wording, which already exist for it.
+///
+/// The shortfall is measured against what the reply CLAIMS is behind it —
+/// `matching` where the helm gave one, and the fleet total where it did not.
+/// That last part is the ignored-filter case: those rows are the whole
+/// fleet, so a walk that stopped short of the fleet has to say "showing N of
+/// M" like any other, rather than presenting an ignored filter's partial
+/// list as if it were everything.
 pub(crate) fn count_banner(listing: &SessionListing) -> CountBanner {
-    if listing.truncated || (listing.sessions.len() as u64) < listing.total {
-        CountBanner {
-            class: "banner truncation-banner",
-            text: format!(
-                "showing {} of {} sessions",
-                listing.sessions.len(),
+    let shown = listing.sessions.len() as u64;
+    // What the rows on screen are a subset OF, from this reply's own claims.
+    let claimed = listing.matching.unwrap_or(listing.total);
+    // The two contradictions above. `overshot` stays confined to filtered
+    // listings because unfiltered `matching` IS the fleet total and that
+    // comparison is already the helm's own — duplicating it would make one
+    // flag two.
+    let overshot = listing.filtered && listing.matching.is_some_and(|matching| shown > matching);
+    let counts_contradict = listing
+        .matching
+        .is_some_and(|matching| matching > listing.total);
+    let short = listing.truncated || overshot || counts_contradict || shown < claimed;
+    let (class, text) = match (listing.filtered, listing.matching, short) {
+        (false, _, false) => (
+            "banner session-count",
+            format!("{} sessions", listing.total),
+        ),
+        (false, _, true) => (
+            "banner truncation-banner",
+            format!("showing {shown} of {} sessions", listing.total),
+        ),
+        (true, Some(matching), false) => (
+            "banner session-count filtered",
+            format!("{matching} matching of {} sessions", listing.total),
+        ),
+        // Three numbers, because all three are different questions: how many
+        // are on screen, how many match, and how big the fleet is. Dropping
+        // the last would leave a user unable to tell a narrow filter from a
+        // small fleet.
+        (true, Some(matching), true) => (
+            "banner truncation-banner filtered",
+            format!(
+                "showing {shown} of {matching} matching sessions ({} in all)",
                 listing.total
             ),
-            // Named separately from a plain shortfall: the rows and the
-            // count disagree in a direction that means the list CHANGED
-            // under the walk, not that there is more of it.
-            incoherence: listing
-                .incoherent
-                .then_some(" — the list changed while it was being read; refreshing"),
-        }
-    } else {
-        CountBanner {
-            class: "banner session-count",
-            text: format!("{} sessions", listing.total),
-            incoherence: None,
-        }
+        ),
+        // No matching count to report: the sentence reverts to the
+        // unfiltered one, which is what the rows actually are, and the
+        // clause explains why the filter changed nothing. The `filtered`
+        // modifier stays on the class — the REQUEST carried a filter, and
+        // that is what the modifier has always meant.
+        (true, None, false) => (
+            "banner session-count filtered",
+            format!("{} sessions{FILTER_UNSUPPORTED_NOTE}", listing.total),
+        ),
+        (true, None, true) => (
+            "banner truncation-banner filtered",
+            format!(
+                "showing {shown} of {} sessions{FILTER_UNSUPPORTED_NOTE}",
+                listing.total
+            ),
+        ),
+    };
+    CountBanner {
+        class,
+        text,
+        // Only ever on a banner whose wording already admits something is
+        // off: a complete-walk sentence with a note saying the list changed
+        // underneath would contradict itself in one line. Both local
+        // contradictions force `short`, so the two conditions never
+        // disagree.
+        incoherence: (short && (listing.incoherent || overshot || counts_contradict))
+            .then_some(INCOHERENCE_NOTE),
     }
 }
 
@@ -220,11 +453,13 @@ mod tests {
     /// The sequence check is the load-bearing half: a listing reply that
     /// was already in flight when the rename landed reports the OLD title
     /// truthfully and must not be read as the server disagreeing, or the
-    /// row visibly flips back for a whole poll interval. A reply that
+    /// row visibly flips back until another read lands. A reply that
     /// postdates the rename is authoritative in both directions —
-    /// agreement retires the correction, and disagreement (another
-    /// client's later rename, or a session that has left the listing)
-    /// retires it too, because the server wins.
+    /// agreement retires the correction, and disagreement (another client's
+    /// later rename) retires it too, because the server wins.
+    ///
+    /// What this deliberately does NOT test is absence, which is
+    /// `retire_vanished_renames`' evidence and not every read's to use.
     #[test]
     fn optimistic_renames_retire_only_on_a_reply_that_could_have_seen_them() {
         let mut renamed: HashMap<String, (String, u64)> =
@@ -232,45 +467,123 @@ mod tests {
                 .into_iter()
                 .collect();
 
-        prune_optimistic_renames(&mut renamed, &[session("a", "old-a")], 4);
+        settle_optimistic_renames(&mut renamed, &[session("a", "old-a")], 4);
         assert!(
             renamed.contains_key("a"),
-            "a poll that started before the rename says nothing about it"
+            "a read that started before the rename says nothing about it"
         );
 
         let mut graduated = renamed.clone();
-        prune_optimistic_renames(&mut graduated, &[session("a", "new-a")], 4);
+        settle_optimistic_renames(&mut graduated, &[session("a", "new-a")], 4);
         assert!(
             graduated.is_empty(),
-            "the server now reports our title, even on an early poll: nothing left to correct"
+            "the server now reports our title, even on an early read: nothing left to correct"
         );
 
         let mut contradicted = renamed.clone();
-        prune_optimistic_renames(&mut contradicted, &[session("a", "someone-else")], 6);
+        settle_optimistic_renames(&mut contradicted, &[session("a", "someone-else")], 6);
         assert!(
             contradicted.is_empty(),
             "a reply that could have seen the rename and reports another title wins"
         );
+    }
 
-        let mut vanished = renamed.clone();
-        prune_optimistic_renames(&mut vanished, &[], 6);
+    /// A read that carried a FILTER still graduates the renames it can see,
+    /// and still never reads absence as departure.
+    ///
+    /// This is the bug the split exists for. With all the pruning behind a
+    /// whole-fleet authority check, a server row AGREEING with the
+    /// optimistic title could not retire the correction while any filter was
+    /// applied — so the overlay stayed on top of the server's own rows
+    /// indefinitely, and a LATER rename from another client was masked by a
+    /// correction that had nothing left to correct. Agreement needs no
+    /// authority: a row that came back is the server's word about that
+    /// session whatever query produced it.
+    #[test]
+    fn a_filtered_reply_still_settles_the_rows_it_did_return() {
+        let mut renamed: HashMap<String, (String, u64)> = [
+            ("a".to_string(), ("new-a".to_string(), 5)),
+            ("b".to_string(), ("new-b".to_string(), 5)),
+        ]
+        .into_iter()
+        .collect();
+
+        // A filtered read that matched only `a`, reporting the title this
+        // view painted optimistically.
+        settle_optimistic_renames(&mut renamed, &[session("a", "new-a")], 6);
+        assert!(!renamed.contains_key("a"), "the rename graduated");
         assert!(
-            vanished.is_empty(),
-            "a session the listing no longer carries has no row to correct"
+            renamed.contains_key("b"),
+            "a session the filter excluded is not a session that went away"
         );
     }
 
-    /// A listing carrying `rows` sessions, with the three count fields set
-    /// explicitly — the banner reads nothing else, so the sessions
+    /// Absence retires a correction only for a walk that speaks for the
+    /// whole fleet, and only once it is late enough to be evidence.
+    ///
+    /// Both halves matter. Without the authority check a filtered read would
+    /// retire corrections for every row it excluded — dropping the user's
+    /// own rename back to the old title for as long as a filter is applied.
+    /// Without the index check a walk already in flight when the rename
+    /// landed would do the same on a session it simply had not reached yet.
+    #[test]
+    fn only_a_walk_with_authority_reads_absence_as_departure() {
+        let renamed: HashMap<String, (String, u64)> = [("a".to_string(), ("new-a".to_string(), 5))]
+            .into_iter()
+            .collect();
+
+        let mut early = renamed.clone();
+        retire_vanished_renames(&mut early, &[], 4);
+        assert!(
+            early.contains_key("a"),
+            "a walk that started before the rename may simply not have seen it yet"
+        );
+
+        let mut vanished = renamed.clone();
+        retire_vanished_renames(&mut vanished, &[], 6);
+        assert!(
+            vanished.is_empty(),
+            "a session a later whole-fleet walk does not carry has no row to correct"
+        );
+
+        // A whole-fleet walk that DOES list the session leaves the
+        // correction to `settle_optimistic_renames`, which is the only one
+        // of the two that compares titles.
+        let mut listed = renamed.clone();
+        retire_vanished_renames(&mut listed, &[session("a", "old-a")], 6);
+        assert!(listed.contains_key("a"));
+    }
+
+    /// An UNFILTERED listing carrying `rows` sessions, with the count fields
+    /// set explicitly — the banner reads nothing else, so the sessions
     /// themselves are placeholders.
+    ///
+    /// `matching` mirrors `total`, which is what the helm reports whenever
+    /// no filter was given: the unfiltered cases must be built the way the
+    /// server actually builds them, or they would pin wording against a
+    /// reply shape that cannot occur.
     fn listing(rows: usize, total: u64, truncated: bool, incoherent: bool) -> SessionListing {
         SessionListing {
             sessions: (0..rows)
                 .map(|n| session(&format!("s{n}"), &format!("title-{n}")))
                 .collect(),
             total,
+            matching: Some(total),
+            filtered: false,
             truncated,
             incoherent,
+        }
+    }
+
+    /// The same, for a walk that CARRIED a filter: `matching` is now its own
+    /// number, and `filtered` comes from the request rather than from
+    /// comparing the two counts.
+    fn filtered_listing(rows: usize, matching: u64, total: u64, truncated: bool) -> SessionListing {
+        SessionListing {
+            matching: Some(matching),
+            filtered: true,
+            truncated,
+            ..listing(rows, total, truncated, false)
         }
     }
 
@@ -376,5 +689,337 @@ mod tests {
         let complete = count_banner(&listing(4, 4, false, false));
         assert_eq!(complete.class, "banner session-count");
         assert_eq!(complete.incoherence, None);
+    }
+
+    /// A filtered list says "N matching of M sessions" (PLAN_M6_75.md item
+    /// 7) — the distinction the helm's second count exists to make.
+    ///
+    /// Without it, a filter that hid 690 of 700 sessions and a walk that
+    /// could only read 10 of them produce the same sentence, and only one of
+    /// those means "there is more to see". The class carries a `filtered`
+    /// modifier ON TOP of the existing one rather than replacing it, so
+    /// every stylesheet rule and browser assertion written against
+    /// `.session-count` / `.truncation-banner` keeps matching — the wording
+    /// change is not an excuse to move the selectors the suite already pins.
+    #[test]
+    fn a_filtered_list_reports_both_counts() {
+        let banner = count_banner(&filtered_listing(12, 12, 700, false));
+        assert_eq!(banner.class, "banner session-count filtered");
+        assert_eq!(banner.text, "12 matching of 700 sessions");
+        assert_eq!(banner.incoherence, None);
+
+        // A filter matching NOTHING is still a filter, and the fleet total
+        // is what keeps "0 matching" from reading as an empty fleet.
+        assert_eq!(
+            count_banner(&filtered_listing(0, 0, 700, false)).text,
+            "0 matching of 700 sessions"
+        );
+
+        // A filter matching EVERYTHING still says so. Derived from the
+        // request rather than from `matching == total`, because a banner
+        // that silently reverted to the unfiltered wording here would leave
+        // a user unable to tell whether their filter took.
+        let matched_all = count_banner(&filtered_listing(700, 700, 700, false));
+        assert_eq!(matched_all.class, "banner session-count filtered");
+        assert_eq!(matched_all.text, "700 matching of 700 sessions");
+    }
+
+    /// A filtered walk that stopped short reports all THREE numbers.
+    ///
+    /// The shortfall is measured against MATCHING, not against the fleet
+    /// total, and that is the bug this pins: the page walk is over what
+    /// matched, so comparing rows against the fleet would report every
+    /// working filter as a truncated list — a permanent "there is more to
+    /// see" over a list that is already complete.
+    #[test]
+    fn a_truncated_filtered_walk_separates_shown_from_matching_from_the_fleet() {
+        let complete_filter = count_banner(&filtered_listing(40, 40, 700, false));
+        assert_eq!(
+            complete_filter.class, "banner session-count filtered",
+            "40 rows against a 700-session fleet is a filter working, not a walk stopping"
+        );
+
+        let banner = count_banner(&filtered_listing(20, 40, 700, true));
+        assert_eq!(banner.class, "banner truncation-banner filtered");
+        assert_eq!(
+            banner.text,
+            "showing 20 of 40 matching sessions (700 in all)"
+        );
+
+        // And the shortfall alone is enough, with `truncated` unset — the
+        // same independence the unfiltered branches have.
+        assert_eq!(
+            count_banner(&filtered_listing(20, 40, 700, false)).class,
+            "banner truncation-banner filtered"
+        );
+    }
+
+    /// Incoherence is reported on a filtered banner too, and stays a
+    /// separate run.
+    ///
+    /// The check behind it is deliberately against the FLEET total rather
+    /// than against `matching` (`api::fetch_sessions`), which is the helm's
+    /// own reading of the two numbers: holding fewer rows than the fleet is
+    /// a filter, while holding MORE rows than the fleet is a list that
+    /// changed under the walk.
+    #[test]
+    fn a_filtered_banner_still_carries_the_incoherence_note() {
+        let banner = count_banner(&SessionListing {
+            incoherent: true,
+            ..filtered_listing(5, 3, 3, true)
+        });
+        assert_eq!(banner.class, "banner truncation-banner filtered");
+        assert_eq!(banner.text, "showing 5 of 3 matching sessions (3 in all)");
+        assert_eq!(banner.incoherence, Some(INCOHERENCE_NOTE));
+    }
+
+    /// More rows than the filter matched is incoherence the helm's own flags
+    /// cannot express, and the banner has to catch it.
+    ///
+    /// The shape is ordinary: a walk collects rows, the list changes, and the
+    /// LAST page's refreshed `matching` comes back below the number of rows
+    /// already taken — all while staying under the fleet total, so
+    /// `api::fetch_sessions`' fleet-scoped check sees nothing and neither
+    /// `truncated` nor `incoherent` is set. Left alone, the banner would say
+    /// "3 matching of 700 sessions" over five visible rows: the one line
+    /// whose whole job is to be believed, contradicted by the rows beneath
+    /// it.
+    #[test]
+    fn more_rows_than_matched_is_reported_as_incoherence() {
+        let banner = count_banner(&filtered_listing(5, 3, 700, false));
+        assert_eq!(
+            banner.class, "banner truncation-banner filtered",
+            "the wording that admits the counts are unsettled, not the confident one"
+        );
+        assert_eq!(banner.text, "showing 5 of 3 matching sessions (700 in all)");
+        assert_eq!(banner.incoherence, Some(INCOHERENCE_NOTE));
+
+        // The ordinary filter is untouched: fewer rows than matched is a walk
+        // that stopped short, and rows equal to matched is a filter working.
+        assert_eq!(
+            count_banner(&filtered_listing(3, 3, 700, false)).incoherence,
+            None
+        );
+        assert_eq!(
+            count_banner(&filtered_listing(2, 3, 700, false)).incoherence,
+            None
+        );
+    }
+
+    /// Absence is evidence only from a reply that could have carried the
+    /// missing rows.
+    ///
+    /// The truncation half is the one that bites on a real fleet, and it
+    /// destroys the user's own work rather than merely misreporting: a walk
+    /// stopped at a ceiling omits every session past the cutoff, and reading
+    /// those omissions as departures retires the rename someone just made,
+    /// closes the editor they have open, and drops the delete confirmation
+    /// they are mid-decision on. All three are the client's own state, so
+    /// nothing on the next read brings them back.
+    #[test]
+    fn absence_speaks_only_for_a_complete_unfiltered_walk() {
+        assert!(
+            absence_is_evidence(&listing(3, 3, false, false)),
+            "a finished unfiltered walk carries every session there is"
+        );
+        assert!(
+            !absence_is_evidence(&listing(500, 20_000, true, false)),
+            "a walk stopped at a ceiling says nothing about what lay past it"
+        );
+        assert!(
+            !absence_is_evidence(&filtered_listing(3, 3, 700, false)),
+            "and a filter omits what did not match, which is not what left"
+        );
+        // Incoherence arrives as truncation from the walk
+        // (`api::fetch_sessions` sets `truncated: truncated || incoherent`),
+        // which is what makes one check cover both: counts that disagree
+        // with the rows are no basis for declaring anything gone.
+        assert!(!absence_is_evidence(&listing(5, 3, true, true)));
+    }
+
+    /// The bare "no sessions" line is for an empty FLEET, never for a filter
+    /// that matched nothing.
+    ///
+    /// The two are indistinguishable in the counts — an empty fleet under a
+    /// filter reports zero rows and a zero total, exactly like an unfiltered
+    /// one — which is why the request has to be consulted. Taking the plain
+    /// branch for a filtered reply suppresses both the banner and the
+    /// no-match line, so a user who just searched is shown a fleet that
+    /// appears to have vanished. That is the opposite of what happened, and
+    /// the two situations call for opposite reactions.
+    #[test]
+    fn only_an_unfiltered_empty_fleet_gets_the_bare_no_sessions_line() {
+        assert!(is_empty_fleet(&listing(0, 0, false, false)));
+        assert!(
+            !is_empty_fleet(&filtered_listing(0, 0, 0, false)),
+            "a filter over an empty fleet is a search that found nothing, and must say so"
+        );
+        assert!(
+            !is_empty_fleet(&listing(0, 3, false, false)),
+            "no rows against a non-zero total is a truncated walk, which the banner reports"
+        );
+
+        // The shortcut skips `count_banner` entirely, so it may only be taken
+        // by a reply with nothing left to report. Each of these says
+        // something the calmest sentence on the page would swallow.
+        assert!(
+            !is_empty_fleet(&listing(0, 0, true, false)),
+            "a truncated walk with no rows could not read the list, which is not the same as \
+             there being nothing in it"
+        );
+        assert!(
+            !is_empty_fleet(&listing(0, 0, false, true)),
+            "an incoherent reply is exactly what the banner's note exists for"
+        );
+        assert!(
+            !is_empty_fleet(&SessionListing {
+                matching: Some(4),
+                ..listing(0, 0, false, false)
+            }),
+            "four matched out of a zero-session fleet is a contradiction, not an empty fleet"
+        );
+    }
+
+    /// A helm that never answered the filter is described as exactly that,
+    /// with no count invented for it.
+    ///
+    /// The rows on screen are the WHOLE fleet — a helm that predates the
+    /// matching count predates server-side filtering too, so it ignored the
+    /// query (`api::matching_count`). Substituting the fleet total would
+    /// print "700 matching of 700 sessions" over those rows and vouch for a
+    /// filter that never ran, which is the one thing a count line must never
+    /// do. The unfiltered sentence plus a clause is the honest reading of
+    /// what is actually being shown.
+    #[test]
+    fn a_filter_the_helm_ignored_is_said_out_loud_rather_than_counted() {
+        let unanswered = SessionListing {
+            matching: None,
+            filtered: true,
+            ..listing(700, 700, false, false)
+        };
+        let banner = count_banner(&unanswered);
+        assert_eq!(banner.class, "banner session-count filtered");
+        assert_eq!(
+            banner.text,
+            "700 sessions — this helm does not support filtering, so the filter was ignored"
+        );
+        assert_eq!(banner.incoherence, None);
+
+        // A walk that also stopped short keeps both facts: the shortfall in
+        // the numbers, the ignored filter in the clause.
+        let short = SessionListing {
+            matching: None,
+            filtered: true,
+            ..listing(20, 700, true, false)
+        };
+        let banner = count_banner(&short);
+        assert_eq!(banner.class, "banner truncation-banner filtered");
+        assert_eq!(
+            banner.text,
+            "showing 20 of 700 sessions — this helm does not support filtering, so the filter was \
+             ignored"
+        );
+    }
+
+    /// An ignored filter whose walk fell short of the FLEET says "showing N
+    /// of M", even with nothing flagged.
+    ///
+    /// The rows an ignoring helm returns are the whole fleet, so the number
+    /// they are a subset of is `total` — there is no matching count to
+    /// measure against. Without that substitution the shortfall check has
+    /// nothing to compare and the confident sentence wins: "700 sessions"
+    /// printed over twenty rows, on a banner whose entire job is to say when
+    /// the list on screen is not the list that exists.
+    #[test]
+    fn an_ignored_filters_shortfall_is_measured_against_the_fleet() {
+        let cut_short = SessionListing {
+            matching: None,
+            filtered: true,
+            ..listing(20, 700, false, false)
+        };
+        let banner = count_banner(&cut_short);
+        assert_eq!(
+            banner.class, "banner truncation-banner filtered",
+            "twenty rows out of a 700-session fleet is a walk that stopped, whatever the flags say"
+        );
+        assert_eq!(
+            banner.text,
+            "showing 20 of 700 sessions — this helm does not support filtering, so the filter was \
+             ignored"
+        );
+
+        // A complete unfiltered walk under an ignored filter still reads as
+        // complete: the rows ARE the fleet, and claiming otherwise would be
+        // the same lie in the opposite direction.
+        let complete = SessionListing {
+            matching: None,
+            filtered: true,
+            ..listing(700, 700, false, false)
+        };
+        assert_eq!(
+            count_banner(&complete).class,
+            "banner session-count filtered"
+        );
+    }
+
+    /// More matched than exist is a contradiction, and the banner says so.
+    ///
+    /// `matching > total` cannot describe any fleet. It is what a list
+    /// changing under a multi-page walk looks like when the two counts are
+    /// read a moment apart, and it arrives with neither flag set — the
+    /// helm's own incoherence check is about ROWS against the fleet, and
+    /// this is one count against the other. Left alone the banner would
+    /// print "40 matching of 3 sessions" in the confident wording, which is
+    /// the count line contradicting itself in a single sentence.
+    #[test]
+    fn more_matched_than_exist_is_reported_as_incoherence() {
+        let banner = count_banner(&filtered_listing(3, 40, 3, false));
+        assert_eq!(banner.class, "banner truncation-banner filtered");
+        assert_eq!(banner.text, "showing 3 of 40 matching sessions (3 in all)");
+        assert_eq!(banner.incoherence, Some(INCOHERENCE_NOTE));
+
+        // The ordinary case is untouched: matching below the fleet total is
+        // what every working filter looks like.
+        assert_eq!(
+            count_banner(&filtered_listing(3, 3, 700, false)).incoherence,
+            None
+        );
+    }
+
+    /// The no-match line follows the helm's COUNT, never the emptiness of
+    /// this page's rows.
+    ///
+    /// Three ways to have no rows and only one of them means "your search
+    /// found nothing". Saying it in the other two is worse than saying
+    /// nothing: it contradicts the banner beside it (which is reporting how
+    /// many matched, or that the filter never ran) and sends the user off to
+    /// change a query that was working.
+    #[test]
+    fn the_no_match_line_follows_the_matching_count_rather_than_the_rows() {
+        assert!(
+            no_matches(&filtered_listing(0, 0, 700, false)),
+            "the helm counted the matches and counted none"
+        );
+        assert!(
+            !no_matches(&filtered_listing(0, 12, 700, true)),
+            "twelve matched and this walk collected none of them: a truncation, not an empty search"
+        );
+        assert!(
+            !no_matches(&SessionListing {
+                matching: None,
+                filtered: true,
+                ..listing(0, 0, false, false)
+            }),
+            "a helm that ignored the filter counted nothing, so it cannot be quoted as counting zero"
+        );
+        assert!(
+            !no_matches(&listing(0, 0, false, false)),
+            "and an unfiltered listing has no filter to report on"
+        );
+        assert!(
+            !no_matches(&filtered_listing(2, 0, 700, false)),
+            "zero matches over visible rows is a contradiction the banner reports; the line would \
+             argue with the rows"
+        );
     }
 }

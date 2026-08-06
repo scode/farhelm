@@ -23,12 +23,12 @@ use dioxus::prelude::*;
 ///
 /// This component is mounted only while a rename is open, and its host can
 /// be re-rendered out from under it by something the user did not do — a
-/// transient listing-poll failure swaps `ListView`'s rows for an error
+/// transient listing-read failure swaps `ListView`'s rows for an error
 /// line, which unmounts every row and this form with them. A draft owned
 /// here would vanish with it, silently discarding what the user had typed.
 /// Owned by the caller it survives that remount, and seeding stays the
 /// caller's job too: the draft is set from the CURRENT title at the moment
-/// the field is opened, which is also what keeps a poll carrying another
+/// the field is opened, which is also what keeps a read carrying another
 /// client's rename from overwriting an edit in progress.
 ///
 /// ## A textarea, not a text input, and why that is not cosmetic

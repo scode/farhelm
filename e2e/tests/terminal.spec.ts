@@ -29,7 +29,26 @@
 // materializes only viewport rows, so scrolled-off content (exactly what
 // replay tests care about) never appears in .xterm-rows. The buffer is
 // the semantic truth of what the terminal holds.
+//
+// ## Tests that used to wait for a poll
+//
+// A dozen tests here were written against the four periodic loops M6.75
+// removed (PLAN_M6_75.md item 6): they changed an intercepted fixture and
+// waited for the next listing, detail or hosts poll to pick it up. Nothing
+// polls a healthy page any more, so each of them now takes control of the
+// INVALIDATION instead, through `helpers/fleet`'s feed stub — the same
+// convention feed.spec.ts, filters.spec.ts and m6-5-debts.spec.ts use:
+// stub the socket, hand the page a handshake so the feed is healthy (and
+// therefore silent), change the fixture, then notify and let the page's own
+// re-read pick it up. The handful whose subject genuinely IS the fallback
+// cadence say so in their own docs and make the feed unhealthy on purpose.
+//
+// The stub is imported rather than copied, unlike this file's other
+// helpers: what it defines is not a snippet but the CONTRACT for what "the
+// feed is healthy" means, and a second definition of that would drift from
+// the one the feed's own spec asserts against.
 import { test, expect, Page, APIRequestContext } from "@playwright/test";
+import { stubFeed } from "./helpers/fleet";
 import path from "node:path";
 // The terminal-tab tests at the end of this file need a working directory
 // nothing else can be sitting in, so they mint one per test — the stack
@@ -2437,27 +2456,33 @@ test("a legal multi-KB, unbroken title keeps the consequence text intact and cli
 });
 
 // The confirming state lives in `ListView`'s own client-side signal, keyed
-// by session id (see `confirming`'s doc in lib.rs) — a poll refresh (the
-// list's ONLY live-update mechanism in M2) refetches and re-renders the
-// whole listing on its own timer, independent of anything the user is
-// doing, and must not silently revert an in-progress confirmation out
-// from under them.
+// by session id (see `confirming`'s doc in lib.rs) — a listing refresh
+// refetches and re-renders the whole listing for reasons the user did not
+// cause, and must not silently revert an in-progress confirmation out from
+// under them.
 //
-// A distinguishable field on a LATER poll response — not merely a
-// counted request — is what actually proves a real refetch's RESULT
-// reached the DOM: counting requests alone cannot rule out a regression
-// that fires the request but never applies its response (a dropped
-// `listing.set`, a silently-ignored decode failure), which would still
-// increment a request counter while never actually re-rendering anything.
-// Route-intercepting the GET with a synthetic listing carrying a marker
-// invocation is what turns "a poll happened" into "a poll's response was
-// applied and rendered" — but the marker is only armed AFTER the confirm
-// prompt is already open, not from page load onward: arming it up front
-// would let the marker show up as a leftover of the FIRST fetch (the one
-// that populates the initial list, before any click), which would pass
-// this test even if no poll ever landed again while confirming — exactly
-// the false positive this ordering exists to rule out.
-test("an inline confirming state survives a poll refresh; cancel still works afterward", async ({
+// A distinguishable field on a LATER response — not merely a counted
+// request — is what actually proves a real refetch's RESULT reached the
+// DOM: counting requests alone cannot rule out a regression that fires the
+// request but never applies its response (a dropped `listing.set`, a
+// silently-ignored decode failure), which would still increment a request
+// counter while never actually re-rendering anything. Route-intercepting
+// the GET with a synthetic listing carrying a marker invocation is what
+// turns "a refresh happened" into "a refresh's response was applied and
+// rendered" — but the marker is only armed AFTER the confirm prompt is
+// already open, not from page load onward: arming it up front would let the
+// marker show up as a leftover of the FIRST fetch (the one that populates
+// the initial list, before any click), which would pass this test even if
+// nothing ever landed again while confirming — exactly the false positive
+// this ordering exists to rule out.
+//
+// The refresh used to be M2's three-second poll and is now a feed
+// notification (PLAN_M6_75.md item 6), which is a change of TRIGGER and
+// nothing else as far as this rule is concerned. Stubbed rather than left
+// to the real feed: the moment the re-render happens has to be strictly
+// after the marker is armed, and a shared stack bumps its revision whenever
+// it likes.
+test("an inline confirming state survives a listing refresh; cancel still works afterward", async ({
   page,
   request,
 }) => {
@@ -2496,8 +2521,11 @@ test("an inline confirming state survives a poll refresh; cancel still works aft
     });
   });
 
+  const feed = await stubFeed(page);
   try {
     await page.goto("/");
+    await feed.waitForConnection(1);
+    feed.notify(1);
     const row = page.locator(`[data-session-id="${id}"]`);
     await expect(row.locator(".status-badge")).toHaveText(LIVE_BADGE, {
       timeout: 10_000,
@@ -2507,9 +2535,10 @@ test("an inline confirming state survives a poll refresh; cancel still works aft
 
     // Only NOW does the route start serving the marker — strictly after
     // the prompt is already open, so the marker appearing can only be
-    // the result of a poll that happened WHILE confirming, not the
+    // the result of a refresh that happened WHILE confirming, not the
     // initial page-load fetch.
     markerArmed = true;
+    feed.notify(2);
 
     // The marker invocation only ever appears once THIS route's synthetic
     // response has actually been fetched, decoded, and rendered — proof
@@ -2621,9 +2650,10 @@ test("an alive-to-exited status change under an open confirm prompt keeps confir
     // client) while this row's prompt sits open.
     await request.post(`/api/sessions/${id}/stop`);
 
-    // The next poll picks the exited status up and re-words the SAME
-    // open prompt — it does not close it, and does not swap back to the
-    // normal stop/delete pair.
+    // The stop bumps the helm's revision, so the real feed carries it here
+    // without anything in this test playing helm: the re-read it triggers
+    // picks the exited status up and re-words the SAME open prompt — it does
+    // not close it, and does not swap back to the normal stop/delete pair.
     await expect(row.locator(".confirm-consequence")).toHaveText(
       "delete anyway:",
       { timeout: 10_000 },
@@ -2643,52 +2673,59 @@ test("an alive-to-exited status change under an open confirm prompt keeps confir
   }
 });
 
-// The poll loop's own error path (`fetch_sessions` failing) swaps the
-// WHOLE list view for an error banner (`ListView`'s `Some(Err(e))` render
-// arm) rather than leaving stale rows on screen — which means a row's
-// `confirming` entry has nothing left to render into for as long as that
-// banner is showing. This pins that the entry itself, held in `ListView`'s
-// own state independent of any particular render, survives that gap
-// intact and reappears the moment the list recovers — a bare "the request
-// count went up" would not prove this, since it says nothing about
-// whether the confirm prompt for THIS id came back correctly afterward.
-test("a failed poll fetch while confirming does not clear the confirming state", async ({
+// A failed listing read (`fetch_sessions` failing) swaps the WHOLE list
+// view for an error banner (`ListView`'s `Some(Err(e))` render arm) rather
+// than leaving stale rows on screen — which means a row's `confirming`
+// entry has nothing left to render into for as long as that banner is
+// showing. This pins that the entry itself, held in `ListView`'s own state
+// independent of any particular render, survives that gap intact and
+// reappears the moment the list recovers — a bare "the request count went
+// up" would not prove this, since it says nothing about whether the confirm
+// prompt for THIS id came back correctly afterward.
+//
+// The read that fails is a feed-triggered one now rather than a poll, and
+// the failure is a LATCH the test opens and closes rather than the one-shot
+// it used to be. Both changes are about controlling the moment: the page
+// re-reads when this test says so, and the error state ends when this test
+// says so — a one-shot failure would be repaired by the reader's own retry
+// at a moment nothing here chose, which is exactly the sort of race that
+// makes a transient assertion flake.
+test("a failed listing read while confirming does not clear the confirming state", async ({
   page,
   request,
 }) => {
-  const title = `poll-error-while-confirming-${Date.now()}`;
+  const title = `read-error-while-confirming-${Date.now()}`;
   const created = await request.post("/api/sessions", {
     data: { cwd: "/tmp", invocation: "sleep 300", title },
   });
   expect(created.status()).toBe(200);
   const { id } = await created.json();
 
-  // A one-shot failure, armed only once the confirm prompt is genuinely
-  // open (below) — not from the start: arming up front races the very
-  // FIRST poll after page load (which can fire before the delete click
-  // even lands), which would fail a fetch that has nothing to do with
-  // confirming at all and could flake this test on nothing but timing.
-  let failArmed = false;
-  let failed = false;
+  // Armed only once the confirm prompt is genuinely open (below) — not from
+  // the start: arming up front would fail the page's own mount read, which
+  // has nothing to do with confirming at all.
+  let failing = false;
   await page.route("**/api/sessions", async (route) => {
     if (route.request().method() !== "GET") {
       await route.continue();
       return;
     }
-    if (failArmed && !failed) {
-      failed = true;
+    if (failing) {
       await fulfillAsHelm(route, {
         status: 500,
         contentType: "text/plain",
-        body: "injected poll failure",
+        body: "injected read failure",
       });
       return;
     }
     await route.continue();
   });
 
+  const feed = await stubFeed(page);
   try {
     await page.goto("/");
+    await feed.waitForConnection(1);
+    feed.notify(1);
     const row = page.locator(`[data-session-id="${id}"]`);
     await expect(row.locator(".status-badge")).toHaveText(LIVE_BADGE, {
       timeout: 10_000,
@@ -2696,9 +2733,10 @@ test("a failed poll fetch while confirming does not clear the confirming state",
     await row.locator(".session-row-delete").click();
     await expect(row.locator(".confirm-title")).toHaveText(`"${title}"`);
 
-    // Only NOW does the next poll-driven GET fail — strictly after the
-    // prompt is confirmed open.
-    failArmed = true;
+    // Only NOW does a listing read fail — strictly after the prompt is
+    // confirmed open, and only because this test asked for a read.
+    failing = true;
+    feed.notify(2);
 
     // The failed fetch swaps the list view for an error banner — this IS
     // that transient state, not a bug this test is tripping over.
@@ -2706,9 +2744,13 @@ test("a failed poll fetch while confirming does not clear the confirming state",
       timeout: 10_000,
     });
 
-    // The next poll succeeds; the list — and the SAME confirming prompt,
+    // The next read succeeds; the list — and the SAME confirming prompt,
     // restored from `ListView`'s own state rather than anything baked
-    // into this particular render — comes back.
+    // into this particular render — comes back. The reader retries a failed
+    // read on its own, so the notification here is belt and braces rather
+    // than the only way back.
+    failing = false;
+    feed.notify(3);
     await expect(row.locator(".confirm-title")).toHaveText(`"${title}"`, {
       timeout: 10_000,
     });
@@ -2783,7 +2825,14 @@ test("create-shows-no-badge-until-a-status-is-classified", async ({ page }) => {
     });
   });
 
+  // Stubbed, because both halves of this test are about what a REFRESH
+  // does: the badge staying absent across one, and then appearing on one.
+  // Nothing refreshes a healthy page on its own any more (PLAN_M6_75.md
+  // item 6), so the refreshes have to be this test's to trigger.
+  const feed = await stubFeed(page);
   await page.goto("/");
+  await feed.waitForConnection(1);
+  feed.notify(1);
   const row = page.locator(`[data-session-id="${sessionId}"]`);
   // The ROW renders fully — this is a missing badge, not a missing row,
   // and the difference is the whole point: an unclassified session is
@@ -2793,10 +2842,12 @@ test("create-shows-no-badge-until-a-status-is-classified", async ({ page }) => {
   await expect(row.locator(".status-badge")).toHaveCount(0);
   // Held across a listing refresh, so this is "no badge for as long as the
   // status is unknown" rather than "no badge in the instant we looked".
+  feed.notify(2);
   await page.waitForTimeout(3_000);
   await expect(row.locator(".status-badge")).toHaveCount(0);
 
   classified = true;
+  feed.notify(3);
   await expect(row.locator(".status-badge")).toHaveText(LIVE_BADGE, {
     timeout: 15_000,
   });
@@ -6982,21 +7033,30 @@ test("a tab closed elsewhere is torn down here, leaving its sibling untouched", 
   }
 });
 
-// A poll that FAILS is not evidence about anything. The strip must keep
-// showing the tabs it knows about and their terminals must keep working —
-// a view that emptied itself on a transient 500 would tear down live
-// attachments over a dropped request, which is the opposite of what the
-// poll is for.
-test("a failing detail poll leaves the tabs and their terminals alone", async ({
+// A detail read that FAILS is not evidence about anything. The strip must
+// keep showing the tabs it knows about and their terminals must keep
+// working — a view that emptied itself on a transient 500 would tear down
+// live attachments over a dropped request, which is the opposite of what
+// the read is for.
+//
+// The reads are triggered rather than waited for: with the feed healthy
+// nothing re-reads on a timer, so the test notifies to produce the first
+// failure and the surface reader's own retry ladder (`reader`) produces the
+// rest. Three failures in a row is what makes this "a run of failures the
+// view rode out" rather than "one failure it happened to survive".
+test("a failing detail read leaves the tabs and their terminals alone", async ({
   page,
   request,
 }) => {
   test.setTimeout(120_000);
-  const title = `tab-poll-fail-${Date.now()}`;
+  const title = `tab-read-fail-${Date.now()}`;
   let id: string | undefined;
+  const feed = await stubFeed(page);
   try {
     const session = await openSessionWithTabs(page, request, title, 1);
     id = session.id;
+    await feed.waitForConnection(1);
+    feed.notify(1);
     const [tabId] = session.tabs;
     const before = await mountedIslands(page);
 
@@ -7010,7 +7070,8 @@ test("a failing detail poll leaves the tabs and their terminals alone", async ({
       await fulfillAsHelm(route, { status: 500, contentType: "text/plain", body: "injected" });
     });
 
-    // Several poll intervals of nothing but failures.
+    // Nothing but failures for as long as the reader keeps asking.
+    feed.notify(2);
     await expect.poll(() => failures, { timeout: 20_000 }).toBeGreaterThanOrEqual(3);
 
     await expect(page.locator(".tab-slot")).toHaveCount(1);
@@ -7041,9 +7102,14 @@ test("a session the helm stops listing is reported as stale, not torn down", asy
   test.setTimeout(120_000);
   const title = `tab-stale-${Date.now()}`;
   let id: string | undefined;
+  // Stubbed: both the arrival and the clearing of the notice are the
+  // RESULT of a detail read, and a healthy page performs none on its own.
+  const feed = await stubFeed(page);
   try {
     const session = await openSessionWithTabs(page, request, title, 1);
     id = session.id;
+    await feed.waitForConnection(1);
+    feed.notify(1);
     const [tabId] = session.tabs;
     const before = await mountedIslands(page);
     await expect(page.locator(".refresh-stale")).toHaveCount(0);
@@ -7062,6 +7128,7 @@ test("a session the helm stops listing is reported as stale, not torn down", asy
     });
 
     const stale = page.locator(".refresh-stale");
+    feed.notify(2);
     await expect(stale).toBeVisible({ timeout: 15_000 });
     // Both readings named, neither claimed.
     await expect(stale).toContainText("deleted from another client");
@@ -7076,8 +7143,11 @@ test("a session the helm stops listing is reported as stale, not torn down", asy
     await runInShell(page, `terminal-${tabId}`, live.command, live.expected);
 
     // And it clears itself once the helm answers again — a staleness
-    // notice that outlived its cause would be its own lie.
+    // notice that outlived its cause would be its own lie. A 404 is an
+    // ANSWER rather than a failure, so the reader is idle and something has
+    // to ask again; the next notification is that something.
     missing = false;
+    feed.notify(3);
     await expect(stale).toHaveCount(0, { timeout: 15_000 });
   } finally {
     if (id) await cleanupSession(request, id);
@@ -9440,24 +9510,30 @@ async function stuckWebSocketFromNextLoad(page: Page) {
 }
 
 /**
- * Resolve once TWO further GET responses matching `pattern` have landed in
- * the page — that many polls completed since this was called.
+ * Trigger two reads matching `pattern` and resolve once both have landed in
+ * the page.
  *
- * Two, always, and it is not padding: the first response may belong to a
- * poll that was already in flight when the rename landed, which reports
- * the old title truthfully and is exactly the case the optimistic
- * correction exists to survive. The second cannot predate the rename, so a
- * title still standing after it came from the SERVER rather than from this
- * view's own optimism — which is the whole difference between a rename
- * that landed and one that only painted.
+ * Two, always, and it is not padding: the first read is the one that RETIRES
+ * an optimistic correction (`ListView`'s and `SessionView`'s `renamed`
+ * signals hold the typed title until a reply settles it), so a title still
+ * standing after the SECOND is a title the view is rendering from the
+ * server's own answer with no correction left underneath it — which is the
+ * whole difference between a rename that landed and one that only painted.
+ *
+ * `trigger` is what asks for each read, and it is a parameter rather than a
+ * wait because nothing asks on its own any more: this used to count polls,
+ * and a healthy page performs none (PLAN_M6_75.md item 6). Callers pass the
+ * feed stub's notification, which is what the helm would have sent.
  */
-async function afterTwoPolls(page: Page, pattern: RegExp) {
+async function afterTwoReads(page: Page, pattern: RegExp, trigger: () => void) {
   for (let i = 0; i < 2; i++) {
-    await page.waitForResponse(
+    const landed = page.waitForResponse(
       (response) =>
         response.request().method() === "GET" && pattern.test(response.url()),
       { timeout: 30_000 },
     );
+    trigger();
+    await landed;
   }
 }
 
@@ -9908,10 +9984,15 @@ test("replay-degrades-on-close: a socket closing mid-catch-up flushes, reveals, 
 
 // SPEC.md has listed rename in the v1 client surface since the beginning
 // (PLAN_M5.md item 6). From the list, the row's own field renames the
-// session and the row takes the new title AT ONCE — and, two polls later,
-// still has it, which is what separates a rename that reached the
+// session and the row takes the new title AT ONCE — and, two re-reads
+// later, still has it, which is what separates a rename that reached the
 // supervisor from one this view merely painted over its own listing.
-test("rename-from-list: the row takes the new title and keeps it across polls", async ({
+//
+// The re-reads are driven from here through a stubbed feed rather than
+// waited for: they used to be the listing poll, which M6.75 removed, and
+// making them this test's to trigger also removes the shared stack's
+// revision churn from the picture.
+test("rename-from-list: the row takes the new title and keeps it across re-reads", async ({
   page,
   request,
 }) => {
@@ -9919,6 +10000,8 @@ test("rename-from-list: the row takes the new title and keeps it across polls", 
   const title = `rename-list-${Date.now()}`;
   const renamed = `${title}-renamed`;
   let id: string | undefined;
+  const feed = await stubFeed(page);
+  let revision = 1;
   try {
     const created = await request.post("/api/sessions", {
       data: { cwd: "/tmp", invocation: FAKE_AGENT_INVOCATION, title },
@@ -9927,6 +10010,8 @@ test("rename-from-list: the row takes the new title and keeps it across polls", 
     id = (await created.json()).id as string;
 
     await page.goto("/");
+    await feed.waitForConnection(1);
+    feed.notify(revision);
     const row = page.locator(`[data-session-id="${id}"]`);
     await expect(row).toBeVisible({ timeout: 15_000 });
     await row.locator(".session-row-rename").click();
@@ -9937,7 +10022,7 @@ test("rename-from-list: the row takes the new title and keeps it across polls", 
     await row.locator(".rename-submit").click();
 
     // The field closes and the row reads the new name without waiting for
-    // a poll — the optimistic half of the contract.
+    // any re-read — the optimistic half of the contract.
     await expect(row.locator(".rename-form")).toHaveCount(0);
     await expect(row.locator(".session-title")).toHaveText(renamed);
 
@@ -9947,8 +10032,8 @@ test("rename-from-list: the row takes the new title and keeps it across polls", 
     const listed = await (await request.get(`/api/sessions/${id}`)).json();
     expect(listed.title).toBe(renamed);
 
-    // And the polled listing agrees — see `afterTwoPolls` for why two.
-    await afterTwoPolls(page, /\/api\/sessions$/);
+    // And the re-read listing agrees — see `afterTwoReads` for why two.
+    await afterTwoReads(page, /\/api\/sessions$/, () => feed.notify(++revision));
     await expect(row.locator(".session-title")).toHaveText(renamed);
     await expect(row.locator(".action-error")).toHaveCount(0);
   } finally {
@@ -9961,7 +10046,10 @@ test("rename-from-list: the row takes the new title and keeps it across polls", 
 // the session's freshly recomputed state — so the view has to keep working
 // (tab strip, restart offer, live terminal) around a header that just
 // changed under it.
-test("rename-from-session-view: the header takes the new title and keeps it across polls", async ({
+//
+// The re-reads are this test's to trigger, through a stubbed feed, for the
+// reason its list-side sibling above gives.
+test("rename-from-session-view: the header takes the new title and keeps it across re-reads", async ({
   page,
   request,
 }) => {
@@ -9969,11 +10057,15 @@ test("rename-from-session-view: the header takes the new title and keeps it acro
   const title = `rename-view-${Date.now()}`;
   const renamed = `${title}-renamed`;
   let id: string | undefined;
+  const feed = await stubFeed(page);
+  let revision = 1;
   try {
     const session = await createTabSession(request, title);
     id = session.id;
 
     await page.goto("/");
+    await feed.waitForConnection(1);
+    feed.notify(revision);
     await page.locator(`[data-session-id="${id}"]`).click();
     await page.waitForFunction(() => (window as any).__farhelmTermReady === true);
     await waitForTermText(page, "FAKE-AGENT READY");
@@ -9992,9 +10084,9 @@ test("rename-from-session-view: the header takes the new title and keeps it acro
     const fetched = await (await request.get(`/api/sessions/${id}`)).json();
     expect(fetched.title).toBe(renamed);
 
-    // The detail poll is what would revert an unprotected optimistic
+    // A detail re-read is what would revert an unprotected optimistic
     // paint; two of them must leave the header alone.
-    await afterTwoPolls(page, new RegExp(`/api/sessions/${id}$`));
+    await afterTwoReads(page, new RegExp(`/api/sessions/${id}$`), () => feed.notify(++revision));
     await expect(page.locator(".titlebar .title")).toHaveText(renamed);
 
     // The terminal underneath is untouched by the rename — nothing about
@@ -10370,42 +10462,42 @@ test("replay-stale-mount: a torn-down island's deferred ending cannot touch its 
 });
 
 // A rename field is an edit in progress, and the list re-renders for
-// reasons the user did not cause: one failed listing poll swaps the rows
+// reasons the user did not cause: one failed listing read swaps the rows
 // for an error line, unmounting every row and the open field with them.
 // The draft has to survive that, or a transient network blip silently
 // throws away what someone was in the middle of typing.
 //
-// The failure is injected the same way the confirming-state poll tests
-// inject theirs (a one-shot 500 armed only once the field is open), so
-// what is exercised is the real poll loop's real failure path.
-test("rename-draft-survives-a-failed-poll: the field keeps what was typed", async ({
+// The failure is injected the same way the confirming-state tests inject
+// theirs — a 500 latched on while the field is open, and a feed
+// notification to ask for the read that hits it — so what is exercised is
+// the real reader's real failure path.
+test("rename-draft-survives-a-failed-read: the field keeps what was typed", async ({
   page,
   request,
 }) => {
   test.setTimeout(90_000);
-  const title = `rename-poll-fail-${Date.now()}`;
+  const title = `rename-read-fail-${Date.now()}`;
   const draft = `half-typed-${Date.now()}`;
   let id: string | undefined;
 
-  let failArmed = false;
-  let failed = false;
+  let failing = false;
   await page.route("**/api/sessions", async (route) => {
     if (route.request().method() !== "GET") {
       await route.continue();
       return;
     }
-    if (failArmed && !failed) {
-      failed = true;
+    if (failing) {
       await fulfillAsHelm(route, {
         status: 500,
         contentType: "text/plain",
-        body: "injected poll failure",
+        body: "injected read failure",
       });
       return;
     }
     await route.continue();
   });
 
+  const feed = await stubFeed(page);
   try {
     const created = await request.post("/api/sessions", {
       data: { cwd: "/tmp", invocation: FAKE_AGENT_INVOCATION, title },
@@ -10414,21 +10506,27 @@ test("rename-draft-survives-a-failed-poll: the field keeps what was typed", asyn
     id = (await created.json()).id as string;
 
     await page.goto("/");
+    await feed.waitForConnection(1);
+    feed.notify(1);
     const row = page.locator(`[data-session-id="${id}"]`);
     await expect(row).toBeVisible({ timeout: 15_000 });
     await row.locator(".session-row-rename").click();
     await row.locator(".rename-input").fill(draft);
 
-    // Only now does the next poll fail, strictly after the field holds
+    // Only now does a listing read fail, strictly after the field holds
     // the draft.
-    failArmed = true;
+    failing = true;
+    feed.notify(2);
     // The rows really do go away — this is the transient state the draft
     // has to survive, not a bug the test is stepping around.
     await expect(page.locator(".status.error")).toBeVisible({ timeout: 10_000 });
     await expect(row).toHaveCount(0);
 
-    // The next poll succeeds and the row comes back, with the field still
-    // open and still holding what was typed into it.
+    // The next read succeeds and the row comes back, with the field still
+    // open and still holding what was typed into it. The reader retries a
+    // failed read on its own; the notification is belt and braces.
+    failing = false;
+    feed.notify(3);
     await expect(row).toHaveCount(1, { timeout: 10_000 });
     await expect(row.locator(".rename-input")).toHaveValue(draft);
 
@@ -11311,17 +11409,26 @@ test("bfcache-restore-lets-a-terminal-reconnect-again", async ({ page, request }
 // send a request whose safety clause the far end may ignore.
 //
 // The revocation is applied MID-RECOVERY on purpose: a tab that survives a
-// helm rollback learns about it from an ordinary poll, seconds after its
+// helm rollback learns about it from an ordinary REPLY, seconds after its
 // ladder started, and a permission captured when the terminal mounted
 // would be exactly the stale one.
+//
+// Which reply that is, is the one thing this test has to arrange for
+// itself. The stamp rides on whatever the page happens to read, and a
+// healthy page reads only when the feed says something changed — so the
+// feed is stubbed and the notification below is what sends the session view
+// to the helm and brings the rolled-back stamp back with it.
 test("latched-skew-revokes-automatic-reconnect", async ({ page, request }) => {
   await reconnectTimingsFromNextLoad(page, {
     delaysMs: [800, 800, 800, 800, 800, 800],
   });
+  const feed = await stubFeed(page);
   let ownId: string | undefined;
   try {
     const own = await openOwnTerminal(page, request, `latched-skew-revokes-automatic-reconnect-${Date.now()}`);
     ownId = own.id;
+    await feed.waitForConnection(1);
+    feed.notify(1);
     await rememberSocket(page, "terminal");
 
     // A recovery that is genuinely IN PROGRESS when the build changes: the
@@ -11343,8 +11450,9 @@ test("latched-skew-revokes-automatic-reconnect", async ({ page, request }) => {
     const surface = page.locator("#term-connecting");
     await expect(surface).toHaveAttribute("data-reconnect-phase", "retrying");
 
-    // Now the helm "changes build" under the open tab. The next poll latches
-    // the mismatch, which withdraws the permission this ladder was armed on.
+    // Now the helm "changes build" under the open tab. The next reply
+    // latches the mismatch, which withdraws the permission this ladder was
+    // armed on.
     await page.route("**/api/**", async (route) => {
       const response = await route.fetch();
       await route.fulfill({
@@ -11353,6 +11461,9 @@ test("latched-skew-revokes-automatic-reconnect", async ({ page, request }) => {
       });
     });
 
+    // And the notification is what makes that reply happen: the session view
+    // re-reads its own detail, and the stamp comes back with it.
+    feed.notify(2);
     await expect(page.locator(".build-skew")).toBeVisible({ timeout: 15_000 });
     await expect(
       surface,
@@ -11605,10 +11716,23 @@ test("manual-reconnect-takes-the-session-back", async ({ browser, page, request 
 //
 // The socket is deliberately left ALIVE and quiet (unlike the skew test
 // above, which closes it first) — a live, silent socket is the only state
-// in which an armed heartbeat can do damage. The timings are chosen around
-// the poll that latches the mismatch: the deadline under test has to fall
-// AFTER the revocation lands, or the test would be watching the heartbeat
-// work rather than watching it be withdrawn.
+// in which an armed heartbeat can do damage. The deadline under test has to
+// fall AFTER the revocation lands, or the test would be watching the
+// heartbeat work rather than watching it be withdrawn.
+//
+// That ordering used to rest on a poll: the mismatch latched on whatever
+// read came next, which was never more than an interval away. M6.75 removed
+// the polls, so the latch now waits for a read the FEED asks for — and on a
+// quiet fleet that is an unbounded wait, while the heartbeat's deadline runs
+// on regardless. Both variants below therefore drive the latch themselves
+// (stub the feed, rewrite the stamp, notify), which turns "the revocation
+// lands before the deadline" from an assumption about the shared stack into
+// a fact about this test.
+//
+// The probe count is likewise taken only once the revocation is ON SCREEN. A
+// probe sent before that is a probe sent to a helm this page still trusted —
+// correct behavior, not the failure under test — and counting it was how a
+// slow engine turned a legitimate probe into a failure.
 for (const when of [
   {
     name: "before the probe is sent",
@@ -11619,8 +11743,10 @@ for (const when of [
   },
   {
     name: "while the answer is outstanding",
-    // Probe goes out almost at once; the answer stays due long enough for
-    // the revocation to arrive while it is outstanding.
+    // Probe goes out almost at once; the answer stays due long enough that
+    // the revocation — which the test triggers, so it lands in a round trip
+    // rather than whenever the fleet next stirs — arrives while it is still
+    // outstanding.
     timings: { heartbeatIdleMs: 800, heartbeatTimeoutMs: 12_000 },
     awaitProbe: true,
     settleMs: 13_000,
@@ -11640,6 +11766,7 @@ for (const when of [
       ...when.timings,
       delaysMs: [200, 200, 200, 200, 200, 200],
     });
+    const feed = await stubFeed(page);
     let ownId: string | undefined;
     try {
       const own = await openOwnTerminal(
@@ -11648,6 +11775,25 @@ for (const when of [
         `skew-revocation-${Date.now()}`,
       );
       ownId = own.id;
+      /**
+       * Hand the page a revision however it can be reached: on the socket it
+       * has open now, and on every socket it opens later.
+       *
+       * An ungreeted stub socket is torn down by the client's own handshake
+       * deadline and reopened a ladder rung later, so a bare `notify` is a
+       * bet that the socket seen a moment ago is still there — and losing
+       * that bet throws rather than flakes.
+       */
+      const greet = (revision: number) => {
+        feed.notifyOnConnect(revision);
+        if (feed.openSockets() > 0) feed.notify(revision);
+      };
+      // Healthy from here on, so nothing reads until this test says so — and
+      // so the one read that matters below is unmistakably the one it asked
+      // for. A handshake is an HTTP read; it says nothing on the terminal
+      // socket and so leaves the heartbeat's idle window alone.
+      await feed.waitForConnection(1);
+      greet(1);
       await rememberSocket(page, "terminal");
 
       // Silence the island so the idle window actually elapses: the socket
@@ -11660,7 +11806,6 @@ for (const when of [
           .poll(() => pings.length, { timeout: 15_000, message: "the probe must go out first" })
           .toBeGreaterThan(0);
       }
-      const pingsBefore = pings.length;
 
       await page.route("**/api/**", async (route) => {
         const response = await route.fetch();
@@ -11669,7 +11814,16 @@ for (const when of [
           headers: { ...response.headers(), "x-farhelm-build": "9999.0.0-rolled-back" },
         });
       });
+      // The read that carries the rolled-back stamp, asked for rather than
+      // waited for: this view re-reads its own session on a notification, and
+      // the reply latches the mismatch a round trip later.
+      greet(2);
       await expect(page.locator(".build-skew")).toBeVisible({ timeout: 15_000 });
+
+      // Sampled HERE, with the revocation on screen: everything counted from
+      // now on was sent by a page that had already given up on this helm,
+      // which is the only thing this test is entitled to complain about.
+      const pingsBefore = pings.length;
 
       // Past the deadline the withdrawal was supposed to disarm.
       await page.waitForTimeout(when.settleMs);
@@ -11944,23 +12098,35 @@ try {
 });
 
 // The rollback window: a helm that went BACK to a build without the
-// non-displacing route, in the seconds before the next poll can latch the
-// mismatch.
+// non-displacing route, in the seconds before the page's next reply can
+// latch the mismatch.
 //
-// The build stamp alone cannot close this — it is up to a poll interval
-// stale, and the first retry fires in half a second. What closes it is
-// that the automatic attach asks by CHOOSING A PATH the old helm does not
-// serve: the handshake fails, the attempt counts as a failure, and the
-// ladder carries on until the stamp catches up. The property under test is
-// negative and absolute: no displacing attach may occur in that window.
+// The build stamp alone cannot close this — it is only as fresh as the last
+// reply the page happened to read, and the first retry fires in half a
+// second. What closes it is that the automatic attach asks by CHOOSING A
+// PATH the old helm does not serve: the handshake fails, the attempt counts
+// as a failure, and the ladder carries on until the stamp catches up. The
+// property under test is negative and absolute: no displacing attach may
+// occur in that window.
+//
+// The window is STAGED here rather than raced: the ladder is allowed to
+// climb until it has really made an attempt, and only then does a feed
+// notification send the page to the helm for the reply that latches the
+// mismatch. Against the real feed the window's length is whatever the fleet
+// happens to be doing, which is a different test on every run — and a short
+// one is a test that proves nothing, since a ladder that never attempted
+// has no displacing attach to have avoided.
 test("a-rolled-back-helm-gets-no-automatic-attach", async ({ page, request }) => {
 await reconnectTimingsFromNextLoad(page, {
   delaysMs: [200, 200, 200, 200, 200, 200],
 });
+const feed = await stubFeed(page);
 let ownId: string | undefined;
 try {
   const own = await openOwnTerminal(page, request, `a-rolled-back-helm-gets-no-automatic-att-${Date.now()}`);
   ownId = own.id;
+  await feed.waitForConnection(1);
+  feed.notify(1);
 
   // The old helm, simulated where the socket is CONSTRUCTED rather than
   // through `page.routeWebSocket` (which only governs sockets created
@@ -11996,8 +12162,18 @@ try {
   });
 
   await page.evaluate(() => (window as any).__farhelmIslands["terminal"].ws.close());
-  // Several rungs' worth of time, spanning the window before the stamp
-  // latches and the manual-only state after it.
+  // The rollback window itself: the ladder is genuinely climbing against a
+  // helm whose stamp this page has not read yet.
+  await expect
+    .poll(() => page.evaluate(() => (window as any).__attachCounts.unowned), {
+      timeout: 15_000,
+      message: "a ladder that never attempted proves nothing about what it attempted with",
+    })
+    .toBeGreaterThan(0);
+
+  // And now the stamp catches up, because the page reads a reply: several
+  // rungs' worth of time then passes in the manual-only state.
+  feed.notify(2);
   await expect(page.locator(".build-skew")).toBeVisible({ timeout: 15_000 });
   await page.waitForTimeout(1_500);
 
@@ -12063,8 +12239,29 @@ test("client-helm-skew-prompts-reload", async ({ page, request }) => {
   // the slow reply that left the old helm arriving after a fast one from
   // the new build. Certainty here is worth more than tidiness, and the
   // remedy it keeps recommending (reload) stays correct either way.
+  //
+  // The agreeing replies have to be USER-DRIVEN, and that is the withdrawal
+  // rule showing through (SPEC_impl.md's version-and-skew section): a skewed
+  // page withdraws every UNATTENDED behavior — the feed, the fallback poll,
+  // the heartbeat, automatic reconnect — while "anything the user explicitly
+  // asks for keeps working". Nothing reads on its own here, so a test that
+  // waited for a read would wait forever; applying the (empty) filter is a
+  // person asking, and a submit always reads (`ListView`'s `apply_filter`).
+  //
+  // So these two waits assert the explicit half of that rule as much as they
+  // stage the latch: a page that stood its EXPLICIT reads down under skew
+  // would hang here rather than fail an assertion, which is the shape this
+  // exact regression took on WebKit. Two submits, two agreeing replies.
   await page.unroute("**/api/**");
-  await afterTwoPolls(page, /\/api\/sessions/);
+  for (let i = 0; i < 2; i++) {
+    const landed = page.waitForResponse(
+      (response) =>
+        response.request().method() === "GET" && /\/api\/sessions/.test(response.url()),
+      { timeout: 30_000 },
+    );
+    await page.locator(".filter-apply").click();
+    await landed;
+  }
   await expect(
     notice,
     "a mismatch, once seen, survives until the page is actually reloaded",
@@ -13605,6 +13802,10 @@ test.describe("multi-host", () => {
   test("create-dialog-selector-disappearance: a vanished choice is announced, not substituted", async ({
     page,
   }) => {
+    // The registry read that discovers the disappearance is a feed-triggered
+    // one (PLAN_M6_75.md item 6 removed the hosts poll), so the moment it
+    // happens is this test's to choose rather than the shared fleet's.
+    const feed = await stubFeed(page);
     let offerExtra = true;
     await page.route("**/api/hosts", async (route) => {
       const response = await route.fetch();
@@ -13633,14 +13834,19 @@ test.describe("multi-host", () => {
     });
 
     await page.goto("/");
+    await feed.waitForConnection(1);
+    feed.notify(1);
     await page.locator(".new-session-button").click();
     const selector = page.locator(".create-session-host");
     await selector.selectOption({ label: "user@ephemeral" });
     await expect(selector).toHaveValue("8100");
     await expect(page.locator(".create-session-host-note")).toHaveCount(0);
 
-    // The host is removed from under the open dialog.
+    // The host is removed from under the open dialog, and the page finds out
+    // the way it finds out about anything now: a revision notification and
+    // its own re-read.
     offerExtra = false;
+    feed.notify(2);
     await expect(page.locator(".create-session-host-note")).toBeVisible({
       timeout: 15_000,
     });
@@ -13930,14 +14136,18 @@ test.describe("multi-host", () => {
   // INCARNATION (`hosts::host_incarnation`), which the destination is part
   // of.
   //
-  // The retarget is applied to the hosts POLL rather than to the real
+  // The retarget is applied to the hosts READ rather than to the real
   // registry: what is under test is the client's binding, and actually
   // retargeting the harness's remote would disconnect the fleet for a
-  // minute to prove something about a string comparison.
+  // minute to prove something about a string comparison. The read that
+  // discovers it is triggered from here through a stubbed feed — a healthy
+  // page re-reads the registry when it is told something changed, and
+  // nothing else (PLAN_M6_75.md item 6).
   test("create-intent-key-rebinds-on-retarget: a moved host is a new intent", async ({
     page,
     request,
   }) => {
+    const feed = await stubFeed(page);
     const local = (await apiHosts(request)).find((host: any) => host.kind === "local");
     const title = `rebind-retarget-${Date.now()}`;
     let moved = false;
@@ -13975,6 +14185,8 @@ test.describe("multi-host", () => {
 
     try {
       await page.goto("/");
+      await feed.waitForConnection(1);
+      feed.notify(1);
       // A directory that does not exist, so both attempts fail and the
       // assertion is about the key rather than about which create happened
       // to succeed.
@@ -13986,8 +14198,10 @@ test.describe("multi-host", () => {
       await form.locator('button[type="submit"]').click();
       await expect(form.locator(".create-session-error")).toBeVisible();
 
-      // Same row, same id, different machine behind it.
+      // Same row, same id, different machine behind it — and a notification
+      // to send the page looking, since nothing else will.
       moved = true;
+      feed.notify(2);
       await expect(page.locator(`[data-host-id="${local.id}"] .host-name`)).toHaveText(
         "this machine",
         { timeout: 15_000 },

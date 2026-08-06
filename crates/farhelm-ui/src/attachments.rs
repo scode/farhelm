@@ -586,7 +586,7 @@ const SKEW_SILENT_TEXT: &str = "this page was built against a different farhelm 
 /// own spec. A view with the maximum number of tabs would otherwise carry
 /// thirty-odd identical copies of this through the eval channel on every
 /// desired-set change. `SessionView` memoizes the serialized result by
-/// session id, so a three-second detail poll does not rebuild it.
+/// session id, so a feed-driven detail read does not rebuild it.
 ///
 /// Every string here is authored in this module (see the constants above)
 /// so that the wording a user reads when an upload fails is reviewable in

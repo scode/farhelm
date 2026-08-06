@@ -1,6 +1,7 @@
 //! One open session: `SessionView`, the stateful component that owns the
-//! terminal tabs feature's signals, futures, and effect (mount/unmount,
-//! polling, the optimistic open/close corrections, the lease). The tab
+//! terminal tabs feature's signals, futures, and effects (mount/unmount,
+//! the reads the invalidation feed drives, the optimistic open/close
+//! corrections, the lease). The tab
 //! domain it calls into — which tabs to show, their labels and DOM ids,
 //! the close-confirmation wording (renderer-free, unit-tested), plus the
 //! strip's presentational `TabStripItem` — lives in `tabs`; see that
@@ -13,12 +14,15 @@ use std::collections::{HashMap, HashSet};
 use dioxus::prelude::*;
 
 use crate::api::{
-    POLL_INTERVAL_MS, close_tab, fetch_hosts, fetch_session, mint_lease, open_tab, rename_session,
-    restart_mode_for, restart_session,
+    close_tab, fetch_hosts, fetch_session, mint_lease, open_tab, rename_session, restart_mode_for,
+    restart_session,
 };
 use crate::attachments::{attachment_policy, attachment_status_element_id};
+use crate::feed::{fallback_polls_now, fallback_sleep, use_feed_reader};
 use crate::hosts::{HostLookup, HostsRead, is_connected, stale_session_notice};
+use crate::ops::ReadGate;
 use crate::peer::PeerLine;
+use crate::reader::{SurfaceReader, Trigger, request_read};
 use crate::reconnect::reconnect_policy;
 use crate::rename::RenameForm;
 use crate::status::status_badge;
@@ -141,7 +145,7 @@ use crate::{ApiBase, RestartOffer, Session, SessionStatus};
 /// described as unreachable hides the upgrade that fixes it and a
 /// mismatched one hides that a decision is being waited on. That costs one
 /// extra read of `/api/hosts`, taken only while the session is stale — see
-/// the host-state poll below.
+/// the host-state read below.
 ///
 /// The restart affordance deliberately stays: a refused restart surfaces the
 /// helm's own words, which is the same bargain the list's stale rows make
@@ -164,7 +168,8 @@ use crate::{ApiBase, RestartOffer, Session, SessionStatus};
 /// full set of terminals it wants and hands it to `farhelmTerm.sync()`,
 /// which reconciles (see terminal.js's header for why the diff belongs on
 /// that side). The effect below is therefore idempotent by construction,
-/// which is what makes it safe for a 3-second poll to re-run it forever.
+/// which is what makes it safe for every feed notification to re-run it
+/// forever.
 ///
 /// ## The sync-generation token
 ///
@@ -178,6 +183,63 @@ use crate::{ApiBase, RestartOffer, Session, SessionStatus};
 /// separate concern guarded entirely inside terminal.js (its `pendings`
 /// replacement-and-clear scheme — see that function's docs); this token
 /// does not reach that far.
+/// What a detail reply may do to this view.
+///
+/// Three outcomes rather than a boolean, because "do not apply this" has two
+/// meanings that differ in what happens NEXT — and collapsing them is what
+/// left a restart showing the run that had just ended.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Admission {
+    /// Commit it: this is the newest word about the session as it is now.
+    Apply,
+    /// A newer read has already committed. Drop this reply, and count the
+    /// surface as ANSWERED — someone else did the work.
+    Superseded,
+    /// A restart happened after this read started, so the reply describes a
+    /// run that no longer exists. Drop it, and do NOT count the surface as
+    /// answered: nothing was applied, and the demand that produced this read
+    /// is still owed.
+    Discarded,
+}
+
+/// Whether a detail reply may touch this view at all.
+///
+/// Split out of `SessionView`'s commit path so the rule can be exercised
+/// without a Dioxus runtime, and because the shape of it is the whole point:
+/// ONE decision covering EVERY answer the helm can give, rather than a gate
+/// on the happy path and a separate ungated route for the rest. It is
+/// deliberately blind to the PAYLOAD — a session and a 404 are both
+/// statements about the same moment, and the bug this shape fixes was
+/// exactly a 404 that skipped the epoch check because it was not an
+/// `Ok(Some(..))`.
+///
+/// - **Ordering** is `ops::ReadGate`'s: an older reply landing last must
+///   lose, or a stale session overwrites newer status, title and tabs, and a
+///   stale 404 raises the staleness notice over a view that was just
+///   refreshed. Neither self-corrects — a healthy feed keeps the fallback
+///   poll off, and the next notification only comes if the fleet changes.
+/// - **The restart epoch** is a different question: not "is this the newest
+///   reply" but "does this reply describe the run this view is showing".
+///   A read held across a restart can be both newest and obsolete.
+///
+/// A transport failure never reaches here: it commits nothing, and admitting
+/// it would let a dropped request advance the ordering and then refuse the
+/// perfectly good reply that follows it.
+fn admit_detail(
+    reads: &mut ReadGate,
+    generation: u64,
+    started_at: u32,
+    epoch_now: u32,
+) -> Admission {
+    if !reads.accept_success(generation) {
+        return Admission::Superseded;
+    }
+    if started_at != epoch_now {
+        return Admission::Discarded;
+    }
+    Admission::Apply
+}
+
 #[component]
 pub(crate) fn SessionView(session: Session, on_back: EventHandler<()>) -> Element {
     let base = use_context::<ApiBase>().0;
@@ -210,12 +272,12 @@ pub(crate) fn SessionView(session: Session, on_back: EventHandler<()>) -> Elemen
     //
     // The correction is the tab strip's `(value, observed_from)` scheme
     // applied to a title, and it earns its keep for the same reason: the
-    // detail poll below can have a fetch in the air from before the rename
+    // detail read below can have a fetch in the air from before the rename
     // landed, and committing that reply's older title would flip the
-    // header back for up to a full poll interval. Pairing the new title
-    // with the index of the first poll GUARANTEED to start after the
-    // rename's response is what tells "this reply cannot have carried it
-    // yet" apart from "the server disagrees".
+    // header back until the next read landed. Pairing the new title with
+    // the index of the first read GUARANTEED to start after the rename's
+    // response is what tells "this reply cannot have carried it yet" apart
+    // from "the server disagrees".
     //
     // The draft is a signal here rather than inside `RenameForm` for the
     // reason that component's docs give: a re-render can unmount the form
@@ -227,12 +289,31 @@ pub(crate) fn SessionView(session: Session, on_back: EventHandler<()>) -> Elemen
     let mut renamed = use_signal(|| None::<(String, u64)>);
     let mut rename_draft = use_signal(String::new);
     // Counts restart ATTEMPTS, and versions every read of this session
-    // against them. The detail poll below is a round trip that can outlive
+    // against them. The detail read below is a round trip that can outlive
     // a restart the user starts while one of its fetches is in flight;
     // without this, that stale answer would land on top of the restart's
     // own fresher one and the view would go back to describing the run
     // that no longer exists.
     let mut restart_epoch = use_signal(|| 0_u32);
+    // Which of several in-flight reads may be BELIEVED, per surface
+    // (`ops::ReadGate`). Two gates rather than one because they order two
+    // unrelated resources: a slow `/api/hosts` must not make a fresh session
+    // detail look superseded, or vice versa.
+    //
+    // Distinct from `restart_epoch`, which answers a different question —
+    // that one invalidates reads that span a restart, this one orders reads
+    // against each other. Both are needed: a read can be perfectly current
+    // with respect to restarts and still be the older of two replies.
+    let mut detail_reads = use_signal(ReadGate::default);
+    let mut host_reads = use_signal(ReadGate::default);
+    // How many times this session has crossed the stale/fresh line. The
+    // host-state read's own epoch, mirroring what `restart_epoch` does for
+    // the detail read: ordering says which of two replies is newer, and this
+    // says whether a reply is still about the situation that asked for it.
+    // A host reading taken while the session was stale must not explain a
+    // session that has since gone fresh, and must not be the thing that
+    // fires the reconnect follow-up.
+    let mut stale_epoch = use_signal(|| 0_u32);
 
     // This view's attachment lease, `None` until minting finishes (it is
     // an `await` on both renderers) and `lease_error` instead if it never
@@ -245,13 +326,13 @@ pub(crate) fn SessionView(session: Session, on_back: EventHandler<()>) -> Elemen
     // attached regardless of what this holds.
     let mut selected = use_signal(|| None::<String>);
     // The optimistic corrections `visible_tabs` applies over the server's
-    // list, so the user sees their own open/close before the next poll
-    // confirms it. Pruned by that poll (below) once the server agrees.
+    // list, so the user sees their own open/close before the next detail
+    // read confirms it. Pruned by that read (below) once the server agrees.
     //
     // `opened_tabs` carries a SEQUENCE NUMBER per entry, not just an id,
     // and that is what keeps a phantom tab from living forever. A reply
     // that omits an optimistic tab is only evidence of absence if the
-    // request behind it was sent AFTER the open completed; a poll already
+    // request behind it was sent AFTER the open completed; a read already
     // in flight when the tab was created legitimately predates it. Without
     // the number, "absent" could never be distinguished from "too early",
     // so an entry the server would never list — one another client closed
@@ -260,10 +341,14 @@ pub(crate) fn SessionView(session: Session, on_back: EventHandler<()>) -> Elemen
     // was closed. `poll_sequence` below is the counter both sides read.
     let mut opened_tabs = use_signal(Vec::<(String, u64)>::new);
     let mut closed_tabs = use_signal(HashSet::<String>::new);
-    // How many detail polls have been STARTED by this view. Incremented at
-    // each fetch's launch, so a poll's own index is the value it read
+    // How many detail reads have been STARTED by this view. Incremented at
+    // each fetch's launch, so a read's own index is the value it took
     // before incrementing, and an optimistic open recording the current
-    // value names the first poll that could possibly know about it.
+    // value names the first read that could possibly know about it.
+    //
+    // Named for the polls it used to count, deliberately: `ListView` keeps
+    // the same counter under the same name, and renaming one of them would
+    // leave two vocabularies for one scheme.
     let mut poll_sequence = use_signal(|| 0_u64);
     // In-flight guards, mirroring `ListView`'s `pending`: one flag for the
     // single add control, a set for closes (which are per tab and can
@@ -272,7 +357,7 @@ pub(crate) fn SessionView(session: Session, on_back: EventHandler<()>) -> Elemen
     let mut closing_tabs = use_signal(HashSet::<String>::new);
     // Which tab, if any, is showing the inline close confirmation.
     let mut confirming_close = use_signal(|| None::<String>);
-    // Set when the detail poll gets a 404 for this session: what is on
+    // Set when a detail read gets a 404 for this session: what is on
     // screen is the last state that DID arrive, and this says so. See
     // `fetch_session` for why a 404 cannot be read as "deleted" — the
     // helm's detail route is listing-backed and inherits its cap — and
@@ -289,8 +374,8 @@ pub(crate) fn SessionView(session: Session, on_back: EventHandler<()>) -> Elemen
     let mut tab_errors = use_signal(HashMap::<String, String>::new);
     // The hosts read behind a stale session's notice, refreshed ONLY while
     // the session is stale — that is the one time this view needs it, and
-    // polling `/api/hosts` for every open terminal would be a second request
-    // per tick to answer a question nobody is asking.
+    // reading `/api/hosts` for every open terminal would be a second request
+    // per notification to answer a question nobody is asking.
     //
     // The four-state model rather than an `Option<Host>`, because this
     // surface has to tell three failures apart: not read yet, could not be
@@ -315,8 +400,8 @@ pub(crate) fn SessionView(session: Session, on_back: EventHandler<()>) -> Elemen
         }
     });
 
-    // Poll the session DETAIL for as long as this view is open, at the
-    // same cadence `ListView` polls the listing (PLAN_M4.md item 6).
+    // Keep the session DETAIL current for as long as this view is open
+    // (PLAN_M4.md item 6, rebuilt on the feed by PLAN_M6_75.md item 6).
     //
     // Through M3 this was ONE refresh on open, and its doc said polling
     // was deliberately not wanted: the `Session` this view is handed can
@@ -328,171 +413,384 @@ pub(crate) fn SessionView(session: Session, on_back: EventHandler<()>) -> Elemen
     // change that, and only that: the tab list has no server-side recheck
     // standing behind it, and SPEC.md's changes-appear-automatically rule
     // means a tab opened or closed from another client has to show up
-    // without a reload. Polling the detail is the interim mechanism for
-    // exactly that reason M2 chose it for the list; M6.75's live push
-    // replaces both together. The status refresh comes along for free and
-    // is strictly better than the single shot it replaces.
+    // without a reload. M2's poll was the interim mechanism; the
+    // invalidation feed is what actually delivers that promise, and the
+    // status refresh comes along with it for free.
     //
-    // Scoped to a `use_future` owned by this component, so it stops for
-    // free when the view unmounts — the same lifecycle `ListView`'s poll
-    // relies on.
+    // Every trigger is scoped to this component, so all of them stop when
+    // the view unmounts — the same lifecycle the poll relied on, now
+    // carrying the stronger property that only the MOUNTED page re-reads.
+    // Each of the two surfaces (this session's detail, and the host registry
+    // behind a stale notice) runs its reads through one `reader`, so a burst
+    // of notifications coalesces into one follow-up read and a read that
+    // never answered is retried rather than forgotten.
+    //
     // Everything that happens to a detail reply once it is BACK: decide
     // whether it still speaks for this view, retire the optimistic
     // corrections it settles, and paint it.
     //
-    // Hoisted out of the loop so the poll body reads as what it is — a
+    // Hoisted out of the read so the read body reads as what it is — a
     // fetch and a commit — rather than as forty lines in which the two are
     // interleaved. The counters it needs are PARAMETERS rather than reads
-    // of their own, and that is the load-bearing part: both must be sampled
-    // synchronously at the point the request is issued, BEFORE the `await`,
-    // or they stop describing the request they are supposed to version.
-    // `restart_epoch` is read a second time INSIDE, after the await, and
-    // that one has to stay here: it is the current value that `started_at`
-    // is compared against.
+    // of their own, and that is the load-bearing part: all three must be
+    // sampled synchronously at the point the request is issued, BEFORE the
+    // `await`, or they stop describing the request they are supposed to
+    // version. `restart_epoch` is read a second time INSIDE, after the
+    // await, and that one has to stay here: it is the current value that
+    // `started_at` is compared against.
+    //
+    // ## Two orderings, and why the epoch is not enough on its own
+    //
+    // `started_at` versions a reply against RESTARTS, which is a different
+    // question from whether a reply is the newest one. Three triggers read
+    // this session — the mount read, the feed's re-read, the host-state
+    // follow-up — and they overlap freely, so without a generation gate an
+    // older reply committing last would silently overwrite newer status,
+    // title and tabs. Nothing would correct it either: with the feed healthy
+    // the fallback poll is off, and the next notification only arrives if
+    // the fleet changes again.
+    //
+    // ## The epoch has TWO boundaries, and both are bumps
+    //
+    // A restart invalidates reads on either side of itself, and they are
+    // different sets:
+    //
+    // - **In flight when the user clicked.** The bump before the request
+    //   goes out invalidates every read already walking. Those replies
+    //   describe the run that is being replaced, and the newest of them can
+    //   easily land after the restart has finished — putting the old run's
+    //   status, offer and tabs back on screen.
+    // - **STARTED DURING the restart.** The bump after it finishes
+    //   invalidates reads issued while the request was in the air. Those
+    //   share the first bump's epoch, so they pass that guard, and they saw
+    //   a session mid-relaunch — a supervisor that has torn the old pane
+    //   down and not yet execed the new agent. Without the second bump the
+    //   view would settle on that intermediate state and stay there.
+    //
+    // The refresh a restart owes is therefore issued AFTER the second bump
+    // (see `restart`), which is what makes it the only read in the set that
+    // can commit.
+    //
+    // Every ANSWER goes through both guards, 404s included, and the return
+    // value says which of the three things happened (`Admission`). A caller
+    // needs that distinction: a reply the epoch DISCARDED applied nothing, so
+    // the demand behind it is still owed and reporting the read as answered
+    // would spend a notification on nothing.
+    //
+    // Takes the reply as an `Option<Session>` rather than the fetch's own
+    // `Result`: an error commits nothing at all, so the caller drops it
+    // before this closure is ever reached and the failure arm here would be
+    // one nobody could take.
     let mut commit_detail =
-        move |fetched: Result<Option<Session>, String>, started_at: u32, index: u64| {
-            // A 404 is surfaced rather than absorbed, and deliberately
-            // NOT acted on: the view keeps everything it has —
-            // metadata, tabs, live terminals — and merely stops
-            // claiming to be current. `fetch_session`'s docs carry the
-            // reason this is not "the session was deleted"; a
-            // transport error is left silent because a poll that
-            // failed to reach the helm says nothing about the session
-            // at all, and one dropped request every few seconds is not
-            // worth a banner.
-            if matches!(fetched, Ok(None)) {
-                refresh_stale.set(true);
-            }
-            if let Ok(Some(fresh)) = fetched
-                && *restart_epoch.peek() == started_at
-            {
-                refresh_stale.set(false);
-                // Prune the optimistic corrections this reply settles.
-                // Deliberately NOT done on a failed or 404 fetch — an
-                // error carries no tab list at all, and a transient
-                // failure is not evidence about what exists
-                // (`ListView`'s poll makes the same call for the same
-                // reason).
-                let live: HashSet<&str> = fresh.tabs.iter().map(|tab| tab.id.as_str()).collect();
-                // An optimistic open retires two ways: the server now
-                // lists it (it graduated to the real list), or this
-                // poll STARTED after the open and still does not
-                // mention it (it is genuinely gone — closed from
-                // another client between creation and this view's
-                // first sight of it). A poll that predates the open
-                // says nothing either way and leaves it alone.
-                opened_tabs.write().retain(|(id, observed_from)| {
-                    !live.contains(id.as_str()) && index < *observed_from
-                });
-                closed_tabs.write().retain(|id| live.contains(id.as_str()));
-                // The optimistic rename retires on exactly the two
-                // reads that settle it — the server now reports this
-                // title (it graduated), or a reply GUARANTEED to have
-                // started after the rename's response completed
-                // reports a different one (another client renamed it
-                // afterwards, and the server wins). A reply that may
-                // predate it says nothing either way and leaves it
-                // alone; that bound is conservative rather than exact
-                // (see `on_rename_submit`), which can only hold a
-                // correction a little longer than needed.
-                let settled = renamed
-                    .peek()
-                    .as_ref()
-                    .is_some_and(|(title, observed_from)| {
-                        &fresh.title == title || index >= *observed_from
+        move |generation: u64, fetched: Option<Session>, started_at: u32, index: u64| {
+            match admit_detail(
+                &mut detail_reads.write(),
+                generation,
+                started_at,
+                *restart_epoch.peek(),
+            ) {
+                // A newer read already spoke for this view; this one is spent
+                // rather than lost.
+                Admission::Superseded => true,
+                // Held across a restart: it describes a run that no longer
+                // exists. Nothing is applied and nothing is satisfied.
+                Admission::Discarded => false,
+                Admission::Apply => {
+                    // A 404 is surfaced rather than absorbed, and deliberately
+                    // NOT acted on: the view keeps everything it has —
+                    // metadata, tabs, live terminals — and merely stops
+                    // claiming to be current. `fetch_session`'s docs carry the
+                    // reason this is not "the session was deleted".
+                    let Some(fresh) = fetched else {
+                        refresh_stale.set(true);
+                        return true;
+                    };
+                    refresh_stale.set(false);
+                    // Prune the optimistic corrections this reply settles.
+                    // Deliberately NOT done on a failed or 404 fetch — an
+                    // error carries no tab list at all, and a transient
+                    // failure is not evidence about what exists
+                    // (`ListView`'s commit path makes the same call for the
+                    // same reason).
+                    let live: HashSet<&str> =
+                        fresh.tabs.iter().map(|tab| tab.id.as_str()).collect();
+                    // An optimistic open retires two ways: the server now
+                    // lists it (it graduated to the real list), or this
+                    // read STARTED after the open and still does not
+                    // mention it (it is genuinely gone — closed from
+                    // another client between creation and this view's
+                    // first sight of it). A read that predates the open
+                    // says nothing either way and leaves it alone.
+                    opened_tabs.write().retain(|(id, observed_from)| {
+                        !live.contains(id.as_str()) && index < *observed_from
                     });
-                if settled {
-                    renamed.set(None);
+                    closed_tabs.write().retain(|id| live.contains(id.as_str()));
+                    // The optimistic rename retires on exactly the two
+                    // reads that settle it — the server now reports this
+                    // title (it graduated), or a reply GUARANTEED to have
+                    // started after the rename's response completed
+                    // reports a different one (another client renamed it
+                    // afterwards, and the server wins). A reply that may
+                    // predate it says nothing either way and leaves it
+                    // alone; that bound is conservative rather than exact
+                    // (see `on_rename_submit`), which can only hold a
+                    // correction a little longer than needed.
+                    let settled = renamed
+                        .peek()
+                        .as_ref()
+                        .is_some_and(|(title, observed_from)| {
+                            &fresh.title == title || index >= *observed_from
+                        });
+                    if settled {
+                        renamed.set(None);
+                    }
+                    current.set(fresh);
+                    true
                 }
-                current.set(fresh);
             }
         };
 
-    let refresh_base = base.clone();
-    let refresh_id = session.id.clone();
-    use_future(move || {
-        let base = refresh_base.clone();
-        let id = refresh_id.clone();
+    // One detail read, shared by every trigger — the mount read, the feed's
+    // re-read, the fallback poll, and the host-state read's follow-up. Going
+    // through one door is what made replacing the poll with the feed a
+    // change of TRIGGER only: the commit closure above, and every
+    // reconciliation rule in it, is reached the same way from all of them.
+    //
+    // All three versioning values are sampled synchronously, BEFORE the
+    // await, and that is load-bearing rather than tidy. `generation` orders
+    // this read against every other one; `started_at` versions it against
+    // restarts, so a restart landing mid-flight invalidates only the request
+    // that was in the air when it happened; `index` is this read's position
+    // in the view's own read order, which is what tells an optimistic tab
+    // whether this reply is late enough to be evidence about it. Sampled
+    // after the await, all three would describe a moment the reply has
+    // already outlived.
+    //
+    // Reports whether the helm ANSWERED, which is what the surface reader
+    // needs (see `reader`). A 404 counts: the helm replied about this
+    // session, the view said so, and retrying the same question in a loop
+    // would not change the answer.
+    let detail_base = base.clone();
+    let detail_id = session.id.clone();
+    let read_detail = move || {
+        let base = detail_base.clone();
+        let id = detail_id.clone();
+        let generation = detail_reads.write().start();
+        let started_at = restart_epoch.peek().to_owned();
+        let index = poll_sequence.peek().to_owned();
+        poll_sequence += 1;
         async move {
-            loop {
-                // Both counters are read per iteration, not once outside
-                // the loop. `started_at` versions THIS fetch against
-                // restarts, so a restart landing mid-flight invalidates
-                // only the request that was in the air when it happened;
-                // `index` is this poll's position in the view's own poll
-                // order, which is what tells an optimistic tab whether
-                // this reply is late enough to be evidence about it.
-                let started_at = restart_epoch.peek().to_owned();
-                let index = poll_sequence.peek().to_owned();
-                poll_sequence += 1;
-                let fetched = fetch_session(&base, &id).await;
-                commit_detail(fetched, started_at, index);
-                // Same per-target sleep split as `ListView`'s poll — see
-                // its own comment for why each target gets its own idiom.
-                #[cfg(target_arch = "wasm32")]
-                gloo_timers::future::TimeoutFuture::new(POLL_INTERVAL_MS as u32).await;
-                #[cfg(not(target_arch = "wasm32"))]
-                tokio::time::sleep(std::time::Duration::from_millis(POLL_INTERVAL_MS)).await;
+            // A read that never reached the helm is not evidence about the
+            // session and never reaches the commit path — the surface reader
+            // retries it (see `reader`).
+            let Ok(fetched) = fetch_session(&base, &id).await else {
+                return false;
+            };
+            // The commit's own answer, because a reply can arrive and still
+            // leave the surface unread: one the restart epoch discards
+            // applied nothing, so the demand stands and the reader asks
+            // again.
+            commit_detail(generation, fetched, started_at, index)
+        }
+    };
+
+    // The detail surface's reader: one read at a time, notices arriving
+    // mid-read coalesced into one follow-up, and a read that never answered
+    // retried until one does. The retry is what keeps a failed read from
+    // being permanent — the notification that prompted it is spent, and with
+    // a healthy feed nothing else is coming (see `reader`). A notice landing
+    // during one of those retry waits is dispatched at once rather than
+    // waiting the rung out: the backoff belongs to the reader's own blind
+    // retries, and a notice is neither blind nor late.
+    let detail_surface = use_signal(SurfaceReader::default);
+    let request_detail =
+        move |trigger: Trigger| request_read(detail_surface, trigger, read_detail.clone());
+
+    // The host-state read behind a stale session's notice (PLAN_M6.md item
+    // 6), likewise through one door and under its own generation gate. Only
+    // ever called while the session READS stale — that is the one time this
+    // view needs the registry at all, and reading `/api/hosts` for every
+    // open terminal would be a second request to answer a question nobody is
+    // asking.
+    //
+    // Gated for the same reason the detail read is: the staleness transition
+    // fires it, the feed fires it, and the fallback fires it, so two reads
+    // can be in the air at once and an older registry landing last would
+    // explain this session's staleness with a phase that has since changed.
+    let host_base = base.clone();
+    let follow_up_detail = request_detail.clone();
+    let read_host_state = move || {
+        let base = host_base.clone();
+        let host = current.peek().host;
+        // Re-checked at every invocation, not only at the trigger, because
+        // the reader calls this again on its own: a retry ladder started
+        // while the session was stale would otherwise go on probing
+        // `/api/hosts` long after the host came back, asking a question
+        // nobody has any use for. Reported as ANSWERED so the reader retires
+        // rather than treating the skip as another failure.
+        let wanted = current.peek().stale;
+        // The staleness EPOCH this read belongs to. Two transitions can
+        // happen while one read is in flight (stale, back, stale again), and
+        // a reply that crosses one is not merely old — it describes a
+        // different situation. Committing it would explain a fresh session
+        // with a phase from before the host recovered, and would fire the
+        // reconnect follow-up below on the strength of it.
+        let epoch = stale_epoch.peek().to_owned();
+        let generation = host_reads.write().start();
+        let follow_up = follow_up_detail.clone();
+        async move {
+            if !wanted {
+                return true;
             }
+            // Recorded through the four-state model, so a dropped request
+            // becomes a REPORTED refresh failure rather than either a silent
+            // hold — which would keep presenting a phase that may have
+            // changed since — or a blank, which would lose the only
+            // explanation on screen.
+            let outcome = fetch_hosts(&base).await;
+            let answered = outcome.is_ok();
+            // Successes and failures are gated differently — see
+            // `ops::ReadGate`: an older success describes a registry that
+            // has since moved on, while a failure newer than what is on
+            // screen is worth reporting even though a later read has already
+            // started.
+            let accepted = match &outcome {
+                Ok(_) => host_reads.write().accept_success(generation),
+                Err(_) => host_reads.peek().accept_failure(generation),
+            };
+            // The epoch is checked at COMMIT as well as at dispatch: a read
+            // launched while the session was stale can land after it has gone
+            // fresh, and the effect that cleared `host_read` on that
+            // transition would then be undone by a reply describing the
+            // outage that just ended. Still counted as answered — the helm
+            // did reply, it simply answers a question this view has stopped
+            // asking.
+            if !accepted || *stale_epoch.peek() != epoch {
+                return answered;
+            }
+            host_read.write().record(outcome);
+            // The host is back while this session still reads stale: two
+            // reads disagreeing, not a state to explain. The notice says
+            // exactly that (`stale_session_notice`), and this closes the gap
+            // rather than waiting for the detail read the feed will bring —
+            // the terminal cannot mount until the session row itself stops
+            // saying stale, so any wait here is a wait with a usable session
+            // showing no terminal.
+            //
+            // Asked for through the detail door rather than fetched here and
+            // written straight into `current`, which is what this used to do.
+            // A direct write skips the restart epoch AND the generation gate,
+            // so a follow-up racing a restart could put the previous run back
+            // on screen, and one racing an ordinary re-read could roll the
+            // view backwards with nothing left to correct it.
+            let reconnected = matches!(
+                host_read.peek().lookup(host),
+                HostLookup::Known(host) if is_connected(&host.state)
+            );
+            if reconnected {
+                // News: the registry just said the host is back, and the
+                // session row has to catch up before a terminal can mount.
+                follow_up(Trigger::Notice);
+            }
+            answered
+        }
+    };
+    let host_surface = use_signal(SurfaceReader::default);
+    let request_host_state =
+        move |trigger: Trigger| request_read(host_surface, trigger, read_host_state.clone());
+
+    // The page's first look, for the same reason `ListView` keeps one: a
+    // view has to draw something before anything has changed. The
+    // host-state read has no equivalent here because its trigger below
+    // already fires at mount for a session that arrives stale.
+    // Explicit for `ListView`'s reason: opening a session is a person
+    // navigating, and a view that read nothing under a latched build
+    // mismatch would show an empty shell rather than the metadata the skew
+    // notice sits above.
+    let mount_detail = request_detail.clone();
+    use_hook(move || mount_detail(Trigger::Explicit));
+
+    // Whether the session currently READS stale, as a memo rather than a
+    // plain read, and that distinction is what keeps the effect below from
+    // running on every detail commit: a memo marks dirty only when its VALUE
+    // changes, so the host-state read is triggered by the staleness
+    // TRANSITION rather than by each reply that reports the same flag again.
+    let stale = use_memo(move || current.read().stale);
+
+    // Staleness is discovered by the detail read, so the host-state read
+    // follows the flag rather than waiting for the next revision: a session
+    // that has just gone stale must name its host's state on the frames that
+    // follow, not whenever the fleet next happens to change. At mount this
+    // is also what gives a session opened from a stale row its notice
+    // immediately.
+    let stale_host_read = request_host_state.clone();
+    use_effect(move || {
+        // Bumped on EVERY transition, in both directions, before anything
+        // else happens: it is what tells a host read in flight that the
+        // situation it was launched for is over (see `read_host_state`).
+        stale_epoch += 1;
+        if stale() {
+            // Notice, not explicit: the staleness flag changed because a
+            // READ said so, not because anyone clicked. It is news — the one
+            // moment this view needs the registry at all — but nobody is
+            // waiting on it, so a page that has stood down under skew leaves
+            // the notice's generic wording rather than fetching a registry
+            // it has been told to stop reading.
+            stale_host_read(Trigger::Notice);
+        } else if *host_read.peek() != HostsRead::default() {
+            // The host came back. Dropping the record is what keeps a LATER
+            // staleness from being explained by a reading taken before the
+            // host recovered.
+            host_read.set(HostsRead::default());
         }
     });
 
-    // The host-state read behind a stale session's notice (PLAN_M6.md item
-    // 6). Its own loop rather than a leg of the detail poll above, for the
-    // property that matters here: it runs its first iteration IMMEDIATELY on
-    // mount, so a session opened from a stale row names its host's state on
-    // the first frames rather than after a poll interval of saying "not read
-    // yet" — and it costs nothing at all for the overwhelmingly common
-    // not-stale case, which is the whole reason it is conditional.
-    let host_poll_base = base.clone();
-    let host_poll_id = session.id.clone();
+    // The feed's consumer (PLAN_M6_75.md item 6). A revision notification
+    // says only that something changed, so this view re-reads what it shows:
+    // its own session always, and the host registry only while the session
+    // is stale — which is exactly when a host state change is the thing the
+    // user is waiting on.
+    //
+    // Marked, not awaited, and marked through the readers: a notification
+    // that lands while a read is still walking becomes that read's single
+    // follow-up rather than a second concurrent walk.
+    let feed_detail = request_detail.clone();
+    let feed_host_read = request_host_state.clone();
+    use_feed_reader(move || {
+        feed_detail(Trigger::Notice);
+        if current.peek().stale {
+            feed_host_read(Trigger::Notice);
+        }
+    });
+
+    // The documented fallback (PLAN_M6_75.md item 6): the timer runs
+    // unconditionally and the READS are what is gated, so the mechanism that
+    // covers a failed feed is never itself being started at the moment the
+    // feed fails. It reads only while `feed::fallback_polls` says to — never
+    // on a healthy feed, and never under build skew, where this view stands
+    // down with the rest of the page rather than polling a helm whose
+    // vocabulary it does not share.
+    let fallback_detail = request_detail.clone();
+    let fallback_host_read = request_host_state;
     use_future(move || {
-        let base = host_poll_base.clone();
-        let poll_id = host_poll_id.clone();
+        let detail = fallback_detail.clone();
+        let host = fallback_host_read.clone();
         async move {
             loop {
-                let (stale, host) = {
-                    let session = current.peek();
-                    (session.stale, session.host)
-                };
-                if stale {
-                    // Recorded through the four-state model, so a dropped
-                    // request becomes a REPORTED refresh failure rather than
-                    // either a silent hold — which would keep presenting a
-                    // phase that may have changed since — or a blank, which
-                    // would lose the only explanation on screen.
-                    let outcome = fetch_hosts(&base).await;
-                    host_read.write().record(outcome);
-                    // The host is back while this session still reads stale:
-                    // two reads disagreeing, not a state to explain. The
-                    // notice says exactly that (`stale_session_notice`), and
-                    // this closes the gap rather than waiting out the detail
-                    // poll — the terminal cannot mount until the session row
-                    // itself stops saying stale, so a whole interval of
-                    // "reconnected — refreshing" would be a whole interval
-                    // of a usable session showing no terminal.
-                    let reconnected = matches!(
-                        host_read.peek().lookup(host),
-                        HostLookup::Known(host) if is_connected(&host.state)
-                    );
-                    if reconnected && let Ok(Some(fresh)) = fetch_session(&base, &poll_id).await {
-                        current.set(fresh);
+                fallback_sleep().await;
+                if fallback_polls_now() {
+                    detail(Trigger::Scheduled);
+                    if current.peek().stale {
+                        host(Trigger::Scheduled);
                     }
-                } else if *host_read.peek() != HostsRead::default() {
-                    // The host came back. Dropping the record is what keeps
-                    // a LATER staleness from being explained by a reading
-                    // taken before the host recovered.
-                    host_read.set(HostsRead::default());
                 }
-                #[cfg(target_arch = "wasm32")]
-                gloo_timers::future::TimeoutFuture::new(POLL_INTERVAL_MS as u32).await;
-                #[cfg(not(target_arch = "wasm32"))]
-                tokio::time::sleep(std::time::Duration::from_millis(POLL_INTERVAL_MS)).await;
             }
         }
     });
 
     let restart_base = base.clone();
+    // The detail door, for the refresh a restart owes (see below).
+    let refresh_after_restart = request_detail.clone();
     let restart = move |stop_if_running: bool| {
         if restarting() {
             return;
@@ -503,47 +801,16 @@ pub(crate) fn SessionView(session: Session, on_back: EventHandler<()>) -> Elemen
         let base = restart_base.clone();
         let id = current.read().id.clone();
         let mode = restart_mode_for(current.read().restart_offer);
+        // Cloned per click: the spawned task owns what it captures, and this
+        // closure runs again for the next restart.
+        let refresh_after_restart = refresh_after_restart.clone();
         spawn(async move {
             let outcome = restart_session(&base, &id, mode, stop_if_running).await;
             if let Err(e) = &outcome {
                 restart_error.set(Some(e.clone()));
             }
-            // Refreshed on BOTH paths, and from the server rather than
-            // from the reply, for two different reasons that land on the
-            // same call:
-            //
-            // - After a success, the reply's `status` is a deliberate
-            //   `Unknown` (the supervisor cannot claim the agent execed
-            //   yet), and a view that kept it would think the session is
-            //   not running — so the NEXT restart click would skip the
-            //   confirmation that exists to stop it killing a live agent.
-            // - After a failure, the refusal is most often a STALE OFFER,
-            //   whose prescribed handling is to re-present the offer the
-            //   session has NOW rather than retry. And a failure is not
-            //   even proof the restart did not happen: the reply can be
-            //   lost after the relaunch succeeded, which only the server's
-            //   own answer can settle.
-            //
-            // A refresh that fails leaves the reply's own view in place
-            // (or, having none, the last known one): an unreachable helm
-            // is not evidence about the session.
-            match fetch_session(&base, &id).await {
-                Ok(Some(fresh)) => current.set(fresh),
-                Ok(None) => {
-                    // The session is genuinely gone (deleted from
-                    // elsewhere, or a restart that raced a delete). Say so
-                    // rather than leaving a view describing something that
-                    // no longer exists.
-                    restart_error.set(Some(format!("session {id} no longer exists on the server")));
-                }
-                Err(_) => {
-                    if let Ok(session) = outcome.as_ref() {
-                        current.set(session.clone());
-                    }
-                }
-            }
-            // Remounted on both paths too. A success obviously needs it
-            // (new pane, or a respawned one, and the server tore the old
+            // Remounted on both paths. A success obviously needs it (new
+            // pane, or a respawned one, and the server tore the old
             // attachment down). A FAILURE needs it just as much: the
             // server detaches before anything can fail, so a view that
             // only remounted on success would leave the user staring at a
@@ -553,16 +820,52 @@ pub(crate) fn SessionView(session: Session, on_back: EventHandler<()>) -> Elemen
             mount_generation += 1;
             // A SECOND bump, closing the other half of the staleness this
             // counter exists for. The first bump (before the request)
-            // invalidates polls that were already in flight; without this
-            // one, a poll that STARTED during the restart shares the new
-            // epoch, passes its own guard, and can land its
-            // mid-restart answer on top of the authoritative refresh above
-            // — putting the view back to describing the run that just
-            // ended. Bumping again means only polls launched after the
-            // restart finished are allowed to commit, which is exactly the
-            // set that can have seen the result.
+            // invalidates reads that were already in flight; without this
+            // one, a read that STARTED during the restart shares the new
+            // epoch, passes its own guard, and can land its mid-restart
+            // answer on top of the refresh below — putting the view back to
+            // describing the run that just ended. Bumping again means only
+            // reads launched after the restart finished are allowed to
+            // commit, which is exactly the set that can have seen the
+            // result.
             restart_epoch += 1;
+            // Released before the refresh rather than after it, deliberately:
+            // the refresh is now a reader's business and a failing helm can
+            // keep it retrying for minutes, so holding the control until it
+            // lands would freeze the affordance on exactly the helm where a
+            // user most wants to try again. What that costs is a second
+            // restart acting on a `current` that predates the refresh — and
+            // that is the safe direction, because the status it still holds
+            // is the pre-restart one, which confirms.
             restarting.set(false);
+            // The authoritative refresh, asked for through the SAME door
+            // every other read uses and issued after the final bump so it
+            // carries the epoch it will be judged against.
+            //
+            // It is needed on both paths. After a success the reply's
+            // `status` is a deliberate `Unknown` (the supervisor cannot
+            // claim the agent execed yet); after a failure the refusal is
+            // most often a STALE OFFER, whose prescribed handling is to
+            // re-present the offer the session has NOW — and a failure is
+            // not even proof the restart did not happen, since the reply can
+            // be lost after the relaunch succeeded.
+            //
+            // Direct, this used to be: fetch here and write `current`
+            // straight through. That bypassed both guards at once. A slow
+            // direct reply could land on top of newer feed-driven state with
+            // nothing left to correct it, and a FAILED one left the view
+            // describing the run that just ended forever — the notice that
+            // would have re-read was already consumed by a read the epoch
+            // bump discarded, which reported itself answered. Through the
+            // door, the reader retries until an answer lands and every reply
+            // is ordered against every other.
+            //
+            // What is deliberately NOT carried over is the old 404 branch's
+            // "session no longer exists" claim: `fetch_session`'s docs are
+            // explicit that a 404 on the listing-backed detail route cannot
+            // be read as deletion, and the guarded commit says the honest
+            // thing instead (the staleness notice).
+            refresh_after_restart(Trigger::Explicit);
         });
     };
     // One closure, two call sites (the confirm button and the direct
@@ -576,14 +879,14 @@ pub(crate) fn SessionView(session: Session, on_back: EventHandler<()>) -> Elemen
     // decided here is only what to do with the answer.
     //
     // A success takes the reply's TITLE and nothing else, as the
-    // optimistic correction the poll then settles. Taking the whole
-    // `SessionInfo` would be the obvious move and is wrong: the reply is a
-    // snapshot from when the rename was handled, so a slow rename landing
-    // after a fresher poll would roll `status` and `tabs` BACKWARDS until
-    // the next tick — a rename silently reverting a status change is
+    // optimistic correction the next detail read then settles. Taking the
+    // whole `SessionInfo` would be the obvious move and is wrong: the reply
+    // is a snapshot from when the rename was handled, so a slow rename
+    // landing after a fresher read would roll `status` and `tabs` BACKWARDS
+    // until the next one — a rename silently reverting a status change is
     // exactly the staleness `restart_epoch` exists to prevent elsewhere.
-    // The dynamic fields belong to the poll; a rename only ever knows
-    // about a label.
+    // The dynamic fields belong to the detail read; a rename only ever
+    // knows about a label.
     //
     // A refusal leaves the field open with what the user typed still in it
     // and puts the supervisor's own words on screen, while the title
@@ -602,8 +905,8 @@ pub(crate) fn SessionView(session: Session, on_back: EventHandler<()>) -> Elemen
             match rename_session(&base, &id, &title).await {
                 Ok(session) => {
                     // Read AFTER the reply, never before the request: the
-                    // index names the first poll GUARANTEED to have started
-                    // after this response completed. A poll launched while
+                    // index names the first read GUARANTEED to have started
+                    // after this response completed. A read launched while
                     // the POST was still in flight MAY also carry the new
                     // title — the write lands before the reply is read — so
                     // this is a conservative bound, and conservative in the
@@ -649,12 +952,12 @@ pub(crate) fn SessionView(session: Session, on_back: EventHandler<()>) -> Elemen
                 Ok(tab) => {
                     // Rendered immediately at the END of the strip and
                     // selected, so the user lands in the terminal they
-                    // just asked for; the next poll gives it its real
-                    // position (see `tabs::visible_tabs`).
+                    // just asked for; the next detail read gives it its
+                    // real position (see `tabs::visible_tabs`).
                     //
                     // The sequence number is read AFTER the reply, not
-                    // before the request: it names the first poll that
-                    // could possibly have seen this tab, and a poll
+                    // before the request: it names the first read that
+                    // could possibly have seen this tab, and a read
                     // launched while the POST was still in flight could
                     // not have.
                     let observed_from = poll_sequence.peek().to_owned();
@@ -696,13 +999,13 @@ pub(crate) fn SessionView(session: Session, on_back: EventHandler<()>) -> Elemen
                     // Acting on a response already in hand, not guessing:
                     // the same deliberate optimism `ListView` applies to a
                     // deleted row, and for the same reason — leaving the
-                    // tab on screen until the next poll would leave a
+                    // tab on screen until the next read would leave a
                     // clickable control that attaches a terminal the
                     // supervisor has already destroyed.
                     closed_tabs.write().insert(tab_id.clone());
                     // Retired from the OPTIMISTIC list too, not just
                     // suppressed by `closed_tabs`. A tab opened and closed
-                    // before any poll observed it would otherwise sit in
+                    // before any read observed it would otherwise sit in
                     // `opened_tabs` forever — `closed_tabs` is itself
                     // pruned once the server stops listing the id, and for
                     // a tab the server never listed that is immediately,
@@ -758,8 +1061,9 @@ pub(crate) fn SessionView(session: Session, on_back: EventHandler<()>) -> Elemen
     // `farhelmTerm.sync()` takes — `None` until the lease exists, which is
     // what keeps any terminal from attaching un-leased.
     //
-    // A memo rather than computing this inside the effect: the poll above
-    // writes `current` on every tick whether or not the session changed,
+    // A memo rather than computing this inside the effect: the detail read
+    // above writes `current` on every reply whether or not the session
+    // changed,
     // and each write marks its subscribers dirty. A memo re-COMPUTES just
     // as often, but only notifies when the resulting value differs, so the
     // effect — and with it an eval round trip into the page — runs on real
@@ -842,9 +1146,9 @@ pub(crate) fn SessionView(session: Session, on_back: EventHandler<()>) -> Elemen
     // see `attachment_policy`.
     //
     // Memoized rather than rebuilt in the component body: it depends on
-    // the session id alone, so a poll can never change it, and the body
-    // re-runs on every one of those three-second polls. Without the memo
-    // this would serialize the same ~1KB of JSON forever, for nothing.
+    // the session id alone, so no read can ever change it, and the body
+    // re-runs on every reply the feed brings. Without the memo this would
+    // serialize the same ~1KB of JSON forever, for nothing.
     let policy_session_id = session.id.clone();
     let attach_policy = use_memo(move || attachment_policy(&policy_session_id).to_string());
     // The auto-reconnect policy (PLAN_M6.md item 7), handed across the same
@@ -935,10 +1239,10 @@ pub(crate) fn SessionView(session: Session, on_back: EventHandler<()>) -> Elemen
         .and_then(|id| tabs.iter().position(|candidate| candidate == id))
         .map(tab_label);
     // The title as this view should show it: the server's, unless a rename
-    // this view performed has not been settled by a poll yet (see
+    // this view performed has not been settled by a detail read yet (see
     // `renamed`). Derived per render rather than written back into
     // `current`, so the correction can only ever be as long-lived as the
-    // poll takes to confirm it.
+    // next read takes to confirm it.
     let shown_title = renamed
         .read()
         .as_ref()
@@ -1387,6 +1691,121 @@ fn restart_button_label(offer: RestartOffer) -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// An older detail reply must never overwrite a newer one, and the case
+    /// that matters is the one that happens: the NEWER read completing
+    /// first.
+    ///
+    /// Three triggers read this session (mount, feed notice, host-state
+    /// follow-up) and they overlap freely, so this is an ordinary
+    /// interleaving rather than an exotic one. Nothing would correct it
+    /// afterwards either — with the feed healthy the fallback poll is off,
+    /// and the next notification only arrives if the fleet changes again —
+    /// so an accepted stale reply is a view that describes the past until
+    /// the user navigates away.
+    #[test]
+    fn a_detail_reply_older_than_what_is_shown_is_refused() {
+        let mut reads = ReadGate::default();
+        let older = reads.start();
+        let newer = reads.start();
+
+        assert_eq!(
+            admit_detail(&mut reads, newer, 0, 0),
+            Admission::Apply,
+            "the newer read lands first and is committed"
+        );
+        assert_eq!(
+            admit_detail(&mut reads, older, 0, 0),
+            Admission::Superseded,
+            "the older read, completing afterwards, describes a moment already superseded"
+        );
+    }
+
+    /// A 404 goes through the same guards as a session, in both directions.
+    ///
+    /// The failure this forbids is specific: a 404 is what raises the
+    /// staleness notice, and only a later successful commit clears it — so
+    /// an older 404 accepted after a newer success would put a permanent
+    /// "this may be out of date" over a view that is not. The reverse
+    /// ordering has to keep working too, since a 404 that IS the newest word
+    /// must still be able to raise the notice.
+    ///
+    /// That the admission is PAYLOAD-BLIND is the point rather than an
+    /// accident of the signature: the bug it fixes was a 404 taking a
+    /// different route through the commit path from a session, and any
+    /// future outcome the helm learns to send inherits both guards for free.
+    #[test]
+    fn a_stale_404_cannot_reopen_the_staleness_notice() {
+        let mut reads = ReadGate::default();
+        let older_404 = reads.start();
+        let newer = reads.start();
+        assert_eq!(admit_detail(&mut reads, newer, 0, 0), Admission::Apply);
+        assert_eq!(
+            admit_detail(&mut reads, older_404, 0, 0),
+            Admission::Superseded,
+            "an older 404 must not be believed over a newer answer"
+        );
+
+        let latest_404 = reads.start();
+        assert_eq!(
+            admit_detail(&mut reads, latest_404, 0, 0),
+            Admission::Apply,
+            "but the newest word, 404 or not, is the one the view reflects"
+        );
+    }
+
+    /// A 404 held across a RESTART is discarded, and discarding it leaves the
+    /// read unsatisfied.
+    ///
+    /// The shape is ordinary: a read goes out, the user restarts, the reply
+    /// arrives afterwards. It is the newest reply by generation — nothing
+    /// else has completed — so ordering alone admits it, and it would raise
+    /// the staleness notice over the run that was just launched. The epoch is
+    /// what catches it, and it has to be consulted for EVERY answered
+    /// outcome: applying it only to `Ok(Some(..))` is exactly how a 404 got
+    /// through.
+    ///
+    /// `Discarded` rather than `Superseded` is the other half. Nothing was
+    /// applied and no newer read is guaranteed to be coming, so the caller
+    /// must report the read as unanswered — otherwise the notification that
+    /// prompted it is spent on nothing and the view keeps the restart's
+    /// placeholder until the fleet next changes.
+    #[test]
+    fn a_404_held_across_a_restart_is_discarded_rather_than_applied() {
+        let mut reads = ReadGate::default();
+        let held = reads.start();
+        assert_eq!(
+            admit_detail(&mut reads, held, 0, 1),
+            Admission::Discarded,
+            "the reply describes the run that the restart replaced"
+        );
+
+        // And the read that the restart itself asks for afterwards — same
+        // epoch, newer generation — applies normally.
+        let after = reads.start();
+        assert_eq!(admit_detail(&mut reads, after, 1, 1), Admission::Apply);
+    }
+
+    /// The generation is claimed even by a reply the epoch discards, so an
+    /// older read cannot slip in behind it.
+    ///
+    /// Subtle but load-bearing: the discarded reply is still EVIDENCE about
+    /// ordering — it came from a request issued later than everything before
+    /// it — and letting an older one through afterwards would put a
+    /// pre-restart view on screen through the very path the epoch exists to
+    /// close.
+    #[test]
+    fn a_discarded_reply_still_settles_the_ordering() {
+        let mut reads = ReadGate::default();
+        let older = reads.start();
+        let held = reads.start();
+        assert_eq!(admit_detail(&mut reads, held, 0, 1), Admission::Discarded);
+        assert_eq!(
+            admit_detail(&mut reads, older, 0, 1),
+            Admission::Superseded,
+            "an older reply is refused on ordering, before the epoch is even asked"
+        );
+    }
 
     /// SPEC.md requires restart to SAY what it would do to the
     /// conversation — "it must never silently resume the wrong

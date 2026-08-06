@@ -761,6 +761,58 @@ body,
   background: #1d2026;
 }
 
+/* Filter and search (PLAN_M6_75.md item 7). Always mounted, unlike the
+   create dialog below it: the controls ARE the statement of what the list
+   is currently showing, so hiding them behind a toggle would make an active
+   filter something a user has to go looking for to explain a short list.
+
+   A wrapping row rather than the create form's column, because these are
+   five short, independent dimensions rather than one form to fill in top to
+   bottom — and wrapping is what keeps them all reachable at a narrow width
+   instead of pushing the apply control off the edge. */
+.session-filter {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 8px;
+  padding: 10px 14px 0;
+}
+
+.session-filter label {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 12px;
+  color: #8a919e;
+}
+
+.session-filter input,
+.session-filter select {
+  background: #14161a;
+  border: 1px solid #3a3f47;
+  border-radius: 3px;
+  color: #d8dee9;
+  font: inherit;
+  font-size: 13px;
+  padding: 4px 8px;
+  /* Bounded rather than content-sized: a host name or a typed search term
+     can be long, and a field that grew with it would reflow the whole row
+     as the user types. */
+  max-width: 14em;
+}
+
+.session-filter .btn {
+  font-size: 13px;
+  padding: 4px 10px;
+}
+
+/* Said in words beside the banner's numbers: a count over an empty box
+   reads as a list that failed to load rather than as a search that found
+   nothing, and the two call for opposite reactions. */
+.filter-empty {
+  color: #8a919e;
+}
+
 /* Create dialog (PLAN_M2.md step 8): an inline form toggled from the
    toolbar, not a modal library — see the design note in lib.rs's
    `CreateSessionForm` doc. Kept visually close to the row/badge styling

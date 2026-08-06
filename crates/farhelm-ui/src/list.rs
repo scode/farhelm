@@ -1,5 +1,6 @@
-//! The session list: `ListView` (the flat, polled listing plus its
-//! stop/delete/create/rename actions), `SessionRow` (one row, including
+//! The session list: `ListView` (the flat listing, its filter and search
+//! surface, and its stop/delete/create/rename actions), `SessionRow` (one
+//! row, including
 //! the inline delete-confirmation prompt and the inline rename field), and
 //! `CreateSessionForm` (the "new session" inline form). All three are
 //! `ListView`'s own concern — none of them is meaningful mounted outside
@@ -19,7 +20,7 @@
 //! that explains nothing.
 //!
 //! This view also owns the hosts READ (`hosts::HostsPanel` renders it),
-//! because two consumers need one poll: the panel, and the create dialog's
+//! because two consumers need one read: the panel, and the create dialog's
 //! host selector.
 //!
 //! ## The list is the WHOLE list
@@ -36,14 +37,19 @@ use std::collections::{HashMap, HashSet};
 use dioxus::prelude::*;
 
 use crate::api::{
-    POLL_INTERVAL_MS, SessionListing, create_session, delete_session, fetch_hosts, fetch_sessions,
+    SessionFilter, SessionListing, create_session, delete_session, fetch_hosts, fetch_sessions,
     mint_intent_key, rename_session, stop_session,
 };
+use crate::feed::{fallback_polls_now, fallback_sleep, use_feed_reader};
 use crate::hosts::{HostsPanel, HostsRead, host_incarnation, is_connected, phase_label};
 use crate::ops::{OpLock, ReadGate, use_op_lock};
 use crate::peer::{DetailPart, PeerLine, display_peer};
+use crate::reader::{SurfaceReader, Trigger, request_read};
 use crate::rename::RenameForm;
-use crate::rows::{apply_optimistic_renames, count_banner, prune_optimistic_renames};
+use crate::rows::{
+    self, absence_is_evidence, apply_optimistic_renames, count_banner, retire_vanished_renames,
+    settle_optimistic_renames,
+};
 use crate::status::{confirm_consequence, status_badge};
 use crate::{ApiBase, HostId, HostKind, Session, SessionStatus};
 
@@ -174,22 +180,32 @@ impl IntentBinding {
     }
 }
 
-/// Wait one poll interval.
+/// Every status this list offers as a filter, in the spelling the wire uses
+/// and the helm parses.
 ///
-/// Split into a helper because two loops and one early-continue all need it
-/// and the body is a per-target `cfg` pair rather than a call:
-/// `tokio::time::sleep` is unavailable on wasm32 (no reactor in the browser)
-/// while `gloo-timers`' `TimeoutFuture` only works on wasm32 (a
-/// `wasm-bindgen` binding to `setTimeout`), so each target gets the idiom
-/// that already fits it. The desktop build runs inside the tokio
-/// multi-thread runtime `dioxus-desktop` itself constructs (see its
-/// `launch.rs`), so `tokio::time::sleep` needs no extra setup there.
-async fn sleep_one_interval() {
-    #[cfg(target_arch = "wasm32")]
-    gloo_timers::future::TimeoutFuture::new(POLL_INTERVAL_MS as u32).await;
-    #[cfg(not(target_arch = "wasm32"))]
-    tokio::time::sleep(std::time::Duration::from_millis(POLL_INTERVAL_MS)).await;
-}
+/// Offered as a CHOICE rather than typed, and that is the helm's constraint
+/// showing through rather than a UI preference: it refuses an unrecognized
+/// status with a 400 rather than answering "no sessions", precisely because
+/// a typo that answers "no sessions" is a lie the user will believe. A
+/// select cannot produce a typo.
+///
+/// `unknown` is deliberately NOT among them, even though the wire has the
+/// word and this UI still decodes it. PLAN_M6_75.md item 3 makes Unknown
+/// internal/compat vocabulary that must never RENDER — a session nothing has
+/// classified yet shows no badge at all, precisely so the UI never says
+/// something it does not know. Offering it here would put that word back on
+/// screen in the one control whose options ARE its vocabulary, and would
+/// invite a user to search for a state the rest of the interface refuses to
+/// name. The compat side is untouched: a helm still reporting it decodes as
+/// before, and those rows still appear under every unfiltered listing.
+const FILTERABLE_STATUSES: [&str; 6] = [
+    "running",
+    "waiting",
+    "idle",
+    "exited",
+    "interrupted",
+    "error",
+];
 
 /// Which host a fresh create dialog should target: the LOCAL row, whatever
 /// phase it is in.
@@ -230,24 +246,93 @@ fn default_create_host(hosts: &[HostOption]) -> Option<HostId> {
     hosts.iter().find(|host| host.local).map(|host| host.id)
 }
 
+/// Whether a listing reply may touch this view at all.
+///
+/// Two independent admissions, and a reply needs both. Split out of
+/// `ListView`'s commit path so the rule can be exercised without a Dioxus
+/// runtime — and so the two questions stay visibly separate, because
+/// conflating them is exactly how one of them goes missing.
+///
+/// - **Does it still answer the question on screen?** `ops::ReadGate` orders
+///   requests but knows nothing about what they ASKED. A read issued under
+///   filter A completing after filter B was applied is the newest reply
+///   available and still wrong: its rows describe A while every control
+///   describes B. Nothing corrects that either — with a healthy feed the
+///   fallback poll is off, and if B's own read failed there is no later
+///   reply coming. Refusing it costs nothing, since applying a filter marks
+///   a demand on the surface and the reader will ask again under B.
+/// - **Is it the newest word?** The generation gate's ordinary split, with
+///   successes and failures gated differently for the reasons `ops` gives.
+fn accepts_listing(
+    reads: &mut ReadGate,
+    generation: u64,
+    succeeded: bool,
+    answers_applied_filter: bool,
+) -> bool {
+    if !answers_applied_filter {
+        return false;
+    }
+    if succeeded {
+        reads.accept_success(generation)
+    } else {
+        reads.accept_failure(generation)
+    }
+}
+
 /// The flat session list: host, title, cwd, invocation, and a truthful
-/// status badge per row, refetched on a timer; the hosts panel, the "new
-/// session" form and the per-row stop/delete actions (PLAN_M2.md step 8)
-/// live here too, since all of them need to reach into the same poll loops
-/// — a create or a stop should be reflected as soon as the next poll runs,
-/// not held behind an optimistic local edit.
+/// status badge per row; the filter and search surface above them, the hosts
+/// panel, the "new session" form and the per-row stop/delete actions
+/// (PLAN_M2.md step 8) live here too, since all of them need to reach into
+/// the same reads — a create or a stop should be reflected as soon as the
+/// next read lands, not held behind an optimistic local edit.
 ///
-/// The poll loops live in `use_future`s scoped to this component, so they
-/// are cancelled for free when `App` switches to `SessionView` and this
-/// component unmounts — "polling stops while a terminal is open"
-/// (PLAN_M2.md) falls out of Dioxus's own task lifecycle rather than
-/// needing an explicit stop signal.
+/// ## Two reads, and what drives them (PLAN_M6_75.md item 6)
 ///
-/// Two polls, one cadence. The hosts read is its own loop rather than a
-/// second leg of the listing's, so a slow or failing `/api/hosts` cannot
-/// delay the session list (or vice versa) — and it is deliberately not new
-/// push machinery: M6.75 owns that, and until then the hosts panel gets the
-/// same three-second freshness every other surface has.
+/// The listing and the hosts registry are separate reads, deliberately, so a
+/// slow or failing `/api/hosts` cannot delay the session list or vice versa.
+/// Each is reachable from four places and goes through ONE door
+/// (`listing_read` / `hosts_read`), which is what keeps the generation gate a
+/// total order over reads rather than a per-caller counter:
+///
+/// - once on mount, because a page has to draw something;
+/// - on every feed notification, which is what replaced the periodic loops —
+///   the mounted page re-reads through the very same commit path, so every
+///   reconciliation rule those closures carry survives the change of trigger
+///   untouched;
+/// - from the fallback poll, which runs only while the feed is unhealthy and
+///   no build mismatch has been latched (`feed::fallback_polls`);
+/// - from the filter surface's own submit, since nothing else is coming.
+///
+/// None of those STARTS a read directly. All four ask the surface's reader
+/// (`reader::request_read`), which runs one read at a time, coalesces
+/// everything that arrives mid-read into a single follow-up, and retries a
+/// read that never answered. Both properties are load-bearing rather than
+/// tidy: a notification is spent the moment a read is dispatched, so without
+/// the retry a read that failed against a HEALTHY feed leaves this page
+/// stale until the fleet happens to change again — the fallback poll is off,
+/// and nothing else is owed. Without the coalescing, a helm that has stopped
+/// answering accumulates one walk per notification and per fallback tick for
+/// as long as the page is open.
+///
+/// Everything is scoped to this component, so it is all cancelled for free
+/// when `App` switches to `SessionView` and this component unmounts —
+/// "polling stops while a terminal is open" (PLAN_M2.md) still falls out of
+/// Dioxus's own task lifecycle, and now so does "only the mounted page
+/// re-reads".
+///
+/// ## Filtering is a query, not a render pass (PLAN_M6_75.md item 7)
+///
+/// The filter surface builds `api::SessionFilter` and the helm answers with
+/// the matching rows plus their count; nothing here narrows a list it was
+/// handed. That is the only arrangement coherent with pagination — a
+/// client-side filter over one page hides matches beyond the cut while the
+/// banner reports a count that includes them.
+///
+/// The filter is applied on SUBMIT rather than per keystroke, which is a
+/// deliberate trade: a live filter over a server-side query is one whole
+/// cursor walk per character typed, and the debounce that would make that
+/// tolerable is a second cadence to tune in a UI whose entire point this
+/// milestone is that it has none left.
 ///
 /// ## One operation at a time
 ///
@@ -272,18 +357,19 @@ pub(crate) fn ListView(on_open: EventHandler<Session>) -> Element {
     let mut listing = use_signal(|| None::<Result<SessionListing, String>>);
     // The same generation discipline the hosts read has, for the same
     // reason and against a slower race: a listing walk is several round
-    // trips, so a poll that started before a delete can easily still be
+    // trips, so a read that started before a delete can easily still be
     // walking when the delete's own refresh has already landed — and
-    // committing it would put the deleted row back until the next tick.
+    // committing it would put the deleted row back until the next one.
     let mut listing_reads = use_signal(ReadGate::default);
     // The host registry as this client currently knows it — four states, not
-    // three, so a failed poll cannot blank the panel (see `hosts::HostsRead`).
+    // three, so a failed read cannot blank the panel (see `hosts::HostsRead`).
     // Shared by the hosts panel and the create dialog's selector.
     let mut hosts = use_signal(HostsRead::default);
-    // Per-REQUEST, not per-poll: the periodic loop and every
-    // mutation-triggered refetch draw from the same gate, so an older
-    // completion cannot resurrect what a newer one removed — see
-    // `ops::ReadGate` for why successes and failures are gated differently.
+    // Per-REQUEST, not per-caller: the mount read, the feed's re-read, the
+    // fallback poll and every mutation-triggered refetch draw from the same
+    // gate, so an older completion cannot resurrect what a newer one removed
+    // — see `ops::ReadGate` for why successes and failures are gated
+    // differently.
     let mut hosts_reads = use_signal(ReadGate::default);
     // Which host row is BUSY, for drawing only: the exclusion is the token.
     // Lifted out of `HostsPanel` because navigating away unmounts the tasks
@@ -307,10 +393,10 @@ pub(crate) fn ListView(on_open: EventHandler<Session>) -> Element {
     // Which sessions are showing the inline "confirm delete?" prompt in
     // place of their normal stop/delete buttons — see `on_delete` below.
     // Deliberately a plain client-side set with no timeout and no
-    // poll-driven reset: a listing refresh must leave an in-progress
-    // confirmation alone (the user is mid-decision, not mid-poll), so
+    // refresh-driven reset: a listing refresh must leave an in-progress
+    // confirmation alone (the user is mid-decision, not mid-refresh), so
     // this is intentionally NOT derived from `listing` on every render.
-    // The one reconciliation that does happen is in the poll loop below,
+    // The one reconciliation that does happen is in `commit_listing`,
     // which drops an entry once its session is no longer in the listing
     // at all (deleted from elsewhere, say) — there is no row left for a
     // dangling entry to ever affect, so this is tidiness, not correctness.
@@ -325,46 +411,70 @@ pub(crate) fn ListView(on_open: EventHandler<Session>) -> Element {
     // submits. The draft lives HERE rather than in `RenameForm` for a
     // reason that has nothing to do with how many can be open: this
     // component re-renders for reasons the user did not cause, and one of
-    // them (a failed listing poll swapping the rows for an error line)
+    // them (a failed listing read swapping the rows for an error line)
     // unmounts the form entirely — a draft owned by the form would be
     // silently discarded with it. Seeded from the row's current title when
-    // the field opens, which is also what keeps a poll carrying someone
+    // the field opens, which is also what keeps a read carrying someone
     // else's rename from overwriting an edit in progress.
     let mut renaming = use_signal(|| None::<String>);
     let mut rename_draft = use_signal(String::new);
     // The optimistic rename corrections `apply_optimistic_renames` paints
-    // over the server's listing, keyed by session id and carrying the poll
+    // over the server's listing, keyed by session id and carrying the read
     // sequence number that bounds when the server could first have told
-    // this view about it (`prune_optimistic_renames`). The tab strip's
+    // this view about it (`rows::settle_optimistic_renames`). The tab strip's
     // scheme, applied to a title: without the number, a listing reply that
     // was already in flight when the rename landed would be
     // indistinguishable from the server disagreeing, and the row would flip
-    // back to the old title for up to a full poll interval — a visible
-    // wobble on the one operation whose entire point is that the new name
-    // shows up at once.
+    // back to the old title until the next read landed — a visible wobble on
+    // the one operation whose entire point is that the new name shows up at
+    // once.
     let mut renamed = use_signal(HashMap::<String, (String, u64)>::new);
-    // How many listing polls this view has STARTED. A poll's own index is
-    // the value it reads before incrementing, so an optimistic rename
-    // recording the current value names the first poll GUARANTEED to have
+    // How many listing reads this view has STARTED. A read's own index is
+    // the value it takes before incrementing, so an optimistic rename
+    // recording the current value names the first read GUARANTEED to have
     // started after the rename's response completed. That is a
-    // conservative bound rather than a statement about the server: a poll
+    // conservative bound rather than a statement about the server: a read
     // launched earlier can perfectly well observe the committed title,
     // since the write lands before the response is read. Conservative is
     // the safe direction — it can only keep a correction slightly longer
     // than strictly necessary, never retire one on a reply that could not
     // have seen it.
+    //
+    // Named for the polls it used to count, and kept under that name
+    // deliberately: `rows`' two pruning halves and the session view's twin
+    // all speak of a "poll sequence", and renaming the counter without them
+    // would leave two vocabularies for one number.
     let mut poll_sequence = use_signal(|| 0_u64);
     let mut show_create = use_signal(|| false);
+    // The filter the reads are currently CARRYING, and the one the surface
+    // is being edited into. Two signals rather than one because a filter is
+    // applied on submit (see this component's docs): the draft changes with
+    // every keystroke, and the applied one changes only when a read is
+    // actually asked for — so a re-read triggered by the feed mid-edit uses
+    // the filter whose results are on screen rather than a half-typed one.
+    let mut filter = use_signal(SessionFilter::default);
+    let mut filter_draft = use_signal(SessionFilter::default);
+
+    // The two surfaces' readers (`reader::SurfaceReader`): one reader each,
+    // coalescing every trigger into a single live read and retrying one that
+    // failed to answer. Separate, because the two reads are independent —
+    // a hanging `/api/hosts` must not hold the session list off the screen,
+    // which is the same independence the mount reads keep below.
+    let listing_surface = use_signal(SurfaceReader::default);
+    let hosts_surface = use_signal(SurfaceReader::default);
 
     // Everything that happens to a listing reply once it is BACK, in one
     // place: decide whether this read still speaks for the view, reconcile
     // the view-local state a fresh listing settles, and paint it. A reply
     // the gate rejects leaves every one of those untouched.
     //
-    // Hoisted rather than inlined because there are two readers of the
-    // session listing — the poll below and `on_stop`'s immediate refetch —
-    // and a second hand-rolled copy of the gate decision is exactly the kind
-    // of divergence that shows up as a stale row nobody can reproduce.
+    // Hoisted rather than inlined because there are several readers of the
+    // session listing — the mount read, the feed's re-read, the fallback
+    // poll, and `on_stop`'s immediate refetch — and a second hand-rolled
+    // copy of the gate decision is exactly the kind of divergence that shows
+    // up as a stale row nobody can reproduce. M6.75 made that pay off
+    // directly: the feed became one more caller of this closure rather than
+    // a second commit path with its own approximation of these rules.
     //
     // What it deliberately does NOT do is claim the generation. That claim
     // has to happen synchronously at the point the request is ISSUED (see
@@ -373,38 +483,70 @@ pub(crate) fn ListView(on_open: EventHandler<Session>) -> Element {
     // to be polled. Taking an already-claimed `generation` keeps that
     // property with the caller, where the `await` is.
     //
-    // `poll_index` is `Some` only for a poll tick, carrying that tick's own
-    // position in the view's poll order. The reconciliation below is gated
-    // on it in full: `on_stop`'s refetch exists to show ONE session's new
-    // status at once and has no standing in the poll order, so it can
-    // neither date an optimistic rename nor be read as evidence that some
-    // other session has left the listing.
+    // `requested` is the filter this reply ANSWERS, sampled where the
+    // request was issued. Ordering alone is not enough to make a reply
+    // usable: the gate knows that read A started before read B, but not that
+    // B asked a different question. A read for filter A completing after
+    // filter B was applied would paint A's rows under controls describing B
+    // — indefinitely, if B's own read failed — so a reply whose filter is no
+    // longer the applied one is refused outright. The user's next move
+    // (submitting, clearing) is a read of its own, and the surface reader
+    // has already recorded the submit's own demand, so nothing is lost by
+    // dropping this one.
+    //
+    // `authoritative` says whether this READ speaks for the whole fleet —
+    // `on_stop`'s refetch exists to show ONE session's new status and does
+    // not. It is necessary and not sufficient: the REPLY has to speak for
+    // the whole fleet too, which is `rows::absence_is_evidence`'s question
+    // (a filtered listing omits what did not match; a truncated one omits
+    // whatever lay past its ceiling, and neither omission means "gone").
+    //
+    // What every successful read does regardless is settle the corrections
+    // its own ROWS speak to (`rows::settle_optimistic_renames`): a title the
+    // server now agrees with graduates, and a title it contradicts on a late
+    // enough read loses. That half needs no authority, and withholding it
+    // from filtered reads is what used to leave a rename painted over the
+    // server's own rows for as long as any filter was applied.
     let mut commit_listing = move |generation: u64,
+                                   requested: SessionFilter,
                                    fetched: Result<SessionListing, String>,
-                                   poll_index: Option<u64>| {
-        // Superseded reads are dropped before they can touch
-        // anything — including the optimistic-correction pruning
-        // below, which would otherwise retire a rename on the
-        // authority of a walk that predates it.
-        let accepted = match &fetched {
-            Ok(_) => listing_reads.write().accept_success(generation),
-            Err(_) => listing_reads.peek().accept_failure(generation),
-        };
+                                   index: u64,
+                                   authoritative: bool| {
+        // Superseded reads, and reads answering a question nobody is asking
+        // anymore, are dropped before they can touch anything — including
+        // the optimistic-correction pruning below, which would otherwise
+        // retire a rename on the authority of a walk that predates it.
+        let accepted = accepts_listing(
+            &mut listing_reads.write(),
+            generation,
+            fetched.is_ok(),
+            *filter.peek() == requested,
+        );
         if !accepted {
             return;
         }
-        // Drop any `confirming` entry whose session is gone from
-        // this fetch entirely — the counterpart to the "a poll
-        // refresh must not clear an in-progress confirmation"
-        // rule just above: that rule protects a row that is
-        // still LISTED, not one that has vanished (deleted from
-        // another client while this one sat mid-confirmation, an
-        // externally-imposed departure the `retain` below cannot
-        // distinguish from the id simply never having existed).
-        // Left off a failed fetch on purpose: an error reply
-        // carries no session ids at all, and a transient fetch
-        // failure is not evidence any session actually left.
-        if let (Ok(listing), Some(index)) = (&fetched, poll_index) {
+        if let Ok(listing) = &fetched {
+            // Only a successful fetch is evidence about titles: an error
+            // carries none at all, so it can neither confirm nor contradict
+            // an optimistic rename.
+            settle_optimistic_renames(&mut renamed.write(), &listing.sessions, index);
+        }
+        // Everything below reads ABSENCE, so it needs a read with standing
+        // AND a reply that covers the fleet — and a successful one, since an
+        // error reply carries no session ids and a transient failure is not
+        // evidence that any session left.
+        if let Ok(listing) = &fetched
+            && authoritative
+            && absence_is_evidence(listing)
+        {
+            // Drop any `confirming` entry whose session is gone from
+            // this fetch entirely — the counterpart to the "a poll
+            // refresh must not clear an in-progress confirmation"
+            // rule just above: that rule protects a row that is
+            // still LISTED, not one that has vanished (deleted from
+            // another client while this one sat mid-confirmation, an
+            // externally-imposed departure the `retain` below cannot
+            // distinguish from the id simply never having existed).
             let live_ids: HashSet<&str> = listing.sessions.iter().map(|s| s.id.as_str()).collect();
             confirming
                 .write()
@@ -420,51 +562,75 @@ pub(crate) fn ListView(on_open: EventHandler<Session>) -> Element {
             if renaming_vanished {
                 renaming.set(None);
             }
-            // Same "only a successful fetch is evidence" rule as
-            // the two above, for the same reason: an error carries
-            // no titles at all, so it can neither confirm nor
-            // contradict an optimistic rename.
-            prune_optimistic_renames(&mut renamed.write(), &listing.sessions, index);
+            retire_vanished_renames(&mut renamed.write(), &listing.sessions, index);
         }
         listing.set(Some(fetched));
     };
 
-    // Cloned once up front rather than moved into the poll loop below: a
-    // `move ||` closure takes ownership of everything it captures, and
-    // `on_stop`/`on_delete` need their own copy of `base` afterward.
-    let poll_base = base.clone();
-    use_future(move || {
-        let base = poll_base.clone();
+    // One listing read, shared by every caller — the mount read, the feed's
+    // re-read, the fallback poll, and the filter surface's apply. Going
+    // through one place is what makes the generation a total order over
+    // READS rather than a per-caller counter each could satisfy
+    // independently, and it is why swapping the poll for the feed changed
+    // the TRIGGER and nothing else.
+    //
+    // Everything that has to describe THIS request is sampled synchronously,
+    // before the `await`: the generation, the read's position in the read
+    // order, and the filter itself. Sampling the filter after the await
+    // would let a submit landing mid-flight relabel a reply as answering a
+    // query it never asked. Sampled per CALL rather than per reader, because
+    // the reader calls this again for a retry or a coalesced notice, and
+    // that later read is a new request with a new filter to answer for.
+    //
+    // The `bool` it reports is what `reader` needs: whether the helm
+    // answered at all. Anything narrower (whether the reply was painted)
+    // would make a superseded read look like a failed one and retry against
+    // a surface that is already current.
+    //
+    // Cloned bases rather than one moved in: a `move ||` closure takes
+    // ownership of everything it captures, and `on_stop`/`on_delete` need
+    // their own copy of `base` afterward.
+    let read_listing_base = base.clone();
+    let listing_read = move || {
+        let base = read_listing_base.clone();
+        // Cloned OUT of the signal rather than read through it, and the
+        // annotation is what enforces that: a borrow guard moved into the
+        // async block below would be held across the walk's every round
+        // trip, and the filter surface's own submit writes that signal.
+        let requested: SessionFilter = filter.peek().clone();
+        // Read before incrementing, so `index` is this read's own position
+        // in the view's read order — what tells an optimistic rename whether
+        // this reply is late enough to be evidence about it. Claimed even
+        // for a filtered read, so the order stays a single sequence; what a
+        // filtered read does not get is AUTHORITY over absence (see
+        // `commit_listing`).
+        let index = poll_sequence.peek().to_owned();
+        poll_sequence += 1;
+        let authoritative = !requested.is_active();
+        let generation = listing_reads.write().start();
         async move {
-            loop {
-                // Read before incrementing, so `index` is this poll's own
-                // position in the view's poll order — what tells an
-                // optimistic rename whether this reply is late enough to
-                // be evidence about it.
-                let index = poll_sequence.peek().to_owned();
-                poll_sequence += 1;
-                let generation = listing_reads.write().start();
-                let fetched = fetch_sessions(&base).await;
-                commit_listing(generation, fetched, Some(index));
-                sleep_one_interval().await;
-            }
+            let fetched = fetch_sessions(&base, &requested).await;
+            let answered = fetched.is_ok();
+            commit_listing(generation, requested, fetched, index, authoritative);
+            answered
         }
-    });
+    };
 
-    // One hosts read, generation-guarded, shared by every caller — the
-    // periodic poll and every mutation-triggered refetch. Going through one
-    // place is what makes the generation a total order over READS rather
-    // than a per-loop counter two callers could each satisfy independently.
+    // One hosts read, generation-guarded, shared by every caller — the mount
+    // read, the feed, the fallback poll and every mutation-triggered
+    // refetch, on the same one-door reasoning as the listing above.
     //
     // The number is claimed synchronously, at the CALL, so ordering is
     // decided by when a read was asked for rather than by when its task
-    // happens to be scheduled.
+    // happens to be scheduled. The `bool` it reports means what the listing
+    // read's does: the helm answered, whatever the gate then did with it.
     let read_hosts_base = base.clone();
-    let start_hosts_read = move || {
+    let hosts_read = move || {
         let base = read_hosts_base.clone();
         let generation = hosts_reads.write().start();
         async move {
             let outcome = fetch_hosts(&base).await;
+            let answered = outcome.is_ok();
             // Successes and failures are gated differently — see
             // `ops::ReadGate`. An older success is dropped entirely (it
             // describes a registry that has since been changed by something
@@ -480,37 +646,155 @@ pub(crate) fn ListView(on_open: EventHandler<Session>) -> Element {
             if accepted {
                 hosts.write().record(outcome);
             }
+            answered
         }
     };
 
-    // The hosts poll, at the listing's cadence and independent of it (see
-    // this component's docs). A failed read keeps the last snapshot and adds
-    // a refresh-failure line rather than blanking the rows: SPEC.md's
-    // promise is that connection state is VISIBLE, and one dropped request
-    // is not evidence that anything changed.
-    let poll_hosts = start_hosts_read.clone();
+    // The two doors every trigger below actually knocks on. Asking for a
+    // read is not the same as starting one: `reader::request_read` starts a
+    // reader only if this surface has none, and otherwise records the demand
+    // so the running read is followed by exactly one more (see `reader`).
+    // That is what keeps a burst of notifications, or a helm that has
+    // stopped answering, from accumulating walks for as long as the page is
+    // open — and what makes a read that FAILED get retried at all, since the
+    // notification that prompted it is spent the moment it is dispatched.
+    //
+    // Every caller names WHY it wants a read (`reader::Trigger`), and the
+    // three answers are treated differently in two ways that matter here: a
+    // fallback tick may only start an idle reader (it carries no news, so
+    // cancelling a backoff with it would flatten the retry ladder into a
+    // three-second poll), and under a latched build mismatch only ATTENDED
+    // reads still happen — the feed and the fallback stand down, while a
+    // filter submit or a mutation's refresh is answered, because the page
+    // must keep working for the person using it (SPEC_impl.md's withdrawal
+    // rule is about unattended behavior).
+    //
+    // Cloned per call site rather than made `Copy`: the read closures own
+    // their copy of the API base, which is a `String`.
+    let request_listing =
+        move |trigger: Trigger| request_read(listing_surface, trigger, listing_read.clone());
+    let request_hosts =
+        move |trigger: Trigger| request_read(hosts_surface, trigger, hosts_read.clone());
+
+    // The page's first look at both surfaces. A `use_hook` rather than a
+    // future, because the work of starting a read now belongs to the reader:
+    // this is one call, made once, on mount.
+    //
+    // Both reads are asked for together and neither waits on the other,
+    // which preserves the independence the two loops had: a hosts read that
+    // hangs must not hold the session list off the screen.
+    //
+    // Explicit, and that classification is a decision rather than a default:
+    // a mount is a person navigating here, it happens once rather than on a
+    // cadence, and under a latched build mismatch it is the difference
+    // between a page that shows what it can beside the reload prompt and one
+    // that shows nothing at all. The withdrawal rule revokes unattended
+    // BEHAVIOR, not the user's ability to look at their own fleet.
+    let mount_listing = request_listing.clone();
+    let mount_hosts = request_hosts.clone();
+    use_hook(move || {
+        mount_listing(Trigger::Explicit);
+        mount_hosts(Trigger::Explicit);
+    });
+
+    // The feed's consumer (PLAN_M6_75.md item 6): every revision
+    // notification re-reads BOTH surfaces through the same doors, because
+    // the notification says only that something changed — a status flip, a
+    // rename, a host going down and a registry edit are indistinguishable on
+    // that channel by design, so the honest answer is to re-read whatever
+    // this page is showing.
+    //
+    // Marked, not awaited: an effect is not a place to hold a round trip
+    // open. A notice landing while a read is already in flight is not
+    // dropped — it becomes the follow-up read the reader runs next.
+    let feed_listing = request_listing.clone();
+    let feed_hosts = request_hosts.clone();
+    use_feed_reader(move || {
+        feed_listing(Trigger::Notice);
+        feed_hosts(Trigger::Notice);
+    });
+
+    // The documented fallback (PLAN_M6_75.md item 6). The timer runs
+    // unconditionally and the READ is what is gated, which is deliberate:
+    // the alternative — starting and stopping a task as the feed's health
+    // changes — makes the handover a lifecycle problem, and a fallback whose
+    // job is to cover the moment the feed fails is the worst possible thing
+    // to have to spin up at that moment.
+    //
+    // So it ticks forever and asks only while `feed::fallback_polls` says
+    // to: never on a healthy feed, and never under build skew, where the
+    // page stands down entirely rather than polling a helm whose vocabulary
+    // it does not share.
+    //
+    // Both surfaces on one timer, unlike the mount reads: a fallback is not
+    // where the independence argument pays, and one loop is one thing to
+    // reason about when the interesting question is whether it runs at all.
+    // A tick that lands while the previous one's read is still walking adds
+    // nothing at all — a tick may only start an IDLE reader (see
+    // `reader::Trigger::Scheduled`), which is what keeps a slow helm from
+    // turning a three-second cadence into a queue and what keeps a tick from
+    // cancelling a backoff it knows nothing about.
+    let fallback_listing = request_listing.clone();
+    let fallback_hosts = request_hosts.clone();
     use_future(move || {
-        let mut read = poll_hosts.clone();
+        let listing = fallback_listing.clone();
+        let hosts = fallback_hosts.clone();
         async move {
             loop {
-                read().await;
-                sleep_one_interval().await;
+                fallback_sleep().await;
+                if fallback_polls_now() {
+                    listing(Trigger::Scheduled);
+                    hosts(Trigger::Scheduled);
+                }
             }
         }
     });
 
-    // An immediate re-read after a host mutation, instead of waiting out the
-    // poll. Every host verb changes state this side cannot predict — an
-    // add's chip is whatever the connection finds, a retarget's is a fresh
-    // active-retry window, an adopt's is a reconnect — so there is nothing
-    // honest to paint optimistically, and the fastest truthful answer is the
-    // server's.
-    let mut refresh_read = start_hosts_read;
+    // An immediate re-read after a host mutation, instead of waiting for the
+    // helm's own notification. Every host verb changes state this side
+    // cannot predict — an add's chip is whatever the connection finds, a
+    // retarget's is a fresh active-retry window, an adopt's is a reconnect —
+    // so there is nothing honest to paint optimistically, and the fastest
+    // truthful answer is the server's. The feed will say so too, a moment
+    // later, and the generation gate is what makes the two arriving in
+    // either order harmless.
+    //
+    // BOTH surfaces, because every host verb moves the session list too: the
+    // merged view is per-host, so a removal takes that host's sessions out of
+    // it, an adopt rebinds them, and a retarget changes which machine they
+    // are read from. Refreshing only the panel leaves rows for a host that is
+    // no longer registered, with a fleet total that still counts them — and
+    // under a latched build mismatch, where the feed and the fallback are
+    // both withdrawn, "leaves" means for the rest of the page's life.
+    let host_mutation_listing = request_listing.clone();
     let refresh_hosts = move |_| {
-        spawn(refresh_read());
+        request_hosts(Trigger::Explicit);
+        host_mutation_listing(Trigger::Explicit);
+    };
+
+    // Apply the filter surface's draft: swap it in, then read with it.
+    //
+    // The read is asked for HERE rather than left to the feed or the
+    // fallback, and that is the whole reason a filter feels like a filter:
+    // nothing else is going to happen — the fleet did not change, so no
+    // revision is coming, and the fallback is not running on a healthy feed.
+    // A submit that only updated state would leave the list exactly as it
+    // was until something unrelated changed.
+    //
+    // A read already walking under the OLD filter is left to finish and be
+    // refused by `commit_listing`; the demand recorded here is what makes
+    // the follow-up read carry the new one.
+    let filter_read = request_listing.clone();
+    let apply_filter = move |next: SessionFilter| {
+        filter.set(next.clone());
+        filter_draft.set(next);
+        filter_read(Trigger::Explicit);
     };
 
     let stop_base = base.clone();
+    // The surface reader, for the one path that reads outside it: a stop's
+    // own refetch fails on its own and has nobody to retry it (see below).
+    let stop_recovery = request_listing.clone();
     // Takes the id directly, not the whole `Session`: nothing past the
     // insert-into-`pending` check below reads any other field, so a
     // `Session` clone (and a second, redundant id clone off of it) would
@@ -547,6 +831,9 @@ pub(crate) fn ListView(on_open: EventHandler<Session>) -> Element {
             return;
         }
         let base = stop_base.clone();
+        // Cloned per invocation: the spawned task takes ownership of what it
+        // captures, and this handler runs once per stop click.
+        let stop_recovery = stop_recovery.clone();
         spawn(async move {
             // No optimistic flip (PLAN_M2.md design note): the row's
             // badge only ever reflects what the NEXT poll observes, so a
@@ -569,19 +856,55 @@ pub(crate) fn ListView(on_open: EventHandler<Session>) -> Element {
                     // and confirm with the wrong "is still running"
                     // wording for a session that just got stopped.
                     //
-                    // Through the SAME gate the poll uses, which is the
-                    // whole reason the gate is per-request rather than
+                    // Through the SAME gate every other read uses, which is
+                    // the whole reason the gate is per-request rather than
                     // per-loop: this read exists to show the stop at once,
-                    // and a poll that started before the stop — a walk is
-                    // several round trips, so one easily spans it —
+                    // and a listing walk that started before the stop — a
+                    // walk is several round trips, so one easily spans it —
                     // completing afterwards would put the pre-stop status
-                    // back and undo exactly what this call is for.
+                    // back and undo exactly what this call is for. The race
+                    // did not go away when the poll did: the stop itself
+                    // bumps the helm's revision, so the feed answers with a
+                    // re-read of its own, and the gate is what orders the
+                    // two.
+                    //
+                    // Deliberately NOT routed through the surface reader,
+                    // despite reading the same endpoint: this read exists to
+                    // show ONE session's new status immediately, and a
+                    // reader that happened to be mid-walk would turn it into
+                    // a follow-up read that lands whenever the current one
+                    // finishes. It is bounded by the operation that issued
+                    // it — one stop, one refetch — rather than by the
+                    // reader, and ordered against everything else by the
+                    // same generation gate.
                     let generation = listing_reads.write().start();
-                    let fetched = fetch_sessions(&base).await;
-                    // `None`: this read is not a poll tick, so it settles
-                    // nothing about optimistic renames or about which
-                    // sessions still exist — see `commit_listing`.
-                    commit_listing(generation, fetched, None);
+                    // Cloned out of the signal before the walk, never read
+                    // through it — see `listing_read` for why a guard must
+                    // not survive into an await.
+                    let snapshot: SessionFilter = filter.peek().clone();
+                    // Claimed like any other read, so the read order stays
+                    // one sequence: an optimistic rename asks whether a
+                    // reply STARTED after it, and a read outside the
+                    // numbering could not answer.
+                    let index = poll_sequence.peek().to_owned();
+                    poll_sequence += 1;
+                    let fetched = fetch_sessions(&base, &snapshot).await;
+                    let failed = fetched.is_err();
+                    // Not authoritative: this read speaks for one session's
+                    // status, so a session missing from it is not a session
+                    // that left — see `commit_listing`. It still settles the
+                    // renames its own rows agree or disagree with.
+                    commit_listing(generation, snapshot, fetched, index, false);
+                    // A failure here replaces a perfectly good list with an
+                    // error line, and nothing outside the reader ever retries
+                    // — this walk is the operation's own, so a lost request
+                    // would leave the page reading "failed to load sessions"
+                    // until the fleet next changed. Handing the demand to the
+                    // surface reader is what turns that into a blip: it
+                    // retries on the ladder and the rows come back.
+                    if failed {
+                        stop_recovery(Trigger::Explicit);
+                    }
                     pending.write().remove(&id);
                 }
             }
@@ -597,11 +920,13 @@ pub(crate) fn ListView(on_open: EventHandler<Session>) -> Element {
     // pending/error bookkeeping). Mirrors `on_stop`'s shape exactly,
     // `delete_session` and `errors`'/`pending`'s "delete:"-prefixed entry
     // in place of `on_stop`'s "stop:" one.
+    let delete_refresh = request_listing.clone();
     let mut do_delete = move |id: String| {
         if !pending.write().insert(id.clone()) {
             return;
         }
         let base = delete_base.clone();
+        let refresh = delete_refresh.clone();
         spawn(async move {
             let outcome = delete_session(&base, &id).await;
             match outcome.err() {
@@ -626,6 +951,17 @@ pub(crate) fn ListView(on_open: EventHandler<Session>) -> Element {
                         current.sessions.retain(|s| s.id != id);
                     }
                     pending.write().remove(&id);
+                    // The optimistic removal takes the ROW and nothing else:
+                    // the fleet total, the matching count and the truncation
+                    // flag all still describe a list that included it, and
+                    // this client cannot recompute any of them (a truncated
+                    // walk does not even know whether the row it dropped was
+                    // one of the ones it was counting). The feed's own
+                    // notification would settle that — except under a latched
+                    // build mismatch, where the feed and the fallback are both
+                    // withdrawn and this explicit read is the ONLY thing that
+                    // will ever correct the banner.
+                    refresh(Trigger::Explicit);
                 }
             }
         });
@@ -777,6 +1113,7 @@ pub(crate) fn ListView(on_open: EventHandler<Session>) -> Element {
     // supervisor's own words land in this row's error line, while the old
     // title stays everywhere it was.
     let rename_base = base.clone();
+    let rename_refresh = request_listing.clone();
     let on_rename_submit = move |(id, title): (String, String)| {
         if !pending.write().insert(id.clone()) {
             return;
@@ -785,6 +1122,7 @@ pub(crate) fn ListView(on_open: EventHandler<Session>) -> Element {
         // supersedes it and by nothing else (see `errors`).
         errors.write().remove(&id);
         let base = rename_base.clone();
+        let refresh = rename_refresh.clone();
         spawn(async move {
             match rename_session(&base, &id, &title).await {
                 Ok(session) => {
@@ -812,6 +1150,15 @@ pub(crate) fn ListView(on_open: EventHandler<Session>) -> Element {
                     if renaming.peek().as_deref() == Some(id.as_str()) {
                         renaming.set(None);
                     }
+                    // The overlay paints the new title and can do nothing
+                    // else — and a title is exactly what a filter can be ON.
+                    // A row renamed OUT of an active title search stays on
+                    // screen under a query it no longer matches, and the
+                    // counts beside it still describe the old name, until
+                    // something re-reads. Normally the feed does; under a
+                    // latched build mismatch nothing does, so this explicit
+                    // read is the correction.
+                    refresh(Trigger::Explicit);
                 }
                 Err(e) => {
                     errors.write().insert(id.clone(), format!("rename: {e}"));
@@ -863,8 +1210,192 @@ pub(crate) fn ListView(on_open: EventHandler<Session>) -> Element {
         })
         .collect();
 
+    // Whether anything is currently being filtered on, for the clear
+    // control and for the empty-result line. Read off the APPLIED filter
+    // rather than the draft: what is on screen is what the applied one
+    // asked for, and a clear control that lit up while someone typed would
+    // be offering to undo something that has not happened yet.
+    let filter_active = filter.read().is_active();
+    // The selector's own copy: the create form takes ownership of
+    // `host_options` further down, and both surfaces want the same list —
+    // the same hosts, called the same things, with the same phase labels.
+    let filter_hosts = host_options.clone();
+    // The host this filter names that the registry no longer carries, if
+    // any — a host removed from another client while a filter on it was
+    // applied. Derived from the DRAFT because that is what the select's
+    // value is bound to, and only once a registry read has landed: an empty
+    // list before the first read would make every id look removed.
+    let removed_filter_host = filter_draft.read().host.filter(|id| {
+        hosts.read().hosts().is_some() && !filter_hosts.iter().any(|host| host.id == *id)
+    });
+    // Two handles on one closure, because a closure is not `Copy` once it
+    // captures the API base: submit and clear are the same operation with
+    // different arguments, not two operations.
+    let mut submit_filter = apply_filter.clone();
+    let mut clear_filter = apply_filter;
+
     rsx! {
         HostsPanel { hosts, ops, busy_host, on_changed: refresh_hosts }
+        // Filtering and search (PLAN_M6_75.md item 7): this builds the
+        // QUERY, the helm answers it, and `rows::count_banner` says how many
+        // matched. Nothing here narrows a list that was already fetched —
+        // see this component's docs for why a client-side filter cannot be
+        // coherent with pagination.
+        //
+        // A `form` rather than loose inputs, and that is what makes Enter
+        // work from any field: applying a filter is a submit, so the keyboard
+        // path and the button are the same path rather than two.
+        form {
+            class: "session-filter",
+            onsubmit: move |evt| {
+                evt.prevent_default();
+                // Bind before calling: `submit_filter` writes `filter_draft`
+                // (apply swaps the draft in as the applied filter), and the
+                // temporary read guard from an inline `peek()` would live to
+                // the end of the whole call statement — a guaranteed
+                // AlreadyBorrowed panic, not a race. The `let` ends the
+                // guard's life before the call starts.
+                let next = filter_draft.peek().clone();
+                submit_filter(next);
+            },
+            label {
+                "host"
+                select {
+                    class: "filter-host",
+                    // The empty value is "any host", not "no host": absence
+                    // is what an unfiltered dimension looks like on the wire,
+                    // so it is what the blank option has to produce.
+                    value: filter_draft.read().host.map(|id| id.to_string()).unwrap_or_default(),
+                    onchange: move |evt| {
+                        filter_draft.write().host = evt.value().parse::<HostId>().ok();
+                    },
+                    // Selection is stated on each option, not only via the
+                    // select's `value`: the option LIST mutates under an
+                    // applied value (a removed host's option gives way to
+                    // the tombstone below), and a re-rendered list resets
+                    // the browser's selection to nothing while Dioxus —
+                    // whose Rust-side `value` did not change — never
+                    // re-applies it. The same defect class the create and
+                    // profile selects fixed; this select joined it the day
+                    // the tombstone made its options mutable.
+                    option {
+                        value: "",
+                        selected: filter_draft.read().host.is_none(),
+                        "any host"
+                    }
+                    for host in filter_hosts.iter() {
+                        option {
+                            key: "{host.id}",
+                            value: "{host.id}",
+                            selected: filter_draft.read().host == Some(host.id),
+                            "{host.label()}"
+                        }
+                    }
+                    // A host the filter names but the registry no longer
+                    // carries gets a tombstone rather than vanishing.
+                    //
+                    // Without one the select falls back to showing its first
+                    // option — "any host" — while the applied filter goes on
+                    // sending the dead id with every read: the control says
+                    // one thing, the request says another, and the rows
+                    // agree with neither. The alternative (clearing the
+                    // filter for them) was rejected because it silently
+                    // widens a query the user chose; a disabled option
+                    // states the situation and leaves the fix theirs, which
+                    // is one click on any other option.
+                    //
+                    // Only ever rendered once the registry has actually been
+                    // read: before that every id looks unregistered, and a
+                    // tombstone during loading would be a lie that flickers.
+                    if let Some(missing) = removed_filter_host {
+                        option {
+                            value: "{missing}",
+                            disabled: true,
+                            // Selected by construction: the tombstone only
+                            // renders while the draft names this host, and
+                            // it must claim the selection the moment it
+                            // replaces the ordinary option.
+                            selected: true,
+                            "host {missing} (no longer registered)"
+                        }
+                    }
+                }
+            }
+            label {
+                "status"
+                select {
+                    class: "filter-status",
+                    value: "{filter_draft.read().status}",
+                    onchange: move |evt| filter_draft.write().status = evt.value(),
+                    option { value: "", "any status" }
+                    for status in FILTERABLE_STATUSES {
+                        option { key: "{status}", value: "{status}", "{status}" }
+                    }
+                }
+            }
+            // The three free-text dimensions opt out of every form of
+            // browser text mangling for the same reason the create form's
+            // fields do: a directory is a literal path, a profile is a name
+            // the helm matches exactly, and an autocorrected search term
+            // finds the wrong thing while looking like it found nothing.
+            label {
+                "directory"
+                input {
+                    r#type: "text",
+                    class: "filter-directory",
+                    autocomplete: "off",
+                    autocorrect: "off",
+                    autocapitalize: "none",
+                    spellcheck: "false",
+                    value: "{filter_draft.read().directory}",
+                    oninput: move |evt| filter_draft.write().directory = evt.value(),
+                }
+            }
+            label {
+                "profile"
+                input {
+                    r#type: "text",
+                    class: "filter-profile",
+                    autocomplete: "off",
+                    autocorrect: "off",
+                    autocapitalize: "none",
+                    spellcheck: "false",
+                    // Free text rather than a picker over the catalog, and
+                    // deliberately: the helm matches a profile by id OR by
+                    // the name a session snapshotted at creation, which is
+                    // what keeps a DELETED profile's sessions findable — and
+                    // a picker built from the catalog could not offer a
+                    // profile that no longer exists.
+                    value: "{filter_draft.read().profile}",
+                    oninput: move |evt| filter_draft.write().profile = evt.value(),
+                }
+            }
+            label {
+                "search titles"
+                input {
+                    r#type: "text",
+                    class: "filter-title",
+                    autocomplete: "off",
+                    autocorrect: "off",
+                    autocapitalize: "none",
+                    spellcheck: "false",
+                    value: "{filter_draft.read().title}",
+                    oninput: move |evt| filter_draft.write().title = evt.value(),
+                }
+            }
+            button { r#type: "submit", class: "btn filter-apply", "filter" }
+            button {
+                r#type: "button",
+                class: "btn filter-clear",
+                // Inert while nothing is applied, so the control cannot
+                // offer to undo something that never happened. Cosmetic
+                // only, like every other `disabled` on this page — the
+                // handler clears an already-empty filter harmlessly.
+                disabled: !filter_active,
+                onclick: move |_| clear_filter(SessionFilter::default()),
+                "clear"
+            }
+        }
         div { class: "list-toolbar",
             button {
                 r#type: "button",
@@ -904,10 +1435,14 @@ pub(crate) fn ListView(on_open: EventHandler<Session>) -> Element {
                 div { class: "status error", "failed to load sessions: {e}" }
             },
             Some(Ok(listing)) => rsx! {
-                if listing.sessions.is_empty() && listing.total == 0 {
+                // The plain empty-fleet line, which is deliberately NOT the
+                // same thing as a filter matching nothing — see
+                // `rows::is_empty_fleet` for why the request has to be
+                // consulted and what taking this branch would suppress.
+                if rows::is_empty_fleet(listing) {
                     div { class: "status", "no sessions" }
                 } else {
-                    // The count ALWAYS renders, and which of the two
+                    // The count ALWAYS renders, and which of its four
                     // wordings it carries is `rows::count_banner`'s
                     // decision — see there for why an absent banner would
                     // itself be a claim nobody can read.
@@ -920,6 +1455,20 @@ pub(crate) fn ListView(on_open: EventHandler<Session>) -> Element {
                                     "{note}"
                                 }
                             }
+                        }
+                    }
+                    // A filter that matched nothing says so in words, beside
+                    // the banner's numbers. Without it the page is a count
+                    // over an empty box, which reads as a list that failed
+                    // to load rather than as a search that found nothing —
+                    // and the two call for opposite reactions. What counts
+                    // as "nothing" is the helm's own matching count rather
+                    // than the emptiness of this page's rows; see
+                    // `rows::no_matches` for the two cases that distinction
+                    // keeps the UI honest about.
+                    if rows::no_matches(listing) {
+                        div { class: "status filter-empty",
+                            "no sessions match this filter"
                         }
                     }
                     div { class: "session-list",
@@ -1773,6 +2322,69 @@ fn SessionRow(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A reply is refused when it answers a filter that is no longer
+    /// applied, however new it is.
+    ///
+    /// The interleaving is ordinary: a filter is submitted while a read for
+    /// the previous one is still walking (a walk is several round trips, and
+    /// the previous filter may well have been "none" over a whole fleet).
+    /// Ordering alone accepts it — it IS the newest reply — and the page
+    /// then shows rows matching A under controls describing B. The failure
+    /// is not transient either: if B's own read fails, nothing further is
+    /// owed and the mismatch stands until the user acts again.
+    #[test]
+    fn a_reply_for_a_filter_that_is_no_longer_applied_is_refused() {
+        let mut reads = ReadGate::default();
+        // ORDER MATTERS in this test, and it is the half that was wrong
+        // first time round: the read that answers the applied filter is
+        // started FIRST, so the wrong-filter reply is genuinely newer. A
+        // rejection that advanced the gate anyway would then lock the right
+        // reply out — and a test that started the right read afterwards
+        // could not tell the two implementations apart, because a newer
+        // generation wins either way.
+        let for_applied_filter = reads.start();
+        let for_old_filter = reads.start();
+
+        assert!(
+            !accepts_listing(&mut reads, for_old_filter, true, false),
+            "the newest reply is still the wrong question's answer"
+        );
+        assert!(
+            accepts_listing(&mut reads, for_applied_filter, true, true),
+            "and refusing it left the ordering alone, so the older reply that DOES answer the \
+             applied filter still commits"
+        );
+    }
+
+    /// The ordering half, unchanged: an older success loses, and a failure
+    /// newer than what is displayed is still reported.
+    ///
+    /// Kept here as well as in `ops` because this is the call site that has
+    /// to get BOTH admissions right at once — a refactor that folded the
+    /// filter check into the success arm alone would leave failures
+    /// reporting a read nobody asked for.
+    #[test]
+    fn listing_replies_are_ordered_by_generation_within_the_applied_filter() {
+        let mut reads = ReadGate::default();
+        let older = reads.start();
+        let newer = reads.start();
+
+        assert!(accepts_listing(&mut reads, newer, true, true));
+        assert!(
+            !accepts_listing(&mut reads, older, true, true),
+            "an older walk describes a list that has since changed"
+        );
+        let latest = reads.start();
+        assert!(
+            accepts_listing(&mut reads, latest, false, true),
+            "a failure newer than what is on screen is worth saying"
+        );
+        assert!(
+            !accepts_listing(&mut reads, older, false, true),
+            "while one older than it says nothing about the rows now displayed"
+        );
+    }
 
     /// A CONNECTED host as the create dialog would be offered it —
     /// `phase: None` is what "connected" means to an option.

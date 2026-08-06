@@ -13,7 +13,14 @@ serde.workspace = true
 serde_json.workspace = true
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
-web-sys.workspace = true
+# `Performance` is added on top of the workspace features (which carry
+# `Window`/`Location` for every crate that needs them): the browser's
+# `performance.now()` is this target's only monotonic clock, and
+# `api::WalkClock` needs one to bound a listing walk in TIME as well as in
+# pages, rows and bytes. `std::time::Instant` panics on
+# wasm32-unknown-unknown, which is why the clock is a `cfg` pair rather than
+# one implementation.
+web-sys = { workspace = true, features = ["Performance"] }
 # List-view and session-detail polling sleep (PLAN_M2.md step 7 / PLAN_M4.md
 # item 6; `ListView` in src/list.rs, `SessionView` in src/session_view.rs,
 # both sharing `POLL_INTERVAL_MS` from src/api.rs): `TimeoutFuture` wraps

@@ -1,0 +1,559 @@
+// Shared machinery for the M6.75 UI specs (PLAN_M6_75.md items 6 and 7):
+// creating and cleaning up sessions through the real API, and taking
+// deterministic control of the two channels the feed work is about — the
+// invalidation socket and the build stamp.
+//
+// A helper MODULE rather than another copy pasted per spec, unlike
+// titlebar.spec.ts's and mouse-modes.spec.ts's duplicated terminal helpers.
+// The difference is what is being shared: those files each needed one
+// small, stable snippet, while the three feed/filter specs share a
+// non-obvious CONTRACT — what a stubbed feed does, what counts as a
+// periodic read, how skew is forced — and three copies of that would drift
+// into three different definitions of "the feed is healthy", which is
+// exactly the claim those tests exist to make.
+//
+// The pre-existing specs keep their own copies of the SESSION helpers, and
+// that is still deliberate. One export has since crossed over:
+// terminal.spec.ts imports `stubFeed`, because a dozen of its tests had to
+// stop waiting for the polls M6.75 removed and take control of invalidation
+// instead. That one is a contract rather than a snippet — what "the feed is
+// healthy" means — and two definitions of it would drift apart while the
+// specs that depend on the difference kept passing.
+import { APIRequestContext, expect, Page, Route, WebSocketRoute } from "@playwright/test";
+import path from "node:path";
+
+/**
+ * The fake agent's `basic` script, as the create form's `invocation` string
+ * — an absolute path, quoted, exactly as terminal.spec.ts and
+ * titlebar.spec.ts build theirs. The supervisor shell-splits it into argv
+ * when the session launches.
+ *
+ * `basic` is deliberate: it prints, echoes, and then goes quiet, which is
+ * what makes it a usable fixture for a status transition (the supervisor's
+ * sampler classifies a quiet pane as idle after a few looks).
+ */
+export const FAKE_AGENT = `"${
+  path.resolve(__dirname, "../../../target/debug/farhelm")
+}" internal fake-agent --script basic`;
+
+/**
+ * A session as the helm's JSON describes it, narrowed to what these specs
+ * read.
+ *
+ * Narrowed DELIBERATELY rather than transcribed: a field declared here is a
+ * field some assertion depends on, so the interface doubles as the list of
+ * wire fields this suite is pinned to. Adding one that nothing reads makes
+ * that list a lie and invites a later reader to believe the suite covers a
+ * field it never looks at.
+ */
+export interface SessionRow {
+  id: string;
+  title: string;
+  status?: { state: string };
+}
+
+/**
+ * One page of `GET /api/sessions`, narrowed on the same terms as
+ * [`SessionRow`] — which here means the rows and nothing else.
+ *
+ * The reply also carries `total`, `matching`, `truncated` and `next_cursor`,
+ * and they are deliberately absent: the specs read those NUMBERS off the
+ * count banner the page renders, which is the claim worth pinning, and
+ * re-declaring them here would suggest a wire-level assertion nothing makes.
+ * A cursor page is identified by the URL that asked for it, not by this
+ * shape.
+ */
+export interface SessionPage {
+  sessions: SessionRow[];
+}
+
+/** A registry row from `GET /api/hosts`, narrowed to what these specs read. */
+export interface HostRow {
+  id: number;
+  kind: string;
+}
+
+/** Fail loudly rather than returning a half-decoded body: every caller here
+ * is setting up a fixture, and a fixture that quietly did not happen makes
+ * the test that follows assert against the wrong world. */
+async function ok(response: { ok(): boolean; status(): number; text(): Promise<string> }, what: string) {
+  if (!response.ok()) {
+    throw new Error(`${what} failed (${response.status()}): ${await response.text()}`);
+  }
+}
+
+/** The whole registry. */
+export async function listHosts(request: APIRequestContext): Promise<HostRow[]> {
+  const response = await request.get("/api/hosts");
+  await ok(response, "reading the host registry");
+  return (await response.json()).hosts;
+}
+
+/** The reserved local row's id — the host every fixture here creates on. */
+export async function localHostId(request: APIRequestContext): Promise<number> {
+  const local = (await listHosts(request)).find((host) => host.kind === "local");
+  if (!local) throw new Error("the helm reported no local host row");
+  return local.id;
+}
+
+/** One page of the session list, with an optional filter query string. */
+export async function listSessions(
+  request: APIRequestContext,
+  query = "",
+): Promise<SessionPage> {
+  const response = await request.get(`/api/sessions${query ? `?${query}` : ""}`);
+  await ok(response, `listing sessions (${query || "unfiltered"})`);
+  return await response.json();
+}
+
+/**
+ * Create a session through the real API, the way every client does.
+ *
+ * Deliberately NOT through the UI's create form: these specs are about what
+ * the UI does when the FLEET changes underneath it, so the change has to
+ * arrive from somewhere other than the page under test — a create driven
+ * through the form would be indistinguishable from the page having been
+ * told, which is the very thing the two-client and feed tests set out to
+ * prove.
+ */
+export async function createSession(
+  request: APIRequestContext,
+  body: {
+    title: string;
+    cwd?: string;
+    invocation?: string;
+    host?: number;
+    profile_id?: string;
+  },
+): Promise<SessionRow> {
+  const response = await request.post("/api/sessions", {
+    data: {
+      cwd: body.cwd ?? "/tmp",
+      title: body.title,
+      ...(body.profile_id
+        ? { profile_id: body.profile_id }
+        : { invocation: body.invocation ?? FAKE_AGENT }),
+      ...(body.host === undefined ? {} : { host: body.host }),
+    },
+  });
+  await ok(response, `creating session ${body.title}`);
+  return await response.json();
+}
+
+/** Rename a session — the cheapest single-request mutation there is, which
+ * is why the feed specs use it as their "something changed" event. */
+export async function renameSession(
+  request: APIRequestContext,
+  id: string,
+  title: string,
+): Promise<void> {
+  const response = await request.post(`/api/sessions/${id}/rename`, { data: { title } });
+  await ok(response, `renaming session ${id}`);
+}
+
+/**
+ * Stop a session, insisting that it worked.
+ *
+ * Separate from [`cleanupSession`], which tolerates a session that is already
+ * gone: a stop used as a FIXTURE is a precondition for the assertions that
+ * follow — most often "this row now reads exited" — and a refused stop there
+ * has to fail as a setup error rather than as a filter or a badge mysteriously
+ * disagreeing with the test's expectations.
+ */
+export async function stopSession(request: APIRequestContext, id: string): Promise<void> {
+  const response = await request.post(`/api/sessions/${id}/stop`);
+  await ok(response, `stopping session ${id}`);
+}
+
+/**
+ * Stop and delete a session, tolerating either already being done.
+ *
+ * Cleanup runs after a failed test too, so "it is already gone" is a normal
+ * outcome rather than an error worth propagating over the real failure.
+ */
+export async function cleanupSession(request: APIRequestContext, id: string): Promise<void> {
+  for (const [what, response] of [
+    ["stopping", await request.post(`/api/sessions/${id}/stop`)],
+    ["deleting", await request.delete(`/api/sessions/${id}`)],
+  ] as const) {
+    if (!response.ok() && response.status() !== 404) {
+      throw new Error(
+        `cleanup: ${what} session ${id} failed (${response.status()}): ${await response.text()}`,
+      );
+    }
+  }
+}
+
+/**
+ * A stubbed invalidation feed: the page believes it is subscribed, and this
+ * test decides what it is ever told.
+ *
+ * The stub replaces the helm's socket entirely rather than proxying it, and
+ * that is what makes the assertions in these specs provable rather than
+ * probable. A proxied feed carries whatever the shared stack happens to be
+ * doing — another spec's leftover session settling into `idle` bumps the
+ * revision — so "a healthy feed performs no periodic reads" could only ever
+ * be observed as "no reads happened to occur", which is a different claim.
+ *
+ * Install BEFORE `page.goto`: a route only applies to sockets opened after
+ * it exists.
+ */
+/**
+ * ## A socket this stub never greets does not live long
+ *
+ * The client gives a fresh subscription a bounded time to say something and
+ * tears it down when nothing comes (a real helm greets immediately, so
+ * silence means the far end accepted the upgrade and then wedged). A test
+ * that stages a long outage therefore watches the page open, abandon and
+ * reopen sockets the whole time, and "the socket I saw a moment ago" is not
+ * something it may assume still exists — which is what
+ * [`FeedStub::notifyOnConnect`] is for and why [`FeedStub::openSockets`] is
+ * worth asking before [`FeedStub::notify`].
+ */
+export interface FeedStub {
+  /** How many times the page has opened a feed socket, handshakes and
+   * reconnects alike — the page's own recovery, made observable. Climbs on
+   * its own during an ungreeted outage, per the note above. */
+  connections(): number;
+  /**
+   * How many of those sockets are still OPEN.
+   *
+   * The counterpart [`FeedStub::connections`] cannot supply, and the reason
+   * this stub tracks lifetime rather than just arrivals: a page that has
+   * withdrawn its feed and a page holding one silent socket open forever
+   * both report exactly one connection, and only the second is the bug the
+   * skew tests are looking for. It is also the question to ask before
+   * notifying, since an ungreeted socket is torn down on the client's own
+   * schedule rather than on the test's.
+   */
+  openSockets(): number;
+  /** Send a revision notification on the live socket, handshake or bump —
+   * the helm makes no distinction and neither does this. Throws if there is
+   * no socket to send on, which for a stub is a setup error rather than a
+   * condition worth tolerating silently. */
+  notify(revision: number): void;
+  /**
+   * Greet every socket the page opens FROM NOW ON with `revision`, the
+   * instant it opens; called with no argument, stop greeting.
+   *
+   * The helm's own behavior (it sends the current revision immediately on
+   * every (re)subscription), armed ahead of time, and it earns its keep two
+   * ways. It is the only way to hand a notice to a page whose socket comes
+   * and goes on a schedule the test does not control — see the note above —
+   * and it is what lets a test say something about a subscription that was
+   * never supposed to open at all: if the page opens one anyway, the notice
+   * is already on the mat and any read that follows is visible.
+   *
+   * Sticky rather than one-shot, so a reconnect ladder's later rungs are
+   * greeted too. DISARM it before staging an outage the page must not
+   * recover from until the test says so, or the socket it opens next is made
+   * healthy on arrival and the fallback never runs.
+   */
+  notifyOnConnect(revision?: number): void;
+  /** Drop the live socket, as a helm restart or a lost network would. */
+  kill(): void;
+  /** Wait until the page has opened its `nth` socket (1-based). */
+  waitForConnection(nth: number): Promise<void>;
+}
+
+export async function stubFeed(page: Page): Promise<FeedStub> {
+  let live: WebSocketRoute | undefined;
+  let connections = 0;
+  let greeting: number | undefined;
+  // The sockets that have not closed. A SET rather than a counter because
+  // both the page and this stub can end a socket, and set removal is
+  // idempotent where a decrement would double-count a socket whose close
+  // this stub performed and whose close handler then fired anyway.
+  const open = new Set<WebSocketRoute>();
+  await page.routeWebSocket("**/api/events**", (ws) => {
+    live = ws;
+    connections += 1;
+    open.add(ws);
+    ws.onClose(() => {
+      open.delete(ws);
+      if (live === ws) live = undefined;
+    });
+    // Deliberately no automatic handshake unless one was ARMED: every spec
+    // here is about WHEN the client is told the current revision, so the
+    // moment has to be the test's to choose — and arming is how a test
+    // chooses "the moment a socket appears at all".
+    if (greeting !== undefined) ws.send(JSON.stringify({ revision: greeting }));
+  });
+  return {
+    connections: () => connections,
+    openSockets: () => open.size,
+    notify(revision: number) {
+      if (!live) throw new Error("no feed socket is open to notify on");
+      live.send(JSON.stringify({ revision }));
+    },
+    notifyOnConnect(revision?: number) {
+      greeting = revision;
+    },
+    kill() {
+      if (!live) throw new Error("no feed socket is open to kill");
+      const socket = live;
+      live = undefined;
+      open.delete(socket);
+      socket.close();
+    },
+    async waitForConnection(nth: number) {
+      const deadline = Date.now() + 15_000;
+      while (connections < nth) {
+        if (Date.now() > deadline) {
+          throw new Error(`the page never opened feed socket #${nth} (saw ${connections})`);
+        }
+        await page.waitForTimeout(50);
+      }
+    },
+  };
+}
+
+/** One held read: what the helm answered when it arrived, and (privately) the
+ * switch that lets that answer through. */
+export interface HeldRead {
+  status: number;
+  headers: Record<string, string>;
+  /** The reply as TEXT, so a test can decode it, change one field, and send
+   * the result back as this read's answer. */
+  body: string;
+}
+
+/**
+ * Hold every matching read open — reply in hand, delivery on the test's word.
+ *
+ * ## Why holding one read is not enough any more
+ *
+ * Each surface reads through ONE reader (`farhelm-ui/src/reader.rs`): a
+ * notification arriving while a read is in flight becomes that read's single
+ * follow-up rather than a second concurrent walk, and a mutation's own
+ * refresh queues the same way. So a fixture that holds one stale reply and
+ * lets everything else through is not staging a race — it is staging a QUEUE,
+ * and the reply behind the stale one repairs the screen microseconds after
+ * the stale one lands. Tests written that way pass with the ordering gates
+ * deleted, because they never look in the window where the damage is visible.
+ *
+ * Holding the repair too is what opens that window. The sequence is: hold the
+ * stale read, hold whatever would repair it, release the stale one, ASSERT,
+ * and only then release the repair.
+ *
+ * ## Captured, not merely intercepted
+ *
+ * Each read's reply is fetched the moment the request arrives, so it
+ * describes the world at THAT moment rather than at delivery — which is what
+ * makes a held reply genuinely stale rather than merely late. A caller must
+ * wait for the capture ([`HeldReads::waitForCaptures`]) before mutating, or
+ * the "stale" reply carries the very change it was supposed to predate.
+ *
+ * Capture ORDER is dispatch order for reads through one reader, since the
+ * next is not sent until the previous is delivered. A read from outside the
+ * reader — a stop's own refetch — can arrive alongside; a test expecting one
+ * should say where it lands.
+ */
+export interface HeldReads {
+  /** How many replies are in hand. */
+  captured(): number;
+  /** Resolve once at least `count` replies are in hand. */
+  waitForCaptures(count: number): Promise<void>;
+  /** The reply captured for read `nth` (1-based). */
+  reply(nth: number): HeldRead;
+  /**
+   * Deliver read `nth`, optionally answering with a different status or body
+   * than the helm gave.
+   *
+   * The helm's own headers are kept either way — the build stamp above all,
+   * whose absence would latch skew and stand the page down mid-test — but the
+   * length and encoding headers are dropped when the body is replaced, since
+   * they describe bytes that are no longer being sent.
+   */
+  release(nth: number, replacement?: { status?: number; body?: string }): void;
+  /** Deliver everything still held, and let later reads through untouched. */
+  releaseAll(): void;
+}
+
+export async function holdReads(
+  page: Page,
+  // A PREDICATE rather than a glob, because the read to hold is identified by
+  // its path alone: an unfiltered listing walk asks for `/api/sessions` with
+  // no query string at all and its later pages ask for the same path with a
+  // cursor, and no single glob covers both without also swallowing
+  // `/api/sessions/{id}`.
+  matches: (url: URL) => boolean,
+): Promise<HeldReads> {
+  type Replacement = { status?: number; body?: string };
+  const held: { reply: HeldRead; deliver: (replacement?: Replacement) => void }[] = [];
+  let open = false;
+  await page.route(matches, async (route: Route) => {
+    if (route.request().method() !== "GET" || open) {
+      await route.continue();
+      return;
+    }
+    const response = await route.fetch();
+    const reply: HeldRead = {
+      status: response.status(),
+      headers: response.headers(),
+      body: await response.text(),
+    };
+    let deliver: (replacement?: Replacement) => void = () => {};
+    const released = new Promise<Replacement | undefined>((resolve) => {
+      deliver = resolve;
+    });
+    // Pushed only once the reply is IN HAND, which is what makes a capture
+    // count a statement about staleness rather than about arrival.
+    held.push({ reply, deliver });
+    const replacement = await released;
+    if (!replacement) {
+      await route.fulfill(reply);
+      return;
+    }
+    const headers = { ...reply.headers };
+    if (replacement.body !== undefined) {
+      delete headers["content-length"];
+      delete headers["content-encoding"];
+    }
+    await route.fulfill({
+      status: replacement.status ?? reply.status,
+      headers,
+      body: replacement.body ?? reply.body,
+    });
+  });
+  const at = (nth: number) => {
+    const read = held[nth - 1];
+    if (!read) throw new Error(`read #${nth} has not been captured (saw ${held.length})`);
+    return read;
+  };
+  return {
+    captured: () => held.length,
+    async waitForCaptures(count: number) {
+      await expect
+        .poll(() => held.length, {
+          timeout: 30_000,
+          message: `the page must have taken ${count} read(s) by now`,
+        })
+        .toBeGreaterThanOrEqual(count);
+    },
+    reply: (nth) => at(nth).reply,
+    release(nth, replacement) {
+      at(nth).deliver(replacement);
+    },
+    releaseAll() {
+      open = true;
+      for (const read of held) read.deliver();
+    },
+  };
+}
+
+/**
+ * Hold a mutation's REPLY until the test says so, while the server acts at
+ * once.
+ *
+ * The window every ordering test around a stop or a restart needs: the
+ * operation has really happened and the CLIENT does not know yet — which is
+ * exactly the state the epoch bumps and the post-mutation refresh are written
+ * for, and a state a real supervisor passes through too fast to assert in.
+ *
+ * Re-fulfilled from the reply the helm actually gave, headers included, for
+ * the reason [`holdReads`] gives.
+ */
+export async function holdMutation(
+  page: Page,
+  matches: (url: URL) => boolean,
+): Promise<() => void> {
+  let release = () => {};
+  const held = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  await page.route(matches, async (route: Route) => {
+    const response = await route.fetch();
+    await held;
+    await route.fulfill({ response });
+  });
+  return () => release();
+}
+
+/**
+ * Which of the removed periodic loops a read belongs to.
+ *
+ * There were FOUR loops, not two, and they are separated here because a
+ * no-polling proof that lumps them together only ever proves the ones the
+ * page under test happens to be showing: the list's listing walk and its
+ * host registry read, and the session view's detail read and the host
+ * registry read behind a stale session's notice. A test that mounts only the
+ * list and counts "any read" says nothing at all about the other two.
+ *
+ * There is deliberately no `any` member: every place that wants the union
+ * simply omits the argument, and a named member for "all of them" would be a
+ * second spelling of the same thing — one that also has to be excluded again
+ * everywhere a read's OWN surface is stored, since no single read is ever
+ * `any`.
+ */
+export type ReadSurface = "listing" | "detail" | "hosts";
+
+/**
+ * Count the page's READS of the surfaces the periodic loops used to poll.
+ *
+ * Only `GET`s are counted, and only of `/api/sessions` (the listing walk,
+ * cursor pages included), `/api/sessions/{id}` (one session's detail) and
+ * `/api/hosts`. Mutations are excluded on purpose: a stop or a rename is the
+ * user acting, and a spec that counted those could never tell a busy page
+ * from a polling one.
+ */
+export interface ReadCounter {
+  /** How many reads of `surface` — or of ALL of them, when it is omitted —
+   * have been seen since the counter was installed. Take one before a window
+   * and one after; the difference is what happened during it. */
+  count(surface?: ReadSurface): number;
+  /** The URLs behind [`ReadCounter::count`], for a failure message that can
+   * name what was read rather than only how much. */
+  urls(surface?: ReadSurface): string[];
+}
+
+/** Which loop a URL belongs to, or `undefined` for a request that is not one
+ * of the four reads (a mutation's path, an asset, the terminal socket). */
+function readSurface(url: string): ReadSurface | undefined {
+  const { pathname } = new URL(url);
+  if (pathname === "/api/sessions") return "listing";
+  if (pathname === "/api/hosts") return "hosts";
+  // One session, and nothing under it: `/api/sessions/{id}/stop` and friends
+  // are mutations, and `/api/sessions/{id}/tabs` is not a read this UI makes.
+  if (/^\/api\/sessions\/[^/]+$/.test(pathname)) return "detail";
+  return undefined;
+}
+
+export function countReads(page: Page): ReadCounter {
+  const seen: { surface: ReadSurface; url: string }[] = [];
+  page.on("request", (request) => {
+    if (request.method() !== "GET") return;
+    const surface = readSurface(request.url());
+    if (surface) seen.push({ surface, url: request.url() });
+  });
+  const matching = (surface?: ReadSurface) =>
+    seen.filter((read) => surface === undefined || read.surface === surface);
+  return {
+    count: (surface) => matching(surface).length,
+    urls: (surface) => matching(surface).map((read) => read.url),
+  };
+}
+
+/**
+ * Make every API reply carry a build stamp this bundle disagrees with, so
+ * the page latches skew (`farhelm-ui/src/skew.rs`).
+ *
+ * Rewriting the HEADER rather than standing up a second helm is the only
+ * practical way to reach this state: the mismatch is between the compiled-in
+ * bundle version and what the server says, and both sides of a real
+ * disagreement would have to be built from different commits.
+ *
+ * The stamp must be visible ASCII, and that is the transport's rule rather
+ * than this helper's: an HTTP header cannot carry arbitrary text, and a
+ * value with anything else in it is refused when the client reads the header
+ * — so the page sees NO stamp and latches a different verdict than the
+ * caller intended. Anything hostile therefore has to reach the screen
+ * through a JSON body instead (see m6-5-debts.spec.ts's peer-rendering pin).
+ */
+export async function forceBuildSkew(page: Page, stamp: string): Promise<void> {
+  await page.route("**/api/**", async (route) => {
+    const response = await route.fetch();
+    const headers = { ...response.headers(), "x-farhelm-build": stamp };
+    await route.fulfill({ response, headers });
+  });
+}

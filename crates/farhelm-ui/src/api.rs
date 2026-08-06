@@ -11,14 +11,15 @@
 //! there is no second consumer that would ever want a structured error to
 //! match on.
 //!
-//! `SessionPage`/`SessionListing`, `POLL_INTERVAL_MS`, and
+//! `SessionPage`/`SessionListing`, `SessionFilter`, `POLL_INTERVAL_MS`, and
 //! `restart_mode_for` live here too, even though none of them performs I/O
 //! directly: the first pair is this module's own decoded response shape and
-//! the walked result it assembles, the second is the cadence every poller
-//! (`ListView`'s listing and hosts polls, `SessionView`'s detail poll)
-//! shares, and the third documents the wire-level pairing `restart_session`
-//! enforces from the caller's side — all of them are part of the HTTP
-//! contract this module owns, not the view code that consumes it.
+//! the walked result it assembles, `SessionFilter` is the query surface's
+//! half of the helm's server-side filtering (PLAN_M6_75.md item 7),
+//! `POLL_INTERVAL_MS` is the cadence the FALLBACK polls run at, and the last
+//! documents the wire-level pairing `restart_session` enforces from the
+//! caller's side — all of them are part of the HTTP contract this module
+//! owns, not the view code that consumes it.
 //!
 //! The URL-building helpers (`encode_query_value`, `encode_path_segment`)
 //! are `pub(crate)` rather than private: every endpoint below that embeds
@@ -45,7 +46,7 @@ use serde::Deserialize;
 
 /// Mirror of one PAGE of the helm's `GET /api/sessions` response
 /// (farhelm-helm's `SessionPageBody`): `{"sessions": [...], "total": N,
-/// "truncated": bool, "next_cursor": "…"}`.
+/// "matching": N, "truncated": bool, "next_cursor": "…"}`.
 ///
 /// `total`/`truncated` keep `#[serde(default)]` for the same old-peer
 /// tolerance as `Session::status`; `next_cursor` needs none, since serde
@@ -59,11 +60,105 @@ struct SessionPage {
     sessions: Vec<Session>,
     #[serde(default)]
     total: u64,
+    /// How many sessions match the request's filter across the whole merged
+    /// view — the other half of "N matching of M" (PLAN_M6_75.md item 5).
+    ///
+    /// An `Option` rather than a `#[serde(default)]` u64, and the difference
+    /// is the difference between a tolerated old reply and a fabricated
+    /// count. Defaulting to 0 would make a helm that predates the field say
+    /// "0 matching of 700 sessions" over a list full of rows — a claim
+    /// nothing supports, on the one line whose whole job is to be believed.
+    /// Absent means "this helm does not report a matching count", and what
+    /// the walk may honestly do with that depends on the REQUEST — see
+    /// [`matching_count`].
+    matching: Option<u64>,
     #[serde(default)]
     truncated: bool,
     /// Opaque resume key for the next page — replayed verbatim, never
     /// constructed or interpreted here.
     next_cursor: Option<String>,
+}
+
+/// The session list's query surface (PLAN_M6_75.md item 7): SPEC.md's five
+/// dimensions, as the values a user typed or chose.
+///
+/// Filtering is a QUERY, not a render pass. Every field here becomes a
+/// parameter on `GET /api/sessions` and the helm answers with the matching
+/// rows plus their count — which is the only arrangement that can be
+/// coherent with pagination at all. A client filtering the page it was
+/// handed would hide matches beyond the page cut while reporting a count
+/// that included them, and the count is what the banner says out loud.
+///
+/// The parent-reference dimension SPEC.md ties to spawned sessions is
+/// deliberately absent: it ships in M7 beside the feature that mints parent
+/// references, not here where no session has one (PLAN_M6_75.md's Out).
+///
+/// Strings rather than `Option<String>` because a text field's empty value
+/// IS its absent value, and the helm agrees — an exactly-empty parameter is
+/// treated as absent there, which is what makes clearing a search box widen
+/// the list instead of erroring.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub(crate) struct SessionFilter {
+    /// A registered host's id, from `GET /api/hosts`.
+    pub(crate) host: Option<HostId>,
+    /// Substring of the working directory, case-insensitively.
+    pub(crate) directory: String,
+    /// A profile, named by its id or by the name a session snapshotted at
+    /// creation — the latter is what keeps a DELETED profile's sessions
+    /// findable, and is why this is free text rather than a picker over the
+    /// catalog as it stands today.
+    pub(crate) profile: String,
+    /// A status, spelled exactly as the wire spells it. The helm refuses a
+    /// word it does not know with a 400 rather than answering "no sessions",
+    /// so this is offered as a choice rather than typed.
+    pub(crate) status: String,
+    /// Substring of the title, case-insensitively — SPEC.md's "search".
+    pub(crate) title: String,
+}
+
+impl SessionFilter {
+    /// Whether anything is being filtered on.
+    ///
+    /// Drives the count banner's wording (`rows::count_banner`) and, more
+    /// quietly, what a reply is EVIDENCE about: a filtered listing says
+    /// nothing about the sessions it excluded, so the reconciliations that
+    /// treat absence as departure are held back for one (see
+    /// `list::ListView`'s commit path).
+    pub(crate) fn is_active(&self) -> bool {
+        self.host.is_some()
+            || !self.directory.is_empty()
+            || !self.profile.is_empty()
+            || !self.status.is_empty()
+            || !self.title.is_empty()
+    }
+
+    /// This filter as the query string's parameters, percent-encoded and
+    /// joined — empty when nothing is set.
+    ///
+    /// Values travel BYTE FOR BYTE apart from the encoding: no trimming, on
+    /// purpose and in step with the helm, which drops only the exactly-empty
+    /// value. A directory may legitimately contain surrounding whitespace
+    /// and a title may be `fix  the  spacing`, so trimming would make text
+    /// that is actually there unfindable — and would collapse `" "` and `""`
+    /// into one request, which the user can see as a space silently clearing
+    /// their filter.
+    fn query(&self) -> String {
+        let mut parts: Vec<String> = Vec::new();
+        if let Some(host) = self.host {
+            parts.push(format!("host={host}"));
+        }
+        for (name, value) in [
+            ("directory", &self.directory),
+            ("profile", &self.profile),
+            ("status", &self.status),
+            ("title", &self.title),
+        ] {
+            if !value.is_empty() {
+                parts.push(format!("{name}={}", encode_query_value(value)));
+            }
+        }
+        parts.join("&")
+    }
 }
 
 /// The whole session list, as this UI holds it: every page of the helm's
@@ -78,7 +173,32 @@ pub(crate) struct SessionListing {
     /// Every session in the merged view across every host, as the helm
     /// counts them — which is what SPEC.md's "showing N of M" is about, and
     /// is NOT the same as `sessions.len()` whenever a walk stopped early.
+    ///
+    /// Counted BEFORE any filter, deliberately: it is the fleet's size, so
+    /// "N matching of M sessions" has an M that does not move when the user
+    /// types.
     pub(crate) total: u64,
+    /// How many sessions matched the filter, fleet-wide — or `None` when
+    /// this helm did not say and no honest number can be substituted.
+    ///
+    /// Fleet-wide rather than page-wide is the whole point: a walk that
+    /// stopped at a ceiling holds fewer rows than matched, and the banner's
+    /// job is to say so.
+    ///
+    /// `None` is only ever produced for a FILTERED walk against a helm that
+    /// predates the count (see [`matching_count`]), and it travels this far
+    /// rather than being resolved in the walk because it is a fact about the
+    /// helm the banner has to render — `rows::count_banner` says the filter
+    /// went unanswered instead of printing a number nobody counted.
+    pub(crate) matching: Option<u64>,
+    /// Whether this walk carried a filter at all.
+    ///
+    /// From the REQUEST, never derived by comparing `matching` against
+    /// `total`: a filter that happens to match everything is still a filter,
+    /// and the banner should say "5 matching of 5 sessions" rather than
+    /// silently reverting to the unfiltered wording and leaving the user
+    /// wondering whether their filter took.
+    pub(crate) filtered: bool,
     /// Whether entries remain beyond what `sessions` carries: the walk hit
     /// one of its own ceilings, the helm's last page still reported more, or
     /// the walk turned out `incoherent`.
@@ -200,6 +320,31 @@ fn client() -> reqwest::Client {
     reqwest::Client::new()
 }
 
+/// How long any one request may take before it is abandoned.
+///
+/// It exists because of `reader`, not because of the network. A surface now
+/// runs ONE read at a time: a request that never completes and never fails
+/// would hold that reader forever, and the surface would sit stale with no
+/// retry ever scheduled — the previous arrangement, which spawned a read per
+/// notification, at least kept trying (while accumulating tasks against a
+/// helm that had stopped answering, which is the problem the reader solves).
+/// Bounding the request is what makes the single-flight reader safe: a hung
+/// connection becomes an ordinary failed read, and the retry ladder takes
+/// over.
+///
+/// Sixty seconds is deliberately generous rather than tuned. A read is
+/// expected to take milliseconds, but this door is shared with the host
+/// mutations, and those do real work on another machine — an add or an adopt
+/// opens an SSH connection and inspects an install. The number matches the
+/// helm's own stall bounds (`uploads.rs`'s sixty-second deadlines) so the
+/// two sides give up on roughly the same scale. Nothing here streams a large
+/// body: uploads never pass through this module (terminal.js owns them, see
+/// `attachments`), so a total-request deadline cannot cut a transfer short.
+///
+/// Applied in [`send`] rather than on the client, so it holds for every
+/// request by construction — the same argument the funnel itself makes.
+const REQUEST_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(60);
+
 /// Send one request and read the helm's build stamp off its reply
 /// (PLAN_M6.md item 6's client↔helm skew edge).
 ///
@@ -213,8 +358,36 @@ fn client() -> reqwest::Client {
 /// The reply is handed back untouched — the observation only reads a
 /// header — so this is a one-line substitution at each call site and every
 /// status/decode decision below is unchanged.
+///
+/// The [`REQUEST_TIMEOUT`] is applied here for the same funnel reason: a
+/// per-call-site deadline is a deadline someone eventually forgets, and the
+/// one request left unbounded is the one that wedges a surface.
+///
+/// One caller needs a SHORTER deadline than the default and reaches
+/// [`send_within`] for it — the listing walk, whose pages share one budget
+/// (see `walk_step`). Nothing may reach for a longer one, which is why this
+/// is the door everything else uses.
 async fn send(request: reqwest::RequestBuilder) -> Result<reqwest::Response, String> {
-    let resp = request.send().await.map_err(|e| e.to_string())?;
+    send_within(request, REQUEST_TIMEOUT).await
+}
+
+/// [`send`] with an explicit deadline, for a request that is one step of a
+/// larger bounded operation.
+///
+/// Separate from `send` rather than a parameter on it, because the choice is
+/// not one every call site should be invited to make: fifteen endpoints want
+/// the standard deadline and exactly one — a page of the listing walk — has
+/// a budget of its own to divide up. The build-stamp observation is the same
+/// either way, which is the property that must not vary.
+async fn send_within(
+    request: reqwest::RequestBuilder,
+    timeout: std::time::Duration,
+) -> Result<reqwest::Response, String> {
+    let resp = request
+        .timeout(timeout)
+        .send()
+        .await
+        .map_err(|e| e.to_string())?;
     // Called for its effect, in a statement of its own. Folding it into a
     // `.map()` reads as a transformation of the response and is not one —
     // the value is unchanged and the point is entirely the side effect.
@@ -339,6 +512,178 @@ const MAX_LIST_ROWS: usize = 20_000;
 /// what was actually transferred and held.
 const MAX_LIST_BYTES: usize = 16 * 1024 * 1024;
 
+/// What this reply may honestly claim matched, given what it reported and
+/// what was asked for.
+///
+/// The substitution — an absent count answered with the fleet total — is
+/// correct for an UNFILTERED request and only for one: with no filter, every
+/// session matches, so `total` is not a stand-in but the same number by
+/// another name. That is what makes a helm one version behind produce the
+/// banner it always did.
+///
+/// Under an active filter the same substitution is a fabrication, and a
+/// specific one: a helm that predates the matching count also predates
+/// server-side filtering (both landed together — PLAN_M6_75.md item 5), so
+/// it answered the filter by IGNORING it. Substituting `total` would then
+/// print "700 matching of 700 sessions" over 700 unfiltered rows — the UI
+/// vouching for a filter that never ran. `None` carries that ignorance to
+/// the banner instead, which says so in words (`rows::count_banner`).
+///
+/// Absent-with-a-filter is therefore a fact about the HELM rather than about
+/// the fleet, which is why the decision reads the request and not the reply
+/// alone.
+fn matching_count(filter_active: bool, reported: Option<u64>, total: u64) -> Option<u64> {
+    reported.or_else(|| (!filter_active).then_some(total))
+}
+
+/// How long one logical WALK may spend before it stops and reports what it
+/// has (`truncated`), joining [`MAX_LIST_PAGES`], [`MAX_LIST_ROWS`] and
+/// [`MAX_LIST_BYTES`] as a fourth ceiling of exactly the same kind.
+///
+/// The three existing bounds are about SIZE, and none of them bounds time: a
+/// helm answering each page just under [`REQUEST_TIMEOUT`] can hold a walk
+/// for two hundred pages — hours — while every trigger behind it queues.
+/// That was tolerable when a read was one request among many; it is not now
+/// that a surface has ONE reader (`reader`), because the walk IS the
+/// surface's only way to hear anything.
+///
+/// Ninety seconds is chosen against the page bounds rather than plucked: a
+/// fleet large enough to walk forty pages at 500 rows each is already past
+/// what this UI renders comfortably, and forty pages of a healthy helm take
+/// well under a second. What the number really buys is that the worst case
+/// is a minute and a half plus one request timeout — bounded, and shorter
+/// than any user's patience for a page that has stopped moving — rather than
+/// unbounded.
+///
+/// Stopping is not an error, exactly as it is not for the other three: the
+/// rows collected are real and in order, so they are returned with
+/// `truncated` set and the count line says "showing N of M". A read that
+/// FAILED would be the wrong answer here — it would blank a list the client
+/// successfully collected most of.
+const MAX_LIST_MILLIS: u64 = 90_000;
+
+/// What the walk may do next, given how long it has already spent.
+///
+/// A value rather than an `if` inside the loop, because the boundary is
+/// exactly where this gets subtle: `>` instead of `>=` buys one more page
+/// past the ceiling, and a page issued with the FULL request timeout can run
+/// the walk to half again its budget. Both are invisible in review and both
+/// are pinned by [`walk_step`]'s tests.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum WalkStep {
+    /// Fetch another page, with THIS timeout — the smaller of the ordinary
+    /// per-request deadline and whatever is left of the walk's budget.
+    Fetch { timeout_ms: u64 },
+    /// The budget is spent: stop and report what has been collected.
+    Stop,
+}
+
+/// Whether a walk that has spent `elapsed_ms` may fetch another page, and
+/// how long that page gets.
+///
+/// The second half is the one a between-pages check alone gets wrong. A page
+/// STARTED just under the ceiling would otherwise carry the full
+/// [`REQUEST_TIMEOUT`], so a walk bounded at ninety seconds could run to a
+/// hundred and fifty — the ceiling would bound when the last page is asked
+/// for rather than when the walk ends, which is not what a budget is.
+/// Shrinking each page's own deadline to the remaining budget makes the two
+/// meanings the same.
+///
+/// The floor of one millisecond is deliberate: a zero timeout is not a
+/// bounded request on every client, and this function's contract is "a
+/// deadline", not "an immediate failure". The remaining-zero case is
+/// [`WalkStep::Stop`] anyway.
+fn walk_step(elapsed_ms: u64) -> WalkStep {
+    let Some(remaining) = MAX_LIST_MILLIS
+        .checked_sub(elapsed_ms)
+        .filter(|left| *left > 0)
+    else {
+        return WalkStep::Stop;
+    };
+    WalkStep::Fetch {
+        timeout_ms: remaining.min(REQUEST_TIMEOUT.as_millis() as u64).max(1),
+    }
+}
+
+/// What a page request's FAILURE means, given the clock and what has already
+/// been collected.
+///
+/// A request cut short by the walk's own budget is not an error — it is the
+/// time ceiling doing its job, and the rows already collected are real. The
+/// distinction matters because the two outcomes are opposites on screen: a
+/// truncated listing shows the rows with "showing N of M", while an error
+/// replaces a mostly-complete list with a failure line and sends the surface
+/// reader off to retry a walk that will hit the same ceiling.
+///
+/// The exception is a walk that has collected NOTHING. There are no rows to
+/// present and no counts to present them against — the first page never
+/// landed — so the honest answer is the failure, which the reader then
+/// retries.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum PageFailure {
+    /// Report the rows collected so far, marked truncated.
+    Truncate,
+    /// Surface the error.
+    Fail,
+}
+
+fn page_failure(pages: usize, elapsed_ms: u64) -> PageFailure {
+    if pages > 0 && elapsed_ms >= MAX_LIST_MILLIS {
+        PageFailure::Truncate
+    } else {
+        PageFailure::Fail
+    }
+}
+
+/// A monotonic-enough stopwatch for [`MAX_LIST_MILLIS`], on both renderers.
+///
+/// A `cfg` pair rather than a crate: `std::time::Instant::now()` panics on
+/// wasm32-unknown-unknown (the browser target has no std clock), and the
+/// browser's own answer — `performance.now()` — is monotonic and needs
+/// nothing beyond a web-sys feature this crate already carries for `Window`.
+///
+/// A browser without `performance` (there is none in practice, but the API
+/// is fallible) yields a clock that reports no elapsed time at all, which
+/// disables the ceiling rather than failing the walk. That is the same
+/// direction every other tolerance in this module leans: a missing
+/// capability costs a safeguard, never a feature.
+struct WalkClock {
+    #[cfg(not(target_arch = "wasm32"))]
+    started: std::time::Instant,
+    #[cfg(target_arch = "wasm32")]
+    started: Option<f64>,
+}
+
+impl WalkClock {
+    fn start() -> Self {
+        WalkClock {
+            #[cfg(not(target_arch = "wasm32"))]
+            started: std::time::Instant::now(),
+            #[cfg(target_arch = "wasm32")]
+            started: web_sys::window()
+                .and_then(|window| window.performance())
+                .map(|performance| performance.now()),
+        }
+    }
+
+    fn elapsed_ms(&self) -> u64 {
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            self.started.elapsed().as_millis() as u64
+        }
+        #[cfg(target_arch = "wasm32")]
+        {
+            let Some(started) = self.started else {
+                return 0;
+            };
+            web_sys::window()
+                .and_then(|window| window.performance())
+                .map(|performance| (performance.now() - started).max(0.0) as u64)
+                .unwrap_or(0)
+        }
+    }
+}
+
 /// Fetch the whole session listing, following the helm's cursor to
 /// exhaustion, flattening every failure into a displayable string.
 ///
@@ -374,34 +719,102 @@ const MAX_LIST_BYTES: usize = 16 * 1024 * 1024;
 ///
 /// ## Three bounds, and what hitting one means
 ///
-/// [`MAX_LIST_PAGES`], [`MAX_LIST_ROWS`] and [`MAX_LIST_BYTES`] each stop the
-/// walk independently, because each bounds a different resource and none
-/// implies the others. Stopping is not an error: the rows collected are real
-/// and in order, so they are returned with `truncated` set, and the count
-/// line's "showing N of M" is the continuation story a user reads. Failing
-/// the whole poll instead would replace a partial list with no list at all,
-/// which is strictly worse for a surface refreshed every three seconds.
+/// [`MAX_LIST_PAGES`], [`MAX_LIST_ROWS`], [`MAX_LIST_BYTES`] and
+/// [`MAX_LIST_MILLIS`] each stop the walk independently, because each bounds
+/// a different resource and none implies the others. Stopping is not an
+/// error: the rows collected are real and in order, so they are returned
+/// with `truncated` set, and the count line's "showing N of M" is the
+/// continuation story a user reads. Failing the whole poll instead would
+/// replace a partial list with no list at all, which is strictly worse for a
+/// surface the feed refreshes on every change.
+///
+/// The time ceiling is the one that also reaches INSIDE a page: each request
+/// is issued with the smaller of its own timeout and the walk's remaining
+/// budget (`walk_step`), and a page cut short by that budget is truncation
+/// rather than failure (`page_failure`). Checking only between pages would
+/// bound when the last page is ASKED FOR rather than when the walk ends,
+/// which is not a budget at all.
 ///
 /// The message on failure is a `String`, not `reqwest::Error`, because it is
 /// rendered to the user directly (SPEC.md wants concrete errors) — the URL
 /// and status are folded into the message here rather than logged and
 /// dropped.
-pub(crate) async fn fetch_sessions(base: &str) -> Result<SessionListing, String> {
+///
+/// ## The filter travels on every page
+///
+/// `filter` is appended to each request, cursor pages included, because a
+/// cursor names a position in the helm's ORDER rather than in a result set:
+/// a walk whose later pages dropped the filter would quietly start listing
+/// rows its first page had excluded. The helm makes the same statement from
+/// its side (`ListQuery::cursor`), and this is the client half of it.
+pub(crate) async fn fetch_sessions(
+    base: &str,
+    filter: &SessionFilter,
+) -> Result<SessionListing, String> {
     let mut sessions: Vec<Session> = Vec::new();
     let mut cursor: Option<String> = None;
-    // Assigned by the first iteration, which always runs: a walk fetches at
-    // least one page, and taking the LAST page's numbers is what keeps the
-    // count fresh under a list that changes during the walk.
-    let mut total;
-    let mut truncated;
+    // The LAST page's counts win — they are the freshest read of numbers that
+    // can legitimately change under a walk — and they live in an `Option` so
+    // that a walk which stopped before any page landed cannot publish counts
+    // no page ever reported. The ceiling breaks below cannot be taken that
+    // early (`walk_step` never stops a walk that has spent no time, and
+    // `page_failure` refuses to truncate an empty walk), and this is how that
+    // reasoning is enforced rather than merely believed.
+    let mut counts: Option<(u64, Option<u64>, bool)> = None;
+    // Whether one of OUR ceilings ended the walk, as opposed to the helm
+    // running out of pages.
+    let mut hit_ceiling = false;
     let mut pages = 0;
     let mut bytes = 0_usize;
+    // Started before the first request, so the ceiling covers the whole
+    // logical read rather than each page's share of it (see
+    // `MAX_LIST_MILLIS`).
+    let clock = WalkClock::start();
+    let query = filter.query();
+    // Hoisted: the filter cannot change under a walk (it is a snapshot the
+    // caller took before the first request), so asking it once per page was
+    // asking the same question over and over.
+    let filtered = filter.is_active();
     loop {
-        let url = match &cursor {
-            None => format!("{base}/api/sessions"),
-            Some(cursor) => format!("{base}/api/sessions?cursor={}", encode_query_value(cursor)),
+        let url = match (&cursor, query.is_empty()) {
+            (None, true) => format!("{base}/api/sessions"),
+            (None, false) => format!("{base}/api/sessions?{query}"),
+            (Some(cursor), true) => {
+                format!("{base}/api/sessions?cursor={}", encode_query_value(cursor))
+            }
+            (Some(cursor), false) => format!(
+                "{base}/api/sessions?{query}&cursor={}",
+                encode_query_value(cursor)
+            ),
         };
-        let resp = send(client().get(&url)).await?;
+        // Each page is asked for under the SMALLER of its own timeout and
+        // what is left of the walk's budget, so the ceiling bounds when the
+        // walk ENDS rather than when its last page is requested.
+        let WalkStep::Fetch { timeout_ms } = walk_step(clock.elapsed_ms()) else {
+            // Only reachable when the budget ran out inside the previous
+            // page's own request; the post-page check below catches the
+            // ordinary case first.
+            hit_ceiling = true;
+            break;
+        };
+        let fetched = send_within(
+            client().get(&url),
+            std::time::Duration::from_millis(timeout_ms),
+        )
+        .await;
+        let resp = match fetched {
+            Ok(resp) => resp,
+            Err(reason) => match page_failure(pages, clock.elapsed_ms()) {
+                // The budget expired mid-page. The rows already collected are
+                // real and in order, so this is the time ceiling stopping the
+                // walk rather than a failure to report — see `page_failure`.
+                PageFailure::Truncate => {
+                    hit_ceiling = true;
+                    break;
+                }
+                PageFailure::Fail => return Err(reason),
+            },
+        };
         if !resp.status().is_success() {
             return Err(read_failure("GET", &url, resp).await);
         }
@@ -412,10 +825,11 @@ pub(crate) async fn fetch_sessions(base: &str) -> Result<SessionListing, String>
         bytes = bytes.saturating_add(body.len());
         let page = serde_json::from_str::<SessionPage>(&body).map_err(|e| e.to_string())?;
         sessions.extend(page.sessions);
-        // The LAST page's numbers win: they are the freshest read of a count
-        // that can legitimately change under a walk.
-        total = page.total;
-        truncated = page.truncated;
+        counts = Some((
+            page.total,
+            matching_count(filtered, page.matching, page.total),
+            page.truncated,
+        ));
         pages += 1;
         cursor = page.next_cursor;
         if cursor.is_none() {
@@ -423,37 +837,67 @@ pub(crate) async fn fetch_sessions(base: &str) -> Result<SessionListing, String>
         }
         // Stopped short by one of OUR ceilings rather than by the helm. Each
         // is checked after taking the page, so a walk always makes progress
-        // and never spins on a bound it has already exceeded.
-        if pages >= MAX_LIST_PAGES || sessions.len() >= MAX_LIST_ROWS || bytes >= MAX_LIST_BYTES {
-            truncated = true;
+        // and never spins on a bound it has already exceeded — the time
+        // ceiling included, which is why a slow helm always yields at least
+        // one page rather than an empty truncated list.
+        if pages >= MAX_LIST_PAGES
+            || sessions.len() >= MAX_LIST_ROWS
+            || bytes >= MAX_LIST_BYTES
+            || clock.elapsed_ms() >= MAX_LIST_MILLIS
+        {
+            hit_ceiling = true;
             break;
         }
     }
+    // Unreachable by construction (see `counts`), and stated as an error
+    // rather than an `unwrap` because the honest answer for a walk with no
+    // pages IS a failure: there are no rows to show and no counts to show
+    // them against.
+    let (total, matching, page_truncated) = counts.ok_or_else(|| {
+        format!("the session list walk at {base} ended before its first page arrived")
+    })?;
+    let truncated = page_truncated || hit_ceiling;
     // A walk that collected MORE rows than the helm says exist is
     // incoherent: the list changed underneath it in a way that makes
     // "complete" unprovable — a session deleted from an earlier page shrinks
     // `total` while the rows already taken stay taken, and a cursor replayed
     // across such a change can re-serve a row. Presenting that as a finished
     // walk would claim a completeness nothing supports, so it is reported as
-    // truncated and the next poll (three seconds away) re-reads.
+    // truncated and the next read settles it — which, since whatever changed
+    // the list also bumped the helm's revision, is one the feed is already
+    // on its way to asking for.
+    // Checked against the FLEET total rather than against `matching`, and
+    // that is the helm's own reading of the two numbers (PLAN_M6_75.md item
+    // 5): a filtered page holding fewer rows than the fleet is not an
+    // incoherent list, it is a working filter, so the check stays against
+    // the count it has always described.
     let incoherent = sessions.len() as u64 > total;
     Ok(SessionListing {
         sessions,
         total,
+        matching,
+        filtered,
         truncated: truncated || incoherent,
         incoherent,
     })
 }
 
-/// How often the views refetch (PLAN_M2.md: "Polling for list freshness"
-/// is the M2 mechanism; current PLAN.md schedules live push for M6.75).
+/// How often the FALLBACK polls refetch (PLAN_M6_75.md item 6).
 ///
-/// Shared by both polls, deliberately one constant rather than two:
-/// `list::ListView` polls the listing and `session_view::SessionView`
-/// polls its own session's detail for tab-list changes (PLAN_M4.md item 6
-/// asks for "the same polling M2 settled for the session list"), and M6.75
-/// replaces both with live push together, so a divergence here would be a
-/// difference no one chose and no one would maintain.
+/// This was the cadence of four periodic loops — the session list, the hosts
+/// panel, a session's detail, and the session view's host-state read — and
+/// M6.75 removed all four. What survives is a fallback and nothing else:
+/// `feed::fallback_polls` runs a read at this cadence exactly while the
+/// invalidation feed is unhealthy AND no build mismatch has been latched.
+/// Under skew it does not run at all, which is the point of the withdrawal
+/// rule rather than an omission.
+///
+/// Still one constant rather than one per surface, and still for the reason
+/// it always was: every fallback reads the same helm through the same feed's
+/// absence, so a divergence here would be a difference nobody chose. Three
+/// seconds is unchanged deliberately — it is the interval this UI ran on for
+/// four milestones, and a fallback is exactly the wrong place to introduce
+/// an untested cadence.
 pub(crate) const POLL_INTERVAL_MS: u64 = 3_000;
 
 /// POST the create endpoint, returning the decoded `Session` on success or
@@ -747,7 +1191,7 @@ pub(crate) async fn restart_session(
 /// The reply is the session's freshly recomputed state, not an ack — the
 /// supervisor re-probes status and rediscovers tabs while building it — so
 /// a caller can paint the new title from this answer instead of waiting for
-/// its next poll. Same error-surfacing shape as `restart_session`: the
+/// its next read. Same error-surfacing shape as `restart_session`: the
 /// supervisor's own words, which for the control-character refusal is the
 /// whole point of the feature.
 pub(crate) async fn rename_session(base: &str, id: &str, title: &str) -> Result<Session, String> {
@@ -801,7 +1245,7 @@ struct TabOpened {
 /// A duplicated tab is a smaller problem, though not a free one: it is a
 /// real login shell, and a login shell runs the user's rc files, which can
 /// start anything. What makes it acceptable is that it is VISIBLE and
-/// individually reversible — the next detail poll lists both tabs, and
+/// individually reversible — the next detail read lists both tabs, and
 /// closing one is a click that reaps that shell's whole process tree. The
 /// duplicate-agent case has neither property, which is the actual
 /// distinction. This UI also cannot lose a reply and retry silently: the
@@ -831,7 +1275,7 @@ pub(crate) async fn open_tab(base: &str, session_id: &str) -> Result<Tab, String
 /// answer by tearing down that tab's island, and a 404 is at least as
 /// likely to mean the id was wrong (a bug) as to mean another client got
 /// there first. Reporting it lets the user see something disagreed, while
-/// the poll that follows reconciles the list either way.
+/// the read that follows reconciles the list either way.
 pub(crate) async fn close_tab(base: &str, session_id: &str, tab_id: &str) -> Result<(), String> {
     let url = format!(
         "{base}/api/sessions/{}/tabs/{}",
@@ -1035,7 +1479,7 @@ pub(crate) async fn remove_host(base: &str, host: HostId) -> Result<(), String> 
 /// is what turns "a re-probe landed between the prompt and the click" from a
 /// silent adoption of a third install into a refusal the user answers by
 /// looking again. Sending whatever is current at request time would defeat
-/// the entire check, so this argument is never derived from a fresh poll.
+/// the entire check, so this argument is never derived from a fresh read.
 ///
 /// Deliberately has no counterpart for `identity-unverified`: there is
 /// nothing to adopt there, and the helm refuses it (see that phase's docs).
@@ -1170,6 +1614,204 @@ mod tests {
         assert_eq!(
             decoded.next_cursor, None,
             "no cursor is how a walk learns it has reached the end"
+        );
+        assert_eq!(
+            decoded.matching, None,
+            "an absent matching count must stay absent rather than becoming a zero the banner \
+             would then print over a list full of rows"
+        );
+    }
+
+    /// The walk's time ceiling, at the boundary and inside a page.
+    ///
+    /// Both halves have a wrong version that looks right in review: `>`
+    /// instead of `>=` buys one extra page every single walk, and issuing
+    /// that page with the full request timeout lets a ninety-second budget
+    /// run to a hundred and fifty seconds — with the surface's single reader
+    /// blocked for all of it.
+    #[test]
+    fn the_walk_stops_at_its_time_ceiling_rather_than_one_page_past_it() {
+        // The clock is a PARAMETER here, which is the only way this boundary
+        // can be asserted at all: the alternative is a test that waits ninety
+        // seconds to find out whether the comparison was `>` or `>=`.
+        assert_eq!(
+            walk_step(MAX_LIST_MILLIS - 1),
+            WalkStep::Fetch { timeout_ms: 1 },
+            "one millisecond under the ceiling still buys a page — with one millisecond to run it"
+        );
+        assert_eq!(
+            walk_step(MAX_LIST_MILLIS),
+            WalkStep::Stop,
+            "and AT the ceiling the walk stops: `>` here would fetch one more page, every time"
+        );
+        assert_eq!(
+            walk_step(MAX_LIST_MILLIS * 2),
+            WalkStep::Stop,
+            "well past it, too — the budget does not wrap"
+        );
+
+        // Early in a walk the page gets the ordinary request deadline; the
+        // budget only starts biting once less of it remains than that.
+        let full = REQUEST_TIMEOUT.as_millis() as u64;
+        assert_eq!(walk_step(0), WalkStep::Fetch { timeout_ms: full });
+        assert_eq!(
+            walk_step(MAX_LIST_MILLIS - full),
+            WalkStep::Fetch { timeout_ms: full },
+            "exactly one request's worth left is still a full request"
+        );
+        assert_eq!(
+            walk_step(MAX_LIST_MILLIS - full + 1),
+            WalkStep::Fetch {
+                timeout_ms: full - 1
+            },
+            "past that the page is cut to what is left, or the walk would overrun its budget by \
+             nearly a full request timeout"
+        );
+    }
+
+    /// A page request that fails after the budget is spent is TRUNCATION, not
+    /// an error — unless nothing was collected at all.
+    ///
+    /// The distinction decides what the user sees: rows plus "showing N of
+    /// M", or a failure line where a mostly-complete list should be, followed
+    /// by a reader retrying a walk that will hit the same ceiling. The empty
+    /// case is the exception because there is nothing to show and no counts
+    /// to show it against — the first page never landed.
+    #[test]
+    fn a_page_cut_short_by_the_budget_truncates_only_once_something_was_collected() {
+        assert_eq!(
+            page_failure(3, MAX_LIST_MILLIS),
+            PageFailure::Truncate,
+            "three pages in hand and the budget spent: report them"
+        );
+        assert_eq!(
+            page_failure(3, MAX_LIST_MILLIS - 1),
+            PageFailure::Fail,
+            "a failure with budget left is a real failure, not a ceiling"
+        );
+        assert_eq!(
+            page_failure(0, MAX_LIST_MILLIS * 2),
+            PageFailure::Fail,
+            "an empty walk has nothing to truncate, so the reader is told the read failed"
+        );
+    }
+
+    /// The two-count reply (PLAN_M6_75.md item 5), and what a reply carrying
+    /// only one of them may be turned into.
+    ///
+    /// Routed through `matching_count` rather than through an `unwrap_or`
+    /// written out in the assertion, which is the whole point: an assertion
+    /// that repeats the conversion it is checking passes for every possible
+    /// conversion, including the one this test exists to forbid. What must
+    /// hold is that absence becomes a CLAIM only where the claim is true by
+    /// construction — no filter, so everything matched — and stays an
+    /// absence under a filter, where the substituted number would vouch for
+    /// a filter that never ran.
+    #[test]
+    fn an_absent_matching_count_becomes_a_number_only_where_it_cannot_lie() {
+        let filtered: SessionPage = serde_json::from_value(serde_json::json!({
+            "sessions": [], "total": 700, "matching": 12, "truncated": false,
+        }))
+        .unwrap();
+        assert_eq!(filtered.matching, Some(12));
+        assert_eq!(
+            matching_count(true, filtered.matching, filtered.total),
+            Some(12),
+            "a helm that answered the filter is believed"
+        );
+
+        let older: SessionPage = serde_json::from_value(serde_json::json!({
+            "sessions": [], "total": 700, "truncated": false,
+        }))
+        .unwrap();
+        assert_eq!(
+            matching_count(false, older.matching, older.total),
+            Some(700),
+            "with no filter, the fleet total IS the matching count"
+        );
+        assert_eq!(
+            matching_count(true, older.matching, older.total),
+            None,
+            "a helm that predates the count also predates filtering, so it matched nothing it \
+             can be quoted on"
+        );
+    }
+
+    /// An empty filter must produce an empty query string — a request byte
+    /// for byte identical to the unfiltered one this UI has always sent.
+    ///
+    /// Not tidiness: the helm caps a FILTERED page lower than an unfiltered
+    /// one and counts a request as filtered by what it carries, so a filter
+    /// that sent `?title=` for a cleared search box would narrow nothing
+    /// while paying the filtered path's ceiling — and would make the banner
+    /// claim a filter is active when none is.
+    #[test]
+    fn an_empty_filter_asks_for_exactly_what_an_unfiltered_walk_asks_for() {
+        let empty = SessionFilter::default();
+        assert!(!empty.is_active());
+        assert_eq!(empty.query(), "");
+    }
+
+    /// Each dimension reaches the wire under the helm's own parameter name,
+    /// and every value is encoded rather than pasted.
+    ///
+    /// The encoding is the load-bearing half: an unescaped `&` in a title
+    /// search would split into a second parameter, and a search for
+    /// `a&status=exited` would silently become a status filter the user
+    /// never asked for.
+    #[test]
+    fn every_filter_dimension_travels_under_its_own_encoded_parameter() {
+        let filter = SessionFilter {
+            host: Some(7),
+            directory: "/srv/my project".to_string(),
+            profile: "claude code".to_string(),
+            status: "waiting".to_string(),
+            title: "a&b".to_string(),
+        };
+        assert!(filter.is_active());
+        assert_eq!(
+            filter.query(),
+            "host=7&directory=%2Fsrv%2Fmy%20project&profile=claude%20code&status=waiting&\
+             title=a%26b"
+        );
+    }
+
+    /// Only the EXACTLY-empty value clears a dimension; whitespace is a
+    /// search like any other.
+    ///
+    /// The helm draws the line in the same place, and both sides have to for
+    /// the same user-visible reason: a directory may legitimately contain
+    /// surrounding spaces, so trimming would make what is actually there
+    /// unfindable — and would turn typing a single space into a silent
+    /// clear, which is the one version of this a user can watch happen.
+    #[test]
+    fn only_an_exactly_empty_value_clears_a_dimension() {
+        let blank = SessionFilter {
+            title: String::new(),
+            ..SessionFilter::default()
+        };
+        assert!(!blank.is_active(), "an empty box filters nothing");
+
+        let spaced = SessionFilter {
+            title: " ".to_string(),
+            ..SessionFilter::default()
+        };
+        assert!(spaced.is_active());
+        assert_eq!(
+            spaced.query(),
+            "title=%20",
+            "a space is a search for a space, not a cleared filter"
+        );
+
+        // And the host dimension, whose emptiness is an absent id rather
+        // than an empty string — including id 0, which is a value and not a
+        // blank.
+        assert!(
+            SessionFilter {
+                host: Some(0),
+                ..SessionFilter::default()
+            }
+            .is_active()
         );
     }
 

@@ -120,6 +120,39 @@ pub(crate) fn helm_is_current() -> bool {
     *HELM_BUILD_SEEN.read() && HELM_BUILD_SKEW.read().is_none()
 }
 
+/// Whether a mismatch has been LATCHED — the trigger the invalidation feed
+/// and its fallback poll are both withdrawn on (`feed`).
+///
+/// Deliberately NOT [`helm_is_current`] inverted, and the difference is the
+/// whole reason this exists as its own question. `helm_is_current` fails
+/// CLOSED on a helm that has not been heard from at all, which is right for
+/// the behavior it gates (an unattended attach against a peer whose contract
+/// is unknown) and catastrophic for this one: at startup no reply has landed,
+/// so a page gated on it would withdraw its reads before making the first
+/// one — and never make it, since nothing else would produce the stamp it is
+/// waiting for.
+///
+/// What this asks instead is whether a DISAGREEMENT has been observed, which
+/// no amount of silence can produce. A helm that reports no stamp at all is
+/// still caught, one request later: its first reply latches
+/// [`Skew::Silent`], which is a mismatch like any other.
+///
+/// Tracked (`read`), so a mismatch latched mid-session revokes the feed on a
+/// page that is already open rather than only on the next load.
+pub(crate) fn build_skew_detected() -> bool {
+    HELM_BUILD_SKEW.read().is_some()
+}
+
+/// [`build_skew_detected`] for a task rather than a render.
+///
+/// `peek`, for the reason `ops::OpLock::busy_now` peeks: a fallback poll
+/// loop re-checks this on its own schedule and has no business subscribing
+/// whichever component happens to own it to a signal it is already
+/// re-reading every interval.
+pub(crate) fn build_skew_detected_now() -> bool {
+    HELM_BUILD_SKEW.peek().is_some()
+}
+
 /// What a disagreement is: either a build that differs from this bundle's,
 /// or no build reported at all.
 ///

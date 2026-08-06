@@ -33,7 +33,14 @@
 //!
 //! - `api`: every `async fn` that calls the helm's HTTP API, the
 //!   response-shape types those calls decode, the URL-building helpers,
-//!   and the shared poll cadence both pollers below use.
+//!   the session-list filter both the query surface and the readers share,
+//!   and the cadence the fallback polls run at.
+//! - `feed`: the invalidation feed (PLAN_M6_75.md item 6) — the App-level
+//!   subscription that replaced all four periodic loops, the revision
+//!   counter the mounted page re-reads on, and the rule deciding when the
+//!   documented poll fallback runs instead. Mounted here, beside the skew
+//!   notice, because the channel has to survive navigation between the two
+//!   mutually exclusive pages below.
 //! - `list`: [`ListView`], `SessionRow`, and `CreateSessionForm` — the
 //!   session list and its lifecycle actions.
 //! - `hosts`: the hosts panel (PLAN_M6.md item 6) — the per-host state
@@ -93,10 +100,12 @@ use serde::Deserialize;
 
 mod api;
 mod attachments;
+mod feed;
 mod hosts;
 mod list;
 mod ops;
 mod peer;
+mod reader;
 mod reconnect;
 mod rename;
 mod rows;
@@ -327,8 +336,8 @@ pub struct Session {
     /// listing is where its FIRST tab snapshot comes from (the `Session`
     /// the list hands `SessionView` when a row is opened is already
     /// populated, so a session with tabs renders its strip on the first
-    /// frame rather than after a round trip), and the detail poll is what
-    /// keeps it current afterwards.
+    /// frame rather than after a round trip), and the feed-driven detail
+    /// read is what keeps it current afterwards.
     ///
     /// `#[serde(default)]` for the same old-peer tolerance as `status` —
     /// and, unlike `status`, the default is also the everyday case: a
@@ -573,6 +582,13 @@ const VENDOR_FIT_JS: Asset = asset!("/assets/vendor/addon-fit.js");
 // terminal.js's mount readiness gate waits for the helper's global.
 const TERM_BYTES_JS: Asset = asset!("/assets/term-bytes.js");
 const TERMINAL_JS: Asset = asset!("/assets/terminal.js");
+// The invalidation feed's socket (PLAN_M6_75.md item 6) — its own asset
+// rather than a corner of terminal.js, because it has nothing to do with a
+// terminal: it outlives every island, carries no bytes, and is subscribed
+// once for the whole page. Registration order is not execution order here
+// either; `feed::FleetFeed`'s snippet waits for the global this file
+// assigns.
+const EVENTS_JS: Asset = asset!("/assets/events.js");
 const APP_CSS: Asset = asset!("/assets/app.css");
 
 /// Root component: switches between the session list and one open
@@ -602,11 +618,21 @@ pub fn App() -> Element {
         document::Script { src: VENDOR_FIT_JS }
         document::Script { src: TERM_BYTES_JS }
         document::Script { src: TERMINAL_JS }
+        document::Script { src: EVENTS_JS }
         // Above both views and outside the match, deliberately: a build
         // mismatch is a fact about this whole PAGE rather than about
         // whatever it happens to be showing, and it must not disappear
         // because the user navigated into a session while reading it.
         skew::BuildSkewNotice {}
+        // Beside it, and outside the match for a related reason: the
+        // invalidation feed is the whole page's channel, and a subscription
+        // owned by either view below would be torn down and re-handshaked
+        // every time the user opened or closed a session — turning
+        // navigation into a window with no live updates and a fallback poll
+        // spinning back up to cover it. It renders nothing (PLAN_M6_75.md
+        // item 6); what it produces is the revision counter each page
+        // re-reads on.
+        feed::FleetFeed {}
         match &*current.read() {
             None => rsx! {
                 ListView { on_open: move |session: Session| current.set(Some(session)) }
