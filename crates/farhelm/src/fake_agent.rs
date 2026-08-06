@@ -85,6 +85,13 @@ pub enum Script {
     Counter,
     /// Raw-mode hex echo of every input byte, for input-fidelity tests.
     Hexecho,
+    /// Enables mouse reporting on cue (`legacy` for DECSET 1000 alone,
+    /// `sgr` to add DECSET 1006 on top), while hex-echoing every input
+    /// byte like [`Script::Hexecho`]. The reattach-restoration fixture for
+    /// `PaneModes`' mouse fields (PLAN_M6_5.md item 2) — see
+    /// [`mouse_modes`]'s own docs for why the two cues are separate and
+    /// how the echo is shared with `Hexecho` rather than reimplemented.
+    MouseModes,
     /// Spawns a child process and prints both pids, for process-tree-kill
     /// tests.
     Spawner,
@@ -194,6 +201,7 @@ pub fn run(script: Script, record_home: Option<std::path::PathBuf>) -> anyhow::R
         Script::FloodGated => flood_gated(),
         Script::Counter => counter(),
         Script::Hexecho => hexecho(),
+        Script::MouseModes => mouse_modes(),
         Script::Spawner => spawn_and_echo("sleep 3600", "spawner"),
         Script::SpawnerStubborn => spawn_and_echo(
             "trap '' TERM; touch stubborn-ready; sleep 3600",
@@ -982,6 +990,27 @@ fn hexecho() -> anyhow::Result<()> {
     writeln!(out, "FAKE-AGENT READY\r")?;
     out.flush()?;
 
+    hex_echo_loop(&mut out, |_out, _chunk| Ok(()))
+}
+
+/// Read stdin until EOF, hex-echoing every chunk exactly as [`hexecho`]
+/// always has, but first handing the raw chunk to `on_chunk` — the shared
+/// body behind both `hexecho` and [`mouse_modes`], which reacts to input
+/// (turning on a DECSET mode) while STILL owing the caller the same
+/// byte-visible echo. Splitting the reaction out as a callback rather than
+/// duplicating the read loop is what keeps there being exactly one place
+/// that decides how input bytes become hex text; a second hand-rolled copy
+/// is exactly the drift this refactor exists to prevent.
+///
+/// Caller order matters and is deliberately NOT this function's job: raw
+/// mode and the READY marker must both be established before the first
+/// byte can arrive (see `hexecho`'s own docs for why), and different
+/// scripts may need script-specific setup in between — `mouse_modes` has
+/// none today, but a future caller might.
+fn hex_echo_loop<W: Write>(
+    out: &mut W,
+    mut on_chunk: impl FnMut(&mut W, &[u8]) -> anyhow::Result<()>,
+) -> anyhow::Result<()> {
     use std::fmt::Write as _;
     let mut stdin = std::io::stdin().lock();
     let mut buf = [0u8; 4096];
@@ -990,8 +1019,10 @@ fn hexecho() -> anyhow::Result<()> {
         if n == 0 {
             return Ok(());
         }
+        let chunk = &buf[..n];
+        on_chunk(out, chunk)?;
         let mut line = String::with_capacity(n * 3);
-        for (i, byte) in buf[..n].iter().enumerate() {
+        for (i, byte) in chunk.iter().enumerate() {
             if i > 0 {
                 line.push(' ');
             }
@@ -1000,6 +1031,226 @@ fn hexecho() -> anyhow::Result<()> {
         writeln!(out, "{line}\r")?;
         out.flush()?;
     }
+}
+
+/// Map a recognized cue word directly to the escape sequence it triggers,
+/// or `None` for anything else [`CueScanner`] might produce (a typo, or an
+/// unrelated line) — a test that types a typo must not silently enable a
+/// mode. One function rather than an enum plus two matches over it:
+/// nothing else in this file needs the cue as a distinct TYPE, only this
+/// word-to-escape mapping (the marker `mouse_modes` prints uses the WORD
+/// itself, not anything derived from a cue type).
+///
+/// `legacy` DECRSTs 1006 before asserting 1000, rather than only
+/// asserting 1000 — necessary, not decorative: DECSET only ever turns
+/// bits ON, so cueing `sgr` and then `legacy` must still leave the pane
+/// in PLAIN legacy tracking. Without the explicit DECRST, `sgr`'s earlier
+/// DECSET 1006 would still be latched in tmux's pane state, and every
+/// report after the "corrective" `legacy` cue would keep arriving in SGR
+/// shape regardless — silently defeating the very cue meant to select
+/// the other encoding.
+fn mouse_escape(word: &str) -> Option<&'static str> {
+    match word {
+        "legacy" => Some("\x1b[?1006l\x1b[?1000h"),
+        "sgr" => Some("\x1b[?1000h\x1b[?1006h"),
+        _ => None,
+    }
+}
+
+/// The longest word [`mouse_escape`] recognizes (`legacy`), in bytes.
+/// [`CueScanner`] uses this to bound its own accumulator — see
+/// `CueScanState::Invalid`'s docs — so a future cue word longer than this
+/// one must bump it, or the new word could never complete.
+const MAX_CUE_WORD_LEN: usize = 6;
+
+/// Recognizes the plain-word cues (`legacy`, `sgr`) `mouse_modes` reads
+/// while correctly ignoring every byte that is part of a MOUSE REPORT
+/// instead of a typed command — the reason this needs a state machine
+/// rather than a bare "accumulate until CR" scan. A report's own data
+/// bytes are arbitrary (a column or row value plus 32 can land anywhere in
+/// the printable ASCII range) and share the wire with real cue words, so
+/// treating every printable byte as a candidate cue character would let a
+/// click's own bytes corrupt whatever cue is typed next — confirmed while
+/// designing this fixture: a naive version left `sgr` never matching once
+/// even one prior click's report bytes had been folded into the
+/// accumulator.
+///
+/// Feed bytes one at a time via [`CueScanner::feed`]; it returns the
+/// completed word once a bare CR arrives OUTSIDE a report, and `None`
+/// otherwise (still accumulating a word, the byte belonged to a report
+/// being skipped, or the word overran [`MAX_CUE_WORD_LEN`]).
+#[derive(Debug, Default)]
+struct CueScanner {
+    state: CueScanState,
+    word: String,
+}
+
+#[derive(Debug, Default, PartialEq, Eq)]
+enum CueScanState {
+    #[default]
+    Normal,
+    /// Saw a bare ESC; the next byte decides whether a report is starting.
+    Esc,
+    /// Saw `ESC [`; the next byte picks which report shape follows.
+    EscBracket,
+    /// Inside a legacy (X10-style) report body: `ESC [ M` was seen, and
+    /// this many more DATA bytes remain — always starts at 3 (button,
+    /// column, row) because that format has no terminator of its own and
+    /// is fixed-length by construction, unlike SGR's below.
+    LegacyBody(u8),
+    /// Inside an SGR report body: `ESC [ <` was seen; everything up to and
+    /// including the terminating `M` (button press/motion) or `m` (button
+    /// release) belongs to the report.
+    SgrBody,
+    /// The current word already exceeds [`MAX_CUE_WORD_LEN`] and can
+    /// therefore never complete a real cue, no matter what follows —
+    /// everything is swallowed (not accumulated) until the next
+    /// delimiter. Without this state, an unboundedly long run of
+    /// lowercase letters typed (or pasted) by mistake would keep growing
+    /// `word` forever, and — worse — a cue word hiding inside it as a
+    /// SUFFIX (e.g. `xlegacy`) could shift back into range and fire once
+    /// the accumulator happened to end in exactly `legacy` or `sgr`. ESC
+    /// is still honored here rather than swallowed too, so a mouse report
+    /// immediately following an over-long run (no delimiter in between)
+    /// is still parsed correctly instead of having its own bytes
+    /// misread as more garbage.
+    Invalid,
+}
+
+impl CueScanner {
+    fn feed(&mut self, byte: u8) -> Option<String> {
+        match self.state {
+            CueScanState::Normal => match byte {
+                0x1b => self.state = CueScanState::Esc,
+                b'\r' => {
+                    let word = std::mem::take(&mut self.word);
+                    return (!word.is_empty()).then_some(word);
+                }
+                // Only lowercase ASCII letters can be part of `legacy` or
+                // `sgr`; anything else (a stray control byte, a digit)
+                // starts the next candidate word fresh rather than gluing
+                // a botched keystroke onto whatever follows it.
+                b'a'..=b'z' => {
+                    self.word.push(byte as char);
+                    if self.word.len() > MAX_CUE_WORD_LEN {
+                        self.word.clear();
+                        self.state = CueScanState::Invalid;
+                    }
+                }
+                _ => self.word.clear(),
+            },
+            CueScanState::Esc => {
+                self.state = if byte == b'[' {
+                    CueScanState::EscBracket
+                } else {
+                    // Not a CSI sequence this scanner understands; drop
+                    // back to Normal rather than latching into a report
+                    // state this fixture would then never leave.
+                    CueScanState::Normal
+                };
+            }
+            CueScanState::EscBracket => {
+                self.state = match byte {
+                    b'M' => CueScanState::LegacyBody(3),
+                    b'<' => CueScanState::SgrBody,
+                    _ => CueScanState::Normal,
+                };
+            }
+            CueScanState::LegacyBody(remaining) => {
+                self.state = if remaining <= 1 {
+                    CueScanState::Normal
+                } else {
+                    CueScanState::LegacyBody(remaining - 1)
+                };
+            }
+            CueScanState::SgrBody => {
+                if byte == b'M' || byte == b'm' {
+                    self.state = CueScanState::Normal;
+                }
+            }
+            CueScanState::Invalid => match byte {
+                0x1b => self.state = CueScanState::Esc,
+                b'\r' => self.state = CueScanState::Normal,
+                _ => {}
+            },
+        }
+        None
+    }
+}
+
+/// Enable mouse reporting on cue, hex-echoing every input byte the whole
+/// time (via [`hex_echo_loop`], shared with [`hexecho`] rather than
+/// reimplemented). The reattach-restoration fixture for the one
+/// `PaneModes` branch with no end-to-end coverage before this
+/// (PLAN_M6_5.md item 2): mouse modes set by an agent must survive a
+/// client detaching and reattaching, exactly like bracketed paste already
+/// does.
+///
+/// Two SEPARATE cues, `legacy\r` and `sgr\r`, rather than one "enable
+/// mouse" command — because they exercise DIFFERENT client code paths and
+/// a test needs to provoke each independently:
+///
+/// - `legacy` turns on DECSET 1000 alone: reports use the X10-derived
+///   encoding, which vendored xterm.js routes through `onBinary`
+///   UNCONDITIONALLY whenever that encoding is the active one — not
+///   because of any particular byte value, but because `onBinary` is
+///   simply where this encoding's reports are always delivered. The
+///   format nonetheless CAN carry bytes above 0x7f (`column`/`row` are
+///   each offset by 32, and a column or row past 95 already crosses that
+///   line), and it is only by clicking at such a coordinate that a test
+///   actually forces a high byte through the wire — proving the
+///   `onBinary` path byte-for-byte rather than merely exercising it.
+///   `term-bytes.js`'s extracted byte-domain conversion (PLAN_M6_5.md
+///   item 1) is exactly what that high byte's fidelity depends on:
+///   without a high-coordinate click, that extraction's unit test could
+///   pass while the browser-side global sat entirely unwired, and this
+///   fixture would never notice.
+/// - `sgr` layers DECSET 1006 on top: reports switch to SGR's pure-ASCII
+///   encoding, delivered through `onData` instead — the ordinary text
+///   path every other fake-agent script's input already exercises.
+///
+/// Every byte this script receives — a cue word, a real mouse report,
+/// anything else — is echoed back as hex regardless of whether it meant
+/// anything to [`CueScanner`], so a test can assert a report arrived
+/// without this script knowing or caring what a report looks like; only
+/// the cue-recognition path needs to know that. Recognizing a cue ALSO
+/// prints a plain `MOUSE-MODE:<word>` marker, so a test can wait for the
+/// mode to actually be live before clicking, instead of racing the hex
+/// echo of the cue's own bytes (which, split across reads one keystroke
+/// at a time, has no single line a test could reliably wait for).
+fn mouse_modes() -> anyhow::Result<()> {
+    let mut out = std::io::stdout().lock();
+
+    // Same ordering rationale as `hexecho`: raw mode must be live before
+    // the ready marker is even flushed, or a fast test's first cue could
+    // land in a still-canonical pty.
+    set_raw_mode()?;
+
+    writeln!(out, "FAKE-AGENT READY\r")?;
+    out.flush()?;
+
+    let mut scanner = CueScanner::default();
+    hex_echo_loop(&mut out, |out, chunk| {
+        for &byte in chunk {
+            if let Some(word) = scanner.feed(byte)
+                && let Some(escape) = mouse_escape(&word)
+            {
+                write!(out, "{escape}")?;
+                // A plain, VISIBLE marker — distinct from the hex echo
+                // below, which cannot tell a test "the cue byte arrived"
+                // apart from "the cue was RECOGNIZED and acted on" (a
+                // typo hex-echoes identically to a real cue). Matches
+                // this file's own marker convention (its header docs):
+                // a test keys on text like this instead of a sleep timed
+                // against how fast the agent happens to react, and it is
+                // written AFTER the escape above so a test that waits for
+                // it never races the mode actually taking effect.
+                writeln!(out, "MOUSE-MODE:{word}\r")?;
+                out.flush()?;
+            }
+        }
+        Ok(())
+    })
 }
 
 /// Spawn a child running `child_shell_cmd` under `sh -c`, print both pids,
@@ -1305,5 +1556,139 @@ mod tests {
             };
             assert_eq!(recorded.as_str(), Some(cwd), "{shape:?} lost the cwd");
         }
+    }
+
+    /// Feed every byte of `bytes` through a fresh [`CueScanner`], returning
+    /// only the completed words it produced (dropping the `None`s that
+    /// mark "still accumulating" or "byte belonged to a report").
+    fn scan(bytes: &[u8]) -> Vec<String> {
+        let mut scanner = CueScanner::default();
+        bytes.iter().filter_map(|&b| scanner.feed(b)).collect()
+    }
+
+    /// The ordinary case: a plain typed word terminated by a bare CR (what
+    /// a real terminal sends for Enter in raw mode) is recognized whole.
+    #[test]
+    fn a_plain_cue_word_is_recognized_on_bare_cr() {
+        assert_eq!(scan(b"legacy\r"), vec!["legacy"]);
+        assert_eq!(scan(b"sgr\r"), vec!["sgr"]);
+    }
+
+    /// The scenario this scanner exists for (see its own docs): a legacy
+    /// X10-encoded mouse report's three data bytes are printable ASCII by
+    /// construction whenever a click lands near the top-left of the
+    /// screen, and a naive "accumulate every printable byte until CR" scan
+    /// would fold them into whatever cue is typed next — silently
+    /// preventing it from ever matching. A real button click reports
+    /// press AND release, so this pins both reports in sequence, followed
+    /// by a genuine cue, exactly as the browser-driven e2e test drives it.
+    ///
+    /// The three data bytes in each report are deliberately chosen as
+    /// LOWERCASE ASCII LETTERS (`x`/`y`/`z`, `p`/`q`/`r`) rather than the
+    /// punctuation a click position would actually produce: letters are
+    /// the one byte class [`CueScanner::feed`]'s `Normal` state treats as
+    /// a candidate cue character. An off-by-one in `LegacyBody`'s skip
+    /// count (leaking the report's last data byte into `Normal` one byte
+    /// early) would, with punctuation bytes, still just clear the
+    /// accumulator and vanish without a trace — this test would pass
+    /// whether or not the bug existed. With a leaked LETTER, that byte
+    /// would glue itself onto the very next cue word instead, changing
+    /// the final assertion's result and actually catching the bug.
+    #[test]
+    fn legacy_mouse_report_bytes_never_pollute_the_next_cue_word() {
+        // `ESC [ M` + three lowercase-letter "data bytes" standing in for
+        // button/column/row — see this test's own docs for why letters,
+        // not the punctuation a real click would encode, are what makes
+        // this assertion meaningful.
+        let press = b"\x1b[Mxyz";
+        let release = b"\x1b[Mpqr";
+        let mut input = Vec::new();
+        input.extend_from_slice(press);
+        input.extend_from_slice(release);
+        input.extend_from_slice(b"sgr\r");
+        assert_eq!(
+            scan(&input),
+            vec!["sgr"],
+            "the report bytes must contribute nothing; only the typed cue word may surface"
+        );
+    }
+
+    /// The SGR-encoded counterpart: variable-length, digit/semicolon
+    /// bodied, and terminated by `M` (press) or `m` (release) rather than
+    /// legacy's fixed three bytes — a distinct shape the scanner must skip
+    /// just as cleanly. Unlike the legacy test above, SGR's body bytes
+    /// (digits, `;`, and the `M`/`m` terminator) are NEVER lowercase
+    /// letters by construction, so no choice of realistic body bytes here
+    /// could ever leak into a cue word undetected — this test's existing
+    /// digit/semicolon bytes are already as sensitive as this shape can be
+    /// made.
+    #[test]
+    fn sgr_mouse_report_bytes_never_pollute_the_next_cue_word() {
+        let press = b"\x1b[<0;3;3M";
+        let release = b"\x1b[<0;3;3m";
+        let mut input = Vec::new();
+        input.extend_from_slice(press);
+        input.extend_from_slice(release);
+        input.extend_from_slice(b"legacy\r");
+        assert_eq!(scan(&input), vec!["legacy"]);
+    }
+
+    /// An over-length run of lowercase letters must never let a shorter
+    /// cue hiding inside it as its own SUFFIX match once the run has
+    /// shifted back into range (`CueScanState::Invalid`'s own docs cover
+    /// why this bound exists at all), and normal service must resume
+    /// cleanly once a real delimiter is seen.
+    #[test]
+    fn an_over_length_word_never_matches_even_when_a_cue_is_its_suffix() {
+        assert_eq!(scan(b"xlegacy\r"), Vec::<String>::new());
+        // No delimiter between the overflow and the trailing `sgr` at
+        // all: everything after the overflow point is swallowed as one
+        // run, exactly like `CueScanState::Invalid`'s docs describe.
+        assert_eq!(scan(b"xxxxxxxxsgr\r"), Vec::<String>::new());
+        // A delimiter DOES resync the scanner: a fresh, in-range word
+        // right after it still matches normally.
+        assert_eq!(scan(b"xlegacy\rsgr\r"), vec!["sgr"]);
+    }
+
+    /// [`mouse_escape`] is the ONE place a recognized word turns into a
+    /// mode change; pinned against the EXACT bytes (not merely "some
+    /// escape came back") because 1002/1003 (motion tracking) would
+    /// satisfy a browser-level test just as well as 1000 — only an exact
+    /// byte comparison catches the wrong DECSET code. `legacy`'s DECRST
+    /// 1006 prefix is pinned here too: see `mouse_escape`'s own docs for
+    /// why cueing `legacy` must actively turn SGR back off, not merely
+    /// re-assert 1000.
+    #[test]
+    fn mouse_escape_selects_the_exact_decset_sequence() {
+        assert_eq!(mouse_escape("legacy"), Some("\x1b[?1006l\x1b[?1000h"));
+        assert_eq!(mouse_escape("sgr"), Some("\x1b[?1000h\x1b[?1006h"));
+        assert_eq!(mouse_escape("quit"), None);
+        assert_eq!(mouse_escape(""), None);
+    }
+
+    /// The scenario the review that added `legacy`'s DECRST prefix was
+    /// written against: cueing `sgr` and then `legacy`, IN THAT ORDER,
+    /// through the real scanner (not `mouse_escape` in isolation) must
+    /// still end with SGR encoding turned back off. Before the DECRST fix
+    /// this second escape was just `\x1b[?1000h` — a no-op against tmux's
+    /// already-latched 1006, so every report after the "corrective" cue
+    /// kept arriving in SGR shape regardless of what the user had just
+    /// asked for.
+    #[test]
+    fn legacy_after_sgr_resets_sgr_encoding() {
+        let mut scanner = CueScanner::default();
+        let mut escapes = Vec::new();
+        for &byte in b"sgr\rlegacy\r" {
+            if let Some(word) = scanner.feed(byte)
+                && let Some(escape) = mouse_escape(&word)
+            {
+                escapes.push(escape);
+            }
+        }
+        assert_eq!(
+            escapes,
+            vec!["\x1b[?1000h\x1b[?1006h", "\x1b[?1006l\x1b[?1000h"],
+            "the second cue must actively turn 1006 back off, not just re-assert 1000"
+        );
     }
 }
