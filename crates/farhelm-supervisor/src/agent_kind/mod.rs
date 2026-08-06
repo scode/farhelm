@@ -21,10 +21,10 @@
 //!    agent configuration, no file in the agent's own directories is ever
 //!    written.
 //! 3. **Status sharpening** (PLAN_M6_75.md item 2). The generic classifier
-//!    in `service::status` can only see whether a pane produced output
-//!    recently; recognizing that an agent is BLOCKED ON A QUESTION means
-//!    recognizing that agent's own prompt and approval shapes, which is
-//!    per-kind knowledge and nothing else's business.
+//!    in `service::status` can only see whether successive sampled screens
+//!    differed from each other; recognizing that an agent is BLOCKED ON A
+//!    QUESTION means recognizing that agent's own prompt and approval
+//!    shapes, which is per-kind knowledge and nothing else's business.
 //!
 //! ## Where the line between this file and `capture` is drawn
 //!
@@ -81,10 +81,20 @@
 //! forbids anything about interaction from waiting on a status, so a
 //! sharpener that misses a prompt costs a session that reads idle while it
 //! waits, and one that fires early costs the reverse. Both are cosmetic.
-//! What neither is allowed to do is cost anything else, which is why
-//! [`AgentIntegration::sharpen`] takes a plain `&str`, returns a status,
-//! and is called from a place that has no lock, no I/O, and no way to
-//! delay a keystroke.
+//!
+//! What neither is allowed to do is cost anything else, and the properties
+//! that guarantee it are worth stating exactly rather than loosely.
+//! [`AgentIntegration::sharpen`] takes a plain `&str` and returns a status:
+//! it performs no I/O, awaits nothing, acquires no admission permit, and
+//! cannot block on anything a request needs. It IS called while its
+//! session's `activity` cell is locked, so the honest claim is "holds one
+//! per-entry leaf mutex for a substring search", not "holds no lock at
+//! all" — and not "uncontended" either, which an earlier version of this
+//! paragraph claimed: the sampler WRITES that cell every tick, so a reply
+//! and a tick can genuinely contend for it. What the leaf-lock property
+//! guarantees is the part that matters — the mutex is held across no await
+//! and alongside no other lock, so the wait is bounded by one substring
+//! search or one sample fold and can never participate in a deadlock.
 
 use farhelm_proto::{AgentKind, RestartOffer, SessionStatus};
 use std::path::{Path, PathBuf};
@@ -192,23 +202,39 @@ pub trait AgentIntegration: Send + Sync {
     /// the last screen the sampler captured from its pane (PLAN_M6_75.md
     /// item 2).
     ///
-    /// `baseline` is what `service::status` concluded from output recency
-    /// alone — `Running` or `Idle`, never a dead status, because a session
-    /// with no live pane is never sharpened. `tail` is the pane's visible
-    /// grid as of the last tick (`ticker::ActivitySample::tail`), bottom-
-    /// anchored and lossily decoded.
+    /// `baseline` is what `service::status` concluded from this session's
+    /// own run of unchanged samples alone — `Running` or `Idle`, never a
+    /// dead status, because a session with no live pane is never sharpened.
+    /// `tail` is the pane's visible grid as of the last SUCCESSFUL capture
+    /// (`ticker::ActivitySample::tail`), bottom-anchored and lossily
+    /// decoded; a session whose captures have started failing has no tail
+    /// at all rather than a stale one, so nothing here is ever asked to
+    /// judge a screen of unknown age.
     ///
     /// ## What an implementation may do
     ///
     /// Exactly one thing is worth doing here and it is the whole point of
-    /// the method: PROMOTE a live baseline to
-    /// [`SessionStatus::Waiting`](farhelm_proto::SessionStatus::Waiting)
+    /// the method: PROMOTE a live baseline to [`SessionStatus::Waiting`]
     /// when the tail shows this agent's own unanswered question or approval
-    /// prompt, or leave `baseline` alone. Returning a status that is not
-    /// live at all is not merely discouraged — `service::status` DISCARDS
-    /// it and keeps the baseline, because a sharpener is looking at a
-    /// screen and a screen is not evidence that a process ended. Nothing
-    /// here may invent liveness in either direction.
+    /// prompt, or leave `baseline` alone. Two rules bound that, and both
+    /// are enforced rather than trusted:
+    ///
+    /// - A NON-LIVE baseline must come back untouched. A screen is not
+    ///   evidence about a process, so a stale prompt on the pane of a
+    ///   session that has exited must not resurrect it as `Waiting`.
+    ///   [`promote_if_waiting`] is where the implementations in this module
+    ///   enforce that, at the seam, because the consumer downstream can
+    ///   only check that an ANSWER is live — not that the promotion was
+    ///   legitimate.
+    /// - Anything OTHER than `Waiting` is discarded, and this is a
+    ///   whitelist rather than a rejection of dead statuses:
+    ///   `service::status::waiting_or_baseline` takes exactly `Waiting`
+    ///   through and keeps the baseline for everything else — `Running` and
+    ///   `Idle` included. So an implementation cannot flip a session's
+    ///   activity classification either, not just its liveness. Returning
+    ///   `Idle` because a screen looks still is precisely the mistake that
+    ///   would otherwise pass, since the sampler's own count of unchanged
+    ///   looks is the only thing entitled to that answer.
     ///
     /// ## Why it is defaulted, and what the default means
     ///
@@ -313,14 +339,11 @@ impl AgentIntegration for ClaudeIntegration {
 
     /// Claude Code asks for permission through a bordered dialog at the
     /// bottom of the screen: a question line, then a numbered list of
-    /// answers. [`looks_like_a_choice_prompt`] is that shape, and
-    /// [`CLAUDE_QUESTION_PHRASES`] is the vocabulary it is required to
-    /// appear with.
+    /// answers. [`promote_if_waiting`] is that shape plus the baseline
+    /// gate, and [`CLAUDE_QUESTION_PHRASES`] is the vocabulary it is
+    /// required to appear with.
     fn sharpen(&self, baseline: SessionStatus, tail: &str) -> SessionStatus {
-        if looks_like_a_choice_prompt(tail, CLAUDE_QUESTION_PHRASES) {
-            return SessionStatus::Waiting;
-        }
-        baseline
+        promote_if_waiting(baseline, tail, CLAUDE_QUESTION_PHRASES)
     }
 }
 
@@ -430,10 +453,7 @@ impl AgentIntegration for CodexIntegration {
     /// one vendor copied the other; if either diverges, the phrase list is
     /// what changes, and only for that kind.
     fn sharpen(&self, baseline: SessionStatus, tail: &str) -> SessionStatus {
-        if looks_like_a_choice_prompt(tail, CODEX_QUESTION_PHRASES) {
-            return SessionStatus::Waiting;
-        }
-        baseline
+        promote_if_waiting(baseline, tail, CODEX_QUESTION_PHRASES)
     }
 }
 
@@ -450,18 +470,39 @@ impl AgentIntegration for CodexIntegration {
 // ignore the column, which is the one failure that makes the whole
 // milestone pointless.
 //
-// Hence the shape below is a CONJUNCTION of two independent signals
-// (vendor question wording AND a rendered menu of numbered answers),
-// restricted to the bottom of the screen. Every part of that is load-
-// bearing; see `looks_like_a_choice_prompt`.
+// Hence the shape below is a CONJUNCTION of independent signals, and
+// every one of them has been tightened at least once after a reviewer
+// found ordinary prose that satisfied the previous version. As it stands,
+// a match needs all of:
+//
+//   - SUFFIX ORDERING. Read from the bottom up: optional chrome, then a
+//     contiguous run of numbered answers, then the question above them.
+//     A dialog with even one line of the agent's own output below it has
+//     been answered, and must not read as pending.
+//   - EVERY OPTION ANSWER-SHAPED. Not "at least one" — a numbered
+//     explanation whose first item happens to begin "No" is prose, and is
+//     the single most ordinary thing an agent prints.
+//   - THE ANSWER-WORD GRAMMAR. The word alone, or the word plus a
+//     terminator the recorded dialogs actually use. Anything looser takes
+//     "No migration is required" and "No-code path".
+//   - MARKER GRAMMAR. A selection pointer belongs to the menu LINE it
+//     prefixes rather than to the box's chrome, because the same glyphs
+//     are what an empty composer draws — and a composer that trimmed away
+//     to nothing would hide an answered dialog above it.
+//   - A BOUNDED LOOKBACK for the question, so the search stays inside the
+//     dialog box instead of finding questions in the transcript above.
+//
+// `looks_like_a_choice_prompt` carries each argument in full, including
+// the concrete false positive that motivated it.
 //
 // Deliberately not regular expressions, and not a dependency. What these
-// patterns need is exact substring recognition plus a two-character
-// prefix test, which plain `str` methods do without adding a crate to a
-// supervisor whose dependency set is kept small enough to cross-compile
-// to musl (see `capture`'s note on the hand-rolled timestamp parser for
-// the same trade). It also keeps the no-panic property trivial to see:
-// there is no byte-offset arithmetic anywhere in here.
+// patterns need is exact substring recognition plus a little
+// character-wise prefix work, which plain `str` methods do without adding
+// a crate to a supervisor whose dependency set is kept small enough to
+// cross-compile to musl (see `capture`'s note on the hand-rolled
+// timestamp parser for the same trade). It also keeps the no-panic
+// property trivial to see: there is no byte-offset arithmetic anywhere in
+// here.
 // ---------------------------------------------------------------------
 
 /// Question wording that, together with a menu of numbered answers, means
@@ -502,61 +543,290 @@ const CODEX_QUESTION_PHRASES: &[&str] = &[
     "Allow command",
 ];
 
-/// How many trailing lines of a sampled tail count as "the bottom of the
-/// screen".
-///
-/// Both agents draw a pending dialog as the bottom-most element of the
-/// pane, so restricting the match here is what separates a LIVE question
-/// from one that was answered and scrolled up — the transcript above is
-/// full of text the agent has already moved past, and matching it would
-/// pin a session at `Waiting` for as long as the answered dialog stayed on
-/// screen. Sized for a whole dialog box (a question, a rule, three or four
-/// options, a border) rather than for the question alone, since both
-/// halves of the conjunction have to fall inside it.
-const PROMPT_TAIL_LINES: usize = 14;
-
 /// How many numbered answers a menu needs before it counts as one.
 ///
 /// Two, because a real choice always offers at least "yes" and "no", while
 /// a single `1.` line is the ordinary shape of an agent enumerating steps
-/// in its own prose. This is the cheapest available defence against the
-/// expensive failure direction.
+/// in its own prose.
 const MIN_MENU_CHOICES: usize = 2;
 
-/// Whether the bottom of `tail` looks like an unanswered
-/// question-plus-numbered-answers dialog written in `phrases`' vocabulary.
+/// How many numbered answers a menu may have before it stops looking like
+/// one.
 ///
-/// The conjunction is the whole design. A question phrase alone appears in
-/// ordinary agent output constantly ("Do you want to keep the old name?"
-/// written INTO a reply); a numbered menu alone is how any agent formats a
-/// list. Together, at the bottom of the screen, they are what neither an
-/// agent's prose nor a shell prompt produces by accident.
+/// Neither vendor offers more than four (yes / yes-and-remember /
+/// no-with-feedback, plus the occasional variant), so a run of a dozen
+/// numbered lines is an agent enumerating something in prose, not a
+/// question. Bounding the run is also what keeps the backward scan from
+/// walking a whole screen of numbered output.
+const MAX_MENU_CHOICES: usize = 8;
+
+/// The words a menu option starts with when it is an ANSWER rather than a
+/// list item.
 ///
-/// Blank lines are ignored rather than counted, so the padding rows inside
-/// a dialog box cannot push the question out of the window
-/// ([`PROMPT_TAIL_LINES`]) while it is still on screen.
+/// The discriminator that ordering and phrasing alone do not provide.
+/// Every approval, trust, and plan dialog either vendor draws is a
+/// yes/no question whose options are spelled that way — "1. Yes", "2. Yes,
+/// and don't ask again", "3. No, and tell Claude what to do differently",
+/// "1. Yes, proceed" / "2. No, exit" — while a numbered list an agent
+/// writes into its own output ("1. Read the module docs") is not. Without
+/// this, prose that happens to ask a question above a numbered list
+/// matches perfectly, which is a false `Waiting` produced by the single
+/// most ordinary thing an agent does.
 ///
-/// Case-sensitive: these are fixed strings a TUI renders from its own
-/// source, not user input, and lowercasing every line would spend
-/// allocations on a robustness nobody needs.
+/// EVERY option in the run has to match, not merely one — see
+/// [`looks_like_a_choice_prompt`] for the numbered-prose block that the
+/// weaker rule let through, and for why the conjunction was chosen over
+/// "the set must contain both a yes and a no".
+///
+/// A menu with even one option spelled some other way ("3. Cancel") is
+/// therefore missed, as is one spelled entirely differently ("1. Proceed" /
+/// "2. Abort"). That is the cheap direction, deliberately chosen: see
+/// [`CLAUDE_QUESTION_PHRASES`] for the same trade on the question half.
+const MENU_ANSWER_WORDS: &[&str] = &["yes", "no"];
+
+/// What may follow an answer word and still leave the option an ANSWER
+/// rather than a sentence that happens to start with one.
+///
+/// Comma alone, because that is what all three recorded dialogs use and
+/// nothing else appears in any of them — see [`starts_with_answer_word`],
+/// which quotes every option of all three. Written as a set rather than a
+/// literal `','` so a vendor's variant can be added beside it with the
+/// audit that justified it, exactly as the phrase lists grow.
+///
+/// Deliberately NOT whitespace: "No migration is required" is prose, and
+/// admitting a space is what let a numbered explanation read as a menu.
+/// Deliberately not `-` either: "No-code path" is a compound word, not an
+/// answer.
+const ANSWER_WORD_TERMINATORS: &[char] = &[','];
+
+/// How many substantive lines above the menu are read while looking for
+/// the question it answers.
+///
+/// Not zero, because a real dialog puts body text between the two: the
+/// folder-trust dialog this repo has observed explains what trusting the
+/// directory means over several lines before offering its options. Small,
+/// because the search must stay inside the dialog box — read far enough up
+/// and it starts finding questions in the transcript above, which is
+/// exactly the unanchored matching this shape replaced.
+const PROMPT_QUESTION_LOOKBACK: usize = 8;
+
+/// Whether `tail` ENDS in an unanswered question-plus-numbered-answers
+/// dialog written in `phrases`' vocabulary.
+///
+/// ## The shape, and why it is a suffix rather than a search
+///
+/// Read from the bottom up, a pending dialog is: optional chrome (the
+/// box's closing border, blank padding), then a contiguous run of numbered
+/// answers, then the question. Anything else at the bottom of the screen
+/// means the dialog is not what the pane is currently showing.
+///
+/// An earlier version of this searched a window of trailing lines for a
+/// phrase and any two numbered lines, which is not the same thing at all:
+/// a dialog the user ANSWERED, followed by one line of the agent getting
+/// on with the work, still matched — so a session would read `Waiting`
+/// while its agent was visibly running. Requiring the block to be the
+/// suffix is what makes "the question is still on screen, unanswered" the
+/// thing being recognized rather than "a question was asked at some point
+/// recently".
+///
+/// ## The four independent signals
+///
+/// A match needs all of: the suffix shape above, between
+/// [`MIN_MENU_CHOICES`] and [`MAX_MENU_CHOICES`] numbered answers of which
+/// EVERY ONE reads as an answer ([`MENU_ANSWER_WORDS`]), at least one
+/// option carrying a selection pointer ([`MENU_SELECTION_MARKERS`]), and a
+/// question line in the vendor's own wording. Each alone is common in
+/// ordinary output; together, at the bottom of the screen, they are what
+/// neither an agent's prose nor a shell prompt produces by accident.
+///
+/// ## Why a selection pointer is required, and not merely tolerated
+///
+/// The other three signals are all things ORDINARY PROSE can satisfy, and
+/// the case that proves it is a numbered explanation whose every item opens
+/// with an answer word and a comma:
+///
+/// ```text
+/// Do you want to know why the migration is a no-op?
+/// 1. No, migration is required only for rows written before the bump.
+/// 2. Yes, and the defaults backfill everything else.
+/// ```
+///
+/// That is a suffix, it is a menu-sized run, every option satisfies
+/// [`starts_with_answer_word`], and the line above it is in
+/// [`CLAUDE_QUESTION_PHRASES`]' vocabulary — so the conjunction of the
+/// other three signals says `Waiting` at a session whose agent is in the
+/// middle of writing. Tightening the answer grammar further cannot fix
+/// this: the options really ARE answer-shaped, because prose is allowed to
+/// be.
+///
+/// A selection pointer is the one signal that is not prose. It is drawn by
+/// the widget, not written by the model, and every dialog this repo has
+/// recorded carries one — Claude renders `❯ 1. Yes`, Codex renders
+/// `▌ › 1. Yes, run it`. An agent enumerating something in its own output
+/// has no reason to emit one, so requiring it is what separates "a menu" from
+/// "a numbered list that reads like one".
+///
+/// The cost is this module's standing trade (see [`CLAUDE_QUESTION_PHRASES`]):
+/// a vendor that stops drawing a pointer, or draws one this build does not
+/// know, costs a missed `Waiting` until someone re-audits and adds the
+/// glyph. That is the cheap direction; a false `Waiting` that persists for
+/// as long as the screen does is not.
+///
+/// ## Why every option, and not just one
+///
+/// An earlier version asked only that SOME option in the run be
+/// answer-shaped, and that is far too weak for the thing it is guarding
+/// against. An agent writing prose reaches for numbered lists constantly,
+/// and a single line beginning "No" or "Yes" is an ordinary way for one to
+/// start — so a block like
+///
+/// ```text
+/// Do you want to know why?
+/// 1. No migration is required for existing rows
+/// 2. The defaults backfill everything else
+/// ```
+///
+/// satisfied every part of the shape: a vendor question phrase, two
+/// numbered lines at the bottom of the screen, one of them beginning with
+/// an answer word. That reads `Waiting` at a session whose agent is
+/// working, which is the expensive direction this whole module is built to
+/// avoid.
+///
+/// Requiring every option to be answer-shaped is a CONJUNCTION over the
+/// run, so an ordinary numbered list disqualifies itself at whichever of
+/// its items is not an answer — which for real prose is almost always the
+/// first one. The alternative considered was "the set must contain both a
+/// yes-shaped and a no-shaped option", which every recorded dialog also
+/// satisfies; it was rejected as the weaker of the two, since it is an
+/// existence test that a two-item list beginning "No..." and "Yes..." still
+/// passes.
+///
+/// Checked against the dialogs this repo has actually recorded, because a
+/// rule that excluded one of them would be a rule that lost real prompts:
+/// Claude's command approval ("1. Yes" / "2. Yes, and don't ask again" /
+/// "3. No, and tell Claude what to do differently"), Claude's folder-trust
+/// dialog ("1. Yes, proceed" / "2. No, exit"), and Codex's command approval
+/// ("1. Yes, run it" / "2. Yes, and don't ask again this session" / "3. No,
+/// and tell Codex what to do instead"). All three are answer-shaped
+/// throughout. A vendor that adds a "3. Cancel" costs us that dialog's
+/// `Waiting` until someone re-audits — the cheap direction, and the same
+/// one [`CLAUDE_QUESTION_PHRASES`] already chooses.
+///
+/// ## What counts as chrome, and what deliberately does not
+///
+/// Only blank lines and lines made entirely of border characters
+/// ([`is_line_decoration`]). Footer hints are NOT tolerated below the
+/// menu, and that is a decision rather than an omission: the hint-shaped
+/// line most likely to appear under an answered dialog is the working
+/// spinner itself ("esc to interrupt"), so any vocabulary broad enough to
+/// skip footers is broad enough to skip the very line that proves the
+/// dialog is gone. A vendor that draws a real hint below its options costs
+/// us a missed `Waiting`; the alternative costs a wrong one that persists.
+///
+/// Case-sensitive on the question phrases (fixed strings a TUI renders
+/// from its own source) and case-INSENSITIVE on the answer words, which
+/// are ordinary prose a vendor may capitalize either way.
+///
+/// ## Why the question is looked for above the menu rather than beside it
+///
+/// Claude's folder-trust dialog — the one shape this repo has actually
+/// observed — puts explanatory body text between its question and its
+/// options ("Claude Code'll be able to read, edit, and execute files
+/// here."), so "the line immediately above the menu" would miss it. The
+/// search upward is bounded by [`PROMPT_QUESTION_LOOKBACK`] instead, which
+/// keeps it inside the dialog box without needing to know what a vendor
+/// chose to explain there. Note what this does NOT relax: the menu itself
+/// still has to be the suffix, which is the property the answered-dialog
+/// case turns on.
+///
+/// One backward pass over the lines, allocating nothing at all: this runs
+/// once per integrated session per reply, under that session's activity
+/// lock.
+///
+/// Two phases over ONE reverse iterator, which is also why the lookback
+/// cannot drift: the body phase is a `take(PROMPT_QUESTION_LOOKBACK)`, so
+/// the number of lines examined IS the declared bound rather than a
+/// counter compared against it (an earlier shape tested each line and then
+/// checked the counter, which examined nine lines where eight were
+/// declared).
 fn looks_like_a_choice_prompt(tail: &str, phrases: &[&str]) -> bool {
-    let lines: Vec<&str> = tail
+    let asks = |content: &str| phrases.iter().any(|phrase| content.contains(phrase));
+    // Blank padding and the box's own borders — above and below the menu
+    // alike — are dropped once, here, so neither phase has to think about
+    // them. A line made entirely of decoration trims to nothing.
+    let mut lines = tail
         .lines()
-        .filter(|line| !line.trim().is_empty())
-        .collect();
-    let bottom = &lines[lines.len().saturating_sub(PROMPT_TAIL_LINES)..];
-    let choices = bottom
-        .iter()
-        .filter(|line| is_numbered_choice(line))
-        .count();
-    choices >= MIN_MENU_CHOICES
-        && bottom
-            .iter()
-            .any(|line| phrases.iter().any(|phrase| line.contains(phrase)))
+        .rev()
+        .map(|line| line.trim_matches(is_line_decoration))
+        .filter(|content| !content.is_empty());
+
+    // Phase 1: the menu, which must be the suffix. Reaching a non-menu line
+    // on the FIRST substantive line means the bottom of the screen was
+    // never a menu at all, which is what the suffix rule is.
+    let mut choices = 0usize;
+    // The widget-drawn signal, tracked across the whole run rather than
+    // demanded of each line: exactly one option is selected at a time, so
+    // only one of them carries the pointer.
+    let mut pointed_at = false;
+    let first_body_line = loop {
+        // A screen that is nothing but a menu has no question on it.
+        let Some(content) = lines.next() else {
+            return false;
+        };
+        match menu_choice_text(content) {
+            Some(choice) => {
+                // EVERY option, not merely one: see this function's docs
+                // for the numbered-prose block that "at least one" let
+                // through.
+                if !starts_with_answer_word(choice.answer) {
+                    return false;
+                }
+                pointed_at |= choice.selected;
+                choices += 1;
+                if choices > MAX_MENU_CHOICES {
+                    return false;
+                }
+            }
+            None => break content,
+        }
+    };
+    if choices < MIN_MENU_CHOICES {
+        return false;
+    }
+    // The signal an agent's own prose does not produce; see this function's
+    // docs for the answer-shaped numbered explanation that satisfies
+    // everything else.
+    if !pointed_at {
+        return false;
+    }
+
+    // Phase 2: the question, somewhere in the bounded body above the menu.
+    // The line that ENDED the menu is the first of those lines, not an
+    // extra one beyond the bound.
+    std::iter::once(first_body_line)
+        .chain(lines)
+        .take(PROMPT_QUESTION_LOOKBACK)
+        .any(asks)
 }
 
-/// Whether a rendered line is one option of a numbered menu — `1.`, `2.`,
-/// once the box drawing and selection markers around it are stripped.
+/// One parsed numbered menu option, as [`menu_choice_text`] reads it off a
+/// line.
+///
+/// The `selected` flag is carried out rather than being consumed inside the
+/// parser because it answers a question about the RUN, not about the line:
+/// [`looks_like_a_choice_prompt`] requires at least one pointed-at option
+/// anywhere in the menu, which is the signal that separates a widget from
+/// an agent's numbered prose.
+struct MenuChoice<'a> {
+    /// The option's text with its number, separator, and any selection
+    /// pointer stripped — `❯ 1. Yes, proceed` yields `Yes, proceed`.
+    answer: &'a str,
+    /// Whether this line carried one of [`MENU_SELECTION_MARKERS`].
+    selected: bool,
+}
+
+/// The parsed form of a numbered menu option — `1. Yes` yields `Yes` — or
+/// `None` for any other line.
 ///
 /// Character-wise rather than by byte offset, which is not stylistic: the
 /// input is a lossily decoded terminal screen, so a `&line[..2]` would
@@ -567,35 +837,177 @@ fn looks_like_a_choice_prompt(tail: &str, phrases: &[&str]) -> bool {
 /// options, so `10.` is not a case worth admitting — and refusing it also
 /// refuses years, versions, and section numbers that would otherwise start
 /// a prose line.
-fn is_numbered_choice(line: &str) -> bool {
-    let mut chars = line.trim_matches(is_line_decoration).chars();
-    let Some(digit) = chars.next() else {
-        return false;
+fn menu_choice_text(content: &str) -> Option<MenuChoice<'_>> {
+    // The pointer at the currently selected option is part of a menu
+    // line's grammar, not of the box's chrome, so it is skipped HERE rather
+    // than trimmed as decoration — see [`MENU_SELECTION_MARKERS`] for the
+    // answered-dialog bug that distinction fixes.
+    let (content, selected) = match content.strip_prefix(MENU_SELECTION_MARKERS) {
+        Some(rest) => (rest.trim_start(), true),
+        None => (content, false),
     };
+    let mut chars = content.chars();
+    let digit = chars.next()?;
     if !digit.is_ascii_digit() || digit == '0' {
-        return false;
+        return None;
     }
     if chars.next() != Some('.') {
-        return false;
+        return None;
     }
+    let rest = chars.as_str();
     // A menu option is `1. Yes`, never `1.5`: requiring the separator to be
     // followed by space (or by nothing, on a truncated capture) is what
     // keeps a decimal number at the start of a prose line from counting.
-    chars.next().is_none_or(char::is_whitespace)
+    if rest.starts_with(|c: char| !c.is_whitespace()) {
+        return None;
+    }
+    Some(MenuChoice {
+        answer: rest.trim_start(),
+        selected,
+    })
 }
 
+/// Whether a menu option IS an answer rather than a list item: its text is
+/// one of [`MENU_ANSWER_WORDS`], either alone or followed by
+/// [`ANSWER_WORD_TERMINATORS`].
+///
+/// ## Why the terminator, and not "any word boundary"
+///
+/// Requiring only that the first WORD be an answer word — with whitespace
+/// ending it like any other separator — is too loose in exactly the
+/// direction that matters, because "No migration is required" and "Yes it
+/// does" are ordinary English sentences an agent writes into a numbered
+/// list. So is a hyphenated compound: "No-code path", "Yes-style wording".
+/// Every one of those passes a word-boundary test and none of them is an
+/// answer to anything.
+///
+/// The grammar encoded here is the one the three recorded dialogs actually
+/// use, and they are unanimous — in every option of all three, the answer
+/// word either IS the whole option or is immediately followed by a comma:
+///
+/// - Claude command approval: "Yes", "Yes, and don't ask again for rm
+///   commands", "No, and tell Claude what to do differently".
+/// - Claude folder trust: "Yes, proceed", "No, exit".
+/// - Codex command approval: "Yes, run it", "Yes, and don't ask again this
+///   session", "No, and tell Codex what to do instead".
+///
+/// So the rule is: nothing after the word, or a terminator. A vendor that
+/// writes "Yes — proceed" costs a missed `Waiting` until someone adds its
+/// separator here, which is this module's standing trade (see
+/// [`CLAUDE_QUESTION_PHRASES`]) and the cheap direction of it.
+///
+/// Borrows rather than building: every answer word is ASCII, so the prefix
+/// that could match one is exactly the leading run of ASCII letters, and
+/// `eq_ignore_ascii_case` compares it in place.
+fn starts_with_answer_word(text: &str) -> bool {
+    let end = text
+        .char_indices()
+        .find(|(_, c)| !c.is_ascii_alphabetic())
+        .map_or(text.len(), |(index, _)| index);
+    let (word, rest) = text.split_at(end);
+    if !MENU_ANSWER_WORDS
+        .iter()
+        .any(|answer| word.eq_ignore_ascii_case(answer))
+    {
+        return false;
+    }
+    rest.chars()
+        .next()
+        .is_none_or(|next| ANSWER_WORD_TERMINATORS.contains(&next))
+}
+
+/// Apply one vendor's prompt vocabulary to a baseline, promoting only a
+/// LIVE baseline and only to [`SessionStatus::Waiting`].
+///
+/// The shared body of both implementations' [`AgentIntegration::sharpen`],
+/// and the place the trait's "never invent liveness" rule is actually
+/// enforced. It has to be enforced HERE, at the seam, rather than only
+/// where `service::status` consumes the result: that consumer can check
+/// that an ANSWER is live, but not that a promotion was legitimate, so a
+/// sharpener handed `Exited` and returning `Waiting` would sail straight
+/// through — a screen full of a stale prompt claiming a dead session is
+/// blocked on a human.
+///
+/// `sharpen` is a public method on a public trait, so "the only caller
+/// passes a live baseline" is a property of today's tree rather than of
+/// the API. The gate costs one comparison and removes the question.
+///
+/// Considered and rejected: narrowing the parameter to a `LiveStatus`
+/// newtype, which would make the invariant unrepresentable. It would also
+/// introduce a second status vocabulary next to the wire enum every caller
+/// already holds, and force a conversion at both ends of a seam whose
+/// entire subject matter is cosmetic. A guard plus tests buys the same
+/// property here without that.
+fn promote_if_waiting(baseline: SessionStatus, tail: &str, phrases: &[&str]) -> SessionStatus {
+    if baseline.is_live() && looks_like_a_choice_prompt(tail, phrases) {
+        return SessionStatus::Waiting;
+    }
+    baseline
+}
+
+/// The pointers a TUI draws at the currently selected option.
+///
+/// Skipped by [`menu_choice_text`] as part of a menu line's grammar rather
+/// than trimmed by [`is_line_decoration`] as chrome, and the distinction is
+/// a real bug rather than taxonomy. These glyphs are ALSO what a composer
+/// prompt draws when it is empty, and an empty composer is precisely the
+/// screen that means "no question is pending". As decoration, a bare `›`
+/// line would trim to nothing, become indistinguishable from a dialog's
+/// blank padding, and let [`looks_like_a_choice_prompt`] scan straight past
+/// it into an ANSWERED menu above — reporting `Waiting` at a session whose
+/// user has already answered, for as long as that screen stays put. It is
+/// the same failure the ASCII `>` is excluded from the decoration set to
+/// avoid; Claude's composer draws that one, and Codex's draws `›`.
+///
+/// Arbitrated on the repo's own evidence, since one reviewer read the risk
+/// the other way. The observation that settles the SKIP being necessary is
+/// Codex's recorded approval modal, whose selected option renders as
+/// `▌ › 1. Yes, run it` — treat `›` as an ordinary character and that line
+/// stops parsing as a menu option, and the real dialog stops being
+/// recognized at all. What the repo does NOT contain is any capture of an
+/// EMPTY Codex composer, so "a bare `›` cannot occur, because the composer
+/// always renders placeholder text" could not be written down with a
+/// citation; the only in-repo sighting of that line
+/// (`real_agent_capture.rs`, on the flake it documents) has the user's
+/// typed prompt sitting on it, which says nothing about the empty case.
+/// Handling the marker here costs nothing and does not depend on which
+/// reading of the vendor's composer is right.
+///
+/// Since the prose-hardening pass these glyphs also carry a third job:
+/// [`looks_like_a_choice_prompt`] REQUIRES one of them somewhere in the run
+/// it is about to call a menu. That makes this list load-bearing for
+/// recognition rather than only for parsing — a vendor whose pointer is not
+/// here now costs a missed `Waiting` for its whole dialog, not merely a
+/// mis-parsed selected line. See that function's docs for why a
+/// widget-drawn signal is the only thing that separates a real menu from an
+/// answer-shaped numbered explanation.
+const MENU_SELECTION_MARKERS: &[char] = &['❯', '›', '⏵'];
+
 /// Characters a TUI wraps a line in that carry no meaning for matching:
-/// whitespace, box-drawing borders, bullets, and the marker that points at
-/// the currently selected option.
+/// whitespace, box-drawing borders, and bullets.
 ///
 /// Trimmed from BOTH ends, since a boxed dialog closes every line with the
-/// same border it opened with.
+/// same border it opened with. A line made ENTIRELY of these — the box's
+/// top and bottom rules, an empty row inside it — therefore trims to
+/// nothing, which is how [`looks_like_a_choice_prompt`] tells a dialog's
+/// own chrome from something the agent printed.
+///
+/// The two Unicode blocks are taken wholesale rather than character by
+/// character: Box Drawing (U+2500–U+257F) is where `│ ─ ╭ ╰ ┃` and every
+/// variant a vendor might switch to live, and Block Elements
+/// (U+2580–U+259F) covers the solid bars Codex rules its panes with. Any
+/// character in either block is decoration by construction, so enumerating
+/// them would only invite a miss when a vendor changes its border style.
+/// Deliberately NOT included are the status glyphs both agents prefix real
+/// output with (`⏺`, `✻`) — those mark lines that carry meaning, and
+/// trimming them away would let a working screen look empty.
+///
+/// Also deliberately excluded, and for a sharper reason than style: the
+/// ASCII `>` and every glyph in [`MENU_SELECTION_MARKERS`]. All of them are
+/// composer prompts as well as pointers, and a composer line that trimmed
+/// to nothing would hide an answered dialog. See that constant.
 fn is_line_decoration(c: char) -> bool {
-    c.is_whitespace()
-        || matches!(
-            c,
-            '│' | '┃' | '┆' | '┊' | '▌' | '▏' | '|' | '❯' | '›' | '>' | '*' | '•' | '⏵'
-        )
+    c.is_whitespace() || ('\u{2500}'..='\u{259f}').contains(&c) || matches!(c, '|' | '*' | '•')
 }
 
 /// Assemble validated correlators, refusing anything this module is not
@@ -864,6 +1276,99 @@ pub fn template_has_placeholder(template: Option<&[String]>) -> bool {
     template.is_some_and(|template| template.iter().any(|e| e == CONVERSATION_PLACEHOLDER))
 }
 
+/// Whether `argv` is a vector this supervisor could actually hand to
+/// `execvp` — the ONE rule, applied everywhere an executable vector is
+/// accepted, built, or read back.
+///
+/// `subject` names the thing being checked in the returned message ("agent
+/// invocation", "profile invocation", "resume template", ...); the `Err` is
+/// the user-facing text verbatim, so callers wrap it in whichever
+/// `ErrorKind` their boundary uses rather than reformatting it.
+///
+/// It lives here, beside [`CONVERSATION_PLACEHOLDER`], because the rule is
+/// about what an argv IS rather than about which request produced one. It
+/// used to exist only in the profile-write validator, which meant a raw
+/// create, a pending-retry takeover, and a restart each accepted vectors
+/// that profile CRUD refused — the same unexecutable command line, reached
+/// by a different door.
+///
+/// The three refusals, and why each:
+///
+/// - **An empty vector** names no program at all. Note that
+///   `shell_words::split("''")` yields `[""]` and not `[]`, so this alone
+///   never was enough.
+/// - **An empty `argv[0]`** is the `''` case above: a command line that
+///   exists and names nothing.
+/// - **A NUL byte anywhere** cannot survive the C string every exec
+///   ultimately builds. It TRUNCATES the argument at the NUL rather than
+///   failing, which is the worst of the three because something still runs
+///   — just not what was asked for.
+///
+/// What this deliberately does NOT refuse is an empty element AFTER
+/// `argv[0]`. That is the ordinary way to write a safe resume wrapper:
+///
+/// ```text
+/// ["sh", "-c", "exec claude --resume \"$1\"", "", "{conversation}"]
+/// ```
+///
+/// The empty element there is `$0` for the inner shell — a positional slot
+/// that exists precisely so the captured identity lands in `$1` rather than
+/// being spliced into the script text. An earlier version rejected those
+/// and forced users into exactly the substitution the argv-vector design
+/// exists to avoid.
+pub fn ensure_executable_argv(subject: &str, argv: &[String]) -> Result<(), String> {
+    let Some(program) = argv.first() else {
+        return Err(format!("{subject} is empty"));
+    };
+    if program.is_empty() {
+        return Err(format!(
+            "{subject}'s first element is empty, so it names no program to run; only the \
+             ARGUMENTS after it may be empty"
+        ));
+    }
+    if argv.iter().any(|element| element.contains('\0')) {
+        return Err(format!(
+            "{subject} contains a NUL byte, which cannot survive being passed to a program"
+        ));
+    }
+    Ok(())
+}
+
+/// [`ensure_executable_argv`] plus the two rules that are about a RESUME
+/// template specifically.
+///
+/// A present-but-empty template gets its own wording rather than the
+/// generic "is empty", because omitting the field entirely is a different
+/// request (this kind's default, or no resume invocation at all) and the
+/// message has to say which one the caller probably meant.
+///
+/// The second rule is the sharp one: [`CONVERSATION_PLACEHOLDER`] may not
+/// be the PROGRAM. Substitution replaces that element with a captured
+/// conversation id, so a template shaped `["{conversation}", ...]` turns
+/// into an argv whose `argv[0]` is a UUID read off disk — a restart that
+/// tries to execute the conversation identity. It passes every other check
+/// (the vector is non-empty, `argv[0]` is non-empty, the placeholder is
+/// present so an integrated kind is satisfied), which is exactly why it
+/// needs naming here rather than being caught by accident.
+pub fn ensure_resume_template(template: &[String]) -> Result<(), String> {
+    if template.is_empty() {
+        return Err(
+            "resume template is present but empty; omit it entirely to mean \"this kind's \
+             default\" or \"no resume invocation\""
+                .to_string(),
+        );
+    }
+    ensure_executable_argv("resume template", template)?;
+    if template[0] == CONVERSATION_PLACEHOLDER {
+        return Err(format!(
+            "resume template's first element is {CONVERSATION_PLACEHOLDER}, so substituting the \
+             captured conversation identity would make it the PROGRAM this session tries to run; \
+             the placeholder belongs in an argument slot"
+        ));
+    }
+    Ok(())
+}
+
 /// Recognize an agent kind from the basename of an invocation's first
 /// token — PLAN_M3.md item 7's deliberately dumb default.
 ///
@@ -1020,6 +1525,57 @@ mod tests {
             .is_ok()
         );
         assert!(IntegrationSnapshot::resolve("bash", Some(AgentKind::Generic), None).is_ok());
+    }
+
+    /// The placeholder may not be the PROGRAM, and the shapes that put it
+    /// anywhere else keep working.
+    ///
+    /// Substitution replaces the placeholder element with an identifier read
+    /// off disk, so a template shaped `["{conversation}", ...]` resolves to
+    /// an argv whose `argv[0]` is a conversation id — a restart that tries
+    /// to execute the identity it was supposed to resume. It passes every
+    /// other rule: the vector is non-empty, `argv[0]` is non-empty, and the
+    /// placeholder IS present, so an integrated kind's own validation is
+    /// satisfied by the very element that breaks it.
+    ///
+    /// The accepted half is not filler. The refusal has to be narrow enough
+    /// that the wrapper idiom — `sh -c 'exec … "$1"' '' {conversation}` —
+    /// still works, and the filled argv is asserted rather than merely the
+    /// acceptance, so a rule that quietly stopped substituting would fail
+    /// here too.
+    #[test]
+    fn the_conversation_placeholder_may_not_be_the_program() {
+        let refused =
+            ensure_resume_template(&[CONVERSATION_PLACEHOLDER.to_string(), "--resume".to_string()])
+                .expect_err("a template whose program slot is the placeholder is unexecutable");
+        assert!(
+            refused.contains("PROGRAM"),
+            "the refusal must say what would go wrong: {refused}"
+        );
+
+        let wrapper = vec![
+            "sh".to_string(),
+            "-c".to_string(),
+            "exec claude --resume \"$1\"".to_string(),
+            String::new(),
+            CONVERSATION_PLACEHOLDER.to_string(),
+        ];
+        ensure_resume_template(&wrapper).expect("the placeholder in an ARGUMENT slot is the point");
+        let snapshot = IntegrationSnapshot::resolve("sh", Some(AgentKind::Claude), Some(wrapper))
+            .expect("an integrated kind is satisfied by a placeholder anywhere in the vector");
+        assert_eq!(
+            snapshot
+                .filled_resume_argv("0199a4d2-9c1a-7bd6-9d18-2c0f2f1c7f31")
+                .expect("a plausible id fills the template"),
+            [
+                "sh",
+                "-c",
+                "exec claude --resume \"$1\"",
+                "",
+                "0199a4d2-9c1a-7bd6-9d18-2c0f2f1c7f31"
+            ],
+            "the program stays the program and the identity lands in its own slot"
+        );
     }
 
     /// The option-injection case, which is the reason this validation
@@ -1331,10 +1887,11 @@ mod tests {
     /// a quiet session to `Waiting`.
     ///
     /// The baseline is passed as `Idle` on purpose: a pending approval
-    /// produces no output, so by the time it matters the generic
-    /// classifier has already decayed the session — meaning `Waiting` can
-    /// only ever arrive by promotion, never by a sharpener happening to
-    /// agree with recency.
+    /// leaves the screen sitting still, so once enough consecutive samples
+    /// have found it unchanged the generic classifier has already decayed
+    /// the session — meaning `Waiting` can only ever arrive by promotion,
+    /// never by a sharpener happening to agree with a baseline that was
+    /// going to say `Running` anyway.
     #[test]
     fn each_kind_recognizes_its_own_pending_question() {
         for tail in [CLAUDE_COMMAND_APPROVAL, CLAUDE_TRUST_DIALOG] {
@@ -1349,8 +1906,11 @@ mod tests {
             SessionStatus::Waiting
         );
         // A running session with a question on screen is waiting too: the
-        // question is the more specific fact, and the recency that made it
-        // "running" is at most a few seconds of the dialog being drawn.
+        // question is the more specific fact. A `Running` baseline here
+        // only means the unchanged-sample streak has not yet reached the
+        // idle threshold — under a budgeted round robin that can outlast
+        // the dialog being drawn by a long way, so the sharpener must not
+        // wait for the baseline to decay before it says anything.
         assert_eq!(
             ClaudeIntegration.sharpen(SessionStatus::Running, CLAUDE_COMMAND_APPROVAL),
             SessionStatus::Waiting
@@ -1360,11 +1920,17 @@ mod tests {
     /// Ordinary screens are left exactly as the baseline classified them.
     ///
     /// This is the test that would fail first if the recognizer were ever
-    /// loosened, and it covers the four ways a screen can look like a
+    /// loosened, and it covers the five ways a screen can look like a
     /// prompt without being one: an agent working, an agent finished and
-    /// idle, a numbered list with no question, and a question with no
-    /// menu. The last two are the halves of the conjunction, checked
-    /// separately so a change that dropped either requirement cannot pass.
+    /// idle, a numbered list with no question, a question with no menu,
+    /// and — the case that defeats a plain conjunction — a question phrase
+    /// sitting directly above a numbered list in the agent's OWN prose.
+    ///
+    /// That last one is why a menu has to read as an ANSWER
+    /// ([`MENU_ANSWER_WORDS`]) rather than merely as a numbered run: it
+    /// satisfies every other requirement, including the suffix shape, and
+    /// an agent laying out a plan when asked to is about as ordinary as
+    /// output gets.
     #[test]
     fn ordinary_output_is_never_mistaken_for_a_pending_question() {
         let numbered_prose = "\
@@ -1375,12 +1941,18 @@ mod tests {
         let question_prose = "\
 ⏺ I renamed the field to `budget`. Do you want to keep the old name as an
   alias, or is the rename fine?";
+        let question_over_numbered_prose = "\
+⏺ Do you want to see the plan before I start? Here it is:
+  1. Read the module docs
+  2. Extract the classifier
+  3. Wire it into the reply path";
 
         for tail in [
             CLAUDE_WORKING,
             CLAUDE_COMPOSER,
             numbered_prose,
             question_prose,
+            question_over_numbered_prose,
         ] {
             assert_eq!(
                 ClaudeIntegration.sharpen(SessionStatus::Idle, tail),
@@ -1395,32 +1967,422 @@ mod tests {
         }
     }
 
-    /// A dialog that has been ANSWERED and scrolled up the transcript must
-    /// not hold the session at `Waiting`.
+    /// The adversarial case the "at least one answer-shaped option" rule
+    /// let through: a numbered PROSE block whose first item happens to
+    /// begin with an answer word, under a line the vendor phrase list
+    /// matches.
     ///
-    /// The failure this pins is not hypothetical: a whole-screen search
-    /// would keep matching the answered box for as long as it stayed
-    /// visible, so a session would sit at `Waiting` for minutes after the
-    /// user replied — which is precisely the "the column is lying, ignore
-    /// it" outcome the heuristic has to avoid. [`PROMPT_TAIL_LINES`] is
-    /// the mechanism, and this is what says why it exists.
+    /// This is not a contrived shape. "Do you want to know why?" is
+    /// ordinary agent prose, "1. No migration is required" is an ordinary
+    /// way to open a numbered explanation, and the two together satisfied
+    /// every part of the old shape — vendor phrase, suffix menu, two
+    /// numbered lines, one of them answer-shaped. The result was `Waiting`
+    /// at a session whose agent was in the middle of explaining something,
+    /// which teaches users the column lies.
+    ///
+    /// Both orders and both answer words, because the rule is a
+    /// conjunction over the whole run and would be equally wrong if it
+    /// happened to check only the first option or only the last.
+    ///
+    /// The fixtures carry a selection pointer they would never have in real
+    /// prose, and that is deliberate: the pointer requirement added later
+    /// (see [`looks_like_a_choice_prompt`]) would otherwise reject every row
+    /// here before the answer grammar was ever consulted, leaving this test
+    /// green while the rule it names went untested. Realism belongs to
+    /// `an_answer_shaped_numbered_explanation_is_not_a_menu`, which is the
+    /// pointer rule's own regression.
     #[test]
-    fn an_answered_dialog_scrolled_out_of_the_bottom_no_longer_counts() {
-        let mut tail = CLAUDE_COMMAND_APPROVAL.to_string();
-        for i in 0..PROMPT_TAIL_LINES {
-            tail.push_str(&format!("\n⏺ Update(src/file-{i}.rs)"));
+    fn a_numbered_prose_block_with_one_answer_shaped_line_is_not_a_menu() {
+        let answer_word_first = "\
+⏺ Do you want to know why the schema needed no migration?
+❯ 1. No migration is required for existing rows
+  2. The defaults backfill everything else";
+        let answer_word_last = "\
+⏺ Do you want to know why the schema needed no migration?
+❯ 1. The defaults backfill everything else
+  2. Yes-style wording is what makes this a menu, and this line is not one";
+        let answer_word_in_the_middle = "\
+⏺ Do you want to see what changed?
+❯ 1. The column is nullable
+  2. No backfill was needed
+  3. The version bump is atomic with it";
+
+        for tail in [
+            answer_word_first,
+            answer_word_last,
+            answer_word_in_the_middle,
+        ] {
+            assert_eq!(
+                ClaudeIntegration.sharpen(SessionStatus::Running, tail),
+                SessionStatus::Running,
+                "every option must read as an answer, or this is prose:\n{tail}"
+            );
         }
+    }
+
+    /// A numbered explanation whose EVERY item opens with an answer word and
+    /// a comma is still prose, and must not read as a pending question.
+    ///
+    /// This is the case that survived the "every option must be
+    /// answer-shaped" tightening, and it survived because the tightening was
+    /// aimed at the wrong axis. Answer grammar cannot separate these two
+    /// things: an agent answering "why?" with a numbered list genuinely does
+    /// write "No, ..." and "Yes, ..." at the head of its items, and a
+    /// recognizer strict enough to exclude that would have to exclude
+    /// Claude's own "Yes, proceed" / "No, exit" as well.
+    ///
+    /// What separates them is that a menu is drawn by a WIDGET, so exactly
+    /// one of its options carries a selection pointer, and prose carries
+    /// none. Every fixture here satisfies the suffix shape, the size bounds,
+    /// the answer grammar, and the vendor question phrase — everything
+    /// except the pointer — so a build that dropped that requirement fails
+    /// here and nowhere else.
+    ///
+    /// Both vendors, since each has its own phrase list and each would be
+    /// independently wrong.
+    #[test]
+    fn an_answer_shaped_numbered_explanation_is_not_a_menu() {
+        let two_items = "\
+⏺ Do you want to know why the migration is a no-op?
+  1. No, migration is required only for rows written before the bump.
+  2. Yes, and the defaults backfill everything else.";
+        let three_items = "\
+⏺ Do you trust the summary above?
+  1. Yes, the counts match the fixture.
+  2. No, the third column was renamed since.
+  3. Yes, once the rename is accounted for.";
+        // The bare-word shape too, which is the closest an explanation ever
+        // gets to a real dialog's option text.
+        let bare_words = "\
+⏺ Allow command? Here is how I read the two flags:
+  1. Yes
+  2. No";
+
+        for tail in [two_items, three_items, bare_words] {
+            assert_eq!(
+                ClaudeIntegration.sharpen(SessionStatus::Running, tail),
+                SessionStatus::Running,
+                "prose draws no selection pointer, so this is not a menu:\n{tail}"
+            );
+            assert_eq!(
+                CodexIntegration.sharpen(SessionStatus::Idle, tail),
+                SessionStatus::Idle,
+                "codex must not promote it either:\n{tail}"
+            );
+        }
+
+        // ...and the same block WITH a pointer is recognized, so this test
+        // cannot pass by a recognizer that stopped working altogether.
+        let pointed_at = "\
+⏺ Do you want to know why the migration is a no-op?
+❯ 1. No, migration is required only for rows written before the bump.
+  2. Yes, and the defaults backfill everything else.";
         assert_eq!(
-            ClaudeIntegration.sharpen(SessionStatus::Running, &tail),
-            SessionStatus::Running
+            ClaudeIntegration.sharpen(SessionStatus::Running, pointed_at),
+            SessionStatus::Waiting,
+            "premise: the pointer is the only difference"
         );
-        // ...and it DOES still count while it is the bottom-most thing on
-        // the screen, or the test above would pass with the recognizer
-        // removed entirely.
+    }
+
+    /// The two numeric boundaries of a menu, at and just past each end.
+    ///
+    /// Both bounds exist for the same reason and fail in opposite
+    /// directions: below [`MIN_MENU_CHOICES`] a single numbered line is the
+    /// ordinary shape of an agent enumerating one thing, and above
+    /// [`MAX_MENU_CHOICES`] a long numbered run is an agent enumerating
+    /// many. Off by one at either end is invisible in production until the
+    /// day a real dialog sits on the boundary, so both are pinned at the
+    /// exact value rather than "a few" and "lots".
+    #[test]
+    fn a_menu_is_recognized_at_its_size_bounds_and_not_past_them() {
+        let menu = |count: usize| {
+            let mut tail = String::from("Do you want to proceed?\n");
+            for i in 1..=count {
+                // Every option answer-shaped and the first one pointed at,
+                // so SIZE is the only variable.
+                let pointer = if i == 1 { "❯ " } else { "  " };
+                tail.push_str(&format!("{pointer}{i}. Yes, option {i}\n"));
+            }
+            tail
+        };
+        for (count, expected) in [
+            (MIN_MENU_CHOICES - 1, SessionStatus::Running),
+            (MIN_MENU_CHOICES, SessionStatus::Waiting),
+            (MAX_MENU_CHOICES, SessionStatus::Waiting),
+            (MAX_MENU_CHOICES + 1, SessionStatus::Running),
+        ] {
+            assert_eq!(
+                ClaudeIntegration.sharpen(SessionStatus::Running, &menu(count)),
+                expected,
+                "a menu of {count} options"
+            );
+        }
+    }
+
+    /// The LEXICAL boundary beside the numeric one: an option must BE an
+    /// answer word, alone or followed by [`ANSWER_WORD_TERMINATORS`].
+    ///
+    /// Three families of near-miss, all of them ordinary English an agent
+    /// writes into numbered lists, and all of them accepted by weaker
+    /// versions of this rule:
+    ///
+    /// - Prefix matching takes "Note the following" and "Yesterday's run".
+    /// - Word-boundary matching (any whitespace ends the word) additionally
+    ///   takes "No migration is required" and "Yes it does" — a numbered
+    ///   EXPLANATION, which is about the most ordinary thing an agent
+    ///   prints.
+    /// - Either takes hyphenated compounds: "No-code path", "Yes-style
+    ///   wording".
+    ///
+    /// The accepted rows are the shapes the three recorded dialogs actually
+    /// use, so a tightening that broke a real prompt fails here rather than
+    /// in the field.
+    #[test]
+    fn an_option_must_be_an_answer_word_rather_than_merely_start_like_one() {
+        for (first, second, expected) in [
+            // The recorded shapes: the bare word, and the word plus comma.
+            ("Yes", "No", SessionStatus::Waiting),
+            ("Yes, proceed", "No, exit", SessionStatus::Waiting),
+            ("YES", "no", SessionStatus::Waiting),
+            (
+                "Yes, and don't ask again for rm commands",
+                "No, and tell Claude what to do differently",
+                SessionStatus::Waiting,
+            ),
+            // Prefixes of an answer word.
+            (
+                "Note the following",
+                "Yesterday's run failed",
+                SessionStatus::Running,
+            ),
+            ("Yes, proceed", "Nothing to do", SessionStatus::Running),
+            ("Nope", "Yes", SessionStatus::Running),
+            // Answer-shaped PROSE: the word is genuinely there, as a word,
+            // and the option is still a sentence.
+            (
+                "No migration is required for existing rows",
+                "Yes it does apply here",
+                SessionStatus::Running,
+            ),
+            ("Yes", "No migration is required", SessionStatus::Running),
+            // Hyphenated compounds, including the all-hyphenated menu that
+            // has no ordinary-prose option to disqualify it.
+            ("No-code path", "Yes-style wording", SessionStatus::Running),
+            ("Yes-and", "No-but", SessionStatus::Running),
+        ] {
+            // Pointed at, so the ANSWER grammar is the only variable here;
+            // the menu-only signal has its own test.
+            let tail = format!("Do you want to proceed?\n❯ 1. {first}\n  2. {second}");
+            assert_eq!(
+                ClaudeIntegration.sharpen(SessionStatus::Running, &tail),
+                expected,
+                "options {first:?} / {second:?}"
+            );
+        }
+    }
+
+    /// Every declared selection marker, on both sides of the grammar it
+    /// participates in.
+    ///
+    /// [`MENU_SELECTION_MARKERS`] is a list, and a list is where a glyph
+    /// gets added with no test and quietly does nothing — `⏵` sat in the
+    /// decoration set for a long time with nothing asserting what it
+    /// MEANT. Each marker has two opposite jobs, so each is checked for
+    /// both: prefixing a selected option without stopping it from parsing
+    /// as one, and — alone on a line, which is what an empty composer
+    /// prompt renders as — ending the scan, so an ANSWERED dialog above it
+    /// does not read as pending.
+    #[test]
+    fn every_selection_marker_prefixes_an_option_and_ends_a_scan_alone() {
+        for marker in MENU_SELECTION_MARKERS {
+            let selected = format!("Do you want to proceed?\n{marker} 1. Yes\n  2. No");
+            assert_eq!(
+                ClaudeIntegration.sharpen(SessionStatus::Running, &selected),
+                SessionStatus::Waiting,
+                "{marker:?} must not stop the option it points at from parsing as one"
+            );
+
+            let answered = format!("{selected}\n{marker}");
+            assert_eq!(
+                ClaudeIntegration.sharpen(SessionStatus::Running, &answered),
+                SessionStatus::Running,
+                "{marker:?} alone is a composer prompt, and must end the scan rather than \
+                 trimming away to nothing"
+            );
+        }
+    }
+
+    /// The question is found up to exactly [`PROMPT_QUESTION_LOOKBACK`]
+    /// substantive lines above the menu, and not one line further.
+    ///
+    /// Both sides of the boundary, because the bound is the only thing
+    /// keeping the search inside the dialog box: read further up and it
+    /// starts matching questions in the TRANSCRIPT above, which is the
+    /// unanchored matching this whole shape replaced. An earlier version
+    /// examined nine lines while declaring eight — the counter was compared
+    /// after the line had already been tested — which is the kind of drift
+    /// that only a boundary test catches.
+    #[test]
+    fn the_question_lookback_reaches_exactly_as_far_as_it_declares() {
+        let dialog = |body_lines: usize| {
+            let mut tail = String::from("Do you want to proceed?\n");
+            for i in 1..=body_lines {
+                tail.push_str(&format!("explanatory body line {i}\n"));
+            }
+            tail.push_str("❯ 1. Yes\n  2. No");
+            tail
+        };
+        // The question sits `body_lines + 1` lines above the menu, so a
+        // body of LOOKBACK-1 lines puts it on the last line the search is
+        // allowed to read.
         assert_eq!(
-            ClaudeIntegration.sharpen(SessionStatus::Running, CLAUDE_COMMAND_APPROVAL),
-            SessionStatus::Waiting
+            ClaudeIntegration.sharpen(
+                SessionStatus::Running,
+                &dialog(PROMPT_QUESTION_LOOKBACK - 1)
+            ),
+            SessionStatus::Waiting,
+            "a question on the {PROMPT_QUESTION_LOOKBACK}th body line is still inside the bound"
         );
+        assert_eq!(
+            ClaudeIntegration.sharpen(SessionStatus::Running, &dialog(PROMPT_QUESTION_LOOKBACK)),
+            SessionStatus::Running,
+            "one line further is outside it, and must not be found"
+        );
+    }
+
+    /// Codex's composer, empty, below an ANSWERED approval modal.
+    ///
+    /// The selection marker is what makes this case sharp. Codex draws `›`
+    /// at its selected option AND at its composer prompt, so treating that
+    /// glyph as box chrome made an empty composer line trim to nothing —
+    /// indistinguishable from the dialog's blank padding — and let the scan
+    /// run straight past it into the menu above, reporting `Waiting` at a
+    /// session whose user had already answered and whose agent was waiting
+    /// on nothing. Skipping the marker inside
+    /// [`menu_choice_text`] instead keeps the real modal recognized while
+    /// leaving a bare `›` as a substantive line that ends the scan.
+    ///
+    /// The real modal is asserted alongside it, in the same test, because
+    /// the two are the halves of one trade: a fix for either that broke the
+    /// other would be no fix at all.
+    #[test]
+    fn an_empty_codex_composer_below_an_answered_modal_ends_the_scan() {
+        let answered = format!("{CODEX_COMMAND_APPROVAL}\n▌ ›");
+        assert_eq!(
+            CodexIntegration.sharpen(SessionStatus::Running, &answered),
+            SessionStatus::Running,
+            "an empty composer under the modal means the question was answered:\n{answered}"
+        );
+        assert_eq!(
+            CodexIntegration.sharpen(SessionStatus::Running, CODEX_COMMAND_APPROVAL),
+            SessionStatus::Waiting,
+            "and the real modal — whose selected option is prefixed with the same glyph — must \
+             still be recognized"
+        );
+    }
+
+    /// A dialog that is still on screen but no longer the BOTTOM of it has
+    /// been answered, and must not hold the session at `Waiting`.
+    ///
+    /// The sharpest case first, and it is the one that killed the previous
+    /// design: ONE line of the agent getting on with the work is enough.
+    /// A window-based search ("a phrase and two numbered lines somewhere in
+    /// the last N lines") matches the answered box for as long as it stays
+    /// visible, so a session would read `Waiting` while its agent was
+    /// visibly running — the "the column is lying, ignore it" outcome the
+    /// whole heuristic exists to avoid. The suffix shape is the mechanism,
+    /// and one trailing line is what pins it: nothing weaker distinguishes
+    /// the two designs.
+    ///
+    /// Both vendors, because each has its own phrase list and its own
+    /// fixture, and the shape is the only thing they share.
+    #[test]
+    fn an_answered_dialog_that_is_no_longer_the_bottom_of_the_screen_does_not_count() {
+        for (what, dialog, sharpen) in [
+            (
+                "claude",
+                CLAUDE_COMMAND_APPROVAL,
+                &ClaudeIntegration as &dyn AgentIntegration,
+            ),
+            ("codex", CODEX_COMMAND_APPROVAL, &CodexIntegration),
+        ] {
+            // Exactly one line of ordinary work below the answered dialog.
+            let one_line_later = format!("{dialog}\n✻ Thinking… (3s · esc to interrupt)");
+            assert_eq!(
+                sharpen.sharpen(SessionStatus::Running, &one_line_later),
+                SessionStatus::Running,
+                "{what}: one line of progress under an answered dialog is enough to mean it \
+                 was answered"
+            );
+
+            // The composer coming back is the same fact wearing the other
+            // vendor-neutral shape (S11's boundary): the prompt block is
+            // still on screen, but something else is now bottom-most.
+            let composer_back = format!("{dialog}\n╭────────────╮\n│ >          │\n╰────────────╯");
+            assert_eq!(
+                sharpen.sharpen(SessionStatus::Idle, &composer_back),
+                SessionStatus::Idle,
+                "{what}: a composer under the block means the question is no longer pending"
+            );
+
+            // ...and the dialog DOES still count while it is the
+            // bottom-most thing on the screen, or the assertions above
+            // would pass with the recognizer removed entirely.
+            assert_eq!(
+                sharpen.sharpen(SessionStatus::Running, dialog),
+                SessionStatus::Waiting,
+                "{what}: premise"
+            );
+        }
+    }
+
+    /// A NON-LIVE baseline comes back untouched, whatever the screen says.
+    ///
+    /// `sharpen` is a public method on a public trait, so "the only caller
+    /// passes a live baseline" is a fact about today's tree and not about
+    /// the API — and the guard downstream
+    /// (`status::waiting_or_baseline`) cannot help here, because `Waiting`
+    /// is exactly what that guard lets through. The
+    /// failure without this is a session that exited hours ago being
+    /// reported as blocked on a human, on the strength of the last thing
+    /// its pane happened to be showing.
+    ///
+    /// Every non-live variant against both vendors, with the tail that
+    /// WOULD promote a live baseline, so nothing passes by accident of the
+    /// fixture.
+    #[test]
+    fn a_non_live_baseline_is_never_promoted_by_any_screen() {
+        for (what, tail, sharpen) in [
+            (
+                "claude",
+                CLAUDE_COMMAND_APPROVAL,
+                &ClaudeIntegration as &dyn AgentIntegration,
+            ),
+            ("codex", CODEX_COMMAND_APPROVAL, &CodexIntegration),
+        ] {
+            for baseline in [
+                SessionStatus::Exited { exit_code: Some(0) },
+                SessionStatus::Exited { exit_code: None },
+                SessionStatus::Error {
+                    detail: "Permission denied".to_string(),
+                },
+                SessionStatus::Interrupted,
+                SessionStatus::Unknown,
+            ] {
+                assert_eq!(
+                    sharpen.sharpen(baseline.clone(), tail),
+                    baseline,
+                    "{what} promoted a {baseline:?} session on the strength of its screen"
+                );
+            }
+            // The live baselines it IS allowed to act on, so this test
+            // cannot pass by refusing everything.
+            assert_eq!(
+                sharpen.sharpen(SessionStatus::Idle, tail),
+                SessionStatus::Waiting,
+                "{what}: premise"
+            );
+        }
     }
 
     /// Sharpening survives arbitrary bytes without panicking.

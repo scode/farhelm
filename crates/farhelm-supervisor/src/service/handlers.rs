@@ -20,8 +20,8 @@ use super::connection::{
     spawn_admitted,
 };
 use super::core::{
-    CreateInputs, SessionEntry, Supervisor, create_fingerprint, ensure_title_printable, error_kind,
-    truncate_for_error,
+    CreateInputs, CreateMode, SessionEntry, Supervisor, create_fingerprint, ensure_title_printable,
+    error_kind, truncate_for_error,
 };
 use super::launch_artifacts::{
     cleanup_launch_artifacts, read_launch_sentinel, sentinel_could_still_apply,
@@ -43,10 +43,13 @@ use super::uploads::{
     UploadHandle, UploadOutcome, UploadRequest, UploadRoute, UploadSignal, commit_without_upload,
     run_upload,
 };
-use crate::store::{IntentClaim, LastOutcome, Transition};
+use crate::store::{
+    IntentClaim, LastOutcome, ProfileCreation, ProfileNames, Transition, validate_profile_fields,
+};
 use anyhow::Context;
 use farhelm_proto::{
-    AgentKind, ControlMsg, ErrorKind, Frame, RestartMode, SessionInfo, TerminalSelector,
+    AgentKind, ControlMsg, ErrorKind, Frame, MAX_PROFILES_PER_HOST, RestartMode, SessionInfo,
+    TerminalSelector,
 };
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -87,30 +90,13 @@ const INTENT_KEY_CAP: usize = 512;
 /// Cap on how many argv elements `CreateSession`'s `resume_template`
 /// override may carry (PLAN_M3.md items 6 and 7).
 ///
-/// Independent of the byte cap it is enforced alongside, because the two
-/// bound different things: a template of ten thousand EMPTY elements costs
-/// almost nothing in bytes while still being nothing a resume invocation
-/// could legitimately be, and it lands in the same never-pruned
-/// reservation row. 64 elements is far beyond every real resume
-/// invocation (`claude --resume {conversation}` is three).
-const RESUME_TEMPLATE_ELEMENT_CAP: usize = 64;
-
-/// Which of `CreateSession`'s two creation modes a request selected, once
-/// it has been shown to select exactly one (PLAN_M6_75.md item 3).
-///
-/// A resolved value rather than the raw pair of `Option`s, so that
-/// everything downstream of [`create_mode`] is working from a request whose
-/// meaning is settled — there is deliberately no way to construct a
-/// `CreateMode` that names both modes or neither, which is the ambiguity
-/// the refusal exists to remove.
-enum CreateMode {
-    /// The caller gave a command line, and may have overridden what would
-    /// be derived from it (`agent_kind`, `resume_template`).
-    Raw { invocation: String },
-    /// The caller named one of this supervisor's profiles, which supplies
-    /// every launch-shaping value.
-    Profile { profile_id: String },
-}
+/// Re-exported from `store` rather than declared here, because the same
+/// bound applies to a profile's template and profile validation had to move
+/// below the handler to be reachable from the store's own writes. One
+/// constant is what keeps a create override and a profile definition from
+/// growing different limits for the same field; see the definition for what
+/// the number is and why.
+use crate::store::RESUME_TEMPLATE_ELEMENT_CAP;
 
 /// Decide which creation mode a `CreateSession` selected, or say why the
 /// request has no single meaning (PLAN_M6_75.md item 3).
@@ -133,11 +119,15 @@ enum CreateMode {
 /// The `Err` is the user-facing message verbatim (SPEC.md's concrete,
 /// actionable errors), so each one names both what was sent and what would
 /// have been acceptable.
+///
+/// The overrides are MOVED into the raw variant rather than passed onward
+/// beside the mode: past this function they are meaningful only for a raw
+/// create, and [`CreateMode`] is where that stops being a convention.
 fn create_mode(
     invocation: Option<String>,
     profile_id: Option<String>,
     agent_kind: Option<AgentKind>,
-    resume_template: Option<&[String]>,
+    resume_template: Option<Vec<String>>,
 ) -> Result<CreateMode, String> {
     match (invocation, profile_id) {
         (Some(_), Some(_)) => Err(
@@ -147,7 +137,11 @@ fn create_mode(
         (None, None) => Err(
             "a create must name an invocation or a profile; this request named neither".to_string(),
         ),
-        (Some(invocation), None) => Ok(CreateMode::Raw { invocation }),
+        (Some(invocation), None) => Ok(CreateMode::Raw {
+            invocation,
+            agent_kind,
+            resume_template,
+        }),
         (None, Some(profile_id)) => {
             if agent_kind.is_some() || resume_template.is_some() {
                 return Err(
@@ -165,13 +159,15 @@ fn create_mode(
 /// the reply-size and idempotency-store caps, then hands off to
 /// [`Supervisor::create_session`].
 ///
-/// The refusal ORDER is shape, then size, then capability: an ambiguous
-/// request has no meaning to measure, a request too large to store is
-/// refused before anything is stored, and only a well-formed, bounded
-/// request gets as far as asking whether this build can serve it. Every one
-/// of those refusals happens before a reservation is claimed, so none of
-/// them SPENDS an intent key — a corrected retry (or, for the profile mode,
-/// the same request against a later build) may still use it.
+/// The refusal ORDER is shape, then size: an ambiguous request has no
+/// meaning to measure, and a request too large to store is refused before
+/// anything is stored. Both refusals happen before a reservation is
+/// claimed, so neither SPENDS an intent key — a corrected retry may still
+/// use it. That is deliberately NOT true of the preconditions past this
+/// point (a working directory that does not exist, a profile that no longer
+/// does): those are recorded against the key and replayed verbatim, which
+/// is the contract `Supervisor::create_session` states in full. The line
+/// between the two is whether the request could be understood at all.
 #[allow(clippy::too_many_arguments)]
 async fn handle_create_session(
     sup: &Arc<Supervisor>,
@@ -192,12 +188,7 @@ async fn handle_create_session(
     agent_kind: Option<AgentKind>,
     resume_template: Option<Vec<String>>,
 ) {
-    let mode = match create_mode(
-        invocation,
-        profile_id,
-        agent_kind,
-        resume_template.as_deref(),
-    ) {
+    let mode = match create_mode(invocation, profile_id, agent_kind, resume_template) {
         Ok(mode) => mode,
         Err(message) => {
             send_reply(
@@ -212,53 +203,46 @@ async fn handle_create_session(
             return;
         }
     };
-    // Only the raw mode carries an invocation to charge against the cap;
-    // a profile-backed create's command line lives in the catalog, not in
-    // the request.
-    // Exactly one of these is `Some` — that is what `create_mode` just
-    // established — and BOTH are caller-supplied text this request can make
-    // the supervisor store, so both are charged against the same cap.
-    let (raw_invocation, selected_profile) = match &mode {
-        CreateMode::Raw { invocation } => (Some(invocation.as_str()), None),
-        CreateMode::Profile { profile_id } => (None, Some(profile_id.as_str())),
-    };
     // One accounting for every caller-supplied field that this
     // request can make the supervisor STORE — the reply-size
     // argument `CREATE_FIELD_CAP` was introduced for, plus item
     // 6's: the fingerprint holds a copy of all of them, in a
     // reservation row that is never pruned, so an unbounded
-    // override is an unbounded permanent write. `profile_id` is in
+    // override is an unbounded permanent write. A profile id is in
     // the sum for both reasons at once: it goes into the fingerprint
     // exactly as the raw fields do, and it is the mode's whole
     // payload — leaving it out would have let a profile-mode create
     // carry an 8 MiB "id" past a cap the raw mode cannot dodge.
-    let template_bytes: usize = resume_template
-        .iter()
-        .flatten()
-        .map(|element| element.len())
-        .sum();
-    let field_len = cwd.len()
-        + raw_invocation.map_or(0, str::len)
-        + selected_profile.map_or(0, str::len)
-        + title.as_deref().map_or(0, str::len)
-        + template_bytes;
+    let (mode_bytes, template_elements) = match &mode {
+        CreateMode::Raw {
+            invocation,
+            resume_template,
+            ..
+        } => (
+            invocation.len()
+                + resume_template
+                    .iter()
+                    .flatten()
+                    .map(|element| element.len())
+                    .sum::<usize>(),
+            resume_template.as_ref().map_or(0, Vec::len),
+        ),
+        CreateMode::Profile { profile_id } => (profile_id.len(), 0),
+    };
+    let field_len = cwd.len() + mode_bytes + title.as_deref().map_or(0, str::len);
     let refusal = if field_len > CREATE_FIELD_CAP {
         Some(format!(
             "cwd, invocation or profile, title, and resume template together are {field_len} \
              bytes, exceeding the {CREATE_FIELD_CAP}-byte limit"
         ))
-    } else if resume_template
-        .as_ref()
-        .is_some_and(|template| template.len() > RESUME_TEMPLATE_ELEMENT_CAP)
-    {
+    } else if template_elements > RESUME_TEMPLATE_ELEMENT_CAP {
         // Bounded separately from the byte total because the two
         // are independent: a template of ten thousand EMPTY
         // elements costs almost no bytes and is still nothing a
         // resume invocation could legitimately be.
         Some(format!(
-            "resume template has {} elements, exceeding the \
-             {RESUME_TEMPLATE_ELEMENT_CAP}-element limit",
-            resume_template.as_ref().map_or(0, Vec::len)
+            "resume template has {template_elements} elements, exceeding the \
+             {RESUME_TEMPLATE_ELEMENT_CAP}-element limit"
         ))
     } else {
         // Both refusals below are about a key that could never do
@@ -288,73 +272,31 @@ async fn handle_create_session(
         .await;
         return;
     }
-    // ## The step-5 seam
+    // Both halves of the mode travel onward as they are: the fingerprint
+    // binds whichever one the request selected (so a retried key cannot
+    // flip a raw create into a profile create, or into a DIFFERENT
+    // profile), and `create_session` resolves the profile during
+    // validation, where the unknown-profile precondition can fail the
+    // create with no session and — like every other precondition — be
+    // recorded against the intent key so a retry replays the same answer.
     //
-    // The wire shape of a profile-backed create ships with
-    // `PROTOCOL_VERSION` 10; the CATALOG it would resolve against is
-    // PLAN_M6_75.md's step 5. Until then this is the one honest answer: a
-    // clear refusal naming the gap, never a silent fall back to some
-    // invocation the caller did not ask for, and never a launch of
-    // something the profile might not have described.
-    //
-    // `InvalidRequest` rather than `Internal` because nothing failed — the
-    // supervisor is working exactly as built, and a different request (the
-    // raw mode) would have succeeded, which is precisely the line
-    // `ErrorKind`'s own docs draw between the two. Refused HERE, before any
-    // reservation is claimed, so the intent key survives for the retry that
-    // a later build will serve.
-    let invocation = match &mode {
-        CreateMode::Profile { profile_id } => {
-            send_reply(
-                tx,
-                &ControlMsg::Error {
-                    req_id,
-                    // Truncated, like every other echoed caller id in this
-                    // module: an error message travels back through the
-                    // helm into an HTTP body and a browser, and echoing an
-                    // arbitrary-length id verbatim turns a refusal into an
-                    // amplifier. The cap above bounds the id at all; this
-                    // bounds what a refusal REPEATS of it.
-                    message: format!(
-                        "this supervisor cannot yet create sessions from a profile (asked for \
-                         {:?}); create with an invocation instead",
-                        truncate_for_error(profile_id)
-                    ),
-                    kind: ErrorKind::InvalidRequest,
-                },
-            )
-            .await;
-            return;
-        }
-        CreateMode::Raw { invocation } => invocation.as_str(),
-    };
+    // Nothing about the profile is resolved HERE, deliberately: doing it
+    // before the reservation lookup would run a catalog read for a replay
+    // that is only going to return the original attempt's answer, and would
+    // put a second (and differently-ordered) precondition check on the
+    // create path.
     let idempotency = intent_key.map(|intent_key| IntentClaim {
         intent_key,
-        fingerprint: create_fingerprint(
-            &cwd,
-            Some(invocation),
-            title.as_deref(),
-            agent_kind,
-            resume_template.as_deref(),
-            // The profile half of the mode is `None` for everything that
-            // reaches here, because profile mode is refused directly above.
-            // Step 5 replaces that refusal with a real resolution and passes
-            // the id it resolved; the fingerprint's shape is already fixed
-            // for it, which is the whole point of binding the mode into the
-            // fingerprint at the bump rather than at the feature.
-            None,
-        ),
+        fingerprint: create_fingerprint(&cwd, &mode, title.as_deref()),
     });
     match sup
         .create_session(
             CreateInputs {
                 cwd: &cwd,
-                invocation,
+                mode,
                 title,
                 cols,
                 rows,
-                agent_kind,
-                resume_template,
             },
             idempotency,
         )
@@ -452,10 +394,24 @@ async fn session_info_now(
             cleanup_launch_artifacts(&sup.state_dir, &entry.info.id, entry.generation).await;
         }
     }
+    // One session, so one catalog read — and only for a session that names
+    // a profile at all. Failing the reply on a failed read rather than
+    // passing an empty catalog, for `list_page`'s reason: an absent id is
+    // how a DELETED profile reads, so an empty map would report this
+    // session's profile as gone.
+    let profiles = if entry.info.source_profile.is_some() {
+        sup.store
+            .profile_names()
+            .await
+            .context("reading the profile catalog to describe this session's source profile")?
+    } else {
+        ProfileNames::new()
+    };
     Ok(entry_info(
         entry,
         &pane_states,
         observed.sentinel.as_deref(),
+        &profiles,
     ))
 }
 
@@ -2171,6 +2127,197 @@ fn handle_abort_upload(upload_routes: &mut HashMap<u32, UploadRoute>, channel: u
     }
 }
 
+/// Send one correlated refusal — the shape the profile handlers below
+/// repeat four times over.
+///
+/// Not a general replacement for the inline `ControlMsg::Error` replies
+/// elsewhere in this module: those mostly carry a message assembled from
+/// several pieces at the site that knows them. This exists because the
+/// profile verbs share both their error kinds and their phrasing rules, and
+/// four hand-written copies of the same three-line reply is how two of them
+/// end up saying different things about the same refusal.
+async fn refuse(tx: &mpsc::Sender<Frame>, req_id: u64, kind: ErrorKind, message: String) {
+    send_reply(
+        tx,
+        &ControlMsg::Error {
+            req_id,
+            message,
+            kind,
+        },
+    )
+    .await;
+}
+
+/// The whole catalog, in the id-ascending order the wire contract promises
+/// (`ControlMsg::ProfileList`).
+///
+/// Unpaginated and unfiltered: the catalog is bounded
+/// ([`MAX_PROFILES_PER_HOST`]) precisely so that one reply is always
+/// enough, and a picker that showed only some of the options would not be a
+/// picker.
+async fn handle_list_profiles(sup: &Arc<Supervisor>, tx: &mpsc::Sender<Frame>, req_id: u64) {
+    match sup.store.profiles().await {
+        Ok(profiles) => send_reply(tx, &ControlMsg::ProfileList { req_id, profiles }).await,
+        Err(e) => {
+            refuse(
+                tx,
+                req_id,
+                ErrorKind::Internal,
+                format!("could not read the profile catalog: {e:#}"),
+            )
+            .await;
+        }
+    }
+}
+
+/// Define a new profile, minting its id.
+///
+/// The two bounds are enforced in different places on purpose, and the
+/// split is the whole reason the catalog cannot become unlistable: this
+/// request's own size is a property of the request
+/// ([`validate_profile_fields`]), while the catalog's size is a property of
+/// the catalog and can only be checked truthfully inside the transaction
+/// that inserts (`SessionStore::create_profile`).
+///
+/// The per-record check runs HERE as well as in the store, and the
+/// duplication is deliberate rather than redundant. The store's copy is
+/// what makes the rule true for every caller; this one is what turns a
+/// violation into an `InvalidRequest` carrying the exact message, instead
+/// of the `Internal` that a store refusal would otherwise become.
+async fn handle_create_profile(
+    sup: &Arc<Supervisor>,
+    tx: &mpsc::Sender<Frame>,
+    req_id: u64,
+    name: String,
+    invocation: String,
+    agent_kind: AgentKind,
+    resume_template: Option<Vec<String>>,
+) {
+    if let Err(message) =
+        validate_profile_fields(&name, &invocation, agent_kind, resume_template.as_deref())
+    {
+        refuse(tx, req_id, ErrorKind::InvalidRequest, message).await;
+        return;
+    }
+    match sup
+        .store
+        .create_profile(name, invocation, agent_kind, resume_template)
+        .await
+    {
+        Ok(ProfileCreation::Created(profile)) => {
+            send_reply(tx, &ControlMsg::ProfileCreated { req_id, profile }).await;
+        }
+        Ok(ProfileCreation::CatalogFull) => {
+            refuse(
+                tx,
+                req_id,
+                ErrorKind::InvalidRequest,
+                format!(
+                    "this host already holds the maximum of {MAX_PROFILES_PER_HOST} profiles; \
+                     delete one before creating another"
+                ),
+            )
+            .await;
+        }
+        Err(e) => {
+            refuse(
+                tx,
+                req_id,
+                ErrorKind::Internal,
+                format!("could not store the new profile: {e:#}"),
+            )
+            .await;
+        }
+    }
+}
+
+/// Replace a profile's definition wholesale, keyed by its id.
+///
+/// Sessions already created from this profile are untouched — not as a
+/// courtesy this handler extends, but because nothing here can reach them:
+/// their launch and resume snapshots are their own columns and their
+/// source-profile snapshot keeps the name it recorded (SPEC.md's snapshot
+/// rule). What a rename changes for them is only what a later reply DERIVES
+/// about the profile's existence.
+async fn handle_update_profile(
+    sup: &Arc<Supervisor>,
+    tx: &mpsc::Sender<Frame>,
+    req_id: u64,
+    profile: farhelm_proto::Profile,
+) {
+    if let Err(message) = validate_profile_fields(
+        &profile.name,
+        &profile.invocation,
+        profile.agent_kind,
+        profile.resume_template.as_deref(),
+    ) {
+        refuse(tx, req_id, ErrorKind::InvalidRequest, message).await;
+        return;
+    }
+    let asked_for = truncate_for_error(&profile.id).into_owned();
+    match sup.store.update_profile(profile).await {
+        Ok(Some(profile)) => {
+            send_reply(tx, &ControlMsg::ProfileUpdated { req_id, profile }).await;
+        }
+        Ok(None) => {
+            refuse(
+                tx,
+                req_id,
+                ErrorKind::NotFound,
+                format!("no profile {asked_for} exists on this host"),
+            )
+            .await;
+        }
+        Err(e) => {
+            refuse(
+                tx,
+                req_id,
+                ErrorKind::Internal,
+                format!("could not store the edited profile: {e:#}"),
+            )
+            .await;
+        }
+    }
+}
+
+/// Remove a profile from the catalog.
+///
+/// An unknown id is `NotFound` rather than a silent success, per
+/// `ControlMsg::DeleteProfile`'s own docs: a client asking to delete
+/// something that is not there is working from a stale catalog and should
+/// be told so.
+async fn handle_delete_profile(
+    sup: &Arc<Supervisor>,
+    tx: &mpsc::Sender<Frame>,
+    req_id: u64,
+    profile_id: String,
+) {
+    match sup.store.delete_profile(&profile_id).await {
+        Ok(true) => send_reply(tx, &ControlMsg::ProfileDeleted { req_id }).await,
+        Ok(false) => {
+            refuse(
+                tx,
+                req_id,
+                ErrorKind::NotFound,
+                format!(
+                    "no profile {} exists on this host",
+                    truncate_for_error(&profile_id)
+                ),
+            )
+            .await;
+        }
+        Err(e) => {
+            refuse(
+                tx,
+                req_id,
+                ErrorKind::Internal,
+                format!("could not delete the profile: {e:#}"),
+            )
+            .await;
+        }
+    }
+}
+
 /// Dispatch one control message from a connected client.
 ///
 /// Failures belonging to one request—bad cwd, a tmux hiccup, an unknown
@@ -2339,27 +2486,30 @@ pub(crate) async fn handle_control(sup: &Arc<Supervisor>, msg: ControlMsg, ctx: 
             handle_commit_upload(ctx.tx, ctx.upload_routes, req_id, channel).await
         }
         ControlMsg::AbortUpload { channel } => handle_abort_upload(ctx.upload_routes, channel),
-        // The profile catalog is PLAN_M6_75.md's step 5; `PROTOCOL_VERSION`
-        // 10 ships only the vocabulary. These four REQUESTS therefore get an
-        // explicit refusal rather than falling through to the log-and-drop
-        // arm below — that arm exists for messages nobody is waiting on
-        // (replies and events arriving at the wrong end), and dropping a
-        // request that carries a `req_id` hangs its caller forever instead.
-        // Answering is what turns "this build cannot do that yet" from a
-        // stall into a sentence.
-        ControlMsg::ListProfiles { req_id }
-        | ControlMsg::CreateProfile { req_id, .. }
-        | ControlMsg::UpdateProfile { req_id, .. }
-        | ControlMsg::DeleteProfile { req_id, .. } => {
-            send_reply(
+        ControlMsg::ListProfiles { req_id } => handle_list_profiles(sup, ctx.tx, req_id).await,
+        ControlMsg::CreateProfile {
+            req_id,
+            name,
+            invocation,
+            agent_kind,
+            resume_template,
+        } => {
+            handle_create_profile(
+                sup,
                 ctx.tx,
-                &ControlMsg::Error {
-                    req_id,
-                    message: "this supervisor has no profile catalog yet".to_string(),
-                    kind: ErrorKind::InvalidRequest,
-                },
+                req_id,
+                name,
+                invocation,
+                agent_kind,
+                resume_template,
             )
-            .await;
+            .await
+        }
+        ControlMsg::UpdateProfile { req_id, profile } => {
+            handle_update_profile(sup, ctx.tx, req_id, profile).await
+        }
+        ControlMsg::DeleteProfile { req_id, profile_id } => {
+            handle_delete_profile(sup, ctx.tx, req_id, profile_id).await
         }
         // Response/event messages arriving at the supervisor are peer
         // bugs; log and continue.
@@ -2376,7 +2526,7 @@ mod tests {
     use super::super::terminals::Terminal;
     use super::*;
     use crate::agent_kind::IntegrationSnapshot;
-    use farhelm_proto::{RestartOffer, SessionStatus};
+    use farhelm_proto::{PROFILE_FIELD_CAP, RestartOffer, SessionStatus};
     use std::time::Duration;
 
     /// The create-mode contract (PLAN_M6_75.md item 3), driven through the
@@ -2578,8 +2728,8 @@ mod tests {
             message.len()
         );
 
-        // At the cap: accepted by the size check, so it reaches the
-        // step-5 refusal — which must still not echo an id this long.
+        // At the cap: accepted by the size check, so it reaches the catalog
+        // lookup — whose own refusal must still not echo an id this long.
         handle_control(
             &sup,
             create_with_profile("p".repeat(CREATE_FIELD_CAP - cwd.len()), 2),
@@ -2593,10 +2743,10 @@ mod tests {
         )
         .await;
         let (kind, message) = reply(&mut rx);
-        assert_eq!(kind, ErrorKind::InvalidRequest);
+        assert_eq!(kind, ErrorKind::NotFound);
         assert!(
-            message.contains("cannot yet"),
-            "an id exactly at the cap must pass the size check and reach the mode refusal: \
+            message.contains("no profile"),
+            "an id exactly at the cap must pass the size check and reach the catalog lookup: \
              {message}"
         );
         assert!(
@@ -2606,19 +2756,156 @@ mod tests {
         );
     }
 
-    /// Every profile CRUD request is ANSWERED, even though this build has
-    /// no catalog to answer it from (PLAN_M6_75.md item 3 ships the
-    /// vocabulary; item 4 builds the catalog).
+    /// Every profile CRUD verb, driven through the real dispatcher against
+    /// a real catalog (PLAN_M6_75.md item 4): list, create, update, delete,
+    /// each answered with its OWN reply variant and correlated to its
+    /// `req_id`.
     ///
-    /// The failure this guards against is not a wrong answer but SILENCE: a
+    /// Two things at once, and both are worth the one test. The obvious
+    /// one is the round trip — what a create stores is what a later list
+    /// returns. The other is that no request is ever met with SILENCE: a
     /// request carrying a `req_id` that the dispatcher merely logs leaves
-    /// its caller waiting on a reply that will never come, and a hung
-    /// request looks nothing like a version problem from either end. That
-    /// no production caller can currently send these is not a defence — it
-    /// is exactly the situation in which a dropped request would go
-    /// unnoticed until the PR that starts sending them.
+    /// its caller waiting forever, and a hung request looks nothing like a
+    /// failure from either end. Correlation is asserted on every reply for
+    /// that reason, not only on the interesting ones.
     #[tokio::test]
-    async fn every_profile_request_gets_a_correlated_reply_rather_than_silence() {
+    async fn every_profile_verb_round_trips_through_the_dispatcher() {
+        let state = StateDir::new();
+        let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
+            .await
+            .expect("supervisor construction touches only tmux, not the launch shim");
+        let (tx, mut rx) = mpsc::channel(CONNECTION_WRITER_QUEUE);
+        let mut input_routes = HashMap::new();
+        let mut tasks = tokio::task::JoinSet::new();
+        let mut dispatch = async |msg, rx: &mut mpsc::Receiver<Frame>| -> ControlMsg {
+            handle_control(
+                &sup,
+                msg,
+                ConnectionCtx {
+                    tx: &tx,
+                    priority: &tx,
+                    input_routes: &mut input_routes,
+                    upload_routes: &mut no_uploads(),
+                    tasks: &mut tasks,
+                },
+            )
+            .await;
+            let frame = rx
+                .try_recv()
+                .expect("a profile request must be answered, never dropped");
+            serde_json::from_slice(&frame.body).expect("decode")
+        };
+
+        // The starters are what a fresh supervisor answers a list with.
+        let ControlMsg::ProfileList { req_id, profiles } =
+            dispatch(ControlMsg::ListProfiles { req_id: 1 }, &mut rx).await
+        else {
+            panic!("a list must answer with the catalog");
+        };
+        assert_eq!(req_id, 1, "the reply must correlate");
+        assert_eq!(
+            profiles.iter().map(|p| p.name.as_str()).collect::<Vec<_>>(),
+            vec!["Claude Code", "Codex"],
+            "a fresh supervisor is not empty (SPEC.md)"
+        );
+
+        let ControlMsg::ProfileCreated { req_id, profile } = dispatch(
+            ControlMsg::CreateProfile {
+                req_id: 2,
+                name: "Mine".to_string(),
+                invocation: "claude --dangerously-skip-permissions".to_string(),
+                agent_kind: AgentKind::Claude,
+                resume_template: None,
+            },
+            &mut rx,
+        )
+        .await
+        else {
+            panic!("a well-formed create must be stored");
+        };
+        assert_eq!(req_id, 2);
+        assert_eq!(profile.name, "Mine");
+
+        let ControlMsg::ProfileUpdated {
+            req_id,
+            profile: updated,
+        } = dispatch(
+            ControlMsg::UpdateProfile {
+                req_id: 3,
+                profile: farhelm_proto::Profile {
+                    name: "Mine, renamed".to_string(),
+                    ..profile.clone()
+                },
+            },
+            &mut rx,
+        )
+        .await
+        else {
+            panic!("an edit of an existing profile must be stored");
+        };
+        assert_eq!(req_id, 3);
+        assert_eq!(updated.name, "Mine, renamed");
+        assert_eq!(updated.id, profile.id, "an edit never re-mints the id");
+
+        let ControlMsg::ProfileDeleted { req_id } = dispatch(
+            ControlMsg::DeleteProfile {
+                req_id: 4,
+                profile_id: profile.id.clone(),
+            },
+            &mut rx,
+        )
+        .await
+        else {
+            panic!("a delete of an existing profile must succeed");
+        };
+        assert_eq!(req_id, 4);
+
+        // Both mutating verbs answer NotFound for an id the catalog does
+        // not hold — a client working from a stale catalog is told so
+        // rather than being left to believe it changed something.
+        for (req_id, msg) in [
+            (
+                5,
+                ControlMsg::DeleteProfile {
+                    req_id: 5,
+                    profile_id: profile.id.clone(),
+                },
+            ),
+            (
+                6,
+                ControlMsg::UpdateProfile {
+                    req_id: 6,
+                    profile: profile.clone(),
+                },
+            ),
+        ] {
+            let ControlMsg::Error {
+                req_id: replied,
+                kind,
+                ..
+            } = dispatch(msg, &mut rx).await
+            else {
+                panic!("a profile that is gone cannot be edited or deleted again");
+            };
+            assert_eq!(replied, req_id);
+            assert_eq!(kind, ErrorKind::NotFound);
+        }
+    }
+
+    /// A profile write is refused when it would not fit the bounds
+    /// `ProfileList` depends on, or when it describes a profile no create
+    /// could ever use (PLAN_M6_75.md item 4).
+    ///
+    /// The bound rows are the load-bearing ones: an unbounded catalog is
+    /// one too large to LIST, and the listing is how a client would find
+    /// the profile it needs to delete — so the catalog that outgrows its
+    /// reply can never be trimmed back. The other rows are about failing
+    /// EARLY: a name with a control character and an integrated kind with a
+    /// placeholder-free resume template are both refused here rather than
+    /// at every create that later names the profile, which is what keeps
+    /// "pick a profile" from failing for reasons the picker could not show.
+    #[tokio::test]
+    async fn a_profile_write_is_refused_when_it_breaks_a_bound_or_could_never_launch() {
         let state = StateDir::new();
         let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
             .await
@@ -2627,26 +2914,432 @@ mod tests {
         let mut input_routes = HashMap::new();
         let mut tasks = tokio::task::JoinSet::new();
 
-        // Each row states its own `req_id` beside the message rather than
-        // having it dug back out afterwards: the id is what the reply must
-        // correlate against, so naming it here is both shorter and the
-        // thing being asserted.
-        let profile = farhelm_proto::Profile {
-            id: "prof-1".to_string(),
-            name: "Claude Code".to_string(),
-            invocation: "claude".to_string(),
-            agent_kind: AgentKind::Claude,
-            resume_template: None,
-        };
-        for (expected_req_id, msg) in [
+        for (req_id, name, invocation, agent_kind, resume_template, expected) in [
+            (
+                1,
+                "x".repeat(PROFILE_FIELD_CAP + 1),
+                "claude".to_string(),
+                AgentKind::Generic,
+                None,
+                PROFILE_FIELD_CAP.to_string(),
+            ),
+            (
+                6,
+                "empty template".to_string(),
+                "bash".to_string(),
+                AgentKind::Generic,
+                Some(Vec::new()),
+                "present but empty".to_string(),
+            ),
+            (
+                7,
+                "empty program".to_string(),
+                "bash".to_string(),
+                AgentKind::Generic,
+                Some(vec![String::new(), "-c".to_string()]),
+                "names no program".to_string(),
+            ),
+            (
+                11,
+                "quoted-empty invocation".to_string(),
+                "''".to_string(),
+                AgentKind::Generic,
+                None,
+                "names no program".to_string(),
+            ),
+            (
+                12,
+                String::new(),
+                "bash".to_string(),
+                AgentKind::Generic,
+                None,
+                "must not be empty".to_string(),
+            ),
+            (
+                13,
+                "    ".to_string(),
+                "bash".to_string(),
+                AgentKind::Generic,
+                None,
+                "must not be empty".to_string(),
+            ),
+            (
+                8,
+                "nul in the template".to_string(),
+                "bash".to_string(),
+                AgentKind::Generic,
+                Some(vec!["bash".to_string(), "sleep\u{0}30".to_string()]),
+                "NUL byte".to_string(),
+            ),
+            (
+                9,
+                "nul in the invocation".to_string(),
+                "bash\u{0}-c".to_string(),
+                AgentKind::Generic,
+                None,
+                "NUL byte".to_string(),
+            ),
+            (
+                10,
+                "one element too many".to_string(),
+                "bash".to_string(),
+                AgentKind::Generic,
+                Some(vec!["x".to_string(); RESUME_TEMPLATE_ELEMENT_CAP + 1]),
+                RESUME_TEMPLATE_ELEMENT_CAP.to_string(),
+            ),
+            (
+                2,
+                "tab\tseparated".to_string(),
+                "claude".to_string(),
+                AgentKind::Generic,
+                None,
+                "control characters".to_string(),
+            ),
+            (
+                3,
+                "unparseable".to_string(),
+                "claude --flag 'unterminated".to_string(),
+                AgentKind::Generic,
+                None,
+                "does not parse".to_string(),
+            ),
+            (
+                4,
+                "empty".to_string(),
+                "   ".to_string(),
+                AgentKind::Generic,
+                None,
+                "is empty".to_string(),
+            ),
+            (
+                5,
+                "unresumable".to_string(),
+                "claude".to_string(),
+                AgentKind::Claude,
+                Some(vec!["claude".to_string(), "--continue".to_string()]),
+                crate::agent_kind::CONVERSATION_PLACEHOLDER.to_string(),
+            ),
+            // The placeholder in the PROGRAM slot, which satisfies every
+            // other rule — non-empty vector, non-empty argv[0], placeholder
+            // present so an integrated kind is happy — and would make a
+            // restart try to execute the conversation id it just read off
+            // disk.
+            (
+                14,
+                "placeholder as the program".to_string(),
+                "claude".to_string(),
+                AgentKind::Claude,
+                Some(vec![
+                    crate::agent_kind::CONVERSATION_PLACEHOLDER.to_string(),
+                    "--resume".to_string(),
+                ]),
+                "the PROGRAM".to_string(),
+            ),
+        ] {
+            handle_control(
+                &sup,
+                ControlMsg::CreateProfile {
+                    req_id,
+                    name,
+                    invocation,
+                    agent_kind,
+                    resume_template,
+                },
+                ConnectionCtx {
+                    tx: &tx,
+                    priority: &tx,
+                    input_routes: &mut input_routes,
+                    upload_routes: &mut no_uploads(),
+                    tasks: &mut tasks,
+                },
+            )
+            .await;
+            let frame = rx.try_recv().expect("a reply must have been sent");
+            let decoded: ControlMsg = serde_json::from_slice(&frame.body).expect("decode");
+            let ControlMsg::Error {
+                req_id: replied,
+                kind,
+                message,
+            } = decoded
+            else {
+                panic!("request {req_id} must be refused, got {decoded:?}");
+            };
+            assert_eq!(replied, req_id, "the refusal must correlate");
+            assert_eq!(kind, ErrorKind::InvalidRequest);
+            assert!(
+                message.contains(&expected),
+                "request {req_id}'s refusal must say what was wrong: {message}"
+            );
+        }
+        assert_eq!(
+            sup.store.profiles().await.expect("catalog").len(),
+            2,
+            "not one refused write may have landed beside the starters"
+        );
+
+        // The shapes that must be ACCEPTED, which a refusal table alone
+        // cannot show. A validator is wrong in two directions and only one
+        // of them is loud: a rejected-but-legal profile is reported to the
+        // user as "the thing I typed will not save", with nothing in any
+        // log explaining why it should have worked.
+        //
+        // The wrapper is the case that motivated this: an empty element
+        // AFTER the program is `$0` for an inner shell, which is how a
+        // resume template passes the captured identity as `$1` instead of
+        // splicing it into the script text. Rejecting it forced users into
+        // exactly the substitution the argv-vector design exists to avoid.
+        for (req_id, template) in [
+            (
+                30,
+                vec![
+                    "sh".to_string(),
+                    "-c".to_string(),
+                    "exec claude --resume \"$1\"".to_string(),
+                    String::new(),
+                    crate::agent_kind::CONVERSATION_PLACEHOLDER.to_string(),
+                ],
+            ),
+            // Several empty arguments, none of them the program.
+            (
+                31,
+                vec![
+                    "sh".to_string(),
+                    String::new(),
+                    String::new(),
+                    crate::agent_kind::CONVERSATION_PLACEHOLDER.to_string(),
+                ],
+            ),
+        ] {
+            handle_control(
+                &sup,
+                ControlMsg::CreateProfile {
+                    req_id,
+                    name: format!("wrapper {req_id}"),
+                    invocation: "sh".to_string(),
+                    agent_kind: AgentKind::Generic,
+                    resume_template: Some(template),
+                },
+                ConnectionCtx {
+                    tx: &tx,
+                    priority: &tx,
+                    input_routes: &mut input_routes,
+                    upload_routes: &mut no_uploads(),
+                    tasks: &mut tasks,
+                },
+            )
+            .await;
+            let frame = rx.try_recv().expect("a reply must have been sent");
+            let decoded: ControlMsg = serde_json::from_slice(&frame.body).expect("decode");
+            assert!(
+                matches!(decoded, ControlMsg::ProfileCreated { req_id: replied, .. }
+                    if replied == req_id),
+                "an empty element after the program is a legal argv entry: {decoded:?}"
+            );
+        }
+
+        // The other side of both bounds: a record exactly AT each limit
+        // must be accepted, or a cap written with the wrong comparison
+        // silently rejects legitimate profiles.
+        let name = "at the cap";
+        let invocation = "bash";
+        let filler = PROFILE_FIELD_CAP - name.len() - invocation.len();
+        for (req_id, resume_template) in [
+            // Exactly `PROFILE_FIELD_CAP` bytes of name + invocation +
+            // template, in one element.
+            (20, vec!["x".repeat(filler)]),
+            // Exactly `RESUME_TEMPLATE_ELEMENT_CAP` elements, well under
+            // the byte cap: the two bounds are independent, so each needs
+            // its own boundary case.
+            (21, vec!["x".to_string(); RESUME_TEMPLATE_ELEMENT_CAP]),
+        ] {
+            handle_control(
+                &sup,
+                ControlMsg::CreateProfile {
+                    req_id,
+                    name: name.to_string(),
+                    invocation: invocation.to_string(),
+                    agent_kind: AgentKind::Generic,
+                    resume_template: Some(resume_template),
+                },
+                ConnectionCtx {
+                    tx: &tx,
+                    priority: &tx,
+                    input_routes: &mut input_routes,
+                    upload_routes: &mut no_uploads(),
+                    tasks: &mut tasks,
+                },
+            )
+            .await;
+            let frame = rx.try_recv().expect("a reply must have been sent");
+            let decoded: ControlMsg = serde_json::from_slice(&frame.body).expect("decode");
+            assert!(
+                matches!(decoded, ControlMsg::ProfileCreated { req_id: replied, .. }
+                    if replied == req_id),
+                "a record exactly at the limit is legal: {decoded:?}"
+            );
+        }
+    }
+
+    /// The same rules apply to an EDIT, not only to a create.
+    ///
+    /// Both verbs share one validator, so this is a wiring test rather
+    /// than a second copy of the table above — but the wiring is exactly
+    /// what a bound needs: an update that accepted what a create refuses
+    /// would let every refused shape into the catalog one edit at a time,
+    /// and the catalog is where the rest of the system reads them from.
+    ///
+    /// Driven against a REAL existing profile, so a refusal cannot be
+    /// passing for the unrelated reason that the id is unknown — and the
+    /// stored record is read back afterwards to prove a refused edit
+    /// changed nothing.
+    #[tokio::test]
+    async fn an_edit_is_held_to_the_same_rules_as_a_create() {
+        let state = StateDir::new();
+        let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
+            .await
+            .expect("supervisor construction touches only tmux, not the launch shim");
+        let (tx, mut rx) = mpsc::channel(CONNECTION_WRITER_QUEUE);
+        let mut input_routes = HashMap::new();
+        let mut tasks = tokio::task::JoinSet::new();
+        let original = sup
+            .store
+            .profile("starter-claude")
+            .await
+            .expect("read")
+            .expect("the starter is there to edit");
+
+        for (req_id, name, invocation, resume_template, expected) in [
+            (
+                1,
+                String::new(),
+                "claude".to_string(),
+                None,
+                "must not be empty",
+            ),
+            (
+                2,
+                "   ".to_string(),
+                "claude".to_string(),
+                None,
+                "must not be empty",
+            ),
+            (
+                3,
+                "empty program".to_string(),
+                "''".to_string(),
+                None,
+                "names no program",
+            ),
+            (
+                4,
+                "empty program in the template".to_string(),
+                "claude".to_string(),
+                Some(vec![String::new(), "--resume".to_string()]),
+                "names no program",
+            ),
+            (
+                5,
+                "nul".to_string(),
+                "claude\u{0}".to_string(),
+                None,
+                "NUL byte",
+            ),
+            // The placeholder in the program slot; see the create table's
+            // row for what makes this shape slip past every other rule.
+            (
+                6,
+                "placeholder as the program".to_string(),
+                "claude".to_string(),
+                Some(vec![
+                    crate::agent_kind::CONVERSATION_PLACEHOLDER.to_string(),
+                    "--resume".to_string(),
+                ]),
+                "the PROGRAM",
+            ),
+        ] {
+            handle_control(
+                &sup,
+                ControlMsg::UpdateProfile {
+                    req_id,
+                    profile: farhelm_proto::Profile {
+                        name,
+                        invocation,
+                        resume_template,
+                        agent_kind: AgentKind::Generic,
+                        ..original.clone()
+                    },
+                },
+                ConnectionCtx {
+                    tx: &tx,
+                    priority: &tx,
+                    input_routes: &mut input_routes,
+                    upload_routes: &mut no_uploads(),
+                    tasks: &mut tasks,
+                },
+            )
+            .await;
+            let frame = rx.try_recv().expect("a reply must have been sent");
+            let decoded: ControlMsg = serde_json::from_slice(&frame.body).expect("decode");
+            let ControlMsg::Error {
+                req_id: replied,
+                kind,
+                message,
+            } = decoded
+            else {
+                panic!("edit {req_id} must be refused, got {decoded:?}");
+            };
+            assert_eq!(replied, req_id);
+            assert_eq!(kind, ErrorKind::InvalidRequest);
+            assert!(
+                message.contains(expected),
+                "edit {req_id}'s refusal must say what was wrong: {message}"
+            );
+        }
+
+        assert_eq!(
+            sup.store.profile("starter-claude").await.expect("read"),
+            Some(original),
+            "not one refused edit may have reached the catalog"
+        );
+    }
+
+    /// Every profile verb against an unreadable catalog answers, and
+    /// answers with a correlated `Internal`.
+    ///
+    /// Table-driven across all four because the failure being excluded is
+    /// SILENCE, and silence is per-arm: a verb whose error path forgot to
+    /// reply leaves its caller waiting on a `req_id` that never comes, and
+    /// a hung request looks nothing like a failure from either end. The
+    /// classification matters too — `Internal` rather than
+    /// `InvalidRequest`, because nothing about these requests is wrong and
+    /// a client told "bad request" would stop retrying something that will
+    /// work again the moment the database does.
+    #[tokio::test]
+    async fn every_profile_verb_answers_when_the_catalog_cannot_be_read() {
+        let state = StateDir::new();
+        let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
+            .await
+            .expect("supervisor construction touches only tmux, not the launch shim");
+        let (tx, mut rx) = mpsc::channel(CONNECTION_WRITER_QUEUE);
+        let mut input_routes = HashMap::new();
+        let mut tasks = tokio::task::JoinSet::new();
+        let profile = sup
+            .store
+            .profile("starter-claude")
+            .await
+            .expect("read")
+            .expect("present");
+        sup.store.drop_profile_catalog_for_test().await;
+
+        for (req_id, request) in [
             (1, ControlMsg::ListProfiles { req_id: 1 }),
             (
                 2,
                 ControlMsg::CreateProfile {
                     req_id: 2,
-                    name: profile.name.clone(),
-                    invocation: profile.invocation.clone(),
-                    agent_kind: profile.agent_kind,
+                    name: "new".to_string(),
+                    invocation: "bash".to_string(),
+                    agent_kind: AgentKind::Generic,
                     resume_template: None,
                 },
             ),
@@ -2667,7 +3360,7 @@ mod tests {
         ] {
             handle_control(
                 &sup,
-                msg,
+                request,
                 ConnectionCtx {
                     tx: &tx,
                     priority: &tx,
@@ -2682,35 +3375,39 @@ mod tests {
                 .expect("a profile request must be answered, never dropped");
             let decoded: ControlMsg = serde_json::from_slice(&frame.body).expect("decode");
             let ControlMsg::Error {
-                req_id,
+                req_id: replied,
                 kind,
-                message,
+                ..
             } = decoded
             else {
-                panic!("this build has no catalog to answer from: {decoded:?}");
+                panic!("request {req_id} cannot have succeeded against no catalog: {decoded:?}");
             };
-            assert_eq!(req_id, expected_req_id, "the reply must correlate");
-            assert_eq!(kind, ErrorKind::InvalidRequest);
-            assert!(
-                message.contains("profile catalog"),
-                "the refusal must name what is missing: {message}"
+            assert_eq!(replied, req_id, "the failure must correlate");
+            assert_eq!(
+                kind,
+                ErrorKind::Internal,
+                "request {req_id}: a database that cannot be read is not a bad request"
             );
         }
     }
 
-    /// The step-5 seam (PLAN_M6_75.md items 3 and 5): a well-formed
-    /// profile-backed create is refused by THIS build with a clear
-    /// message, creates nothing, and — the part worth pinning hardest —
-    /// does not SPEND its intent key.
+    /// The unknown-profile precondition (PLAN_M6_75.md item 4), driven as
+    /// the RACE it actually is rather than as a made-up id: the profile is
+    /// read, then deleted, then the create that names it arrives — exactly
+    /// what happens when a user deletes a profile in one client while
+    /// another has the create dialog open.
     ///
-    /// The key matters because the refusal is temporary: the same request
-    /// will succeed once the catalog lands, and a client that had its key
-    /// consumed by a build that could not serve it would find its retry
-    /// answered with a stale failure forever. Refusing before the
-    /// reservation is claimed is what keeps that from happening, and the
-    /// empty reservation table below is how that is observable at all.
+    /// Three things must hold, and each is a distinct way this could go
+    /// wrong. The create must FAIL rather than silently fall back to some
+    /// other profile (a launch the user never asked for, and SPEC.md's
+    /// creation-failure split makes a precondition failure a visible one).
+    /// It must leave NO session — the failure is decided before anything is
+    /// launched. And the refusal must be recorded against the intent key so
+    /// a retry replays it: an unknown profile is a precondition failure
+    /// like a vanished working directory, and `create_session`'s contract
+    /// for those has no exception.
     #[tokio::test]
-    async fn a_profile_backed_create_is_refused_without_spending_its_intent_key() {
+    async fn a_profile_deleted_between_the_picker_and_the_submit_fails_the_create() {
         let state = StateDir::new();
         let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
             .await
@@ -2719,17 +3416,803 @@ mod tests {
         let mut input_routes = HashMap::new();
         let mut tasks = tokio::task::JoinSet::new();
 
+        // What the client read from its picker, and what happened to it
+        // before the client got around to submitting.
+        let picked = sup.store.profiles().await.expect("catalog")[0].clone();
+        assert!(
+            sup.store
+                .delete_profile(&picked.id)
+                .await
+                .expect("delete the profile out from under the create")
+        );
+
+        let create = |req_id| ControlMsg::CreateSession {
+            req_id,
+            cwd: state.path().to_string_lossy().to_string(),
+            invocation: None,
+            profile_id: Some(picked.id.clone()),
+            title: None,
+            cols: 80,
+            rows: 24,
+            intent_key: Some("intent-abc".to_string()),
+            agent_kind: None,
+            resume_template: None,
+        };
+        let mut refusal = async |msg, rx: &mut mpsc::Receiver<Frame>| -> (u64, ErrorKind, String) {
+            handle_control(
+                &sup,
+                msg,
+                ConnectionCtx {
+                    tx: &tx,
+                    priority: &tx,
+                    input_routes: &mut input_routes,
+                    upload_routes: &mut no_uploads(),
+                    tasks: &mut tasks,
+                },
+            )
+            .await;
+            let frame = rx.try_recv().expect("a reply must have been sent");
+            match serde_json::from_slice(&frame.body).expect("decode") {
+                ControlMsg::Error {
+                    req_id,
+                    kind,
+                    message,
+                } => (req_id, kind, message),
+                other => panic!("a create naming a deleted profile must fail: {other:?}"),
+            }
+        };
+
+        let (req_id, kind, message) = refusal(create(7), &mut rx).await;
+        assert_eq!(req_id, 7);
+        assert_eq!(kind, ErrorKind::NotFound);
+        assert!(
+            message.contains(&picked.id) && message.contains("deleted"),
+            "the refusal must name the profile and say what likely happened to it, so the user \
+             re-picks instead of guessing their profile is broken: {message}"
+        );
+        assert!(
+            sup.sessions.lock().await.is_empty(),
+            "a precondition failure launches nothing"
+        );
+
+        // The retry replays the SAME answer rather than re-deriving it from
+        // a catalog that may have changed again — and the way that is
+        // pinned is by making the catalog change first, in the one
+        // direction that would make a re-derivation SUCCEED.
+        //
+        // A profile with the same id existing again is not reachable
+        // through the real API (creates mint their own ids), which is
+        // exactly why the replay rule has to be tested rather than assumed:
+        // the only thing standing between this key and a second, different
+        // answer is that a settled refusal is replayed rather than
+        // recomputed. A build that re-resolved here would create a session
+        // for an intent whose client was already told, definitively, that
+        // it had failed.
+        sup.store
+            .insert_profile_with_id(farhelm_proto::Profile {
+                id: picked.id.clone(),
+                name: "Recreated under the same id".to_string(),
+                invocation: "bash".to_string(),
+                agent_kind: AgentKind::Generic,
+                resume_template: None,
+            })
+            .await
+            .expect("reconstruct the id the catalog once held");
+
+        let (_, replayed_kind, replayed_message) = refusal(create(8), &mut rx).await;
+        assert_eq!(replayed_kind, kind);
+        assert_eq!(replayed_message, message);
+        assert!(
+            sup.sessions.lock().await.is_empty(),
+            "a settled refusal is replayed, not recomputed against a catalog that has changed \
+             since"
+        );
+    }
+
+    /// What a profile-backed create actually PRODUCES (PLAN_M6_75.md item
+    /// 4): a session whose durable snapshot came from the profile, and a
+    /// source-profile identity recorded beside it.
+    ///
+    /// The integration half is the point the plan is emphatic about — the
+    /// profile feeds the EXISTING `IntegrationSnapshot` seam rather than a
+    /// second path — so it is asserted through what the seam produces: the
+    /// kind the profile named, and the resume template that kind derives
+    /// from the profile's OWN argv0. A build that stored the profile's
+    /// fields without going through the seam would still create a session,
+    /// and it would silently be a session that can never resume its
+    /// conversation.
+    ///
+    /// The replay half pins the idempotency contract for the new mode: a
+    /// retried key returns the first attempt's session rather than
+    /// launching a second agent, which is the whole reason the mode and the
+    /// profile identity join the create fingerprint.
+    #[tokio::test]
+    async fn a_profile_backed_create_snapshots_the_profile_and_replays_its_key() {
+        let state = StateDir::new();
+        let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
+            .await
+            .expect("supervisor construction touches only tmux, not the launch shim");
+        let (tx, mut rx) = mpsc::channel(CONNECTION_WRITER_QUEUE);
+        let mut input_routes = HashMap::new();
+        let mut tasks = tokio::task::JoinSet::new();
+
+        // A profile whose invocation is a PATH, so the derived resume
+        // template can only have come from this profile's own argv0 rather
+        // than from a bare command name someone hardcoded.
+        let profile = match sup
+            .store
+            .create_profile(
+                "Local Claude".to_string(),
+                "/opt/bin/claude --verbose".to_string(),
+                AgentKind::Claude,
+                None,
+            )
+            .await
+            .expect("create the profile")
+        {
+            crate::store::ProfileCreation::Created(profile) => profile,
+            other => panic!("a catalog of two starters is not full: {other:?}"),
+        };
+        let create = |req_id| ControlMsg::CreateSession {
+            req_id,
+            cwd: state.path().to_string_lossy().to_string(),
+            invocation: None,
+            profile_id: Some(profile.id.clone()),
+            title: Some("from a profile".to_string()),
+            cols: 80,
+            rows: 24,
+            intent_key: Some("intent-profile".to_string()),
+            agent_kind: None,
+            resume_template: None,
+        };
+        let mut created = async |msg, rx: &mut mpsc::Receiver<Frame>| -> SessionInfo {
+            handle_control(
+                &sup,
+                msg,
+                ConnectionCtx {
+                    tx: &tx,
+                    priority: &tx,
+                    input_routes: &mut input_routes,
+                    upload_routes: &mut no_uploads(),
+                    tasks: &mut tasks,
+                },
+            )
+            .await;
+            let frame = rx.try_recv().expect("a reply must have been sent");
+            match serde_json::from_slice(&frame.body).expect("decode") {
+                ControlMsg::SessionCreated { session, .. } => session,
+                other => panic!("a create naming a live profile must succeed: {other:?}"),
+            }
+        };
+
+        let session = created(create(1), &mut rx).await;
+        assert_eq!(
+            session.invocation, "/opt/bin/claude --verbose",
+            "the profile is what says WHAT to run"
+        );
+        assert_eq!(
+            session.source_profile,
+            Some(farhelm_proto::SourceProfile {
+                id: profile.id.clone(),
+                name: "Local Claude".to_string(),
+                existence: farhelm_proto::ProfileExistence::Present,
+            })
+        );
+        let snapshot = sup
+            .session_snapshot(&session.id)
+            .await
+            .expect("reading the snapshot")
+            .expect("the session exists");
+        assert_eq!(
+            snapshot.kind,
+            AgentKind::Claude,
+            "the profile's kind is an explicit choice, not a basename guess"
+        );
+        assert_eq!(
+            snapshot.resume_template.as_deref().unwrap(),
+            [
+                "/opt/bin/claude",
+                "--resume",
+                crate::agent_kind::CONVERSATION_PLACEHOLDER
+            ],
+            "an absent template on an integrated profile means the KIND's default, derived from \
+             this profile's own argv0"
+        );
+
+        // The catalog moves between the two attempts, which is what makes
+        // this a derivation test as well as an idempotency test: a REPLAY
+        // is still a reply, so its existence must describe the catalog now
+        // rather than repeating what the original attempt reported.
+        sup.store
+            .update_profile(farhelm_proto::Profile {
+                name: "Local Claude, renamed".to_string(),
+                ..profile.clone()
+            })
+            .await
+            .expect("rename")
+            .expect("the profile is there to rename");
+
+        let replayed = created(create(2), &mut rx).await;
+        assert_eq!(
+            replayed.id, session.id,
+            "a retried intent key replays its session rather than launching a second agent"
+        );
+        assert_eq!(
+            sup.sessions.lock().await.len(),
+            1,
+            "and there is still exactly one session"
+        );
+        let source = replayed
+            .source_profile
+            .expect("a replay describes the same session, profile and all");
+        assert_eq!(
+            source.name, "Local Claude",
+            "the SNAPSHOT is immutable: an edit does not reach the sessions already created \
+             from the profile (SPEC.md)"
+        );
+        assert_eq!(
+            source.existence,
+            farhelm_proto::ProfileExistence::Renamed,
+            "while existence is derived for the reply being built, not replayed"
+        );
+
+        // And the same again for a DELETE, which is the state a client is
+        // most likely to be looking at when it retries an old key.
+        assert!(sup.store.delete_profile(&profile.id).await.expect("delete"));
+        let after_delete = created(create(3), &mut rx).await;
+        let source = after_delete
+            .source_profile
+            .expect("a deleted profile does not erase what the session came from");
+        assert_eq!(source.name, "Local Claude");
+        assert_eq!(source.existence, farhelm_proto::ProfileExistence::Deleted);
+    }
+
+    /// All three source-profile existence states, derived through a REAL
+    /// `ListSessions` reply (PLAN_M6_75.md item 5).
+    ///
+    /// Existence is the one part of `SourceProfile` that is not stored, so
+    /// the only way to be wrong about it is to derive it wrongly — and the
+    /// three cases fail differently: a missed DELETED renders a profile
+    /// that is gone as if it were still there, a missed RENAMED implies the
+    /// snapshotted name is current (SPEC.md's snapshot rule says it is
+    /// not), and a wrongly-flagged PRESENT would mark every ordinary
+    /// session as broken. All three ride one reply because that is also
+    /// what pins the BATCH: one catalog read answering a whole page, with
+    /// each row resolved against its own id.
+    ///
+    /// The raw-created session in the mix is not filler either — it is the
+    /// case every pre-M6.75 session is, and it must stay `None` rather than
+    /// acquiring some default.
+    ///
+    /// Session entries are built by hand rather than launched: what is
+    /// under test is the reply-build derivation, and three real tmux
+    /// launches would test tmux.
+    #[tokio::test]
+    async fn a_list_reply_derives_present_renamed_and_deleted_source_profiles() {
+        let state = StateDir::new();
+        let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
+            .await
+            .expect("supervisor construction touches only tmux, not the launch shim");
+
+        // Three profiles and the three fates they meet. The snapshots below
+        // record each one's name AS IT WAS, which is what the derivation
+        // compares against.
+        let mut profiles = Vec::new();
+        for name in ["Kept", "Renamed later", "Deleted later"] {
+            profiles.push(
+                match sup
+                    .store
+                    .create_profile(
+                        name.to_string(),
+                        "bash".to_string(),
+                        AgentKind::Generic,
+                        None,
+                    )
+                    .await
+                    .expect("create")
+                {
+                    crate::store::ProfileCreation::Created(profile) => profile,
+                    other => panic!("the catalog is not full: {other:?}"),
+                },
+            );
+        }
+        for (index, profile) in profiles.iter().enumerate() {
+            let snapshotted = Some(farhelm_proto::SourceProfile {
+                id: profile.id.clone(),
+                name: profile.name.clone(),
+                // Deliberately the WRONG answer for two of the three: this
+                // is the placeholder an entry carries, and a reply that
+                // echoed it instead of deriving would pass every other
+                // assertion here.
+                existence: farhelm_proto::ProfileExistence::Present,
+            });
+            let id = format!("s{index}");
+            sup.sessions.lock().await.insert(
+                id.clone(),
+                Arc::new(SessionEntry {
+                    info: SessionInfo {
+                        id: id.clone(),
+                        title: id.clone(),
+                        // Descending creation order is what `list_page`
+                        // walks, so a later index must sort later.
+                        created_at: 1_700_000_000 - index as i64,
+                        cwd: "/tmp".to_string(),
+                        invocation: "bash".to_string(),
+                        status: SessionStatus::default(),
+                        annotation: None,
+                        restart_offer: RestartOffer::default(),
+                        tabs: Vec::new(),
+                        source_profile: snapshotted,
+                    },
+                    // No terminal, so the reply needs nothing from tmux.
+                    terminal: None,
+                    outcome: Arc::new(std::sync::Mutex::new(LastOutcome::Exited {
+                        exit_code: Some(0),
+                        annotation: None,
+                    })),
+                    snapshot: IntegrationSnapshot {
+                        kind: AgentKind::Generic,
+                        resume_template: None,
+                    },
+                    canonical_cwd: None,
+                    first_input: Arc::new(std::sync::Mutex::new(FirstInput {
+                        at: None,
+                        durable: true,
+                    })),
+                    capture: Arc::new(std::sync::Mutex::new(CaptureState::Unclaimed)),
+                    activity: crate::service::ticker::ActivitySample::unsampled(),
+                    generation: 0,
+                    scope: None,
+                }),
+            );
+        }
+        // A raw-created session beside them.
+        sup.sessions.lock().await.insert(
+            "s3".to_string(),
+            Arc::new(SessionEntry {
+                info: SessionInfo {
+                    id: "s3".to_string(),
+                    title: "s3".to_string(),
+                    created_at: 1_699_999_997,
+                    cwd: "/tmp".to_string(),
+                    invocation: "bash".to_string(),
+                    status: SessionStatus::default(),
+                    annotation: None,
+                    restart_offer: RestartOffer::default(),
+                    tabs: Vec::new(),
+                    source_profile: None,
+                },
+                terminal: None,
+                outcome: Arc::new(std::sync::Mutex::new(LastOutcome::Exited {
+                    exit_code: Some(0),
+                    annotation: None,
+                })),
+                snapshot: IntegrationSnapshot {
+                    kind: AgentKind::Generic,
+                    resume_template: None,
+                },
+                canonical_cwd: None,
+                first_input: Arc::new(std::sync::Mutex::new(FirstInput {
+                    at: None,
+                    durable: true,
+                })),
+                capture: Arc::new(std::sync::Mutex::new(CaptureState::Unclaimed)),
+                activity: crate::service::ticker::ActivitySample::unsampled(),
+                generation: 0,
+                scope: None,
+            }),
+        );
+
+        // The catalog moves out from under the snapshots.
+        sup.store
+            .update_profile(farhelm_proto::Profile {
+                name: "Renamed now".to_string(),
+                ..profiles[1].clone()
+            })
+            .await
+            .expect("rename")
+            .expect("the profile is there to rename");
+        assert!(
+            sup.store
+                .delete_profile(&profiles[2].id)
+                .await
+                .expect("delete")
+        );
+
+        let (tx, mut rx) = mpsc::channel(CONNECTION_WRITER_QUEUE);
+        let mut input_routes = HashMap::new();
+        let mut tasks = tokio::task::JoinSet::new();
+        handle_control(
+            &sup,
+            ControlMsg::ListSessions {
+                req_id: 9,
+                cursor: None,
+                limit: None,
+            },
+            ConnectionCtx {
+                tx: &tx,
+                priority: &tx,
+                input_routes: &mut input_routes,
+                upload_routes: &mut no_uploads(),
+                tasks: &mut tasks,
+            },
+        )
+        .await;
+        // Spawned, so the reply is awaited rather than polled — see the
+        // `ListSessions` arm's own comment.
+        let reply = tokio::time::timeout(Duration::from_secs(5), rx.recv())
+            .await
+            .expect("spawned ListSessions handler never replied")
+            .expect("reply channel closed before a reply arrived");
+        let ControlMsg::SessionList { sessions, .. } =
+            serde_json::from_slice(&reply.body).expect("decode")
+        else {
+            panic!("expected a session list");
+        };
+        let by_id: HashMap<&str, Option<&farhelm_proto::SourceProfile>> = sessions
+            .iter()
+            .map(|s| (s.id.as_str(), s.source_profile.as_ref()))
+            .collect();
+
+        assert_eq!(
+            by_id["s0"].map(|p| p.existence),
+            Some(farhelm_proto::ProfileExistence::Present)
+        );
+        assert_eq!(
+            by_id["s1"].map(|p| p.existence),
+            Some(farhelm_proto::ProfileExistence::Renamed)
+        );
+        assert_eq!(
+            by_id["s1"].map(|p| p.name.as_str()),
+            Some("Renamed later"),
+            "a renamed profile's sessions keep the name they snapshotted (SPEC.md's snapshot \
+             rule); the CURRENT name is deliberately not on this wire"
+        );
+        assert_eq!(
+            by_id["s2"].map(|p| p.existence),
+            Some(farhelm_proto::ProfileExistence::Deleted)
+        );
+        assert_eq!(
+            by_id["s2"].map(|p| p.name.as_str()),
+            Some("Deleted later"),
+            "and a deleted profile's sessions still filter under theirs"
+        );
+        assert_eq!(
+            by_id["s3"], None,
+            "a raw-created session names no profile and must not acquire one"
+        );
+    }
+
+    /// Existence is derived per profile ID, so two profiles sharing a NAME
+    /// meet their own fates.
+    ///
+    /// Profile names are not unique and nothing anywhere makes them so —
+    /// `create_profile` mints an id and never looks at the name, and SPEC.md
+    /// gives no uniqueness rule — so "Claude Code" twice is an ordinary
+    /// catalog, not a contrived one. Every other fixture for this derivation
+    /// happens to use distinct names, which means a name-keyed lookup would
+    /// pass all of them: delete one of two same-named profiles and every
+    /// session created from EITHER reads `Deleted`, or none does, depending
+    /// on which way the lookup fell.
+    ///
+    /// The failure that produces is quiet and permanent — a session is
+    /// labelled as coming from a profile that still exists, or a live
+    /// profile's sessions are marked orphaned — and it is exactly the kind
+    /// of thing a user creates by duplicating a profile to tweak it.
+    #[tokio::test]
+    async fn two_profiles_sharing_a_name_derive_their_existence_separately() {
+        let state = StateDir::new();
+        let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
+            .await
+            .expect("supervisor construction touches only tmux, not the launch shim");
+
+        // The SAME name twice: the catalog allows it, so the derivation has
+        // to tell them apart by something else.
+        let mut twins = Vec::new();
+        for _ in 0..2 {
+            twins.push(
+                match sup
+                    .store
+                    .create_profile(
+                        "Claude Code".to_string(),
+                        "bash".to_string(),
+                        AgentKind::Generic,
+                        None,
+                    )
+                    .await
+                    .expect("create")
+                {
+                    crate::store::ProfileCreation::Created(profile) => profile,
+                    other => panic!("the catalog is not full: {other:?}"),
+                },
+            );
+        }
+        assert_ne!(twins[0].id, twins[1].id, "premise: two distinct profiles");
+
+        for (index, profile) in twins.iter().enumerate() {
+            let id = format!("s{index}");
+            sup.sessions.lock().await.insert(
+                id.clone(),
+                Arc::new(SessionEntry {
+                    info: SessionInfo {
+                        id: id.clone(),
+                        title: id.clone(),
+                        created_at: 1_700_000_000 - index as i64,
+                        cwd: "/tmp".to_string(),
+                        invocation: "bash".to_string(),
+                        status: SessionStatus::default(),
+                        annotation: None,
+                        restart_offer: RestartOffer::default(),
+                        tabs: Vec::new(),
+                        source_profile: Some(farhelm_proto::SourceProfile {
+                            id: profile.id.clone(),
+                            name: profile.name.clone(),
+                            existence: farhelm_proto::ProfileExistence::Present,
+                        }),
+                    },
+                    terminal: None,
+                    outcome: Arc::new(std::sync::Mutex::new(LastOutcome::Exited {
+                        exit_code: Some(0),
+                        annotation: None,
+                    })),
+                    snapshot: IntegrationSnapshot {
+                        kind: AgentKind::Generic,
+                        resume_template: None,
+                    },
+                    canonical_cwd: None,
+                    first_input: Arc::new(std::sync::Mutex::new(FirstInput {
+                        at: None,
+                        durable: true,
+                    })),
+                    capture: Arc::new(std::sync::Mutex::new(CaptureState::Unclaimed)),
+                    activity: crate::service::ticker::ActivitySample::unsampled(),
+                    generation: 0,
+                    scope: None,
+                }),
+            );
+        }
+
+        // Exactly one of the twins goes away.
+        assert!(
+            sup.store
+                .delete_profile(&twins[0].id)
+                .await
+                .expect("delete")
+        );
+
+        let (tx, mut rx) = mpsc::channel(CONNECTION_WRITER_QUEUE);
+        let mut input_routes = HashMap::new();
+        let mut tasks = tokio::task::JoinSet::new();
+        handle_control(
+            &sup,
+            ControlMsg::ListSessions {
+                req_id: 1,
+                cursor: None,
+                limit: None,
+            },
+            ConnectionCtx {
+                tx: &tx,
+                priority: &tx,
+                input_routes: &mut input_routes,
+                upload_routes: &mut no_uploads(),
+                tasks: &mut tasks,
+            },
+        )
+        .await;
+        let reply = tokio::time::timeout(Duration::from_secs(5), rx.recv())
+            .await
+            .expect("spawned ListSessions handler never replied")
+            .expect("reply channel closed before a reply arrived");
+        let ControlMsg::SessionList { sessions, .. } =
+            serde_json::from_slice(&reply.body).expect("decode")
+        else {
+            panic!("expected a session list");
+        };
+        let by_id: HashMap<&str, Option<&farhelm_proto::SourceProfile>> = sessions
+            .iter()
+            .map(|s| (s.id.as_str(), s.source_profile.as_ref()))
+            .collect();
+
+        assert_eq!(
+            by_id["s0"].map(|p| p.existence),
+            Some(farhelm_proto::ProfileExistence::Deleted),
+            "the session from the DELETED twin must say so"
+        );
+        assert_eq!(
+            by_id["s1"].map(|p| p.existence),
+            Some(farhelm_proto::ProfileExistence::Present),
+            "and the surviving twin's session must not be dragged down with it by a name-keyed \
+             lookup"
+        );
+    }
+
+    /// What a list reply COSTS in catalog reads: exactly one for a page
+    /// that needs the catalog, and exactly zero for one that does not
+    /// (PLAN_M6_75.md item 5).
+    ///
+    /// This is a performance contract with a correctness-shaped failure. A
+    /// per-session lookup is invisible in every other test — the answers
+    /// are identical — and turns one small query per reply into one per
+    /// row, on the path a fleet's whole session list is served from. The
+    /// zero case matters at least as much: every session predating this
+    /// feature is raw-created, so the overwhelmingly common page must not
+    /// pay for a catalog nothing on it references.
+    ///
+    /// The third case is the failure mode, and it is here rather than in
+    /// its own test because it is the same seam: a catalog that cannot be
+    /// read FAILS the reply instead of degrading to an empty map. An empty
+    /// map is indistinguishable from "every profile was deleted", so
+    /// degrading would render a transient database error as a page of
+    /// sessions whose profiles are all gone — a specific, alarming lie
+    /// about durable state, in place of an error the next list retries.
+    #[tokio::test]
+    async fn a_list_reads_the_catalog_once_never_per_session_and_never_optionally() {
+        let state = StateDir::new();
+        let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
+            .await
+            .expect("supervisor construction touches only tmux, not the launch shim");
+        let (tx, mut rx) = mpsc::channel(CONNECTION_WRITER_QUEUE);
+        let mut input_routes = HashMap::new();
+        let mut tasks = tokio::task::JoinSet::new();
+        let mut list = async |req_id, rx: &mut mpsc::Receiver<Frame>| -> ControlMsg {
+            handle_control(
+                &sup,
+                ControlMsg::ListSessions {
+                    req_id,
+                    cursor: None,
+                    limit: None,
+                },
+                ConnectionCtx {
+                    tx: &tx,
+                    priority: &tx,
+                    input_routes: &mut input_routes,
+                    upload_routes: &mut no_uploads(),
+                    tasks: &mut tasks,
+                },
+            )
+            .await;
+            let reply = tokio::time::timeout(Duration::from_secs(5), rx.recv())
+                .await
+                .expect("spawned ListSessions handler never replied")
+                .expect("reply channel closed before a reply arrived");
+            serde_json::from_slice(&reply.body).expect("decode")
+        };
+
+        // Three sessions from ONE profile, so a per-row lookup and a
+        // per-reply read differ by two.
+        let profile = match sup
+            .store
+            .create_profile(
+                "Shared".to_string(),
+                "bash".to_string(),
+                AgentKind::Generic,
+                None,
+            )
+            .await
+            .expect("create the profile")
+        {
+            crate::store::ProfileCreation::Created(profile) => profile,
+            other => panic!("the catalog is not full: {other:?}"),
+        };
+        let entry = |id: &str, source: Option<&farhelm_proto::Profile>| {
+            Arc::new(SessionEntry {
+                info: SessionInfo {
+                    id: id.to_string(),
+                    title: id.to_string(),
+                    created_at: 1_700_000_000,
+                    cwd: "/tmp".to_string(),
+                    invocation: "bash".to_string(),
+                    status: SessionStatus::default(),
+                    annotation: None,
+                    restart_offer: RestartOffer::default(),
+                    tabs: Vec::new(),
+                    source_profile: source.map(|profile| farhelm_proto::SourceProfile {
+                        id: profile.id.clone(),
+                        name: profile.name.clone(),
+                        existence: farhelm_proto::ProfileExistence::Present,
+                    }),
+                },
+                terminal: None,
+                outcome: Arc::new(std::sync::Mutex::new(LastOutcome::Exited {
+                    exit_code: Some(0),
+                    annotation: None,
+                })),
+                snapshot: IntegrationSnapshot {
+                    kind: AgentKind::Generic,
+                    resume_template: None,
+                },
+                canonical_cwd: None,
+                first_input: Arc::new(std::sync::Mutex::new(FirstInput {
+                    at: None,
+                    durable: true,
+                })),
+                capture: Arc::new(std::sync::Mutex::new(CaptureState::Unclaimed)),
+                activity: crate::service::ticker::ActivitySample::unsampled(),
+                generation: 0,
+                scope: None,
+            })
+        };
+
+        // A page of raw-created sessions only: no catalog read at all.
+        for id in ["r1", "r2", "r3"] {
+            sup.sessions
+                .lock()
+                .await
+                .insert(id.to_string(), entry(id, None));
+        }
+        let before = sup.store.profile_name_reads();
+        list(1, &mut rx).await;
+        assert_eq!(
+            sup.store.profile_name_reads(),
+            before,
+            "a page where no session names a profile must not read the catalog at all"
+        );
+
+        // Add the profile-created ones: one read for the whole page.
+        for id in ["p1", "p2", "p3"] {
+            sup.sessions
+                .lock()
+                .await
+                .insert(id.to_string(), entry(id, Some(&profile)));
+        }
+        let before = sup.store.profile_name_reads();
+        let reply = list(2, &mut rx).await;
+        assert_eq!(
+            sup.store.profile_name_reads(),
+            before + 1,
+            "one read per REPLY, not one per profile-created session"
+        );
+        let ControlMsg::SessionList { sessions, .. } = reply else {
+            panic!("expected a session list");
+        };
+        assert_eq!(
+            sessions.len(),
+            6,
+            "premise: all six sessions are on the page"
+        );
+
+        // And with the catalog unreadable, the whole request fails rather
+        // than reporting six sessions whose profiles are all gone.
+        sup.store.drop_profile_catalog_for_test().await;
+        let ControlMsg::Error { req_id, kind, .. } = list(3, &mut rx).await else {
+            panic!("an unreadable catalog must fail the list, not degrade it");
+        };
+        assert_eq!(req_id, 3);
+        assert_eq!(kind, ErrorKind::Internal);
+    }
+
+    /// The same refusal on the single-session reply path (`RenameSession`),
+    /// which reads the catalog for ONE id rather than in bulk.
+    ///
+    /// A separate path with the same rule, and the one where degrading
+    /// would be most tempting: the rename itself has already succeeded by
+    /// the time the reply is assembled, so answering with a slightly-wrong
+    /// `SessionInfo` looks like the kind thing to do. It is not — the
+    /// wrong field would say a profile the user still has was deleted —
+    /// and the handler's own contract is that a mutation's reply is the
+    /// authoritative answer rather than a best effort.
+    #[tokio::test]
+    async fn a_rename_reply_refuses_rather_than_guessing_when_the_catalog_is_unreadable() {
+        let state = StateDir::new();
+        let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
+            .await
+            .expect("supervisor construction touches only tmux, not the launch shim");
+        let cwd = state.path().to_string_lossy().to_string();
+        let (tx, mut rx) = mpsc::channel(CONNECTION_WRITER_QUEUE);
+        let mut input_routes = HashMap::new();
+        let mut tasks = tokio::task::JoinSet::new();
+
         handle_control(
             &sup,
             ControlMsg::CreateSession {
-                req_id: 7,
-                cwd: state.path().to_string_lossy().to_string(),
+                req_id: 1,
+                cwd,
                 invocation: None,
-                profile_id: Some("prof-7".to_string()),
+                profile_id: Some("starter-claude".to_string()),
                 title: None,
                 cols: 80,
                 rows: 24,
-                intent_key: Some("intent-abc".to_string()),
+                intent_key: None,
                 agent_kind: None,
                 resume_template: None,
             },
@@ -2742,39 +4225,52 @@ mod tests {
             },
         )
         .await;
-
         let frame = rx.try_recv().expect("a reply must have been sent");
-        let decoded: ControlMsg = serde_json::from_slice(&frame.body).expect("decode");
-        let ControlMsg::Error {
-            req_id,
-            kind,
-            message,
-        } = decoded
+        let ControlMsg::SessionCreated { session, .. } =
+            serde_json::from_slice(&frame.body).expect("decode")
         else {
-            panic!("a profile-backed create is not servable by this build: {decoded:?}");
+            panic!("the create must succeed before the rename can be tested");
         };
-        assert_eq!(req_id, 7);
-        assert_eq!(kind, ErrorKind::InvalidRequest);
-        assert!(
-            message.contains("prof-7") && message.contains("cannot yet"),
-            "the refusal must name the profile asked for and say the capability is missing, so a \
-             user is not left guessing whether their profile is broken: {message}"
-        );
-        assert!(
-            sup.sessions.lock().await.is_empty(),
-            "a refused create must launch nothing"
-        );
-        assert!(
-            // By NAME, not "no pending reservations": a key wrongly claimed
-            // and then settled would leave that list empty while the key
-            // itself was permanently spent, which is the exact failure this
-            // assertion is about.
+
+        sup.store.drop_profile_catalog_for_test().await;
+        handle_control(
+            &sup,
+            ControlMsg::RenameSession {
+                req_id: 2,
+                session_id: session.id.clone(),
+                title: "renamed".to_string(),
+            },
+            ConnectionCtx {
+                tx: &tx,
+                priority: &tx,
+                input_routes: &mut input_routes,
+                upload_routes: &mut no_uploads(),
+                tasks: &mut tasks,
+            },
+        )
+        .await;
+        let reply = tokio::time::timeout(Duration::from_secs(5), rx.recv())
+            .await
+            .expect("the rename handler never replied")
+            .expect("reply channel closed");
+        let ControlMsg::Error { req_id, kind, .. } =
+            serde_json::from_slice(&reply.body).expect("decode")
+        else {
+            panic!("an unreadable catalog must fail the reply, not fill the field in by guess");
+        };
+        assert_eq!(req_id, 2);
+        assert_eq!(kind, ErrorKind::Internal);
+        // The rename itself LANDED — the failure is about describing the
+        // session, not about changing it, and a client that retries the
+        // read gets the new title.
+        assert_eq!(
             sup.store
-                .reservation("intent-abc")
+                .session(&session.id)
                 .await
-                .expect("reservation lookup")
-                .is_none(),
-            "the intent key must survive for the retry a later build will serve"
+                .expect("read")
+                .expect("present")
+                .title,
+            "renamed"
         );
     }
 

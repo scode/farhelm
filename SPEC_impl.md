@@ -321,6 +321,19 @@ remains that can never be represented on any page.
   the boot id last seen. Comparing the stored boot id against the current one (`/proc/sys/kernel/random/boot_id`;
   equivalent on macOS) is how "interrupted" is classified per SPEC.md.
 - Host identity: generated once at first run, stored in the db.
+- Agent profiles live in a `profiles` table in that same db, bounded on both axes — 128 profiles per host, 8 KiB of
+  caller-supplied text per profile — so the unpaginated catalog reply can never outgrow a frame. That bound is not
+  tidiness: the listing is also how a client finds the profile it wants to delete, so a catalog too large to list would
+  be one nobody could trim back. The starter profiles SPEC.md promises (Claude Code, Codex) are seeded by the schema
+  migration that creates the table, not by a check at startup. A migration step runs exactly once per database, so a
+  deleted starter stays deleted and an edited one stays edited, with no "already seeded" flag that could disagree with
+  the table it describes and re-seed what the user threw away. A profile names its kind explicitly (`generic` is the
+  spelling for "no kind"), and an absent resume template means the kind's own default, derived at create time from that
+  profile's invocation. A session records the id and name of the profile it was created from and nothing mutable;
+  whether that profile still exists, and whether it has since been renamed, is derived by one catalog lookup when a
+  reply is built (one per reply, not one per session), so an edit or a delete never rewrites historical rows and there
+  is only one copy of existence truth. Creating a session from a profile that has since been deleted fails as a
+  precondition — before any launch, with no session left behind — and never falls back to another profile.
 - Sessions launch through the user's shell as an interactive login shell inside the PTY —
   `$SHELL -l -i -c 'exec farhelm internal launch ...'` as the window's command, with the shim doing the final exec of
   the profile invocation (see exited-session semantics) — evaluated per launch. The `-i` is load-bearing, by different
@@ -333,10 +346,13 @@ remains that can never be represented on any page.
   below). Sampling must never sit on the attach/input path — SPEC.md forbids status from gating interaction. The
   supervisor's own ticker takes the samples; classification is a pure read of the sample beside the durable outcome, and
   sits BELOW the recorded-error and dead-pane rules in the existing precedence, so a heuristic can only ever choose
-  among the live statuses. The generic baseline is output recency alone — a screen that changed within a few sampling
-  intervals is running, a screen that has been watched and stayed still is idle — with a live session that has not been
-  sampled twice yet reported running, since that is what a session that just launched is. Waiting is never derived from
-  recency (a blocked agent and a finished one are equally quiet); it comes only from per-kind sharpening.
+  among the live statuses. The generic baseline is observed output alone, counted in a session's OWN samples rather than
+  in elapsed time: three consecutive samples showing an unchanged screen reads idle, anything else live reads running,
+  and a session not yet sampled twice reads running since that is what a session that just launched is. Counting samples
+  rather than seconds is load-bearing — the sampler works through live panes on a budgeted round robin, so a session's
+  real sampling period grows with the fleet, and any wall-clock window would eventually report a continuously-working
+  agent as idle because the HOST was busy. Waiting is never derived from activity at all (a blocked agent and a finished
+  one are equally quiet); it comes only from per-kind sharpening.
 - Agent-kind integrations live in the supervisor as a small trait (`AgentIntegration`; `AgentKind` is the wire enum
   naming the kind itself): status sharpening over the sampled tail, and conversation-identity capture. Sharpening is a
   DEFAULTED trait method that may only promote a live baseline to waiting, never invent liveness, and never panic on

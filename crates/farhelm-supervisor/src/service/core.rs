@@ -29,6 +29,7 @@ use super::snapshots::{
     MAX_ALT_SCREEN_SNAPSHOT_BYTES, capture_alt_screen_before_stop, snapshot_path,
     sweep_snapshot_temp_files,
 };
+use super::status::source_profile_existence;
 use super::sweep::{
     StopFailure, SweepTarget, TabReapAnchor, launch_scope_unit, reap_process_tree, stop_live_agent,
 };
@@ -44,13 +45,14 @@ use crate::agent_kind::{
 };
 use crate::launch::{LaunchSpec, resolve_shell, window_command};
 use crate::store::{
-    Claimed, IntentClaim, LastOutcome, Reservation, ReservationOutcome, RetryClaim, SessionStore,
-    Settlement, StoredSession, Transition, now_unix,
+    Claimed, IntentClaim, LastOutcome, ProfileSnapshot, Reservation, ReservationOutcome,
+    RetryClaim, SessionStore, Settlement, StoredSession, Transition, now_unix,
 };
 use crate::tmux::{AGENT_WINDOW_OPTION, PaneState, TAB_WINDOW_OPTION, TmuxDriver};
 use anyhow::Context;
 use farhelm_proto::{
-    AgentKind, ErrorKind, RestartMode, RestartOffer, SessionInfo, SessionStatus, TabInfo,
+    AgentKind, ErrorKind, ProfileExistence, RestartMode, RestartOffer, SessionInfo, SessionStatus,
+    SourceProfile, TabInfo,
 };
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
@@ -348,6 +350,36 @@ pub enum CaptureWrite {
 /// none, so every call site is one `Option` check.
 pub type CaptureStoreFault = Arc<dyn Fn(CaptureWrite, &str) -> anyhow::Result<()> + Send + Sync>;
 
+/// Which of a sampling pass's two tmux reads a [`SampleFault`] is being
+/// asked about (PLAN_M6_75.md items 1 and 2).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SampleRead<'a> {
+    /// The single batched liveness probe the whole pass is built on.
+    /// Failing it means the pass learns nothing about ANY session.
+    PaneStates,
+    /// One selected session's own screen capture.
+    Tail { session: &'a str },
+}
+
+/// A failure injected in place of one of a sampling pass's tmux reads,
+/// returning the message the read should fail with.
+///
+/// A seam rather than a fault-injecting tmux wrapper, and it exists for a
+/// property that is otherwise untestable: what a pass does to the retained
+/// screens when it cannot read them. Both failure paths INVALIDATE
+/// sharpening evidence without recording an observation
+/// (`ticker::ActivitySample::forget_tail`), and neither can be reached from
+/// a test by arranging real conditions — a pane must be alive in the very
+/// probe that selected it for its capture to be attempted at all, so
+/// "selected, then unreadable" is a race with no handle on it, and a failed
+/// server-wide probe means breaking tmux underneath a running supervisor.
+///
+/// Testing the invalidation by calling `forget_tail` directly was the
+/// alternative and is not equivalent: it stays green if production stops
+/// calling it, which is precisely the regression. Production installs none,
+/// so the cost is one `Option` check per read.
+pub type SampleFault = Arc<dyn Fn(SampleRead<'_>) -> Option<String> + Send + Sync>;
+
 /// A hook awaited at the START of every conversation-capture pass, after
 /// the pass has taken the coordination lock and committed to running.
 ///
@@ -399,6 +431,8 @@ pub struct SupervisorSeams {
     pub capture_store_fault: Option<CaptureStoreFault>,
     /// See [`CaptureGate`]. `None` in production.
     pub capture_gate: Option<CaptureGate>,
+    /// See [`SampleFault`]. `None` in production.
+    pub sample_fault: Option<SampleFault>,
     /// How often the supervisor's own periodic task fires — see
     /// [`crate::service::ticker`] for what rides that cadence and
     /// [`TICKER_INTERVAL`] for why production picks the value it does.
@@ -514,6 +548,7 @@ impl Default for SupervisorSeams {
             capture_window: CaptureWindowBounds::default(),
             capture_store_fault: None,
             capture_gate: None,
+            sample_fault: None,
             ticker_interval: TICKER_INTERVAL,
             launch_env: Vec::new(),
             scopes: Arc::new(crate::scope::ScopeManager::systemd()),
@@ -857,41 +892,35 @@ pub(crate) fn error_kind(e: &anyhow::Error) -> ErrorKind {
 /// is how long a copy outlives its session, not who can read it. That is a
 /// separate piece of work from bounding the row COUNT (see
 /// `store::Reservation`), and neither is owned here.
-pub(crate) fn create_fingerprint(
-    cwd: &str,
-    invocation: Option<&str>,
-    title: Option<&str>,
-    agent_kind: Option<AgentKind>,
-    resume_template: Option<&[String]>,
-    profile: Option<&str>,
-) -> String {
-    // The raw-only fields cannot accompany a profile selection — a request
-    // naming both is refused by `handlers::create_mode` before anything
-    // reaches here — so their absence from the profile encoding below drops
-    // nothing a caller could legally have sent. Asserted rather than
-    // assumed, because the failure mode of a future caller getting this
-    // wrong is a fingerprint that silently ignores fields it was given.
-    debug_assert!(
-        profile.is_none() || (invocation.is_none() && agent_kind.is_none()),
-        "a profile-mode fingerprint cannot also carry raw-mode inputs"
-    );
+pub(crate) fn create_fingerprint(cwd: &str, mode: &CreateMode, title: Option<&str>) -> String {
     // Infallible in practice: every element is a string, an option, or an
     // array of strings, none of which can fail to serialize. The `expect`
     // documents that rather than inviting a caller to handle an error that
     // cannot occur.
-    match profile {
+    //
+    // The raw-only fields cannot accompany a profile selection because
+    // [`CreateMode`] cannot represent that at all — an earlier shape passed
+    // both halves as separate `Option`s and needed a `debug_assert` to say
+    // so, which is a comment with a runtime cost rather than a guarantee.
+    match mode {
         // FROZEN — see this function's own docs. Five elements, in this
         // order, exactly as every pre-M6.75 supervisor wrote them.
-        None => serde_json::to_string(&(
-            cwd,
+        CreateMode::Raw {
             invocation,
+            agent_kind,
+            resume_template,
+        } => serde_json::to_string(&(
+            cwd,
+            Some(invocation.as_str()),
             title,
             agent_kind.map(crate::store::agent_kind_column),
-            resume_template,
+            resume_template.as_deref(),
         )),
         // The profile mode's own encoding, discriminated and shorter, so it
         // cannot collide with the frozen tuple above under any input.
-        Some(profile) => serde_json::to_string(&("profile", cwd, title, profile)),
+        CreateMode::Profile { profile_id } => {
+            serde_json::to_string(&("profile", cwd, title, profile_id))
+        }
     }
     .expect("a fingerprint of strings and options always serializes")
 }
@@ -1098,8 +1127,36 @@ fn unrecorded_outcome(original: anyhow::Error, settle: anyhow::Error) -> anyhow:
 /// checked" — `Supervisor::launch_session` performs no validation of its
 /// own and would have no way to.
 struct LaunchRequest<'a> {
+    /// The working directory AS THE CALLER SPELLED IT — what the session
+    /// records and what every error names, symlinks and all. Deliberately
+    /// not the resolved spelling: see `store::StoredSession::canonical_cwd`
+    /// for why the user-facing path must stay the user's.
     cwd: &'a str,
-    invocation: &'a str,
+    /// The directory this launch actually hands to tmux, which is NOT the
+    /// same question as what it records.
+    ///
+    /// For a create the two are identical: there is no prior identity to
+    /// check the path against, and canonicalization is best-effort there
+    /// (a failure costs capture correlation, never the create), so
+    /// substituting a resolved path would only add a way for the launch to
+    /// disagree with the request.
+    ///
+    /// For a RETRY it is the canonical path [`ensure_cwd_identity`] just
+    /// verified, and that is the whole point of the field. Checking that
+    /// `cwd` still resolves to the session's stored identity and then
+    /// handing tmux the ORIGINAL symlink is a time-of-check/time-of-use
+    /// gap: the link can be repointed between the two, and the launch lands
+    /// in a directory nobody validated — often with a permissively
+    /// configured agent. Launching into the resolved path closes it, since
+    /// a path with no symlinks left in it cannot be repointed out from
+    /// under the launch.
+    launch_cwd: String,
+    /// The command line this session will run and record, whoever supplied
+    /// it: the caller's own, or the one the resolved profile carried.
+    /// OWNED rather than borrowed from `CreateInputs` for exactly that
+    /// reason — a profile-backed create's invocation belongs to a catalog
+    /// row read during validation, which outlives nothing.
+    invocation: String,
     argv: Vec<String>,
     title: String,
     cols: u16,
@@ -1118,6 +1175,14 @@ struct LaunchRequest<'a> {
     /// session because re-resolving later could follow a symlink that has
     /// since been repointed.
     canonical_cwd: String,
+    /// The profile this create resolved, as the session will remember it
+    /// forever (PLAN_M6_75.md item 4), or `None` for a raw create.
+    ///
+    /// Resolved during validation beside the integration snapshot, and for
+    /// the same reason: the resolution can FAIL (the unknown-profile
+    /// precondition), and every refusal from validation is one a keyed
+    /// create records and replays verbatim.
+    source_profile: Option<ProfileSnapshot>,
 }
 
 /// One `CreateSession` request's session-shaping inputs, exactly as sent.
@@ -1131,12 +1196,48 @@ struct LaunchRequest<'a> {
 /// the launch does need them.
 pub(crate) struct CreateInputs<'a> {
     pub(crate) cwd: &'a str,
-    pub(crate) invocation: &'a str,
+    /// Which of the two creation modes this request selected, already
+    /// resolved to one (PLAN_M6_75.md item 3).
+    pub(crate) mode: CreateMode,
     pub(crate) title: Option<String>,
     pub(crate) cols: u16,
     pub(crate) rows: u16,
-    pub(crate) agent_kind: Option<AgentKind>,
-    pub(crate) resume_template: Option<Vec<String>>,
+}
+
+/// Which of `CreateSession`'s two creation modes a request selected, once
+/// it has been shown to select exactly one (PLAN_M6_75.md item 3).
+///
+/// A resolved value rather than a pair of `Option`s, so that everything
+/// downstream of `handlers::create_mode` is working from a request whose
+/// meaning is settled: there is deliberately no way to construct a
+/// `CreateMode` that names both modes, or neither, or a profile alongside
+/// the raw-mode overrides. The overrides live INSIDE the raw variant for
+/// that last reason — an earlier shape carried them beside the mode as
+/// their own fields, which made "a profile-backed create must not carry
+/// these" an invariant maintained by comment and `debug_assert` rather than
+/// by the type.
+///
+/// Lives here rather than in `handlers` because the create path is what
+/// consumes it: [`create_fingerprint`] encodes it, and
+/// [`Supervisor::validate_create`] resolves it. `handlers::create_mode` is
+/// only where a wire request is proven to name one.
+pub(crate) enum CreateMode {
+    /// The caller gave a command line, and may have overridden what would
+    /// be derived from it.
+    Raw {
+        invocation: String,
+        /// `None` means "derive the kind from the invocation's basename",
+        /// which is a guess a raw caller may want. A profile is never a
+        /// guess (see `farhelm_proto::Profile::agent_kind`).
+        agent_kind: Option<AgentKind>,
+        resume_template: Option<Vec<String>>,
+    },
+    /// The caller named one of this supervisor's profiles, which supplies
+    /// every launch-shaping value. Resolved against the catalog during
+    /// validation, so a profile deleted between a client's picker read and
+    /// its submit fails the create visibly, before any launch, with no
+    /// session left behind.
+    Profile { profile_id: String },
 }
 
 /// Everything durable a session knows about resuming itself: its
@@ -1233,37 +1334,80 @@ impl Reserved {
     }
 }
 
-/// Why a relaunch failed, and — the part the caller acts on — whether it
-/// is DEFINITIVE that nothing outside this process changed.
+/// How much a failed relaunch changed outside this process — the input to
+/// every recovery decision `Supervisor::relaunch` makes.
 ///
-/// The distinction decides whether the previous run's outcome may be put
-/// back (`SessionStore::abort_relaunch`). Restoring "exited, stopped by
-/// user" over a session that may have a live agent under its new
-/// generation would be a worse lie than the honest `Launching` that reload
-/// knows how to reconcile — so only failures that PROVED nothing spawned
-/// are marked definitive, and every ambiguity (including every failure to
-/// probe one) stays on the safe side.
+/// The first two decide whether the previous run's outcome may be put back
+/// (`SessionStore::abort_relaunch`). Restoring "exited, stopped by user"
+/// over a session that may have a live agent under its new generation would
+/// be a worse lie than the honest `Launching` that reload knows how to
+/// reconcile — so only failures that PROVED nothing spawned are
+/// `Definitive`, and every ambiguity (including every failure to probe one)
+/// stays on the safe side.
+///
+/// [`RelaunchDisposition::Published`] is a different kind of answer
+/// entirely and is the reason this is an enum rather than a `bool`. See its
+/// own docs.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum RelaunchDisposition {
+    /// Nothing outside this process changed: the previous outcome is still
+    /// the truth about this session and may be restored.
+    Definitive,
+    /// An agent may be running under the new generation; the durable
+    /// `Launching` record stays and reload reconciles it.
+    Ambiguous,
+    /// The relaunch REACHED ITS PUBLICATION: the new terminal, generation,
+    /// and outcome are already installed on the map, and only the reply
+    /// that describes them could not be produced. Recovery must not run.
+    ///
+    /// This exists because classifying such a failure as merely `Ambiguous`
+    /// was actively destructive rather than conservative. The recovery path
+    /// republishes the entry built from the PRE-restart `SessionEntry` — the
+    /// old terminal, the old generation's pane, a `Launching` outcome — so a
+    /// reply-build failure would overwrite the entry the relaunch had just
+    /// published moments earlier. On a fresh-terminal restart that discards
+    /// the live terminal outright: the map ends up pointing at a pane the
+    /// restart replaced, while the agent it actually started runs in a
+    /// terminal nothing references. SPEC.md's restart contract is that a
+    /// successful restart's live terminal is what the session has, and a
+    /// failure to build a REPLY has no standing to revise that.
+    ///
+    /// The error still surfaces — the caller is told what it must not
+    /// assume — but the published state stands, and the next list describes
+    /// the session correctly.
+    Published,
+}
+
+/// Why a relaunch failed, and what the caller may do about it.
 struct RelaunchFailure {
     error: anyhow::Error,
-    definitive: bool,
+    disposition: RelaunchDisposition,
 }
 
 impl RelaunchFailure {
-    /// Nothing outside this process changed: the previous outcome is still
-    /// the truth about this session and may be restored.
+    /// See [`RelaunchDisposition::Definitive`].
     fn definitive(error: anyhow::Error) -> RelaunchFailure {
         RelaunchFailure {
             error,
-            definitive: true,
+            disposition: RelaunchDisposition::Definitive,
         }
     }
 
-    /// An agent may be running under the new generation; the durable
-    /// `Launching` record stays.
+    /// See [`RelaunchDisposition::Ambiguous`].
     fn ambiguous(error: anyhow::Error) -> RelaunchFailure {
         RelaunchFailure {
             error,
-            definitive: false,
+            disposition: RelaunchDisposition::Ambiguous,
+        }
+    }
+
+    /// See [`RelaunchDisposition::Published`]. Only ever constructed AFTER
+    /// `publish_relaunched` has returned, which is the invariant that makes
+    /// skipping recovery safe.
+    fn published(error: anyhow::Error) -> RelaunchFailure {
+        RelaunchFailure {
+            error,
+            disposition: RelaunchDisposition::Published,
         }
     }
 }
@@ -1371,11 +1515,12 @@ fn relaunched_entry(
         canonical_cwd: entry.canonical_cwd.clone(),
         first_input: Arc::new(std::sync::Mutex::new(first_input)),
         capture: Arc::new(std::sync::Mutex::new(capture)),
-        // Never carried over, whatever `reset_capture` says: the previous
-        // run's screen and its output recency describe a process that no
-        // longer exists, and inheriting them would report the replacement
-        // launch as busy (or quiet) on evidence gathered from its
-        // predecessor.
+        // Never carried over, whatever `reset_capture` says: the sampled
+        // tail and the unchanged-sample streak beside it both describe a
+        // process that no longer exists. Inheriting them would classify the
+        // replacement launch from its predecessor's screen — quiet because
+        // the OLD pane stopped changing, or sharpened `Waiting` from a
+        // dialog the previous run was showing when it died.
         activity: ActivitySample::unsampled(),
         generation,
         scope,
@@ -1383,7 +1528,8 @@ fn relaunched_entry(
 }
 
 /// Refuse a relaunch whose working directory no longer resolves to the
-/// path this session was created against (fix-batch item 21).
+/// path this session was created against (fix-batch item 21; PLAN_M6_75.md
+/// item 4 gave it a second caller).
 ///
 /// `ensure_cwd_usable` answers "is there a usable directory here"; this
 /// answers "is it the SAME one". They are different questions the moment a
@@ -1395,30 +1541,64 @@ fn relaunched_entry(
 /// against precisely because it was resolved once, at create, and is
 /// immutable after (`store::StoredSession::canonical_cwd`).
 ///
+/// The two callers are `restart_session` and
+/// [`Supervisor::validate_retry`], and the second wants it for a reason
+/// worth stating separately: a pending retry carries the crashed attempt's
+/// `canonical_cwd` forward, so a symlink repointed between the two attempts
+/// would launch the agent in the NEW target while conversation capture went
+/// on correlating against the OLD one — no failure anywhere, just a session
+/// that never captures its conversation (or correlates against another
+/// project's records) for the rest of its life.
+///
 /// Sessions with no stored canonical path (rows predating the column) skip
 /// the check rather than fail it: there is nothing to compare, and
 /// inventing a mismatch would refuse every such session's restart forever.
-/// A path that cannot be canonicalized NOW is likewise not treated as a
-/// mismatch — `ensure_cwd_usable` has already established the directory is
-/// there, so this is a race or an exotic filesystem, and the honest cost
-/// is skipping a defence rather than blocking a legitimate restart.
-async fn ensure_cwd_identity(cwd: &str, canonical: Option<&str>) -> anyhow::Result<()> {
+/// That case answers `None`, and its caller launches into `cwd` unchanged.
+///
+/// ## Why it fails closed, and why it returns a path
+///
+/// Both were bugs, and they were the same bug seen from two sides: the
+/// check looked like a guard while leaving the door open.
+///
+/// A path that cannot be canonicalized used to be waved through with a
+/// warning, on the reasoning that `ensure_cwd_usable` had already found a
+/// directory there. That reasoning inverts the threat. The whole scenario
+/// this defends against is a path whose meaning CHANGED, and a
+/// canonicalization that fails against a directory that stats fine is
+/// exactly the shape a hostile or broken path takes — so the one input that
+/// most deserves refusing was the one it let through. A session that has a
+/// recorded identity and cannot be checked against it is refused; a session
+/// with no recorded identity is untouched, since there was never anything
+/// to check.
+///
+/// And a successful comparison is not the end of the guard's job. The
+/// caller was passing the ORIGINAL, still-symlinked `cwd` to tmux
+/// afterwards, so a link repointed between the comparison and the launch
+/// put the agent in a directory nothing validated — the classic
+/// time-of-check/time-of-use window, and a wide one, since a launch is
+/// several awaits and a subprocess away. Handing back the RESOLVED path and
+/// launching into that closes it: a path with no symlink components left
+/// cannot be repointed, so what was verified is what runs.
+async fn ensure_cwd_identity(cwd: &str, canonical: Option<&str>) -> anyhow::Result<Option<String>> {
     let Some(canonical) = canonical else {
-        return Ok(());
+        return Ok(None);
     };
     let resolved = match tokio::fs::canonicalize(cwd).await {
         Ok(resolved) => resolved.to_string_lossy().into_owned(),
         Err(e) => {
-            warn!(
-                cwd = %cwd, error = %e,
-                "could not resolve this working directory before a relaunch; proceeding \
-                 without confirming it still names the directory the session was created in"
-            );
-            return Ok(());
+            return Err(RequestError::new(
+                ErrorKind::InvalidRequest,
+                format!(
+                    "working directory {cwd} could not be resolved ({e}), so it cannot be \
+                     confirmed to still name {canonical} where this session was created; \
+                     refusing to relaunch its agent into a directory nothing could check"
+                ),
+            )
+            .into());
         }
     };
     if resolved == canonical {
-        return Ok(());
+        return Ok(Some(resolved));
     }
     Err(RequestError::new(
         ErrorKind::InvalidRequest,
@@ -1463,6 +1643,11 @@ const RELAUNCH_ROWS: u16 = 24;
 ///
 /// The `Conflict` names the CURRENT offer, because the client's next move
 /// is to re-present that offer to the user rather than to retry.
+///
+/// Whatever the mode, the vector that comes back has been through the
+/// shared executable-argv rule (`agent_kind::ensure_executable_argv`): all
+/// three sources are durable columns, and a restart is the moment a stored
+/// argv stops being data and becomes an exec.
 fn relaunch_argv(
     mode: RestartMode,
     snapshot: &SessionSnapshot,
@@ -1485,7 +1670,7 @@ fn relaunch_argv(
         )
         .into());
     }
-    match mode {
+    let argv = match mode {
         // Already substituted, slot by slot, from the DURABLE identity
         // (`IntegrationSnapshot::filled_resume_argv`) — never spliced into
         // a command string, so an id cannot become a different command.
@@ -1513,7 +1698,18 @@ fn relaunch_argv(
                 format!("this session's launch invocation no longer parses: {e}"),
             ))
         }),
-    }
+    }?;
+    // The last gate before an argv becomes a real exec, whichever of the
+    // three modes produced it. All three read from DURABLE columns — the
+    // launch invocation, the stored template, the substituted identity —
+    // and a row written by an older build (or edited by hand) can carry a
+    // vector that names no program or hides a NUL. The same rule profile
+    // writes enforce, applied where the vector is about to be run rather
+    // than only where it was accepted.
+    crate::agent_kind::ensure_executable_argv("this session's restart command", &argv).map_err(
+        |message| anyhow::Error::new(RequestError::new(ErrorKind::InvalidRequest, message)),
+    )?;
+    Ok(argv)
 }
 
 /// How an offer reads in a refusal aimed at a user. Deliberately prose
@@ -2349,6 +2545,15 @@ pub struct Supervisor {
     /// durable-then-in-memory write from interleaving with an operation
     /// that republishes or removes the same entry (see
     /// [`Supervisor::rename_session`]).
+    ///
+    /// A CREATE takes one too, but only on its retry-takeover path and only
+    /// for the two steps that reclaim an existing session's identities: the
+    /// takeover transaction and the map removal that mirrors it. That span
+    /// is the one window in a create where a rename can interleave —
+    /// everywhere else the session is not on the map yet, or no longer is,
+    /// and rename answers `NotFound` like stop and delete do. The claim is
+    /// released well before the launch's tmux work, so a create never holds
+    /// one across a subprocess (see `Supervisor::launch_reserved`).
     ///
     /// The map-wide `sessions` mutex cannot do this job — it is released
     /// the moment an entry is cloned out of it, and every one of these
@@ -3352,12 +3557,17 @@ impl Supervisor {
                         // is the honest "none known" value every reload
                         // reports.
                         tabs: Vec::new(),
-                        // Nothing stored has ever named a profile: the
-                        // catalog and the session columns that would
-                        // snapshot one arrive together in PLAN_M6_75.md's
-                        // step 5, so every reloaded session is raw-created
-                        // and says so.
-                        source_profile: None,
+                        // The stored snapshot, with a PLACEHOLDER existence
+                        // — like `status` and `restart_offer` above, and
+                        // for the same reason: existence is a statement
+                        // about the catalog at REPLY time, and `entry_info`
+                        // re-derives it on every reply that carries this
+                        // entry. Nothing reads the value parked here.
+                        source_profile: row.source_profile.map(|profile| SourceProfile {
+                            id: profile.id,
+                            name: profile.name,
+                            existence: ProfileExistence::Present,
+                        }),
                     },
                     terminal,
                     outcome: Arc::new(std::sync::Mutex::new(outcome)),
@@ -3710,13 +3920,27 @@ impl Supervisor {
     /// same key gets the same "working directory does not exist" answer
     /// rather than a different one derived from a filesystem that changed
     /// in between.
+    ///
+    /// ## Why a RETRY does not re-resolve its request
+    ///
+    /// A pending retry rebuilds its launch from the row the crashed attempt
+    /// committed ([`Supervisor::validate_retry`]) rather than from the
+    /// request that arrived, and the reason is PLAN_M6_75.md item 4's
+    /// catalog: the request names a profile, and a profile is MUTABLE. An
+    /// unchanged retry that re-read the catalog would launch whatever the
+    /// profile says NOW — so editing a profile between the crash and the
+    /// retry would silently change what an already-accepted intent runs,
+    /// and deleting it would turn that intent into a `NotFound` for a
+    /// create the supervisor had already accepted and half-performed. The
+    /// stored row is what the first attempt actually resolved, and a retry
+    /// under the same reservation is the same create.
     pub(crate) async fn create_session(
         &self,
         inputs: CreateInputs<'_>,
         claim: Option<IntentClaim>,
     ) -> anyhow::Result<SessionInfo> {
         let Some(claim) = claim else {
-            let request = Self::validate_create(inputs).await?;
+            let request = self.validate_create(inputs).await?;
             return self
                 .launch_session(request, Reserved::Unkeyed(new_session_identity()))
                 .await;
@@ -3740,7 +3964,11 @@ impl Supervisor {
                 identity: new_session_identity(),
             },
         };
-        let request = match Self::validate_create(inputs).await {
+        let validated = match &reserved {
+            Reserved::Retry(reservation) => self.validate_retry(inputs, reservation).await,
+            _ => self.validate_create(inputs).await,
+        };
+        let request = match validated {
             Ok(request) => request,
             Err(refusal) => return self.record_refused_create(&reserved, refusal).await,
         };
@@ -3768,12 +3996,14 @@ impl Supervisor {
         self.create_session(
             CreateInputs {
                 cwd,
-                invocation,
+                mode: CreateMode::Raw {
+                    invocation: invocation.to_string(),
+                    agent_kind: None,
+                    resume_template: None,
+                },
                 title,
                 cols,
                 rows,
-                agent_kind: None,
-                resume_template: None,
             },
             claim,
         )
@@ -3789,8 +4019,7 @@ impl Supervisor {
     /// Split out of `create_session` because the idempotency state machine
     /// must be able to run its reservation lookup WITHOUT it (see that
     /// function's docs on ordering) and then apply it to only the branches
-    /// that are about to launch something. Associated rather than a method
-    /// because it touches no supervisor state at all.
+    /// that are about to launch something.
     ///
     /// The snapshot resolution belongs HERE rather than at the launch for
     /// two reasons. It can fail — PLAN_M3.md item 7's one validation
@@ -3800,16 +4029,101 @@ impl Supervisor {
     /// needs the parsed `argv`, since the kind and the default template
     /// both come from the invocation's FIRST TOKEN rather than from the
     /// invocation string.
-    async fn validate_create(inputs: CreateInputs<'_>) -> anyhow::Result<LaunchRequest<'_>> {
+    ///
+    /// The parsed argv and any resume-template override are additionally
+    /// held to the shared executable-argv rule
+    /// (`agent_kind::ensure_executable_argv`,
+    /// `agent_kind::ensure_resume_template`), which is the same rule profile
+    /// writes enforce. A raw create is otherwise the door through which a
+    /// command line that names no program — `''` splits into a one-element
+    /// argv holding the empty string — reaches tmux.
+    ///
+    /// ## Profile resolution (PLAN_M6_75.md item 4)
+    ///
+    /// A profile-backed create resolves its profile FIRST, and everything
+    /// after that point is identical to a raw create: the profile's
+    /// invocation, kind, and template feed the very same
+    /// [`IntegrationSnapshot::resolve`] seam a raw create's overrides do,
+    /// so a session created from a profile carries an ordinary immutable
+    /// snapshot with no second code path behind it. What the profile adds
+    /// is the source-profile identity recorded beside that snapshot.
+    ///
+    /// An unknown profile is refused right here — a precondition failure in
+    /// SPEC.md's split, so no session exists and nothing was launched — and
+    /// it is a REAL race rather than a malformed request: a profile can be
+    /// deleted between the client reading its picker and submitting. It is
+    /// therefore refused rather than quietly resolved to some other
+    /// profile, which would launch an agent the user never asked for. Being
+    /// a validation refusal, it is also recorded against a keyed create's
+    /// intent key like every other precondition, so a retry replays the
+    /// same answer instead of re-deriving it from a catalog that may have
+    /// changed again.
+    ///
+    /// A method rather than an associated function since PLAN_M6_75.md item
+    /// 4: resolving a profile needs the store.
+    async fn validate_create<'a>(
+        &self,
+        inputs: CreateInputs<'a>,
+    ) -> anyhow::Result<LaunchRequest<'a>> {
         let CreateInputs {
             cwd,
-            invocation,
+            mode,
             title,
             cols,
             rows,
-            agent_kind,
-            resume_template,
         } = inputs;
+        // The profile lookup precedes the cwd check for one reason: it is
+        // the only precondition here that reads state this supervisor OWNS,
+        // and reporting "no such profile" for a request that also names a
+        // vanished directory is the more actionable of the two answers —
+        // the client's catalog is stale and every retry against that
+        // profile will fail, directory or no directory.
+        let (invocation, agent_kind, resume_template, source_profile) = match mode {
+            CreateMode::Raw {
+                invocation,
+                agent_kind,
+                resume_template,
+            } => (invocation, agent_kind, resume_template, None),
+            CreateMode::Profile { profile_id } => {
+                let profile_id = profile_id.as_str();
+                let profile = self
+                    .store
+                    .profile(profile_id)
+                    .await
+                    .context("reading the profile this create names")?
+                    .ok_or_else(|| {
+                        RequestError::new(
+                            ErrorKind::NotFound,
+                            format!(
+                                "no profile {} exists on this host; it may have been deleted \
+                                 since the profile list was read — pick another and try again",
+                                truncate_for_error(profile_id)
+                            ),
+                        )
+                    })?;
+                (
+                    profile.invocation,
+                    // A profile's kind is never a guess (it is
+                    // `AgentKind::Generic` when the user picked none), so it
+                    // is passed as an explicit OVERRIDE rather than left for
+                    // basename derivation — a `Generic` profile whose
+                    // invocation happens to start with `claude` must stay
+                    // generic, because that is what the user chose.
+                    Some(profile.agent_kind),
+                    // `None` here keeps `Profile::resume_template`'s own
+                    // meaning: for an integrated kind the snapshot resolver
+                    // derives that kind's default (from THIS invocation's
+                    // argv0, so an edited invocation carries its resume with
+                    // it), and for a generic profile there is simply no
+                    // resume template.
+                    profile.resume_template,
+                    Some(ProfileSnapshot {
+                        id: profile.id,
+                        name: profile.name,
+                    }),
+                )
+            }
+        };
         let cwd_path = PathBuf::from(cwd);
         ensure_cwd_usable(cwd).await?;
         // The invocation itself stays out of the error: it may carry
@@ -3819,14 +4133,26 @@ impl Supervisor {
         // (not the root cause) specifically so that diagnostic keeps
         // reaching the user through the `{e:#}` chain — `RequestError` is
         // still findable via `downcast_ref` at this depth (see its docs).
-        let argv = shell_words::split(invocation).context(RequestError::new(
+        let argv = shell_words::split(&invocation).context(RequestError::new(
             ErrorKind::InvalidRequest,
             "parsing agent invocation",
         ))?;
-        if argv.is_empty() {
-            return Err(
-                RequestError::new(ErrorKind::InvalidRequest, "agent invocation is empty").into(),
-            );
+        // The SHARED executable-argv rule, not a local emptiness test. An
+        // `argv.is_empty()` check on its own accepts `''`, which
+        // `shell_words` splits into a one-element argv holding the empty
+        // string — a command line that exists and names nothing — and it
+        // says nothing about a NUL byte, which truncates an argument
+        // silently rather than failing. Profile writes have refused both
+        // for a while; this is the same rule reaching the raw path.
+        crate::agent_kind::ensure_executable_argv("agent invocation", &argv)
+            .map_err(|message| RequestError::new(ErrorKind::InvalidRequest, message))?;
+        // The resume-template OVERRIDE is caller data on exactly the same
+        // footing as a profile's template, and it becomes this session's
+        // immutable snapshot — so it is held to the same rule here rather
+        // than at the restart that would otherwise discover it.
+        if let Some(template) = resume_template.as_deref() {
+            crate::agent_kind::ensure_resume_template(template)
+                .map_err(|message| RequestError::new(ErrorKind::InvalidRequest, message))?;
         }
         // ## Titles must stay printable on one line
         //
@@ -3921,6 +4247,11 @@ impl Supervisor {
         };
         Ok(LaunchRequest {
             cwd,
+            // A create has no prior identity to have verified, and the
+            // canonicalization above is deliberately allowed to fail
+            // without failing the create — so the caller's own spelling is
+            // what tmux gets. See [`LaunchRequest::launch_cwd`].
+            launch_cwd: cwd.to_string(),
             invocation,
             argv,
             title,
@@ -3928,6 +4259,107 @@ impl Supervisor {
             rows,
             snapshot,
             canonical_cwd,
+            source_profile,
+        })
+    }
+
+    /// Rebuild a PENDING retry's launch from the row its crashed attempt
+    /// committed, rather than re-resolving the request that arrived
+    /// (PLAN_M6_75.md item 4).
+    ///
+    /// A retry under an existing reservation is the SAME create: its
+    /// identities are already assigned, and by this point the supervisor has
+    /// established that the first attempt left no launch behind. What it
+    /// must therefore run is what the first attempt resolved — and for a
+    /// profile-backed create, that is no longer derivable from the request,
+    /// because the catalog it names is mutable. Re-resolving would let an
+    /// edit between the two attempts change what an unchanged intent
+    /// launches, and a delete turn an accepted create into a `NotFound`.
+    /// The row is the record of that resolution, so the row is what this
+    /// reads: invocation, integration snapshot, canonical cwd, title, and
+    /// the source-profile identity all come back exactly as committed.
+    ///
+    /// Two things are still checked against the world rather than taken from
+    /// the row, and both are about to be used:
+    ///
+    /// - The working directory must STILL be usable. The retry is about to
+    ///   launch into it, and a directory removed since the crash is a
+    ///   precondition failure now, not a historical detail.
+    /// - The working directory must still be the SAME directory
+    ///   ([`ensure_cwd_identity`]). Usable is not enough: a symlink
+    ///   repointed between the two attempts leaves a path that stats fine
+    ///   and now resolves somewhere else, and this retry would launch there
+    ///   while carrying the crashed attempt's `canonical_cwd` — so the
+    ///   agent runs in one directory and conversation capture correlates
+    ///   against another, silently and for the life of the session. The
+    ///   VERIFIED path is what the launch is then aimed at
+    ///   ([`LaunchRequest::launch_cwd`]), so the same link cannot be
+    ///   repointed again between this check and the tmux call.
+    /// - The stored invocation must still be an executable argv
+    ///   (`agent_kind::ensure_executable_argv`), and so must the stored
+    ///   resume template. They were once, so this cannot fail for a row this
+    ///   build wrote — but the database is a trust boundary like any other
+    ///   input (`store`'s own decode says the same), and the alternative to
+    ///   checking is handing tmux a vector that names no program.
+    ///
+    /// A retry whose row is GONE falls back to validating the request
+    /// normally. That is the honest fallback rather than a failure: there is
+    /// no recorded resolution left to preserve, the reservation's identities
+    /// are still free to reuse, and the alternative — refusing — would
+    /// permanently strand an intent key whose session someone deleted.
+    async fn validate_retry<'a>(
+        &self,
+        inputs: CreateInputs<'a>,
+        reservation: &Reservation,
+    ) -> anyhow::Result<LaunchRequest<'a>> {
+        let row = self
+            .store
+            .session(&reservation.session_id)
+            .await
+            .context("reading the interrupted attempt's session row")?;
+        let Some(row) = row else {
+            return self.validate_create(inputs).await;
+        };
+        ensure_cwd_usable(inputs.cwd).await?;
+        let verified = ensure_cwd_identity(inputs.cwd, row.canonical_cwd.as_deref()).await?;
+        let argv = shell_words::split(&row.invocation).context(RequestError::new(
+            ErrorKind::InvalidRequest,
+            "parsing the interrupted attempt's recorded agent invocation",
+        ))?;
+        // Same shared rule the raw path applies, for the reason this
+        // function's docs give about the database being a trust boundary:
+        // `''` and an embedded NUL both survive a round trip through
+        // SQLite, and neither is an argv anything can run.
+        crate::agent_kind::ensure_executable_argv(
+            "the interrupted attempt's recorded agent invocation",
+            &argv,
+        )
+        .map_err(|message| RequestError::new(ErrorKind::InvalidRequest, message))?;
+        if let Some(template) = row.resume_template.as_deref() {
+            crate::agent_kind::ensure_resume_template(template)
+                .map_err(|message| RequestError::new(ErrorKind::InvalidRequest, message))?;
+        }
+        Ok(LaunchRequest {
+            cwd: inputs.cwd,
+            // The path `ensure_cwd_identity` just VERIFIED, so the launch
+            // cannot be aimed somewhere else by a symlink repointed between
+            // that check and the tmux call. `None` only for a row with no
+            // recorded identity, where there was nothing to verify.
+            launch_cwd: verified.unwrap_or_else(|| inputs.cwd.to_string()),
+            invocation: row.invocation,
+            argv,
+            title: row.title,
+            cols: inputs.cols,
+            rows: inputs.rows,
+            snapshot: IntegrationSnapshot {
+                kind: row.agent_kind,
+                resume_template: row.resume_template,
+            },
+            // `None` only for a row written before the column existed, which
+            // is necessarily a non-integrated session; the literal cwd is the
+            // same honest fallback `validate_create` uses.
+            canonical_cwd: row.canonical_cwd.unwrap_or_else(|| inputs.cwd.to_string()),
+            source_profile: row.source_profile,
         })
     }
 
@@ -4160,7 +4592,17 @@ impl Supervisor {
                     kind: row.agent_kind,
                     resume_template: row.resume_template,
                 };
-                Ok(SessionInfo {
+                // A placeholder existence, replaced below by
+                // `with_derived_source_profile`. Derived NOW rather than
+                // replayed, because a replay can land long after the
+                // original create and the profile it named may have been
+                // renamed or deleted since.
+                let source_profile = row.source_profile.map(|snapshotted| SourceProfile {
+                    id: snapshotted.id,
+                    name: snapshotted.name,
+                    existence: ProfileExistence::Present,
+                });
+                let info = SessionInfo {
                     restart_offer: snapshot.restart_offer(row.captured_conversation.as_deref()),
                     id: row.id,
                     title: row.title,
@@ -4172,11 +4614,9 @@ impl Supervisor {
                     // Vocabulary only for now — see PLAN_M4.md step 4 for
                     // where tabs get real rediscovery.
                     tabs: Vec::new(),
-                    // Raw-created, like every session this build can make:
-                    // profile-backed creation is refused at the handler
-                    // until PLAN_M6_75.md's step 5 builds the catalog.
-                    source_profile: None,
-                })
+                    source_profile,
+                };
+                self.with_derived_source_profile(info).await
             }
             None => Err(RequestError::new(
                 ErrorKind::Conflict,
@@ -4336,6 +4776,7 @@ impl Supervisor {
     ) -> anyhow::Result<SessionInfo> {
         let LaunchRequest {
             cwd,
+            launch_cwd,
             invocation,
             argv,
             title,
@@ -4343,7 +4784,13 @@ impl Supervisor {
             rows,
             snapshot,
             canonical_cwd,
+            source_profile,
         } = request;
+        // Reassigned on the retry-takeover path below, from the value that
+        // transaction actually committed: a rename that landed between the
+        // crashed attempt and this retry survives in SQLite, and the reply
+        // and the published entry built from here have to agree with it.
+        let mut title = title;
         let id = reserved.session_id().to_string();
         let tmux_name = reserved.tmux_name().to_string();
         // Decided ONCE, here, and carried into every durable write below —
@@ -4405,13 +4852,16 @@ impl Supervisor {
             // first insert: a relaunch under the same reservation is the
             // same create, so the session it finally produces must carry
             // the same immutable kind and template it would have had if
-            // the first attempt had not crashed.
+            // the first attempt had not crashed. The source-profile
+            // snapshot rides along for the same reason — and it is the same
+            // profile either way, since the fingerprint binds the profile
+            // identity to the intent key.
             let row = StoredSession {
                 id: id.clone(),
                 title: title.clone(),
                 created_at,
                 cwd: cwd.to_string(),
-                invocation: invocation.to_string(),
+                invocation: invocation.clone(),
                 tmux_name: tmux_name.clone(),
                 pane: String::new(),
                 outcome: LastOutcome::Launching,
@@ -4424,33 +4874,74 @@ impl Supervisor {
                 first_input_at: None,
                 generation: 0,
                 launch_scoped: scoped,
+                source_profile: source_profile.clone(),
             };
-            match self
-                .store
-                .restart_pending_launch(row, &reservation.intent_key)
-                .await
-                .context("taking over the interrupted attempt's reservation")?
-            {
+            // The takeover and the map removal that mirrors it run under
+            // this session's LIFECYCLE CLAIM, which is what closes the
+            // rename window between them. `rename_session` takes the same
+            // claim and then resolves the session through the map, so with
+            // the claim held it either commits entirely BEFORE the takeover
+            // — where the transaction preserves its title and hands it back
+            // — or finds the entry already gone and answers `NotFound`, the
+            // same way stop and delete do for the rest of this launch.
+            // Without it a rename could land in between: committed to
+            // SQLite and to the map, and then erased from the map by the
+            // removal below, leaving the durable title and every list this
+            // process serves disagreeing until the next reload.
+            //
+            // The claim is released the moment this block ends, well before
+            // the tmux round trips further down. Holding one across a wedged
+            // tmux would take this session's stop, restart and delete down
+            // with it, and nothing past the map removal needs it: with no
+            // entry on the map there is nothing left for a claim-holder to
+            // resolve.
+            //
+            // Nothing inside takes a lifecycle claim of its own (the two
+            // replay paths are reached only after this block), so the
+            // non-reentrant `KeyedLocks` cannot deadlock here. The
+            // intent-key claim `create_session` already holds is nested
+            // OUTSIDE this one, and that nesting has no partner in the
+            // other direction: `intent_locks` is claimed in exactly one
+            // place, and nothing there holds a lifecycle claim first.
+            let claim = {
+                let _lifecycle = self.lifecycle_locks.claim(&id).await;
+                let claim = self
+                    .store
+                    .restart_pending_launch(row, &reservation.intent_key)
+                    .await
+                    .context("taking over the interrupted attempt's reservation")?;
+                if matches!(claim, RetryClaim::Acquired { .. }) {
+                    // The in-memory mirror follows the row it mirrors, and
+                    // it is also what serializes this relaunch against
+                    // `StopSession` and `DeleteSession`: both resolve the
+                    // session through this map, so while a relaunch is in
+                    // flight they answer `NotFound` rather than tearing down
+                    // a launch that is half-built. The residual window — a
+                    // delete that read the map just before this removal — is
+                    // closed at the other end, where the confirmation below
+                    // finds its row already gone.
+                    self.sessions.lock().await.remove(&id);
+                }
+                claim
+            };
+            match claim {
                 // Overwrites the fallback `now_unix()` reading above with
-                // the crashed attempt's PRESERVED value — see
-                // `RetryClaim::Acquired`'s and `StoredSession::created_at`'s
-                // own docs for why this reply must agree with whatever a
-                // concurrent reload-then-list could already have shown.
+                // the crashed attempt's PRESERVED value, and the resolved
+                // snapshot's title with whatever the row actually carries —
+                // see `RetryClaim::Acquired`'s and
+                // `StoredSession::created_at`'s own docs for why this reply
+                // must agree with whatever a concurrent reload-then-list
+                // could already have shown.
                 RetryClaim::Acquired {
                     created_at: preserved,
-                } => created_at = preserved,
+                    title: preserved_title,
+                } => {
+                    created_at = preserved;
+                    title = preserved_title;
+                }
                 RetryClaim::Resolved(settled) => return self.answer_from(&settled).await,
                 RetryClaim::Launched => return self.settle_and_replay(reservation).await,
             }
-            // The in-memory mirror follows the row it mirrors, and it is
-            // also what serializes this relaunch against `StopSession` and
-            // `DeleteSession`: both resolve the session through this map,
-            // so while a relaunch is in flight they answer `NotFound`
-            // rather than tearing down a launch that is half-built. The
-            // residual window — a delete that read the map just before
-            // this removal — is closed at the other end, where the
-            // confirmation below finds its row already gone.
-            self.sessions.lock().await.remove(&id);
         }
 
         // The durable launching record, committed BEFORE any external side
@@ -4490,7 +4981,7 @@ impl Supervisor {
                         title: title.clone(),
                         created_at,
                         cwd: cwd.to_string(),
-                        invocation: invocation.to_string(),
+                        invocation: invocation.clone(),
                         tmux_name: tmux_name.clone(),
                         // Not known until tmux has created the session —
                         // see `StoredSession::pane`.
@@ -4510,6 +5001,11 @@ impl Supervisor {
                         first_input_at: None,
                         generation: 0,
                         launch_scoped: scoped,
+                        // Written once, with the row, and never rewritten:
+                        // SPEC.md's snapshot rule is that a later edit or
+                        // delete of the profile leaves this session's record
+                        // of what it came from exactly as it is.
+                        source_profile: source_profile.clone(),
                     },
                     claim,
                 )
@@ -4539,7 +5035,11 @@ impl Supervisor {
                 0,
                 &tmux_name,
                 argv,
-                cwd,
+                // The VERIFIED directory, not the caller's spelling: see
+                // [`LaunchRequest::launch_cwd`]. They differ only on the
+                // retry path, and only there because that path had an
+                // identity to check.
+                &launch_cwd,
                 cols,
                 rows,
                 None,
@@ -4664,7 +5164,7 @@ impl Supervisor {
             // why a retry in particular must not re-mint.
             created_at,
             cwd: cwd.to_string(),
-            invocation: invocation.to_string(),
+            invocation: invocation.clone(),
             // Create-time placeholder, deliberately NOT a live status:
             // `SessionCreated`'s own docs say creation establishes that
             // the session and terminal exist, not that the agent's later
@@ -4689,12 +5189,17 @@ impl Supervisor {
             // A brand-new session has no tabs; real tab creation lands in
             // PLAN_M4.md step 4.
             tabs: Vec::new(),
-            // This build only ever reaches a launch through the RAW mode
-            // (the handler refuses profile mode until PLAN_M6_75.md's step
-            // 5), so there is no profile to snapshot. Step 5 fills this
-            // from the profile it resolved, at exactly this point — the
-            // snapshot is taken once, at creation, and never rewritten.
-            source_profile: None,
+            // The profile this create resolved, snapshotted once and never
+            // rewritten (PLAN_M6_75.md item 4). The existence beside it is
+            // a PLACEHOLDER here — like `status` above — because this value
+            // is what the published ENTRY carries, and an entry's existence
+            // is re-derived by every reply built from it. The reply this
+            // function returns derives its own below.
+            source_profile: source_profile.map(|profile| SourceProfile {
+                id: profile.id,
+                name: profile.name,
+                existence: ProfileExistence::Present,
+            }),
         };
 
         // Launch confirmed: the pane exists, so the durable record moves
@@ -4871,6 +5376,69 @@ impl Supervisor {
                 scope: launch_scope,
             }),
         );
+        // Derived HERE rather than reused from the pre-launch lookup, and
+        // the gap is real: a launch is a tmux round trip plus two durable
+        // writes, and a profile renamed or deleted while it ran would make
+        // a `Present` copied from that lookup a stale answer on a reply
+        // whose contract (`farhelm_proto::SourceProfile`) is that existence
+        // describes the catalog AT REPLY TIME.
+        //
+        // The failure carries the session ID, and that is the load-bearing
+        // part rather than politeness. This runs AFTER the session is
+        // durable and published, so the caller is being told a create
+        // failed that in fact succeeded; without the id in the message
+        // there is nothing in the reply that could ever reach that session
+        // again, and the obvious response — retry the create — starts a
+        // SECOND agent in the same directory. An unkeyed create has no
+        // reservation to reconcile it either, so the id is the only handle
+        // that exists.
+        let session_id = info.id.clone();
+        self.with_derived_source_profile(info).await.with_context(|| {
+            format!(
+                "session {session_id} WAS created and is running; only describing which profile \
+                 it came from failed, so this reply is withheld — attach to or delete that \
+                 session rather than creating another",
+                session_id = truncate_for_error(&session_id)
+            )
+        })
+    }
+
+    /// Re-derive `info`'s source-profile existence against the catalog as it
+    /// stands right now (PLAN_M6_75.md item 5).
+    ///
+    /// The single-snapshot counterpart to `list_page`'s batched read: one
+    /// reply describing one session costs one lookup by id, and a reply
+    /// describing a page reads the whole catalog once instead. Both feed the
+    /// same rule (`status::source_profile_existence`).
+    ///
+    /// A raw-created session costs NOTHING — no query is issued at all,
+    /// which is what keeps this off the create and restart paths of every
+    /// session that names no profile.
+    ///
+    /// The read is allowed to FAIL the reply, and deliberately so: an
+    /// unreadable catalog cannot be degraded into "the profile is gone"
+    /// without lying about a specific and alarming thing. Callers on a path
+    /// that has already changed the world add the context saying so, since
+    /// the failure describes the REPLY rather than the operation.
+    async fn with_derived_source_profile(
+        &self,
+        mut info: SessionInfo,
+    ) -> anyhow::Result<SessionInfo> {
+        let Some(snapshotted) = info.source_profile else {
+            return Ok(info);
+        };
+        let current = self
+            .store
+            .profile(&snapshotted.id)
+            .await
+            .context("reading the profile this session was created from")?;
+        info.source_profile = Some(SourceProfile {
+            existence: source_profile_existence(
+                &snapshotted.name,
+                current.map(|profile| profile.name).as_deref(),
+            ),
+            ..snapshotted
+        });
         Ok(info)
     }
 
@@ -4920,7 +5488,10 @@ impl Supervisor {
     ///   (`ensure_cwd_usable`); identity additionally requires the path to
     ///   still resolve to what it resolved to at create
     ///   (`ensure_cwd_identity`), so a symlink repointed between launches
-    ///   cannot silently relaunch a permissive agent somewhere else.
+    ///   cannot silently relaunch a permissive agent somewhere else. The
+    ///   RESOLVED path is then what the relaunch is aimed at, rather than
+    ///   the session's own spelling of it — otherwise the same link could
+    ///   simply be repointed again between this check and the tmux call.
     /// - **A still-running agent without explicit consent.** Liveness is
     ///   RE-probed through the pane here; the client's `status` is only ever
     ///   a hint about whether to show a confirm dialog, never the
@@ -5002,7 +5573,14 @@ impl Supervisor {
         };
         let argv = relaunch_argv(mode, &snapshot, &entry.info.invocation)?;
         ensure_cwd_usable(&entry.info.cwd).await?;
-        ensure_cwd_identity(&entry.info.cwd, snapshot.canonical_cwd.as_deref()).await?;
+        // The VERIFIED path travels with the relaunch rather than being
+        // discarded once the comparison passes: `relaunch_into_terminal`
+        // hands it to tmux, so a symlink repointed between here and there
+        // cannot aim the new agent somewhere nothing checked. `None` only
+        // for a row with no recorded identity — see `ensure_cwd_identity`.
+        let launch_cwd = ensure_cwd_identity(&entry.info.cwd, snapshot.canonical_cwd.as_deref())
+            .await?
+            .unwrap_or_else(|| entry.info.cwd.clone());
 
         // Liveness as it is NOW, from the pane rather than from anything a
         // client cached. A pane query that FAILS is not read as "not
@@ -5109,6 +5687,7 @@ impl Supervisor {
                 &snapshot,
                 mode,
                 argv,
+                launch_cwd,
                 terminal_survives,
                 live_frame,
             )
@@ -5152,12 +5731,22 @@ impl Supervisor {
     /// leaves the `Launching` row alone for reload to reconcile: restoring
     /// "exited, stopped by user" over a session that may be running would
     /// be a worse lie than an honest "unknown".
+    ///
+    /// A failure that arrives AFTER the new generation was published
+    /// ([`RelaunchDisposition::Published`]) restores nothing at all. The
+    /// restoration below rebuilds the entry from the PRE-restart one, so
+    /// running it over a completed publication would replace a live terminal
+    /// with the one it superseded — a fresh-terminal restart would lose its
+    /// new pane to a reply-building error, which no failure to describe a
+    /// session has any standing to do.
+    #[allow(clippy::too_many_arguments)]
     async fn relaunch(
         self: &Arc<Self>,
         entry: &Arc<SessionEntry>,
         snapshot: &SessionSnapshot,
         mode: RestartMode,
         argv: Vec<String>,
+        launch_cwd: String,
         terminal_survives: bool,
         live_frame: Option<Vec<u8>>,
     ) -> anyhow::Result<SessionInfo> {
@@ -5233,6 +5822,7 @@ impl Supervisor {
                 claim.generation,
                 launch_scope_unit(&id, claim.generation, claim.scoped),
                 argv,
+                launch_cwd,
                 terminal_survives,
                 live_frame,
                 reset_capture,
@@ -5240,7 +5830,18 @@ impl Supervisor {
             .await;
         match relaunched {
             Ok(info) => Ok(info),
+            // The relaunch got as far as publishing its new generation and
+            // then failed to describe it. Everything below would UNDO that
+            // publication — republishing the pre-restart entry, terminal
+            // included — so it is skipped outright; see
+            // [`RelaunchDisposition::Published`].
+            Err(failure) if failure.disposition == RelaunchDisposition::Published => {
+                Err(failure.error)
+            }
             Err(failure) => {
+                // Definitive from here on means exactly one thing, since
+                // the published case returned above.
+                let definitive = failure.disposition == RelaunchDisposition::Definitive;
                 // Which selection the re-published entry describes follows
                 // the same rule the outcome does: on a DEFINITIVE failure
                 // `abort_relaunch` just put the previous run's selection
@@ -5259,13 +5860,13 @@ impl Supervisor {
                 let scope = launch_scope_unit(
                     &id,
                     claim.generation,
-                    if failure.definitive {
+                    if definitive {
                         claim.prior.scoped
                     } else {
                         claim.scoped
                     },
                 );
-                if failure.definitive {
+                if definitive {
                     // Nothing outside this process changed, so the previous
                     // run's outcome is still the truth about this session —
                     // annotation, exit code and all.
@@ -5342,6 +5943,11 @@ impl Supervisor {
     /// surviving pane, or a fresh session), confirm it durably, and
     /// republish the entry.
     ///
+    /// `launch_cwd` is the directory the caller VERIFIED against this
+    /// session's recorded identity ([`ensure_cwd_identity`]), which is what
+    /// tmux is given — never `entry.info.cwd`, whose symlinks could be
+    /// repointed between that check and this launch.
+    ///
     /// `terminal_survives` is the caller's own pane probe: `true` means the
     /// pane still exists (alive or dead-but-retained) and the relaunch
     /// respawns into it, keeping the prior run above in scrollback
@@ -5358,6 +5964,7 @@ impl Supervisor {
         generation: i64,
         scope: Option<String>,
         argv: Vec<String>,
+        launch_cwd: String,
         terminal_survives: bool,
         live_frame: Option<Vec<u8>>,
         reset_capture: bool,
@@ -5464,7 +6071,11 @@ impl Supervisor {
                 generation,
                 &tmux_name,
                 argv,
-                &entry.info.cwd,
+                // The path `restart_session` VERIFIED against this
+                // session's recorded identity, not `entry.info.cwd` — see
+                // `ensure_cwd_identity` for the check-then-repoint window
+                // that closes.
+                &launch_cwd,
                 RELAUNCH_COLS,
                 RELAUNCH_ROWS,
                 reuse,
@@ -5560,7 +6171,12 @@ impl Supervisor {
                     },
                 )
                 .await;
-                return Err(RelaunchFailure::ambiguous(e.context(
+                // PUBLISHED, not merely ambiguous: the entry above is on
+                // the map with the new terminal and generation, and the
+                // generic recovery would immediately replace it with the
+                // pre-restart one — throwing away the very reachability
+                // this branch just went out of its way to preserve.
+                return Err(RelaunchFailure::published(e.context(
                     "confirming the relaunch in the database; the agent is running and the \
                      session lists as unknown until the next observation",
                 )));
@@ -5631,7 +6247,7 @@ impl Supervisor {
                     session = %id, outcome = ?other,
                     "this relaunch's confirmation lost a race; publishing what committed"
                 );
-                return Ok(self
+                let info = self
                     .publish_relaunched(
                         entry,
                         generation,
@@ -5646,12 +6262,13 @@ impl Supervisor {
                             tabs,
                         },
                     )
-                    .await);
+                    .await;
+                return self.restart_reply(info).await;
             }
         }
 
         info!(session = %id, tmux = %tmux_name, %pane, reused = reuse.is_some(), "session restarted");
-        Ok(self
+        let info = self
             .publish_relaunched(
                 entry,
                 generation,
@@ -5663,7 +6280,8 @@ impl Supervisor {
                     tabs,
                 },
             )
-            .await)
+            .await;
+        self.restart_reply(info).await
     }
 
     /// Unwind a relaunch whose tmux command failed — but only once it is
@@ -5751,6 +6369,41 @@ impl Supervisor {
         RelaunchFailure::definitive(error)
     }
 
+    /// Finish a successful relaunch's reply by deriving its source-profile
+    /// existence against the catalog as it stands now (PLAN_M6_75.md item
+    /// 4).
+    ///
+    /// Separate from [`Supervisor::publish_relaunched`] because publication
+    /// must not be able to fail: the new entry is already on the map and the
+    /// agent is already running by the time this reads anything. So a failed
+    /// catalog read is reported as a PUBLISHED relaunch failure whose
+    /// message says the restart itself succeeded — the same shape, and the
+    /// same reasoning, as the confirm-write failure above it: the caller is
+    /// told what it must not assume, and the next list describes the session
+    /// correctly regardless.
+    ///
+    /// [`RelaunchDisposition::Published`] rather than `ambiguous`, and the
+    /// difference is not bookkeeping. An ambiguous failure runs the generic
+    /// recovery, which republishes the entry built from the PRE-restart one
+    /// — so a catalog read failing here used to overwrite the new terminal
+    /// with the terminal the restart had just replaced, and report a
+    /// `Launching` outcome over an agent that was confirmed running. On a
+    /// fresh-terminal restart that loses the live terminal entirely, which
+    /// contradicts SPEC.md's restart guarantee for a reason that has nothing
+    /// to do with the restart.
+    async fn restart_reply(&self, info: SessionInfo) -> Result<SessionInfo, RelaunchFailure> {
+        let session_id = info.id.clone();
+        self.with_derived_source_profile(info).await.map_err(|e| {
+            RelaunchFailure::published(e.context(format!(
+                "the restart of session {session_id} SUCCEEDED and its new generation is \
+                 published and running; only describing which profile it was created from \
+                 failed, so this reply is withheld — the next list reports the restarted \
+                 session normally, and restarting again would kill the agent this one started",
+                session_id = truncate_for_error(&session_id)
+            )))
+        })
+    }
+
     /// Put a relaunched session back on the map under its NEW generation,
     /// and build the reply that describes it.
     ///
@@ -5811,11 +6464,17 @@ impl Supervisor {
             // why a post-restart query must not be allowed to report `[]`
             // for a session whose tabs the restart never touched.
             tabs,
-            // A restart never changes what a session was CREATED from, so
-            // this re-reports the creation-time snapshot — `None` for
-            // every session this build can create (see the create path's
-            // own note).
-            source_profile: None,
+            // A restart is a new launch generation of the SAME session, so
+            // what it was created from is carried forward from the entry
+            // being replaced — never dropped, and never re-resolved. Losing
+            // it here would have been invisible until the next reload put
+            // it back, and in the meantime a profile-created session would
+            // have looked raw-created to every client (PLAN_M6_75.md item
+            // 4's snapshot rule, which a restart has no standing to
+            // rewrite). The existence rides along as the same placeholder
+            // every entry carries; the reply built from this derives its
+            // own.
+            source_profile: entry.info.source_profile.clone(),
         };
         let published = relaunched_entry(
             entry,
@@ -8465,10 +9124,7 @@ pub(crate) mod tests {
         // discovered — which, once the classifier consumes this, would
         // show up as a status that resets every time somebody edits a
         // title.
-        old.activity
-            .lock()
-            .unwrap()
-            .observe("screen".to_string(), Instant::now());
+        old.activity.lock().unwrap().observe("screen".to_string());
         assert_eq!(
             renamed.activity.lock().unwrap().samples,
             1,
@@ -8533,18 +9189,20 @@ pub(crate) mod tests {
     /// Separate from the test above because the RULE is different, not
     /// merely the field: `first_input`/`capture` carry their VALUES across
     /// a relaunch that kept its window, while a sample describes a process
-    /// that no longer exists. Inheriting it would hand the classifier the
-    /// dead run's screen and its output recency — reporting the
-    /// replacement launch as busy, or as quiet, on evidence gathered from
-    /// its predecessor, which is precisely the cross-generation
-    /// contamination the fence exists to prevent.
+    /// that no longer exists. Inheriting it would let the previous
+    /// generation's sampled tail and its unchanged-sample streak contaminate
+    /// the replacement — the new pane classified `Idle` because the OLD one
+    /// stopped changing, or sharpened to `Waiting` from a dialog the dead
+    /// run was showing, on evidence gathered from a process that is gone.
+    /// That cross-generation contamination is exactly what the fence exists
+    /// to prevent.
     #[test]
     fn a_relaunch_resets_the_activity_sample_rather_than_inheriting_the_dead_runs_screen() {
         let old = entry_with(Some(a_terminal()), LastOutcome::Running);
         old.activity
             .lock()
             .unwrap()
-            .observe("previous run's screen".to_string(), Instant::now());
+            .observe("previous run's screen".to_string());
 
         let relaunched = relaunched_entry(
             &old,
@@ -8570,7 +9228,7 @@ pub(crate) mod tests {
         old.activity
             .lock()
             .unwrap()
-            .observe("a late sample of the dead run".to_string(), Instant::now());
+            .observe("a late sample of the dead run".to_string());
         assert_eq!(
             relaunched.activity.lock().unwrap().samples,
             0,
@@ -8639,6 +9297,7 @@ pub(crate) mod tests {
                         first_input_at: None,
                         generation: 0,
                         launch_scoped: false,
+                        source_profile: None,
                     },
                     None,
                 )
@@ -8693,7 +9352,7 @@ pub(crate) mod tests {
                 sample.samples, 0,
                 "session {id} came back from the store, so nothing has observed its pane yet"
             );
-            assert_eq!(sample.last_change, None);
+            assert_eq!(sample.unchanged_streak, 0);
         }
         let dead = sessions["dead"].outcome.lock().unwrap().clone();
         match dead {
@@ -8775,6 +9434,7 @@ pub(crate) mod tests {
                     first_input_at: None,
                     generation: 0,
                     launch_scoped: true,
+                    source_profile: None,
                 },
                 None,
             )
@@ -8851,6 +9511,7 @@ pub(crate) mod tests {
                         first_input_at: None,
                         generation: 0,
                         launch_scoped: false,
+                        source_profile: None,
                     },
                     None,
                 )
@@ -8951,6 +9612,7 @@ pub(crate) mod tests {
                     first_input_at: None,
                     generation: 0,
                     launch_scoped: false,
+                    source_profile: None,
                 },
                 None,
             )
@@ -9036,6 +9698,7 @@ pub(crate) mod tests {
                     first_input_at: None,
                     generation: 0,
                     launch_scoped: false,
+                    source_profile: None,
                 },
                 None,
             )
@@ -9109,6 +9772,7 @@ pub(crate) mod tests {
                     first_input_at: None,
                     generation: 0,
                     launch_scoped: false,
+                    source_profile: None,
                 },
                 None,
             )
@@ -9306,55 +9970,52 @@ pub(crate) mod tests {
     /// refused as a key reuse.
     #[test]
     fn the_create_fingerprint_covers_every_session_shaping_field() {
-        let base = create_fingerprint("/work", Some("agent --flag"), Some("t"), None, None, None);
+        let base = raw_fingerprint("/work", "agent --flag", Some("t"), None, None);
         let cases = [
             (
-                create_fingerprint("/other", Some("agent --flag"), Some("t"), None, None, None),
+                raw_fingerprint("/other", "agent --flag", Some("t"), None, None),
                 "cwd",
             ),
             (
-                create_fingerprint("/work", Some("agent --other"), Some("t"), None, None, None),
+                raw_fingerprint("/work", "agent --other", Some("t"), None, None),
                 "invocation",
             ),
             (
-                create_fingerprint(
-                    "/work",
-                    Some("agent --flag"),
-                    Some("other"),
-                    None,
-                    None,
-                    None,
-                ),
+                raw_fingerprint("/work", "agent --flag", Some("other"), None, None),
                 "title",
             ),
             (
-                create_fingerprint("/work", Some("agent --flag"), None, None, None, None),
+                raw_fingerprint("/work", "agent --flag", None, None, None),
                 "an omitted title",
             ),
             (
-                create_fingerprint(
+                raw_fingerprint(
                     "/work",
-                    Some("agent --flag"),
+                    "agent --flag",
                     Some("t"),
                     Some(AgentKind::Claude),
-                    None,
                     None,
                 ),
                 "the agent-kind override",
             ),
             (
-                create_fingerprint(
+                raw_fingerprint(
                     "/work",
-                    Some("agent --flag"),
+                    "agent --flag",
                     Some("t"),
                     None,
-                    Some(&["claude".to_string(), "{conversation}".to_string()]),
-                    None,
+                    Some(&["claude", "{conversation}"]),
                 ),
                 "the resume-template override",
             ),
             (
-                create_fingerprint("/work", None, Some("t"), None, None, Some("prof-1")),
+                create_fingerprint(
+                    "/work",
+                    &CreateMode::Profile {
+                        profile_id: "prof-1".to_string(),
+                    },
+                    Some("t"),
+                ),
                 "the create MODE",
             ),
         ];
@@ -9362,55 +10023,72 @@ pub(crate) mod tests {
             assert_ne!(fingerprint, base, "{what} must change the fingerprint");
         }
         assert_eq!(
-            create_fingerprint("/work", Some("agent --flag"), Some("t"), None, None, None),
+            raw_fingerprint("/work", "agent --flag", Some("t"), None, None),
             base,
             "the same request must fingerprint identically every time"
         );
         // Adjacent fields cannot bleed into one another: a delimiter-joined
         // encoding would make these two requests indistinguishable.
         assert_ne!(
-            create_fingerprint("/a", Some("bc"), None, None, None, None),
-            create_fingerprint("/ab", Some("c"), None, None, None, None),
+            raw_fingerprint("/a", "bc", None, None, None),
+            raw_fingerprint("/ab", "c", None, None, None),
         );
         // Distinct override VALUES are distinguished, not merely the
         // presence of an override: two integrated kinds are two different
         // requests, and so are two templates of the same length.
         assert_ne!(
-            create_fingerprint(
-                "/work",
-                Some("a"),
-                None,
-                Some(AgentKind::Claude),
-                None,
-                None
-            ),
-            create_fingerprint("/work", Some("a"), None, Some(AgentKind::Codex), None, None),
+            raw_fingerprint("/work", "a", None, Some(AgentKind::Claude), None),
+            raw_fingerprint("/work", "a", None, Some(AgentKind::Codex), None),
         );
         assert_ne!(
-            create_fingerprint(
-                "/work",
-                Some("a"),
-                None,
-                None,
-                Some(&["x".to_string()]),
-                None
-            ),
-            create_fingerprint(
-                "/work",
-                Some("a"),
-                None,
-                None,
-                Some(&["y".to_string()]),
-                None
-            ),
+            raw_fingerprint("/work", "a", None, None, Some(&["x"])),
+            raw_fingerprint("/work", "a", None, None, Some(&["y"])),
         );
         // Two profile-mode creates that differ only in WHICH profile are
         // two different requests: same key, different profile, refused —
         // never a replay of whichever one happened to run first.
         assert_ne!(
-            create_fingerprint("/work", None, None, None, None, Some("prof-1")),
-            create_fingerprint("/work", None, None, None, None, Some("prof-2")),
+            profile_fingerprint("/work", "prof-1", None),
+            profile_fingerprint("/work", "prof-2", None),
         );
+    }
+
+    /// [`create_fingerprint`] of a RAW-mode request, spelled as the fields
+    /// a caller actually sends.
+    ///
+    /// The mode enum makes an unrepresentable-state bug impossible but a
+    /// literal verbose, and these tests are about the ENCODING rather than
+    /// about constructing modes; the two helpers keep each case one line so
+    /// the field being varied is the visible thing.
+    fn raw_fingerprint(
+        cwd: &str,
+        invocation: &str,
+        title: Option<&str>,
+        agent_kind: Option<AgentKind>,
+        resume_template: Option<&[&str]>,
+    ) -> String {
+        create_fingerprint(
+            cwd,
+            &CreateMode::Raw {
+                invocation: invocation.to_string(),
+                agent_kind,
+                resume_template: resume_template
+                    .map(|template| template.iter().map(ToString::to_string).collect()),
+            },
+            title,
+        )
+    }
+
+    /// [`create_fingerprint`] of a PROFILE-mode request. See
+    /// [`raw_fingerprint`].
+    fn profile_fingerprint(cwd: &str, profile_id: &str, title: Option<&str>) -> String {
+        create_fingerprint(
+            cwd,
+            &CreateMode::Profile {
+                profile_id: profile_id.to_string(),
+            },
+            title,
+        )
     }
 
     /// The PERSISTED fingerprint, byte for byte.
@@ -9435,25 +10113,24 @@ pub(crate) mod tests {
     #[test]
     fn the_persisted_fingerprint_encoding_is_pinned() {
         assert_eq!(
-            create_fingerprint(
+            raw_fingerprint(
                 "/work",
-                Some("claude --flag"),
+                "claude --flag",
                 Some("title"),
                 Some(AgentKind::Claude),
-                Some(&["claude".to_string(), "{conversation}".to_string()]),
-                None,
+                Some(&["claude", "{conversation}"]),
             ),
             r#"["/work","claude --flag","title","claude",["claude","{conversation}"]]"#
         );
         assert_eq!(
-            create_fingerprint("/work", Some("agent"), None, None, None, None),
+            raw_fingerprint("/work", "agent", None, None, None),
             r#"["/work","agent",null,null,null]"#
         );
         // The profile mode's own encoding: discriminated and SHORTER, so it
         // is distinguishable from a raw fingerprint by shape alone — no
         // `cwd`, title or profile id can make the two collide.
         assert_eq!(
-            create_fingerprint("/work", None, Some("title"), None, None, Some("prof-7")),
+            profile_fingerprint("/work", "prof-7", Some("title")),
             r#"["profile","/work","title","prof-7"]"#
         );
     }
@@ -9472,18 +10149,17 @@ pub(crate) mod tests {
     #[test]
     fn a_v9_fingerprint_is_reproduced_exactly_by_the_same_request_today() {
         // Exactly what `create_fingerprint(cwd, invocation, title,
-        // agent_kind, resume_template)` produced before the profile mode
-        // existed.
+        // agent_kind, resume_template)` produced when those were five
+        // separate parameters and the profile mode did not exist.
         const V9_RAW: &str =
             r#"["/work","claude --flag","title","claude",["claude","{conversation}"]]"#;
         assert_eq!(
-            create_fingerprint(
+            raw_fingerprint(
                 "/work",
-                Some("claude --flag"),
+                "claude --flag",
                 Some("title"),
                 Some(AgentKind::Claude),
-                Some(&["claude".to_string(), "{conversation}".to_string()]),
-                None,
+                Some(&["claude", "{conversation}"]),
             ),
             V9_RAW,
             "a raw create whose key was claimed before the upgrade must still match its own \
@@ -9546,7 +10222,7 @@ pub(crate) mod tests {
                 24,
                 Some(IntentClaim {
                     intent_key: "v9-key".to_string(),
-                    fingerprint: create_fingerprint("/", Some("agent"), None, None, None, None),
+                    fingerprint: raw_fingerprint("/", "agent", None, None, None),
                 }),
             )
             .await
@@ -9599,6 +10275,7 @@ pub(crate) mod tests {
                     first_input_at: None,
                     generation: 0,
                     launch_scoped: false,
+                    source_profile: None,
                 },
                 Some(IntentClaim {
                     intent_key: "v9-key".to_string(),
@@ -9617,7 +10294,7 @@ pub(crate) mod tests {
                 24,
                 Some(IntentClaim {
                     intent_key: "v9-key".to_string(),
-                    fingerprint: create_fingerprint("/", Some("agent"), None, None, None, None),
+                    fingerprint: raw_fingerprint("/", "agent", None, None, None),
                 }),
             )
             .await
@@ -9685,12 +10362,14 @@ pub(crate) mod tests {
             .create_session(
                 CreateInputs {
                     cwd: &cwd,
-                    invocation: "/opt/bin/claude --dangerously-skip-permissions",
+                    mode: CreateMode::Raw {
+                        invocation: "/opt/bin/claude --dangerously-skip-permissions".to_string(),
+                        agent_kind: None,
+                        resume_template: None,
+                    },
                     title: Some("t".to_string()),
                     cols: 80,
                     rows: 24,
-                    agent_kind: None,
-                    resume_template: None,
                 },
                 None,
             )
@@ -9729,12 +10408,14 @@ pub(crate) mod tests {
             .create_session(
                 CreateInputs {
                     cwd: &cwd,
-                    invocation: "claude",
+                    mode: CreateMode::Raw {
+                        invocation: "claude".to_string(),
+                        agent_kind: None,
+                        resume_template: Some(vec!["claude".to_string(), "--continue".to_string()]),
+                    },
                     title: None,
                     cols: 80,
                     rows: 24,
-                    agent_kind: None,
-                    resume_template: Some(vec!["claude".to_string(), "--continue".to_string()]),
                 },
                 None,
             )
@@ -9981,7 +10662,7 @@ pub(crate) mod tests {
                 24,
                 Some(IntentClaim {
                     intent_key: "key".to_string(),
-                    fingerprint: create_fingerprint("/", Some("agent"), None, None, None, None),
+                    fingerprint: raw_fingerprint("/", "agent", None, None, None),
                 }),
             )
             .await
@@ -10016,7 +10697,7 @@ pub(crate) mod tests {
                 24,
                 Some(IntentClaim {
                     intent_key: "key".to_string(),
-                    fingerprint: create_fingerprint("/", Some("agent"), None, None, None, None),
+                    fingerprint: raw_fingerprint("/", "agent", None, None, None),
                 }),
             )
             .await
@@ -10055,14 +10736,7 @@ pub(crate) mod tests {
         let cwd = work.to_string_lossy().to_string();
         let claim = |fingerprint_cwd: &str, invocation: &str| IntentClaim {
             intent_key: "one-intent".to_string(),
-            fingerprint: create_fingerprint(
-                fingerprint_cwd,
-                Some(invocation),
-                None,
-                None,
-                None,
-                None,
-            ),
+            fingerprint: raw_fingerprint(fingerprint_cwd, invocation, None, None, None),
         };
 
         let first = sup
@@ -10170,7 +10844,7 @@ pub(crate) mod tests {
 
         // A pending reservation whose attempt never launched: the shape a
         // crash after the claim leaves, and the one a retry relaunches.
-        let fingerprint = create_fingerprint("/", Some("agent"), None, None, None, None);
+        let fingerprint = raw_fingerprint("/", "agent", None, None, None);
         sup.store
             .insert_session(
                 StoredSession {
@@ -10191,6 +10865,7 @@ pub(crate) mod tests {
                     first_input_at: None,
                     generation: 0,
                     launch_scoped: false,
+                    source_profile: None,
                 },
                 Some(IntentClaim {
                     intent_key: "key".to_string(),
@@ -10247,7 +10922,7 @@ pub(crate) mod tests {
         let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
             .await
             .expect("supervisor");
-        let fingerprint = create_fingerprint("/", Some("agent"), None, None, None, None);
+        let fingerprint = raw_fingerprint("/", "agent", None, None, None);
         sup.store
             .insert_session(
                 StoredSession {
@@ -10268,6 +10943,7 @@ pub(crate) mod tests {
                     first_input_at: None,
                     generation: 0,
                     launch_scoped: false,
+                    source_profile: None,
                 },
                 Some(IntentClaim {
                     intent_key: "key".to_string(),
@@ -10674,10 +11350,9 @@ pub(crate) mod tests {
                 24,
                 Some(IntentClaim {
                     intent_key: "key".to_string(),
-                    fingerprint: create_fingerprint(
+                    fingerprint: raw_fingerprint(
                         &work.path().to_string_lossy(),
-                        Some("sh -c 'sleep 300'"),
-                        None,
+                        "sh -c 'sleep 300'",
                         None,
                         None,
                         None,
@@ -10737,7 +11412,7 @@ pub(crate) mod tests {
         let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
             .await
             .expect("supervisor");
-        let fingerprint = create_fingerprint("/", Some("agent"), None, None, None, None);
+        let fingerprint = raw_fingerprint("/", "agent", None, None, None);
         sup.store
             .insert_session(
                 StoredSession {
@@ -10758,6 +11433,7 @@ pub(crate) mod tests {
                     first_input_at: None,
                     generation: 0,
                     launch_scoped: false,
+                    source_profile: None,
                 },
                 Some(IntentClaim {
                     intent_key: "key".to_string(),
@@ -10821,7 +11497,7 @@ pub(crate) mod tests {
         let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
             .await
             .expect("supervisor");
-        let fingerprint = create_fingerprint("/", Some("agent"), None, None, None, None);
+        let fingerprint = raw_fingerprint("/", "agent", None, None, None);
         sup.store
             .insert_session(
                 StoredSession {
@@ -10842,6 +11518,7 @@ pub(crate) mod tests {
                     first_input_at: None,
                     generation: 0,
                     launch_scoped: false,
+                    source_profile: None,
                 },
                 Some(IntentClaim {
                     intent_key: "key".to_string(),
@@ -10955,7 +11632,7 @@ pub(crate) mod tests {
                 24,
                 Some(IntentClaim {
                     intent_key: "key".to_string(),
-                    fingerprint: create_fingerprint("/", Some("agent"), None, None, None, None),
+                    fingerprint: raw_fingerprint("/", "agent", None, None, None),
                 }),
             )
             .await
@@ -11068,5 +11745,1223 @@ pub(crate) mod tests {
             .find_map(|cause| cause.downcast_ref::<std::io::Error>())
             .expect("the underlying io error must stay in the chain");
         assert_ne!(io.kind(), std::io::ErrorKind::ConnectionRefused);
+    }
+
+    /// A profile-backed create whose profile is RENAMED while the launch is
+    /// in flight reports the rename (PLAN_M6_75.md item 5).
+    ///
+    /// `SourceProfile`'s contract is that existence describes the catalog
+    /// AT REPLY TIME, and a create is the one path where that is easy to
+    /// get wrong: the profile was looked up before the launch, so copying
+    /// `Present` from that lookup costs nothing and looks right. The gap it
+    /// ignores is real — a launch is a tmux round trip plus two durable
+    /// writes — and the reply would then assert something about the catalog
+    /// that stopped being true while it worked.
+    ///
+    /// Forced deterministically through the create-lifecycle seam rather
+    /// than by racing a spawned task: the rename is performed from inside
+    /// the `DuringLaunch` stage, which is exactly the window between the
+    /// pre-launch resolution and the reply.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_profile_renamed_during_the_launch_is_reported_by_the_create_reply() {
+        let state = StateDir::new();
+        let db = state.path().join("supervisor.db");
+        let sup = {
+            let db = db.clone();
+            Supervisor::new_with_seams(
+                state.path(),
+                dummy_exe(),
+                SupervisorTimeouts::default(),
+                SupervisorSeams {
+                    create_crash: Some(Arc::new(move |stage| {
+                        if stage != CreateStage::DuringLaunch {
+                            return Ok(());
+                        }
+                        // A second connection to the same database, which
+                        // is what a concurrent profile edit would have.
+                        let db = db.clone();
+                        tokio::task::block_in_place(move || {
+                            tokio::runtime::Handle::current().block_on(async move {
+                                let store = SessionStore::open(&db, false).await?;
+                                let profile = store
+                                    .profile("starter-claude")
+                                    .await?
+                                    .expect("the starter is what the create named");
+                                store
+                                    .update_profile(farhelm_proto::Profile {
+                                        name: "Renamed mid-launch".to_string(),
+                                        ..profile
+                                    })
+                                    .await?;
+                                anyhow::Ok(())
+                            })
+                        })?;
+                        Ok(())
+                    })),
+                    ..SupervisorSeams::default()
+                },
+            )
+            .await
+            .expect("supervisor")
+        };
+
+        let session = sup
+            .create_session(
+                CreateInputs {
+                    cwd: "/",
+                    mode: CreateMode::Profile {
+                        profile_id: "starter-claude".to_string(),
+                    },
+                    title: None,
+                    cols: 80,
+                    rows: 24,
+                },
+                None,
+            )
+            .await
+            .expect("the create itself succeeds; only the catalog moved under it");
+        let source = session
+            .source_profile
+            .expect("a profile-backed create records what it came from");
+        assert_eq!(
+            source.name, "Claude Code",
+            "the SNAPSHOT is what the user picked, and no later edit rewrites it"
+        );
+        assert_eq!(
+            source.existence,
+            ProfileExistence::Renamed,
+            "existence describes the catalog when the reply was built, not when the profile was \
+             resolved"
+        );
+    }
+
+    /// A pending retry launches what the FIRST attempt resolved, even after
+    /// its profile has been edited out from under it (PLAN_M6_75.md item
+    /// 4).
+    ///
+    /// A profile is mutable and an accepted intent is not. Re-resolving the
+    /// request on the retry would mean that editing a profile between a
+    /// crash and its retry silently changes what an unchanged intent
+    /// launches — the same key, the same request, a different agent — and
+    /// there is no moment at which the client could have asked for that.
+    /// The row the crashed attempt committed is the record of what was
+    /// resolved, so the row is what the retry runs.
+    ///
+    /// The stranded row is planted directly, which is what a crash between
+    /// the claim and the launch leaves behind: a reservation, a `Launching`
+    /// row with no pane, and no tmux session anywhere.
+    #[tokio::test]
+    async fn a_pending_retry_runs_the_original_profile_resolution_not_the_edited_one() {
+        let state = StateDir::new();
+        let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
+            .await
+            .expect("supervisor");
+        let fingerprint = create_fingerprint(
+            "/",
+            &CreateMode::Profile {
+                profile_id: "starter-claude".to_string(),
+            },
+            None,
+        );
+        sup.store
+            .insert_session(
+                StoredSession {
+                    id: "stranded".to_string(),
+                    title: "stranded".to_string(),
+                    created_at: now_unix(),
+                    cwd: "/".to_string(),
+                    invocation: "claude --original".to_string(),
+                    tmux_name: "fh-stranded".to_string(),
+                    pane: String::new(),
+                    outcome: LastOutcome::Launching,
+                    agent_kind: farhelm_proto::AgentKind::Claude,
+                    resume_template: Some(vec![
+                        "claude".to_string(),
+                        "--resume".to_string(),
+                        crate::agent_kind::CONVERSATION_PLACEHOLDER.to_string(),
+                    ]),
+                    canonical_cwd: Some("/".to_string()),
+                    captured_conversation: None,
+                    captured_record: None,
+                    capture_ambiguous: false,
+                    first_input_at: None,
+                    generation: 0,
+                    launch_scoped: false,
+                    source_profile: Some(ProfileSnapshot {
+                        id: "starter-claude".to_string(),
+                        name: "Claude Code".to_string(),
+                    }),
+                },
+                Some(IntentClaim {
+                    intent_key: "key".to_string(),
+                    fingerprint: fingerprint.clone(),
+                }),
+            )
+            .await
+            .expect("seed the crashed attempt");
+
+        // The catalog moves between the two attempts: a rename AND a
+        // changed invocation, so re-resolution would be visible in the
+        // launched command line rather than only in a label.
+        sup.store
+            .update_profile(farhelm_proto::Profile {
+                id: "starter-claude".to_string(),
+                name: "Edited".to_string(),
+                invocation: "claude --edited".to_string(),
+                agent_kind: farhelm_proto::AgentKind::Claude,
+                resume_template: None,
+            })
+            .await
+            .expect("edit")
+            .expect("the profile is there to edit");
+
+        let session = sup
+            .create_session(
+                CreateInputs {
+                    cwd: "/",
+                    mode: CreateMode::Profile {
+                        profile_id: "starter-claude".to_string(),
+                    },
+                    title: None,
+                    cols: 80,
+                    rows: 24,
+                },
+                Some(IntentClaim {
+                    intent_key: "key".to_string(),
+                    fingerprint,
+                }),
+            )
+            .await
+            .expect("the retry performs the create under the reserved identity");
+        assert_eq!(session.id, "stranded");
+        assert_eq!(
+            session.invocation, "claude --original",
+            "the retry runs what the first attempt resolved, not what the catalog says now"
+        );
+        let source = session.source_profile.expect("the snapshot rides the row");
+        assert_eq!(
+            source.name, "Claude Code",
+            "and so does the name it recorded"
+        );
+        assert_eq!(
+            source.existence,
+            ProfileExistence::Renamed,
+            "while existence is still derived fresh, as on every other reply"
+        );
+    }
+
+    /// The same retry, with its profile DELETED between the attempts.
+    ///
+    /// The failure this excludes is worse than the edited case: deleting a
+    /// profile would turn an already-accepted create — one the supervisor
+    /// had committed a row for and told nobody about — into a permanent
+    /// `NotFound` for its own intent key. The unknown-profile precondition
+    /// is about a create that has not happened yet; this one already has.
+    #[tokio::test]
+    async fn a_pending_retry_survives_its_profile_being_deleted_between_attempts() {
+        let state = StateDir::new();
+        let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
+            .await
+            .expect("supervisor");
+        let fingerprint = create_fingerprint(
+            "/",
+            &CreateMode::Profile {
+                profile_id: "starter-codex".to_string(),
+            },
+            None,
+        );
+        sup.store
+            .insert_session(
+                StoredSession {
+                    id: "stranded".to_string(),
+                    title: "stranded".to_string(),
+                    created_at: now_unix(),
+                    cwd: "/".to_string(),
+                    invocation: "codex".to_string(),
+                    tmux_name: "fh-stranded".to_string(),
+                    pane: String::new(),
+                    outcome: LastOutcome::Launching,
+                    agent_kind: farhelm_proto::AgentKind::Codex,
+                    resume_template: Some(vec![
+                        "codex".to_string(),
+                        "resume".to_string(),
+                        crate::agent_kind::CONVERSATION_PLACEHOLDER.to_string(),
+                    ]),
+                    canonical_cwd: Some("/".to_string()),
+                    captured_conversation: None,
+                    captured_record: None,
+                    capture_ambiguous: false,
+                    first_input_at: None,
+                    generation: 0,
+                    launch_scoped: false,
+                    source_profile: Some(ProfileSnapshot {
+                        id: "starter-codex".to_string(),
+                        name: "Codex".to_string(),
+                    }),
+                },
+                Some(IntentClaim {
+                    intent_key: "key".to_string(),
+                    fingerprint: fingerprint.clone(),
+                }),
+            )
+            .await
+            .expect("seed the crashed attempt");
+        assert!(
+            sup.store
+                .delete_profile("starter-codex")
+                .await
+                .expect("delete")
+        );
+
+        let session = sup
+            .create_session(
+                CreateInputs {
+                    cwd: "/",
+                    mode: CreateMode::Profile {
+                        profile_id: "starter-codex".to_string(),
+                    },
+                    title: None,
+                    cols: 80,
+                    rows: 24,
+                },
+                Some(IntentClaim {
+                    intent_key: "key".to_string(),
+                    fingerprint,
+                }),
+            )
+            .await
+            .expect("a create the supervisor already accepted must not become NotFound");
+        assert_eq!(session.id, "stranded");
+        assert_eq!(session.invocation, "codex");
+        let source = session.source_profile.expect("the snapshot rides the row");
+        assert_eq!(source.name, "Codex");
+        assert_eq!(
+            source.existence,
+            ProfileExistence::Deleted,
+            "the session still says what it came from, and the reply says that profile is gone"
+        );
+    }
+
+    /// A RESTART keeps the session's source profile, and re-derives its
+    /// existence (PLAN_M6_75.md item 4).
+    ///
+    /// A restart is a new launch generation of the same session, so what it
+    /// was created from does not change — but the restart publishes a NEW
+    /// entry, and an entry built without the snapshot loses it for every
+    /// reply until the next supervisor reload puts it back. That is a
+    /// SPEC.md violation with a long fuse: a profile-created session would
+    /// simply look raw-created, and nothing would ever fail.
+    ///
+    /// The rename is applied between the create and the restart, so the
+    /// reply cannot be passing by echoing a placeholder: the snapshotted
+    /// name and the derived existence disagree with each other, and both
+    /// have to be right.
+    #[tokio::test]
+    async fn a_restart_keeps_the_source_profile_and_re_derives_its_existence() {
+        let state = StateDir::new();
+        let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
+            .await
+            .expect("supervisor");
+        let cwd = state.path().to_string_lossy().to_string();
+        let created = sup
+            .create_session(
+                CreateInputs {
+                    cwd: &cwd,
+                    mode: CreateMode::Profile {
+                        profile_id: "starter-claude".to_string(),
+                    },
+                    title: None,
+                    cols: 80,
+                    rows: 24,
+                },
+                None,
+            )
+            .await
+            .expect("create from the starter profile");
+
+        sup.store
+            .update_profile(farhelm_proto::Profile {
+                id: "starter-claude".to_string(),
+                name: "Claude, renamed".to_string(),
+                invocation: "claude".to_string(),
+                agent_kind: farhelm_proto::AgentKind::Claude,
+                resume_template: None,
+            })
+            .await
+            .expect("rename")
+            .expect("the profile is there to rename");
+
+        let restarted = sup
+            .restart_session(&created.id, RestartMode::Fresh, true)
+            .await
+            .expect("restart");
+        let source = restarted
+            .source_profile
+            .expect("a restart never changes what a session was created from");
+        assert_eq!(source.id, "starter-claude");
+        assert_eq!(
+            source.name, "Claude Code",
+            "the snapshot is what the session recorded at creation"
+        );
+        assert_eq!(
+            source.existence,
+            ProfileExistence::Renamed,
+            "and the existence beside it is derived for THIS reply"
+        );
+
+        // The republished ENTRY carries it too, which is what every later
+        // reply is built from — a restart that returned the right reply
+        // while dropping the entry's copy would look correct exactly once.
+        let entry = sup
+            .sessions
+            .lock()
+            .await
+            .get(&created.id)
+            .cloned()
+            .expect("the restarted session is back on the map");
+        assert_eq!(
+            entry
+                .info
+                .source_profile
+                .as_ref()
+                .map(|profile| profile.id.as_str()),
+            Some("starter-claude")
+        );
+    }
+
+    /// The source-profile snapshot survives a supervisor RESTART, and its
+    /// existence is derived fresh on the way back up (PLAN_M6_75.md item
+    /// 4).
+    ///
+    /// The columns are only worth having if reload reads them: a session
+    /// created from a profile, on a supervisor that then goes away, must
+    /// come back still knowing what it came from. Nothing else in the tree
+    /// covers the reload wiring — the create path builds its entry from the
+    /// request rather than from the row, so a reload that dropped these two
+    /// columns would pass every create-side test.
+    ///
+    /// The profile is DELETED while the supervisor is down, which is both
+    /// the harder case and the honest one: it proves the reloaded snapshot
+    /// is the session's own record rather than something re-derived from a
+    /// catalog that no longer contains it.
+    #[tokio::test]
+    async fn a_reloaded_session_keeps_its_source_profile_and_derives_existence_freshly() {
+        let state = StateDir::new();
+        let cwd = state.path().to_string_lossy().to_string();
+        let created = {
+            let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
+                .await
+                .expect("supervisor");
+            let created = sup
+                .create_session(
+                    CreateInputs {
+                        cwd: &cwd,
+                        mode: CreateMode::Profile {
+                            profile_id: "starter-claude".to_string(),
+                        },
+                        title: None,
+                        cols: 80,
+                        rows: 24,
+                    },
+                    None,
+                )
+                .await
+                .expect("create from the starter profile");
+            sup.store
+                .delete_profile("starter-claude")
+                .await
+                .expect("delete the profile out from under the session");
+            created
+        };
+
+        let reloaded = Supervisor::new_with_exe(state.path(), dummy_exe())
+            .await
+            .expect("a second supervisor over the same state directory");
+        let entry = reloaded
+            .sessions
+            .lock()
+            .await
+            .get(&created.id)
+            .cloned()
+            .expect("the session is reloaded");
+        let snapshot = entry
+            .info
+            .source_profile
+            .as_ref()
+            .expect("the stored snapshot survives the process that wrote it");
+        assert_eq!(snapshot.id, "starter-claude");
+        assert_eq!(snapshot.name, "Claude Code");
+
+        // Through a real reply, so the derivation is exercised rather than
+        // the raw column: the profile is gone, and the reply must say so.
+        let page = crate::service::listing::list_page(
+            &reloaded,
+            crate::service::listing::ListQuery {
+                cursor: None,
+                limit: 10,
+            },
+        )
+        .await
+        .expect("list");
+        let listed = page
+            .sessions
+            .iter()
+            .find(|session| session.id == created.id)
+            .expect("the reloaded session lists");
+        assert_eq!(
+            listed
+                .source_profile
+                .as_ref()
+                .map(|profile| profile.existence),
+            Some(ProfileExistence::Deleted),
+            "existence is derived at reply time, never reloaded from the row"
+        );
+    }
+
+    /// A retry whose working directory was REPOINTED between the attempts
+    /// is refused rather than launched somewhere else (PLAN_M6_75.md item
+    /// 4).
+    ///
+    /// The path still stats fine — that is the whole difficulty. A symlink
+    /// repointed between the crash and the retry leaves `ensure_cwd_usable`
+    /// perfectly satisfied while the directory underneath is somebody
+    /// else's, and the retry carries the crashed attempt's `canonical_cwd`
+    /// forward: so the agent would run in the NEW target while conversation
+    /// capture correlated against the OLD one. Nothing fails, no log line
+    /// appears, and the session simply never captures its conversation —
+    /// or, where the old target is another live project, correlates against
+    /// records that are not its own.
+    ///
+    /// The refusal names both paths, because "working directory does not
+    /// exist" would send the user looking for a typo when the directory is
+    /// right there.
+    #[tokio::test]
+    async fn a_retry_whose_directory_was_repointed_is_refused_rather_than_relaunched() {
+        let state = StateDir::new();
+        let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
+            .await
+            .expect("supervisor");
+        let original = state.path().join("original");
+        let replacement = state.path().join("replacement");
+        std::fs::create_dir(&original).expect("original target");
+        std::fs::create_dir(&replacement).expect("replacement target");
+        let link = state.path().join("work");
+        std::os::unix::fs::symlink(&original, &link).expect("symlink");
+        let cwd = link.to_string_lossy().to_string();
+
+        let fingerprint = raw_fingerprint(&cwd, "agent", None, None, None);
+        sup.store
+            .insert_session(
+                StoredSession {
+                    id: "stranded".to_string(),
+                    title: "stranded".to_string(),
+                    created_at: now_unix(),
+                    cwd: cwd.clone(),
+                    invocation: "agent".to_string(),
+                    tmux_name: "fh-stranded".to_string(),
+                    pane: String::new(),
+                    outcome: LastOutcome::Launching,
+                    agent_kind: farhelm_proto::AgentKind::Generic,
+                    resume_template: None,
+                    // What the crashed attempt resolved, and what capture
+                    // would go on correlating against.
+                    canonical_cwd: Some(
+                        std::fs::canonicalize(&original)
+                            .expect("canonicalize")
+                            .to_string_lossy()
+                            .into_owned(),
+                    ),
+                    captured_conversation: None,
+                    captured_record: None,
+                    capture_ambiguous: false,
+                    first_input_at: None,
+                    generation: 0,
+                    launch_scoped: false,
+                    source_profile: None,
+                },
+                Some(IntentClaim {
+                    intent_key: "key".to_string(),
+                    fingerprint: fingerprint.clone(),
+                }),
+            )
+            .await
+            .expect("seed the crashed attempt");
+
+        // The repoint, between the two attempts.
+        std::fs::remove_file(&link).expect("unlink");
+        std::os::unix::fs::symlink(&replacement, &link).expect("re-link");
+
+        let refusal = sup
+            .create_session_without_overrides(
+                &cwd,
+                "agent",
+                None,
+                80,
+                24,
+                Some(IntentClaim {
+                    intent_key: "key".to_string(),
+                    fingerprint,
+                }),
+            )
+            .await
+            .expect_err("a retry must not relaunch into a directory that is no longer the one");
+        assert_eq!(error_kind(&refusal), ErrorKind::InvalidRequest);
+        let rendered = format!("{refusal:#}");
+        assert!(
+            rendered.contains(&replacement.to_string_lossy().to_string())
+                && rendered.contains(&original.to_string_lossy().to_string()),
+            "the refusal must name where the path resolves NOW and where the session was \
+             created, or it reads as a missing directory: {rendered}"
+        );
+        assert!(
+            sup.sessions.lock().await.is_empty(),
+            "and nothing may have been launched"
+        );
+    }
+
+    /// A catalog read that fails AFTER the session is created still tells
+    /// the caller which session exists (PLAN_M6_75.md item 5).
+    ///
+    /// The reply is withheld — an unreadable catalog cannot be degraded
+    /// into "the profile is gone" — but the create itself has already
+    /// happened by then: the row is committed, the tmux session is running,
+    /// and the entry is on the map. So the error is the ONLY thing the
+    /// caller will ever see about a session that exists, and without the id
+    /// in it there is no handle anywhere: an unkeyed create has no
+    /// reservation to reconcile, the caller cannot attach, cannot delete,
+    /// and the obvious response — retry the create — starts a second agent
+    /// in the same directory.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_catalog_failure_after_the_launch_still_names_the_session_it_created() {
+        let state = StateDir::new();
+        let db = state.path().join("supervisor.db");
+        let sup = {
+            let db = db.clone();
+            Supervisor::new_with_seams(
+                state.path(),
+                dummy_exe(),
+                SupervisorTimeouts::default(),
+                SupervisorSeams {
+                    create_crash: Some(Arc::new(move |stage| {
+                        if stage != CreateStage::DuringLaunch {
+                            return Ok(());
+                        }
+                        // After the profile was resolved and the launch
+                        // happened; before the reply is assembled.
+                        let db = db.clone();
+                        tokio::task::block_in_place(move || {
+                            tokio::runtime::Handle::current().block_on(async move {
+                                SessionStore::open(&db, false)
+                                    .await?
+                                    .drop_profile_catalog_for_test()
+                                    .await;
+                                anyhow::Ok(())
+                            })
+                        })?;
+                        Ok(())
+                    })),
+                    ..SupervisorSeams::default()
+                },
+            )
+            .await
+            .expect("supervisor")
+        };
+
+        let failure = sup
+            .create_session(
+                CreateInputs {
+                    cwd: "/",
+                    mode: CreateMode::Profile {
+                        profile_id: "starter-claude".to_string(),
+                    },
+                    title: None,
+                    cols: 80,
+                    rows: 24,
+                },
+                None,
+            )
+            .await
+            .expect_err("an unreadable catalog withholds the reply");
+        let rendered = format!("{failure:#}");
+
+        let published = sup.sessions.lock().await;
+        let (id, _) = published
+            .iter()
+            .next()
+            .expect("the session was created and published before the catalog was read");
+        assert!(
+            rendered.contains(id.as_str()),
+            "the failure must name the session that exists, or nothing ever can: {rendered}"
+        );
+        assert!(
+            rendered.contains("WAS created"),
+            "and must say plainly that it exists, so the caller does not retry into a \
+             duplicate: {rendered}"
+        );
+        assert!(
+            sup.store
+                .session(id)
+                .await
+                .expect("read")
+                .is_some_and(|row| row.outcome == LastOutcome::Running),
+            "the session must be durable and confirmed, not rolled back with the reply"
+        );
+    }
+
+    /// The same for a RESTART: the reply is withheld, and the new
+    /// generation — terminal included — stays published.
+    ///
+    /// Worse than the create case if it were silent, because the obvious
+    /// response to a failed restart is to restart again — which would kill
+    /// the agent this restart just started and launch a third. The message
+    /// therefore names the session AND says the restart succeeded.
+    ///
+    /// ## Why the terminal is asserted, and why the restart is a
+    /// fresh-terminal one
+    ///
+    /// The bug this pins was not the message. A reply-build failure used to
+    /// be classified as an AMBIGUOUS relaunch failure, which runs the
+    /// generic recovery — and that recovery republishes an entry built from
+    /// the PRE-restart one, terminal and all. So a catalog read failing
+    /// after `publish_relaunched` had already installed the new generation
+    /// overwrote it: the map ended up pointing at the terminal the restart
+    /// had just replaced, with a `Launching` outcome, while the agent the
+    /// restart actually started ran in a terminal nothing referenced. That
+    /// contradicts SPEC.md's restart guarantee for a reason that has nothing
+    /// to do with restarting.
+    ///
+    /// The generation alone could not catch it — the recovery republishes
+    /// under `claim.generation` too, so `generation == 1` was true either
+    /// way. What separates them is the TERMINAL, and it only differs when
+    /// the restart builds a fresh one: a reused pane keeps its id across
+    /// `respawn-pane`, so the terminal is identical whichever entry wins.
+    /// Killing the tmux session first is what makes this the fresh-terminal
+    /// path, and the new pane is then probed through tmux to prove it is
+    /// live rather than merely different.
+    #[tokio::test]
+    async fn a_catalog_failure_after_a_restart_keeps_the_new_terminal_published() {
+        let state = StateDir::new();
+        let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
+            .await
+            .expect("supervisor");
+        let cwd = state.path().to_string_lossy().to_string();
+        let created = sup
+            .create_session(
+                CreateInputs {
+                    cwd: &cwd,
+                    mode: CreateMode::Profile {
+                        profile_id: "starter-claude".to_string(),
+                    },
+                    title: None,
+                    cols: 80,
+                    rows: 24,
+                },
+                None,
+            )
+            .await
+            .expect("create from the starter profile");
+        let before = sup
+            .sessions
+            .lock()
+            .await
+            .get(&created.id)
+            .cloned()
+            .expect("the create publishes an entry")
+            .terminal
+            .clone()
+            .expect("with a terminal");
+
+        // The terminal goes away, which is what an interrupted session (or
+        // a tmux server that died) leaves behind — and is what makes the
+        // restart below build a FRESH terminal with a pane id of its own.
+        sup.tmux
+            .kill_session(&before.tmux_name)
+            .await
+            .expect("kill the session's terminal");
+
+        // Unreadable from here on: the restart's own work does not touch
+        // the catalog, so only the reply-building read fails.
+        sup.store.drop_profile_catalog_for_test().await;
+        let failure = sup
+            .restart_session(&created.id, RestartMode::Fresh, true)
+            .await
+            .expect_err("an unreadable catalog withholds the restart's reply too");
+        let rendered = format!("{failure:#}");
+        assert!(
+            rendered.contains(&created.id) && rendered.contains("SUCCEEDED"),
+            "the failure must name the session and say the restart happened, so nobody \
+             restarts it again: {rendered}"
+        );
+
+        let entry = sup
+            .sessions
+            .lock()
+            .await
+            .get(&created.id)
+            .cloned()
+            .expect("the restarted session stays published despite the withheld reply");
+        assert_eq!(
+            entry.generation, 1,
+            "and it is the NEW generation that is published, not the one the restart replaced"
+        );
+        assert_eq!(
+            *entry.outcome.lock().expect("outcome mutex poisoned"),
+            LastOutcome::Running,
+            "the restart confirmed its launch, so a failure to DESCRIBE the session must not \
+             walk that back to Launching"
+        );
+        let published = entry.terminal.clone().expect("a restarted session has one");
+        assert_ne!(
+            published.pane, before.pane,
+            "the published terminal must be the one the restart created, not the pane it \
+             replaced — a recovery that republished the pre-restart entry would leave the live \
+             terminal unreferenced"
+        );
+        assert!(
+            sup.tmux
+                .pane_process(&published.tmux_name, &published.pane)
+                .await
+                .expect("probe the published pane")
+                .is_some(),
+            "and it must be attachable: tmux has to know the pane the map points at"
+        );
+    }
+
+    /// A retry adopts the title its TAKEOVER preserved, not the one its
+    /// snapshot was resolved with — in the reply, in SQLite, and in the
+    /// entry the very next list is served from.
+    ///
+    /// A rename is the one field a user can change after creation, and a
+    /// retry's takeover is a delete-and-reinsert. The store keeps the
+    /// renamed title (`SessionStore::restart_pending_launch` has its own
+    /// test for that), but keeping it there is only half the fix: the caller
+    /// resolved its `LaunchRequest` before the race and would otherwise
+    /// build both its reply and the replacement `SessionEntry` from the
+    /// stale label — so the durable row and every list this process serves
+    /// disagree until the next reload, with the user's rename apparently
+    /// reverted.
+    ///
+    /// The race is constructed by calling the launch directly with a
+    /// deliberately STALE snapshot title against a row that already carries
+    /// the new one, which is exactly the state a rename landing between
+    /// `validate_retry`'s row read and the takeover's commit produces. Doing
+    /// it this way rather than through a seam is what makes it
+    /// deterministic; the serialization that keeps a rename from landing
+    /// LATER (between the takeover and the map removal) is the lifecycle
+    /// claim `launch_reserved` holds across both.
+    #[tokio::test]
+    async fn a_retry_publishes_the_title_its_takeover_preserved() {
+        let state = StateDir::new();
+        let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
+            .await
+            .expect("supervisor");
+        let cwd = state.path().to_string_lossy().to_string();
+        let stranded = StoredSession {
+            id: "stranded".to_string(),
+            title: "as created".to_string(),
+            created_at: now_unix(),
+            cwd: cwd.clone(),
+            invocation: "agent".to_string(),
+            tmux_name: "fh-stranded".to_string(),
+            pane: String::new(),
+            outcome: LastOutcome::Launching,
+            agent_kind: farhelm_proto::AgentKind::Generic,
+            resume_template: None,
+            canonical_cwd: Some(cwd.clone()),
+            captured_conversation: None,
+            captured_record: None,
+            capture_ambiguous: false,
+            first_input_at: None,
+            generation: 0,
+            launch_scoped: false,
+            source_profile: None,
+        };
+        sup.store
+            .insert_session(
+                stranded.clone(),
+                Some(IntentClaim {
+                    intent_key: "key".to_string(),
+                    fingerprint: "fp".to_string(),
+                }),
+            )
+            .await
+            .expect("seed the crashed attempt");
+        sup.store
+            .set_session_title("stranded", "as renamed")
+            .await
+            .expect("the user renames the stranded session");
+
+        let reservation = Reservation {
+            intent_key: "key".to_string(),
+            fingerprint: "fp".to_string(),
+            session_id: "stranded".to_string(),
+            tmux_name: "fh-stranded".to_string(),
+            outcome: ReservationOutcome::Pending,
+        };
+        let reply = sup
+            .launch_reserved(
+                LaunchRequest {
+                    cwd: &cwd,
+                    launch_cwd: cwd.clone(),
+                    invocation: "agent".to_string(),
+                    argv: vec!["agent".to_string()],
+                    // The STALE label: what the retry resolved before the
+                    // rename it knows nothing about.
+                    title: "as created".to_string(),
+                    cols: 80,
+                    rows: 24,
+                    snapshot: IntegrationSnapshot {
+                        kind: farhelm_proto::AgentKind::Generic,
+                        resume_template: None,
+                    },
+                    canonical_cwd: cwd.clone(),
+                    source_profile: None,
+                },
+                &Reserved::Retry(Box::new(reservation)),
+            )
+            .await
+            .expect("the retry performs the create under the reserved identity");
+
+        assert_eq!(
+            reply.title, "as renamed",
+            "the reply must carry the title the takeover committed, not the one it was built \
+             from"
+        );
+        assert_eq!(
+            sup.store
+                .session("stranded")
+                .await
+                .expect("read")
+                .expect("the takeover leaves a row")
+                .title,
+            "as renamed",
+            "premise: the durable row keeps the rename"
+        );
+        assert_eq!(
+            sup.sessions
+                .lock()
+                .await
+                .get("stranded")
+                .expect("the retry publishes an entry")
+                .info
+                .title,
+            "as renamed",
+            "and the entry the next list is served from must agree with the row, or the rename \
+             looks reverted until the supervisor restarts"
+        );
+    }
+
+    /// An unexecutable argv is refused on EVERY path that can produce one,
+    /// not only at a profile write.
+    ///
+    /// `''` is the case that motivates this: it parses to a one-element argv
+    /// holding the empty string, so an `argv.is_empty()` test — which is
+    /// what the raw create and the pending retry each had — sees a perfectly
+    /// good command line that names nothing. Profile CRUD has refused it for
+    /// a while, so the same command line was accepted or refused depending
+    /// on which door it came through.
+    ///
+    /// All three doors, because each reads its argv from a different place:
+    /// the request (raw create), the crashed attempt's row (retry), and the
+    /// session's stored invocation (restart). The restart half is asserted
+    /// against `relaunch_argv` directly, which is where that path's argv is
+    /// built and the only place a stored one is checked before it becomes an
+    /// exec.
+    #[tokio::test]
+    async fn an_argv_naming_no_program_is_refused_on_every_launch_path() {
+        let state = StateDir::new();
+        let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
+            .await
+            .expect("supervisor");
+        let cwd = state.path().to_string_lossy().to_string();
+
+        let raw = sup
+            .create_session_without_overrides(&cwd, "''", None, 80, 24, None)
+            .await
+            .expect_err("a raw create must not launch a command line that names no program");
+        assert_eq!(error_kind(&raw), ErrorKind::InvalidRequest);
+        assert!(
+            format!("{raw:#}").contains("names no program"),
+            "the refusal must say what is wrong: {raw:#}"
+        );
+
+        // The retry path reads its argv from the crashed attempt's ROW,
+        // which a build with looser rules could have written.
+        let fingerprint = raw_fingerprint(&cwd, "''", None, None, None);
+        sup.store
+            .insert_session(
+                StoredSession {
+                    id: "stranded".to_string(),
+                    title: "stranded".to_string(),
+                    created_at: now_unix(),
+                    cwd: cwd.clone(),
+                    invocation: "''".to_string(),
+                    tmux_name: "fh-stranded".to_string(),
+                    pane: String::new(),
+                    outcome: LastOutcome::Launching,
+                    agent_kind: farhelm_proto::AgentKind::Generic,
+                    resume_template: None,
+                    canonical_cwd: Some(cwd.clone()),
+                    captured_conversation: None,
+                    captured_record: None,
+                    capture_ambiguous: false,
+                    first_input_at: None,
+                    generation: 0,
+                    launch_scoped: false,
+                    source_profile: None,
+                },
+                Some(IntentClaim {
+                    intent_key: "key".to_string(),
+                    fingerprint: fingerprint.clone(),
+                }),
+            )
+            .await
+            .expect("seed the crashed attempt");
+        let retry = sup
+            .create_session_without_overrides(
+                &cwd,
+                "''",
+                None,
+                80,
+                24,
+                Some(IntentClaim {
+                    intent_key: "key".to_string(),
+                    fingerprint,
+                }),
+            )
+            .await
+            .expect_err("a retry must not relaunch a recorded argv that names no program");
+        assert!(
+            format!("{retry:#}").contains("names no program"),
+            "the retry's refusal must say what is wrong too: {retry:#}"
+        );
+        assert!(
+            sup.sessions.lock().await.is_empty(),
+            "and neither refusal may have launched anything"
+        );
+
+        // The restart path, at the point its argv is built from durable
+        // columns. Both the fresh-launch invocation and a stored fallback
+        // template can carry the shape.
+        let fresh = relaunch_argv(
+            RestartMode::Fresh,
+            &snapshot_offering(RestartOffer::FreshOnly),
+            "''",
+        )
+        .expect_err("a stored invocation that names no program is not a restart command");
+        assert_eq!(error_kind(&fresh), ErrorKind::InvalidRequest);
+        assert!(format!("{fresh:#}").contains("names no program"));
+
+        let empty_template = SessionSnapshot {
+            resume_template: Some(vec![String::new(), "--continue".to_string()]),
+            ..snapshot_offering(RestartOffer::FallbackTemplate)
+        };
+        let fallback = relaunch_argv(RestartMode::FallbackTemplate, &empty_template, "agent")
+            .expect_err("nor is a stored fallback template whose program slot is empty");
+        assert!(format!("{fallback:#}").contains("names no program"));
+    }
+
+    /// A relaunch whose directory identity cannot be CHECKED is refused, and
+    /// the launch it does allow is aimed at the path it verified.
+    ///
+    /// Both halves were the same hole. The check used to proceed with a
+    /// warning when canonicalization failed, which inverts the threat model:
+    /// the scenario being defended against is a path whose meaning changed,
+    /// and a path that stats fine but will not resolve is exactly that shape
+    /// — so the one input most deserving refusal was the one waved through.
+    /// And a successful comparison used to be discarded, with the ORIGINAL
+    /// symlinked path handed to tmux afterwards, leaving a
+    /// time-of-check/time-of-use window several awaits and a subprocess
+    /// wide.
+    ///
+    /// A session with no recorded identity is untouched by either rule,
+    /// which is asserted too: rows predating the column would otherwise
+    /// become unrestartable forever.
+    #[tokio::test]
+    async fn a_relaunch_refuses_a_directory_identity_it_cannot_confirm() {
+        let state = StateDir::new();
+        let target = state.path().join("target");
+        std::fs::create_dir(&target).expect("target");
+        let canonical = std::fs::canonicalize(&target)
+            .expect("canonicalize")
+            .to_string_lossy()
+            .into_owned();
+        let link = state.path().join("work");
+        std::os::unix::fs::symlink(&target, &link).expect("symlink");
+        let link_path = link.to_string_lossy().into_owned();
+
+        assert_eq!(
+            ensure_cwd_identity(&link_path, Some(&canonical))
+                .await
+                .expect("a matching identity is not a refusal"),
+            Some(canonical.clone()),
+            "the RESOLVED path comes back, so the launch can be aimed at it rather than at a \
+             link that can still be repointed"
+        );
+
+        // The link now points at nothing: the directory itself is gone, so
+        // canonicalization fails while the session's recorded identity says
+        // exactly what it should have resolved to.
+        std::fs::remove_dir(&target).expect("remove the link's target");
+        let refusal = ensure_cwd_identity(&link_path, Some(&canonical))
+            .await
+            .expect_err("an unresolvable path cannot be confirmed, so it must not be launched in");
+        assert_eq!(error_kind(&refusal), ErrorKind::InvalidRequest);
+        let rendered = format!("{refusal:#}");
+        assert!(
+            rendered.contains(&canonical) && rendered.contains(&link_path),
+            "the refusal must name both the path and what it was supposed to be: {rendered}"
+        );
+
+        assert_eq!(
+            ensure_cwd_identity(&link_path, None)
+                .await
+                .expect("a session with no recorded identity has nothing to confirm"),
+            None,
+            "and it must stay restartable, or every row predating the column is stranded"
+        );
+    }
+
+    /// A retry launches into the directory it VERIFIED, even when the
+    /// symlink it was given is repointed after the check and before tmux
+    /// sees it.
+    ///
+    /// This is the time-of-check/time-of-use window `ensure_cwd_identity`
+    /// closes, forced open deterministically: the create-lifecycle seam runs
+    /// at `AfterRecord`, which is after validation and before the launch's
+    /// first external side effect, and repoints the link from there. A build
+    /// that passed the original path through would put the agent in the
+    /// attacker's directory — with the permissive flags agents are commonly
+    /// launched with — while the session went on recording, and correlating
+    /// against, the directory it thought it had checked.
+    ///
+    /// The agent itself reports where it landed, because that is the only
+    /// answer that matters: a stub shim writes its own `pwd` and then sits
+    /// there, so the assertion is on the working directory the launched
+    /// process actually inherited rather than on anything the supervisor
+    /// says about itself.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_retry_launches_into_the_directory_it_verified_not_a_repointed_link() {
+        let state = StateDir::new();
+        let original = state.path().join("original");
+        let replacement = state.path().join("replacement");
+        std::fs::create_dir(&original).expect("original target");
+        std::fs::create_dir(&replacement).expect("replacement target");
+        let canonical_original = std::fs::canonicalize(&original)
+            .expect("canonicalize")
+            .to_string_lossy()
+            .into_owned();
+        let link = state.path().join("work");
+        std::os::unix::fs::symlink(&original, &link).expect("symlink");
+        let cwd = link.to_string_lossy().into_owned();
+
+        // A stub standing in for the launch shim: it records the directory
+        // it was started in and then stays alive, so the pane survives long
+        // enough for the create to confirm it.
+        let landed = state.path().join("landed");
+        let shim = state.path().join("stub-shim");
+        std::fs::write(
+            &shim,
+            format!(
+                "#!/bin/sh\npwd -P > {}\nexec sleep 300\n",
+                landed.to_string_lossy()
+            ),
+        )
+        .expect("write the stub shim");
+        std::fs::set_permissions(&shim, std::os::unix::fs::PermissionsExt::from_mode(0o755))
+            .expect("make the stub executable");
+
+        let sup = {
+            let link = link.clone();
+            let replacement = replacement.clone();
+            Supervisor::new_with_seams(
+                state.path(),
+                shim,
+                SupervisorTimeouts::default(),
+                SupervisorSeams {
+                    // `/bin/sh` rather than the user's shell: the stub
+                    // ignores the `-l -i -c` it is handed, and pinning the
+                    // shell keeps a login profile out of the picture.
+                    launch_shell: Some("/bin/sh".to_string()),
+                    create_crash: Some(Arc::new(move |stage| {
+                        if stage != CreateStage::AfterRecord {
+                            return Ok(());
+                        }
+                        // Validation has run and nothing external exists
+                        // yet: exactly the window a repoint would have to
+                        // land in to win.
+                        std::fs::remove_file(&link)?;
+                        std::os::unix::fs::symlink(&replacement, &link)?;
+                        Ok(())
+                    })),
+                    ..SupervisorSeams::default()
+                },
+            )
+            .await
+            .expect("supervisor")
+        };
+
+        let fingerprint = raw_fingerprint(&cwd, "agent", None, None, None);
+        sup.store
+            .insert_session(
+                StoredSession {
+                    id: "stranded".to_string(),
+                    title: "stranded".to_string(),
+                    created_at: now_unix(),
+                    cwd: cwd.clone(),
+                    invocation: "agent".to_string(),
+                    tmux_name: "fh-stranded".to_string(),
+                    pane: String::new(),
+                    outcome: LastOutcome::Launching,
+                    agent_kind: farhelm_proto::AgentKind::Generic,
+                    resume_template: None,
+                    canonical_cwd: Some(canonical_original.clone()),
+                    captured_conversation: None,
+                    captured_record: None,
+                    capture_ambiguous: false,
+                    first_input_at: None,
+                    generation: 0,
+                    launch_scoped: false,
+                    source_profile: None,
+                },
+                Some(IntentClaim {
+                    intent_key: "key".to_string(),
+                    fingerprint: fingerprint.clone(),
+                }),
+            )
+            .await
+            .expect("seed the crashed attempt");
+
+        sup.create_session_without_overrides(
+            &cwd,
+            "agent",
+            None,
+            80,
+            24,
+            Some(IntentClaim {
+                intent_key: "key".to_string(),
+                fingerprint,
+            }),
+        )
+        .await
+        .expect("the retry launches: the repoint happened after the check, not before it");
+
+        let deadline = std::time::Instant::now() + Duration::from_secs(30);
+        let reported = loop {
+            if let Ok(reported) = std::fs::read_to_string(&landed) {
+                break reported;
+            }
+            assert!(
+                std::time::Instant::now() < deadline,
+                "the stub shim never reported the directory it started in"
+            );
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        };
+        assert_eq!(
+            reported.trim(),
+            canonical_original,
+            "the agent must have started in the directory the identity check verified, not in \
+             whatever the link was repointed at afterwards"
+        );
     }
 }

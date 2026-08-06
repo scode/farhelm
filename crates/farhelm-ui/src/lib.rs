@@ -145,10 +145,18 @@ pub enum SessionStatus {
     /// screen; this covers the create case, where none does.
     #[default]
     Unknown,
-    /// The agent is alive and appears to be working. See farhelm-proto's
-    /// `SessionStatus::Running` for the transitional note that matters
-    /// here: before the supervisor's first sample of a session, that live session
-    /// arrives as this one.
+    /// The agent is alive and appears to be working — and the status a
+    /// live session carries whenever nothing more specific has been
+    /// established.
+    ///
+    /// Two of those cases are worth knowing when reading a screen: a
+    /// session the supervisor has not yet sampled twice (it has no
+    /// comparison to draw a conclusion from, and a just-launched agent is
+    /// working), and one whose screen changed at its last sample. See
+    /// farhelm-proto's `SessionStatus::Running` for the full contract; the
+    /// rule that matters here is that all three live statuses are
+    /// heuristic and cosmetic, so nothing in this UI may gate on which one
+    /// it is.
     Running,
     /// The agent is alive and appears to be blocked on the user — a
     /// detected question or approval prompt with no answer yet. The status

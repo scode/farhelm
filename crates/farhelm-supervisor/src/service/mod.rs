@@ -96,8 +96,8 @@ mod uploads;
 pub use connection::handle_connection;
 pub use core::{
     BootIdSource, CaptureStoreFault, CaptureWrite, CreateCrashSeam, CreateStage,
-    STALL_DETACH_TIMEOUT, SessionSnapshot, StateDirOwnership, Supervisor, SupervisorSeams,
-    SupervisorTimeouts, TabOpenFault, TabOpenStage, UPLOAD_DISK_STAGE_TIMEOUT,
+    STALL_DETACH_TIMEOUT, SampleFault, SampleRead, SessionSnapshot, StateDirOwnership, Supervisor,
+    SupervisorSeams, SupervisorTimeouts, TabOpenFault, TabOpenStage, UPLOAD_DISK_STAGE_TIMEOUT,
     UPLOAD_PROGRESS_TIMEOUT, WRITER_STALL_TIMEOUT, connect, run,
 };
 pub use listing::LIST_SESSION_CAP;

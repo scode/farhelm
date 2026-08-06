@@ -1070,6 +1070,7 @@ async fn capture_considers_sessions_beyond_the_list_reply_cap() {
                     first_input_at: rival.then_some(at),
                     generation: 0,
                     launch_scoped: false,
+                    source_profile: None,
                 },
                 None,
             )

@@ -4,25 +4,35 @@
 //!
 //! These are the read-out half of the state model the `service` module doc
 //! describes — the half that answers "what happened to this session?" from
-//! two inputs: the entry's own durable record and a pane-state map the
-//! CALLER's liveness probe returned.
+//! three inputs, all of them handed in: the entry's own durable record and
+//! sample cell, a pane-state map the CALLER's liveness probe returned, and
+//! a profile-catalog map the caller read for the reply being built. Nothing
+//! here goes looking for any of them.
 //!
 //! The guarantee that shape buys holds for the SYNCHRONOUS
 //! classification core — `session_status`, `session_restart_offer`, and
 //! `entry_info`, the three a reply is actually built from. None of those
 //! consults the session map, and none issues an I/O round trip of its own;
-//! each is a pure read of the entry plus the map it was handed. That is
+//! each is a pure read of the entry plus the maps it was handed. That is
 //! what lets a list pass probe tmux ONCE for a whole page and then
 //! classify every entry from the result, and what makes the
 //! classification testable against hand-built entries with no tmux, no
 //! store, and no supervisor at all.
 //!
-//! PLAN_M6_75.md item 2's activity classification did not weaken that: the
-//! sampler's [`ActivitySample`](crate::service::ticker::ActivitySample)
-//! rides the ENTRY, so "which live status" is answered from the same two
-//! inputs everything else here is. What the classifier does add is a
-//! reading of the monotonic clock, which is why `session_status` is a thin
-//! shell over `session_status_at`.
+//! The third input is why the catalog is a MAP rather than a store handle
+//! (PLAN_M6_75.md item 4). One read serves a whole page, the caller owns
+//! the failure decision — an unreadable catalog fails the reply rather than
+//! reading as "every profile was deleted" — and deriving whether a
+//! session's profile still exists costs this module no I/O and no store
+//! handle.
+//!
+//! PLAN_M6_75.md item 2's activity classification did not weaken the shape
+//! either: the sampler's
+//! [`ActivitySample`](crate::service::ticker::ActivitySample) rides the
+//! ENTRY, so "which live status" is answered from what is already in hand —
+//! no clock, no supervisor, no lookup. The absent clock is a deliberate
+//! property rather than an accident of shape;
+//! `QUIET_SAMPLES_BEFORE_IDLE` carries that argument.
 //!
 //! Three claims a reader might over-generalize from that, all FALSE, and
 //! the difference matters to anyone reasoning about what may run where:
@@ -60,48 +70,41 @@ use super::launch_artifacts::{
     read_launch_sentinel, sentinel_could_still_apply, wrapper_failure_detail,
 };
 use super::terminals::{Terminal, tabs_from_pane_states};
-use super::ticker::TICKER_INTERVAL;
-use crate::store::{LastOutcome, Transition};
+use crate::store::{LastOutcome, ProfileNames, Transition};
 use crate::tmux::PaneState;
 use anyhow::Context;
-use farhelm_proto::{RestartOffer, SessionInfo, SessionStatus, TabInfo};
+use farhelm_proto::{
+    ProfileExistence, RestartOffer, SessionInfo, SessionStatus, SourceProfile, TabInfo,
+};
 use std::collections::HashMap;
 use std::sync::Arc;
-use std::time::{Duration, Instant};
 use tracing::warn;
 
-/// How long a live session's screen may sit unchanged before it stops
-/// being called `Running`.
+/// How many of a session's OWN consecutive samples must show an unchanged
+/// screen before it is reported `Idle` rather than `Running`.
 ///
-/// Stated as a multiple of the sampler's own cadence
-/// ([`TICKER_INTERVAL`]) rather than as an independent number, because
-/// there is no such thing as recency finer than the cadence that measures
-/// it. Three intervals is the smallest value that survives the ways a
-/// genuinely working agent goes momentarily still:
+/// Counted in samples, not seconds, and that is the whole design. The
+/// sampler works through live sessions on a budgeted round robin
+/// (`ticker::SAMPLE_TAIL_BUDGET`), so a session's real sampling period is
+/// `ceil(live / budget) × interval` — unbounded in the number of live
+/// sessions. Any wall-clock window would therefore be crossed by a pane
+/// that changed at EVERY one of its own samples as soon as a host ran
+/// enough sessions, turning "how busy is this host" into "this session is
+/// idle". Counting the session's own observations makes the cadence cancel
+/// out: the question is "how many times have I looked and seen nothing
+/// new", which means the same thing at any population.
 ///
-/// - Change is only ever established by COMPARING two consecutive samples
-///   (`ActivitySample::observe`), so the freshest `last_change` a busy
-///   session can possibly show is already up to one interval old. A
-///   one-interval window would therefore flip sessions to `Idle` purely on
-///   sampling phase.
-/// - An agent between tool calls, or one whose spinner happens to render
-///   identically twice, produces a tick or two of no visible change while
-///   very much running.
-/// - The tail budget (`SAMPLE_TAIL_BUDGET`) stretches the effective
-///   cadence once a host has many live sessions, which pushes in the same
-///   direction.
-///
-/// Nothing wants it much larger: the helm drains every ~3 seconds, so a
-/// window of tens of seconds would make `Idle` an announcement that the
-/// agent stopped a while ago rather than that it is at rest, and `Idle` is
-/// half of what the status column is for.
-///
-/// The coupling is one-directional and worth naming: `SupervisorSeams`
-/// lets tests SHORTEN the ticker interval, which only makes classification
-/// fresher inside this same window. A supervisor configured with an
-/// interval LONGER than this window would report every session `Idle`, so
-/// that combination is not a supported one.
-const OUTPUT_RECENCY_WINDOW: Duration = Duration::from_secs(3 * TICKER_INTERVAL.as_secs());
+/// Three, for the reasons a shorter count is wrong rather than for a
+/// timing: a screen can legitimately repeat for a sample or two while an
+/// agent is working — between tool calls, on a spinner frame that renders
+/// identically, on output that lands and is overwritten within one sample
+/// gap — and a count of one would flip such a session to `Idle` on every
+/// one of those. Three consecutive silent looks is a pattern rather than a
+/// coincidence. Nothing wants it much larger: at the production cadence
+/// with a small fleet this is a handful of seconds, and an `Idle` that
+/// takes a minute to appear is not the signal the status column exists to
+/// give.
+const QUIET_SAMPLES_BEFORE_IDLE: u64 = 3;
 
 /// Compute one session's liveness for a `ListSessions` reply. tmux is the
 /// truth (module docs); this function only ever reports what it can
@@ -185,25 +188,6 @@ pub(crate) fn session_status(
     entry: &SessionEntry,
     pane_states: &HashMap<String, PaneState>,
 ) -> (SessionStatus, Option<String>) {
-    session_status_at(entry, pane_states, Instant::now())
-}
-
-/// [`session_status`] with the clock supplied.
-///
-/// The only impurity classification has is "how long ago was that", so it
-/// is the only thing lifted into a parameter — the same seam
-/// `ActivitySample::observe` takes for the same reason. A test can then
-/// place a sample either side of [`OUTPUT_RECENCY_WINDOW`] exactly, rather
-/// than sleeping out a real window and hoping the runner cooperated.
-///
-/// `now` must come from the same monotonic clock the sampler wrote with
-/// (`Instant::now`), which is why this is private: a caller free to pass
-/// an arbitrary instant is a caller free to make recency meaningless.
-fn session_status_at(
-    entry: &SessionEntry,
-    pane_states: &HashMap<String, PaneState>,
-    now: Instant,
-) -> (SessionStatus, Option<String>) {
     // The guard is held across the whole match rather than cloned out of:
     // this function is synchronous (no await can intervene) and every arm
     // only reads, so the clone would have bought nothing but an allocation
@@ -223,7 +207,7 @@ fn session_status_at(
         ),
         // A live pane, and no annotation with it: an annotation describes
         // how a run ENDED, and this one has not.
-        (_, Some(state)) if !state.dead => (live_status(entry, now), None),
+        (_, Some(state)) if !state.dead => (live_status(entry), None),
         (recorded, Some(state)) => {
             let (recorded_code, annotation) = match recorded {
                 LastOutcome::Exited {
@@ -264,30 +248,33 @@ fn session_status_at(
 ///
 /// Two stages, and the order matters:
 ///
-/// 1. **The generic baseline** is output recency and nothing else. A
-///    screen that changed within [`OUTPUT_RECENCY_WINDOW`] is `Running`; a
-///    screen that has sat still longer is `Idle`. This works for every
-///    agent, including one this build has never heard of, because "the
-///    terminal is producing output" needs no vendor knowledge.
+/// 1. **The generic baseline** is observed output and nothing else. A
+///    session whose last [`QUIET_SAMPLES_BEFORE_IDLE`] samples all showed
+///    the same screen is `Idle`; anything else live is `Running`. This
+///    works for every agent, including one this build has never heard of,
+///    because "the terminal is producing output" needs no vendor
+///    knowledge — and it is expressed in the session's own samples rather
+///    than in elapsed time, so the sampler's population-dependent cadence
+///    cannot leak into the answer.
 /// 2. **Per-kind sharpening** may then promote that to `Waiting` by
 ///    recognizing this agent's own question or approval shape in the
 ///    sampled tail (`AgentIntegration::sharpen`). Waiting is not derivable
-///    from recency — an agent blocked on an approval and an agent that has
-///    finished look identical to a change detector, which is precisely why
-///    the two stages exist.
+///    from screen-change history at all — an agent blocked on an approval
+///    and an agent that has finished both sit at an unchanging screen, so
+///    the generic classifier sees one fact where there are two. That is
+///    precisely why the second stage exists, and why it reads the tail's
+///    CONTENT rather than anything about how the tail moved.
 ///
 /// ## The pre-first-sample state is `Running`, on purpose
 ///
-/// Fewer than two samples means no comparison has been made yet, so there
-/// is no recency to read: `last_change` is `None` because nothing has been
-/// WATCHED, not because the pane is still. `Running` is the honest reading
-/// of that — a session with a live pane and no history is one that just
-/// launched, and an agent that just launched is working — and it is also
-/// the reading that fails safely, since the alternative would paint every
-/// session `Idle` for the first seconds of its life and again after every
-/// supervisor restart. The distinction between "unwatched" and "watched
-/// and quiet" is exactly what `ActivitySample::samples` exists to keep
-/// (see its own docs).
+/// A streak of zero unchanged samples means two different things — "just
+/// changed" and "never compared" — and `ActivitySample::samples` is what
+/// separates them. Below two samples nothing has been WATCHED, which is
+/// not the same fact as a still pane, and `Running` is the honest reading:
+/// a session with a live pane and no history is one that just launched,
+/// and an agent that just launched is working. It is also the reading that
+/// fails safely, since the alternative would paint every session `Idle`
+/// for its first moments and again after every supervisor restart.
 ///
 /// ## Bounds this is deliberately allowed to violate cosmetically
 ///
@@ -296,47 +283,58 @@ fn session_status_at(
 /// "nothing has been observed" answer as the launch case, and it costs a
 /// wrong badge on a supervisor that already cannot talk to its terminals.
 ///
-/// Runs under the entry's `activity` mutex, which is a leaf lock held
-/// across no await. The sharpener is called INSIDE that hold rather than
-/// after cloning the tail out: a tail is up to `SAMPLE_TAIL_BYTES` and
-/// this runs once per session per reply, so cloning it would add a
-/// kilobytes-per-row allocation to the list path to avoid holding an
-/// uncontended lock for a substring search.
-fn live_status(entry: &SessionEntry, now: Instant) -> SessionStatus {
+/// No clock is read here, and none should be: see
+/// [`QUIET_SAMPLES_BEFORE_IDLE`] for why elapsed time is the wrong unit
+/// under a budgeted round robin. It is also what keeps this function a
+/// pure read of the entry, which the module docs promise.
+///
+/// Runs under the entry's `activity` mutex, which is a leaf lock: held
+/// across no await and alongside no other lock, so a hold can never
+/// participate in a deadlock and is bounded by the work inside it. It is
+/// NOT uncontended — the sampler writes the same cell every tick — which
+/// is exactly why the bound is the property worth stating. The sharpener
+/// is called INSIDE the hold rather than after cloning the tail out: a
+/// tail is up to `SAMPLE_TAIL_BYTES` and this runs once per session per
+/// reply, so cloning it would add a kilobytes-per-row allocation to the
+/// list path to avoid holding a leaf lock for a substring search.
+fn live_status(entry: &SessionEntry) -> SessionStatus {
     let activity = entry.activity.lock().expect("activity mutex poisoned");
-    let baseline = match activity.last_change {
-        _ if activity.samples < 2 => SessionStatus::Running,
-        Some(at) if now.saturating_duration_since(at) <= OUTPUT_RECENCY_WINDOW => {
+    let baseline =
+        if activity.samples >= 2 && activity.unchanged_streak >= QUIET_SAMPLES_BEFORE_IDLE {
+            SessionStatus::Idle
+        } else {
             SessionStatus::Running
-        }
-        _ => SessionStatus::Idle,
-    };
+        };
     let (Some(integration), Some(tail)) = (entry.snapshot.integration(), activity.tail.as_deref())
     else {
         return baseline;
     };
     let sharpened = integration.sharpen(baseline.clone(), tail);
-    live_only(baseline, sharpened)
+    waiting_or_baseline(baseline, sharpened)
 }
 
-/// The guard that makes "a sharpener may not invent liveness" structural
-/// rather than a promise: `sharpened` is taken only when it is itself a
-/// live status, and otherwise the baseline stands.
+/// The guard that reduces everything a sharpener can do to the one thing
+/// it is for: `Waiting`, or the baseline unchanged.
 ///
-/// A sharpener looks at a SCREEN, and a screen is not evidence about a
-/// process — a pane can render "Process exited" while the agent is very
-/// much alive, and tmux is the only thing entitled to say otherwise. So no
-/// amount of vendor-shape matching can move a session across the one
-/// distinction in this enum consumers may branch on
-/// ([`SessionStatus::is_live`]); the worst a wrong sharpener can do is
-/// pick the wrong one of three cosmetic labels.
+/// Stated as a whitelist rather than as "reject dead statuses", because
+/// the two are not the same rule and the difference is not theoretical. A
+/// sharpener looks at a SCREEN, and a screen is evidence about neither the
+/// process nor its activity: a pane can render "process exited" from a log
+/// file while the agent runs on, and it can look perfectly still while the
+/// agent works. Rejecting only non-live answers would still let a
+/// mistyped match arm turn `Running` into `Idle` on the strength of a
+/// substring — a wrong answer with no reviewer and no compile error behind
+/// it. Passing exactly `Waiting` through leaves tmux's liveness verdict
+/// and the sample-count baseline both untouchable from here.
 ///
-/// Enforced here rather than trusted to each implementation because the
-/// cost of the two mistakes is wildly asymmetric, and because this is the
-/// one place every implementation's answer passes through.
-fn live_only(baseline: SessionStatus, sharpened: SessionStatus) -> SessionStatus {
-    if sharpened.is_live() {
-        sharpened
+/// Enforced at this end as well as at the seam
+/// (`agent_kind`'s `promote_if_waiting`) because the two catch different
+/// mistakes: the seam refuses to promote a baseline it should not, and
+/// this refuses to accept an answer it should not. Neither subsumes the
+/// other, and both are one comparison.
+fn waiting_or_baseline(baseline: SessionStatus, sharpened: SessionStatus) -> SessionStatus {
+    if sharpened == SessionStatus::Waiting {
+        SessionStatus::Waiting
     } else {
         baseline
     }
@@ -359,10 +357,52 @@ fn session_restart_offer(entry: &SessionEntry) -> RestartOffer {
         .restart_offer(capture.committed_conversation())
 }
 
+/// What became of the profile a session snapshotted, as of right now
+/// (PLAN_M6_75.md items 3 and 4).
+///
+/// `snapshotted_name` is the name the session recorded at creation;
+/// `current_name` is what a catalog lookup on its id found, and `None`
+/// means the catalog has no such id at all. The three outcomes are the
+/// whole of the derivation:
+///
+/// - no such id → [`ProfileExistence::Deleted`],
+/// - present under the snapshotted name → [`ProfileExistence::Present`],
+/// - present under any other name → [`ProfileExistence::Renamed`].
+///
+/// The lookup is the CALLER's because only the caller knows how many
+/// snapshots it is about to resolve: a list reply reads the catalog once
+/// and answers a whole page out of the map, while a single-session reply
+/// asks for one id. Both hand the answer here so the rule itself exists in
+/// exactly one place — two copies would eventually disagree about the
+/// renamed case, which is the only one that needs a comparison rather than
+/// a presence test.
+///
+/// Returns the existence ALONE rather than a rebuilt `SourceProfile`: the
+/// identity half is already in the caller's hands, immutable, and having
+/// this hand back a fresh copy of it only ever meant cloning two strings to
+/// put them back where they came from.
+///
+/// Note what is NOT produced anywhere: the profile's current name. A
+/// session created from "Claude Code" was created from "Claude Code"
+/// whatever the profile is called today (SPEC.md's snapshot rule, and
+/// `SourceProfile`'s own docs on why carrying the live name would put a
+/// mutable copy of catalog state on every session row).
+pub(crate) fn source_profile_existence(
+    snapshotted_name: &str,
+    current_name: Option<&str>,
+) -> ProfileExistence {
+    match current_name {
+        None => ProfileExistence::Deleted,
+        Some(current) if current == snapshotted_name => ProfileExistence::Present,
+        Some(_) => ProfileExistence::Renamed,
+    }
+}
+
 /// One entry as a reply must describe it: the stored metadata plus the
-/// three fields that are NEVER stored and are therefore recomputed on
-/// every reply — live-probed `status` (with its annotation), rediscovered
-/// `tabs`, and a freshly derived `restart_offer`.
+/// four fields that are NEVER stored as answers and are therefore
+/// recomputed on every reply — live-probed `status` (with its annotation),
+/// rediscovered `tabs`, a freshly derived `restart_offer`, and the source
+/// profile's existence.
 ///
 /// The single place that shape is defined, shared by `ListSessions` and by
 /// the single-session replies that must match it (`SessionRenamed`, whose
@@ -381,13 +421,34 @@ fn session_restart_offer(entry: &SessionEntry) -> RestartOffer {
 /// `pane_states` must be the map the caller's own liveness probe returned;
 /// an empty map is correct only for an entry with no terminal (the restart
 /// gap), whose status comes entirely from its recorded outcome.
+///
+/// `profiles` must be the catalog as the caller read it for THIS reply —
+/// one read per reply, not one per entry, which is the batching
+/// `SourceProfile`'s docs ask for. An empty map is correct only when no
+/// entry being described has a source profile at all; it is not a safe
+/// default otherwise, because "absent from the catalog" is exactly how a
+/// DELETED profile reads (see the callers, which is why they fail a reply
+/// whose catalog read failed rather than passing an empty map).
 pub(crate) fn entry_info(
     entry: &SessionEntry,
     pane_states: &HashMap<String, PaneState>,
     sentinel: Option<&str>,
+    profiles: &ProfileNames,
 ) -> SessionInfo {
     let mut info = entry.info.clone();
     info.restart_offer = session_restart_offer(entry);
+    // The entry carries the SNAPSHOT (id and name as recorded at creation);
+    // the existence beside it is a placeholder nothing reads, re-derived
+    // here against the catalog as it stands for this reply — which is what
+    // makes a profile renamed or deleted since creation show up without any
+    // session row ever being rewritten.
+    info.source_profile = info.source_profile.map(|snapshotted| SourceProfile {
+        existence: source_profile_existence(
+            &snapshotted.name,
+            profiles.get(&snapshotted.id).map(String::as_str),
+        ),
+        ..snapshotted
+    });
     // Tabs are not stored anywhere at all (`SessionInfo::tabs`), so this
     // rediscovery IS the tab list. A terminal-less entry has no tmux
     // session and therefore no tabs, which the empty default states
@@ -630,22 +691,22 @@ mod tests {
     /// An entry with a live terminal whose sample cell has been filled in
     /// by hand, standing in for whatever the ticker would have written.
     ///
-    /// `samples` and `last_change` are set directly rather than by
-    /// replaying `ActivitySample::observe`, because these tests are about
-    /// how the CLASSIFIER reads a cell, and driving it through the sampler
-    /// would make every case depend on the sampler's own change detection
-    /// as well.
+    /// The counts are set directly rather than by replaying
+    /// `ActivitySample::observe`, because these tests are about how the
+    /// CLASSIFIER reads a cell; driving them through the sampler would make
+    /// every case depend on its change detection as well, which has its own
+    /// tests next to it.
     fn entry_sampled(
         kind: AgentKind,
         samples: u64,
-        last_change: Option<Instant>,
+        unchanged_streak: u64,
         tail: Option<&str>,
     ) -> SessionEntry {
         let entry = entry_with(Some(a_terminal()), LastOutcome::Running);
         {
             let mut activity = entry.activity.lock().expect("activity mutex");
             activity.samples = samples;
-            activity.last_change = last_change;
+            activity.unchanged_streak = unchanged_streak;
             activity.tail = tail.map(str::to_string);
         }
         SessionEntry {
@@ -851,57 +912,75 @@ mod tests {
         );
     }
 
-    /// The recency rule, at both sides of its boundary and at the two
-    /// states that have no recency at all.
+    /// The decay rule at both sides of its boundary, counted in the
+    /// session's own samples.
     ///
     /// Table-driven for the same reason the precedence test above is: each
     /// case alone looks arbitrary, and it is the RELATIONSHIPS that are the
-    /// contract — that the boundary is inclusive, that "not watched yet"
-    /// and "watched and still" are opposite answers, and that a session
-    /// with no pane never reaches this code at all.
-    ///
-    /// Driven through `session_status_at` rather than by sleeping: the
-    /// window is measured in production seconds, and a test that waited it
-    /// out would be both slow and, on a loaded runner, a flake.
+    /// contract — that the threshold is inclusive, that one silent look
+    /// short of it is still `Running`, and that "not watched yet" and
+    /// "watched and still" are opposite answers.
     #[test]
-    fn the_output_recency_window_decides_running_from_idle_at_both_edges() {
+    fn the_quiet_sample_threshold_decides_running_from_idle_at_both_edges() {
         let live = pane_map(false, None);
-        let now = Instant::now();
-        // Far enough into the fake timeline that subtracting a window
-        // cannot underflow the monotonic clock's origin.
-        let now = now + OUTPUT_RECENCY_WINDOW * 4;
 
-        let just_inside = entry_sampled(
+        let one_short = entry_sampled(
             AgentKind::Generic,
-            9,
-            Some(now - OUTPUT_RECENCY_WINDOW),
+            40,
+            QUIET_SAMPLES_BEFORE_IDLE - 1,
             Some("working"),
         );
         assert_eq!(
-            session_status_at(&just_inside, &live, now).0,
+            session_status(&one_short, &live).0,
             SessionStatus::Running,
-            "the window is inclusive: output exactly one window old still counts"
+            "a screen can repeat for a sample or two while an agent works"
         );
 
-        let just_outside = entry_sampled(
+        let exactly_at = entry_sampled(
             AgentKind::Generic,
-            9,
-            Some(now - OUTPUT_RECENCY_WINDOW - Duration::from_millis(1)),
+            40,
+            QUIET_SAMPLES_BEFORE_IDLE,
             Some("working"),
         );
         assert_eq!(
-            session_status_at(&just_outside, &live, now).0,
+            session_status(&exactly_at, &live).0,
             SessionStatus::Idle,
-            "a millisecond past the window is quiet; nothing rounds in the session's favour"
+            "the threshold is inclusive: the Nth silent look is the one that decides"
         );
 
-        // Sampled repeatedly and never seen to change: the genuinely idle
-        // shape, and the one a `last_change`-only classifier would have to
-        // guess at.
-        let never_changed = entry_sampled(AgentKind::Generic, 9, None, Some("a shell prompt"));
+        let long_quiet = entry_sampled(AgentKind::Generic, 4_000, 3_999, Some("a shell prompt"));
+        assert_eq!(session_status(&long_quiet, &live).0, SessionStatus::Idle);
+    }
+
+    /// The bug this classifier's shape exists to prevent: a busy session on
+    /// a crowded host must not decay just because the sampler gets around
+    /// to it less often.
+    ///
+    /// With more live sessions than `SAMPLE_TAIL_BUDGET`, a session is
+    /// sampled once every `ceil(live / budget)` ticks — at 49 live sessions
+    /// that is every 8 seconds at the production cadence, which is past any
+    /// wall-clock window a reviewer would call reasonable. A clock-based
+    /// classifier therefore reports a continuously-changing pane as `Idle`
+    /// purely because the HOST is busy, and the user watching that column
+    /// sees their fleet go idle as it grows.
+    ///
+    /// Expressed as a pure classifier case because that is where the
+    /// property lives: no elapsed time appears anywhere below, which is
+    /// exactly the point — the same cell means the same thing at any
+    /// cadence, so there is nothing for a population to change. The
+    /// matching end-to-end case lives beside the sampler in `ticker`.
+    #[test]
+    fn a_session_that_changes_at_every_sample_stays_running_at_any_cadence() {
+        let live = pane_map(false, None);
+        // Sampled hundreds of times over an arbitrarily long life, and
+        // never once found unchanged: the shape of a pane that is printing
+        // whenever anybody looks at it, however rarely that is.
+        let rarely_sampled = entry_sampled(AgentKind::Generic, 500, 0, Some("tick 500"));
         assert_eq!(
-            session_status_at(&never_changed, &live, now).0,
-            SessionStatus::Idle
+            session_status(&rarely_sampled, &live).0,
+            SessionStatus::Running,
+            "a pane that changed at every one of its own samples is working, whatever the \
+             interval between them was"
         );
     }
 
@@ -911,7 +990,7 @@ mod tests {
     /// own test because it is the state EVERY session passes through — at
     /// create, and again for every session after a supervisor restart. The
     /// wrong answer here would paint a whole fleet idle for the first
-    /// seconds of its life, which is exactly the kind of systematically
+    /// moments of its life, which is exactly the kind of systematically
     /// wrong status that teaches users to ignore the column.
     ///
     /// Both sub-two counts are pinned, because they are different facts:
@@ -920,11 +999,10 @@ mod tests {
     #[test]
     fn a_session_that_has_not_been_watched_twice_is_running_rather_than_idle() {
         let live = pane_map(false, None);
-        let now = Instant::now();
         for samples in [0, 1] {
-            let entry = entry_sampled(AgentKind::Generic, samples, None, None);
+            let entry = entry_sampled(AgentKind::Generic, samples, 0, None);
             assert_eq!(
-                session_status_at(&entry, &live, now).0,
+                session_status(&entry, &live).0,
                 SessionStatus::Running,
                 "an unwatched live session is one that just launched, not one at rest \
                  ({samples} samples)"
@@ -943,19 +1021,15 @@ mod tests {
     #[test]
     fn an_integrated_sessions_prompt_tail_is_sharpened_to_waiting() {
         let live = pane_map(false, None);
-        let now = Instant::now();
         // Quiet by the baseline rule — a pending approval is exactly the
         // case where nothing is being printed — so the `Waiting` below can
         // only have come from the sharpener.
-        let claude = entry_sampled(AgentKind::Claude, 9, None, Some(CLAUDE_APPROVAL_TAIL));
-        assert_eq!(
-            session_status_at(&claude, &live, now).0,
-            SessionStatus::Waiting
-        );
+        let claude = entry_sampled(AgentKind::Claude, 9, 5, Some(CLAUDE_APPROVAL_TAIL));
+        assert_eq!(session_status(&claude, &live).0, SessionStatus::Waiting);
 
-        let generic = entry_sampled(AgentKind::Generic, 9, None, Some(CLAUDE_APPROVAL_TAIL));
+        let generic = entry_sampled(AgentKind::Generic, 9, 5, Some(CLAUDE_APPROVAL_TAIL));
         assert_eq!(
-            session_status_at(&generic, &live, now).0,
+            session_status(&generic, &live).0,
             SessionStatus::Idle,
             "a session with no integration keeps the generic baseline, whatever its screen says"
         );
@@ -964,50 +1038,101 @@ mod tests {
         let busy = entry_sampled(
             AgentKind::Claude,
             9,
-            Some(now),
+            0,
             Some("⏺ Reading src/main.rs (120 lines)"),
         );
+        assert_eq!(session_status(&busy, &live).0, SessionStatus::Running);
+    }
+
+    /// The prompt-answered-then-captures-failed sequence, which is how a
+    /// session used to get STUCK at `Waiting` forever.
+    ///
+    /// The bug was that a tail is kept until a successful capture replaces
+    /// it, while sharpening reads it on every reply. So: a pane shows an
+    /// approval prompt (correctly `Waiting`), the user answers it, and this
+    /// session's captures then start failing — a pane that is still alive,
+    /// so still classified from its baseline, and still sharpened from a
+    /// screen that stopped being true at the first failure. Nothing
+    /// recovers from that except a successful capture, and the premise of
+    /// the case is that none is coming.
+    ///
+    /// `forget_tail` is what the sampler now calls when a session it
+    /// SELECTED could not be captured, and the two halves of its contract
+    /// are both asserted here because getting either wrong is its own bug:
+    /// sharpening must stop (or the session stays stuck), and the sample
+    /// counts must NOT move (or a run of failures decays a live session to
+    /// `Idle` on the strength of no observation at all — the same wrong
+    /// inference `sample_pass` refuses to make when tmux answers nothing).
+    #[test]
+    fn a_failed_capture_stops_sharpening_without_counting_as_a_quiet_look() {
+        let live = pane_map(false, None);
+        let entry = entry_sampled(AgentKind::Claude, 9, 5, Some(CLAUDE_APPROVAL_TAIL));
         assert_eq!(
-            session_status_at(&busy, &live, now).0,
-            SessionStatus::Running
+            session_status(&entry, &live).0,
+            SessionStatus::Waiting,
+            "premise: the prompt on screen is what makes this session waiting"
+        );
+
+        entry.activity.lock().expect("activity mutex").forget_tail();
+
+        assert_eq!(
+            session_status(&entry, &live).0,
+            SessionStatus::Idle,
+            "with no screen to read, the session falls back to its baseline rather than \
+             reporting a question nobody can confirm is still on screen"
+        );
+        let activity = entry.activity.lock().expect("activity mutex");
+        assert_eq!(
+            (activity.samples, activity.unchanged_streak),
+            (9, 5),
+            "a failed capture is not an observation, and least of all a quiet one"
         );
     }
 
-    /// A sharpener may only ever choose between LIVE statuses; anything
-    /// else it returns is discarded and the baseline stands.
+    /// Nothing a sharpener returns survives except `Waiting`; every other
+    /// answer leaves the baseline exactly as the sampler computed it.
     ///
-    /// Tested against [`live_only`] directly because that is the whole
-    /// mechanism — no implementation in the tree returns a dead status
-    /// today, and the point of the guard is that a future one (or a
-    /// mistyped match arm) cannot make tmux's liveness verdict wrong by
-    /// looking at a screen. The screen is not evidence about the process:
-    /// a pane can print "process exited" from a log file while the agent
-    /// that printed it runs on.
+    /// Tested against [`waiting_or_baseline`] directly because that is the
+    /// whole mechanism — no implementation in the tree returns anything
+    /// else today, and the point of the guard is that a future one, or a
+    /// mistyped match arm, cannot rewrite a status by looking at a screen.
+    ///
+    /// Exhaustive over the cross product rather than spot-checked. Both
+    /// live baselines against every status the enum has is thirteen cheap
+    /// assertions, and the cheap version of this test (one baseline, one
+    /// dead status) passes with half the rule implemented — including with
+    /// the version that let a sharpener demote `Running` to `Idle`, which
+    /// is a wrong answer with no reviewer behind it.
     #[test]
-    fn a_sharpener_can_never_move_a_session_across_the_liveness_boundary() {
-        for dead in [
-            SessionStatus::Exited { exit_code: Some(0) },
-            SessionStatus::Error {
-                detail: "nope".to_string(),
-            },
-            SessionStatus::Interrupted,
-            SessionStatus::Unknown,
-        ] {
-            assert_eq!(
-                live_only(SessionStatus::Running, dead.clone()),
+    fn nothing_but_waiting_survives_a_sharpener() {
+        for baseline in [SessionStatus::Running, SessionStatus::Idle] {
+            for sharpened in [
                 SessionStatus::Running,
-                "{dead:?} from a sharpener must not survive"
-            );
+                SessionStatus::Idle,
+                SessionStatus::Waiting,
+                SessionStatus::Exited { exit_code: Some(0) },
+                SessionStatus::Exited { exit_code: None },
+                SessionStatus::Error {
+                    detail: "nope".to_string(),
+                },
+                SessionStatus::Interrupted,
+                SessionStatus::Unknown,
+            ] {
+                let survived = waiting_or_baseline(baseline.clone(), sharpened.clone());
+                let expected = if sharpened == SessionStatus::Waiting {
+                    SessionStatus::Waiting
+                } else {
+                    baseline.clone()
+                };
+                assert_eq!(
+                    survived, expected,
+                    "a {sharpened:?} answer against a {baseline:?} baseline"
+                );
+                assert!(
+                    survived == baseline || survived == SessionStatus::Waiting,
+                    "{survived:?} is neither the baseline nor the one promotion allowed"
+                );
+            }
         }
-        // The live answers it IS allowed to give pass through untouched,
-        // including the promotion the whole method exists for.
-        assert_eq!(
-            live_only(SessionStatus::Idle, SessionStatus::Waiting),
-            SessionStatus::Waiting
-        );
-        assert_eq!(
-            live_only(SessionStatus::Running, SessionStatus::Running),
-            SessionStatus::Running
-        );
     }
 }

@@ -64,19 +64,38 @@
 //!
 //! Sampling itself writes nothing durable — it reads panes and updates
 //! in-memory [`ActivitySample`] cells — so it is not a `may_record`
-//! question. The capture half of a tick is, and it is gated where it
-//! always was, inside the pass.
+//! question at all. The capture half is, but only PARTLY: a supervisor
+//! that may not record still scans the agents' record trees and still
+//! advances its in-memory capture state, because reading and concluding
+//! are not the thing it lacks standing for. What `may_record` gates is the
+//! durable write, inside the pass, where the conclusion would become a
+//! claim.
 //!
 //! # What the samples are for
 //!
 //! This module measures; it does not classify. `service::status`'s
-//! `live_status` reads exactly what is recorded here — how long a pane has
-//! been quiet, and the tail it last showed — and turns it into
-//! running/waiting/idle, with the per-kind sharpeners matching a pending
-//! question or approval against that tail. Keeping the thresholds there
-//! rather than here is what lets the whole classification be unit-tested
-//! against hand-built entries, and what keeps this task free to be late
-//! without being wrong.
+//! `live_status` reads exactly what is recorded here — how many of a
+//! session's own consecutive samples showed nothing new, and the tail it
+//! last showed — and turns it into running/waiting/idle, with the per-kind
+//! sharpeners matching a pending question or approval against that tail.
+//!
+//! Keeping the thresholds there rather than here is what lets the whole
+//! classification be unit-tested against hand-built entries. Keeping them
+//! expressed in SAMPLES rather than seconds is what keeps this task free
+//! to be late — under a budgeted round robin its cadence is a function of
+//! how many sessions are live, and a classification that read a clock
+//! would silently turn that population into a status. See
+//! [`ActivitySample`]'s own docs, which carry the argument.
+//!
+//! Being free to be late is not the same as being free to run flat out.
+//! The loop's own deadline is ANCHORED so a pass that takes part of its
+//! interval does not push every later tick later, and it is floored so a
+//! pass that OVERRUNS its interval is not followed instantly by the next
+//! one — which is what a supervisor too loaded to keep up would otherwise
+//! do, spawning tmux subprocesses as fast as it could retire them.
+//! [`next_deadline`] is both rules, as a pure function, for the same
+//! reason the thresholds live in `status`: it can then be asserted rather
+//! than timed.
 //!
 //! # Shutdown contract
 //!
@@ -112,23 +131,38 @@
 //! `TickerHandle::watch` is what turns the same information into a loud
 //! log line — see `serve`.
 
-use super::core::{CaptureReason, SessionEntry, Supervisor};
+use super::core::{CaptureReason, SampleRead, SessionEntry, Supervisor};
 use super::terminals::Terminal;
 use std::sync::Arc;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 use tokio::sync::oneshot;
 use tracing::{debug, error, warn};
 
 /// How often the supervisor's periodic task fires in production.
 ///
 /// Chosen against the helm's own 3-second `ListSessions` drain rather than
-/// independently. PLAN_M6_75.md item 3 fixes the supervisor edge's
-/// staleness bound at one ticker interval plus one drain, so a ticker
-/// SLOWER than the drain would widen that bound for no saving, while a
-/// much faster one would spend subprocesses producing samples no reader
-/// ever gets to see. Sitting below the drain means every drain finds a
-/// sample no older than one interval without the two cadences locking into
-/// phase.
+/// independently: a ticker SLOWER than the drain would leave drains
+/// answering from samples nothing had refreshed since the previous one,
+/// while a much faster one would spend subprocesses producing samples no
+/// reader ever gets to see.
+///
+/// ## What this interval is, and is not, a bound on
+///
+/// It is the period of the TASK, not of any one session's sampling. A
+/// live session is sampled once every `ceil(live / SAMPLE_TAIL_BUDGET)`
+/// ticks, so its own refresh period is
+/// `ceil(live / budget) × interval`, plus however long each round's work
+/// takes. An earlier version of this doc promised a drain would find a
+/// sample "no older than one interval"; that was only ever true below the
+/// budget, and it is not what anything depends on.
+///
+/// Nothing depends on it because the classification does not read a clock
+/// at all: `status::live_status` counts a session's OWN consecutive
+/// unchanged samples ([`ActivitySample`]), so a longer effective period
+/// makes a transition arrive later without ever making it wrong. Tail
+/// freshness — what a sharpener matches against — has the same
+/// population-dependent bound, with the same consequence: a prompt that
+/// appeared is noticed at the session's next sample, whenever that is.
 ///
 /// Overridable per supervisor through [`crate::service::SupervisorSeams`],
 /// which is how tests get a cadence measured in milliseconds.
@@ -175,10 +209,29 @@ pub(crate) const SAMPLING_ADMISSION_PERMITS: usize = 1;
 /// knowledge of a stretch of time nobody was looking.
 ///
 /// What the classifier (`status::live_status`) gets is deliberately raw —
-/// an instant and a screen, not a verdict — so that the
-/// running/waiting/idle thresholds and the per-kind sharpening live in one
-/// place, beside the precedence rules they extend, rather than being
-/// half-decided here.
+/// counts and a screen, not a verdict — so that the running/waiting/idle
+/// thresholds and the per-kind sharpening live in one place, beside the
+/// precedence rules they extend, rather than being half-decided here.
+///
+/// # Why nothing here is a timestamp
+///
+/// The obvious shape for "is this pane still producing output" is an
+/// instant of last change, compared by the classifier against a wall-clock
+/// window. That shape is WRONG here, and the reason is [`SAMPLE_TAIL_BUDGET`]:
+/// a session is sampled once every `ceil(live / budget)` ticks, so on a
+/// host with more than `budget` live sessions the gap between one
+/// session's OWN samples grows past any fixed window — and a pane that
+/// changed between every one of its samples would still read "quiet for
+/// longer than the window" and classify idle. The status would then be a
+/// function of how many OTHER sessions the host is running, which is
+/// nonsense a user would experience as the column going idle as their
+/// fleet grew.
+///
+/// Counting the session's own consecutive unchanged samples instead makes
+/// the sampling cadence cancel out of the classification entirely: the
+/// question becomes "how many times have I looked at THIS pane and seen
+/// nothing new", which means the same thing at any budget, any population,
+/// and any interval.
 #[derive(Debug, Default)]
 pub(crate) struct ActivitySample {
     /// How many times this session has been sampled at all.
@@ -187,25 +240,31 @@ pub(crate) struct ActivitySample {
     /// establishes the baseline that later ones are compared against, and
     /// must not itself count as output. Without this, every session would
     /// look busy the moment it was first looked at — including one that
-    /// has sat at a shell prompt untouched since a reboot.
+    /// has sat at a shell prompt untouched since a reboot. The classifier
+    /// reads it as "has this pane been watched twice yet", which is the
+    /// question [`ActivitySample::unchanged_streak`] cannot answer on its
+    /// own (a streak of zero means both "never compared" and "just
+    /// changed").
     pub(crate) samples: u64,
-    /// When the pane's screen was last observed to have CHANGED, on this
-    /// process's monotonic clock. `None` means it has never been seen to
-    /// change: either it has not been sampled twice yet, or it has
-    /// genuinely shown the same thing throughout.
+    /// How many consecutive COMPARISONS have found the screen unchanged,
+    /// reset to zero by any observed change.
     ///
-    /// Read by `status::live_status`, which turns "changed recently" into
-    /// running and "quiet" into idle against its own recency window. The
-    /// `None` is why [`ActivitySample::samples`] has to exist beside it:
-    /// the classifier must be able to tell "never seen to change" from
-    /// "not yet watched twice", and this field alone cannot.
-    pub(crate) last_change: Option<Instant>,
+    /// The decay signal `status::live_status` turns into idle. Counted in
+    /// this session's own samples rather than in seconds — see the type's
+    /// own docs for why a wall-clock window is the wrong shape under a
+    /// budgeted round robin.
+    ///
+    /// Only ever incremented by a comparison, so the first sample of a
+    /// pane leaves it at zero: there was nothing to compare against, and
+    /// counting that as quiet would start every session's decay one step
+    /// in.
+    pub(crate) unchanged_streak: u64,
     /// The pane's screen as of the last sample, bounded to
     /// [`SAMPLE_TAIL_BYTES`] and trimmed of the blank rows a pane is
     /// padded out with.
     ///
     /// Serves both consumers: change detection compares it against the
-    /// next capture, and item 2's per-kind sharpeners match a prompt or
+    /// next capture, and the per-kind sharpeners match a prompt or
     /// approval shape in it.
     pub(crate) tail: Option<String>,
 }
@@ -230,17 +289,55 @@ impl ActivitySample {
     /// cursor blink from a TUI's own timer — which for status purposes is
     /// exactly the noise that would report an idle agent as working. What
     /// this can miss in exchange is output that lands and is overwritten
-    /// entirely between two ticks; that costs one interval of recency on a
+    /// entirely between two samples; that costs one sample of decay on a
     /// status SPEC.md already calls cosmetic.
     ///
-    /// `now` is a parameter rather than read here so the unit tests can
-    /// drive recency without sleeping.
-    pub(crate) fn observe(&mut self, tail: String, now: Instant) {
-        if self.samples > 0 && self.tail.as_deref() != Some(tail.as_str()) {
-            self.last_change = Some(now);
+    /// Takes no clock, deliberately: everything the classifier needs is a
+    /// count of this session's own observations (see the type's docs), and
+    /// a timestamp here would only invite a wall-clock comparison back in.
+    pub(crate) fn observe(&mut self, tail: String) {
+        if self.samples > 0 {
+            if self.tail.as_deref() == Some(tail.as_str()) {
+                self.unchanged_streak += 1;
+            } else {
+                self.unchanged_streak = 0;
+            }
         }
         self.tail = Some(tail);
         self.samples += 1;
+    }
+
+    /// Drop the retained screen after a capture this session was SELECTED
+    /// for failed, without recording an observation.
+    ///
+    /// The bug this closes is specific and durable, which is why forgetting
+    /// is worth doing at all. A tail is not only change-detection input: it
+    /// is the evidence the per-kind sharpeners read, and they read the LAST
+    /// one indefinitely. So a session whose pane showed an approval prompt,
+    /// whose user then answered it, and whose captures then began failing
+    /// — a pane that is still alive, so still classified from its
+    /// baseline — would go on reporting `Waiting` forever on the strength
+    /// of a screen that stopped being true at the first failure. Nothing
+    /// recovers from that except a successful capture, and the whole
+    /// premise of the case is that none is coming.
+    ///
+    /// What it deliberately does NOT do is count as a sample or as a quiet
+    /// look: an unreachable pane is not evidence of stillness, and letting
+    /// a run of failures decay a session to `Idle` would be the same wrong
+    /// inference `sample_pass` refuses to make when tmux answers nothing at
+    /// all. The baseline simply stops moving, which is honest, and
+    /// sharpening stops claiming anything, which is the point.
+    ///
+    /// Change detection is unaffected in the way that matters: the next
+    /// SUCCESSFUL capture has nothing to compare against, so it records no
+    /// change (`observe` only compares when a previous sample exists...
+    /// which it does — `samples` is untouched here — so a first capture
+    /// after a forget compares against `None` and resets the streak).
+    /// Resetting the streak is the conservative direction: it means
+    /// `Running`, which is what "we do not know" has meant on this path
+    /// since the beginning.
+    pub(crate) fn forget_tail(&mut self) {
+        self.tail = None;
     }
 }
 
@@ -342,6 +439,97 @@ impl TickerHandle {
     }
 }
 
+/// The failure a test has installed in place of one of a sampling pass's
+/// tmux reads, if any — see [`SampleFault`](super::core::SampleFault) for
+/// why the two failure paths need a seam at all.
+///
+/// `None` in production, always, so each call site is one `Option` check
+/// next to a subprocess round trip.
+fn injected_sample_fault(sup: &Supervisor, read: SampleRead<'_>) -> Option<anyhow::Error> {
+    sup.seams
+        .sample_fault
+        .as_ref()
+        .and_then(|fault| fault(read))
+        .map(anyhow::Error::msg)
+}
+
+/// Where the sampler's round robin resumes: the id of the last session it
+/// sampled, or `None` to start at the head of the order.
+///
+/// An ID rather than an index, and [`sample_pass`]'s rotation section
+/// carries the argument: an index into a re-sorted population is a position
+/// that CHURN MOVES, so deletes ahead of the cursor can step over the
+/// sessions behind it indefinitely. The id names a place in the order
+/// instead, which nothing else appearing or disappearing can shift.
+///
+/// The named session need not still exist. Resuming means "the first live
+/// session ordered after this one", which is well defined whether or not
+/// the session it names is still there — so a deleted session's id needs no
+/// cleanup and cannot strand the rotation.
+type SampleCursor = Option<String>;
+
+/// The smallest gap the ticker will ever leave between the END of one pass
+/// and the START of the next, as a fraction of the configured interval.
+///
+/// A fraction rather than a constant duration so the rule scales with
+/// whatever cadence a caller (or a test) chose: a 2-second production
+/// interval and a 50-millisecond test interval want the same SHAPE of
+/// recovery pause, not the same number of milliseconds. Half is
+/// deliberately generous — under sustained overrun the supervisor spends at
+/// least a third of its time not sampling, which is the whole point — and
+/// the exact value matters little, because reaching this path at all means
+/// the host is already too loaded to sample at the cadence anyone asked
+/// for.
+const MIN_TICK_GAP_DIVISOR: u32 = 2;
+
+/// Where the next tick lands, given the deadline that just fired, the
+/// instant the pass finished, and the configured interval.
+///
+/// Two rules, and they answer different failures:
+///
+/// - **Anchored**, not "now plus interval": the deadline advances by whole
+///   intervals from its predecessor, so a pass that took 300ms of a
+///   2-second cadence still fires the next tick 2 seconds after the LAST
+///   one rather than 2.3 seconds later. A sleep-after-work loop makes the
+///   real cadence `interval + work`, so every slow pass pushes every later
+///   tick permanently later — a drift that compounds for the life of the
+///   process and that nobody can see, since the only symptom is samples
+///   arriving less often than the interval anyone configured.
+/// - **Never sooner than [`MIN_TICK_GAP_DIVISOR`] allows**, which is what
+///   the anchoring alone gets wrong. When a pass overruns its period every
+///   anchored deadline is already in the past, so an anchor-only rule
+///   schedules the next pass for *immediately*, forever — back-to-back
+///   subprocess churn with no recovery pause, on precisely the host that is
+///   already struggling. Pushing the deadline past `now` is what bounds it.
+///
+/// A pure function of three values, so the schedule can be tested without a
+/// clock, a runtime, or a tmux (`next_deadline_*` below). That is the whole
+/// reason it is not inlined into the loop: a scheduling rule verified only
+/// by timing a real loop is verified by a stopwatch on a shared CI runner.
+fn next_deadline(
+    fired: tokio::time::Instant,
+    now: tokio::time::Instant,
+    interval: Duration,
+) -> tokio::time::Instant {
+    let mut next = fired + interval;
+    if next > now {
+        // On cadence: the anchor is in the future and is returned exactly,
+        // whatever fraction of the interval the pass consumed. The minimum
+        // gap deliberately does NOT apply here — applying it would stretch
+        // the cadence of a perfectly healthy ticker whose passes merely
+        // take more than half an interval, which is the drift this
+        // anchoring exists to prevent.
+        return next;
+    }
+    // Overran: skip whole intervals, so the phase survives a pass that ran
+    // through several periods rather than re-anchoring on the overrun. The
+    // loop is bounded by however many periods were missed.
+    while next <= now {
+        next += interval;
+    }
+    next.max(now + interval / MIN_TICK_GAP_DIVISOR)
+}
+
 /// Start this supervisor's periodic task and hand back its owner.
 ///
 /// Called by `serve` once initialization is complete — the session map is
@@ -363,19 +551,53 @@ pub(crate) fn start_ticker(sup: &Arc<Supervisor>) -> TickerHandle {
         // there is exactly one ticker: keeping it here rather than on the
         // supervisor means no shared state and no lock for a value only
         // this loop ever reads.
-        let mut cursor: usize = 0;
+        let mut cursor: SampleCursor = None;
+        // ANCHORED rather than a sleep at the end of each pass. A
+        // `sleep(interval)` after the work makes the real cadence
+        // `interval + work`, so every slow capture pass permanently pushes
+        // every later tick later — a drift that compounds for the life of
+        // the process and that no reader can see, since the only symptom
+        // is samples arriving less often than the interval anyone
+        // configured.
+        //
+        // The first tick is anchored one interval out because `serve` has
+        // just run a reload and a capture pass of its own; a tick at t=0
+        // would repeat that work before anything could have changed.
+        //
+        // The deadline is computed rather than taken from a tokio
+        // `Interval`, and the reason is the overrun case none of tokio's
+        // three `MissedTickBehavior`s covers. All three of them return
+        // IMMEDIATELY from a `tick()` whose deadline has already passed —
+        // `Skip` only decides where the NEXT deadline lands — so under
+        // sustained overrun (a pass that takes longer than the interval,
+        // which a loaded host with many live sessions can genuinely do)
+        // every tick is already overdue by the time it is awaited and the
+        // passes run back to back forever. That is a supervisor spawning
+        // tmux subprocesses as fast as it can retire them, with no pause in
+        // which anything could recover; see `next_deadline` for the rule
+        // that replaces it, and for why anchoring is still what the
+        // non-overrun case gets.
+        let mut deadline = tokio::time::Instant::now() + interval;
         loop {
-            // Sleep FIRST. `serve` has just run a reload and a capture
-            // pass of its own, so a tick at t=0 would repeat that work
-            // before anything could have changed.
             tokio::select! {
                 _ = &mut stop_rx => break,
-                _ = tokio::time::sleep(interval) => {}
+                _ = tokio::time::sleep_until(deadline) => {}
             }
             let Some(sup) = weak.upgrade() else {
                 break;
             };
             tick(&sup, &mut cursor, SAMPLE_TAIL_BUDGET, &mut stop_rx).await;
+            deadline = next_deadline(deadline, tokio::time::Instant::now(), interval);
+            // A stop observed BETWEEN captures has already been taken out
+            // of the channel by `stop_requested`, and a `oneshot::Receiver`
+            // that has yielded its result panics when polled again — which
+            // the `select!` above would do on the next iteration. Breaking
+            // here is what keeps the cooperative stop from ending the task
+            // by panicking instead of by returning; `try_recv` itself is
+            // safe to repeat, so asking again costs nothing.
+            if stop_requested(&mut stop_rx) {
+                break;
+            }
         }
     });
     TickerHandle {
@@ -417,7 +639,7 @@ fn stop_requested(stop: &mut oneshot::Receiver<()>) -> bool {
 /// racing the loop that owns it.
 async fn tick(
     sup: &Arc<Supervisor>,
-    cursor: &mut usize,
+    cursor: &mut SampleCursor,
     budget: usize,
     stop: &mut oneshot::Receiver<()>,
 ) {
@@ -453,16 +675,34 @@ async fn tick(
 /// as empty: their status is decided entirely by the durable record, so a
 /// sample would be work whose result nothing consults.
 ///
-/// # Rotation, and why the cursor is reset rather than carried
+/// # Rotation, and why it is keyed by session ID
 ///
-/// `cursor` names where the NEXT pass should resume, and it is meaningful
-/// only relative to the population it was computed against. Every early
-/// return that means "there is nothing to rotate through" resets it to
-/// zero, including the empty-map case: carrying an offset across a
-/// population REPLACEMENT — a supervisor whose sessions were all deleted
-/// and new ones created — would make the first pass over the new
-/// population start partway in, permanently skipping the sessions before
-/// that offset on the pass that mattered most.
+/// `cursor` names the session this pass should resume AFTER, by id, and
+/// the next pass starts at the first live session ordered strictly after
+/// it. An earlier version carried a numeric INDEX into the sorted live
+/// list, which is a different thing that only looks the same while the
+/// population holds still: sessions are sorted by id, so deleting or
+/// stopping a session ORDERED BEFORE the cursor shifts every later session
+/// one place toward the front, and the next pass resumes one position too
+/// far in. Under steady churn ahead of it — which is what a busy host does
+/// all day — a session near the end of the order can be stepped over
+/// indefinitely and never sampled at all, so its status simply stops
+/// updating with nothing anywhere reporting a problem. An id is a position
+/// in the ORDER rather than in the list, so churn moves the population
+/// around it without moving it.
+///
+/// `None` starts at the head. Both early returns that mean "there is
+/// nothing to rotate through" reset to it, including the empty-map case:
+/// carrying a resume point across a population REPLACEMENT would be
+/// resuming after a session that no longer exists, and while the id order
+/// makes that harmless it is still not what the first pass over a fresh
+/// population should do.
+///
+/// A FAILED liveness probe is the one early return that does not reset,
+/// and the difference is the point: "there are no live sessions" is an
+/// answer about the population, while "tmux could not be asked" is no
+/// answer at all, and rewinding the rotation on it would resample the head
+/// of the list every time a flaky tmux dropped a query.
 ///
 /// # Cancellation
 ///
@@ -480,7 +720,7 @@ async fn tick(
 /// belongs.
 async fn sample_pass(
     sup: &Supervisor,
-    cursor: &mut usize,
+    cursor: &mut SampleCursor,
     budget: usize,
     stop: &mut oneshot::Receiver<()>,
 ) {
@@ -489,16 +729,42 @@ async fn sample_pass(
     // lock discipline), and every line below awaits a subprocess.
     let entries: Vec<Arc<SessionEntry>> = sup.sessions.lock().await.values().cloned().collect();
     if entries.is_empty() {
-        *cursor = 0;
+        *cursor = None;
         return;
     }
-    let states = match sup.tmux.pane_states().await {
+    let states = match injected_sample_fault(sup, SampleRead::PaneStates) {
+        Some(fault) => Err(fault),
+        None => sup.tmux.pane_states().await,
+    };
+    let states = match states {
         Ok(states) => states,
         Err(e) => {
             debug!(
                 error = %format!("{e:#}"),
-                "could not probe pane liveness for this sampling pass; skipping it"
+                "could not probe pane liveness for this sampling pass; forgetting every \
+                 retained screen so nothing is sharpened from stale evidence"
             );
+            // Nothing was looked at, so nothing may be CLASSIFIED from what
+            // was last seen either. The per-pane failure below invalidates
+            // one session's evidence for exactly this reason, and a probe
+            // that failed for the whole server is the same fact about every
+            // session at once — a prompt that has since been answered would
+            // otherwise hold its session at `Waiting` for as long as these
+            // probes keep failing, which is indefinitely, and which the
+            // LIST path cannot correct because its own probe succeeding is
+            // what makes those sessions live enough to be sharpened at all.
+            //
+            // Sample counts are deliberately untouched, for the same reason
+            // they are on the per-pane path: an unreachable tmux is not
+            // evidence of stillness, and decaying a fleet to `Idle` on it
+            // would be a wrong answer rather than an absent one.
+            for entry in &entries {
+                entry
+                    .activity
+                    .lock()
+                    .expect("activity mutex poisoned")
+                    .forget_tail();
+            }
             return;
         }
     };
@@ -511,33 +777,68 @@ async fn sample_pass(
         })
         .collect();
     if live.is_empty() {
-        *cursor = 0;
+        *cursor = None;
         return;
     }
     // A stable order is what makes the round-robin cursor mean anything:
     // over a `HashMap`'s iteration order the budget would resample an
     // arbitrary subset every tick and starve the rest indefinitely.
     live.sort_by(|(a, _), (b, _)| a.info.id.cmp(&b.info.id));
-    let start = *cursor % live.len();
+    // Resume at the first session ordered strictly AFTER the one this
+    // cursor names — a position in the id order, not an index into the
+    // list, so sessions appearing or disappearing ahead of it cannot step
+    // over the sessions behind it. `partition_point` finds it in one binary
+    // search over the sort just applied, and an id past the end of the
+    // population wraps to the head, which is what a full rotation is.
+    let start = match cursor.as_deref() {
+        Some(last) => {
+            live.partition_point(|(entry, _)| entry.info.id.as_str() <= last) % live.len()
+        }
+        None => 0,
+    };
     let take = budget.min(live.len());
-    let mut taken = 0;
     for offset in 0..take {
         if stop_requested(stop) {
             break;
         }
-        taken += 1;
         let (entry, terminal) = &live[(start + offset) % live.len()];
-        let tail = match sup
-            .tmux
-            .capture_pane_tail(&terminal.tmux_name, &terminal.pane, SAMPLE_TAIL_BYTES)
-            .await
-        {
+        // Advanced BEFORE the capture rather than after it, so a pass that
+        // stops (or whose capture fails) still leaves the rotation past
+        // this session: the alternative would resample whatever the ticker
+        // was cut off at, forever, every time a shutdown or a flaky pane
+        // landed on the same entry.
+        *cursor = Some(entry.info.id.clone());
+        let captured = match injected_sample_fault(
+            sup,
+            SampleRead::Tail {
+                session: &entry.info.id,
+            },
+        ) {
+            Some(fault) => Err(fault),
+            None => {
+                sup.tmux
+                    .capture_pane_tail(&terminal.tmux_name, &terminal.pane, SAMPLE_TAIL_BYTES)
+                    .await
+            }
+        };
+        let tail = match captured {
             Ok(tail) => tail,
             Err(e) => {
                 debug!(
                     session = %entry.info.id, error = %format!("{e:#}"),
-                    "could not sample this session's pane; leaving its previous sample in place"
+                    "could not sample this session's pane; forgetting the screen it last showed \
+                     so nothing is sharpened from stale evidence"
                 );
+                // The SELECTED-but-failed case: this session's pane was
+                // reachable enough to be chosen and its screen could not be
+                // read, so whatever it last showed is of unknown age from
+                // here on. See `ActivitySample::forget_tail` for why that
+                // must not count as a quiet look.
+                entry
+                    .activity
+                    .lock()
+                    .expect("activity mutex poisoned")
+                    .forget_tail();
                 continue;
             }
         };
@@ -545,16 +846,17 @@ async fn sample_pass(
             .activity
             .lock()
             .expect("activity mutex poisoned")
-            .observe(tail, Instant::now());
+            .observe(tail);
     }
-    *cursor = start + taken;
 }
 
 #[cfg(test)]
 mod tests {
     use super::super::connection::{CONNECTION_WRITER_QUEUE, ConnectionCtx};
     use super::super::core::tests::{StateDir, dummy_exe, entry_with, no_uploads};
-    use super::super::core::{CreateInputs, SupervisorSeams, SupervisorTimeouts, note_first_input};
+    use super::super::core::{
+        CreateInputs, CreateMode, SupervisorSeams, SupervisorTimeouts, note_first_input,
+    };
     use super::super::handlers::handle_control;
     use super::super::status::session_status;
     use super::*;
@@ -759,12 +1061,14 @@ mod tests {
             .create_session(
                 CreateInputs {
                     cwd: &cwd,
-                    invocation: "/opt/bin/claude",
+                    mode: CreateMode::Raw {
+                        invocation: "/opt/bin/claude".to_string(),
+                        agent_kind: None,
+                        resume_template: None,
+                    },
                     title: Some("ticker".to_string()),
                     cols: 80,
                     rows: 24,
-                    agent_kind: None,
-                    resume_template: None,
                 },
                 None,
             )
@@ -884,13 +1188,10 @@ mod tests {
         let busy = sample_of(&sup, "busy").await;
         let still = sample_of(&sup, "still").await;
         let ticker = start_ticker(&sup);
-        wait_until("the busy pane was seen to change", || {
-            busy.lock().expect("activity mutex").last_change.is_some()
-        })
-        .await;
-        wait_until("the still pane was sampled more than once", || {
-            still.lock().expect("activity mutex").samples > 1
-        })
+        wait_until(
+            "the still pane's quiet streak passed the classifier's threshold",
+            || still.lock().expect("activity mutex").unchanged_streak >= 3,
+        )
         .await;
         ticker.shutdown().await;
 
@@ -899,28 +1200,43 @@ mod tests {
             busy.samples > 1,
             "change can only be established by comparing two samples"
         );
+        assert_eq!(
+            busy.unchanged_streak, 0,
+            "a pane printing a new line every 50ms must have changed at its most recent \
+             comparison; a streak here is change detection that never fires"
+        );
         assert!(
             busy.tail
                 .as_deref()
                 .is_some_and(|tail| tail.contains("tick")),
-            "the tail is what item 2's sharpeners read, so it has to carry the pane's real \
+            "the tail is what the sharpeners read, so it has to carry the pane's real \
              text; got {:?}",
             busy.tail
         );
         let still = still.lock().expect("activity mutex");
         assert_eq!(
-            still.last_change, None,
-            "a pane that printed nothing must not look like one that did"
+            still.unchanged_streak,
+            still.samples - 1,
+            "every comparison on a pane that printed nothing is an unchanged one — the streak \
+             must count them all rather than resetting on capture noise"
         );
     }
 
     /// Shutdown is deterministic: once `shutdown` returns, no tick can
     /// still be in flight.
     ///
-    /// The property every other ticker test leans on — they all assert
-    /// against state a stray pass could still be mutating — and the one
-    /// that keeps this suite from leaking a task per test into a runtime
-    /// shared with the rest of the binary.
+    /// The property every other ticker test leans on. They all assert
+    /// against state a stray pass could still be mutating, and a
+    /// `shutdown` that returned while a tick was mid-pass would make those
+    /// assertions race a writer — intermittently, and only under load,
+    /// which is the worst way for a test suite to be wrong.
+    ///
+    /// Not a leak test, whatever the sleep below might suggest: each
+    /// `#[tokio::test]` gets its own runtime, which is torn down with the
+    /// test, so a task this file forgot to stop could not outlive it
+    /// anyway. What the sleep checks is the real property — that samples
+    /// stop accumulating and STAY stopped, rather than one more pass
+    /// landing after the handle said it was done.
     #[tokio::test]
     async fn shutdown_stops_the_ticker_and_waits_for_it() {
         let state = StateDir::new();
@@ -952,11 +1268,24 @@ mod tests {
     /// dropping a supervisor would silently keep one running against it.
     /// Proven WITHOUT sending the stop signal, because the stop signal
     /// would prove nothing about the upgrade.
+    ///
+    /// The drop deliberately waits for one tick to have COMPLETED first.
+    /// Dropping immediately would let the loop end while still parked on
+    /// its very first interval — a task that never reached the upgrade at
+    /// all — and the assertion below would pass without the `Weak` being
+    /// load-bearing in the slightest.
     #[tokio::test]
     async fn the_task_ends_when_its_supervisor_is_dropped() {
         let state = StateDir::new();
         let sup = supervisor_with(&state, SupervisorSeams::default()).await;
+        install_live_session(&sup, "one", "sleep 300").await;
+        let sample = sample_of(&sup, "one").await;
         let ticker = start_ticker(&sup);
+        wait_until(
+            "the ticker completed a pass against this supervisor",
+            || sample.lock().expect("activity mutex").samples > 0,
+        )
+        .await;
         drop(sup);
         wait_until("the ticker noticed its supervisor was gone", || {
             ticker.is_finished()
@@ -969,47 +1298,254 @@ mod tests {
         ticker.shutdown().await;
     }
 
-    /// The baseline rule, in isolation: the first look at a pane is not
-    /// output.
+    /// The whole of what one cell records, in sequence: the first look is
+    /// not evidence, repeats accumulate, and any change resets.
     ///
-    /// A unit test rather than a tmux one because the mistake it guards
-    /// against is one character wide with a large blast radius — counting
-    /// sample one as a change would classify every session running the
-    /// moment the supervisor started, which is exactly the "always wrong
-    /// in the same direction" failure that makes a status column
-    /// worthless. It also pins that recency ADVANCES rather than latching
-    /// on the first change, which is what lets a session decay to idle.
+    /// A unit test rather than a tmux one because each mistake it guards
+    /// against is one character wide with a large blast radius. Counting
+    /// sample one as quiet would start every session's decay a step in —
+    /// including every session on a supervisor that just restarted.
+    /// Failing to RESET on a change is worse in the other direction: a
+    /// session that went quiet once would be idle forever, however busy it
+    /// became afterwards, which is the "always wrong in the same
+    /// direction" failure that makes a status column worthless.
     #[test]
-    fn the_first_sample_establishes_a_baseline_rather_than_reporting_change() {
-        let start = Instant::now();
+    fn the_first_sample_is_not_evidence_and_any_change_resets_the_streak() {
         let mut sample = ActivitySample::default();
 
-        sample.observe("hello".to_string(), start);
+        sample.observe("hello".to_string());
         assert_eq!(sample.samples, 1);
         assert_eq!(
-            sample.last_change, None,
-            "one observation cannot establish that anything moved"
+            sample.unchanged_streak, 0,
+            "one observation cannot establish that anything stood still"
         );
 
-        sample.observe("hello".to_string(), start + Duration::from_secs(1));
+        sample.observe("hello".to_string());
         assert_eq!(
-            sample.last_change, None,
-            "an unchanged screen is the quiet case, not a late baseline"
+            sample.unchanged_streak, 1,
+            "the first COMPARISON is the first evidence of quiet"
         );
+        sample.observe("hello".to_string());
+        assert_eq!(sample.unchanged_streak, 2, "and they accumulate");
 
-        let moved = start + Duration::from_secs(2);
-        sample.observe("hello world".to_string(), moved);
-        assert_eq!(sample.last_change, Some(moved));
+        sample.observe("hello world".to_string());
+        assert_eq!(
+            sample.unchanged_streak, 0,
+            "a change resets the decay outright; the classifier reads this as 'how many times \
+             running have I seen nothing new'"
+        );
         assert_eq!(sample.tail.as_deref(), Some("hello world"));
 
-        let moved_again = start + Duration::from_secs(3);
-        sample.observe("hello there".to_string(), moved_again);
+        sample.observe("hello there".to_string());
+        assert_eq!(sample.unchanged_streak, 0);
+        assert_eq!(sample.samples, 5);
+    }
+
+    /// The scheduling rule, exhaustively, with no clock and no runtime:
+    /// [`next_deadline`] is a pure function of three values, so the two
+    /// properties it exists for can be asserted rather than timed.
+    ///
+    /// Timing them is what this replaces, and the replacement is the point.
+    /// The previous version of this test counted how many passes a real
+    /// ticker completed inside a two-second wall-clock window and compared
+    /// that against a threshold — which measures the CI runner as much as
+    /// the code. Roughly 600ms of descheduling (ordinary on a shared
+    /// runner) was enough to fail it, and no amount of widening the
+    /// threshold fixes that without also admitting the bug it was written
+    /// to catch.
+    ///
+    /// The two properties, and the failure each one exists for:
+    ///
+    /// - ANCHORED. A pass that takes part of its interval must not push the
+    ///   next tick out by however long it took. A `sleep(interval)` at the
+    ///   end of each pass makes the real period `interval + work`, so a
+    ///   supervisor whose passes take a moment quietly samples less often
+    ///   than anyone configured, and the error compounds with the work
+    ///   rather than staying bounded.
+    /// - NEVER IMMEDIATE. A pass that overruns its interval must not be
+    ///   followed instantly by the next one. Every deadline is already in
+    ///   the past once work exceeds the period, so an anchor-only rule
+    ///   schedules back-to-back passes forever — a supervisor spawning tmux
+    ///   subprocesses as fast as it can retire them, on precisely the host
+    ///   already too loaded to keep up.
+    #[test]
+    fn next_deadline_anchors_when_on_cadence_and_backs_off_when_overrunning() {
+        const INTERVAL: Duration = Duration::from_millis(100);
+        // A fixed origin, so every case below is arithmetic rather than an
+        // observation: `Instant::now()` is read once and only DIFFERENCES
+        // from it are ever asserted.
+        let fired = tokio::time::Instant::now();
+        let at = |millis: u64| fired + Duration::from_millis(millis);
+
+        // On cadence, whatever fraction of the interval the pass used —
+        // including a pass slow enough to cross the minimum-gap threshold,
+        // which must NOT stretch a ticker that is keeping up.
+        for work in [0, 1, 50, 90, 99] {
+            assert_eq!(
+                next_deadline(fired, at(work), INTERVAL),
+                at(100),
+                "a pass finishing {work}ms into a 100ms interval must keep the anchor"
+            );
+        }
+
+        // Exactly at the deadline is already late: the anchor has arrived,
+        // so the next one is a whole interval further on rather than now.
+        assert_eq!(next_deadline(fired, at(100), INTERVAL), at(200));
+
+        // Overrun, with the anchored candidate comfortably ahead: the phase
+        // is kept and the gap needs no help.
+        assert_eq!(next_deadline(fired, at(101), INTERVAL), at(200));
+        // Overrun by several periods: the phase still survives — the next
+        // tick lands on a multiple of the original anchor, not on
+        // "now plus an interval".
+        assert_eq!(next_deadline(fired, at(250), INTERVAL), at(300));
+
+        // The case the minimum gap exists for: an overrunning pass that
+        // finishes just before the next anchor would leave no pause at all.
         assert_eq!(
-            sample.last_change,
-            Some(moved_again),
-            "the classifier reads this as 'how long has it been quiet', so it must move"
+            next_deadline(fired, at(199), INTERVAL),
+            at(199) + INTERVAL / MIN_TICK_GAP_DIVISOR,
+            "a pass ending 1ms before its next anchor must still get a recovery pause"
         );
-        assert_eq!(sample.samples, 4);
+        // Sustained overrun, stated as the property rather than as a
+        // number: however far behind the loop falls, the next pass is never
+        // scheduled back to back with the one that just ended.
+        for overrun in [100, 150, 199, 200, 201, 999, 1_000] {
+            let now = at(overrun);
+            let next = next_deadline(fired, now, INTERVAL);
+            assert!(
+                next >= now + INTERVAL / MIN_TICK_GAP_DIVISOR,
+                "a pass ending {overrun}ms after its deadline was followed too closely"
+            );
+        }
+    }
+
+    /// The loop waits out the INJECTED interval, not the production one.
+    ///
+    /// A cadence seam that is read once and then ignored is a specific,
+    /// plausible bug — the constant is right there, and every other test in
+    /// this file passes with the seam wired or not, since they only ever
+    /// wait for work to happen rather than for it not to. This is the
+    /// negative: an interval well above the production
+    /// [`TICKER_INTERVAL`], with an observation window comfortably past
+    /// that constant, so a loop sleeping the production cadence samples
+    /// here and fails.
+    ///
+    /// Real time rather than a paused clock, deliberately. Pausing makes
+    /// tokio auto-advance to the next timer whenever the runtime is idle,
+    /// which for a "nothing should have happened yet" assertion is exactly
+    /// backwards: the clock would jump straight to the tick this test
+    /// exists to prove has not arrived.
+    #[tokio::test]
+    async fn the_loop_waits_out_the_injected_interval_rather_than_the_production_one() {
+        let state = StateDir::new();
+        let sup = Supervisor::new_with_seams(
+            state.path(),
+            dummy_exe(),
+            SupervisorTimeouts::default(),
+            SupervisorSeams {
+                // Far above `TICKER_INTERVAL`, so the window below can be
+                // longer than the production cadence and shorter than this.
+                ticker_interval: Duration::from_secs(30),
+                ..SupervisorSeams::default()
+            },
+        )
+        .await
+        .expect("supervisor");
+        install_live_session(&sup, "one", "sleep 300").await;
+        let sample = sample_of(&sup, "one").await;
+
+        let ticker = start_ticker(&sup);
+        // Longer than the production interval a hardcoded loop would use,
+        // by enough that a loaded runner cannot explain the difference.
+        tokio::time::sleep(TICKER_INTERVAL * 2).await;
+        let samples = sample.lock().expect("activity mutex").samples;
+        ticker.shutdown().await;
+        assert_eq!(
+            samples,
+            0,
+            "a ticker configured with a 30-second interval sampled within {:?}",
+            TICKER_INTERVAL * 2
+        );
+    }
+
+    /// A pass that finds no live panes leaves every previous sample
+    /// exactly as it was, and the capture half of the tick runs anyway.
+    ///
+    /// The tempting bug is treating "tmux told us nothing" as "these
+    /// sessions are quiet". Blanking or re-observing the cells here would
+    /// make a supervisor whose tmux server vanished report its entire
+    /// fleet as freshly sampled and unchanged — which decays to `Idle`
+    /// within a few ticks, for every session, on the strength of no
+    /// observation at all. Leaving the cells untouched means the
+    /// classification simply stops moving, which is the honest answer for
+    /// a pass that saw nothing.
+    ///
+    /// The capture half is asserted separately because the two halves of a
+    /// tick are independent: conversation capture reads the filesystem and
+    /// has no business stopping because tmux is unreachable.
+    ///
+    /// Scope note: killing the server exercises `pane_states`'
+    /// DEFINITIVELY-EMPTY path (tmux answers "no server running", which the
+    /// driver reports as an empty map), not its ERROR path. The two are
+    /// deliberately different: an empty answer is an answer — those panes
+    /// are gone, so nothing will be classified from them — while a failed
+    /// query is no answer at all and additionally invalidates every
+    /// retained screen (`a_failed_sample_stops_the_session_being_sharpened_
+    /// from_a_stale_screen`, which reaches that path through
+    /// `SupervisorSeams::sample_fault`). The empty case also resets the
+    /// rotation cursor, where a failed query leaves it alone.
+    #[tokio::test]
+    async fn a_pass_that_finds_no_live_panes_preserves_every_sample_and_still_captures() {
+        let state = StateDir::new();
+        let sup = supervisor_with(&state, SupervisorSeams::default()).await;
+        install_live_session(&sup, "one", "sleep 300").await;
+        let sample = sample_of(&sup, "one").await;
+
+        let (_stop, mut stop) = never_stopped();
+        let mut cursor: SampleCursor = None;
+        sample_pass(&sup, &mut cursor, SAMPLE_TAIL_BUDGET, &mut stop).await;
+        let (samples, tail) = {
+            let sample = sample.lock().expect("activity mutex");
+            (sample.samples, sample.tail.clone())
+        };
+        assert_eq!(samples, 1, "premise: the pass before the failure worked");
+        assert_eq!(cursor.as_deref(), Some("one"));
+
+        // The whole private tmux server, gone out from under the
+        // supervisor — the shape a crashed or reaped server leaves behind.
+        sup.tmux.kill_session("fh-one").await.expect(
+            "the premise of this test is that the server really is gone; a kill that \
+                     silently failed would leave the pass below succeeding for the wrong reason",
+        );
+        // Past the tick's own suppression window, so the capture half
+        // below is skipped only if the probe failure stopped it — the
+        // thing this asserts — rather than because the supervisor's
+        // construction-time pass was still recent (`CaptureReason::Tick`).
+        tokio::time::sleep(TEST_INTERVAL * 3).await;
+        let baseline = sup.capture_passes_completed();
+        tick(&sup, &mut cursor, SAMPLE_TAIL_BUDGET, &mut stop).await;
+
+        {
+            let after = sample.lock().expect("activity mutex");
+            assert_eq!(
+                after.samples, samples,
+                "a pass that found no live pane must not record an observation"
+            );
+            assert_eq!(
+                after.tail, tail,
+                "and must leave the previous screen in place rather than blanking it"
+            );
+            assert_eq!(
+                after.unchanged_streak, 0,
+                "least of all may it count as a quiet look; that is how a vanished tmux \
+                 would decay a whole fleet to idle"
+            );
+        }
+        assert!(
+            sup.capture_passes_completed() > baseline,
+            "the capture half of a tick does not depend on tmux at all"
+        );
     }
 
     /// A pane the entry cannot prove belongs to it is not sampled — the
@@ -1040,7 +1576,10 @@ mod tests {
         let sample = sample_of(&sup, "one").await;
 
         let (_stop, mut stop) = never_stopped();
-        let mut cursor = 7;
+        // A cursor naming a session that is not in this population at all:
+        // resuming means "the first one ordered after it", which is well
+        // defined whether or not that session still exists.
+        let mut cursor: SampleCursor = Some("zzz-gone".to_string());
         sample_pass(&sup, &mut cursor, SAMPLE_TAIL_BUDGET, &mut stop).await;
         assert_eq!(
             sample.lock().expect("activity mutex").samples,
@@ -1048,9 +1587,9 @@ mod tests {
             "a pane whose session name does not match must not be sampled at all"
         );
         assert_eq!(
-            cursor, 0,
-            "a pass with nothing eligible must RESET the rotation rather than leave an offset \
-             that a later, different population would start partway into"
+            cursor, None,
+            "a pass with nothing eligible must RESET the rotation rather than leave a resume \
+             point that a later, different population would start partway into"
         );
     }
 
@@ -1085,20 +1624,18 @@ mod tests {
         // and one that would otherwise need seventeen real tmux sessions
         // to reach through the production constant.
         let (_stop, mut stop) = never_stopped();
-        let mut cursor = 0;
-        for expected_cursor in 1..=3 {
+        let mut cursor: SampleCursor = None;
+        for expected in ["a", "b", "c"] {
             sample_pass(&sup, &mut cursor, 1, &mut stop).await;
-            // The stored cursor counts samples TAKEN; it is normalized
-            // against the population only when next consumed (`start =
-            // cursor % live.len()`), so it legitimately runs past the
-            // population size rather than wrapping in place. What must
-            // hold here is that it advances by exactly the budget — that
-            // the wrap then happens correctly is what the per-session
-            // counts below prove, and they are the assertion that would
-            // catch a rotation which stalled.
+            // The cursor names the session just sampled, so a rotation that
+            // stalled would repeat a name here rather than advancing
+            // through the id order. The per-session counts below are what
+            // prove the wrap; this is what localizes a failure to the
+            // rotation rather than to the sampling.
             assert_eq!(
-                cursor, expected_cursor,
-                "the cursor must advance by exactly the budget each pass"
+                cursor.as_deref(),
+                Some(expected),
+                "the cursor must name the session this pass sampled"
             );
         }
         for (id, cell) in [("a", &a), ("b", &b), ("c", &c)] {
@@ -1110,14 +1647,44 @@ mod tests {
             );
         }
 
-        // Population CHURN: the rotation must not carry an offset from a
-        // population that no longer exists into one that replaced it.
+        // PARTIAL churn, which is the case an index-based cursor gets
+        // wrong and the reason this cursor is an id. Deleting a session
+        // ordered BEFORE the resume point shifts every later session one
+        // place toward the front of the sorted list, so an index would
+        // resume one position too far in — and under steady churn ahead of
+        // it, the tail of the order is stepped over indefinitely and simply
+        // stops being sampled, with nothing anywhere reporting a problem.
+        //
+        // The population deliberately never empties here: the reset on an
+        // empty map would paper over exactly the bug being tested.
+        sup.sessions.lock().await.remove("a");
+        sample_pass(&sup, &mut cursor, 1, &mut stop).await;
+        assert_eq!(
+            cursor.as_deref(),
+            Some("b"),
+            "after c, the rotation wraps to the head of what REMAINS — not to whatever session \
+             now happens to sit at the old index"
+        );
+        assert_eq!(
+            b.lock().expect("activity mutex").samples,
+            2,
+            "b is the head of the surviving order and must be the one sampled"
+        );
+        assert_eq!(
+            c.lock().expect("activity mutex").samples,
+            1,
+            "and c must not be resampled ahead of it"
+        );
+
+        // Full REPLACEMENT still resets: an empty map has nothing to
+        // rotate through, and a resume point carried into a fresh
+        // population is not what its first pass should use.
         sup.sessions.lock().await.clear();
         sample_pass(&sup, &mut cursor, 1, &mut stop).await;
         assert_eq!(
-            cursor, 0,
-            "an empty map resets the rotation; carrying the old offset would make the first \
-             pass over a REPLACEMENT population skip its head"
+            cursor, None,
+            "an empty map resets the rotation; carrying the old resume point would make the \
+             first pass over a REPLACEMENT population start somewhere arbitrary"
         );
         install_live_session(&sup, "z", "sleep 300").await;
         let z = sample_of(&sup, "z").await;
@@ -1128,6 +1695,309 @@ mod tests {
             "the first session of a fresh population must be sampled by the first pass over it"
         );
     }
+
+    /// The cursor names a POSITION IN THE ID ORDER, not a session that has
+    /// to still be there: a resume point whose session disappeared resumes
+    /// at the next greater id, never at the head.
+    ///
+    /// This is the branch the `partition_point` search exists for, and it is
+    /// invisible in the ordinary rotation test because there the cursor
+    /// always names a live session. The wrong implementation it excludes is
+    /// the tempting one — look the id up, and start over from the front when
+    /// it is gone — which under steady churn restarts the rotation every
+    /// time a sampled session is deleted, and never reaches the tail of the
+    /// order at all.
+    ///
+    /// The cursor is deliberately parked in the MIDDLE of the population
+    /// before the deletion. Parking it at the head would make "resume after
+    /// the missing id" and "start over from the head" the same answer, and
+    /// the test would pass either way.
+    #[tokio::test]
+    async fn a_cursor_whose_session_vanished_resumes_at_the_next_greater_id() {
+        let state = StateDir::new();
+        let sup = supervisor_with(&state, SupervisorSeams::default()).await;
+        for id in ["a", "b", "c"] {
+            install_live_session(&sup, id, "sleep 300").await;
+        }
+        let (a, b, c) = (
+            sample_of(&sup, "a").await,
+            sample_of(&sup, "b").await,
+            sample_of(&sup, "c").await,
+        );
+
+        let (_stop, mut stop) = never_stopped();
+        let mut cursor: SampleCursor = None;
+        for expected in ["a", "b"] {
+            sample_pass(&sup, &mut cursor, 1, &mut stop).await;
+            assert_eq!(
+                cursor.as_deref(),
+                Some(expected),
+                "premise: the rotation walks the id order one session per pass"
+            );
+        }
+
+        // The session the cursor names goes away while everything ordered
+        // after it stays.
+        sup.sessions.lock().await.remove("b");
+        sample_pass(&sup, &mut cursor, 1, &mut stop).await;
+
+        assert_eq!(
+            cursor.as_deref(),
+            Some("c"),
+            "the rotation resumes after the position b HELD, not at the head of what remains"
+        );
+        assert_eq!(
+            c.lock().expect("activity mutex").samples,
+            1,
+            "c is the next session in the order and must be the one sampled"
+        );
+        assert_eq!(
+            a.lock().expect("activity mutex").samples,
+            1,
+            "a must not be resampled: a missing cursor is not a reason to start over"
+        );
+        drop(b);
+    }
+
+    /// A capture that FAILS still advances the rotation, so the next pass
+    /// moves on rather than retrying the same session forever.
+    ///
+    /// The cursor is written before the capture is attempted, and that
+    /// ordering is the whole point: a pane that has become unreadable —
+    /// wedged tmux, a pane vanishing between the liveness probe and the
+    /// capture — would otherwise pin the rotation to itself. At a budget of
+    /// one that starves every other session outright; at the production
+    /// budget it costs one slot per pass indefinitely. Either way nothing
+    /// reports a problem, because a failed capture is logged at DEBUG by
+    /// design.
+    ///
+    /// The fault is aimed at ONE session and then lifted, so the pass after
+    /// it is an ordinary successful one: an implementation that advanced
+    /// only on success would resample the failed session there, which is
+    /// exactly what the assertions below refuse.
+    #[tokio::test]
+    async fn a_failed_capture_still_advances_the_rotation() {
+        let state = StateDir::new();
+        // Aimed at "b" alone: the pass-wide `pane_states` probe must keep
+        // working, or nothing would be selected at all and the branch under
+        // test would never be reached.
+        let failing: Arc<AtomicBool> = Arc::default();
+        let sup = {
+            let failing = Arc::clone(&failing);
+            supervisor_with(
+                &state,
+                SupervisorSeams {
+                    sample_fault: Some(Arc::new(move |asked| {
+                        let asked_about_b =
+                            matches!(asked, SampleRead::Tail { session } if session == "b");
+                        (asked_about_b && failing.load(Ordering::SeqCst))
+                            .then(|| "injected capture failure".to_string())
+                    })),
+                    ..SupervisorSeams::default()
+                },
+            )
+            .await
+        };
+        for id in ["a", "b", "c"] {
+            install_live_session(&sup, id, "sleep 300").await;
+        }
+        let (b, c) = (sample_of(&sup, "b").await, sample_of(&sup, "c").await);
+
+        let (_stop, mut stop) = never_stopped();
+        let mut cursor: SampleCursor = None;
+        sample_pass(&sup, &mut cursor, 1, &mut stop).await;
+        assert_eq!(cursor.as_deref(), Some("a"), "premise: the head is first");
+
+        failing.store(true, Ordering::SeqCst);
+        sample_pass(&sup, &mut cursor, 1, &mut stop).await;
+        assert_eq!(
+            cursor.as_deref(),
+            Some("b"),
+            "a pass whose capture failed must still leave the rotation past the session it \
+             selected"
+        );
+        assert_eq!(
+            b.lock().expect("activity mutex").samples,
+            0,
+            "premise: the injected fault means b really was not observed"
+        );
+
+        failing.store(false, Ordering::SeqCst);
+        sample_pass(&sup, &mut cursor, 1, &mut stop).await;
+        assert_eq!(
+            c.lock().expect("activity mutex").samples,
+            1,
+            "the pass after the failure moves on to c rather than retrying b"
+        );
+        assert_eq!(
+            b.lock().expect("activity mutex").samples,
+            0,
+            "and b is not resampled ahead of it, however readable it has become"
+        );
+    }
+
+    /// A prompt that has since been ANSWERED must not hold its session at
+    /// `Waiting` through a run of failing captures — driven through
+    /// `sample_pass` with an injected failure, not by calling
+    /// `forget_tail` by hand.
+    ///
+    /// The distinction is the whole point of the seam. A direct call
+    /// asserts that `forget_tail` does what it says; this asserts that the
+    /// SAMPLER calls it, which is the half that regresses. A change that
+    /// dropped the invalidation from the failure path would leave a
+    /// unit-level test perfectly green while every session whose captures
+    /// started failing sat at `Waiting` forever.
+    ///
+    /// Both failure paths, because they are separately reachable and
+    /// separately wrong: one session's own capture failing while the pass
+    /// otherwise succeeds, and the server-wide liveness probe failing so
+    /// the pass learns nothing about anything. The second is the one a
+    /// user actually notices, since the LIST path's own probe can keep
+    /// succeeding — so the session stays live, stays sharpened, and keeps
+    /// reporting a question that was answered long ago.
+    ///
+    /// ## And the RECOVERY, which is the half a forget can silently break
+    ///
+    /// Invalidating the tail is only correct if a later successful capture
+    /// puts the session back on its feet, and the way that works is subtle
+    /// enough to be worth pinning: `forget_tail` clears the screen but
+    /// deliberately leaves `samples` alone, so the next `observe` still
+    /// takes the comparison branch — comparing against `None`, finding a
+    /// difference, and resetting the streak to zero. Two plausible
+    /// implementations get this wrong in opposite directions. One treats a
+    /// missing tail as "unchanged" and increments the streak, so a session
+    /// that lost its screen keeps decaying toward `Idle` on no evidence.
+    /// The other leaves the pre-failure streak standing, so a session that
+    /// was nine quiet samples deep stays `Idle` through a screen that has
+    /// visibly changed. The continuation below fails on both.
+    #[tokio::test]
+    async fn a_failed_sample_stops_the_session_being_sharpened_from_a_stale_screen() {
+        for read in ["tail", "pane_states"] {
+            let state = StateDir::new();
+            let failing: Arc<AtomicBool> = Arc::default();
+            let sup = {
+                let failing = Arc::clone(&failing);
+                supervisor_with(
+                    &state,
+                    SupervisorSeams {
+                        sample_fault: Some(Arc::new(move |asked| {
+                            let asked_about = matches!(
+                                (read, asked),
+                                ("tail", SampleRead::Tail { .. })
+                                    | ("pane_states", SampleRead::PaneStates)
+                            );
+                            (asked_about && failing.load(Ordering::SeqCst))
+                                .then(|| "injected sampling failure".to_string())
+                        })),
+                        ..SupervisorSeams::default()
+                    },
+                )
+                .await
+            };
+            // A live claude session showing an approval dialog. The pane
+            // itself only has to be alive; what is classified is the
+            // TAIL, which the sample below writes.
+            install_live_session(&sup, "one", "sleep 300").await;
+            let entry = {
+                let sessions = sup.sessions.lock().await;
+                let entry = sessions.get("one").cloned().expect("installed");
+                drop(sessions);
+                Arc::new(SessionEntry {
+                    snapshot: IntegrationSnapshot {
+                        kind: AgentKind::Claude,
+                        resume_template: None,
+                    },
+                    info: entry.info.clone(),
+                    terminal: entry.terminal.clone(),
+                    outcome: Arc::clone(&entry.outcome),
+                    canonical_cwd: entry.canonical_cwd.clone(),
+                    first_input: Arc::clone(&entry.first_input),
+                    capture: Arc::clone(&entry.capture),
+                    activity: Arc::clone(&entry.activity),
+                    generation: entry.generation,
+                    scope: entry.scope.clone(),
+                })
+            };
+            sup.sessions
+                .lock()
+                .await
+                .insert("one".to_string(), Arc::clone(&entry));
+            {
+                let mut activity = entry.activity.lock().expect("activity mutex");
+                activity.samples = 9;
+                activity.unchanged_streak = 9;
+                activity.tail = Some(CLAUDE_APPROVAL_DIALOG.to_string());
+            }
+            let states = sup.tmux.pane_states().await.expect("probe");
+            assert_eq!(
+                session_status(&entry, &states).0,
+                SessionStatus::Waiting,
+                "premise ({read}): the screen on file is an unanswered prompt"
+            );
+
+            failing.store(true, Ordering::SeqCst);
+            let (_stop, mut stop) = never_stopped();
+            let mut cursor: SampleCursor = None;
+            sample_pass(&sup, &mut cursor, SAMPLE_TAIL_BUDGET, &mut stop).await;
+
+            assert_ne!(
+                session_status(&entry, &states).0,
+                SessionStatus::Waiting,
+                "a {read} failure must invalidate the screen it can no longer confirm"
+            );
+            {
+                let activity = entry.activity.lock().expect("activity mutex");
+                assert_eq!(
+                    (activity.samples, activity.unchanged_streak),
+                    (9, 9),
+                    "and must not count as an observation, least of all a quiet one ({read})"
+                );
+                assert_eq!(
+                    activity.tail, None,
+                    "premise ({read}): the screen really is gone, not merely unsharpened"
+                );
+            }
+
+            // Recovery: the reads start working again and one ordinary pass
+            // has to put the session back on its feet.
+            failing.store(false, Ordering::SeqCst);
+            sample_pass(&sup, &mut cursor, SAMPLE_TAIL_BUDGET, &mut stop).await;
+
+            let activity = entry.activity.lock().expect("activity mutex");
+            assert_eq!(
+                activity.samples, 10,
+                "the recovering pass is one observation, not a re-baseline ({read})"
+            );
+            assert!(
+                activity.tail.is_some(),
+                "and it restores the screen the failure dropped ({read})"
+            );
+            assert_eq!(
+                activity.unchanged_streak, 0,
+                "a capture that had nothing to compare against is a CHANGE, not a quiet look: \
+                 carrying the pre-failure streak forward would hold a moved screen at Idle, and \
+                 treating the missing tail as unchanged would decay it on no evidence ({read})"
+            );
+            drop(activity);
+            assert_eq!(
+                session_status(&entry, &states).0,
+                SessionStatus::Running,
+                "so the session classifies from what is on the pane NOW, not from the dialog it \
+                 was showing before the failures ({read})"
+            );
+        }
+    }
+
+    /// A Claude approval dialog as it renders at the bottom of a pane —
+    /// enough of the shape for the recognizer, whose own fixtures live in
+    /// `agent_kind`.
+    const CLAUDE_APPROVAL_DIALOG: &str = "\
+╭───────────────────────────────────────────────╮
+│ Do you want to run this command?              │
+│                                               │
+│ ❯ 1. Yes                                      │
+│   2. No, and tell Claude what to do instead   │
+╰───────────────────────────────────────────────╯";
 
     /// A stop the ticker never receives, for tests that drive
     /// [`sample_pass`] directly.
@@ -1168,6 +2038,7 @@ mod tests {
                     first_input_at: None,
                     generation: 0,
                     launch_scoped: false,
+                    source_profile: None,
                 },
                 None,
             )
@@ -1287,7 +2158,7 @@ mod tests {
 
         // A tick cannot even start now, which is the premise.
         let (_stop, mut stop) = never_stopped();
-        let mut cursor = 0;
+        let mut cursor: SampleCursor = None;
         assert!(
             tokio::time::timeout(
                 Duration::from_millis(200),
@@ -1379,7 +2250,7 @@ mod tests {
         wait_until("a capture pass is parked in the gate", || barrier.entered()).await;
 
         let (_stop, mut stop) = never_stopped();
-        let mut cursor = 0;
+        let mut cursor: SampleCursor = None;
         tokio::time::timeout(
             Duration::from_secs(10),
             tick(&sup, &mut cursor, SAMPLE_TAIL_BUDGET, &mut stop),
@@ -1599,8 +2470,8 @@ mod tests {
     /// real [`session_status`], with nothing hand-fed.
     ///
     /// The DECAY is what earns this test its cost. `status`'s own unit
-    /// tests pin the recency arithmetic exactly, but they build the sample
-    /// cell themselves; only here does the transition depend on the ticker
+    /// tests pin the unchanged-streak arithmetic exactly, but they build the
+    /// sample cell themselves; only here does the transition depend on the ticker
     /// having genuinely watched a pane twice and concluded nothing moved.
     /// The pre-ticker assertion is what makes it a transition rather than
     /// a coincidence: before the first pass the same session classifies
@@ -1626,40 +2497,81 @@ mod tests {
             "premise: a live session nothing has sampled yet is running, not idle"
         );
 
-        let busy = sample_of(&sup, "busy").await;
         let still = sample_of(&sup, "still").await;
         let ticker = start_ticker(&sup);
-        wait_until("the busy pane was seen to change", || {
-            busy.lock().expect("activity mutex").last_change.is_some()
-        })
+        wait_until(
+            "the still pane's quiet streak reached the threshold",
+            || still.lock().expect("activity mutex").unchanged_streak >= 3,
+        )
         .await;
-        wait_until("the still pane was sampled more than once", || {
-            still.lock().expect("activity mutex").samples > 1
-        })
-        .await;
-
-        // Re-classified in a loop rather than once: the busy pane is only
-        // `Running` while its last observed change is inside the recency
-        // window, and a runner that stalls between the wait above and the
-        // probe here would otherwise fail on the machine's scheduling
-        // rather than on the code.
-        let deadline = tokio::time::Instant::now() + TEST_DEADLINE;
-        loop {
-            if classify(&sup, "busy").await == SessionStatus::Running {
-                break;
-            }
-            assert!(
-                tokio::time::Instant::now() < deadline,
-                "a pane printing continuously never classified running"
-            );
-            tokio::time::sleep(Duration::from_millis(20)).await;
-        }
+        assert_eq!(
+            classify(&sup, "busy").await,
+            SessionStatus::Running,
+            "a pane printing continuously must still be running after the same number of \
+             passes that made its quiet neighbour idle"
+        );
         assert_eq!(
             classify(&sup, "still").await,
             SessionStatus::Idle,
-            "a pane watched twice with nothing printed is at rest"
+            "a pane watched repeatedly with nothing printed is at rest"
         );
         ticker.shutdown().await;
+    }
+
+    /// The same decay, with more sessions than the budget can sample in
+    /// one pass: the busy one stays `Running` even though several ticks
+    /// pass between its own samples.
+    ///
+    /// The end-to-end half of the bug `QUIET_SAMPLES_BEFORE_IDLE` exists
+    /// to prevent. Under a wall-clock window this is the shape that breaks:
+    /// with the rotation stretching a session's effective sampling period,
+    /// a continuously-changing pane goes quiet for longer than the window
+    /// BETWEEN ITS OWN SAMPLES and flips to idle — a status decided by how
+    /// many other sessions the host is running.
+    ///
+    /// Driven at a budget of one so three sessions are enough to be
+    /// over-budget; the production constant would need seventeen real tmux
+    /// sessions to reach the same arithmetic. Passes are driven directly
+    /// rather than by the ticker so the test controls how many samples each
+    /// session gets, with a gap between them big enough that the busy pane
+    /// has genuinely printed since its previous look.
+    #[tokio::test]
+    async fn a_busy_pane_stays_running_when_the_rotation_samples_it_rarely() {
+        let state = StateDir::new();
+        let sup = supervisor_with(&state, SupervisorSeams::default()).await;
+        install_live_session(
+            &sup,
+            "busy",
+            "i=0; while true; do i=$((i+1)); echo \"tick $i\"; sleep 0.05; done",
+        )
+        .await;
+        install_live_session(&sup, "quiet-a", "sleep 300").await;
+        install_live_session(&sup, "quiet-b", "sleep 300").await;
+
+        let (_stop, mut stop) = never_stopped();
+        let mut cursor: SampleCursor = None;
+        // Twelve passes at a budget of one: four samples each, which is one
+        // more than the quiet sessions need to cross the threshold.
+        for _ in 0..12 {
+            sample_pass(&sup, &mut cursor, 1, &mut stop).await;
+            // Longer than the busy pane's own 50ms print interval, so each
+            // of its samples genuinely differs from the previous one.
+            tokio::time::sleep(Duration::from_millis(80)).await;
+        }
+
+        assert_eq!(
+            classify(&sup, "busy").await,
+            SessionStatus::Running,
+            "a pane that changed at every one of its own samples is working, however many \
+             ticks its neighbours consumed in between"
+        );
+        for quiet in ["quiet-a", "quiet-b"] {
+            assert_eq!(
+                classify(&sup, quiet).await,
+                SessionStatus::Idle,
+                "{quiet} was watched four times and never changed"
+            );
+        }
     }
 
     /// A pending question on a real pane reaches the per-kind sharpener
@@ -1674,38 +2586,34 @@ mod tests {
     /// bound, the sample cell, the snapshot lookup that decides which
     /// sharpener applies.
     ///
-    /// The pane is SILENT after printing, so its baseline has decayed to
-    /// idle by the time it is classified: `Waiting` here can only be a
-    /// promotion by the sharpener, never recency wearing a different name.
+    /// The pane is SILENT after printing, so its unchanged-sample streak has
+    /// carried the baseline to idle by the time it is classified: `Waiting`
+    /// here can only be a promotion by the sharpener, never the generic
+    /// classifier's answer wearing a different name.
+    ///
+    /// The fixture draws a selection pointer at its first option, because
+    /// the recognizer requires one — that is the signal separating a widget
+    /// from an agent's numbered prose (see
+    /// `agent_kind::looks_like_a_choice_prompt`), and a fixture without it
+    /// would be asserting that a paragraph reads as a dialog.
     #[tokio::test]
     async fn a_prompt_on_a_real_pane_classifies_waiting_through_the_sampler() {
         let state = StateDir::new();
         let sup = supervisor_with(&state, SupervisorSeams::default()).await;
-        install_live_session_of_kind(
-            &sup,
-            "asking",
-            "printf 'Do you want to proceed?\\n 1. Yes\\n 2. No, and tell Claude what to do \
-             differently\\n'; sleep 300",
-            AgentKind::Claude,
-        )
-        .await;
+        const DIALOG: &str = "printf 'Do you want to proceed?\\n ❯ 1. Yes\\n   2. No, and tell \
+                              Claude what to do differently\\n'; sleep 300";
+        install_live_session_of_kind(&sup, "asking", DIALOG, AgentKind::Claude).await;
         // The same screen on a session with no integration: the negative
         // half, in the one place where "the tail really did reach the
         // classifier" is not in question.
-        install_live_session(
-            &sup,
-            "unintegrated",
-            "printf 'Do you want to proceed?\\n 1. Yes\\n 2. No, and tell Claude what to do \
-             differently\\n'; sleep 300",
-        )
-        .await;
+        install_live_session(&sup, "unintegrated", DIALOG).await;
 
         let asking = sample_of(&sup, "asking").await;
         let unintegrated = sample_of(&sup, "unintegrated").await;
         let ticker = start_ticker(&sup);
         for (what, sample) in [("asking", &asking), ("unintegrated", &unintegrated)] {
-            wait_until(&format!("the {what} pane was sampled twice"), || {
-                sample.lock().expect("activity mutex").samples > 1
+            wait_until(&format!("the {what} pane decayed to quiet"), || {
+                sample.lock().expect("activity mutex").unchanged_streak >= 3
             })
             .await;
         }

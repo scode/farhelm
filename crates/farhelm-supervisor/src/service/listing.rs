@@ -26,7 +26,8 @@
 use super::core::{SessionEntry, Supervisor};
 use super::launch_artifacts::cleanup_launch_artifacts;
 use super::status::{entry_info, observe_entry};
-use crate::store::{LastOutcome, Transition};
+use crate::store::{LastOutcome, ProfileNames, Transition};
+use anyhow::Context;
 use farhelm_proto::{ControlMsg, Frame, SessionInfo};
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -390,6 +391,15 @@ pub(crate) struct ListPage {
 /// Walk one `ListSessions` page: snapshot the session map, order it, cut
 /// out the page `query` asks for, and describe every entry on it.
 ///
+/// Two of this walk's reads are BATCHED — taken once for the whole page
+/// rather than once per entry — and both are cut that way on purpose: one
+/// tmux probe for liveness, and (only when some session on the page names a
+/// profile) one read of the profile catalog, from which every
+/// source-profile existence on the page is derived. That is a statement
+/// about those two reads and not a count of everything this function does:
+/// the observation loop below still reads a launch sentinel per entry that
+/// has one, and commits its transitions in one batched write.
+///
 /// The whole of what a list request DOES, with nothing of how it answers:
 /// no reply channel, no frames, no `req_id`. `handle_list_sessions` keeps
 /// the request-shaped half — validating raw wire values on the way in and
@@ -619,6 +629,28 @@ pub(crate) async fn list_page(sup: &Supervisor, query: ListQuery) -> anyhow::Res
             ),
         }
     }
+    // ONE catalog read for the whole page (`farhelm_proto::SourceProfile`'s
+    // note on per-snapshot lookup cost), and only when a session on this
+    // page actually names a profile — the overwhelmingly common page, where
+    // every session is raw-created, pays nothing at all.
+    //
+    // A failed read FAILS the request rather than degrading to an empty
+    // catalog, and the asymmetry is the point: an empty catalog is
+    // indistinguishable from "every profile was deleted", so degrading
+    // would make a transient database error render as a page of sessions
+    // whose profiles are all gone. A failed list is retried in a second;
+    // that lie is not correctable by anything.
+    let profiles = if entries
+        .iter()
+        .any(|entry| entry.info.source_profile.is_some())
+    {
+        sup.store
+            .profile_names()
+            .await
+            .context("reading the profile catalog to describe these sessions' source profiles")?
+    } else {
+        ProfileNames::new()
+    };
     let sessions: Vec<SessionInfo> = entries
         .iter()
         .map(|entry| {
@@ -626,6 +658,7 @@ pub(crate) async fn list_page(sup: &Supervisor, query: ListQuery) -> anyhow::Res
                 entry,
                 &pane_states,
                 sentinel_hits.get(&entry.info.id).map(String::as_str),
+                &profiles,
             )
         })
         .collect();

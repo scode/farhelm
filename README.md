@@ -80,8 +80,11 @@ Ubuntu 24.04 ships 3.4.
   them again.
 - Under it, the session list: which host each session lives on, its title, working directory, invocation, and a status.
   A live session reads running (the agent is working), waiting (it has asked you something and nothing has answered) or
-  idle (it is at rest) — today every live session reads running, and telling the three apart lands with the status
-  sampler. A finished one reads exited with the code when known, qualified "stopped by user" when you stopped it;
+  idle (it is at rest). The supervisor tells them apart by watching each session's terminal periodically: a screen that
+  keeps changing reads running, one that has stayed the same for several looks reads idle, and a screen showing a
+  recognized approval or question prompt from Claude Code or Codex reads waiting. It is a heuristic and it is allowed to
+  be wrong — a status never gates anything, and typing into a session that is mislabelled works exactly as it always
+  did. A finished one reads exited with the code when known, qualified "stopped by user" when you stopped it;
   interrupted after a host reboot; or error, with the reason, when the agent's own command could not start at all. The
   list refreshes on its own every few seconds. A session nothing has classified yet shows no status at all rather than
   guessing. Sessions on a host that is not connected stay listed, dimmed and badged "stale"; their controls still work
