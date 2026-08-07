@@ -1,7 +1,7 @@
 # Farhelm plan
 
 NOTE: This is the overall build plan: the motivation for how the work is ordered, and the coarse milestone ladder. Only
-the current milestone is ever planned in detail — see PLAN_M6_75.md (PLAN_M0.md through PLAN_M6_5.md are history). Later
+the current milestone is ever planned in detail — see PLAN_M7.md (PLAN_M0.md through PLAN_M6_75.md are history). Later
 milestones get their own PLAN_M*.md when their turn comes; pre-emptive detail would just be fiction that dogfooding
 invalidates.
 
@@ -142,4 +142,5 @@ Consequences of that stance:
   of its own — the documented cost of `classify`'s origin heuristic, observed for real; revisit the heuristic (or
   wry-native clipboard hooks) here, and capture the WKWebView clipboard facts (File name, `lastModified`, item order) as
   part of that work. And the remote-screenshot paste-latency measurement (PLAN_M4.md acceptance 9's `--ssh` step) was
-  deferred to daily use — record a number here if dogfooding has not already surfaced one.
+  deferred to daily use — record a number here if dogfooding has not already surfaced one. Planned in detail in
+  PLAN_M7.md.
