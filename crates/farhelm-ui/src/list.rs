@@ -1,7 +1,7 @@
 //! The session list: `ListView` (the flat listing, its filter and search
-//! surface, and its stop/delete/create/rename actions), `SessionRow` (one
-//! row, including
-//! the inline delete-confirmation prompt and the inline rename field), and
+//! surface, and its stop/delete/create/rename actions), `SessionRow`
+//! (one row, including the inline delete confirmation and the inline
+//! rename field), and
 //! `CreateSessionForm` (the "new session" inline form). All three are
 //! `ListView`'s own concern — none of them is meaningful mounted outside
 //! it — so only `ListView` itself is `pub(crate)`; `SessionRow` and
@@ -83,6 +83,21 @@ use crate::{ApiBase, Host, HostId, HostKind, Session, SessionStatus};
 struct DeleteTarget {
     id: String,
     status: SessionStatus,
+}
+
+/// The display state `ListView` derives for one `SessionRow` render.
+///
+/// None of these values owns list behavior. Keeping them together makes
+/// that boundary explicit: the row decides how to present the current
+/// snapshot, while `ListView` remains the owner of every signal and lock
+/// the snapshot came from.
+#[derive(Clone, PartialEq)]
+struct RowState {
+    error: Option<String>,
+    busy: bool,
+    confirming: bool,
+    renaming: bool,
+    nav_disabled: bool,
 }
 
 /// One entry in the create dialog's host selector: everything that decides
@@ -358,6 +373,14 @@ fn accepts_listing(
     } else {
         reads.accept_failure(generation)
     }
+}
+
+#[cfg(test)]
+std::thread_local! {
+    // How often the real row component ran in the callback-memoization
+    // regression below. Thread-local because each Dioxus virtual DOM is
+    // single-threaded while the Rust test harness runs tests concurrently.
+    static SESSION_ROW_RENDERS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
 }
 
 /// The flat session list: host, title, cwd, invocation, and a truthful
@@ -1372,6 +1395,19 @@ pub(crate) fn ListView(on_open: EventHandler<Session>) -> Element {
         }
         on_open.call(session);
     };
+
+    // Stable callback identities are created once, outside the row loop.
+    // The row-specific session or id travels as the callback argument, so
+    // no hook depends on fleet size and unchanged rows remain memoized when
+    // their parent refreshes.
+    let guarded_open = use_callback(guarded_open);
+    let on_stop = use_callback(on_stop);
+    let on_delete = use_callback(on_delete);
+    let confirm_delete = use_callback(confirm_delete);
+    let cancel_delete = use_callback(cancel_delete);
+    let on_rename_start = use_callback(on_rename_start);
+    let on_rename_submit = use_callback(on_rename_submit);
+    let on_rename_cancel = use_callback(move |_| renaming.set(None));
     // Cosmetic reflection of the same conditions, for the disabled
     // attributes. Not the guard — see `ops`.
     let busy = ops.busy();
@@ -1386,12 +1422,10 @@ pub(crate) fn ListView(on_open: EventHandler<Session>) -> Element {
     // than an option the user cannot even select to find out.
     let host_options: Vec<HostOption> = host_options(hosts.read().hosts().unwrap_or_default());
 
-    // Whether anything is currently being filtered on, for the clear
-    // control and for the empty-result line. Read off the APPLIED filter
-    // rather than the draft: what is on screen is what the applied one
-    // asked for, and a clear control that lit up while someone typed would
-    // be offering to undo something that has not happened yet.
-    let filter_active = filter.read().is_active();
+    // Read from the APPLIED filter, not the draft: text typed but not yet
+    // submitted has changed no results and gives the clear button nothing
+    // to undo.
+    let filter_changed = filter.read().is_active();
     // The selector's own copy: the create form takes ownership of
     // `host_options` further down, and both surfaces want the same list —
     // the same hosts, called the same things, with the same phase labels.
@@ -1587,7 +1621,7 @@ pub(crate) fn ListView(on_open: EventHandler<Session>) -> Element {
                 // offer to undo something that never happened. Cosmetic
                 // only, like every other `disabled` on this page — the
                 // handler clears an already-empty filter harmlessly.
-                disabled: !filter_active,
+                disabled: !filter_changed,
                 onclick: move |_| clear_filter(SessionFilter::default()),
                 "clear"
             }
@@ -1697,26 +1731,26 @@ pub(crate) fn ListView(on_open: EventHandler<Session>) -> Element {
                         for session in apply_optimistic_renames(&listing.sessions, &renamed.read()) {
                             SessionRow {
                                 key: "{session.id}",
-                                error: errors.read().get(&session.id).cloned(),
-                                busy: pending.read().contains(&session.id),
-                                confirming: confirming.read().contains(&session.id),
-                                renaming: renaming.read().as_deref() == Some(session.id.as_str()),
-                                nav_disabled: nav_locked,
-                                session,
-                                on_open: guarded_open,
-                                on_stop: on_stop.clone(),
-                                on_delete: on_delete.clone(),
-                                on_confirm_delete: confirm_delete.clone(),
-                                on_cancel_delete: cancel_delete,
+                                state: RowState {
+                                    error: errors.read().get(&session.id).cloned(),
+                                    busy: pending.read().contains(&session.id),
+                                    confirming: confirming.read().contains(&session.id),
+                                    renaming: renaming.read().as_deref()
+                                        == Some(session.id.as_str()),
+                                    nav_disabled: nav_locked,
+                                },
                                 rename_draft,
+                                on_open: guarded_open,
+                                on_stop,
+                                on_delete,
+                                on_confirm_delete: confirm_delete,
+                                on_cancel_delete: cancel_delete,
                                 on_rename_start,
-                                on_rename_submit: on_rename_submit.clone(),
-                                // Inlined rather than a named closure: it
-                                // is one assignment, and the only rename
-                                // state a cancel touches is which row is
-                                // open — the draft is deliberately LEFT
-                                // alone, since the next open reseeds it.
-                                on_rename_cancel: move |_| renaming.set(None),
+                                on_rename_submit,
+                                // The draft is deliberately left alone: the
+                                // next open reseeds it from the current row.
+                                on_rename_cancel,
+                                session,
                             }
                         }
                     }
@@ -2713,23 +2747,29 @@ fn CreateSessionForm(
 /// `onmounted` would have: the button is only ever created fresh inside
 /// the `if confirming` branch below.
 #[component]
+#[allow(clippy::too_many_arguments)]
 fn SessionRow(
     session: Session,
-    error: Option<String>,
-    busy: bool,
-    confirming: bool,
-    renaming: bool,
-    nav_disabled: bool,
+    state: RowState,
+    rename_draft: Signal<String>,
     on_open: EventHandler<Session>,
     on_stop: EventHandler<String>,
     on_delete: EventHandler<DeleteTarget>,
     on_confirm_delete: EventHandler<String>,
     on_cancel_delete: EventHandler<String>,
-    rename_draft: Signal<String>,
     on_rename_start: EventHandler<(String, String)>,
     on_rename_submit: EventHandler<(String, String)>,
     on_rename_cancel: EventHandler<()>,
 ) -> Element {
+    let RowState {
+        error,
+        busy,
+        confirming,
+        renaming,
+        nav_disabled,
+    } = state;
+    #[cfg(test)]
+    SESSION_ROW_RENDERS.with(|renders| renders.set(renders.get() + 1));
     // `None` for a status nothing has classified yet, and the row then
     // renders no badge ELEMENT at all rather than an empty one — see
     // `status_badge`'s own docs for why an empty badge box would be the
@@ -2745,14 +2785,13 @@ fn SessionRow(
     let cancel_id = session.id.clone();
     let rename_start = (session.id.clone(), session.title.clone());
     let rename_submit_id = session.id.clone();
-    // The open button is removed from layout by EITHER prompt — one
-    // modifier class for both, since what the stylesheet needs to know is
-    // "a prompt occupies this row", not which one. The reason is the one
-    // MT-8 recorded: `.session-row-main` is a non-wrapping flex row whose
-    // children have `min-width` floors, so anything that takes space
-    // beside this button — the confirm prompt's elements, or the rename
-    // field — is painted over by the button's own overflowing content
-    // rather than laid out next to it.
+    // The open button is removed from layout by the prompt or rename field.
+    // What the stylesheet needs to know is only that another control owns
+    // this row's action area. The reason is the one MT-8 recorded:
+    // `.session-row-main` is a non-wrapping flex row whose children have
+    // `min-width` floors, so anything that takes space beside this button is
+    // painted over by its overflowing content rather than laid out next to
+    // it.
     let open_class = if confirming || renaming {
         "session-row-open prompting"
     } else {
@@ -2957,6 +2996,79 @@ fn SessionRow(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Repeated parent refreshes must update direct callback props in place
+    /// without rerendering an otherwise unchanged session row.
+    ///
+    /// Dioxus gives `EventHandler` component props special ownership and
+    /// memoization. Hiding them inside an ordinary props struct bypasses
+    /// that path: every fleet refresh then retains another callback set and
+    /// rerenders every row. This drives the real `SessionRow` through many
+    /// parent renders, so either regression changes the count from one.
+    #[test]
+    fn repeated_parent_refreshes_do_not_rerender_an_unchanged_row() {
+        fn app() -> Element {
+            let rename_draft = use_signal(String::new);
+            let on_open = use_callback(|_: Session| {});
+            let on_stop = use_callback(|_: String| {});
+            let on_delete = use_callback(|_: DeleteTarget| {});
+            let on_confirm_delete = use_callback(|_: String| {});
+            let on_cancel_delete = use_callback(|_: String| {});
+            let on_rename_start = use_callback(|_: (String, String)| {});
+            let on_rename_submit = use_callback(|_: (String, String)| {});
+            let on_rename_cancel = use_callback(|_: ()| {});
+            let session = Session {
+                id: "session-1".to_string(),
+                title: "stable".to_string(),
+                cwd: "/tmp".to_string(),
+                invocation: "agent".to_string(),
+                status: SessionStatus::Exited { exit_code: Some(0) },
+                annotation: None,
+                restart_offer: crate::RestartOffer::FreshOnly,
+                tabs: Vec::new(),
+                host: None,
+                host_name: None,
+                stale: false,
+                source_profile: None,
+            };
+            rsx! {
+                SessionRow {
+                    session,
+                    state: RowState {
+                        error: None,
+                        busy: false,
+                        confirming: false,
+                        renaming: false,
+                        nav_disabled: false,
+                    },
+                    rename_draft,
+                    on_open,
+                    on_stop,
+                    on_delete,
+                    on_confirm_delete,
+                    on_cancel_delete,
+                    on_rename_start,
+                    on_rename_submit,
+                    on_rename_cancel,
+                }
+            }
+        }
+
+        SESSION_ROW_RENDERS.with(|renders| renders.set(0));
+        let mut dom = VirtualDom::new(app);
+        dom.rebuild_to_vec();
+        for _ in 0..64 {
+            dom.mark_dirty(dioxus::core::ScopeId::APP);
+            dom.render_immediate(&mut dioxus::core::NoOpMutations);
+        }
+        SESSION_ROW_RENDERS.with(|renders| {
+            assert_eq!(
+                renders.get(),
+                1,
+                "unchanged rows must stay memoized across fleet refreshes"
+            );
+        });
+    }
 
     /// A reply is refused when it answers a filter that is no longer
     /// applied, however new it is.
