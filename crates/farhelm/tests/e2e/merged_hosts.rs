@@ -143,6 +143,53 @@ async fn helm_process(state_dir: &std::path::Path, ensure_hosts: &std::path::Pat
     }
 }
 
+/// Exchange the shipped CLI's bootstrap token for the explicit device secret
+/// every later request in this real-stack test carries.
+async fn authenticated_client(state_dir: &std::path::Path, base: &str) -> reqwest::Client {
+    let output = tokio::process::Command::new(farhelm_bin())
+        .args(["helm", "token", "show", "--state-dir"])
+        .arg(state_dir)
+        .output()
+        .await
+        .expect("run token show");
+    assert!(
+        output.status.success(),
+        "token show failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let token = String::from_utf8(output.stdout)
+        .expect("the token is UTF-8")
+        .trim()
+        .to_string();
+    assert!(!token.is_empty(), "token show must print a credential");
+
+    let response = reqwest::Client::new()
+        .post(format!("{base}/api/auth/token"))
+        .json(&serde_json::json!({ "token": token }))
+        .send()
+        .await
+        .expect("token exchange reached the helm");
+    assert!(
+        response.status().is_success(),
+        "token exchange answered {}",
+        response.status()
+    );
+    let exchange: serde_json::Value = response.json().await.expect("decode device exchange");
+    let secret = exchange["device_secret"]
+        .as_str()
+        .expect("the exchange returns a device secret");
+    let mut headers = reqwest::header::HeaderMap::new();
+    headers.insert(
+        reqwest::header::AUTHORIZATION,
+        reqwest::header::HeaderValue::from_str(&format!("Bearer {secret}"))
+            .expect("the device secret is an Authorization value"),
+    );
+    reqwest::Client::builder()
+        .default_headers(headers)
+        .build()
+        .expect("build authenticated client")
+}
+
 /// GET a JSON body from the helm, failing the test on a non-2xx.
 async fn get_json(client: &reqwest::Client, url: &str) -> serde_json::Value {
     let response = client.get(url).send().await.expect("GET reached the helm");
@@ -270,7 +317,7 @@ async fn two_real_hosts_serve_one_merged_list_and_both_are_operable() {
     .expect("write the ensure-hosts file");
 
     let helm = helm_process(local.state.path(), &ensure).await;
-    let client = reqwest::Client::new();
+    let client = authenticated_client(local.state.path(), &helm.base).await;
 
     let hosts = await_fleet_connected(&client, &helm.base).await;
     let rows = hosts["hosts"].as_array().unwrap();

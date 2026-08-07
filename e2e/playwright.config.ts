@@ -12,6 +12,12 @@
 // the desktop app embeds Gecko, so it would add runtime without
 // covering a real target.
 import { defineConfig, devices } from "@playwright/test";
+import {
+  AUTH_STORAGE_STATE_PATH,
+  harnessAuthorizationHeaders,
+} from "./tests/helpers/device-auth";
+
+const authorizationHeaders = harnessAuthorizationHeaders();
 
 export default defineConfig({
   testDir: "./tests",
@@ -29,9 +35,16 @@ export default defineConfig({
   timeout: 60_000,
   use: {
     baseURL: "http://127.0.0.1:7434",
+    // These two options are one credential in two browser transports.
+    // Playwright injects `use` options into the request fixture and into
+    // manual browser.newContext() calls as well as its default page context,
+    // so secondary clients cannot silently fall back to unauthenticated I/O.
+    storageState: AUTH_STORAGE_STATE_PATH,
+    extraHTTPHeaders: authorizationHeaders,
     screenshot: "only-on-failure",
     trace: "retain-on-failure",
   },
+  globalSetup: "./global-setup.ts",
   // The per-engine stack reset lives in terminal.spec.ts's own
   // `beforeAll`, not in a setup project or a name-ordered spec file:
   // Playwright does not guarantee alphabetical file ordering, and
@@ -46,7 +59,9 @@ export default defineConfig({
   ],
   webServer: {
     command: "bash ./start-stack.sh",
-    url: "http://127.0.0.1:7434/api/sessions",
+    // The API correctly answers 401 before global setup has exchanged the
+    // token. The public static bundle is therefore the readiness probe.
+    url: "http://127.0.0.1:7434/",
     reuseExistingServer: false,
     stdout: "pipe",
     stderr: "pipe",

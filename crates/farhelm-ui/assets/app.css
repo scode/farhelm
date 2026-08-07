@@ -1394,6 +1394,57 @@ body,
   color: #e08080;
 }
 
+/* Device authentication replaces the application rather than floating over
+   it. Every underlying reader has already received 401, so leaving its stale
+   controls visible would invite actions that cannot succeed and make the
+   prompt look dismissible when it is not. */
+.auth-page {
+  min-height: 100%;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  box-sizing: border-box;
+}
+
+.auth-card {
+  width: min(30rem, 100%);
+  display: grid;
+  gap: 12px;
+  padding: 24px;
+  border: 1px solid #3a3f47;
+  border-radius: 4px;
+  background: #1d2026;
+}
+
+.auth-card h1,
+.auth-card p {
+  margin: 0;
+}
+
+.auth-card label {
+  font-size: 13px;
+  color: #aeb6c3;
+}
+
+.auth-token-input {
+  padding: 8px 10px;
+  border: 1px solid #4a505a;
+  border-radius: 3px;
+  background: #14161a;
+  color: #d8dee9;
+  font: 14px ui-monospace, monospace;
+}
+
+.auth-submit {
+  justify-self: start;
+  padding: 6px 12px;
+}
+
+.auth-error {
+  color: #e08080;
+  font-size: 13px;
+}
+
 /* The client↔helm build mismatch (PLAN_M6.md item 6): one line above the
    whole app, on its own band so it reads as a statement about the PAGE
    rather than about whichever view is under it.

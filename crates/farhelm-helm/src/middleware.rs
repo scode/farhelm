@@ -51,9 +51,9 @@ use axum::response::IntoResponse;
 /// DNS to 127.0.0.1 and then read `/api/sessions` and open terminal
 /// WebSockets as if same-origin — and typing into an agent's terminal is
 /// code execution as the user. WebSocket upgrades bypass CORS entirely,
-/// so this check, not the browser, is the defense. It is independent of
-/// the web token SPEC.md schedules for a later milestone, and wanted
-/// alongside it.
+/// so this check remains defense in depth beside explicit device credentials:
+/// authentication decides who holds authority, while this layer refuses a
+/// browser request that arrived through the wrong origin in the first place.
 pub(crate) async fn require_loopback_origin(
     port: u16,
     req: axum::extract::Request,
@@ -176,11 +176,10 @@ fn is_desktop_webview_origin(origin: &str) -> bool {
 /// - Only this route carries it (see `build_router`). The session list and
 ///   the delete route have no cross-origin caller, so they get no
 ///   cross-origin readability.
-/// - Only the methods and header this route actually needs: `POST` (plus
-///   the `OPTIONS` preflight itself), and `content-type`, which is what
-///   makes the browser preflight in the first place — `fetch(url, {body:
-///   file})` sets it from the blob, and an image type is not one of the
-///   three CORS-simple values.
+/// - Only the method and headers this route actually needs: `POST` (plus the
+///   `OPTIONS` preflight itself), `authorization` for the explicit device
+///   secret, and `content-type`, which `fetch(url, {body: file})` sets from
+///   the blob and may itself make non-simple.
 ///
 /// Applied as a middleware rather than inside the handler because the
 /// headers have to be on EVERY answer, error ones included: a 500 the page
@@ -221,7 +220,7 @@ pub(crate) async fn attachment_cors(
     );
     headers.insert(
         axum::http::header::ACCESS_CONTROL_ALLOW_HEADERS,
-        axum::http::HeaderValue::from_static("content-type"),
+        axum::http::HeaderValue::from_static("authorization, content-type"),
     );
     // The build stamp is READABLE cross-origin, and only it. A
     // cross-origin response exposes none of its headers to script by

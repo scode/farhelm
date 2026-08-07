@@ -563,10 +563,10 @@ mod tests {
     }
 
     /// The desktop build's `fetch` preflights before it may upload
-    /// anything, because `fetch(url, {body: file})` sets a content type
-    /// the CORS-simple rules do not cover. Without an `OPTIONS` route that
-    /// answers with the allowed method and header, the browser stops
-    /// there and the desktop attachment flow never sends a byte.
+    /// anything, because A1's explicit Authorization header is not
+    /// CORS-simple (and the file's content type may not be either). Without
+    /// a credential-free `OPTIONS` route that permits both headers, the
+    /// browser stops there and the desktop attachment flow never sends a byte.
     ///
     /// Pinned per header rather than "some CORS headers exist": each one
     /// is separately load-bearing, and a preflight missing any of them
@@ -577,14 +577,17 @@ mod tests {
 
         let harness = rest_harness::idle_helm().await;
 
-        let app = harness.router();
+        let app = harness.unauthenticated_router();
         let request = axum::http::Request::builder()
             .method("OPTIONS")
             .uri("/api/sessions/sess-1/attachments?filename=shot.png")
             .header("host", "127.0.0.1:7433")
             .header("origin", "dioxus://index.html")
             .header("access-control-request-method", "POST")
-            .header("access-control-request-headers", "content-type")
+            .header(
+                "access-control-request-headers",
+                "authorization, content-type",
+            )
             .body(axum::body::Body::empty())
             .unwrap();
 
@@ -596,12 +599,29 @@ mod tests {
             "the origin is echoed, not answered with a wildcard"
         );
         assert_eq!(headers["access-control-allow-methods"], "POST, OPTIONS");
-        assert_eq!(headers["access-control-allow-headers"], "content-type");
+        assert_eq!(
+            headers["access-control-allow-headers"],
+            "authorization, content-type"
+        );
         assert_eq!(
             headers["vary"], "Origin",
             "one origin's answer must not be cached for another"
         );
         assert!(headers.contains_key("access-control-max-age"));
+
+        let post = axum::http::Request::builder()
+            .method("POST")
+            .uri("/api/sessions/sess-1/attachments?filename=shot.png")
+            .header("host", "127.0.0.1:7433")
+            .header("origin", "dioxus://index.html")
+            .body(axum::body::Body::empty())
+            .unwrap();
+        let response = harness
+            .unauthenticated_router()
+            .oneshot(post)
+            .await
+            .unwrap();
+        assert_eq!(response.status(), axum::http::StatusCode::UNAUTHORIZED);
     }
 
     /// The upload itself: a successful POST from the desktop webview's

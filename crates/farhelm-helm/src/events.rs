@@ -41,23 +41,19 @@
 //! "re-read", so a distinct greeting would only invite a client to treat
 //! them differently.
 //!
-//! ## Unauthenticated, for now
+//! ## Authenticated, still bounded
 //!
-//! Like every other route in this build, and no more so: the whole API is
-//! open on loopback until M7's web token lands (see `crate::run`'s startup
-//! warning). Worth stating explicitly here only because of what this socket
-//! discloses, which is one monotonic counter — that the fleet changed, never
-//! what changed. So it is the cheapest thing in the API to leave open in the
-//! meantime, and it gains an auth check with everything else.
-//!
-//! What it does NOT get to be in the meantime is a free way to hold this
-//! process's resources: an unauthenticated endpoint that anything local can
-//! open is bounded here rather than trusted — a subscriber cap, frame and
-//! message limits on an inbound direction that has no vocabulary at all, and
-//! a write deadline so a peer that stops reading cannot pin its task.
+//! The API router rejects an invalid device secret before this upgrade is
+//! reached, and token rotation closes an admitted feed through the
+//! [`crate::auth::AuthenticatedSocket`] carried into its serving task. That
+//! boundary is not a substitute for resource limits: one authenticated tab
+//! can still open sockets in a loop or stop reading. The subscriber cap,
+//! inbound frame/message limits, and write deadline keep those failures
+//! bounded without pretending the credential makes clients infallible.
 
-use crate::AppState;
 use crate::manager::FleetEvents;
+use crate::{AppState, auth::AuthenticatedSocket};
+use axum::Extension;
 use axum::extract::{State, WebSocketUpgrade, ws};
 use axum::response::IntoResponse;
 use std::sync::Arc;
@@ -105,12 +101,11 @@ const WRITE_DEADLINE: std::time::Duration = std::time::Duration::from_secs(10);
 
 /// How many clients may hold a subscription at once, across this helm.
 ///
-/// The feed is unauthenticated on loopback until M7, and one process opening
-/// sockets in a loop is the cheapest way to make a helm hold tasks it will
-/// never free. A bound turns that into a refusal rather than unbounded
-/// growth. Sized well above any real client population — a browser holds one
-/// per tab, and the desktop app one — so reaching it means something is
-/// wrong rather than something is popular.
+/// One authenticated browser opening sockets in a loop is enough to make a
+/// helm hold tasks it will never free. A bound turns that into a refusal
+/// rather than unbounded growth. Sized well above any real client population
+/// — a browser holds one per tab, and the desktop app one — so reaching it
+/// means something is wrong rather than something is popular.
 ///
 /// The DEFAULT, not the value the endpoint reads: that comes from
 /// `AppState::event_subscriber_cap`, so a test can exhaust the bound through
@@ -125,11 +120,12 @@ pub(crate) const MAX_SUBSCRIBERS: usize = 64;
 /// harder, whereas an HTTP status is something the client can see and back
 /// off from.
 ///
-/// There is nothing else to refuse. The feed takes no parameters, names no
-/// session, and touches no host, so every other failure this socket can have
-/// is a transport failure (see [`serve_events`]).
+/// After device authentication there is nothing else to refuse. The feed
+/// takes no parameters, names no session, and touches no host, so every other
+/// failure this socket can have is a transport failure (see [`serve_events`]).
 pub(crate) async fn events_ws(
     State(state): State<Arc<AppState>>,
+    Extension(auth): Extension<AuthenticatedSocket>,
     upgrade: WebSocketUpgrade,
 ) -> impl IntoResponse {
     let events = Arc::clone(state.manager.events());
@@ -148,13 +144,14 @@ pub(crate) async fn events_ws(
             .into_response();
     };
     upgrade
+        .protocols([crate::auth::WS_PROTOCOL])
         // Both bounds, not just the message: a peer can otherwise send one
         // enormous frame or a run of small ones assembled into one message,
         // and only one of those is what `max_message_size` alone stops.
         .max_frame_size(MAX_CLIENT_FRAME)
         .max_message_size(MAX_CLIENT_FRAME)
         .on_upgrade(move |socket| async move {
-            serve_events(events, socket).await;
+            serve_events(events, socket, auth).await;
             drop(seat);
         })
         .into_response()
@@ -176,8 +173,8 @@ pub(crate) async fn events_ws(
 /// are therefore treated as a protocol violation and close the socket rather
 /// than being ignored. Ignoring them would leave an ambiguity worth avoiding
 /// — a future client sending something meaningful would appear to work while
-/// being silently dropped — and would let an unauthenticated peer keep a
-/// task alive by talking to it. Control frames (ping/pong) are the
+/// being silently dropped — and would let a peer keep a task alive by
+/// talking to it. Control frames (ping/pong) are the
 /// exception, because the WebSocket layer answers those itself and they are
 /// not the client speaking this protocol.
 ///
@@ -188,7 +185,7 @@ pub(crate) async fn events_ws(
 /// and a parked task is not reading either, so it would not even notice the
 /// socket close. Abandoning such a subscriber is safe precisely because the
 /// feed is stateless: whatever it missed is one handshake away.
-async fn serve_events(events: Arc<FleetEvents>, socket: ws::WebSocket) {
+async fn serve_events(events: Arc<FleetEvents>, socket: ws::WebSocket, auth: AuthenticatedSocket) {
     // `SinkExt` is not imported here: the only send this function makes goes
     // through [`notify`], which owns the write deadline.
     use futures_util::StreamExt;
@@ -201,11 +198,12 @@ async fn serve_events(events: Arc<FleetEvents>, socket: ws::WebSocket) {
     // SEEN — otherwise the wait below would fire immediately and send the
     // same number twice.
     let current = *revisions.borrow_and_update();
-    if !notify(&mut tx, current).await {
+    if !notify(&mut tx, current, &auth).await {
         return;
     }
     loop {
         tokio::select! {
+            _ = auth.revoked() => return,
             changed = revisions.changed() => {
                 // The sender is the manager's, which lives as long as the
                 // process serves; an error here means the helm is being torn
@@ -214,7 +212,7 @@ async fn serve_events(events: Arc<FleetEvents>, socket: ws::WebSocket) {
                     return;
                 }
                 let revision = *revisions.borrow_and_update();
-                if !notify(&mut tx, revision).await {
+                if !notify(&mut tx, revision, &auth).await {
                     return;
                 }
             }
@@ -245,15 +243,18 @@ async fn serve_events(events: Arc<FleetEvents>, socket: ws::WebSocket) {
 /// stopped reading, and the two deserve the same answer — the caller returns,
 /// the socket drops, and the seat is released. See [`serve_events`] for why a
 /// stalled subscriber must not be waited on.
-async fn notify<S>(tx: &mut S, revision: u64) -> bool
+async fn notify<S>(tx: &mut S, revision: u64, auth: &AuthenticatedSocket) -> bool
 where
     S: futures_util::SinkExt<ws::Message> + Unpin,
 {
-    let sent = tokio::time::timeout(
-        WRITE_DEADLINE,
-        tx.send(ws::Message::Text(notification(revision).into())),
-    )
-    .await;
+    let sent = tokio::select! {
+        biased;
+        _ = auth.revoked() => return false,
+        sent = tokio::time::timeout(
+            WRITE_DEADLINE,
+            tx.send(ws::Message::Text(notification(revision).into())),
+        ) => sent,
+    };
     match sent {
         // The send completed; whether it SUCCEEDED is the same question as
         // whether this subscription continues.
@@ -745,11 +746,11 @@ mod tests {
     /// A client that sends data on this one-directional feed is
     /// disconnected rather than ignored.
     ///
-    /// Two reasons, and the second is why "ignore it" is not good enough on
-    /// an endpoint anything local can open until M7's token lands: a future
-    /// client sending something meaningful would otherwise appear to work
-    /// while being silently dropped, and a peer would be able to keep a task
-    /// alive by talking to a protocol that has no listener.
+    /// Two reasons, and the second is why "ignore it" is not good enough even
+    /// behind authentication: a future client sending something meaningful
+    /// would otherwise appear to work while being silently dropped, and an
+    /// admitted peer could keep a task alive by talking to a protocol that
+    /// has no listener.
     #[tokio::test]
     async fn a_subscriber_that_sends_data_is_disconnected() {
         let mut harness = rest_harness::idle_helm().await;
@@ -980,9 +981,11 @@ mod tests {
             }
         }
 
+        let harness = rest_harness::idle_helm().await;
+        let auth = harness.state.auth.socket_session();
         let started = tokio::time::Instant::now();
         assert!(
-            !super::notify(&mut NeverReady, 7).await,
+            !super::notify(&mut NeverReady, 7, &auth).await,
             "a peer that never accepts the write must be abandoned rather than waited on"
         );
         assert_eq!(
@@ -993,9 +996,21 @@ mod tests {
 
         let mut writable = futures_util::sink::drain();
         assert!(
-            super::notify(&mut writable, 7).await,
+            super::notify(&mut writable, 7, &auth).await,
             "a peer that is still reading must keep its subscription"
         );
+    }
+
+    /// A revocation already waiting wins even against an immediately writable
+    /// sink. Since the handshake and every later revision share `notify`, this
+    /// pins the no-send-after-rotation boundary for the whole feed.
+    #[tokio::test]
+    async fn revocation_wins_every_feed_send() {
+        let harness = rest_harness::idle_helm().await;
+        let auth = harness.state.auth.socket_session();
+        harness.state.auth.rotate().await.unwrap();
+        let mut writable = futures_util::sink::drain();
+        assert!(!super::notify(&mut writable, 7, &auth).await);
     }
 
     /// Reconnecting re-handshakes — the same immediate current revision a

@@ -4,9 +4,12 @@
 //! registry's (list/add/retarget/remove/adopt/retry) since PLAN_M6.md item 5
 //! froze them, and the per-host profile catalog's
 //! (list/create/update/delete) since PLAN_M6_75.md item 5 did the same —
-//! each flattening every failure
-//! — transport, status, or body-read — into a single displayable `String`
-//! rather than a typed error. That flattening is deliberate, not laziness:
+//! each exposing every failure — transport, status, or body-read — as a
+//! single displayable `String`. Internally, the shared send funnel keeps a
+//! typed distinction just long enough to separate the authentication
+//! middleware's global state transition from an operation's own failure, and
+//! its callers explicitly flatten both variants at the public boundary. That
+//! flattening is deliberate, not laziness:
 //! every caller (`list::ListView`, `list::CreateSessionForm`,
 //! `hosts::HostsPanel`, `session_view::SessionView`) renders the message
 //! directly to the user per SPEC.md's "concrete, actionable errors", so
@@ -30,10 +33,12 @@
 //! WebSocket's path and query. `encode_bytes` is their shared,
 //! module-private implementation.
 //!
-//! Every request below is issued through this module's own [`send`], which
-//! is also where the helm's build stamp is read off the reply (`skew`).
-//! That funnel is a contract rather than a convenience: the skew check only
-//! means anything if there is no second path to the helm that skips it.
+//! Every protected request below is issued through this module's own [`send`],
+//! which attaches the device secret and reads the helm's build stamp off the
+//! reply (`skew`). The sole exception is [`exchange_token`]: it is the public
+//! bootstrap request that obtains that credential, so it cannot traverse an
+//! authenticated funnel. It performs the same build-stamp classification
+//! explicitly.
 //!
 //! The cross-module entry points are `pub(crate)`: they exist to be
 //! called from the view components in `list`, `session_view`, and
@@ -292,17 +297,16 @@ fn encode_bytes(value: &str, keep: impl Fn(u8) -> bool) -> String {
 }
 
 // ---------------------------------------------------------------------
-// Every request, one door
+// Protected requests, one door
 // ---------------------------------------------------------------------
 
 /// The HTTP client every request below is built from.
 ///
-/// A SEAM, not an optimization. It exists so that the next thing which has to
-/// be true of every outbound request — M7's token auth — is one edit here
-/// rather than fifteen edits spread across this module, with the fifteenth
-/// one forgotten and silently unauthenticated. That is the same argument
-/// [`send`] makes on the reply side, and the two together are what make "every
-/// request goes through one door" a property rather than a habit.
+/// A seam, not an optimization. Every protected REST request is built here,
+/// then [`send_within`] attaches the current origin-scoped device secret. The
+/// single construction and classification path makes explicit authentication
+/// and build-stamp handling properties of the client rather than call-site
+/// habits that a new endpoint can forget.
 ///
 /// Deliberately constructs a FRESH client per call, which is what the fifteen
 /// call sites did before this function existed. A shared client is the
@@ -313,11 +317,10 @@ fn encode_bytes(value: &str, keep: impl Fn(u8) -> bool) -> String {
 /// looked like on the first request and keeps connections alive across the
 /// whole run.
 ///
-/// M7 is where it deliberately becomes shared, because that is when sharing
-/// starts carrying meaning the UI needs rather than just saving handshakes: a
-/// cookie jar and a device session have to persist ACROSS requests to work at
-/// all. Making that switch there gets it reviewed as the behavior change it
-/// is, alongside the auth it serves.
+/// The device session does not live in this object. Browser localStorage owns
+/// it under the helm's complete origin, and [`send_within`] reads it for each
+/// request before adding the explicit Authorization header. A shared client
+/// would therefore add connection pooling, not authentication semantics.
 fn client() -> reqwest::Client {
     reqwest::Client::new()
 }
@@ -347,19 +350,19 @@ fn client() -> reqwest::Client {
 /// request by construction — the same argument the funnel itself makes.
 const REQUEST_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(60);
 
-/// Send one request and read the helm's build stamp off its reply
+/// Send one protected request and read the helm's build stamp off its reply
 /// (PLAN_M6.md item 6's client↔helm skew edge).
 ///
-/// EVERY request this module makes goes through here, and that is the point
-/// rather than tidiness: the skew check's whole premise is that a tab left
-/// open across a helm upgrade notices on whatever it does next, which only
-/// holds if there is no second path to the helm that skips the observation.
-/// A call site that reached for `reqwest` directly would be a hole in that,
-/// invisible until someone upgraded a helm under a real tab.
+/// Every protected request uses this function or [`send_within`] directly,
+/// and that is the point rather than tidiness: the skew and authentication
+/// checks only mean anything if no protected path skips them. The sole bypass
+/// is [`exchange_token`], which cannot carry the credential it exists to mint
+/// and performs its own build-stamp observation.
 ///
-/// The reply is handed back untouched — the observation only reads a
-/// header — so this is a one-line substitution at each call site and every
-/// status/decode decision below is unchanged.
+/// Successful and non-401 refusal replies are handed back for their endpoint
+/// to decode. Every 401 is consumed here: the authentication middleware's
+/// marker becomes a page-wide transition, while any other 401 remains the
+/// originating operation's ordinary failure.
 ///
 /// The [`REQUEST_TIMEOUT`] is applied here for the same funnel reason: a
 /// per-call-site deadline is a deadline someone eventually forgets, and the
@@ -370,7 +373,31 @@ const REQUEST_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(60);
 /// (see `walk_step`). Nothing may reach for a longer one, which is why this
 /// is the door everything else uses.
 async fn send(request: reqwest::RequestBuilder) -> Result<reqwest::Response, String> {
-    send_within(request, REQUEST_TIMEOUT).await
+    send_within(request, REQUEST_TIMEOUT)
+        .await
+        .map_err(send_error_text)
+}
+
+/// Failure at the one response-classification point every Rust-side API
+/// request traverses.
+///
+/// `Unauthenticated` is deliberately typed rather than formatted into an
+/// ordinary status string: the full-page token surface is a global state
+/// transition, not one call site's inline error. [`send`] and the bounded
+/// listing walk match these variants when they flatten public failures.
+#[derive(Debug)]
+enum SendError {
+    Unauthenticated,
+    Request(String),
+}
+
+/// Deliberately match the typed funnel result at the point endpoint contracts
+/// flatten to display text.
+fn send_error_text(error: SendError) -> String {
+    match error {
+        SendError::Unauthenticated => "authentication is required".to_string(),
+        SendError::Request(detail) => detail,
+    }
 }
 
 /// [`send`] with an explicit deadline, for a request that is one step of a
@@ -379,22 +406,92 @@ async fn send(request: reqwest::RequestBuilder) -> Result<reqwest::Response, Str
 /// Separate from `send` rather than a parameter on it, because the choice is
 /// not one every call site should be invited to make: fifteen endpoints want
 /// the standard deadline and exactly one — a page of the listing walk — has
-/// a budget of its own to divide up. The build-stamp observation is the same
-/// either way, which is the property that must not vary.
+/// a budget of its own to divide up. Both are protected requests: this function
+/// attaches Authorization and classifies the structured auth marker. The
+/// public bootstrap exchange is the sole bypass and performs its own stamp
+/// handling.
 async fn send_within(
-    request: reqwest::RequestBuilder,
+    mut request: reqwest::RequestBuilder,
     timeout: std::time::Duration,
-) -> Result<reqwest::Response, String> {
+) -> Result<reqwest::Response, SendError> {
+    if let Some(secret) = crate::auth::device_secret() {
+        request = request.bearer_auth(secret);
+    }
     let resp = request
         .timeout(timeout)
         .send()
         .await
-        .map_err(|e| e.to_string())?;
+        .map_err(|error| SendError::Request(error.to_string()))?;
     // Called for its effect, in a statement of its own. Folding it into a
     // `.map()` reads as a transformation of the response and is not one —
     // the value is unchanged and the point is entirely the side effect.
     skew::note_build(&resp);
+    if resp.status() == reqwest::StatusCode::UNAUTHORIZED {
+        let body = resp
+            .text()
+            .await
+            .map_err(|error| SendError::Request(error.to_string()))?;
+        if device_auth_required(&body) {
+            // Stamp classification happens first. A bundle that disagrees
+            // with the helm cannot safely interpret even this marker, so the
+            // skew prompt wins and this one stays dormant.
+            if !skew::build_skew_detected_now() {
+                crate::auth::require_token();
+            }
+            return Err(SendError::Unauthenticated);
+        }
+        let detail = body.trim();
+        return Err(SendError::Request(if detail.is_empty() {
+            "the helm refused this request as unauthorized".to_string()
+        } else {
+            detail.to_string()
+        }));
+    }
     Ok(resp)
+}
+
+/// Only the authentication middleware emits this structured error code;
+/// supervisor authorization refusals may share status 401 but not meaning.
+fn device_auth_required(body: &str) -> bool {
+    serde_json::from_str::<serde_json::Value>(body)
+        .ok()
+        .is_some_and(|value| {
+            value.get("code").and_then(|code| code.as_str()) == Some("device_auth_required")
+        })
+}
+
+/// Exchange a pasted bootstrap token for an origin-scoped device secret.
+///
+/// This request deliberately does not feed its own 401 back into the global
+/// 401 funnel: the token form is already mounted, and a rejected token belongs
+/// as an error on that form rather than as another request to show it.
+pub(crate) async fn exchange_token(base: &str, token: &str) -> Result<String, String> {
+    let url = format!("{base}/api/auth/token");
+    let resp = client()
+        .post(&url)
+        .json(&serde_json::json!({ "token": token }))
+        .timeout(REQUEST_TIMEOUT)
+        .send()
+        .await
+        .map_err(|error| error.to_string())?;
+    skew::note_build(&resp);
+    if skew::build_skew_detected_now() {
+        return Err("the helm build changed; reload before authenticating".to_string());
+    }
+    if resp.status() == reqwest::StatusCode::UNAUTHORIZED {
+        return Err("that token was not accepted".to_string());
+    }
+    if !resp.status().is_success() {
+        return Err(refusal_text("POST", &url, resp).await);
+    }
+    #[derive(serde::Deserialize)]
+    struct DeviceExchange {
+        device_secret: String,
+    }
+    resp.json::<DeviceExchange>()
+        .await
+        .map(|exchange| exchange.device_secret)
+        .map_err(|error| format!("the helm returned an unreadable device session: {error}"))
 }
 
 // ---------------------------------------------------------------------
@@ -814,7 +911,7 @@ pub(crate) async fn fetch_sessions(
                     hit_ceiling = true;
                     break;
                 }
-                PageFailure::Fail => return Err(reason),
+                PageFailure::Fail => return Err(send_error_text(reason)),
             },
         };
         if !resp.status().is_success() {
@@ -2011,6 +2108,19 @@ pub(crate) fn restart_mode_for(offer: RestartOffer) -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Only the middleware's structured marker means device authentication;
+    /// an unrelated 401 must stay with the operation that received it.
+    #[test]
+    fn device_authentication_requires_its_specific_marker() {
+        assert!(device_auth_required(
+            r#"{"error":"unauthenticated","code":"device_auth_required"}"#
+        ));
+        assert!(!device_auth_required(
+            r#"{"error":"spawn identity is unauthorized"}"#
+        ));
+        assert!(!device_auth_required("spawn identity is unauthorized"));
+    }
 
     /// A blank install field must reach the wire as ABSENT, and a non-blank
     /// one byte for byte.

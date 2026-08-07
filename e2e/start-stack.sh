@@ -92,6 +92,7 @@ remote_state="$state/remote"
 # untrappable death (SIGKILL, OOM) can still strand a stale file, so
 # readers must not treat its presence as proof of a live stack.
 stack_info="$repo/e2e/.stack-info.json"
+auth_state="$repo/e2e/.auth/storage-state.json"
 mkdir -p "$work" "$remote_state" || exit 1
 
 # Trap installed BEFORE anything is spawned: a TERM during the socket
@@ -102,6 +103,7 @@ cleanup() {
   kill "${sup_pid:-}" 2>/dev/null
   kill "${remote_sup_pid:-}" 2>/dev/null
   rm -f "$stack_info"
+  rm -f "$auth_state"
   # The tmux servers daemonize out of this process group, so killing a
   # supervisor does not reap its own; each needs its own shutdown, and the
   # "remote" has one of its own precisely because its state dir is
@@ -172,10 +174,9 @@ print(json.dumps({
 # ids — the tests read from /api/hosts, which is the authority for them
 # anyway.
 #
-# Only what the tests actually reach for. The helm's OWN state directory was
-# published here too and never read — the tests drive the helm through its
-# API and have no business at its files — and a published path is an
-# invitation to reach for it, so it is not published.
+# The state directory is now published for one narrow reason: auth.spec.ts and
+# the global setup invoke the shipped token CLI against it. Browser behavior
+# still reaches the helm through HTTP; no test reads helm.db directly.
 python3 -c '
 import json, sys
 print(json.dumps({
@@ -183,8 +184,15 @@ print(json.dumps({
     "remote_state": sys.argv[2],
     "remote_supervisor_pid": int(sys.argv[3]),
     "remote_ssh": "localhost",
+    "state": sys.argv[4],
 }))
-' "$bin" "$remote_state" "$remote_sup_pid" >"$stack_info" || exit 1
+' "$bin" "$remote_state" "$remote_sup_pid" "$state" >"$stack_info" || exit 1
+
+# Mint before the helm starts so its first protected request sees the same
+# durable token the harness CLI printed. It is captured only long enough to
+# pipe through stdin into the JSON request body, never placed in an argv;
+# Playwright obtains its credential independently through the same command.
+token="$("$bin" helm token show --state-dir "$state")" || exit 1
 
 # The helm runs as a child, NOT via exec: bash does not run EXIT traps
 # across exec, so an exec'd helm would leave the supervisor and the
@@ -197,6 +205,40 @@ print(json.dumps({
 helm_pid=$!
 
 base="http://127.0.0.1:7434"
+auth_header="$state/harness-auth-header"
+
+# Exchange once for the curl-based setup path. The browser uses its own
+# exchange in global-setup.ts. Each consumer holds its own explicit device
+# secret, matching the product boundary instead of sharing ambient state.
+token_body="$(printf '%s' "$token" | python3 -c 'import json, sys; print(json.dumps({"token": sys.stdin.read()}))')" || exit 1
+authenticated=false
+for _ in $(seq 1 200); do
+  kill -0 "$helm_pid" 2>/dev/null || {
+    echo "helm exited before token exchange" >&2
+    exit 1
+  }
+  exchange_body="$(printf '%s' "$token_body" | curl -sS -m 5 --fail-with-body \
+    -X POST "$base/api/auth/token" \
+    -H 'content-type: application/json' \
+    --data-binary @- 2>/dev/null)" && {
+      device_secret="$(printf '%s' "$exchange_body" | python3 -c '
+import json, sys
+value = json.load(sys.stdin).get("device_secret")
+if not isinstance(value, str) or not value:
+    raise SystemExit(1)
+print(value)
+')" || exit 1
+      printf 'Authorization: Bearer %s\n' "$device_secret" >"$auth_header" || exit 1
+      chmod 600 "$auth_header" || exit 1
+      authenticated=true
+      break
+    }
+  sleep 0.1
+done
+test "$authenticated" = true || {
+  echo "the helm never accepted the harness web token" >&2
+  exit 1
+}
 
 # The id of the reserved local row, once its connection to the supervisor
 # above is actually up.
@@ -214,7 +256,7 @@ connected_local_host() {
       echo "helm exited before it began serving" >&2
       return 1
     }
-    body="$(curl -sS -m 5 "$base/api/hosts" 2>/dev/null)" && {
+    body="$(curl -sS -m 5 -H "@$auth_header" "$base/api/hosts" 2>/dev/null)" && {
       id="$(printf '%s' "$body" | python3 -c '
 import json, sys
 for host in json.load(sys.stdin)["hosts"]:
@@ -255,6 +297,7 @@ print(json.dumps({
 
 curl -sS -m 30 --fail-with-body \
   -X POST "$base/api/sessions" \
+  -H "@$auth_header" \
   -H 'content-type: application/json' \
   -d "$create_body" >/dev/null || {
   echo "creating the startup session through the API failed" >&2

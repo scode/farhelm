@@ -4634,6 +4634,15 @@ mod tests {
         let (_, before) = get_json(&harness, "/api/sessions").await;
         assert_eq!(before["sessions"][0]["status"]["state"], "running");
 
+        // An Unknown-carrying mutation deliberately wakes a refresh so a
+        // previously exited status can converge promptly. Hold that refresh
+        // here: this test is about what the MUTATION REPLY records, and its
+        // fixed list fixture still describes the world before the restart.
+        // Letting the refresh race the assertion made the test depend on how
+        // much unrelated middleware work happened between the POST and GET.
+        let local = rest_harness::local_id(&harness.store).await;
+        let release_refresh = harness.fleet.hold_next_list(local);
+
         let (status, body) = post_text(
             &harness,
             "/api/sessions/sess-1/restart",
@@ -4656,6 +4665,7 @@ mod tests {
             after["sessions"][0]["restart_offer"], "fresh_only",
             "including the freshly recomputed offer the restart exists to produce"
         );
+        drop(release_refresh);
         peer.abort();
     }
 

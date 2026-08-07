@@ -54,6 +54,9 @@ base64 = "0.22"
 clap = { version = "4", features = ["derive"] }
 dioxus = "0.7.0"
 futures-util = { version = "0.3", default-features = false }
+# Browser bootstrap tokens and device cookies are credentials, not identifiers:
+# both are minted directly from 128 bits of operating-system randomness.
+getrandom = "0.3"
 # List-view polling sleep on wasm32 (farhelm-ui's `ListView`): a thin
 # `wasm-bindgen` binding to `setTimeout`, the only timer a browser tab
 # actually has for this. Non-wasm32 targets use `tokio::time::sleep`
@@ -73,7 +76,12 @@ reqwest = { version = "0.12", default-features = false, features = ["json"] }
 rusqlite = { version = "0.40", features = ["bundled"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+# Device credentials are stored as fixed-size SHA-256 digests, and both those
+# digests and the recoverable bootstrap token are compared without revealing
+# a matching prefix through ordinary equality timing.
+sha2 = "0.10"
 shell-words = "1"
+subtle = "2"
 tempfile = "3"
 thiserror = "2"
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "process", "net", "io-util", "io-std", "sync", "time", "fs"] }

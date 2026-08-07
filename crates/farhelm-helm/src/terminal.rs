@@ -7,9 +7,11 @@
 //! holds a connection open for the life of a user's attention, which is why
 //! nearly everything here is about teardown rather than about bytes.
 //!
-//! ## Refusals are delivered ON the socket, not instead of it
+//! ## Auth is refused before upgrade; attach failures are delivered on-socket
 //!
-//! `serve_term_upgrade` accepts the upgrade first and does everything else
+//! The API authentication boundary runs before `serve_term_upgrade`, so an
+//! unauthenticated request receives HTTP 401 and never becomes a WebSocket.
+//! After that boundary, `serve_term_upgrade` accepts the upgrade and does everything else
 //! afterwards: `serve_term` resolves the query (`resolve_attach_request`),
 //! routes to the owning host, and only then sends the `Attach`. So by the
 //! time anything can be refused — an
@@ -42,8 +44,11 @@
 //! `PONG_TEXT_MESSAGE` for the heartbeat and `REPLAY_COMPLETE_TEXT_MESSAGE`
 //! for the marker that separates replayed scrollback from live output.
 
+use crate::auth::AuthenticatedSocket;
 use crate::sessions::{default_cols, default_rows, route_session};
 use crate::{AppState, SupervisorClient, SupervisorError, TermEvent, TermStream};
+use anyhow::Context;
+use axum::Extension;
 use axum::extract::{Path as AxPath, Query, State, WebSocketUpgrade, ws};
 use axum::response::IntoResponse;
 use farhelm_proto::{ErrorKind, TerminalSelector};
@@ -286,11 +291,12 @@ fn refused_as_taken_over(error: &anyhow::Error) -> bool {
 
 pub(crate) async fn term_ws(
     State(state): State<Arc<AppState>>,
+    Extension(auth): Extension<AuthenticatedSocket>,
     AxPath(id): AxPath<String>,
     Query(q): Query<TermQuery>,
     upgrade: WebSocketUpgrade,
 ) -> impl IntoResponse {
-    serve_term_upgrade(state, id, q, upgrade, false)
+    serve_term_upgrade(state, auth, id, q, upgrade, false)
 }
 
 /// The same socket, attached NON-DISPLACINGLY: refused rather than taking
@@ -303,17 +309,19 @@ pub(crate) async fn term_ws(
 /// the ordinary path.
 pub(crate) async fn term_ws_if_unowned(
     State(state): State<Arc<AppState>>,
+    Extension(auth): Extension<AuthenticatedSocket>,
     AxPath(id): AxPath<String>,
     Query(q): Query<TermQuery>,
     upgrade: WebSocketUpgrade,
 ) -> impl IntoResponse {
-    serve_term_upgrade(state, id, q, upgrade, true)
+    serve_term_upgrade(state, auth, id, q, upgrade, true)
 }
 
 /// The upgrade both terminal routes share; `if_unowned` is the one thing
 /// they differ in.
 fn serve_term_upgrade(
     state: Arc<AppState>,
+    auth: AuthenticatedSocket,
     id: String,
     q: TermQuery,
     upgrade: WebSocketUpgrade,
@@ -327,9 +335,10 @@ fn serve_term_upgrade(
     // the handler.
     let id_for_log = id.clone();
     upgrade
+        .protocols([crate::auth::WS_PROTOCOL])
         .max_message_size(farhelm_proto::MAX_FRAME_LEN as usize)
         .on_upgrade(move |socket| async move {
-            if let Err(e) = serve_term(state, id, q, socket, if_unowned).await {
+            if let Err(e) = serve_term(state, auth, id, q, socket, if_unowned).await {
                 // A refused non-displacing attach is an ORDINARY outcome,
                 // not a fault: a browser probing every thirty seconds for a
                 // session someone else holds is the reconnect ladder
@@ -430,14 +439,17 @@ const PONG_TEXT_MESSAGE: &str = r#"{"type":"pong"}"#;
 /// in arrival order. Only the outbound drain moved.
 async fn serve_term(
     state: Arc<AppState>,
+    auth: AuthenticatedSocket,
     session_id: String,
     q: TermQuery,
-    socket: ws::WebSocket,
+    mut socket: ws::WebSocket,
     if_unowned: bool,
 ) -> anyhow::Result<()> {
     use futures_util::{SinkExt, StreamExt};
 
-    let (mut ws_tx, mut ws_rx) = socket.split();
+    if auth.is_revoked().await {
+        return Ok(());
+    }
 
     // One arm covers both failure sources `attach_from_query` can produce
     // — a locally-refused query shape (an explicit empty `?lease=`) and a
@@ -448,17 +460,46 @@ async fn serve_term(
     // request it just made. See `attach_from_query`'s own docs for why
     // folding them into one `Result` is what keeps this a single arm
     // instead of two copies of the same three lines.
-    let (client, channel, mut events) =
-        match attach_from_query(&state, &session_id, &q, if_unowned).await {
+    let attached = attach_from_query(&state, &session_id, &q, if_unowned);
+    tokio::pin!(attached);
+    let (client, channel, mut events) = tokio::select! {
+        biased;
+        _ = auth.revoked() => {
+            // The request may already have crossed into the supervisor. Drop
+            // the browser first, then wait only long enough to learn whether
+            // admission completed and needs an explicit detach.
+            drop(socket);
+            if let Ok(Ok((client, channel, _events))) =
+                tokio::time::timeout(WS_TEARDOWN_GRACE, &mut attached).await
+            {
+                detach_bounded(&client, channel).await;
+            }
+            return Ok(());
+        }
+        attached = &mut attached => {
+            match attached {
             Ok(parts) => parts,
             Err(e) => {
                 let notice = serde_json::json!({"type": "detached", "reason": format!("{e:#}")});
-                let _ = ws_tx
+                let _ = socket
                     .send(ws::Message::Text(notice.to_string().into()))
                     .await;
                 return Err(e);
             }
-        };
+            }
+        }
+    };
+
+    // Rotation may have committed after the attach future became ready but
+    // before this task won the select. Do not start either I/O pump in that
+    // admission gap.
+    if auth.is_revoked().await {
+        drop(socket);
+        detach_bounded(&client, channel).await;
+        return Ok(());
+    }
+
+    let (mut ws_tx, mut ws_rx) = socket.split();
 
     // The detach signal, watched independently of the event queue. This is
     // the priority path that makes teardown always possible: a browser
@@ -552,18 +593,22 @@ async fn serve_term(
         }
     });
 
-    let inbound = async {
+    let client_inbound = Arc::clone(&client);
+    let session_id_inbound = session_id.clone();
+    let inbound = tokio::spawn(async move {
         while let Some(msg) = ws_rx.next().await {
             match msg {
                 Ok(ws::Message::Binary(bytes)) => {
-                    client.send_input(channel, bytes.to_vec()).await;
+                    client_inbound.send_input(channel, bytes.to_vec()).await;
                 }
                 Ok(ws::Message::Text(text)) => match serde_json::from_str::<WsClientMsg>(&text) {
                     Ok(WsClientMsg::Resize { cols, rows }) => {
-                        client.resize(&session_id, channel, cols, rows).await;
+                        client_inbound
+                            .resize(&session_id_inbound, channel, cols, rows)
+                            .await;
                     }
-                    Ok(WsClientMsg::Pause) => client.pause_output(channel).await,
-                    Ok(WsClientMsg::Resume) => client.resume_output(channel).await,
+                    Ok(WsClientMsg::Pause) => client_inbound.pause_output(channel).await,
+                    Ok(WsClientMsg::Resume) => client_inbound.resume_output(channel).await,
                     // The one client message answered HERE rather than
                     // relayed (see `term_ws`'s docs). Notifying never parks,
                     // which is the property this loop needs: the browser
@@ -587,8 +632,8 @@ async fn serve_term(
             }
         }
         anyhow::Ok(())
-    };
-    tokio::pin!(inbound);
+    });
+    let mut inbound = inbound;
 
     // Either half ending must end the whole handler, and the outbound arm
     // is the one that matters for teardown. A browser that stops reading
@@ -597,10 +642,41 @@ async fn serve_term(
     // and every frame queued for it for exactly as long as the wedge
     // lasts. That is the leak the stall detach exists to end, so the
     // detach has to be able to end this handler by itself.
-    let (result, outbound_finished) = tokio::select! {
-        result = &mut inbound => (result, false),
-        _ = &mut outbound => (Ok(()), true),
+    enum SocketEnd {
+        Revoked,
+        Inbound(Result<anyhow::Result<()>, tokio::task::JoinError>),
+        Outbound,
+    }
+    let end = tokio::select! {
+        _ = auth.revoked() => SocketEnd::Revoked,
+        result = &mut inbound => SocketEnd::Inbound(result),
+        _ = &mut outbound => SocketEnd::Outbound,
     };
+
+    if matches!(&end, SocketEnd::Revoked) {
+        // Drop both WebSocket halves before asking the supervisor to clean
+        // up. Cleanup can backpressure; revoked browser I/O must not remain
+        // reachable while it does.
+        inbound.abort();
+        outbound.abort();
+        let _ = inbound.await;
+        let _ = outbound.await;
+        detach_bounded(&client, channel).await;
+        return Ok(());
+    }
+
+    let (result, outbound_finished, inbound_finished) = match end {
+        SocketEnd::Inbound(result) => {
+            let result = result.context("terminal websocket inbound task panicked")?;
+            (result, false, true)
+        }
+        SocketEnd::Outbound => (Ok(()), true, false),
+        SocketEnd::Revoked => unreachable!("handled above"),
+    };
+    if !inbound_finished {
+        inbound.abort();
+        let _ = inbound.await;
+    }
 
     // Detaching is what ends the outbound task in the ORDINARY case (the
     // browser closed its socket): the supervisor drops the attachment,
@@ -611,6 +687,19 @@ async fn serve_term(
     client.detach(channel).await;
     settle_outbound(outbound, outbound_finished, WS_TEARDOWN_GRACE).await;
     result
+}
+
+/// Give supervisor cleanup a bounded opportunity after browser I/O is gone.
+async fn detach_bounded(client: &SupervisorClient, channel: u32) {
+    if tokio::time::timeout(WS_TEARDOWN_GRACE, client.detach(channel))
+        .await
+        .is_err()
+    {
+        tracing::warn!(
+            channel,
+            "supervisor detach timed out after socket revocation"
+        );
+    }
 }
 
 /// Let a terminal socket's outbound drain finish, aborting it past
@@ -698,6 +787,62 @@ mod tests {
             start.elapsed() < Duration::from_secs(2),
             "a wedged drain must be abandoned at the grace, not waited on"
         );
+    }
+
+    /// Rotation during supervisor admission never starts browser I/O and
+    /// still detaches an attachment whose late reply crossed the revocation.
+    #[tokio::test]
+    async fn rotation_during_terminal_admission_closes_before_cleanup() {
+        let (client_side, peer_side) = tokio::io::duplex(64 * 1024);
+        let (attach_seen_tx, attach_seen_rx) = tokio::sync::oneshot::channel();
+        let (release_tx, release_rx) = tokio::sync::oneshot::channel();
+        let peer = tokio::spawn(async move {
+            let (read, write) = tokio::io::split(peer_side);
+            let mut reader = FrameReader::new(read);
+            let mut writer = FrameWriter::new(write);
+            handshake(&mut reader, &mut writer, "supervisor")
+                .await
+                .unwrap();
+            let request =
+                farhelm_proto::io::parse_control(&reader.read_frame().await.unwrap().unwrap())
+                    .unwrap();
+            let ControlMsg::Attach {
+                req_id, channel, ..
+            } = request
+            else {
+                panic!("expected Attach, got {request:?}");
+            };
+            attach_seen_tx.send(()).unwrap();
+            release_rx.await.unwrap();
+            writer
+                .write_control(&ControlMsg::Attached { req_id, channel })
+                .await
+                .unwrap();
+            loop {
+                let frame = reader.read_frame().await.unwrap().unwrap();
+                let message = farhelm_proto::io::parse_control(&frame).unwrap();
+                if matches!(message, ControlMsg::Detach { channel: got } if got == channel) {
+                    return;
+                }
+            }
+        });
+
+        let mut harness = rest_harness::spliced_helm(client_side).await;
+        let addr = harness.serve().await;
+        let mut ws = WsTestClient::connect(addr, "/api/sessions/sess-1/term").await;
+        attach_seen_rx.await.unwrap();
+        harness.state.auth.rotate().await.unwrap();
+        release_tx.send(()).unwrap();
+
+        tokio::time::timeout(Duration::from_secs(5), async {
+            while ws.recv().await.is_some() {}
+        })
+        .await
+        .expect("the revoked browser socket must close before cleanup can stall");
+        tokio::time::timeout(Duration::from_secs(5), peer)
+            .await
+            .expect("the admitted supervisor channel must be cleaned up")
+            .unwrap();
     }
 
     /// Browser pause/resume must reach the SUPERVISOR as

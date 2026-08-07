@@ -82,6 +82,9 @@
 //!   comparison itself plus the one signal `App` renders its reload prompt
 //!   from, so a tab left open across a helm upgrade says so instead of
 //!   failing in ways nothing explains.
+//! - `auth`: the full-page bootstrap-token exchange (PLAN_M7.md item 3),
+//!   raised by `api`'s typed 401 funnel and unmounted after exchange so every
+//!   authenticated reader starts again from a clean state.
 //! - `rename`: `RenameForm`, the one control both rename surfaces share
 //!   (PLAN_M5.md item 6) — a single-line field that sends what the user
 //!   typed verbatim, with the request, the optimistic paint, and the
@@ -106,6 +109,7 @@ use serde::Deserialize;
 
 mod api;
 mod attachments;
+mod auth;
 mod feed;
 mod hosts;
 mod list;
@@ -745,6 +749,8 @@ const APP_CSS: Asset = asset!("/assets/app.css");
 #[component]
 pub fn App() -> Element {
     let mut current = use_signal(|| None::<Session>);
+    let build_skew = skew::build_skew_detected();
+    let token_required = *auth::TOKEN_REQUIRED.read();
 
     rsx! {
         document::Link { rel: "stylesheet", href: VENDOR_XTERM_CSS }
@@ -759,25 +765,29 @@ pub fn App() -> Element {
         // whatever it happens to be showing, and it must not disappear
         // because the user navigated into a session while reading it.
         skew::BuildSkewNotice {}
-        // Beside it, and outside the match for a related reason: the
-        // invalidation feed is the whole page's channel, and a subscription
-        // owned by either view below would be torn down and re-handshaked
-        // every time the user opened or closed a session — turning
-        // navigation into a window with no live updates and a fallback poll
-        // spinning back up to cover it. It renders nothing (PLAN_M6_75.md
-        // item 6); what it produces is the revision counter each page
-        // re-reads on.
-        feed::FleetFeed {}
-        match &*current.read() {
-            None => rsx! {
-                ListView { on_open: move |session: Session| current.set(Some(session)) }
-            },
-            Some(session) => rsx! {
-                SessionView {
-                    session: session.clone(),
-                    on_back: move |_| current.set(None),
-                }
-            },
+        if token_required && !build_skew {
+            auth::TokenPrompt {}
+        } else {
+            // Beside it, and outside the match for a related reason: the
+            // invalidation feed is the whole page's channel, and a subscription
+            // owned by either view below would be torn down and re-handshaked
+            // every time the user opened or closed a session — turning
+            // navigation into a window with no live updates and a fallback poll
+            // spinning back up to cover it. It renders nothing (PLAN_M6_75.md
+            // item 6); what it produces is the revision counter each page
+            // re-reads on.
+            feed::FleetFeed {}
+            match &*current.read() {
+                None => rsx! {
+                    ListView { on_open: move |session: Session| current.set(Some(session)) }
+                },
+                Some(session) => rsx! {
+                    SessionView {
+                        session: session.clone(),
+                        on_back: move |_| current.set(None),
+                    }
+                },
+            }
         }
     }
 }

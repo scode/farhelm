@@ -136,11 +136,11 @@ pub(crate) const DEFAULT_PAGE_LIMIT: usize = 500;
 /// The largest page a caller may ask for.
 ///
 /// A page is real work on this side — an indexed scan, a JSON decode per
-/// row, and a serialize per row — so an uncapped `?limit=` is a request to
-/// do all of it at once, from an endpoint that is unauthenticated on
-/// loopback until M7's web token lands. Ten times the default leaves ample
-/// room for a client that genuinely wants fewer round trips while keeping
-/// one request bounded.
+/// row, and a serialize per row — so an uncapped `?limit=` lets one admitted
+/// client demand all of it at once. Authentication identifies a device; it
+/// does not make its requests cheap. Ten times the default leaves ample room
+/// for a client that genuinely wants fewer round trips while keeping one
+/// request bounded.
 ///
 /// A cap on what may be ASKED, not on what may be returned: the byte budget
 /// ([`PAGE_BYTE_BUDGET`]) is the independent second cut, and an over-large
@@ -178,12 +178,12 @@ pub(crate) const MAX_PAGE_LIMIT: usize = 5_000;
 /// a global scan or time budget across concurrent requests, and pushing the
 /// predicates into SQL so SQLite decides what to touch. Both are real
 /// options and both are being declined this milestone for the same reason:
-/// the helm listens on loopback and serves one user, the cache is bounded per
-/// host by `crate::manager::REFRESH_SESSION_CAP`, and the cost of the wrong
+/// the helm listens on loopback and serves authenticated devices for one user,
+/// the cache is bounded per host by `crate::manager::REFRESH_SESSION_CAP`, and
+/// the cost of the wrong
 /// abstraction here (a budget that silently truncates a count, or a filter
 /// vocabulary split between SQL and Rust that can come to disagree) is worse
-/// than the scan. Revisit when the helm serves more than one caller, which is
-/// also when M7's auth arrives.
+/// than the scan. Revisit when the helm serves more than one trust domain.
 pub(crate) const MAX_FILTERED_PAGE_LIMIT: usize = DEFAULT_PAGE_LIMIT;
 
 /// How a host is NAMED on a session row.

@@ -423,8 +423,8 @@ remains that can never be represented on any page.
 ## Helm internals
 
 - State in SQLite at `~/.local/state/farhelm/helm.db`: host registry (SSH destinations, host identities), last-known
-  session cache (survives helm restarts per SPEC.md), web token hash, browser device sessions, remembered defaults
-  (last-used profile per host).
+  session cache (survives helm restarts per SPEC.md), recoverable web token, hashed browser device sessions, remembered
+  defaults (last-used profile per host).
 - The host registry (PLAN_M6.md item 3) reserves one row for the machine running the helm itself: auto-created at `open`
   if absent, never user management surface, never removable. It exists specifically so the local host has a cache row to
   serve stale sessions from when its own supervisor is down — the plan's first draft made this row optional, and review
@@ -641,8 +641,14 @@ remains that can never be represented on any page.
   since a helm that came up with three of five guaranteed hosts looks healthy and is not.
 - axum serving: REST for CRUD (sessions, profiles, hosts), a WebSocket event stream for live session-list updates, a
   WebSocket per attached terminal, and the static UI bundle. Loopback bind enforced — refuses non-loopback per SPEC.md.
-- Web token: random 128-bit value, stored hashed; browser auth exchanges it once for a device-session cookie; rotation
-  deletes all device sessions.
+- Web token: random 128-bit value minted on the helm's first run and stored recoverably in helm.db so `token show` can
+  print it. Browser auth exchanges it once for a random 128-bit device secret returned in the response body; the browser
+  keeps that secret in origin-scoped localStorage, whose origin includes the loopback port, and sends it explicitly as a
+  Bearer credential on REST requests and a credential-bearing WebSocket subprotocol during upgrades. The helm stores
+  only the device secret's SHA-256 hash, and rotation deletes all device sessions. This deliberately gives up HttpOnly:
+  script execution in the authenticated origin can read the secret, but such a script can already drive the same API,
+  while port scoping prevents an unrelated loopback service from receiving an ambient host-scoped credential. The
+  loopback Origin guard remains defense in depth; no ambient browser credential remains, so this flow has no CSRF edge.
 - The native app embeds farhelm-helm in-process and manages the bundled local supervisor; the Linux helm is the same
   code behind `farhelm helm run`.
 

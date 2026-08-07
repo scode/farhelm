@@ -1,11 +1,12 @@
 //! The `farhelm` multi-call binary.
 //!
-//! One artifact carries every role — `helm run`, `supervisor run`, and
-//! the hidden `internal` namespace — because provisioning copies exactly
-//! one binary to a host and the launch shim must exist inside every
-//! session without separate installation (SPEC_impl.md, "CLI").
-//! `farhelm spawn` is a later milestone; the grammar here is the subset
-//! of SPEC_impl.md's CLI section that exists so far.
+//! One artifact carries every role — helm serving and token management,
+//! `supervisor run`, and the hidden `internal` namespace — because
+//! provisioning copies exactly one binary to a host and the launch shim must
+//! exist inside every session without separate installation (SPEC_impl.md,
+//! "CLI").
+//! `farhelm spawn` is a later milestone; the grammar here is the subset of
+//! SPEC_impl.md's CLI section that exists so far.
 
 use clap::{Parser, Subcommand};
 use std::path::PathBuf;
@@ -46,8 +47,29 @@ enum Cmd {
 
 #[derive(Subcommand)]
 enum HelmCmd {
-    /// Serve the web UI and API on loopback, connected to one supervisor.
+    /// Serve the web UI and API on loopback, connected to the registered fleet.
     Run(farhelm_helm::HelmArgs),
+    /// View or rotate the browser bootstrap token on the helm's machine.
+    Token {
+        #[command(subcommand)]
+        command: TokenCmd,
+    },
+}
+
+#[derive(Subcommand)]
+enum TokenCmd {
+    /// Print the current token, minting it on first need.
+    Show {
+        /// State directory holding helm.db.
+        #[arg(long)]
+        state_dir: Option<PathBuf>,
+    },
+    /// Replace the token and invalidate every browser device session.
+    Rotate {
+        /// State directory holding helm.db.
+        #[arg(long)]
+        state_dir: Option<PathBuf>,
+    },
 }
 
 #[derive(Subcommand)]
@@ -101,6 +123,22 @@ fn main() -> anyhow::Result<()> {
         } => {
             init_tracing();
             runtime()?.block_on(farhelm_helm::run(args))
+        }
+        Cmd::Helm {
+            command: HelmCmd::Token { command },
+        } => {
+            init_tracing();
+            let runtime = runtime()?;
+            let token = match command {
+                TokenCmd::Show { state_dir } => {
+                    runtime.block_on(farhelm_helm::show_token(state_dir))?
+                }
+                TokenCmd::Rotate { state_dir } => {
+                    runtime.block_on(farhelm_helm::rotate_token(state_dir))?
+                }
+            };
+            println!("{token}");
+            Ok(())
         }
         Cmd::Supervisor {
             command: SupervisorCmd::Run { state_dir },
@@ -221,6 +259,34 @@ async fn stdio_proxy(state_dir: &std::path::Path) -> anyhow::Result<()> {
         Err(e) => {
             eprintln!("farhelm internal stdio: {e}");
             std::process::exit(1);
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Both token verbs accept the state directory after the verb, matching
+    /// the command shape the e2e harness and user-facing plan document.
+    #[test]
+    fn token_cli_parses_show_and_rotate_with_an_explicit_state_dir() {
+        for verb in ["show", "rotate"] {
+            let cli = Cli::try_parse_from([
+                "farhelm",
+                "helm",
+                "token",
+                verb,
+                "--state-dir",
+                "/tmp/farhelm-test-state",
+            ])
+            .unwrap();
+            assert!(matches!(
+                cli.command,
+                Cmd::Helm {
+                    command: HelmCmd::Token { .. }
+                }
+            ));
         }
     }
 }

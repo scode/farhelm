@@ -21,6 +21,8 @@ playwright-report/
 # multi-host tests that have to reach behind the API (see that script).
 # Per-run and removed by its cleanup trap.
 e2e/.stack-info.json
+# Minted by Playwright's global auth setup and removed with the stack.
+e2e/.auth/storage-state.json
 
 # RustRover
 #  JetBrains specific template is maintained in a separate JetBrains.gitignore that can

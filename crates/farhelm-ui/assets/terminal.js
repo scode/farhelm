@@ -217,6 +217,23 @@
 // it.
 
 (function () {
+  const DEVICE_SECRET_KEY = "farhelm.device-secret";
+
+  /** Read the current origin-scoped credential for HTTP and WS requests. */
+  function deviceSecret() {
+    try {
+      return window.localStorage.getItem(DEVICE_SECRET_KEY) || "";
+    } catch (_error) {
+      return "";
+    }
+  }
+
+  /** Offer the stable application protocol plus the current device secret. */
+  function deviceProtocols() {
+    const secret = deviceSecret();
+    return secret ? ["farhelm", `farhelm-device-${secret}`] : ["farhelm"];
+  }
+
   "use strict";
 
   // Watermark backpressure (PLAN_M2_5.md step 4): term.write() buffers
@@ -1455,6 +1472,8 @@
     async function upload(file, name) {
       const url = baseUrl + policy.upload + "?filename=" + encodeURIComponent(name);
       const init = { method: "POST", body: file };
+      const secret = deviceSecret();
+      if (secret) init.headers = { Authorization: `Bearer ${secret}` };
       if (controller) init.signal = controller.signal;
       const response = await fetch(url, init);
       // Checked BEFORE the status is looked at, because a refusal is at
@@ -2243,6 +2262,7 @@
         const sep = path.indexOf("?") === -1 ? "?" : "&";
         ws = new WebSocket(
           `${base}${path}${sep}cols=${term.cols}&rows=${term.rows}`,
+          deviceProtocols(),
         );
         ws.binaryType = "arraybuffer";
         // The catch-up's idle watchdog is armed further down, the moment

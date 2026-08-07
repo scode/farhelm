@@ -49,6 +49,10 @@
 // the one the feed's own spec asserts against.
 import { test, expect, Page, APIRequestContext } from "@playwright/test";
 import { stubFeed } from "./helpers/fleet";
+import {
+  DEVICE_SECRET_KEY,
+  requireProductPageAuth,
+} from "./helpers/device-auth";
 import path from "node:path";
 // The terminal-tab tests at the end of this file need a working directory
 // nothing else can be sitting in, so they mint one per test — the stack
@@ -606,6 +610,12 @@ async function openFloodSession(
  * mounts. This one never touches `mount()`, so the mount that follows is
  * still the FIRST one after the paused mount.
  *
+ * The caller clears Playwright's context-level bearer header, and this
+ * socket supplies the same device subprotocol as terminal.js. That pairing
+ * is deliberate: Chromium otherwise authenticates the upgrade from the
+ * ambient header while WebKit does not, masking a missing product credential
+ * in one engine and failing it in the other.
+ *
  * `cols`/`rows` come from the caller (whatever geometry the previous
  * attachment used) rather than the query defaults: every attach resizes
  * the tmux window BEFORE it captures the replay (farhelm-supervisor's
@@ -623,10 +633,16 @@ function drainFloodOffScreen(
   geometry: { cols: number; rows: number },
 ) {
   return page.evaluate(
-    ({ id, cols, rows }) =>
+    ({ id, cols, rows, secretKey }) =>
       new Promise<void>((resolve, reject) => {
+        const secret = localStorage.getItem(secretKey);
+        if (!secret) {
+          reject(new Error("the drain page has no device secret"));
+          return;
+        }
         const ws = new WebSocket(
           `ws://${location.host}/api/sessions/${id}/term?cols=${cols}&rows=${rows}`,
+          ["farhelm", `farhelm-device-${secret}`],
         );
         ws.binaryType = "arraybuffer";
         const decoder = new TextDecoder();
@@ -663,7 +679,7 @@ function drainFloodOffScreen(
           finish(new Error("the drain socket closed before FLOOD-DONE"));
         ws.onerror = () => finish(new Error("the drain socket errored"));
       }),
-    { id, ...geometry },
+    { id, ...geometry, secretKey: DEVICE_SECRET_KEY },
   );
 }
 
@@ -4273,6 +4289,7 @@ test("reconnecting within the same page resets flow-control state; the new attac
   // on a loaded CI runner, and busting it would look like a hang rather
   // than the flake it replaced.
   test.setTimeout(180_000);
+  await requireProductPageAuth(page.context());
   const title = `flood-reconnect-${Date.now()}`;
   let id: string | undefined;
   try {
@@ -4373,16 +4390,25 @@ test("reconnecting within the same page resets flow-control state; the new attac
 // bare close: the helm sends the reason before closing precisely because
 // a bare close renders as a generic "connection closed" and tells the
 // user nothing. Driven through a raw WebSocket because the UI only ever
-// opens sockets for sessions the API listed.
+// opens sockets for sessions the API listed. The test clears Playwright's
+// ambient page header and supplies the product device subprotocol itself,
+// so Chromium cannot pass through a credential WebKit never sends.
 test("a terminal socket for an unknown session reports why", async ({
   page,
 }) => {
+  await requireProductPageAuth(page.context());
   await page.goto("/");
   const notice = await page.evaluate(
-    () =>
+    (secretKey) =>
       new Promise<string>((resolve, reject) => {
+        const secret = localStorage.getItem(secretKey);
+        if (!secret) {
+          reject(new Error("the unknown-session page has no device secret"));
+          return;
+        }
         const ws = new WebSocket(
           `ws://${location.host}/api/sessions/no-such-session/term`,
+          ["farhelm", `farhelm-device-${secret}`],
         );
         const timer = setTimeout(() => reject(new Error("no message")), 10_000);
         ws.onmessage = (ev) => {
@@ -4394,6 +4420,7 @@ test("a terminal socket for an unknown session reports why", async ({
           reject(new Error("socket closed with no detach notice"));
         };
       }),
+    DEVICE_SECRET_KEY,
   );
   const msg = JSON.parse(notice);
   expect(msg.type).toBe("detached");
@@ -14291,4 +14318,3 @@ test.describe("multi-host", () => {
     await stopRestartedRemote();
   });
 });
-

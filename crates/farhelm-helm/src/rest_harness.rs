@@ -643,6 +643,11 @@ pub(crate) struct Harness {
     pub(crate) manager: Arc<ConnectionManager>,
     pub(crate) fleet: Arc<ScriptedFleet>,
     pub(crate) state: Arc<AppState>,
+    /// A real device credential persisted in this harness's helm.db.
+    /// [`Self::router`] and [`Self::serve`] apply it by default so the
+    /// existing suite continues to exercise handlers behind auth, while the
+    /// explicit unauthenticated variants expose the enforcement boundary.
+    device_secret: String,
     port: u16,
     /// Declared LAST so it is dropped last — see this struct's own docs.
     _dir: tempfile::TempDir,
@@ -664,10 +669,50 @@ impl Drop for ServerGuard {
     }
 }
 
+/// Apply the harness's real persisted device credential to every request.
+///
+/// This is deliberately outside the production router. Tests still traverse
+/// the real auth middleware and storage lookup, but the hundreds of fixtures
+/// whose subject is a handler do not each repeat exchange ceremony. Both
+/// explicit transports are supplied because a raw WebSocket upgrade does not
+/// use the REST authorization header.
+fn authenticated_router(router: axum::Router, secret: String) -> axum::Router {
+    let authorization = axum::http::HeaderValue::from_str(&format!("Bearer {secret}"))
+        .expect("the harness secret is an Authorization value");
+    let protocols = axum::http::HeaderValue::from_str(&format!(
+        "{}, farhelm-device-{secret}",
+        crate::auth::WS_PROTOCOL
+    ))
+    .expect("the harness secret is a WebSocket protocol value");
+    router.layer(axum::middleware::from_fn(
+        move |mut request: axum::extract::Request, next: axum::middleware::Next| {
+            let authorization = authorization.clone();
+            let protocols = protocols.clone();
+            async move {
+                request
+                    .headers_mut()
+                    .insert(axum::http::header::AUTHORIZATION, authorization);
+                request
+                    .headers_mut()
+                    .insert(axum::http::header::SEC_WEBSOCKET_PROTOCOL, protocols);
+                next.run(request).await
+            }
+        },
+    ))
+}
+
 impl Harness {
     /// The real router, middleware and all — what `tower::ServiceExt::oneshot`
     /// drives.
     pub(crate) fn router(&self) -> axum::Router {
+        authenticated_router(
+            crate::build_router(Arc::clone(&self.state), None, self.port),
+            self.device_secret.clone(),
+        )
+    }
+
+    /// The real router without the harness's synthetic device secret.
+    pub(crate) fn unauthenticated_router(&self) -> axum::Router {
         crate::build_router(Arc::clone(&self.state), None, self.port)
     }
 
@@ -679,6 +724,23 @@ impl Harness {
     /// tying the two together is what stops a test from leaking a listener
     /// and its actors past its own end.
     pub(crate) async fn serve(&mut self) -> std::net::SocketAddr {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind loopback");
+        let addr = listener.local_addr().expect("local addr");
+        let app = authenticated_router(
+            crate::build_router(Arc::clone(&self.state), None, addr.port()),
+            self.device_secret.clone(),
+        );
+        self.served.push(ServerGuard(tokio::spawn(async move {
+            let _ = axum::serve(listener, app).await;
+        })));
+        addr
+    }
+
+    /// Serve without supplying a device secret, for tests of pre-upgrade
+    /// WebSocket refusal and the public exchange route.
+    pub(crate) async fn serve_unauthenticated(&mut self) -> std::net::SocketAddr {
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
             .await
             .expect("bind loopback");
@@ -728,6 +790,7 @@ impl Harness {
             manager,
             fleet,
             state,
+            device_secret,
             port,
             _dir,
         } = self;
@@ -754,6 +817,7 @@ impl Harness {
             served: Vec::new(),
             store: store.clone(),
             state: Arc::new(AppState::new(Arc::clone(&manager), store)),
+            device_secret,
             manager,
             fleet,
             port,
@@ -964,18 +1028,25 @@ impl FleetBuilder {
         )
         .await
         .expect("start manager");
+        let state = Arc::new(AppState {
+            // The only override any fixture makes, and it exists so the
+            // feed's own bound can be exhausted through real sockets — see
+            // `AppState::event_subscriber_cap`.
+            event_subscriber_cap: self
+                .event_subscriber_cap
+                .unwrap_or(crate::events::MAX_SUBSCRIBERS),
+            ..AppState::new(Arc::clone(&manager), self.store)
+        });
+        let device_secret = state
+            .auth
+            .mint_device()
+            .await
+            .expect("mint the harness device session");
         Harness {
             served: Vec::new(),
-            store: self.store.clone(),
-            state: Arc::new(AppState {
-                // The only override any fixture makes, and it exists so the
-                // feed's own bound can be exhausted through real sockets —
-                // see `AppState::event_subscriber_cap`.
-                event_subscriber_cap: self
-                    .event_subscriber_cap
-                    .unwrap_or(crate::events::MAX_SUBSCRIBERS),
-                ..AppState::new(Arc::clone(&manager), self.store)
-            }),
+            store: state.store.clone(),
+            state,
+            device_secret,
             manager,
             fleet: self.fleet,
             port: self.port,

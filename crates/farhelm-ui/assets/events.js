@@ -54,6 +54,24 @@
 // latch) is exercised in the same tests through `node:vm` with a fake
 // `WebSocket` and fake timers — see that file's header.
 (function () {
+  const DEVICE_SECRET_KEY = "farhelm.device-secret";
+
+  /**
+   * Protocols for an authenticated browser upgrade.
+   *
+   * The secret is read at each attempt rather than captured at subscription:
+   * token rotation keeps the same retrying feed object alive while the auth
+   * surface replaces its localStorage value.
+   */
+  function deviceProtocols() {
+    try {
+      const secret = window.localStorage.getItem(DEVICE_SECRET_KEY);
+      return secret ? ["farhelm", `farhelm-device-${secret}`] : ["farhelm"];
+    } catch (_error) {
+      return ["farhelm"];
+    }
+  }
+
   /**
    * The one live subscription, or null. Singular by construction: a second
    * `subscribe` supersedes the first rather than running beside it, so the
@@ -268,7 +286,7 @@
     if (sub.stopped) return;
     var socket;
     try {
-      socket = new WebSocket(feedUrl(sub.base, sub.policy.path));
+      socket = new WebSocket(feedUrl(sub.base, sub.policy.path), deviceProtocols());
     } catch (e) {
       // A malformed URL or a blocked scheme: the same outage as any other,
       // handled by the same ladder rather than by a special case.

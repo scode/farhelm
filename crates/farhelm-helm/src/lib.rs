@@ -105,6 +105,10 @@ pub use client::{
 /// it — what `GET /api/sessions` is built out of.
 mod aggregate;
 
+/// Browser token exchange, explicit device-secret enforcement, and live socket
+/// revocation.
+mod auth;
+
 /// `--ensure-hosts`: the JSON5 floor under the registry, applied once
 /// before serving starts.
 mod ensure;
@@ -152,6 +156,10 @@ pub mod store;
 /// The terminal WebSocket: the browser's end of an attachment.
 mod terminal;
 
+/// Private local coordination between the token CLI and a serving helm.
+mod token_control;
+pub use token_control::{rotate as rotate_token, show as show_token};
+
 /// `POST /api/sessions/{id}/attachments` — the streaming attachment
 /// upload.
 mod uploads;
@@ -181,9 +189,9 @@ pub struct HelmArgs {
     pub port: u16,
 
     /// State directory (default: ~/.local/state/farhelm). Holds helm.db,
-    /// the ssh ControlMaster sockets, and — in the ordinary single-machine
-    /// arrangement — the local supervisor's socket the reserved local host
-    /// row is reached through.
+    /// the private token-control socket, the ssh ControlMaster sockets, and
+    /// — in the ordinary single-machine arrangement — the local supervisor's
+    /// socket the reserved local host row is reached through.
     #[arg(long)]
     pub state_dir: Option<PathBuf>,
 
@@ -208,14 +216,17 @@ pub struct HelmArgs {
 /// The manager is authority for what each host is DOING right now (and
 /// holds the only live connections); the store is authority for what the
 /// registry says and for the last-known sessions every host's actor drains
-/// into it. The session, upload, terminal, and host handlers all reach for
-/// one or both, and none of them holds a connection of its own — see this
+/// into it. Authentication joins those durable credentials to the
+/// process-local revocation channel. The request handlers reach for the
+/// pieces they need, and none of them holds a connection of its own — see this
 /// crate's docs for why the single-client `AppState` this replaced could
-/// not survive multi-host. (The stateless routes — the CORS preflight, the
-/// middleware layers — take no state at all and are not part of this.)
+/// not survive multi-host.
 struct AppState {
     manager: Arc<manager::ConnectionManager>,
     store: store::HelmStore,
+    /// The browser security boundary: durable credentials plus the
+    /// process-local channel that closes admitted sockets on rotation.
+    auth: auth::AuthState,
     /// Matching counts already computed, so a filtered page WALK pays for one
     /// rather than one per page — see [`aggregate::MatchingCounts`], which
     /// also carries why this must not live in the client's cursor.
@@ -298,7 +309,8 @@ impl AppState {
     fn new(manager: Arc<manager::ConnectionManager>, store: store::HelmStore) -> AppState {
         AppState {
             manager,
-            store,
+            store: store.clone(),
+            auth: auth::AuthState::new(store),
             counts: aggregate::MatchingCounts::default(),
             event_subscriber_cap: events::MAX_SUBSCRIBERS,
             profile_edits: std::sync::Mutex::new(std::collections::HashMap::new()),
@@ -312,8 +324,8 @@ impl AppState {
     /// CALLERS MUST HAVE ESTABLISHED THAT `host` EXISTS. The map is documented
     /// as bounded by the registry, and nothing here can enforce that: the id
     /// arrives as a path segment, so calling this before routing turns any
-    /// stream of made-up ids into permanent entries — an unauthenticated
-    /// loopback caller growing this process's memory one `i64` at a time. Every
+    /// stream of made-up ids into permanent entries — a compromised
+    /// authenticated device growing this process's memory one `i64` at a time. Every
     /// call site therefore routes first (`sessions::host_client`) and takes the
     /// lock afterwards, then re-routes under it, because a host can be
     /// forgotten while a request waits its turn.
@@ -355,14 +367,13 @@ impl AppState {
 }
 
 /// Assemble the API and WebSocket routes that share the helm's application
-/// state.
+/// state and security boundary.
 ///
 /// The static UI deliberately does not live here: it must remain reachable
-/// before a browser has authenticated, and M7's auth boundary (PLAN_M7.md
-/// item 3) will cover exactly this group and nothing outside it. Assembling
-/// the control-plane routes as one group is what makes that coming boundary
-/// structural instead of a per-route discipline each future route would have
-/// to remember.
+/// before a browser has authenticated. The control-plane routes are assembled
+/// first and protected as one group; the one public exchange route is added
+/// afterwards. Keeping both boundaries structural avoids relying on each
+/// future route to remember whether it belongs inside authentication.
 fn api_router(state: Arc<AppState>) -> Router {
     Router::new()
         .route(
@@ -402,7 +413,6 @@ fn api_router(state: Arc<AppState>) -> Router {
             // other route (small JSON bodies) keeps the default's
             // protection against a runaway control-message body.
             axum::routing::post(uploads::upload_attachment)
-                .options(middleware::attachment_preflight)
                 .layer(axum::extract::DefaultBodyLimit::disable())
                 // Scoped to this ONE route rather than the router: it is
                 // the only endpoint a cross-origin caller has any reason
@@ -466,11 +476,31 @@ fn api_router(state: Arc<AppState>) -> Router {
         // with nothing else in common: it names no session, carries no data,
         // and holds no attachment.
         .route("/api/events", get(events::events_ws))
+        // Applied to the ROUTES already assembled above. The exchange route
+        // is added afterwards and is therefore structurally outside the
+        // authenticated boundary rather than exempted inside middleware.
+        .route_layer(axum::middleware::from_fn_with_state(
+            Arc::clone(&state),
+            auth::require_device_session,
+        ))
+        // A CORS preflight cannot carry the Authorization header it is asking
+        // permission to send. Added after `route_layer` so OPTIONS alone is
+        // public; the POST method above remains inside device authentication.
+        .route(
+            "/api/sessions/{id}/attachments",
+            axum::routing::options(middleware::attachment_preflight)
+                .layer(axum::middleware::from_fn(middleware::attachment_cors)),
+        )
+        .route(
+            "/api/auth/token",
+            axum::routing::post(auth::exchange_token)
+                .layer(axum::extract::DefaultBodyLimit::max(256)),
+        )
         .with_state(state)
 }
 
-/// Compose the API with the optional static UI service and the
-/// loopback-origin middleware that `run()` serves.
+/// Compose the protected API with the public static UI and the middleware
+/// that must stamp every response.
 ///
 /// Pulled out of `run()` so tests can drive the real middleware stack
 /// in-process (via `tower::ServiceExt::oneshot`) against a scripted fleet,
@@ -502,9 +532,10 @@ fn build_router(state: Arc<AppState>, ui_dist: Option<&std::path::Path>, port: u
 
 /// Run the helm until the process is killed: open helm.db, apply any
 /// `--ensure-hosts` floor, start a connection actor per registered host,
-/// and serve the API and UI on loopback.
+/// open the private token-control endpoint, and serve the API and UI on
+/// loopback.
 ///
-/// Startup order is deliberate at three points, each for a different
+/// Startup order is deliberate at four points, each for a different
 /// reason:
 ///
 /// - The listener is bound FIRST, so the likely failure (port busy because
@@ -518,6 +549,9 @@ fn build_router(state: Arc<AppState>, ui_dist: Option<&std::path::Path>, port: u
 ///   have connected. A down host must never delay the helm's startup: it is
 ///   simply a host in a non-connected state, which the API exposes for the
 ///   forthcoming UI to draw.
+/// - The token-control socket is bound before HTTP serving begins, so a
+///   successful browser request cannot race a separate `token rotate` into
+///   the offline fallback and miss live WebSocket revocation.
 ///
 /// Returns only on a fatal error. There is no graceful-shutdown path, and
 /// none is needed: SPEC.md's whole durability promise is that killing the
@@ -527,7 +561,8 @@ pub async fn run(args: HelmArgs) -> anyhow::Result<()> {
         Some(dir) => dir,
         None => farhelm_supervisor::default_state_dir()?,
     };
-    // 0700: this directory holds helm.db and ssh ControlMaster sockets.
+    // 0700: this directory holds helm.db, the token-control socket, and ssh
+    // ControlMaster sockets. Each grants the user's authority when reached.
     farhelm_supervisor::ensure_private_dir(&state_dir).await?;
 
     // Bind before creating anything on a host. A busy port is the likely
@@ -556,25 +591,21 @@ pub async fn run(args: HelmArgs) -> anyhow::Result<()> {
     )
     .await?;
 
-    let app = build_router(
-        Arc::new(AppState::new(manager, store)),
-        args.ui_dist.as_deref(),
-        addr.port(),
-    );
+    let state = Arc::new(AppState::new(manager, store));
+    // First run owns token creation. Browser serving must never begin with a
+    // database whose bootstrap secret exists only after somebody invokes the
+    // separate `token show` command.
+    state.auth.token().await?;
+    let mut token_control = token_control::serve(&state_dir, state.auth.clone()).await?;
+    let app = build_router(Arc::clone(&state), args.ui_dist.as_deref(), addr.port());
 
     // Printed on stdout, not logged: the README tells the user to open
     // this URL, and tracing goes to stderr behind an env filter.
     println!("farhelm helm: http://{addr}/");
-    // Loopback keeps other MACHINES out, not other local accounts: until
-    // the web token lands (M7, SPEC.md's Security section), any process
-    // on this machine can drive the API — which includes launching
-    // arbitrary commands as this user. Said out loud rather than left
-    // for a security audit to rediscover.
-    tracing::warn!(
-        "the API on {addr} is unauthenticated in M1: any local user on this machine can \
-         create and drive sessions (the web token that closes this arrives in a later milestone)"
-    );
-    axum::serve(listener, app).await?;
+    tokio::select! {
+        result = axum::serve(listener, app) => result.context("serving helm HTTP")?,
+        result = token_control.failed() => result?,
+    }
     Ok(())
 }
 
@@ -619,13 +650,12 @@ const BUILD_STAMP_HEADER: &str = "x-farhelm-build";
 ///
 /// The body itself is deliberately unsanitized regardless of status:
 /// SPEC.md requires concrete, actionable errors in the client, and the
-/// intended reader is the user's own UI. Note the honest caveat: until the
-/// web token lands (M7), the loopback port is reachable by every local
-/// account, so "no untrusted caller" is not yet true — which is a reason
-/// to keep credentials out of error text (see the invocation-parse context
-/// in the supervisor), not to strip detail the user needs. The body is
-/// displayed as text, never interpreted, which is what makes it safe to
-/// pass a remote supervisor's message through verbatim.
+/// intended reader is the user's authenticated UI. That does not make error
+/// text a safe place for credentials: other same-user processes can read the
+/// browser traffic, and logs may preserve the body. The invocation parser
+/// therefore still keeps credentials out of its context. The UI displays the
+/// body as text rather than interpreting it, which is what makes a remote
+/// supervisor's message safe to pass through verbatim.
 fn http_error(e: anyhow::Error) -> axum::response::Response {
     // ONE status decision and ONE response construction. The three families
     // are consulted in order of specificity — a registry refusal, then a

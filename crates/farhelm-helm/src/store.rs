@@ -11,9 +11,11 @@
 //! This module is STORAGE ONLY: schema, types, and CRUD. It holds no
 //! connections, makes no routing decisions, and knows nothing about which
 //! hosts are currently reachable — [`crate::manager`] owns all of that, and
-//! [`crate::aggregate`] is what joins the two into the served list.
-//! SPEC_impl.md's "Helm internals" section carries the settled data model
-//! this schema implements.
+//! [`crate::aggregate`] is what joins the two into the served list. The one
+//! other boundary is browser authentication: this module persists the
+//! recoverable bootstrap token and hashed device credentials, while
+//! [`crate::auth`] owns their protocol and comparison. SPEC_impl.md's "Helm
+//! internals" section carries the settled data model this schema implements.
 //!
 //! ## Divergences from the supervisor store, and why
 //!
@@ -25,13 +27,13 @@
 //!   "exactly one helm runs at a time" is the whole model, so there is
 //!   never a second, older process this database's owner must protect from
 //!   its own upgrade. [`HelmStore::open`] therefore always migrates.
-//! - **Concurrent-open safety despite the single-helm rule.** SPEC.md's
-//!   "exactly one helm runs at a time" is an operating assumption this
-//!   crate does not enforce anywhere — no lock file, no pid check, nothing
-//!   stops a second helm process from ever being started by mistake.
+//! - **Concurrent-open safety despite the single-helm rule.** The token-control
+//!   ownership lock prevents two serving helms or an offline rotation from
+//!   claiming the state directory together, but this storage type remains
+//!   independently openable by tests and maintenance callers.
 //!   [`ensure_local_row`]'s conditional `ON CONFLICT` and
 //!   [`HelmStore::add_ssh_host`]'s own conditional insert hold regardless: a
-//!   second process racing the first over the same file converges on one
+//!   second connection racing the first over the same file converges on one
 //!   winner instead of corrupting the database. Cheap SQLite-level
 //!   insurance is the honest response to a rule nothing actually enforces —
 //!   the alternative is trusting every future caller of this module to
@@ -97,10 +99,19 @@
 use anyhow::Context;
 use farhelm_proto::{SessionInfo, SessionStatus};
 use rusqlite::{Connection, OpenFlags, OptionalExtension};
+use sha2::{Digest, Sha256};
 use std::path::Path;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
+use subtle::ConstantTimeEq;
+
+/// Maximum number of authenticated browser profiles retained by one helm.
+///
+/// A device exchange is user-mediated and infrequent, so retaining the 64
+/// newest credentials leaves ample room for ordinary use while preventing a
+/// leaked bootstrap token from growing helm.db without bound.
+pub(crate) const MAX_DEVICE_SESSIONS: usize = 64;
 
 /// How long a query waits on `SQLITE_BUSY` before giving up.
 ///
@@ -118,7 +129,7 @@ const BUSY_TIMEOUT: Duration = Duration::from_secs(5);
 
 /// The schema's current shape. See [`apply_schema`] for the version
 /// history and the ladder future migrations extend.
-const SCHEMA_VERSION: i64 = 6;
+const SCHEMA_VERSION: i64 = 7;
 
 /// Surrogate primary key of a `hosts` row.
 ///
@@ -533,8 +544,9 @@ impl SessionFilter {
     /// loopback and serves one user. It buys a probabilistic, process-local
     /// binding, which is proportionate to what a mismatch costs (a page walk
     /// that resumes in the wrong result set, on data the caller may already
-    /// read in full). An authenticated adversary is not in scope here and does
-    /// not become so until M7's web token puts a real credential on this API.
+    /// read in full). It deliberately remains outside the API's credential
+    /// boundary: an authenticated caller can still reuse a cursor accidentally
+    /// or edit it.
     ///
     /// The price is that cursors do not survive a helm restart: the new
     /// process has a new key, every old token fails to match, and the answer
@@ -1084,6 +1096,7 @@ pub struct HelmStore {
 ///   successor install rather than merely dangling. The migration drops the
 ///   old rows for that reason; see [`HelmStore::remembered_profile`] for the
 ///   read-time check the column exists to serve.
+/// - 7: PLAN_M7.md item 3 — web-token authentication and device sessions.
 fn apply_schema(conn: &mut Connection) -> anyhow::Result<()> {
     let tx = conn
         .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
@@ -1245,7 +1258,22 @@ fn apply_schema(conn: &mut Connection) -> anyhow::Result<()> {
                  profile_id    TEXT NOT NULL,
                  host_identity TEXT
              ) STRICT;
-             PRAGMA user_version = 6;",
+             -- One recoverable web token. The fixed primary key makes the
+             -- single-row rule a schema invariant rather than a convention
+             -- shared by whichever commands happen to write it.
+             CREATE TABLE web_token (
+                 singleton  INTEGER PRIMARY KEY CHECK (singleton = 1),
+                 token      TEXT NOT NULL,
+                 created_at INTEGER NOT NULL
+             ) STRICT;
+             -- Device credentials are never recoverable. Only SHA-256 output
+             -- reaches this table, and the length check makes that storage
+             -- contract visible to any future writer that bypasses this API.
+             CREATE TABLE device_sessions (
+                 cookie_hash BLOB PRIMARY KEY CHECK (length(cookie_hash) = 32),
+                 created_at  INTEGER NOT NULL
+             ) STRICT;
+             PRAGMA user_version = 7;",
         )
         .context("creating schema")?;
         version = SCHEMA_VERSION;
@@ -1411,6 +1439,22 @@ fn apply_schema(conn: &mut Connection) -> anyhow::Result<()> {
         .context("migrating helm.db to schema version 6")?;
         version = 6;
     }
+    if version == 6 {
+        tx.execute_batch(
+            "CREATE TABLE web_token (
+                 singleton  INTEGER PRIMARY KEY CHECK (singleton = 1),
+                 token      TEXT NOT NULL,
+                 created_at INTEGER NOT NULL
+             ) STRICT;
+             CREATE TABLE device_sessions (
+                 cookie_hash BLOB PRIMARY KEY CHECK (length(cookie_hash) = 32),
+                 created_at  INTEGER NOT NULL
+             ) STRICT;
+             PRAGMA user_version = 7;",
+        )
+        .context("migrating helm.db to schema version 7")?;
+        version = 7;
+    }
     if version == SCHEMA_VERSION {
         // Nothing to change; commit the otherwise-empty transaction to
         // release the write lock cleanly rather than leaving it to an
@@ -1574,6 +1618,293 @@ impl HelmStore {
     #[cfg(test)]
     pub fn counting_passes(&self) -> u64 {
         self.counting_passes.load(Ordering::Relaxed)
+    }
+
+    /// Return the recoverable web token, inserting `candidate` if this helm
+    /// has never minted one before.
+    ///
+    /// The insert and read share one immediate transaction so concurrent
+    /// `token show` callers converge on the token that actually committed.
+    /// A caller must never assume its candidate won merely because the row
+    /// Read the recoverable web token without creating one.
+    ///
+    /// Keeping this read separate lets callers avoid consuming randomness or
+    /// consulting the clock on the overwhelmingly common existing-token path.
+    pub async fn web_token(&self) -> anyhow::Result<Option<String>> {
+        let conn = Arc::clone(&self.conn);
+        tokio::task::spawn_blocking(move || -> anyhow::Result<Option<String>> {
+            conn.lock()
+                .expect("helm db mutex poisoned")
+                .query_row(
+                    "SELECT token FROM web_token WHERE singleton = 1",
+                    [],
+                    |row| row.get(0),
+                )
+                .optional()
+                .context("reading the web token")
+        })
+        .await
+        .context("web token read task panicked")?
+    }
+
+    /// Commit `candidate` only if the singleton token was still absent.
+    ///
+    /// Two fresh processes may both decide they need to mint. The immediate
+    /// transaction makes one candidate authoritative and returns that same
+    /// committed value to both callers.
+    pub async fn web_token_or_insert(
+        &self,
+        candidate: String,
+        created_at: i64,
+    ) -> anyhow::Result<String> {
+        let conn = Arc::clone(&self.conn);
+        tokio::task::spawn_blocking(move || -> anyhow::Result<String> {
+            let mut conn = conn.lock().expect("helm db mutex poisoned");
+            let tx = conn
+                .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
+                .context("beginning web-token transaction")?;
+            tx.execute(
+                "INSERT INTO web_token (singleton, token, created_at) VALUES (1, ?1, ?2) \
+                 ON CONFLICT (singleton) DO NOTHING",
+                rusqlite::params![candidate, created_at],
+            )
+            .context("minting the web token")?;
+            let token = tx
+                .query_row(
+                    "SELECT token FROM web_token WHERE singleton = 1",
+                    [],
+                    |row| row.get(0),
+                )
+                .context("reading the web token")?;
+            tx.commit().context("committing the web token")?;
+            Ok(token)
+        })
+        .await
+        .context("web token task panicked")?
+    }
+
+    /// Replace the web token and invalidate every device session atomically.
+    ///
+    /// Neither half may commit alone: a new token with old credentials still
+    /// admitted would make rotation lie, while deleted credentials paired with
+    /// the old token would log every device out without changing the secret
+    /// the user asked to rotate.
+    pub async fn rotate_web_token(
+        &self,
+        replacement: String,
+        created_at: i64,
+    ) -> anyhow::Result<String> {
+        let conn = Arc::clone(&self.conn);
+        tokio::task::spawn_blocking(move || -> anyhow::Result<String> {
+            let mut conn = conn.lock().expect("helm db mutex poisoned");
+            let tx = conn
+                .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
+                .context("beginning web-token rotation")?;
+            tx.execute(
+                "INSERT INTO web_token (singleton, token, created_at) VALUES (1, ?1, ?2) \
+                 ON CONFLICT (singleton) DO UPDATE SET token = excluded.token, \
+                     created_at = excluded.created_at",
+                rusqlite::params![replacement, created_at],
+            )
+            .context("replacing the web token")?;
+            tx.execute("DELETE FROM device_sessions", [])
+                .context("deleting device sessions during token rotation")?;
+            tx.commit().context("committing web-token rotation")?;
+            Ok(replacement)
+        })
+        .await
+        .context("web token rotation task panicked")?
+    }
+
+    /// Validate a bootstrap token and record its device credential atomically.
+    ///
+    /// The immediate transaction serializes this decision with rotation. An
+    /// exchange using the old token therefore either commits before rotation
+    /// and is deleted by it, or validates afterwards and is refused.
+    pub async fn exchange_device_session(
+        &self,
+        supplied_token: String,
+        device_hash: [u8; 32],
+        created_at: i64,
+    ) -> anyhow::Result<bool> {
+        self.exchange_device_session_inner(supplied_token, device_hash, created_at, None)
+            .await
+    }
+
+    /// Pause a test after validation while the immediate transaction remains
+    /// open, exposing the exact exchange-versus-rotation serialization seam.
+    #[cfg(test)]
+    pub(crate) async fn exchange_device_session_with_pause(
+        &self,
+        supplied_token: String,
+        device_hash: [u8; 32],
+        created_at: i64,
+        after_validation: Box<dyn FnOnce() + Send>,
+    ) -> anyhow::Result<bool> {
+        self.exchange_device_session_inner(
+            supplied_token,
+            device_hash,
+            created_at,
+            Some(after_validation),
+        )
+        .await
+    }
+
+    /// Shared transaction body with an optional test-only pause after
+    /// validation. The pause runs while the immediate transaction is held so
+    /// a race test can prove rotation waits at the real serialization point.
+    async fn exchange_device_session_inner(
+        &self,
+        supplied_token: String,
+        device_hash: [u8; 32],
+        created_at: i64,
+        after_validation: Option<Box<dyn FnOnce() + Send>>,
+    ) -> anyhow::Result<bool> {
+        let conn = Arc::clone(&self.conn);
+        tokio::task::spawn_blocking(move || -> anyhow::Result<bool> {
+            let mut conn = conn.lock().expect("helm db mutex poisoned");
+            let tx = conn
+                .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
+                .context("beginning device exchange")?;
+            let expected: Option<String> = tx
+                .query_row(
+                    "SELECT token FROM web_token WHERE singleton = 1",
+                    [],
+                    |row| row.get(0),
+                )
+                .optional()
+                .context("reading the web token during device exchange")?;
+            let accepted = expected.is_some_and(|expected| {
+                Sha256::digest(expected.as_bytes())
+                    .ct_eq(&Sha256::digest(supplied_token.as_bytes()))
+                    .into()
+            });
+            if !accepted {
+                return Ok(false);
+            }
+            if let Some(after_validation) = after_validation {
+                after_validation();
+            }
+            tx.execute(
+                "INSERT INTO device_sessions (cookie_hash, created_at) VALUES (?1, ?2) \
+                     ON CONFLICT (cookie_hash) DO NOTHING",
+                rusqlite::params![device_hash.as_slice(), created_at],
+            )
+            .context("recording a device session")?;
+            tx.execute(
+                "DELETE FROM device_sessions WHERE cookie_hash IN (\
+                     SELECT cookie_hash FROM device_sessions \
+                     ORDER BY created_at DESC, cookie_hash DESC LIMIT -1 OFFSET ?1\
+                 )",
+                [i64::try_from(MAX_DEVICE_SESSIONS).expect("device-session cap fits i64")],
+            )
+            .context("evicting old device sessions")?;
+            tx.commit().context("committing device exchange")?;
+            Ok(true)
+        })
+        .await
+        .context("device exchange task panicked")?
+    }
+
+    /// Test whether an exact device digest is present through its primary-key
+    /// index. The digest is public output of SHA-256, so SQLite's equality
+    /// lookup reveals no useful secret-dependent prefix information.
+    pub async fn has_device_session(&self, device_hash: [u8; 32]) -> anyhow::Result<bool> {
+        let conn = Arc::clone(&self.conn);
+        tokio::task::spawn_blocking(move || -> anyhow::Result<bool> {
+            let conn = conn.lock().expect("helm db mutex poisoned");
+            conn.query_row(
+                "SELECT EXISTS(SELECT 1 FROM device_sessions WHERE cookie_hash = ?1)",
+                [device_hash.as_slice()],
+                |row| row.get(0),
+            )
+            .context("looking up a device session")
+        })
+        .await
+        .context("device-session read task panicked")?
+    }
+
+    /// Insert a device digest without token validation for storage fixtures.
+    #[cfg(test)]
+    pub(crate) async fn insert_device_session(
+        &self,
+        device_hash: [u8; 32],
+        created_at: i64,
+    ) -> anyhow::Result<()> {
+        let conn = Arc::clone(&self.conn);
+        tokio::task::spawn_blocking(move || -> anyhow::Result<()> {
+            conn.lock()
+                .expect("helm db mutex poisoned")
+                .execute(
+                    "INSERT INTO device_sessions (cookie_hash, created_at) VALUES (?1, ?2)",
+                    rusqlite::params![device_hash.as_slice(), created_at],
+                )
+                .context("inserting a fixture device session")?;
+            Ok(())
+        })
+        .await
+        .context("fixture device-session insert task panicked")?
+    }
+
+    /// Decode every digest for storage tests that assert exact rotation rows.
+    #[cfg(test)]
+    pub(crate) async fn device_session_hashes(&self) -> anyhow::Result<Vec<[u8; 32]>> {
+        let conn = Arc::clone(&self.conn);
+        tokio::task::spawn_blocking(move || -> anyhow::Result<Vec<[u8; 32]>> {
+            let conn = conn.lock().expect("helm db mutex poisoned");
+            let mut stmt = conn
+                .prepare("SELECT cookie_hash FROM device_sessions ORDER BY cookie_hash")
+                .context("preparing fixture device-session read")?;
+            stmt.query_map([], |row| {
+                let bytes: Vec<u8> = row.get(0)?;
+                bytes.try_into().map_err(|bytes: Vec<u8>| {
+                    rusqlite::Error::FromSqlConversionFailure(
+                        0,
+                        rusqlite::types::Type::Blob,
+                        format!("device-session digest is {} bytes", bytes.len()).into(),
+                    )
+                })
+            })
+            .context("reading fixture device sessions")?
+            .collect::<Result<Vec<_>, _>>()
+            .context("decoding fixture device-session digests")
+        })
+        .await
+        .context("fixture device-session read task panicked")?
+    }
+
+    /// Count retained device credentials for rotation and bound tests.
+    #[cfg(test)]
+    pub(crate) async fn device_session_count(&self) -> anyhow::Result<usize> {
+        let conn = Arc::clone(&self.conn);
+        tokio::task::spawn_blocking(move || -> anyhow::Result<usize> {
+            let count: i64 = conn
+                .lock()
+                .expect("helm db mutex poisoned")
+                .query_row("SELECT COUNT(*) FROM device_sessions", [], |row| row.get(0))
+                .context("counting device sessions")?;
+            usize::try_from(count).context("device-session count does not fit usize")
+        })
+        .await
+        .context("device-session count task panicked")?
+    }
+
+    /// Install a deterministic device-insert failure for authentication error
+    /// surface tests.
+    #[cfg(test)]
+    pub(crate) async fn refuse_device_inserts_for_test(&self) {
+        let conn = Arc::clone(&self.conn);
+        tokio::task::spawn_blocking(move || {
+            conn.lock()
+                .expect("helm db mutex poisoned")
+                .execute_batch(
+                    "CREATE TRIGGER refuse_auth_insert BEFORE INSERT ON device_sessions \
+                     BEGIN SELECT RAISE(ABORT, 'secret database detail'); END;",
+                )
+                .expect("install device-insert refusal");
+        })
+        .await
+        .expect("device-insert refusal task panicked");
     }
 
     /// Every registered host, local row included, ordered by [`HostId`] —
@@ -3543,11 +3874,11 @@ mod tests {
 
     // ---- Schema and the version mechanism ----------------------------
 
-    /// A fresh database must come up on `user_version` 1 with the reserved
+    /// A fresh database must come up on the current schema with the reserved
     /// local row already present — the two invariants every other test in
     /// this module assumes without re-checking.
     #[tokio::test]
-    async fn fresh_open_creates_version_1_with_the_local_row_present() {
+    async fn fresh_open_creates_the_current_schema_with_the_local_row_present() {
         let (_dir, store) = fresh_store().await;
         let conn = Arc::clone(&store.conn);
         let version: i64 = tokio::task::spawn_blocking(move || {
@@ -3583,15 +3914,14 @@ mod tests {
         assert_eq!(hosts[0].kind, HostKind::Local);
     }
 
-    /// The migration-fixture scaffold `apply_schema`'s own docs promise:
-    /// even though version 1 (this PR) has no migration step to pin, the
+    /// The migration-fixture scaffold `apply_schema`'s own docs promise: the
     /// REFUSAL half of the version mechanism — a database claiming a
     /// version this build does not understand — is exercised exactly like
     /// the supervisor store's `open_refuses_an_unrecognized_schema_version`,
     /// by planting a raw `user_version` directly with rusqlite rather than
     /// through `HelmStore::open`. The day a version 2 migration lands, its
-    /// test plants a version-1 fixture the same way this plants a
-    /// too-new one.
+    /// test plants the preceding fixture the same way this plants a too-new
+    /// one.
     ///
     /// `SCHEMA_VERSION + 1` is the one value planted, not also some
     /// arbitrarily-larger one (e.g. 99): `apply_schema`'s refusal branch is
@@ -3973,7 +4303,9 @@ mod tests {
         {
             let conn = Connection::open(&path).expect("reopen raw");
             conn.execute_batch(
-                "DROP TABLE remembered_profiles;
+                "DROP TABLE device_sessions;
+                 DROP TABLE web_token;
+                 DROP TABLE remembered_profiles;
                  CREATE TABLE remembered_profiles (
                      host_id    INTEGER PRIMARY KEY
                                 REFERENCES hosts (id) ON DELETE CASCADE,
@@ -4005,6 +4337,110 @@ mod tests {
                 .iter()
                 .any(|row| row.id == host)
         );
+    }
+
+    /// First need mints one recoverable token, and later callers read that
+    /// committed value rather than replacing it with their own candidate.
+    #[tokio::test]
+    async fn web_token_is_recoverable_and_stable_after_first_need() {
+        let (_dir, store) = fresh_store().await;
+        assert_eq!(
+            store
+                .web_token_or_insert("first-token".to_string(), 100)
+                .await
+                .unwrap(),
+            "first-token"
+        );
+        assert_eq!(
+            store
+                .web_token_or_insert("losing-candidate".to_string(), 200)
+                .await
+                .unwrap(),
+            "first-token"
+        );
+
+        let conn = Arc::clone(&store.conn);
+        let created_at: i64 = tokio::task::spawn_blocking(move || {
+            conn.lock()
+                .unwrap()
+                .query_row(
+                    "SELECT created_at FROM web_token WHERE singleton = 1",
+                    [],
+                    |row| row.get(0),
+                )
+                .unwrap()
+        })
+        .await
+        .unwrap();
+        assert_eq!(created_at, 100, "a losing mint must not rewrite history");
+    }
+
+    /// Rotation's user-visible meaning is one database commit: the new token
+    /// and the absence of every old device row become visible together.
+    #[tokio::test]
+    async fn rotation_replaces_the_token_and_deletes_every_device_session() {
+        let (_dir, store) = fresh_store().await;
+        store
+            .web_token_or_insert("old-token".to_string(), 100)
+            .await
+            .unwrap();
+        store.insert_device_session([1; 32], 101).await.unwrap();
+        store.insert_device_session([2; 32], 102).await.unwrap();
+
+        assert_eq!(
+            store
+                .rotate_web_token("new-token".to_string(), 200)
+                .await
+                .unwrap(),
+            "new-token"
+        );
+        assert!(store.device_session_hashes().await.unwrap().is_empty());
+        assert_eq!(
+            store
+                .web_token_or_insert("unused".to_string(), 300)
+                .await
+                .unwrap(),
+            "new-token"
+        );
+    }
+
+    /// A failure deleting device rows must roll the token replacement back
+    /// too; this is the transaction boundary rotation promises.
+    #[tokio::test]
+    async fn rotation_rolls_back_both_halves_when_device_deletion_fails() {
+        let (_dir, store) = fresh_store().await;
+        store
+            .web_token_or_insert("old-token".to_string(), 100)
+            .await
+            .unwrap();
+        store.insert_device_session([7; 32], 101).await.unwrap();
+        let conn = Arc::clone(&store.conn);
+        tokio::task::spawn_blocking(move || {
+            conn.lock()
+                .unwrap()
+                .execute_batch(
+                    "CREATE TRIGGER refuse_device_delete BEFORE DELETE ON device_sessions \
+                     BEGIN SELECT RAISE(ABORT, 'scripted delete refusal'); END;",
+                )
+                .unwrap();
+        })
+        .await
+        .unwrap();
+
+        let error = store
+            .rotate_web_token("must-not-commit".to_string(), 200)
+            .await
+            .expect_err("the trigger refuses deletion");
+        assert!(format!("{error:#}").contains("scripted delete refusal"));
+        assert_eq!(
+            store
+                .web_token_or_insert("unused".to_string(), 300)
+                .await
+                .unwrap(),
+            "old-token",
+            "the token update must roll back with the failed delete"
+        );
+        assert_eq!(store.device_session_hashes().await.unwrap(), vec![[7; 32]]);
     }
 
     /// The confidentiality repair `open` performs on top of the state

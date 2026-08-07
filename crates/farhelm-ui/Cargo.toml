@@ -20,7 +20,7 @@ serde_json.workspace = true
 # pages, rows and bytes. `std::time::Instant` panics on
 # wasm32-unknown-unknown, which is why the clock is a `cfg` pair rather than
 # one implementation.
-web-sys = { workspace = true, features = ["Performance"] }
+web-sys = { workspace = true, features = ["Performance", "Storage"] }
 # List-view and session-detail polling sleep (PLAN_M2.md step 7 / PLAN_M4.md
 # item 6; `ListView` in src/list.rs, `SessionView` in src/session_view.rs,
 # both sharing `POLL_INTERVAL_MS` from src/api.rs): `TimeoutFuture` wraps

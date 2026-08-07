@@ -27,11 +27,15 @@ an interrupted (or exited, or errored) session relaunches its agent — resuming
 where that conversation was captured, and saying plainly that it is launching fresh where it was not. On Linux hosts
 with a systemd user manager, stopping a session also kills its launch's own cgroup before the portable process sweep,
 which catches descendants that daemonized away from both (see SPEC_impl.md for what that does and does not promise).
-Usable for real work, minimal in everything else. Two caveats worth knowing before that real work: the helm's loopback
-API carries no authentication yet (the web token is a later milestone), so any local account on the helm's machine can
-drive your sessions — treat multi-user hosts accordingly; and every agent invocation entered through the GUI, whether
-typed into the create dialog or stored in a profile, is ordinary argv, visible to every local user via `ps`, so
-credentials do not belong in it.
+Usable for real work, minimal in everything else. On first run the helm creates a recoverable web token. A browser
+enters the value printed by `farhelm helm token show` once, receives an origin-and-port-scoped device secret, and sends
+that secret explicitly on later REST and WebSocket requests; the helm stores only its SHA-256 digest.
+`farhelm helm
+token rotate` replaces the bootstrap token, invalidates every device secret, and closes authenticated live
+sockets. The state directory remains private to the helm account, and a script running in the authenticated UI origin
+has that device's API authority. One further caveat worth knowing before real work: every agent invocation entered
+through the GUI, whether typed into the create dialog or stored in a profile, is ordinary argv, visible to every local
+user via `ps`, so credentials do not belong in it.
 
 ## Trying it (M6.75)
 
@@ -75,15 +79,16 @@ Ubuntu 24.04 ships 3.4.
 - Sessions are created in the UI, not on the command line. The working directory must be an absolute path on the host
   you pick — the supervisor rejects a relative one outright, and against a remote host a `~` would be expanded by your
   local shell against the wrong home.
-- Open the printed loopback URL in a browser: a hosts panel above a session list. Every registered host is listed with
-  its connection state in the helm's own words — connecting, unreachable-reprobing, connected, version-skew,
-  identity-mismatch, identity-unverified, duplicate, retired — plus the evidence behind it (both versions on a skew,
-  both identities on a mismatch) and, where there is one, what to do about it. "add host" registers a destination (with
-  optional remote farhelm path and state directory for an install that is not on the remote's `PATH` or uses a
-  non-default state directory); each ssh row can be retargeted in place or removed, every row can be retried, and a host
-  reporting an identity that does not match the one on record offers to adopt it. Removing forgets the host and the
-  helm's cached view of its sessions — the supervisor and its agents keep running, and re-adding the destination finds
-  them again.
+- Open the printed loopback URL in a browser. At first use, run `target/debug/farhelm helm token show` on the helm's
+  machine and paste that token into the in-page authentication form. The authenticated page is a hosts panel above a
+  session list. Every registered host is listed with its connection state in the helm's own words — connecting,
+  unreachable-reprobing, connected, version-skew, identity-mismatch, identity-unverified, duplicate, retired — plus the
+  evidence behind it (both versions on a skew, both identities on a mismatch) and, where there is one, what to do about
+  it. "add host" registers a destination (with optional remote farhelm path and state directory for an install that is
+  not on the remote's `PATH` or uses a non-default state directory); each ssh row can be retargeted in place or removed,
+  every row can be retried, and a host reporting an identity that does not match the one on record offers to adopt it.
+  Removing forgets the host and the helm's cached view of its sessions — the supervisor and its agents keep running, and
+  re-adding the destination finds them again.
 - Each host row also opens its "profiles": the named agent definitions sessions on that host are launched from. A
   profile is a name, an invocation, an agent kind (Claude Code, Codex, or generic — the kind is what selects a
   supervisor's status heuristics and conversation capture, and is not user-authored beyond picking one), and an optional

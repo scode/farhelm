@@ -1400,11 +1400,10 @@ impl FleetEvents {
     /// Take one of `capacity` subscription seats, or `None` when they are
     /// all taken.
     ///
-    /// The feed is unauthenticated on loopback until M7, so "open sockets
-    /// until the helm stops coping" is a thing any local process can do; a
-    /// seat turns that into a refusal the caller can report. Compare-and-swap
-    /// rather than check-then-increment, because two upgrades arriving
-    /// together must not both see the last free seat.
+    /// Authentication does not stop one admitted browser from opening sockets
+    /// until the helm stops coping; a seat turns that into a refusal the caller
+    /// can report. Compare-and-swap rather than check-then-increment, because
+    /// two upgrades arriving together must not both see the last free seat.
     ///
     /// `capacity` is the CALLER's, not a constant here: the bound is a
     /// property of the endpoint being protected, and this type is only
