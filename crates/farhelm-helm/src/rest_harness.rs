@@ -816,7 +816,10 @@ impl Harness {
         Harness {
             served: Vec::new(),
             store: store.clone(),
-            state: Arc::new(AppState::new(Arc::clone(&manager), store)),
+            state: Arc::new(
+                AppState::new(Arc::clone(&manager), store, _dir.path().to_path_buf())
+                    .expect("build restarted app state"),
+            ),
             device_secret,
             manager,
             fleet,
@@ -1017,6 +1020,7 @@ impl FleetBuilder {
 
     /// Start the manager and assemble the shared state the router reads.
     pub(crate) async fn start(self) -> Harness {
+        let state_dir = self.dir.path().to_path_buf();
         let cadence = Cadence {
             refresh: self.refresh.unwrap_or(test_cadence().refresh),
             ..test_cadence()
@@ -1035,7 +1039,8 @@ impl FleetBuilder {
             event_subscriber_cap: self
                 .event_subscriber_cap
                 .unwrap_or(crate::events::MAX_SUBSCRIBERS),
-            ..AppState::new(Arc::clone(&manager), self.store)
+            ..AppState::new(Arc::clone(&manager), self.store, state_dir)
+                .expect("build harness app state")
         });
         let device_secret = state
             .auth

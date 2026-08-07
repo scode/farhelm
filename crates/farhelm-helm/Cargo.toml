@@ -8,6 +8,7 @@ description = "The control plane: host registry, SSH transport, aggregation, HTT
 
 [dependencies]
 anyhow.workspace = true
+async-trait.workspace = true
 axum.workspace = true
 base64.workspace = true
 clap.workspace = true
@@ -23,13 +24,14 @@ serde_json.workspace = true
 sha2.workspace = true
 shell-words.workspace = true
 subtle.workspace = true
+tempfile.workspace = true
 thiserror.workspace = true
 tokio.workspace = true
 tower-http.workspace = true
 tracing.workspace = true
+uuid.workspace = true
 
 [dev-dependencies]
-tempfile.workspace = true
 # test-util enables tokio's virtual clock (`#[tokio::test(start_paused =
 # true)]`), used by the upload-relay stall tests so a sixty-second
 # no-progress bound is asserted exactly instead of waited out.

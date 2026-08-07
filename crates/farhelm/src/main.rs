@@ -366,11 +366,33 @@ fn init_tracing() {
 /// reach the helm. The two pumps are selected only until stdin finishes:
 /// clean EOF keeps the downstream pump alive, while an upstream error
 /// terminates the otherwise read-only proxy.
+///
+/// Failure to make the initial local socket connection exits 75 only for
+/// not-found/refused. Provisioning treats that status as positive absence;
+/// every other failure remains an ordinary error and must never offer setup.
 async fn stdio_proxy(state_dir: &std::path::Path) -> anyhow::Result<()> {
     use anyhow::Context;
     use tokio::io::AsyncWriteExt;
 
-    let stream = farhelm_supervisor::service::connect(state_dir).await?;
+    let stream = farhelm_supervisor::service::connect(state_dir)
+        .await
+        .unwrap_or_else(|error| {
+            // Provisioning may offer setup only after the command itself ran
+            // and positively established that no supervisor answered. A
+            // dedicated exit status carries exactly that evidence through
+            // ssh; authentication failures and missing remote commands use
+            // different statuses and therefore remain probe errors.
+            let absent = error.chain().any(|cause| {
+                cause.downcast_ref::<std::io::Error>().is_some_and(|error| {
+                    matches!(
+                        error.kind(),
+                        std::io::ErrorKind::NotFound | std::io::ErrorKind::ConnectionRefused
+                    )
+                })
+            });
+            eprintln!("farhelm internal stdio: {error:#}");
+            std::process::exit(if absent { 75 } else { 1 });
+        });
     let (mut sock_r, mut sock_w) = tokio::io::split(stream);
     let mut upstream = tokio::spawn(async move {
         let mut stdin = tokio::io::stdin();

@@ -42,6 +42,7 @@ repository = "https://github.com/scode/farhelm"
 # particular).
 [workspace.dependencies]
 anyhow = "1"
+async-trait = "0.1"
 axum = { version = "0.8", features = ["ws"] }
 # Opaque encoding for both pagination cursors — the `ListSessions` wire
 # cursor (farhelm-supervisor's `service::core`, PLAN_M6.md item 2) and the

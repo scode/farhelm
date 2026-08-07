@@ -28,9 +28,9 @@
 //! destination's placement AFTER that terminator. That ordering is what
 //! keeps a user-supplied destination from being read as an ssh option (see
 //! its docs), so it is stated once here and inherited by every remote
-//! command built on top of it. `ssh_stdio_args` is that one command today:
-//! the `farhelm internal stdio` proxy the connection manager talks the wire
-//! protocol to.
+//! command built on top of it. `ssh_stdio_args` builds the steady-state
+//! `farhelm internal stdio` proxy; provisioning reuses the prefix for its
+//! discovery, reach checks, convergence commands, and sftp transport.
 
 use anyhow::Context;
 use farhelm_proto::io::ClosedBeforeHello;
@@ -60,7 +60,10 @@ use farhelm_proto::io::ClosedBeforeHello;
 /// and still tolerates non-UTF-8 homes (see
 /// `farhelm_supervisor::default_state_dir`), so a helm with no ssh rows
 /// never meets this requirement at all.
-fn ssh_base_args(dest: &str, control_path: &std::path::Path) -> anyhow::Result<Vec<String>> {
+pub(crate) fn ssh_base_args(
+    dest: &str,
+    control_path: &std::path::Path,
+) -> anyhow::Result<Vec<String>> {
     // This is the last point a local filesystem path is still a `Path`
     // before it is embedded in text handed to ssh. The alternative,
     // `Path::to_string_lossy`, does not fail on a non-UTF-8 path — it

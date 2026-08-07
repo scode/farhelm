@@ -2162,6 +2162,106 @@ impl HelmStore {
         .context("add ssh host task panicked")?
     }
 
+    /// Register a supervisor discovered through one resolved SSH dial.
+    ///
+    /// The connection-defining paths and reported identity land in the same
+    /// transaction as the row itself. An existing destination is converged
+    /// to those paths, but a different stored identity is never overwritten:
+    /// discovery must not turn a retarget race into silent adoption. The
+    /// boolean reports whether this transaction inserted the row, so a
+    /// caller whose live-registry reconciliation fails can roll back only
+    /// the row it owns rather than deleting a concurrent registration.
+    pub async fn register_probed_ssh_host(
+        &self,
+        destination: &str,
+        remote_farhelm: Option<&str>,
+        remote_state_dir: Option<&str>,
+        host_identity: Option<&str>,
+    ) -> anyhow::Result<(HostId, bool)> {
+        if !destination_is_usable(destination) {
+            return Err(anyhow::Error::new(HostStoreError::InvalidDestination(
+                destination.to_string(),
+            )));
+        }
+        let conn = Arc::clone(&self.conn);
+        let destination = destination.to_string();
+        let remote_farhelm = remote_farhelm.map(str::to_string);
+        let remote_state_dir = remote_state_dir.map(str::to_string);
+        let host_identity = host_identity.map(str::to_string);
+        tokio::task::spawn_blocking(move || -> anyhow::Result<(HostId, bool)> {
+            let mut conn = conn.lock().expect("helm db mutex poisoned");
+            let tx = conn
+                .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
+                .context("beginning discovered-host registration")?;
+            let existing: Option<(HostId, Option<String>)> = tx
+                .query_row(
+                    "SELECT id, host_identity FROM hosts \
+                     WHERE kind = 'ssh' AND destination = ?1",
+                    rusqlite::params![destination],
+                    |row| Ok((row.get(0)?, row.get(1)?)),
+                )
+                .optional()
+                .context("looking up a discovered ssh destination")?;
+
+            let (host, inserted) = if let Some((host, recorded)) = existing {
+                if let (Some(recorded), Some(reported)) = (&recorded, &host_identity)
+                    && recorded != reported
+                {
+                    return Err(anyhow::Error::new(HostStoreError::IdentityMismatch {
+                        host,
+                        expected: recorded.clone(),
+                        actual: Some(reported.clone()),
+                    }));
+                }
+                if recorded.is_none()
+                    && let Some(identity) = &host_identity
+                    && let Some(owner) = claimant_of(&tx, host, identity)?
+                {
+                    return Err(anyhow::Error::new(HostStoreError::IdentityClaimed {
+                        host,
+                        identity: identity.clone(),
+                        owner,
+                    }));
+                }
+                tx.execute(
+                    "UPDATE hosts SET remote_farhelm = ?2, remote_state_dir = ?3, \
+                     host_identity = COALESCE(host_identity, ?4) WHERE id = ?1",
+                    rusqlite::params![host, remote_farhelm, remote_state_dir, host_identity],
+                )
+                .context("converging the discovered ssh host")?;
+                (host, false)
+            } else {
+                if let Some(identity) = &host_identity {
+                    let owner: Option<HostId> = tx
+                        .query_row(
+                            "SELECT id FROM hosts WHERE host_identity = ?1",
+                            rusqlite::params![identity],
+                            |row| row.get(0),
+                        )
+                        .optional()
+                        .context("checking the discovered identity claim")?;
+                    if let Some(owner) = owner {
+                        anyhow::bail!(
+                            "host {owner} already holds discovered identity {identity:?}"
+                        );
+                    }
+                }
+                tx.execute(
+                    "INSERT INTO hosts (kind, destination, remote_farhelm, remote_state_dir, \
+                     host_identity) VALUES ('ssh', ?1, ?2, ?3, ?4)",
+                    rusqlite::params![destination, remote_farhelm, remote_state_dir, host_identity],
+                )
+                .context("inserting the discovered ssh host")?;
+                (tx.last_insert_rowid(), true)
+            };
+            tx.commit()
+                .context("committing discovered-host registration")?;
+            Ok((host, inserted))
+        })
+        .await
+        .context("register discovered ssh host task panicked")?
+    }
+
     /// Register every destination in `entries` that is not registered
     /// already, in ONE transaction — the `--ensure-hosts` floor
     /// (PLAN_M6.md item 5), applied atomically.

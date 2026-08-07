@@ -139,6 +139,10 @@ mod middleware;
 /// written for one moment cannot execute in another.
 mod precondition;
 
+/// Discovery-first supervisor setup, explicit update, and host-scoped run
+/// progress (PLAN_M7.md item 6).
+mod provisioning;
+
 /// `/api/hosts/{id}/profiles` — agent profile CRUD, proxied to the owning
 /// supervisor, plus the helm-owned remembered default served beside it.
 mod profiles;
@@ -280,6 +284,8 @@ struct AppState {
     /// `AppState` is private to this crate and production has no question this
     /// number answers.
     profile_edit_queue: std::sync::atomic::AtomicUsize,
+    /// The one in-flight provisioning authority shared by every browser.
+    provisioning: Arc<provisioning::ProvisioningService>,
 }
 
 /// Decrements [`AppState::profile_edit_queue`] however its waiter leaves —
@@ -300,13 +306,33 @@ impl Drop for QueuedEdit<'_> {
 
 impl AppState {
     /// The shared state as production builds it: the two halves of the
-    /// fleet, plus every bound and cache at its default.
+    /// fleet, provisioning authority, and every bound/cache at its default.
     ///
     /// A constructor rather than a literal at each call site so the defaults
     /// live in ONE place — the test harness stands this up too, and a
     /// harness that quietly used a different subscriber cap or its own count
     /// cache would be testing something the product does not do.
-    fn new(manager: Arc<manager::ConnectionManager>, store: store::HelmStore) -> AppState {
+    fn new(
+        manager: Arc<manager::ConnectionManager>,
+        store: store::HelmStore,
+        state_dir: PathBuf,
+    ) -> anyhow::Result<AppState> {
+        let provisioning = provisioning::ProvisioningService::production(
+            store.clone(),
+            Arc::clone(&manager),
+            state_dir,
+        )?;
+        Ok(Self::with_provisioning(manager, store, provisioning))
+    }
+
+    /// Assemble state with an injected provisioning service. The ordinary
+    /// constructor owns production wiring; this seam lets provisioning tests
+    /// keep every path and external action isolated.
+    fn with_provisioning(
+        manager: Arc<manager::ConnectionManager>,
+        store: store::HelmStore,
+        provisioning: Arc<provisioning::ProvisioningService>,
+    ) -> AppState {
         AppState {
             manager,
             store: store.clone(),
@@ -315,6 +341,7 @@ impl AppState {
             event_subscriber_cap: events::MAX_SUBSCRIBERS,
             profile_edits: std::sync::Mutex::new(std::collections::HashMap::new()),
             profile_edit_queue: std::sync::atomic::AtomicUsize::new(0),
+            provisioning,
         }
     }
 
@@ -448,7 +475,28 @@ fn api_router(state: Arc<AppState>) -> Router {
         // exactly one thing, and naming the thing is clearer than inventing
         // a partial-update shape this API has nowhere else.
         .route("/api/hosts", get(hosts::list_hosts).post(hosts::add_host))
+        // Provisioning is separate from registry management: probe is
+        // discovery-first and non-mutating on absence, while provision and
+        // update return run identities whose state is re-read after feed
+        // bumps. Their in-flight exclusion lives in AppState, not in one
+        // browser's operation lock.
+        .route(
+            "/api/hosts/probe",
+            axum::routing::post(provisioning::probe_host),
+        )
+        .route(
+            "/api/hosts/provision",
+            axum::routing::post(provisioning::provision_host),
+        )
         .route("/api/hosts/{id}", axum::routing::delete(hosts::remove_host))
+        .route(
+            "/api/hosts/{id}/update",
+            axum::routing::post(provisioning::update_host),
+        )
+        .route(
+            "/api/hosts/{id}/provisioning",
+            get(provisioning::provisioning_state),
+        )
         .route(
             "/api/hosts/{id}/destination",
             axum::routing::post(hosts::set_destination),
@@ -595,7 +643,7 @@ pub async fn run(args: HelmArgs) -> anyhow::Result<()> {
     )
     .await?;
 
-    let state = Arc::new(AppState::new(manager, store));
+    let state = Arc::new(AppState::new(manager, store, state_dir.clone())?);
     // First run owns token creation. Browser serving must never begin with a
     // database whose bootstrap secret exists only after somebody invokes the
     // separate `token show` command.

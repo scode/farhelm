@@ -717,6 +717,25 @@ tmux build when the host has no tmux) into `~/.local/lib/farhelm/`, write user-l
 SPEC.md). Discovery-first: probe for a running supervisor via `farhelm internal stdio` before proposing any of this, and
 show the full concrete action list before touching the host.
 
+ADD and UPDATE both retain that concrete plan behind an opaque, one-use confirmation id. Planning is inspection-only;
+confirmation consumes the id, revalidates the host and registry facts the plan relied on, and only then admits the
+host-scoped run. Discovery records the resolved supervisor binary, state directory, and identity together so a later
+helm dials the same installation that answered the probe. UPDATE starts from those recorded coordinates rather than
+assuming the standard layout.
+
+Artifacts land under temporary names in their final flat directories and are atomically renamed into place. There are no
+version directories or `current` symlinks: a failed transfer leaves the installed file intact, while a running binary
+keeps its old inode until the explicit supervisor restart. Hash checks skip identical payloads and unit files are
+written only when their content differs, so rerunning provisioning converges from wherever an earlier run stopped.
+Matching content also repairs mode drift, and provisioning creates or repairs its directories with explicit modes; the
+supervisor state directory is private to its user (`0700`).
+
+The supervisor unit uses `KillMode=process`. Sessions started through Farhelm belong to the private tmux server that the
+supervisor launches, so systemd's default `control-group` policy would kill that server and every session whenever an
+explicit UPDATE restarts the supervisor. Limiting the unit stop to its main process preserves the same ownership model
+as running `farhelm supervisor run` manually: stopping the supervisor detaches management, while tmux continues to own
+the session processes and terminals until the user deletes them or the host reboots.
+
 Motivation for shipping tmux ourselves when absent or too old: apt needs root, and SPEC.md forbids requiring it; a
 static tmux under our own lib dir keeps the no-root promise without asking the user to install anything.
 

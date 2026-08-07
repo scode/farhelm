@@ -435,7 +435,9 @@ pub(crate) async fn add_host(
 /// identity-less install has nothing left to reject it with, since its stored
 /// `NULL` identity goes on matching the row's. So both steps are taken under
 /// this host's cache-write lock (`ConnectionManager::host_write_lock`), which
-/// is the lock that write already holds.
+/// is the lock that write already holds. Provisioning retains the same lock
+/// for its whole confirmed run, so a retarget also cannot move the registry
+/// out from under a frozen host plan.
 ///
 /// Refuses the reserved local row (409 — it has no destination to change),
 /// an unknown id (404), an unusable destination (400), and a destination
@@ -504,14 +506,21 @@ pub(crate) async fn set_destination(
 ///
 /// Same empty-object success body as the session verbs, so a caller never
 /// has to special-case a bodiless response.
+///
+/// Removal takes the same host write authority as provisioning. Once the
+/// confirmed run releases it, removal deletes the row and purges that host's
+/// retained progress, confirmation ids, and detached-task handle together.
 pub(crate) async fn remove_host(
     State(state): State<Arc<AppState>>,
     AxPath(host): AxPath<HostId>,
 ) -> impl IntoResponse {
+    let serialized = state.manager.host_write_lock(host).await;
     if let Err(e) = state.store.remove_ssh_host(host).await {
         return http_error(e);
     }
+    state.provisioning.forget_host(host).await;
     let stopped = state.manager.stop_actor(host).await;
+    drop(serialized);
     tracing::info!(
         host,
         stopped,
