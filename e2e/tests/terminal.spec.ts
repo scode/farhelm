@@ -12501,11 +12501,11 @@ test("heartbeat-stays-idle-under-output", async ({ page, request }) => {
 /**
  * What `start-stack.sh` publishes about the stack it booted.
  *
- * The tests here need three things no API exposes and none of which they
+ * The tests here need four things no API exposes and none of which they
  * may guess: which binary to relaunch the "remote" supervisor from, which
  * state directory it serves (the isolated one — never the developer's real
- * `~/.local/state/farhelm`), and which process to kill to make that host go
- * away.
+ * `~/.local/state/farhelm`), which process to kill to make that host go away,
+ * and where the injected provisioning backend reads its per-target behavior.
  *
  * The pid is a CLAIM, not an identity, and is never signalled on its own
  * authority — see `verifiedRemoteSupervisorPid`.
@@ -12515,6 +12515,7 @@ type StackInfo = {
   remote_state: string;
   remote_supervisor_pid: number;
   remote_ssh: string;
+  provisioning_backend: string;
 };
 
 /**
@@ -12532,6 +12533,35 @@ function stackInfo(): StackInfo {
     );
   }
   return JSON.parse(fs.readFileSync(at, "utf8"));
+}
+
+/**
+ * Make one injected probe report a supervisor at concrete dial coordinates.
+ *
+ * The injected backend defaults to `absent`, which is right for provisioning
+ * scenarios but wrong for the harness's already-running self-SSH supervisor.
+ * This target-only override leaves every unrelated destination on the absent
+ * path. Publishing by rename matters because the helm reads this file for
+ * each probe and must never observe a half-written JSON document.
+ */
+function configureDiscoveredProbe(
+  destination: string,
+  dialFarhelm: string,
+  dialStateDir: string | null,
+): void {
+  const root = stackInfo().provisioning_backend;
+  const at = path.join(root, "config.json");
+  const config = JSON.parse(fs.readFileSync(at, "utf8"));
+  config.targets ??= {};
+  config.targets[`ssh:${destination}`] = {
+    probe: "supervisor",
+    build_version: HELM_BUILD,
+    dial_farhelm: dialFarhelm,
+    dial_state_dir: dialStateDir,
+  };
+  const next = path.join(root, `config.${process.pid}.next`);
+  fs.writeFileSync(next, `${JSON.stringify(config)}\n`, { mode: 0o600 });
+  fs.renameSync(next, at);
 }
 
 /** Every registered host as `GET /api/hosts` currently reports it. */
@@ -12918,6 +12948,9 @@ test.describe("multi-host", () => {
       );
       return;
     }
+
+    const info = stackInfo();
+    configureDiscoveredProbe(info.remote_ssh, info.farhelm, info.remote_state);
 
     // Self-ssh works, so the fleet is expected to be up — and anything that
     // goes wrong from here is a real failure rather than a reason to skip.
@@ -14030,8 +14063,9 @@ test.describe("multi-host", () => {
     request,
   }) => {
     const destination = `user@blank-fields-${Date.now()}.invalid`;
+    configureDiscoveredProbe(destination, "farhelm", null);
     let body: any;
-    await page.route("**/api/hosts", async (route) => {
+    await page.route("**/api/hosts/probe", async (route) => {
       if (route.request().method() === "POST") {
         body = JSON.parse(route.request().postData() ?? "{}");
       }
@@ -14051,13 +14085,14 @@ test.describe("multi-host", () => {
       });
       expect(body.remote_farhelm ?? null).toBeNull();
       expect(body.remote_state_dir ?? null).toBeNull();
-      // And the row the helm answers with agrees — the fields are genuinely
-      // unset rather than set to something that prints as blank.
+      // The row records what discovery actually dialed. The plain `farhelm`
+      // value comes from the injected supervisor observation, not an empty
+      // form field silently converted into a path.
       const row = (await apiHosts(request)).find(
         (host: any) => host.destination === destination,
       );
       added = row.id;
-      expect(row.remote_farhelm).toBeNull();
+      expect(row.remote_farhelm).toBe("farhelm");
       expect(row.remote_state_dir).toBeNull();
     } finally {
       if (added) await request.delete(`/api/hosts/${added}`).catch(() => {});

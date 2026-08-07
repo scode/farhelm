@@ -60,6 +60,23 @@ pub(crate) struct OpLock {
     held: Signal<bool>,
 }
 
+/// One claimed page operation, released even if its task is cancelled.
+///
+/// Component-scoped futures are dropped when their component disappears. A
+/// manual `release()` at the end of such a future is therefore not a release
+/// guarantee: removing the row that owns it can skip that line and leave the
+/// whole page inert. Keeping the claim in the future's owned state makes
+/// cancellation take the same path as every ordinary return.
+pub(crate) struct OpGuard {
+    held: Signal<bool>,
+}
+
+impl Drop for OpGuard {
+    fn drop(&mut self) {
+        self.held.set(false);
+    }
+}
+
 /// Create the token. A hook: call it unconditionally, once, in the component
 /// that owns the page (`list::ListView`).
 pub(crate) fn use_op_lock() -> OpLock {
@@ -69,6 +86,14 @@ pub(crate) fn use_op_lock() -> OpLock {
 }
 
 impl OpLock {
+    /// Claim the token and return its cancellation-safe release guard.
+    ///
+    /// Move the guard into the spawned future. Dropping that future then
+    /// releases the claim before a removed component can strand it.
+    pub(crate) fn claim_guard(&mut self) -> Option<OpGuard> {
+        self.claim().then_some(OpGuard { held: self.held })
+    }
+
     /// Claim the token, or report that someone else holds it.
     ///
     /// The whole mechanism is in this one function being a test-and-SET

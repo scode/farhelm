@@ -77,6 +77,13 @@ work="$state/work"
 # run entirely. Set-then-trap is the ordering that makes that
 # unconstructible rather than unlikely.
 remote_state="$state/remote"
+# The provisioning specs keep every shipped HTTP boundary and replace only
+# host-side execution. This private directory is the explicit control plane
+# for that E2E-only backend: tests atomically replace config.json and inspect
+# events.jsonl, while the helm still owns auth, plans, registration, progress,
+# and feed bumps. The marker is a second opt-in checked by the binary before
+# it accepts the environment variable below.
+provisioning_backend="$state/provisioning-backend"
 # Where this run publishes what it built, for the multi-host tests that
 # have to reach BEHIND the API — killing the "remote" supervisor to make a
 # host go unreachable, and re-registering it afterwards with the same
@@ -93,7 +100,10 @@ remote_state="$state/remote"
 # readers must not treat its presence as proof of a live stack.
 stack_info="$repo/e2e/.stack-info.json"
 auth_state="$repo/e2e/.auth/storage-state.json"
-mkdir -p "$work" "$remote_state" || exit 1
+mkdir -p "$work" "$remote_state" "$provisioning_backend" || exit 1
+printf '%s\n' 'farhelm-e2e-provisioning-v1' >"$provisioning_backend/ENABLED" || exit 1
+printf '%s\n' '{}' >"$provisioning_backend/config.json" || exit 1
+: >"$provisioning_backend/events.jsonl" || exit 1
 
 # Trap installed BEFORE anything is spawned: a TERM during the socket
 # wait below would otherwise exit with no trap and orphan the supervisor
@@ -185,8 +195,9 @@ print(json.dumps({
     "remote_supervisor_pid": int(sys.argv[3]),
     "remote_ssh": "localhost",
     "state": sys.argv[4],
+    "provisioning_backend": sys.argv[5],
 }))
-' "$bin" "$remote_state" "$remote_sup_pid" "$state" >"$stack_info" || exit 1
+' "$bin" "$remote_state" "$remote_sup_pid" "$state" "$provisioning_backend" >"$stack_info" || exit 1
 
 # Mint before the helm starts so its first protected request sees the same
 # durable token the harness CLI printed. It is captured only long enough to
@@ -197,7 +208,7 @@ token="$("$bin" helm token show --state-dir "$state")" || exit 1
 # The helm runs as a child, NOT via exec: bash does not run EXIT traps
 # across exec, so an exec'd helm would leave the supervisor and the
 # private tmux server orphaned after every run.
-"$bin" helm run \
+FARHELM_E2E_PROVISIONING_BACKEND_DIR="$provisioning_backend" "$bin" helm run \
   --state-dir "$state" \
   --port 7434 \
   --ui-dist "$dist" \

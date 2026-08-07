@@ -1,8 +1,8 @@
 //! The helm's HTTP contract, as this UI speaks it: one `async fn` per
 //! endpoint — the session routes
 //! (fetch/create/stop/restart/rename/delete/tab-open/tab-close), the host
-//! registry's (list/add/retarget/remove/adopt/retry) since PLAN_M6.md item 5
-//! froze them, and the per-host profile catalog's
+//! registry's (list/probe/provision/update/retarget/remove/adopt/retry) since
+//! PLAN_M7.md item 7 extended the M6 host surface, and the per-host profile catalog's
 //! (list/create/update/delete) since PLAN_M6_75.md item 5 did the same —
 //! each exposing every failure — transport, status, or body-read — as a
 //! single displayable `String`. Internally, the shared send funnel keeps a
@@ -1503,6 +1503,118 @@ struct HostListing {
     hosts: Vec<Host>,
 }
 
+/// A discovery result from `POST /api/hosts/probe`.
+///
+/// The helm owns the distinction between positive absence and a transport
+/// failure. A caller may offer setup only for [`Self::Provisionable`]; a
+/// failed request never reaches this type, and [`Self::Manual`] is a
+/// supported host whose setup still has to use the documented manual path.
+#[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
+#[serde(tag = "result", rename_all = "kebab-case")]
+pub(crate) enum ProbeResponse {
+    /// A supervisor answered and the helm registered it as-is.
+    Discovered,
+    /// No supervisor answered, and the retained plan may be consumed once.
+    Provisionable {
+        /// Opaque, one-use confirmation id. Never parsed or reconstructed.
+        probe_id: String,
+        /// The plan rendered by the helm from the executor's own actions.
+        confirmation: String,
+    },
+    /// The transport worked, but automatic provisioning does not cover the
+    /// target.
+    Manual { reason: String },
+    /// The successful response may already have registered an answering
+    /// supervisor, but this build could not decode which outcome occurred.
+    /// Callers must refresh the registry and must not invent a setup offer.
+    #[serde(skip)]
+    Unvalidated(String),
+}
+
+/// The one-use plan returned by the first explicit UPDATE request.
+///
+/// UPDATE uses the same inspect-then-confirm discipline as ADD. Posting
+/// `probe_id` back to the host route consumes exactly the plan whose
+/// `confirmation` the user saw.
+#[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
+pub(crate) struct UpdatePlan {
+    /// Opaque, one-use confirmation id bound to this host and plan.
+    pub(crate) probe_id: String,
+    /// The concrete converge plan the second request authorizes.
+    pub(crate) confirmation: String,
+}
+
+/// Identity returned once the helm has accepted a long provisioning run.
+#[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
+pub(crate) struct ProvisioningAccepted {
+    /// The row whose host-scoped progress route now owns the run.
+    pub(crate) host_id: HostId,
+    /// Opaque diagnostic identity; displayed only if the host id is wrong.
+    pub(crate) run_id: String,
+}
+
+/// What an accepted provisioning POST told this build.
+///
+/// A 202 commits the run before its body is decoded. Treating a malformed
+/// body as a refusal would invite the user to consume the one-use plan again
+/// even though the helm already did; callers instead refresh the registry
+/// and host-scoped run, which are authoritative.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum ProvisioningSubmission {
+    /// The run identity decoded and may be checked against the calling row.
+    Accepted(ProvisioningAccepted),
+    /// The 202 committed, but this build could not decode its identity.
+    Unvalidated(String),
+}
+
+/// Whether a retained run was an ADD convergence or an explicit UPDATE.
+#[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+pub(crate) enum ProvisioningOperation {
+    Add,
+    Update,
+}
+
+/// A provisioning run's retained aggregate state.
+#[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+pub(crate) enum ProvisioningStatus {
+    Running,
+    Completed,
+    Failed,
+}
+
+/// One executor action as `GET /api/hosts/{id}/provisioning` reports it.
+#[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
+pub(crate) struct ProvisioningStep {
+    /// Stable executor label, shown as supplied.
+    pub(crate) step: String,
+    /// Kept as a string so a newer step outcome costs only its styling, not
+    /// the entire progress panel.
+    pub(crate) status: String,
+    /// The executor's bounded explanation, including a failing command's
+    /// own message. Rendered through the peer-text boundary.
+    pub(crate) message: Option<String>,
+}
+
+/// The host-scoped progress snapshot retained in this helm process.
+///
+/// Another run replaces it, and restarting the helm clears it. The durable
+/// host registration survives either event; this view is only live progress
+/// and the most recent result for the current process lifetime.
+#[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
+pub(crate) struct ProvisioningView {
+    /// Absent only for the explicit idle view.
+    pub(crate) run_id: Option<String>,
+    /// Absent with `run_id`; otherwise which idempotent operation may rerun.
+    pub(crate) operation: Option<ProvisioningOperation>,
+    pub(crate) status: ProvisioningStatus,
+    /// Executor order, retained across completion until another run starts.
+    pub(crate) steps: Vec<ProvisioningStep>,
+    /// Aggregate explanation. Step messages remain separately available.
+    pub(crate) message: Option<String>,
+}
+
 /// Fetch the whole host registry with each host's live connection state.
 ///
 /// Never paginated, because the helm does not paginate it: SPEC.md's promise
@@ -1586,39 +1698,22 @@ async fn commit_of<T: serde::de::DeserializeOwned>(
     }
 }
 
-/// Register an ssh destination (`POST /api/hosts`).
+/// Discover an ssh destination before either registering or offering setup.
 ///
-/// Adding ALWAYS registers when the destination is usable at all: whether
-/// anything answered is the new host's connection STATE, not this request's
-/// status. So a caller must not read `Ok` as "the host is up" — the panel
-/// that renders the returned row is where "there was nothing there" shows
-/// up, as an ordinary connecting-then-unreachable chip.
-///
-/// The two optional fields describe the INSTALL rather than the address:
-/// where the remote farhelm binary lives and which state directory it
-/// serves. A blank field is sent as ABSENT rather than as an empty value —
-/// the helm would take `Some("")` literally and dial a binary named nothing
-/// — and a field with anything in it is sent BYTE FOR BYTE.
-///
-/// The distinction matters more than it looks: trimming decides only
-/// whether the field is present, never what it contains. These are
-/// filesystem paths on someone else's machine, and a path may legally begin
-/// or end with a space — trimming one away produces an entry that dials a
-/// path the user did not type and cannot see the difference in. The same
-/// posture the create dialog takes with a working directory, for the same
-/// reason.
-///
-/// A 2xx whose body will not decode is [`Commit::Unvalidated`], not an
-/// error: the row was written (see [`Commit`]).
-pub(crate) async fn add_host(
+/// The optional install coordinates follow the old add form's byte-for-byte
+/// rule: blank means absent, while every non-blank path is sent exactly as
+/// typed. Discovery itself decides whether the supervisor is registered
+/// as-is, a concrete plan is retained for confirmation, or the target stays
+/// manual-only.
+pub(crate) async fn probe_ssh_host(
     base: &str,
     ssh: &str,
     remote_farhelm: &str,
     remote_state_dir: &str,
-) -> Result<Commit, String> {
-    let url = format!("{base}/api/hosts");
+) -> Result<ProbeResponse, String> {
+    let url = format!("{base}/api/hosts/probe");
     let body = serde_json::json!({
-        "ssh": ssh,
+        "target": { "kind": "ssh", "destination": ssh },
         "remote_farhelm": install_field(remote_farhelm),
         "remote_state_dir": install_field(remote_state_dir),
     });
@@ -1626,7 +1721,112 @@ pub(crate) async fn add_host(
     if !resp.status().is_success() {
         return Err(refusal_text("POST", &url, resp).await);
     }
-    Ok(commit_of::<Host>(resp, "the hosts list below").await)
+    Ok(match resp.json::<ProbeResponse>().await {
+        Ok(probed) => probed,
+        Err(error) => ProbeResponse::Unvalidated(format!(
+            "the helm accepted the host probe, but its reply could not be read: {error}"
+        )),
+    })
+}
+
+/// Probe the reserved local host without SSH-to-self.
+pub(crate) async fn probe_local_host(base: &str) -> Result<ProbeResponse, String> {
+    let url = format!("{base}/api/hosts/probe");
+    let resp = send(
+        client()
+            .post(&url)
+            .json(&serde_json::json!({ "target": { "kind": "local" } })),
+    )
+    .await?;
+    if !resp.status().is_success() {
+        return Err(refusal_text("POST", &url, resp).await);
+    }
+    Ok(match resp.json::<ProbeResponse>().await {
+        Ok(probed) => probed,
+        Err(error) => ProbeResponse::Unvalidated(format!(
+            "the helm accepted the local probe, but its reply could not be read: {error}"
+        )),
+    })
+}
+
+/// Consume one confirmed ADD plan.
+///
+/// The helm registers the destination before it claims the id-scoped run.
+/// The response therefore already names the durable row whose progress URL
+/// the caller must read.
+pub(crate) async fn provision_host(
+    base: &str,
+    probe_id: &str,
+) -> Result<ProvisioningSubmission, String> {
+    let url = format!("{base}/api/hosts/provision");
+    let resp = send(
+        client()
+            .post(&url)
+            .json(&serde_json::json!({ "probe_id": probe_id })),
+    )
+    .await?;
+    if !resp.status().is_success() {
+        return Err(refusal_text("POST", &url, resp).await);
+    }
+    Ok(match resp.json::<ProvisioningAccepted>().await {
+        Ok(accepted) => ProvisioningSubmission::Accepted(accepted),
+        Err(error) => ProvisioningSubmission::Unvalidated(format!(
+            "the helm accepted provisioning, but its run identity could not be read ({error}); \
+             the hosts list and provisioning panels are the authoritative view of what happened"
+        )),
+    })
+}
+
+/// Freeze an explicit UPDATE plan without changing the host.
+pub(crate) async fn plan_host_update(base: &str, host: HostId) -> Result<UpdatePlan, String> {
+    let url = format!("{base}/api/hosts/{host}/update");
+    let resp = send(client().post(&url)).await?;
+    if !resp.status().is_success() {
+        return Err(refusal_text("POST", &url, resp).await);
+    }
+    resp.json::<UpdatePlan>().await.map_err(|error| {
+        format!("the helm planned the update, but its reply could not be read: {error}")
+    })
+}
+
+/// Consume the one-use plan returned by [`plan_host_update`].
+pub(crate) async fn update_host(
+    base: &str,
+    host: HostId,
+    probe_id: &str,
+) -> Result<ProvisioningSubmission, String> {
+    let url = format!("{base}/api/hosts/{host}/update");
+    let resp = send(
+        client()
+            .post(&url)
+            .json(&serde_json::json!({ "probe_id": probe_id })),
+    )
+    .await?;
+    if !resp.status().is_success() {
+        return Err(refusal_text("POST", &url, resp).await);
+    }
+    Ok(match resp.json::<ProvisioningAccepted>().await {
+        Ok(accepted) => ProvisioningSubmission::Accepted(accepted),
+        Err(error) => ProvisioningSubmission::Unvalidated(format!(
+            "the helm accepted the update, but its run identity could not be read ({error}); \
+             this host's provisioning panel is the authoritative view of what happened"
+        )),
+    })
+}
+
+/// Read the latest retained provisioning run for one registered host.
+pub(crate) async fn fetch_provisioning(
+    base: &str,
+    host: HostId,
+) -> Result<ProvisioningView, String> {
+    let url = format!("{base}/api/hosts/{host}/provisioning");
+    let resp = send(client().get(&url)).await?;
+    if !resp.status().is_success() {
+        return Err(read_failure("GET", &url, resp).await);
+    }
+    resp.json::<ProvisioningView>()
+        .await
+        .map_err(|error| format!("GET {url} returned an unreadable provisioning state: {error}"))
 }
 
 /// Retarget a registered host (`POST /api/hosts/{id}/destination`).
@@ -2161,6 +2361,63 @@ mod tests {
             "trimming decides presence, never content"
         );
         assert_eq!(install_field("/srv/state"), Some("/srv/state".to_string()));
+    }
+
+    /// Provisioning decoders keep the opaque plan out of the UI while
+    /// preserving the server-rendered confirmation and progress vocabulary.
+    ///
+    /// The plan is intentionally not mirrored: execution and confirmation
+    /// both belong to the helm, and teaching this client every action field
+    /// would create a second renderer that can drift. The opaque one-use id
+    /// and confirmation text are the complete client contract before POST.
+    #[test]
+    fn provisioning_replies_decode_without_reimplementing_the_plan() {
+        let offered: ProbeResponse = serde_json::from_value(serde_json::json!({
+            "result": "provisionable",
+            "probe_id": "add-plan",
+            "plan": {
+                "operation": "add",
+                "actions": [{ "step": "a-future-action", "future_field": true }],
+            },
+            "confirmation": "line one\nline two\n",
+        }))
+        .expect("the helm's concrete plan may grow without teaching the UI its fields");
+        assert_eq!(
+            offered,
+            ProbeResponse::Provisionable {
+                probe_id: "add-plan".to_string(),
+                confirmation: "line one\nline two\n".to_string(),
+            }
+        );
+
+        let update: UpdatePlan = serde_json::from_value(serde_json::json!({
+            "probe_id": "update-plan",
+            "plan": { "operation": "update", "actions": [] },
+            "confirmation": "replace then restart\n",
+        }))
+        .unwrap();
+        assert_eq!(update.probe_id, "update-plan");
+        assert_eq!(update.confirmation, "replace then restart\n");
+
+        let progress: ProvisioningView = serde_json::from_value(serde_json::json!({
+            "host_id": 7,
+            "run_id": "run-7",
+            "operation": "update",
+            "status": "failed",
+            "steps": [{
+                "step": "restart-supervisor",
+                "status": "failed",
+                "message": "systemctl reported a concrete failure",
+            }],
+            "message": "rerun provisioning to continue",
+        }))
+        .unwrap();
+        assert_eq!(progress.status, ProvisioningStatus::Failed);
+        assert_eq!(progress.steps[0].status, "failed");
+        assert_eq!(
+            progress.steps[0].message.as_deref(),
+            Some("systemctl reported a concrete failure")
+        );
     }
 
     /// A create names exactly ONE of the two modes, never both and never

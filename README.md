@@ -40,9 +40,10 @@ user via `ps`, so credentials do not belong in it.
 
 ## Trying it (M7)
 
-Prerequisites: Rust with the `wasm32-unknown-unknown` target (`rustup target add wasm32-unknown-unknown`), tmux on every
-host involved, and `cargo binstall dioxus-cli@0.7.9` (or `cargo install dioxus-cli@0.7.9` — match the workspace's dioxus
-version) for the web UI build.
+Prerequisites: Rust with the `wasm32-unknown-unknown` target (`rustup target add wasm32-unknown-unknown`) and
+`cargo binstall dioxus-cli@0.7.9` (or `cargo install dioxus-cli@0.7.9` — match the workspace's dioxus version) for the
+web UI build. A manually started supervisor also needs tmux 3.3 or newer on that host. Automatic setup checks tmux and
+installs Farhelm's suitable bundled build when the host does not already have one.
 
 NOTE on tmux versions: 3.3 or newer runs everything. Two fidelity details depend on the version, and neither stops a
 session working:
@@ -87,9 +88,13 @@ Ubuntu 24.04 ships 3.4.
   session list. Every registered host is listed with its connection state in the helm's own words — connecting,
   unreachable-reprobing, connected, version-skew, identity-mismatch, identity-unverified, duplicate, retired — plus the
   evidence behind it (both versions on a skew, both identities on a mismatch) and, where there is one, what to do about
-  it. "add host" registers a destination (with optional remote farhelm path and state directory for an install that is
-  not on the remote's `PATH` or uses a non-default state directory); each ssh row can be retargeted in place or removed,
-  every row can be retried, and a host reporting an identity that does not match the one on record offers to adopt it.
+  it. "add host" first discovers the destination. An answering supervisor is registered as-is; positive absence shows
+  the exact setup plan and does nothing until you confirm it; unsupported hosts keep the concrete manual fallback. A
+  confirmed run registers its row before execution and retains step-by-step progress and failures there, so a reload or
+  another browser can follow or rerun it. Each registered row also has an explicit update action with the same
+  plan-then-confirm handshake. Optional remote Farhelm and state-directory fields still describe installs that are not
+  on the remote's `PATH` or use a non-default state directory. Each ssh row can be retargeted in place or removed, every
+  row can be retried, and a host reporting an identity that does not match the one on record offers to adopt it.
   Removing forgets the host and the helm's cached view of its sessions — the supervisor and its agents keep running, and
   re-adding the destination finds them again.
 - Each host row also opens its "profiles": the named agent definitions sessions on that host are launched from. A

@@ -63,10 +63,14 @@ use std::collections::HashMap;
 
 use dioxus::prelude::*;
 
-use crate::api::{Commit, add_host, adopt_host, remove_host, retry_host, set_host_destination};
+use crate::api::{
+    Commit, ProbeResponse, ProvisioningSubmission, adopt_host, probe_ssh_host, provision_host,
+    remove_host, retry_host, set_host_destination,
+};
 use crate::ops::OpLock;
 use crate::peer::{DetailPart, PeerLine, display_peer};
 use crate::profiles::{CatalogSurface, ProfilesSection};
+use crate::provisioning::{PlanConfirmation, ProvisioningPanel};
 use crate::{ApiBase, Host, HostId, HostKind, HostPhase, RefreshHealth};
 
 // ---------------------------------------------------------------------
@@ -362,9 +366,11 @@ fn refresh_detail(refresh: &RefreshHealth) -> Vec<DetailPart> {
 /// end reported.
 pub(crate) fn state_remedy(state: &HostPhase) -> Option<Vec<DetailPart>> {
     match state {
-        // The one unreachable host whose remedy is a command on the machine
-        // the user is already sitting at. Provisioning is M7's, so this is a
-        // manual path and deliberately never an offer to install anything.
+        // The one unreachable host whose fallback is a command on the
+        // machine the user is already sitting at. The provisioning panel
+        // owns the automatic offer; keeping this function manual-only lets
+        // it render the same value as secondary text under that offer, or as
+        // the whole remedy when the local probe says setup is unsupported.
         //
         // CONTRACT-BORNE as of PLAN_M6.md item 7, and that is a correctness
         // fix rather than a tidy-up. The helm reaches its local supervisor
@@ -612,13 +618,12 @@ type HostRequest = std::pin::Pin<Box<dyn std::future::Future<Output = Result<Com
 /// connection finds; a retarget's is a fresh active-retry window).
 ///
 /// `ops` is the page's single live-operation token (`ops::OpLock`), and it
-/// is what actually excludes: every verb below claims it synchronously at
-/// handler entry and releases it when the request completes. `busy_host` is
-/// `ListView`'s too but is only for DRAWING — which row shows itself busy —
-/// because a token is a page-wide fact and a row needs to know whether it is
-/// the row. See the `ops` module for why a `blocked` prop, which this
-/// replaced, could not do the job: a prop is a render-time value, and two
-/// clicks inside one frame both read the page as idle.
+/// excludes click-scale mutations. The two busy-host sets belong to
+/// `ListView` too: one owns ordinary mutations, the other owns provisioning
+/// snapshots, and rows draw their union. Keeping ownership separate is what
+/// stops a quick mutation completion from erasing a still-running provision.
+/// See the `ops` module for why a render-time boolean cannot replace the
+/// token at submit.
 ///
 /// ## Committed but unvalidated
 ///
@@ -657,7 +662,8 @@ type HostRequest = std::pin::Pin<Box<dyn std::future::Future<Output = Result<Com
 pub(crate) fn HostsPanel(
     hosts: Signal<HostsRead>,
     mut ops: OpLock,
-    mut busy_host: Signal<Option<HostId>>,
+    mut mutation_busy_hosts: Signal<std::collections::HashSet<HostId>>,
+    mut provisioning_busy_hosts: Signal<std::collections::HashSet<HostId>>,
     /// Which host's profiles section is expanded, if any — also the catalog
     /// surface's target, which is what keeps "what is on screen" and "what is
     /// being read" one fact rather than two.
@@ -687,12 +693,12 @@ pub(crate) fn HostsPanel(
     // sit on — see the form's `on_added`.
     let mut add_warning = use_signal(|| None::<String>);
 
-    // One shared shape for the five mutations: claim the page's operation
-    // token, clear this host's stale lines, run the request, then ask for a
-    // refetch or record what came back — and release the token whatever
-    // happened. Written once because the only thing that differs between
-    // them is the request, which is why it arrives already built as a boxed
-    // future rather than as five near-identical copies of this bookkeeping.
+    // One shared shape for the ordinary host-row mutations: claim the page's
+    // operation token, clear this host's stale lines, run the request, then
+    // ask for a refetch or record what came back — and release the token
+    // whatever happened. Written once because the only thing that differs
+    // between them is the request, which is why it arrives already built as
+    // a boxed future rather than as several copies of this bookkeeping.
     //
     // The claim is the exclusion and it happens HERE, synchronously, inside
     // the handler: the buttons' `disabled` attributes only take effect after
@@ -704,10 +710,13 @@ pub(crate) fn HostsPanel(
     // path acts on: it closes its field on submit, and closing it for a
     // submit that was refused would throw the draft away with nothing said.
     let mut run = move |host: HostId, request: HostRequest| -> bool {
+        if provisioning_busy_hosts.peek().contains(&host) {
+            return false;
+        }
         if !ops.claim() {
             return false;
         }
-        busy_host.set(Some(host));
+        mutation_busy_hosts.write().insert(host);
         errors.write().remove(&host);
         warnings.write().remove(&host);
         spawn(async move {
@@ -724,7 +733,7 @@ pub(crate) fn HostsPanel(
                     errors.write().insert(host, error);
                 }
             }
-            busy_host.set(None);
+            mutation_busy_hosts.write().remove(&host);
             // Released on every path. A leaked token leaves the whole page
             // inert with nothing on screen to explain why, which is a far
             // worse failure than any of the outcomes above.
@@ -841,6 +850,20 @@ pub(crate) fn HostsPanel(
     };
 
     let read = hosts.read();
+    let rendered_hosts = read.hosts().map(|list| {
+        list.iter()
+            .cloned()
+            .map(|host| {
+                let local_setup = host.kind == HostKind::Local
+                    && matches!(
+                        &host.state,
+                        HostPhase::Unreachable { cause, .. }
+                            if cause == LOCAL_SUPERVISOR_NOT_RUNNING
+                    );
+                (host, local_setup)
+            })
+            .collect::<Vec<_>>()
+    });
     // Cosmetic, not the guard — every handler below claims the token for
     // itself (see the `ops` module).
     let busy = ops.busy();
@@ -873,6 +896,7 @@ pub(crate) fn HostsPanel(
             if adding() {
                 AddHostForm {
                     ops,
+                    on_refresh: on_changed,
                     on_added: move |unvalidated: Option<String>| {
                         adding.set(false);
                         // A committed-but-unreadable add has no row id to
@@ -914,12 +938,14 @@ pub(crate) fn HostsPanel(
             if read.is_loading() {
                 div { class: "status hosts-status", "loading hosts…" }
             }
-            if let Some(list) = read.hosts() {
+            if let Some(list) = rendered_hosts {
                 div { class: "host-list",
-                    for host in list.iter().cloned() {
+                    for (host, local_setup) in list {
                         HostRow {
                             key: "{host.id}",
-                            busy: *busy_host.read() == Some(host.id) || busy,
+                            busy: mutation_busy_hosts.read().contains(&host.id)
+                                || provisioning_busy_hosts.read().contains(&host.id)
+                                || busy,
                             confirming_remove: *confirming_remove.read() == Some(host.id),
                             editing: *editing.read() == Some(host.id),
                             showing_profiles: *profiles_open.read() == Some(host.id),
@@ -929,7 +955,9 @@ pub(crate) fn HostsPanel(
                                 // reason the add-host toggle must not: the
                                 // response would be left with nothing to act
                                 // on it.
-                                if ops.busy_now() {
+                                if ops.busy_now()
+                                    || provisioning_busy_hosts.peek().contains(&id)
+                                {
                                     return;
                                 }
                                 confirming_remove.set(None);
@@ -947,13 +975,35 @@ pub(crate) fn HostsPanel(
                                     }
                                 }
                             },
+                            local_setup,
+                            provisioning_section: rsx! {
+                                ProvisioningPanel {
+                                    host: host.clone(),
+                                    ops,
+                                    local_setup,
+                                    manual_remedy: state_remedy(&host.state),
+                                    on_running: {
+                                        let id = host.id;
+                                        move |running: bool| {
+                                            if running {
+                                                provisioning_busy_hosts.write().insert(id);
+                                            } else {
+                                                provisioning_busy_hosts.write().remove(&id);
+                                            }
+                                        }
+                                    },
+                                    on_changed,
+                                }
+                            },
                             error: errors.read().get(&host.id).cloned(),
                             warning: warnings.read().get(&host.id).cloned(),
                             destination_draft,
                             on_retry: on_retry.clone(),
                             on_adopt: on_adopt.clone(),
                             on_edit_start: move |(id, destination): (HostId, String)| {
-                                if ops.busy_now() {
+                                if ops.busy_now()
+                                    || provisioning_busy_hosts.peek().contains(&id)
+                                {
                                     return;
                                 }
                                 confirming_remove.set(None);
@@ -963,7 +1013,9 @@ pub(crate) fn HostsPanel(
                             on_edit_submit: on_edit_submit.clone(),
                             on_edit_cancel: move |_| editing.set(None),
                             on_remove_start: move |id: HostId| {
-                                if ops.busy_now() {
+                                if ops.busy_now()
+                                    || provisioning_busy_hosts.peek().contains(&id)
+                                {
                                     return;
                                 }
                                 editing.set(None);
@@ -1021,6 +1073,10 @@ fn HostRow(
     showing_profiles: bool,
     /// The expanded section, or nothing. Built by the panel.
     profiles_section: Element,
+    /// Whether automatic local setup replaces the ordinary remedy slot.
+    local_setup: bool,
+    /// The feed-driven setup/update surface built by the panel.
+    provisioning_section: Element,
     error: Option<String>,
     warning: Option<String>,
     destination_draft: Signal<String>,
@@ -1151,7 +1207,7 @@ fn HostRow(
                 }
             }
             PeerLine { class: "host-detail", parts: detail }
-            if let Some(remedy) = remedy {
+            if !local_setup && let Some(remedy) = remedy {
                 PeerLine { class: "host-remedy", parts: remedy }
             }
             // The refusal is the HELM's sentence and routinely embeds
@@ -1175,6 +1231,7 @@ fn HostRow(
                     parts: vec![DetailPart::Peer(warning)],
                 }
             }
+            {provisioning_section}
             // Inside the row rather than after it, so the section is visibly
             // attached to the host whose profiles it holds — on a fleet, a
             // panel of profiles floating between two rows would belong to
@@ -1252,126 +1309,219 @@ fn HostDestinationForm(
     }
 }
 
-/// The add-host form: an ssh destination, plus the two optional fields that
-/// describe the remote INSTALL rather than its address.
-///
-/// Registering ALWAYS succeeds for a usable destination, whether or not
-/// anything answers there — so this form's success is not a claim that the
-/// host is up, and the panel's new chip is where "there was nothing there"
-/// appears. That is deliberate helm behavior (it is what makes a registry
-/// meaningful for a machine that is switched off), and it is why this form
-/// closes on success rather than waiting for a connection that may never
-/// come.
+/// The form inputs that one displayed ADD confirmation was planned from.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct AddBinding {
+    destination: String,
+    remote_farhelm: String,
+    remote_state_dir: String,
+}
+
+/// One-use ADD authority paired with the inputs the helm inspected.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct AddOffer {
+    probe_id: String,
+    confirmation: String,
+    binding: AddBinding,
+}
+
+/// Keep probe and manual diagnostics inside the peer-text boundary.
+fn probe_error_parts(error: String) -> Vec<DetailPart> {
+    vec![DetailPart::Peer(error)]
+}
+
+/// The add-host form: discover first, then either keep the answering
+/// supervisor or offer the exact setup plan retained by the helm.
 ///
 /// The two optional fields are exposed rather than hidden behind a default
-/// because they are the difference between a working entry and a permanently
-/// unreachable one whenever farhelm is not on the remote's `PATH` or its
-/// supervisor serves a non-default state directory — the case the e2e
-/// harness itself is built on.
+/// because discovery needs them to find an existing custom installation, and
+/// a retained setup plan uses them as its installation coordinates. They are
+/// therefore part of both sides of discovery-first ADD whenever farhelm is
+/// not on the remote's `PATH` or its supervisor serves a non-default state
+/// directory — the case the e2e harness itself is built on.
 ///
-/// `ops` is the page's live-operation token, claimed HERE at submit rather
-/// than reflected from a prop: this form previously took no gate at all, so
-/// its POST could start beside a create or a removal that had already begun
-/// — and a `blocked` prop would not have fixed it, since a prop is one
-/// render behind (see the `ops` module).
-///
-/// A 2xx whose body will not decode is a SUCCESS here: the host was
-/// registered, so the form closes and the panel refreshes, and the unread
-/// reply becomes a warning on the new row rather than an error on a form
-/// that would otherwise invite the user to add the same host twice.
+/// Discovery claims no page token because its network wait must not freeze
+/// unrelated page work. It can still mutate the registry when a supervisor
+/// answers, so its local re-entry guard and authoritative refresh are part of
+/// the contract. Only explicit confirmation starts a provisioning run and
+/// claims `OpLock` around its POST.
 #[component]
-fn AddHostForm(mut ops: OpLock, on_added: EventHandler<Option<String>>) -> Element {
+fn AddHostForm(
+    mut ops: OpLock,
+    on_added: EventHandler<Option<String>>,
+    on_refresh: EventHandler<()>,
+) -> Element {
     let base = use_context::<ApiBase>().0;
     let mut ssh = use_signal(String::new);
     let mut remote_farhelm = use_signal(String::new);
     let mut remote_state_dir = use_signal(String::new);
     let mut error = use_signal(|| None::<String>);
-    let busy = ops.busy();
+    let mut probing = use_signal(|| false);
+    let mut offer = use_signal(|| None::<AddOffer>);
+    let page_busy = ops.busy();
+    let busy = page_busy || *probing.read();
+
+    let confirm_base = base.clone();
+    let confirm = move |_| {
+        let Some(planned) = offer.peek().clone() else {
+            return;
+        };
+        let current = AddBinding {
+            destination: ssh.peek().clone(),
+            remote_farhelm: remote_farhelm.peek().clone(),
+            remote_state_dir: remote_state_dir.peek().clone(),
+        };
+        if planned.binding != current {
+            offer.set(None);
+            error.set(Some(
+                "the host fields changed after discovery; probe again".to_string(),
+            ));
+            return;
+        }
+        let Some(claim) = ops.claim_guard() else {
+            return;
+        };
+        // The helm may consume this id before any later refusal or transport
+        // ambiguity reaches the browser. Never present it for a second use.
+        offer.set(None);
+        error.set(None);
+        let base = confirm_base.clone();
+        spawn(async move {
+            let result = provision_host(&base, &planned.probe_id).await;
+            drop(claim);
+            match result {
+                Ok(ProvisioningSubmission::Accepted(_)) => on_added.call(None),
+                Ok(ProvisioningSubmission::Unvalidated(warning)) => on_added.call(Some(warning)),
+                Err(problem) => {
+                    error.set(Some(problem));
+                    on_refresh.call(());
+                }
+            }
+        });
+    };
 
     rsx! {
         form {
             class: "add-host-form",
             onsubmit: move |evt| {
                 evt.prevent_default();
-                // The claim IS the guard, and it happens synchronously here:
-                // the rerender that disables these controls is not
-                // synchronous with the event that queued this submit, and a
-                // second add would either duplicate the destination (409) or
-                // register a second entry for one machine.
-                if !ops.claim() {
+                // Discovery can register an answering supervisor, but it
+                // still stays outside the page lock. This synchronous guard
+                // prevents a second Enter in the same browser task from
+                // retaining two competing one-use plans.
+                if *probing.peek() || offer.peek().is_some() || ops.busy_now() {
                     return;
                 }
                 error.set(None);
+                probing.set(true);
                 let base = base.clone();
-                let (destination, farhelm, state_dir) = (ssh(), remote_farhelm(), remote_state_dir());
+                let binding = AddBinding {
+                    destination: ssh(),
+                    remote_farhelm: remote_farhelm(),
+                    remote_state_dir: remote_state_dir(),
+                };
+                let destination = binding.destination.clone();
+                let farhelm = binding.remote_farhelm.clone();
+                let state_dir = binding.remote_state_dir.clone();
                 spawn(async move {
-                    match add_host(&base, &destination, &farhelm, &state_dir).await {
-                        Ok(Commit::Confirmed) => on_added.call(None),
-                        Ok(Commit::Unvalidated(warning)) => on_added.call(Some(warning)),
-                        Err(e) => error.set(Some(e)),
+                    match probe_ssh_host(&base, &destination, &farhelm, &state_dir).await {
+                        Ok(ProbeResponse::Discovered) => on_added.call(None),
+                        Ok(ProbeResponse::Provisionable {
+                            probe_id,
+                            confirmation,
+                        }) => offer.set(Some(AddOffer {
+                            probe_id,
+                            confirmation,
+                            binding,
+                        })),
+                        Ok(ProbeResponse::Manual { reason }) => error.set(Some(reason)),
+                        Ok(ProbeResponse::Unvalidated(problem)) => {
+                            // A successful probe may have registered an
+                            // answering supervisor before its unreadable
+                            // body reached this client. Refresh before the
+                            // user can mistake the still-open form for proof
+                            // that nothing committed.
+                            error.set(Some(problem));
+                            on_refresh.call(());
+                        }
+                        Err(problem) => error.set(Some(problem)),
                     }
-                    // Released on every path, unlike the create form's,
-                    // which navigates away: there is no navigation on
-                    // success here, so a token left held would strand the
-                    // whole page inert.
-                    ops.release();
+                    probing.set(false);
                 });
             },
             // Same total opt-out of browser text mangling the create form's
             // command fields carry, for the same reason: all three of these
             // become part of a command line, and a "corrected" one dials or
             // execs something the user did not type.
-            label {
-                "ssh destination"
-                input {
-                    r#type: "text",
-                    class: "add-host-ssh",
-                    required: true,
-                    autocomplete: "off",
-                    autocorrect: "off",
-                    autocapitalize: "none",
-                    spellcheck: "false",
-                    value: "{ssh}",
-                    disabled: busy,
-                    oninput: move |evt| ssh.set(evt.value()),
+            if let Some(planned) = offer.read().clone() {
+                PlanConfirmation {
+                    confirmation: planned.confirmation,
+                    busy: page_busy,
+                    confirm_label: "confirm setup",
+                    on_confirm: confirm,
+                    on_cancel: move |_| {
+                        if !ops.busy_now() {
+                            offer.set(None);
+                            error.set(None);
+                        }
+                    },
                 }
-            }
-            label {
-                "remote farhelm (optional)"
-                input {
-                    r#type: "text",
-                    class: "add-host-farhelm",
-                    autocomplete: "off",
-                    autocorrect: "off",
-                    autocapitalize: "none",
-                    spellcheck: "false",
-                    value: "{remote_farhelm}",
-                    disabled: busy,
-                    oninput: move |evt| remote_farhelm.set(evt.value()),
+            } else {
+                label {
+                    "ssh destination"
+                    input {
+                        r#type: "text",
+                        class: "add-host-ssh",
+                        required: true,
+                        autocomplete: "off",
+                        autocorrect: "off",
+                        autocapitalize: "none",
+                        spellcheck: "false",
+                        value: "{ssh}",
+                        disabled: busy,
+                        oninput: move |evt| ssh.set(evt.value()),
+                    }
                 }
-            }
-            label {
-                "remote state dir (optional)"
-                input {
-                    r#type: "text",
-                    class: "add-host-state-dir",
-                    autocomplete: "off",
-                    autocorrect: "off",
-                    autocapitalize: "none",
-                    spellcheck: "false",
-                    value: "{remote_state_dir}",
-                    disabled: busy,
-                    oninput: move |evt| remote_state_dir.set(evt.value()),
+                label {
+                    "remote farhelm (optional)"
+                    input {
+                        r#type: "text",
+                        class: "add-host-farhelm",
+                        autocomplete: "off",
+                        autocorrect: "off",
+                        autocapitalize: "none",
+                        spellcheck: "false",
+                        value: "{remote_farhelm}",
+                        disabled: busy,
+                        oninput: move |evt| remote_farhelm.set(evt.value()),
+                    }
                 }
-            }
-            button {
-                r#type: "submit",
-                class: "btn add-host-submit",
-                disabled: busy,
-                "add"
+                label {
+                    "remote state dir (optional)"
+                    input {
+                        r#type: "text",
+                        class: "add-host-state-dir",
+                        autocomplete: "off",
+                        autocorrect: "off",
+                        autocapitalize: "none",
+                        spellcheck: "false",
+                        value: "{remote_state_dir}",
+                        disabled: busy,
+                        oninput: move |evt| remote_state_dir.set(evt.value()),
+                    }
+                }
+                button {
+                    r#type: "submit",
+                    class: "btn add-host-submit",
+                    disabled: busy,
+                    if *probing.read() { "probing…" } else { "add" }
+                }
             }
             if let Some(err) = error.read().clone() {
-                div { class: "create-session-error add-host-error", "{err}" }
+                PeerLine {
+                    class: "create-session-error add-host-error",
+                    parts: probe_error_parts(err),
+                }
             }
         }
     }
@@ -1381,6 +1531,16 @@ fn AddHostForm(mut ops: OpLock, on_added: EventHandler<Option<String>>) -> Eleme
 mod tests {
     use super::*;
     use crate::peer::detail_text;
+
+    /// Probe and manual diagnostics cannot carry bidi or invisible controls
+    /// into the add form even though the helm relays host-produced text.
+    #[test]
+    fn probe_errors_cross_the_peer_text_boundary() {
+        let shown = detail_text(&probe_error_parts(
+            "ssh failed \u{202E}spoof\u{200B}".to_string(),
+        ));
+        assert_eq!(shown, "ssh failed <U+202E>spoof<U+200B>");
+    }
 
     /// A host in the given state, with the rest of the row as plain as
     /// possible — every assertion below is about the state alone.
@@ -1641,7 +1801,7 @@ mod tests {
         );
     }
 
-    /// The manual-start remedy belongs to exactly one cause, and it must be
+    /// The manual-start fallback belongs to exactly one cause, and it must be
     /// the helm's OWN sentence — which is the one that names the exact
     /// command, `--state-dir` and all (PLAN_M6.md item 7's contract-borne
     /// remedy).
@@ -1676,7 +1836,8 @@ mod tests {
         );
         assert!(
             !hint.contains("install"),
-            "provisioning is M7's; this must not offer to set anything up: {hint}"
+            "the automatic offer is rendered from the probe plan, never invented in this \
+             fallback: {hint}"
         );
         let diagnosis = detail_text(&state_detail(&down));
         assert!(

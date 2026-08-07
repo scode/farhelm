@@ -774,6 +774,117 @@ body,
   padding: 4px 10px;
 }
 
+/* Provisioning stays inside its host row because execution state and progress
+   reads are host-scoped. Acceptance also refreshes the global registry. A
+   left rule makes the long action list subordinate to the row without making
+   it look page-blocking — it is not; OpLock ends at acceptance. */
+.provisioning-panel {
+  border-left: 2px solid #2d3138;
+  margin: 5px 0 1px 10px;
+  padding: 3px 0 3px 10px;
+}
+
+.provisioning-actions,
+.provisioning-confirm-actions,
+.provisioning-run-header {
+  display: flex;
+  align-items: baseline;
+  gap: 7px;
+}
+
+.provisioning-update,
+.provisioning-rerun,
+.provisioning-confirm,
+.provisioning-cancel {
+  font-size: 12px;
+  padding: 2px 8px;
+}
+
+/* The helm rendered this text from the same plan the executor consumes.
+   Preserve its line boundaries and whitespace; wrapping long paths is the
+   only layout intervention, and does not change the text copied or read. */
+.provisioning-plan {
+  background: #14161a;
+  border: 1px solid #2d3138;
+  border-radius: 3px;
+  color: #c5cad3;
+  font: inherit;
+  font-size: 12px;
+  line-height: 1.45;
+  margin: 2px 0 6px;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  padding: 7px 9px;
+  white-space: pre-wrap;
+}
+
+.provisioning-title {
+  color: #d8dee9;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.provisioning-status,
+.provisioning-planning {
+  color: #8a919e;
+  font-size: 12px;
+}
+
+.provisioning-steps {
+  color: #aeb4bf;
+  font-size: 12px;
+  margin: 4px 0 2px;
+  padding-left: 22px;
+}
+
+.provisioning-step {
+  padding: 1px 0;
+}
+
+.provisioning-step-name {
+  color: #d8dee9;
+  margin-right: 7px;
+}
+
+.provisioning-step-status {
+  color: #8a919e;
+}
+
+.provisioning-step[data-status="completed"] .provisioning-step-status,
+.provisioning-step[data-status="skipped"] .provisioning-step-status {
+  color: #7fd88f;
+}
+
+.provisioning-step[data-status="degraded"] .provisioning-step-status {
+  color: #d8b45f;
+}
+
+.provisioning-step[data-status="failed"] .provisioning-step-status,
+.provisioning-run[data-provisioning-status="failed"] .provisioning-status {
+  color: #e0685f;
+}
+
+.provisioning-step-message,
+.provisioning-run-message,
+.provisioning-error,
+.provisioning-read-error {
+  font-size: 12px;
+  padding-top: 2px;
+}
+
+.provisioning-step-message,
+.provisioning-run-message {
+  color: #aeb4bf;
+}
+
+/* The manual command never disappears. It is quiet while automatic setup
+   is available and returns to the ordinary remedy weight when the probe says
+   the machine has no supported manager. */
+.provisioning-manual.secondary {
+  color: #8a919e;
+  margin-top: 4px;
+}
+
 /* One host's profiles, expanded inside its own row (PLAN_M6_75.md item 8).
 
    Indented and ruled on the left rather than boxed: it belongs to the row

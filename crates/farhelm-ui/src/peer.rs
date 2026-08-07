@@ -208,6 +208,33 @@ pub(crate) fn PeerLine(class: String, parts: Vec<DetailPart>) -> Element {
     }
 }
 
+/// Render peer-authored multiline text without surrendering its line shape.
+///
+/// The newlines are structural and trusted: the server uses them to separate
+/// the action a user is about to authorize. Each line's contents are still a
+/// peer value, escaped and direction-isolated independently so one hostile
+/// path cannot reorder another line or the confirmation controls around it.
+#[component]
+pub(crate) fn PeerBlock(class: String, text: String) -> Element {
+    let lines = text.lines().collect::<Vec<_>>();
+    let last = lines.len().saturating_sub(1);
+    rsx! {
+        pre { class: "{class}",
+            for (index, line) in lines.iter().enumerate() {
+                span {
+                    key: "{index}",
+                    class: "peer-value peer-line",
+                    dir: "ltr",
+                    "{display_peer(line)}"
+                }
+                if index != last {
+                    br {}
+                }
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -275,5 +302,17 @@ mod tests {
         // A value whose only content is an escape is visible BECAUSE of the
         // escape, so it renders as itself rather than as the blank form.
         assert_eq!(display_peer("\u{202E}"), "<U+202E>");
+    }
+
+    /// A confirmation keeps trusted newlines while every hostile character
+    /// inside those lines becomes visible rather than controlling layout.
+    #[test]
+    fn multiline_peer_text_preserves_lines_and_escapes_each_value() {
+        let raw = "write /home/alice\u{202E}/unit\nrestart service\u{200B}";
+        let shown = raw.lines().map(display_peer).collect::<Vec<_>>();
+
+        assert_eq!(shown.len(), 2);
+        assert_eq!(shown[0], "write /home/alice<U+202E>/unit");
+        assert_eq!(shown[1], "restart service<U+200B>");
     }
 }

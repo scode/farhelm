@@ -521,10 +521,12 @@ pub(crate) fn ListView(on_open: EventHandler<Session>) -> Element {
     // — see `ops::ReadGate` for why successes and failures are gated
     // differently.
     let mut hosts_reads = use_signal(ReadGate::default);
-    // Which host row is BUSY, for drawing only: the exclusion is the token.
-    // Lifted out of `HostsPanel` because navigating away unmounts the tasks
-    // running its mutations, so this component has to see them.
-    let busy_host = use_signal(|| None::<HostId>);
+    // Ordinary host mutations and accepted provisioning runs are independent
+    // owners. They stay in separate sets so one completion cannot erase the
+    // other's busy state; rows render their union. Both live above the hosts
+    // panel because navigating away can unmount the task that reported them.
+    let mutation_busy_hosts = use_signal(HashSet::<HostId>::new);
+    let provisioning_busy_hosts = use_signal(HashSet::<HostId>::new);
     // Per-session, not one shared slot: a stop failing on session A must
     // not blank out session B's still-fresh success (or vice versa), and
     // a LATER success on any session must not silently erase an EARLIER
@@ -1546,7 +1548,8 @@ pub(crate) fn ListView(on_open: EventHandler<Session>) -> Element {
         HostsPanel {
             hosts,
             ops,
-            busy_host,
+            mutation_busy_hosts,
+            provisioning_busy_hosts,
             profiles_open,
             profiles: host_profiles,
             on_changed: refresh_hosts,

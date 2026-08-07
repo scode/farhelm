@@ -117,6 +117,7 @@ mod list;
 mod ops;
 mod peer;
 mod profiles;
+mod provisioning;
 mod reader;
 mod reconnect;
 mod rename;
