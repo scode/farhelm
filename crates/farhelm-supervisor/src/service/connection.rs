@@ -152,9 +152,27 @@ pub(crate) struct ConnectionCtx<'a> {
     pub(crate) tasks: &'a mut tokio::task::JoinSet<()>,
 }
 
-/// Serve one protocol connection. Generic over the byte stream so tests
-/// can drive it over an in-process duplex pipe with the same code path
-/// production uses over the unix socket.
+impl ConnectionCtx<'_> {
+    /// Derive a create reservation's deduplication window from this
+    /// connection, never from request fields (PLAN_M7.md item 2).
+    ///
+    /// Every connection this PR admits is the existing interactive kind;
+    /// an auth-bearing hello is refused before a `ConnectionCtx` exists.
+    /// The answer therefore remains M3's permanent tombstone. PLAN_M7.md
+    /// item 4 admits authenticated spawn connections and changes this seam
+    /// to return `SessionLifetime` for their creates.
+    pub(crate) fn create_dedup_scope(&self) -> crate::store::DedupScope {
+        crate::store::DedupScope::Permanent
+    }
+}
+
+/// Serve one admitted protocol connection.
+///
+/// Generic over the byte stream so tests can drive it over an in-process
+/// duplex pipe with the same code path production uses over the unix
+/// socket. Until PLAN_M7.md item 4 can validate session credentials and
+/// restrict the request slice, an auth-bearing hello is refused before the
+/// request loop starts; it is never treated as an ordinary local peer.
 pub async fn handle_connection<S>(sup: Arc<Supervisor>, stream: S) -> anyhow::Result<()>
 where
     S: AsyncRead + AsyncWrite + Send + 'static,
@@ -172,7 +190,24 @@ where
     // this process minted or read back a durable one — never a fresh read
     // per connection; the value is immutable for the process lifetime, so
     // cloning it here is cheap and there is nothing to race.
-    handshake_with_host_identity(&mut reader, &mut writer, sup.host_identity.clone()).await?;
+    let peer_hello =
+        handshake_with_host_identity(&mut reader, &mut writer, sup.host_identity.clone()).await?;
+    if matches!(peer_hello, ControlMsg::Hello { auth: Some(_), .. }) {
+        // PLAN_M7.md item 4 validates the credential and installs the
+        // restricted operation slice. Until that exists, accepting this
+        // hello would silently upgrade a deliberately restricted peer to
+        // today's full-authority connection.
+        const MESSAGE: &str = "session-authenticated spawn is not available in this build; upgrade the supervisor \
+             before retrying";
+        writer
+            .write_control(&ControlMsg::Error {
+                req_id: 0,
+                message: MESSAGE.to_string(),
+                kind: ErrorKind::Unauthorized,
+            })
+            .await?;
+        anyhow::bail!(MESSAGE);
+    }
 
     // Single writer task; everything that wants to send (request
     // handlers, the output forwarder, takeover notifications) goes
@@ -1378,6 +1413,9 @@ mod tests {
         let oversized = ControlMsg::SessionList {
             req_id,
             sessions: vec![SessionInfo {
+                creation_seq: None,
+                parent: None,
+                archived: false,
                 id: "s1".to_string(),
                 title: "x".repeat(farhelm_proto::MAX_FRAME_LEN as usize),
                 created_at: 1_700_000_000,
@@ -1434,6 +1472,9 @@ mod tests {
         let msg = ControlMsg::SessionCreated {
             req_id: 7,
             session: SessionInfo {
+                creation_seq: None,
+                parent: None,
+                archived: false,
                 id: "s1".to_string(),
                 title: "demo".to_string(),
                 created_at: 1_700_000_000,
@@ -1463,6 +1504,9 @@ mod tests {
         let msg = ControlMsg::SessionRestarted {
             req_id: 9,
             session: SessionInfo {
+                creation_seq: None,
+                parent: None,
+                archived: false,
                 id: "s1".to_string(),
                 title: "demo".to_string(),
                 created_at: 1_700_000_000,
@@ -1593,6 +1637,72 @@ mod tests {
             channel: 1,
             reason: "x".into(),
         });
+    }
+
+    /// An authenticated spawn hello must fail closed until PLAN_M7.md item
+    /// 4 can validate it and install the restricted operation slice. A
+    /// silent success here would grant the peer full interactive authority.
+    #[tokio::test]
+    async fn an_authenticated_spawn_hello_is_refused_until_admission_exists() {
+        let state = StateDir::new();
+        let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
+            .await
+            .expect("supervisor construction touches only tmux, not the launch shim");
+        let (client_side, server_side) = tokio::io::duplex(64 * 1024);
+        let server = tokio::spawn(async move { handle_connection(sup, server_side).await });
+        let (r, w) = tokio::io::split(client_side);
+        let mut reader = FrameReader::new(r);
+        let mut writer = FrameWriter::new(w);
+        writer
+            .write_control(&ControlMsg::Hello {
+                protocol_version: farhelm_proto::PROTOCOL_VERSION,
+                build_version: farhelm_proto::BUILD_VERSION.to_string(),
+                role: "spawn".to_string(),
+                host_identity: None,
+                auth: Some(farhelm_proto::SessionAuth {
+                    session_id: "session-1".to_string(),
+                    token: "secret".to_string(),
+                }),
+            })
+            .await
+            .expect("send authenticated hello");
+
+        let hello = reader
+            .read_frame()
+            .await
+            .expect("read supervisor hello")
+            .expect("supervisor must answer first");
+        assert!(matches!(
+            parse_control(&hello),
+            Ok(ControlMsg::Hello { .. })
+        ));
+        let refusal = reader
+            .read_frame()
+            .await
+            .expect("read admission refusal")
+            .expect("the refusal must reach the peer before close");
+        let ControlMsg::Error {
+            req_id,
+            kind,
+            message,
+        } = parse_control(&refusal).expect("decode refusal")
+        else {
+            panic!("an authenticated hello must receive an Error");
+        };
+        assert_eq!(req_id, 0);
+        assert_eq!(kind, ErrorKind::Unauthorized);
+        assert!(
+            message.contains("session-authenticated spawn")
+                && message.contains("not available in this build")
+                && message.contains("upgrade"),
+            "the refusal must name the unavailable capability and the remedy: {message}"
+        );
+
+        let error = server
+            .await
+            .expect("connection task must not panic")
+            .expect_err("the restricted peer must not enter the request loop");
+        assert!(format!("{error:#}").contains("session-authenticated spawn"));
     }
 
     /// Drive one real `handle_connection` server task over an in-process

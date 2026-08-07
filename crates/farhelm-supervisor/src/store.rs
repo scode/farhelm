@@ -107,7 +107,7 @@ const BUSY_TIMEOUT: Duration = Duration::from_secs(5);
 /// step in `apply_schema`: version 2 (PLAN_M3.md item 2 — the durable
 /// last-known outcome and the boot id) is the first real migration this
 /// database has ever had, and the template every later one follows.
-const SCHEMA_VERSION: i64 = 8;
+const SCHEMA_VERSION: i64 = 9;
 
 /// The sole row id of [`supervisor_meta`](apply_schema) — the table is
 /// single-row by construction (a `CHECK` on this value), so every read and
@@ -627,13 +627,17 @@ type OutcomeColumns = (String, Option<i32>, Option<String>, Option<String>);
 /// for rather than having to guess whether the previous attempt got
 /// anywhere.
 ///
-/// Rows here are TOMBSTONES: they outlive the session they created (see
+/// `Permanent` rows are TOMBSTONES: they outlive the session they created (see
 /// [`SessionStore::delete_session_settling_reservations`]), because the
 /// question a replay asks — "did this intent already happen?" — still has
 /// an answer after the session is gone, and the honest answer is "yes, and
 /// it was deleted", never a fresh duplicate.
 ///
-/// Nothing prunes them, and the honest accounting is that each row holds a
+/// PLAN_M7.md item 2 adds `SessionLifetime` for spawn. Those rows become
+/// prunable when their child is gone, but item 4 owns that pruning; this PR
+/// records the policy without changing deletion behavior.
+///
+/// Each row holds a
 /// full copy of its request's canonical fields (`service`'s
 /// `create_fingerprint`), so a create with a long invocation stores a long
 /// row — bounded by the request caps, not small in principle. Two separate
@@ -665,7 +669,45 @@ pub struct Reservation {
     /// probes tmux for exactly this name at decision time rather than
     /// trusting a session map that may predate a late-completing create.
     pub tmux_name: String,
+    /// How long this row deduplicates its key. PLAN_M7.md item 4 makes
+    /// `SessionLifetime` rows prunable once their child is gone; this step
+    /// records the policy but keeps all current creates `Permanent`.
+    pub dedup_scope: DedupScope,
     pub outcome: ReservationOutcome,
+}
+
+/// The lifetime policy attached to one create reservation (PLAN_M7.md
+/// item 2).
+///
+/// This is derived from the creating connection and never appears on the
+/// wire, so a caller cannot widen its own deduplication window. Pruning the
+/// bounded scope belongs to PLAN_M7.md item 4; recording it now keeps one
+/// reservation mechanism for interactive creates and spawn.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DedupScope {
+    /// M3's existing tombstone behavior: the key remains spent forever.
+    Permanent,
+    /// The key remains spent only while the child session exists.
+    SessionLifetime,
+}
+
+impl DedupScope {
+    /// Stable SQLite spelling, independent of Rust variant names.
+    fn column(self) -> &'static str {
+        match self {
+            DedupScope::Permanent => "permanent",
+            DedupScope::SessionLifetime => "session_lifetime",
+        }
+    }
+
+    /// Decode the stored policy without guessing at corrupt or future data.
+    fn from_column(text: &str) -> anyhow::Result<Self> {
+        Ok(match text {
+            "permanent" => DedupScope::Permanent,
+            "session_lifetime" => DedupScope::SessionLifetime,
+            other => anyhow::bail!("reservation row has unrecognized dedup scope {other:?}"),
+        })
+    }
 }
 
 /// A create intent being claimed, and the fingerprint that binds it to one
@@ -680,6 +722,8 @@ pub struct Reservation {
 pub struct IntentClaim {
     pub intent_key: String,
     pub fingerprint: String,
+    /// Derived from the creating connection, never from request fields.
+    pub dedup_scope: DedupScope,
 }
 
 /// One reservation's outcome, addressed by BOTH identities it must match.
@@ -924,6 +968,7 @@ fn error_kind_column(kind: farhelm_proto::ErrorKind) -> &'static str {
         K::InvalidRequest => "invalid_request",
         K::Internal => "internal",
         K::Conflict => "conflict",
+        K::Unauthorized => "unauthorized",
     }
 }
 
@@ -937,6 +982,7 @@ fn error_kind_from_column(text: &str) -> anyhow::Result<farhelm_proto::ErrorKind
         "invalid_request" => K::InvalidRequest,
         "internal" => K::Internal,
         "conflict" => K::Conflict,
+        "unauthorized" => K::Unauthorized,
         other => anyhow::bail!("reservation row has unrecognized error kind {other:?}"),
     })
 }
@@ -1344,6 +1390,9 @@ pub struct SessionStore {
 ///   id`/`source_profile_name`, the immutable identity of the profile a
 ///   session was created from. One step for both, and nothing backfilled;
 ///   the step's own comment carries the reasoning for each.
+/// - 9: PLAN_M7.md item 2 — `create_reservations.dedup_scope`, defaulting
+///   existing interactive reservations to their historical `permanent`
+///   policy. Spawn begins writing `session_lifetime` in item 4.
 ///
 /// `may_migrate` is the caller's assertion that it holds this state
 /// directory's exclusivity (see `service::StateDirOwnership`). Upgrading a
@@ -1410,13 +1459,14 @@ fn apply_schema(conn: &Connection, may_migrate: bool) -> anyhow::Result<()> {
                  tmux_name    TEXT NOT NULL,
                  error_kind   TEXT,
                  error_detail TEXT,
-                 created_at   INTEGER NOT NULL
+                 created_at   INTEGER NOT NULL,
+                 dedup_scope  TEXT NOT NULL DEFAULT 'permanent'
              ) STRICT;
              CREATE INDEX create_reservations_pending
                  ON create_reservations (session_id) WHERE state = 'pending';
              {PROFILES_SCHEMA}
              {STARTER_PROFILES}
-             PRAGMA user_version = 8;
+             PRAGMA user_version = 9;
              COMMIT;"
         ))
         .context("creating schema")?;
@@ -1626,6 +1676,22 @@ fn apply_schema(conn: &Connection, may_migrate: bool) -> anyhow::Result<()> {
         ))
         .context("migrating schema from version 7 to 8")?;
         version = 8;
+    }
+    if version == 8 {
+        // PLAN_M7.md item 2's per-reservation deduplication window. Every
+        // existing row came from an interactive create, so `permanent` is
+        // both the compatibility default and its actual historical policy.
+        // Spawn starts writing `session_lifetime` in item 4, when the
+        // authenticated creating connection exists to derive it from.
+        conn.execute_batch(
+            "BEGIN;
+             ALTER TABLE create_reservations
+                 ADD COLUMN dedup_scope TEXT NOT NULL DEFAULT 'permanent';
+             PRAGMA user_version = 9;
+             COMMIT;",
+        )
+        .context("migrating schema from version 8 to 9")?;
+        version = 9;
     }
     if version == SCHEMA_VERSION {
         return Ok(());
@@ -2098,7 +2164,8 @@ pub enum ProfileCreation {
 fn read_reservation(conn: &Connection, intent_key: &str) -> anyhow::Result<Option<Reservation>> {
     let row = conn
         .query_row(
-            "SELECT fingerprint, state, session_id, tmux_name, error_kind, error_detail \
+            "SELECT fingerprint, state, session_id, tmux_name, error_kind, error_detail, \
+                    dedup_scope \
              FROM create_reservations WHERE intent_key = ?1",
             rusqlite::params![intent_key],
             |r| {
@@ -2109,12 +2176,15 @@ fn read_reservation(conn: &Connection, intent_key: &str) -> anyhow::Result<Optio
                     r.get::<_, String>(3)?,
                     r.get::<_, Option<String>>(4)?,
                     r.get::<_, Option<String>>(5)?,
+                    r.get::<_, String>(6)?,
                 ))
             },
         )
         .optional()
         .context("reading a create reservation")?;
-    let Some((fingerprint, state, session_id, tmux_name, error_kind, error_detail)) = row else {
+    let Some((fingerprint, state, session_id, tmux_name, error_kind, error_detail, dedup_scope)) =
+        row
+    else {
         return Ok(None);
     };
     let outcome = ReservationOutcome::from_columns(&state, error_kind, error_detail)
@@ -2124,6 +2194,8 @@ fn read_reservation(conn: &Connection, intent_key: &str) -> anyhow::Result<Optio
         fingerprint,
         session_id,
         tmux_name,
+        dedup_scope: DedupScope::from_column(&dedup_scope)
+            .with_context(|| format!("create reservation {intent_key}"))?,
         outcome,
     }))
 }
@@ -2243,8 +2315,8 @@ impl SessionStore {
                     .execute(
                         "INSERT INTO create_reservations \
                          (intent_key, fingerprint, state, session_id, tmux_name, \
-                          error_kind, error_detail, created_at) \
-                         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8) \
+                          error_kind, error_detail, created_at, dedup_scope) \
+                         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9) \
                          ON CONFLICT(intent_key) DO NOTHING",
                         rusqlite::params![
                             claim.intent_key,
@@ -2255,6 +2327,7 @@ impl SessionStore {
                             error_kind,
                             error_detail,
                             now_unix(),
+                            claim.dedup_scope.column(),
                         ],
                     )
                     .context("claiming the create reservation")?;
@@ -2311,8 +2384,8 @@ impl SessionStore {
             conn.execute(
                 "INSERT INTO create_reservations \
                  (intent_key, fingerprint, state, session_id, tmux_name, \
-                  error_kind, error_detail, created_at) \
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8) \
+                  error_kind, error_detail, created_at, dedup_scope) \
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9) \
                  ON CONFLICT(intent_key) DO NOTHING",
                 rusqlite::params![
                     claim.intent_key,
@@ -2323,6 +2396,7 @@ impl SessionStore {
                     error_kind,
                     error_detail,
                     now_unix(),
+                    claim.dedup_scope.column(),
                 ],
             )
             .context("recording a refused create against its intent key")?;
@@ -2749,7 +2823,7 @@ impl SessionStore {
             let conn = conn.lock().expect("session db mutex poisoned");
             let mut stmt = conn
                 .prepare(
-                    "SELECT intent_key, fingerprint, session_id, tmux_name \
+                    "SELECT intent_key, fingerprint, session_id, tmux_name, dedup_scope \
                      FROM create_reservations WHERE state = 'pending'",
                 )
                 .context("preparing the pending-reservation query")?;
@@ -2760,6 +2834,15 @@ impl SessionStore {
                         fingerprint: r.get(1)?,
                         session_id: r.get(2)?,
                         tmux_name: r.get(3)?,
+                        dedup_scope: DedupScope::from_column(&r.get::<_, String>(4)?).map_err(
+                            |error| {
+                                rusqlite::Error::FromSqlConversionFailure(
+                                    4,
+                                    rusqlite::types::Type::Text,
+                                    error.into(),
+                                )
+                            },
+                        )?,
                         outcome: ReservationOutcome::Pending,
                     })
                 })
@@ -4463,6 +4546,43 @@ mod tests {
         assert_eq!(version, SCHEMA_VERSION);
     }
 
+    /// Every pre-v11 reservation was interactive and therefore permanent.
+    /// The 8-to-9 migration must record that fact rather than inventing a
+    /// bounded lifetime for a key that was originally promised forever.
+    #[tokio::test]
+    async fn schema_8_reservations_migrate_to_permanent_dedup_scope() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let db_path = dir.path().join("supervisor.db");
+        plant_v7_database(&db_path, "s1");
+        let conn = Connection::open(&db_path).expect("open v7 fixture");
+        conn.execute_batch(&format!(
+            "ALTER TABLE sessions ADD COLUMN source_profile_id TEXT;
+             ALTER TABLE sessions ADD COLUMN source_profile_name TEXT;
+             {PROFILES_SCHEMA}
+             {STARTER_PROFILES}
+             PRAGMA user_version = 8;"
+        ))
+        .expect("v8 schema");
+        conn.execute(
+            "INSERT INTO create_reservations
+             (intent_key, fingerprint, state, session_id, tmux_name, created_at)
+             VALUES ('old-key', 'fp', 'created', 's1', 'fh-s1', 1700000000)",
+            [],
+        )
+        .expect("insert v8 reservation");
+        drop(conn);
+
+        let store = SessionStore::open(&db_path, true)
+            .await
+            .expect("migrate v8 reservation");
+        let reservation = store
+            .reservation("old-key")
+            .await
+            .expect("read migrated reservation")
+            .expect("the migration must preserve the row");
+        assert_eq!(reservation.dedup_scope, DedupScope::Permanent);
+    }
+
     /// The v6-to-v7 migration (PLAN_M6.md item 2's `host_identity` column)
     /// against a database that ALREADY HAS `supervisor_meta` data — every
     /// other migration test in this module starts that table empty
@@ -5854,12 +5974,26 @@ mod tests {
     /// claim that reserved it, exactly as `create_session`'s first step
     /// commits them.
     async fn insert_reserved(store: &SessionStore, id: &str, key: &str, fingerprint: &str) {
+        insert_reserved_with_scope(store, id, key, fingerprint, DedupScope::Permanent).await;
+    }
+
+    /// [`insert_reserved`] with an explicit scope for PLAN_M7.md item 2's
+    /// storage tests. Production callers derive this value from their
+    /// connection rather than accepting it from the wire.
+    async fn insert_reserved_with_scope(
+        store: &SessionStore,
+        id: &str,
+        key: &str,
+        fingerprint: &str,
+        dedup_scope: DedupScope,
+    ) {
         let claimed = store
             .insert_session(
                 launching_row(id),
                 Some(IntentClaim {
                     intent_key: key.to_string(),
                     fingerprint: fingerprint.to_string(),
+                    dedup_scope,
                 }),
             )
             .await
@@ -5906,9 +6040,10 @@ mod tests {
                 farhelm_proto::ErrorKind::InvalidRequest,
                 farhelm_proto::ErrorKind::Internal,
                 farhelm_proto::ErrorKind::Conflict,
+                farhelm_proto::ErrorKind::Unauthorized,
             ]
             .into_iter()
-            .zip(["failed-0", "failed-1", "failed-2", "failed-3"])
+            .zip(["failed-0", "failed-1", "failed-2", "failed-3", "failed-4"])
             .map(|(kind, key)| {
                 (
                     key,
@@ -5937,11 +6072,31 @@ mod tests {
             assert_eq!(read.session_id, format!("s{index}"));
             assert_eq!(read.tmux_name, format!("fh-s{index}"));
             assert_eq!(read.fingerprint, "fp");
+            assert_eq!(read.dedup_scope, DedupScope::Permanent);
         }
         assert_eq!(
             store.reservation("never-claimed").await.expect("read"),
             None,
             "a key this state directory has never seen has no reservation"
+        );
+    }
+
+    /// Both deduplication windows survive SQLite unchanged. This step does
+    /// not prune `SessionLifetime`; PLAN_M7.md item 4 owns that behavior.
+    #[tokio::test]
+    async fn reservation_dedup_scopes_round_trip() {
+        let (_dir, store) = fresh_store().await;
+        insert_reserved_with_scope(&store, "s1", "permanent", "fp", DedupScope::Permanent).await;
+        insert_reserved_with_scope(&store, "s2", "session", "fp", DedupScope::SessionLifetime)
+            .await;
+
+        assert_eq!(
+            reservation_of(&store, "permanent").await.dedup_scope,
+            DedupScope::Permanent
+        );
+        assert_eq!(
+            reservation_of(&store, "session").await.dedup_scope,
+            DedupScope::SessionLifetime
         );
     }
 
@@ -5965,6 +6120,7 @@ mod tests {
                 Some(IntentClaim {
                     intent_key: "shared-key".to_string(),
                     fingerprint: "fp".to_string(),
+                    dedup_scope: DedupScope::Permanent,
                 }),
             )
             .await
@@ -6099,10 +6255,19 @@ mod tests {
     /// `pending_reservations` is the reload worklist, so it must return
     /// exactly the rows reload can still act on — and none of the settled
     /// ones, which would grow without bound over a state directory's life.
+    /// The non-default scope is part of that work item: losing it here would
+    /// turn a bounded spawn key into a permanent tombstone during recovery.
     #[tokio::test]
     async fn pending_reservations_lists_only_the_unsettled_ones() {
         let (_dir, store) = fresh_store().await;
-        insert_reserved(&store, "s1", "still-pending", "fp").await;
+        insert_reserved_with_scope(
+            &store,
+            "s1",
+            "still-pending",
+            "fp",
+            DedupScope::SessionLifetime,
+        )
+        .await;
         insert_reserved(&store, "s2", "already-created", "fp").await;
         store
             .settle_reservations(vec![settlement(
@@ -6117,6 +6282,7 @@ mod tests {
         assert_eq!(pending.len(), 1, "got {pending:?}");
         assert_eq!(pending[0].intent_key, "still-pending");
         assert_eq!(pending[0].session_id, "s1");
+        assert_eq!(pending[0].dedup_scope, DedupScope::SessionLifetime);
         assert_eq!(pending[0].outcome, ReservationOutcome::Pending);
     }
 
@@ -6250,7 +6416,9 @@ mod tests {
     /// A refused intent is recorded with no session row at all — the shape
     /// a create rejected by validation leaves behind, so its retry replays
     /// the refusal instead of re-deriving one from a filesystem that may
-    /// have changed.
+    /// have changed. The non-default scope pins this method's independent
+    /// SQL path too: a failed spawn intent must remain prunable once its
+    /// session lifetime ends.
     #[tokio::test]
     async fn a_refused_intent_records_without_a_session_row() {
         let (_dir, store) = fresh_store().await;
@@ -6259,6 +6427,7 @@ mod tests {
                 IntentClaim {
                     intent_key: "key".to_string(),
                     fingerprint: "fp".to_string(),
+                    dedup_scope: DedupScope::SessionLifetime,
                 },
                 "s1",
                 "fh-s1",
@@ -6272,8 +6441,10 @@ mod tests {
             store.load_all().await.expect("load").is_empty(),
             "a validation refusal never had a session"
         );
+        let refused = reservation_of(&store, "key").await;
+        assert_eq!(refused.dedup_scope, DedupScope::SessionLifetime);
         assert_eq!(
-            reservation_of(&store, "key").await.outcome,
+            refused.outcome,
             ReservationOutcome::Failed {
                 kind: farhelm_proto::ErrorKind::InvalidRequest,
                 message: "working directory does not exist: /nope".to_string(),
@@ -6288,6 +6459,7 @@ mod tests {
                 IntentClaim {
                     intent_key: "live".to_string(),
                     fingerprint: "fp".to_string(),
+                    dedup_scope: DedupScope::Permanent,
                 },
                 "s3",
                 "fh-s3",
@@ -6438,6 +6610,7 @@ mod tests {
                 Some(IntentClaim {
                     intent_key: "retry".to_string(),
                     fingerprint: "fp".to_string(),
+                    dedup_scope: DedupScope::Permanent,
                 }),
             )
             .await
@@ -6477,9 +6650,10 @@ mod tests {
     /// a guessed outcome here either replays a success that never happened
     /// or launches a duplicate.
     ///
-    /// The matrix covers every way a `failed` row can be incomplete,
-    /// because each has its own tempting default (`Internal`, an empty
-    /// message) and every one of them would be a fabrication.
+    /// The matrix covers every way a `failed` row can be incomplete and an
+    /// unknown deduplication scope. Each has a tempting default (`Internal`,
+    /// an empty message, or `Permanent`), and every one would fabricate a
+    /// policy the row did not state.
     #[tokio::test]
     async fn a_corrupt_reservation_row_is_refused_rather_than_repaired() {
         let cases = [
@@ -6501,6 +6675,10 @@ mod tests {
                 "UPDATE create_reservations SET state = 'failed', error_kind = 'internal', \
                  error_detail = NULL",
                 "no error text",
+            ),
+            (
+                "UPDATE create_reservations SET dedup_scope = 'ephemeral'",
+                "ephemeral",
             ),
         ];
         for (corruption, expected) in cases {
@@ -7832,6 +8010,7 @@ mod tests {
                 Some(IntentClaim {
                     intent_key: "key".to_string(),
                     fingerprint: "fp".to_string(),
+                    dedup_scope: DedupScope::Permanent,
                 }),
             )
             .await

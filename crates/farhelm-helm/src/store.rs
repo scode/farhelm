@@ -3380,6 +3380,9 @@ mod tests {
     /// other's full field coverage.
     fn session(id: &str, created_at: i64) -> SessionInfo {
         SessionInfo {
+            creation_seq: None,
+            parent: None,
+            archived: false,
             id: id.to_string(),
             title: id.to_string(),
             created_at,

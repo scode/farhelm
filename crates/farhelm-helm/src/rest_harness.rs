@@ -82,6 +82,9 @@ fn test_cadence() -> Cadence {
 /// needs and no test is about.
 pub(crate) fn session(id: &str, created_at: i64) -> SessionInfo {
     SessionInfo {
+        creation_seq: None,
+        parent: None,
+        archived: false,
         id: id.to_string(),
         title: id.to_string(),
         created_at,
@@ -412,6 +415,7 @@ impl PeerBehavior {
             build_version: self.build.clone(),
             role: "supervisor".to_string(),
             host_identity: self.identity.clone(),
+            auth: None,
         }
     }
 
@@ -610,11 +614,13 @@ fn identified_hello(frame: farhelm_proto::Frame, behavior: &PeerBehavior) -> far
             build_version,
             role,
             host_identity: None,
+            auth: None,
         }) => farhelm_proto::Frame::control(&ControlMsg::Hello {
             protocol_version,
             build_version,
             role,
             host_identity: Some(identity.clone()),
+            auth: None,
         }),
         _ => frame,
     }

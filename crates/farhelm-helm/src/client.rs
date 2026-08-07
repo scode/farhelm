@@ -1381,6 +1381,8 @@ impl SupervisorClient {
                 req_id,
                 ControlMsg::CreateSession {
                     req_id,
+                    parent: None,
+                    profile_name: None,
                     cwd: cwd.to_string(),
                     // Always the RAW mode: this client has no profile
                     // catalog to resolve against and no picker to have
@@ -1441,6 +1443,8 @@ impl SupervisorClient {
                 req_id,
                 ControlMsg::CreateSession {
                     req_id,
+                    parent: None,
+                    profile_name: None,
                     cwd: cwd.to_string(),
                     // Exactly one of the two is `Some`; see this method's
                     // own docs for why that is a type-level split here
@@ -2674,6 +2678,9 @@ mod tests {
 
     fn session(id: &str) -> SessionInfo {
         SessionInfo {
+            creation_seq: None,
+            parent: None,
+            archived: false,
             id: id.into(),
             title: id.into(),
             created_at: 1_700_000_000,

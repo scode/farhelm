@@ -345,6 +345,9 @@ mod tests {
                 row.id,
                 "identity-known",
                 vec![farhelm_proto::SessionInfo {
+                    creation_seq: None,
+                    parent: None,
+                    archived: false,
                     id: "remembered".to_string(),
                     title: "remembered".to_string(),
                     created_at: 100,

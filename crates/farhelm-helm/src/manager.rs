@@ -225,8 +225,9 @@ pub const REFRESH_BYTE_CAP: usize = 64 * 1024 * 1024;
 /// A kibibyte is two orders of magnitude above every id any farhelm
 /// supervisor has ever minted and still leaves a cursor comfortably inside
 /// any HTTP head limit. Over-cap rows are poison-tier: skipped and warned
-/// about, never silently kept.
-pub const MAX_SESSION_ID_BYTES: usize = 1024;
+/// about, never silently kept. The value comes from `farhelm-proto` so this
+/// ingestion check cannot drift from the handshake's auth-session check.
+pub const MAX_SESSION_ID_BYTES: usize = farhelm_proto::MAX_SESSION_ID_BYTES;
 
 /// How long one cache refresh may take before the CONNECTION is torn down.
 ///
@@ -5308,6 +5309,7 @@ mod tests {
             build_version: hello.build.clone(),
             role: "supervisor".to_string(),
             host_identity: hello.identity.clone(),
+            auth: None,
         };
         if writer.write_control(&greeting).await.is_err() {
             return;
@@ -5403,6 +5405,9 @@ mod tests {
     /// and neither needs the other's field coverage.
     fn session(id: &str, created_at: i64) -> SessionInfo {
         SessionInfo {
+            creation_seq: None,
+            parent: None,
+            archived: false,
             id: id.to_string(),
             title: id.to_string(),
             created_at,

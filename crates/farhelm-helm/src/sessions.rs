@@ -1399,6 +1399,8 @@ mod tests {
             let request = parse_control(&reader.read_frame().await.unwrap().unwrap()).unwrap();
             let ControlMsg::CreateSession {
                 req_id,
+                parent: None,
+                profile_name: None,
                 cwd,
                 invocation,
                 // Bound rather than swept into the `..` below: which MODE
@@ -1446,6 +1448,9 @@ mod tests {
                 .write_frame(&Frame::control(&ControlMsg::SessionCreated {
                     req_id,
                     session: SessionInfo {
+                        creation_seq: None,
+                        parent: None,
+                        archived: false,
                         id: "sess-1".into(),
                         title: "some-agent".into(),
                         created_at: 1_700_000_000,
@@ -1517,6 +1522,8 @@ mod tests {
             let request = parse_control(&reader.read_frame().await.unwrap().unwrap()).unwrap();
             let ControlMsg::CreateSession {
                 req_id,
+                parent: None,
+                profile_name: None,
                 intent_key,
                 agent_kind,
                 resume_template,
@@ -1539,6 +1546,9 @@ mod tests {
                 .write_frame(&Frame::control(&ControlMsg::SessionCreated {
                     req_id,
                     session: SessionInfo {
+                        creation_seq: None,
+                        parent: None,
+                        archived: false,
                         id: "sess-1".into(),
                         title: "t".into(),
                         created_at: 1_700_000_000,
@@ -2110,6 +2120,9 @@ mod tests {
                 .write_control(&ControlMsg::SessionRestarted {
                     req_id,
                     session: farhelm_proto::SessionInfo {
+                        creation_seq: None,
+                        parent: None,
+                        archived: false,
                         id: "sess-1".into(),
                         title: "t".into(),
                         created_at: 1_700_000_000,
@@ -2249,6 +2262,9 @@ mod tests {
             // must fail the full-struct comparison below even if the
             // title alone looked right.
             let expected_session = SessionInfo {
+                creation_seq: None,
+                parent: None,
+                archived: false,
                 id: "sess-1".into(),
                 title: expected_title.clone(),
                 created_at: 1_700_000_000,
@@ -2417,6 +2433,9 @@ mod tests {
                     .write_control(&ControlMsg::SessionRenamed {
                         req_id,
                         session: farhelm_proto::SessionInfo {
+                            creation_seq: None,
+                            parent: None,
+                            archived: false,
                             id: "sess-1".into(),
                             title: String::new(),
                             created_at: 1_700_000_000,
@@ -2840,6 +2859,9 @@ mod tests {
                 .write_frame(&Frame::control(&ControlMsg::SessionCreated {
                     req_id,
                     session: SessionInfo {
+                        creation_seq: None,
+                        parent: None,
+                        archived: false,
                         id: "sess-new".into(),
                         title: "sess-new".into(),
                         created_at: 1_700_000_500,

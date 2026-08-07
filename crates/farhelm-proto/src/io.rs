@@ -424,6 +424,7 @@ pub async fn handshake_with_host_identity<R: AsyncRead + Unpin, W: AsyncWrite + 
             build_version: crate::BUILD_VERSION.to_string(),
             role: "supervisor".to_string(),
             host_identity,
+            auth: None,
         },
     )
     .await
@@ -454,6 +455,19 @@ pub const MAX_BUILD_VERSION_BYTES: usize = 256;
 /// costs a well-behaved peer is nothing; what shape validation would cost
 /// is a class of hosts that can never connect.
 pub const MAX_HOST_IDENTITY_BYTES: usize = 256;
+
+/// Longest encoded session bearer token a peer's hello may carry.
+///
+/// PLAN_M7.md item 4 will mint a random token whose normal hex or base64
+/// encoding is only tens of bytes. 128 bytes accommodates stronger random
+/// values and future encoding changes without letting a peer retain an
+/// arbitrary secret-sized payload for the connection's whole life.
+///
+/// LENGTH only — deliberately not shape. The token is an opaque bearer
+/// value, so validating its alphabet here would couple the handshake to a
+/// minting format that item 4 has not chosen and authentication itself does
+/// not need.
+pub const MAX_SESSION_AUTH_TOKEN_BYTES: usize = 128;
 
 /// Refuse an over-long hello field, naming which one and by how much.
 ///
@@ -501,6 +515,7 @@ async fn handshake_with_hello<R: AsyncRead + Unpin, W: AsyncWrite + Unpin>(
         protocol_version,
         build_version,
         host_identity,
+        auth,
         ..
     } = &msg
     else {
@@ -511,6 +526,14 @@ async fn handshake_with_hello<R: AsyncRead + Unpin, W: AsyncWrite + Unpin>(
     check_hello_length("build_version", build_version, MAX_BUILD_VERSION_BYTES)?;
     if let Some(identity) = host_identity {
         check_hello_length("host_identity", identity, MAX_HOST_IDENTITY_BYTES)?;
+    }
+    if let Some(auth) = auth {
+        check_hello_length(
+            "auth.session_id",
+            &auth.session_id,
+            crate::MAX_SESSION_ID_BYTES,
+        )?;
+        check_hello_length("auth.token", &auth.token, MAX_SESSION_AUTH_TOKEN_BYTES)?;
     }
     if *protocol_version == PROTOCOL_VERSION {
         return Ok(msg);
@@ -589,6 +612,7 @@ mod tests {
                 build_version: "9.9.9".into(),
                 role: "supervisor".into(),
                 host_identity: None,
+                auth: None,
             })
             .await
             .unwrap();
@@ -632,10 +656,10 @@ mod tests {
         }
     }
 
-    /// The hello's two free-text fields are LENGTH-capped at decode, and a
-    /// peer that exceeds one is refused rather than truncated.
+    /// The hello's retained free-text fields are LENGTH-capped at decode,
+    /// and a peer that exceeds one is refused rather than truncated.
     ///
-    /// Both fields are retained by the peer's counterpart for the whole
+    /// These fields are retained by the peer's counterpart for the whole
     /// life of the connection — the helm keeps them in `PeerHello` and
     /// renders them in a per-host state — so an unbounded one is a memory
     /// cost a peer chooses for the other side, per connection, and a
@@ -648,18 +672,46 @@ mod tests {
     /// an identity is opaque to every consumer by design (see
     /// [`ControlMsg::Hello`]); a format check would invent a compatibility
     /// rule no other code has.
+    ///
+    /// The authentication pair gets the same boundary treatment. Its
+    /// session id shares the protocol-wide id cap, while its opaque bearer
+    /// token has its own encoding-sized cap; both must be checked before a
+    /// future item-4 connection keeps either value as connection state.
     #[tokio::test]
     async fn handshake_refuses_over_long_hello_fields() {
-        let over = "x".repeat(MAX_BUILD_VERSION_BYTES.max(MAX_HOST_IDENTITY_BYTES) + 1);
         let cases = [
-            ("build_version", over.clone(), None),
+            (
+                "build_version",
+                "x".repeat(MAX_BUILD_VERSION_BYTES + 1),
+                None,
+                None,
+            ),
             (
                 "host_identity",
                 crate::BUILD_VERSION.to_string(),
-                Some(over.clone()),
+                Some("x".repeat(MAX_HOST_IDENTITY_BYTES + 1)),
+                None,
+            ),
+            (
+                "auth.session_id",
+                crate::BUILD_VERSION.to_string(),
+                None,
+                Some(crate::SessionAuth {
+                    session_id: "x".repeat(crate::MAX_SESSION_ID_BYTES + 1),
+                    token: "token".to_string(),
+                }),
+            ),
+            (
+                "auth.token",
+                crate::BUILD_VERSION.to_string(),
+                None,
+                Some(crate::SessionAuth {
+                    session_id: "session".to_string(),
+                    token: "x".repeat(MAX_SESSION_AUTH_TOKEN_BYTES + 1),
+                }),
             ),
         ];
-        for (field, build_version, host_identity) in cases {
+        for (field, build_version, host_identity, auth) in cases {
             let (a, b) = tokio::io::duplex(64 * 1024);
             let (ar, aw) = tokio::io::split(a);
             let (br, bw) = tokio::io::split(b);
@@ -680,6 +732,7 @@ mod tests {
                 build_version,
                 role: "supervisor".into(),
                 host_identity,
+                auth,
             })
             .await
             .unwrap();
@@ -694,9 +747,9 @@ mod tests {
         }
     }
 
-    /// The caps must not bind on anything a real peer sends: this side's
-    /// own build version and a UUID-shaped identity both pass, which is the
-    /// half of the previous test that keeps its bounds honest rather than
+    /// Every hello cap is inclusive: ordinary diagnostic fields and
+    /// authentication fields exactly at their limits pass. This is the
+    /// half of the refusal test that keeps each bound honest rather than
     /// merely strict.
     #[tokio::test]
     async fn handshake_accepts_ordinary_hello_field_lengths() {
@@ -717,6 +770,10 @@ mod tests {
             build_version: crate::BUILD_VERSION.to_string(),
             role: "supervisor".into(),
             host_identity: Some("2f8a1c3e-9d4b-4f7a-8e21-6b5c0d9a7e13".to_string()),
+            auth: Some(crate::SessionAuth {
+                session_id: "s".repeat(crate::MAX_SESSION_ID_BYTES),
+                token: "t".repeat(MAX_SESSION_AUTH_TOKEN_BYTES),
+            }),
         })
         .await
         .unwrap();

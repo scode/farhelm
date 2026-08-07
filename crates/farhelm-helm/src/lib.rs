@@ -665,6 +665,7 @@ fn http_error(e: anyhow::Error) -> axum::response::Response {
         // already means something else"; this function's own docstring
         // above is where the full status-mapping table lives.
         Some(ErrorKind::Conflict) => axum::http::StatusCode::CONFLICT,
+        Some(ErrorKind::Unauthorized) => axum::http::StatusCode::UNAUTHORIZED,
     };
     let status = registry.or_else(managed).unwrap_or_else(supervised);
     // The UI shows this body verbatim.
@@ -770,6 +771,19 @@ mod tests {
         });
         let response = super::http_error(err);
         assert_eq!(response.status(), axum::http::StatusCode::CONFLICT);
+    }
+
+    /// PLAN_M7.md item 2's authorization refusal maps to 401 so a client
+    /// can distinguish rejected credentials from a malformed request or a
+    /// supervisor fault.
+    #[test]
+    fn http_error_maps_unauthorized_supervisor_error_to_401() {
+        let err = anyhow::Error::new(SupervisorError {
+            kind: farhelm_proto::ErrorKind::Unauthorized,
+            message: "session credential rejected".to_string(),
+        });
+        let response = super::http_error(err);
+        assert_eq!(response.status(), axum::http::StatusCode::UNAUTHORIZED);
     }
 
     /// Spec: an error chain with no `SupervisorError` anywhere in it — a

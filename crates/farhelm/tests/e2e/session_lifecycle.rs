@@ -940,6 +940,7 @@ async fn a_peer_one_protocol_version_behind_is_refused_before_it_can_attach() {
             build_version: "0.0.0-before-if-unowned".to_string(),
             role: "helm".to_string(),
             host_identity: None,
+            auth: None,
         })
         .await
         .unwrap();

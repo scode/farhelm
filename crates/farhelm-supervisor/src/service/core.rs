@@ -44,6 +44,8 @@ use crate::agent_kind::{
     CaptureVerdict, CaptureWindow, CaptureWindowBounds, IntegrationSnapshot, RecordStamp,
 };
 use crate::launch::{LaunchSpec, resolve_shell, window_command};
+#[cfg(test)]
+use crate::store::DedupScope;
 use crate::store::{
     Claimed, IntentClaim, LastOutcome, ProfileSnapshot, Reservation, ReservationOutcome,
     RetryClaim, SessionStore, Settlement, StoredSession, Transition, now_unix,
@@ -805,35 +807,32 @@ pub(crate) fn error_kind(e: &anyhow::Error) -> ErrorKind {
 /// Every SESSION-shaping field: `cwd`, `invocation`, `title` (as SENT —
 /// `None` means "auto-generate", which is a different request from an
 /// explicit title that happens to equal the derived one), item 7's
-/// `agent_kind`/`resume_template` overrides, and — as of PLAN_M6_75.md
-/// item 3 — the create MODE together with the profile it names.
+/// `agent_kind`/`resume_template` overrides, the chosen launch selector and
+/// its value, and — as of PLAN_M7.md item 2 — `parent`.
 /// `cols`/`rows` are excluded by
 /// design: they shape the ATTACHMENT, not the session, so the same intent
 /// retried from a differently-sized client is still the same intent — a
 /// point the plan makes explicitly, and the reason this function takes no
 /// dimensions at all rather than taking and ignoring them.
 ///
-/// ## The mode is encoded by which of two fields is present
+/// ## The launch selector is encoded explicitly
 ///
-/// `invocation` and `profile` are the raw and profile modes' respective
-/// identities, and exactly one is `Some` for any request that got this far
-/// (`handlers::create_mode` refuses both-or-neither before this is
-/// reached). So the pair encodes the MODE as well as its payload, and the
-/// property PLAN_M6_75.md item 3 asks for falls out: a retry under the same
-/// intent key that flips modes — or names a different profile — produces a
-/// different fingerprint and is refused as a key reuse, rather than
-/// quietly launching something other than what the first attempt did.
+/// [`CreateMode`] exists only after `handlers::create_mode` has proved that
+/// exactly one of `invocation`, `profile_id`, or `profile_name` was present.
+/// Its variant therefore records the selector as well as the value. A retry
+/// under the same key that changes either produces a different fingerprint
+/// and is refused rather than launching something else.
 ///
 /// A retry MUST NOT be able to flip modes, and that is worth stating as a
-/// safety property rather than a consistency one: the two modes can resolve
+/// safety property rather than a consistency one: the selectors can resolve
 /// to entirely different agents in the same directory, and a create is not
 /// undoable.
 ///
 /// ## The RAW encoding is frozen, byte for byte
 ///
-/// A reservation row is a PERMANENT tombstone — nothing prunes it (see
-/// `store::Reservation`) — and every replay compares the stored string
-/// verbatim. So a stored fingerprint is not a cache that ages out: an
+/// Existing interactive reservations are PERMANENT tombstones (see
+/// `store::DedupScope`), and every replay compares the stored string
+/// verbatim. So their fingerprints are not caches that age out: an
 /// encoding change re-reads every key a supervisor has ever seen as
 /// belonging to a DIFFERENT request, and the identical retry that should
 /// have replayed is refused as a key reuse (`Conflict`) instead. Forever,
@@ -848,7 +847,7 @@ pub(crate) fn error_kind(e: &anyhow::Error) -> ErrorKind {
 /// now, but `Some("x")` and `"x"` serialize to the same JSON, so the bytes
 /// are identical rather than merely equivalent.
 ///
-/// The PROFILE mode gets its own, structurally distinct encoding instead: a
+/// The PROFILE-ID mode gets its own, structurally distinct encoding instead: a
 /// leading `"profile"` discriminant and a shorter tuple. Distinctness is
 /// what makes the mode unflippable, and it is stronger here than an
 /// appended element would have been — the two encodings differ in LENGTH as
@@ -857,11 +856,10 @@ pub(crate) fn error_kind(e: &anyhow::Error) -> ErrorKind {
 /// `profile`, say). The raw tuple carries no discriminant of its own
 /// precisely because it cannot: adding one would change the frozen bytes.
 ///
-/// The overrides are threaded in here BEFORE anything else reads them: as
-/// of this PR they shape nothing but the fingerprint (item 7 is what makes
-/// them shape the session), and that is not a placeholder — acceptance 7
-/// requires a request differing ONLY in an override to be rejected as a
-/// key reuse, which is a property of the fingerprint alone.
+/// Version 11's parented and profile-name creates get new discriminated
+/// tuples rather than extending either frozen encoding. That preserves
+/// every existing row byte for byte while making parent, selector, and
+/// selector value independently collision-proof.
 ///
 /// ## Representation
 ///
@@ -892,7 +890,12 @@ pub(crate) fn error_kind(e: &anyhow::Error) -> ErrorKind {
 /// is how long a copy outlives its session, not who can read it. That is a
 /// separate piece of work from bounding the row COUNT (see
 /// `store::Reservation`), and neither is owned here.
-pub(crate) fn create_fingerprint(cwd: &str, mode: &CreateMode, title: Option<&str>) -> String {
+pub(crate) fn create_fingerprint(
+    parent: Option<&str>,
+    cwd: &str,
+    mode: &CreateMode,
+    title: Option<&str>,
+) -> String {
     // Infallible in practice: every element is a string, an option, or an
     // array of strings, none of which can fail to serialize. The `expect`
     // documents that rather than inviting a caller to handle an error that
@@ -902,14 +905,17 @@ pub(crate) fn create_fingerprint(cwd: &str, mode: &CreateMode, title: Option<&st
     // [`CreateMode`] cannot represent that at all — an earlier shape passed
     // both halves as separate `Option`s and needed a `debug_assert` to say
     // so, which is a comment with a runtime cost rather than a guarantee.
-    match mode {
+    match (parent, mode) {
         // FROZEN — see this function's own docs. Five elements, in this
         // order, exactly as every pre-M6.75 supervisor wrote them.
-        CreateMode::Raw {
-            invocation,
-            agent_kind,
-            resume_template,
-        } => serde_json::to_string(&(
+        (
+            None,
+            CreateMode::Raw {
+                invocation,
+                agent_kind,
+                resume_template,
+            },
+        ) => serde_json::to_string(&(
             cwd,
             Some(invocation.as_str()),
             title,
@@ -918,8 +924,36 @@ pub(crate) fn create_fingerprint(cwd: &str, mode: &CreateMode, title: Option<&st
         )),
         // The profile mode's own encoding, discriminated and shorter, so it
         // cannot collide with the frozen tuple above under any input.
-        CreateMode::Profile { profile_id } => {
+        (None, CreateMode::Profile { profile_id }) => {
             serde_json::to_string(&("profile", cwd, title, profile_id))
+        }
+        // A parent cannot be appended to either frozen encoding: doing so
+        // would change every pre-v11 fingerprint. New discriminants give
+        // parented creates their own collision-proof shapes instead.
+        (
+            Some(parent),
+            CreateMode::Raw {
+                invocation,
+                agent_kind,
+                resume_template,
+            },
+        ) => serde_json::to_string(&(
+            "parented_raw",
+            parent,
+            cwd,
+            invocation,
+            title,
+            agent_kind.map(crate::store::agent_kind_column),
+            resume_template.as_deref(),
+        )),
+        (Some(parent), CreateMode::Profile { profile_id }) => {
+            serde_json::to_string(&("parented_profile", parent, cwd, title, profile_id))
+        }
+        // Profile names have no pre-v11 encoding to preserve. Keeping the
+        // selector name in the tuple prevents a name equal to a profile id
+        // from colliding with the id-backed mode.
+        (parent, CreateMode::ProfileName { profile_name }) => {
+            serde_json::to_string(&("profile_name", parent, cwd, title, profile_name))
         }
     }
     .expect("a fingerprint of strings and options always serializes")
@@ -1185,32 +1219,31 @@ struct LaunchRequest<'a> {
     source_profile: Option<ProfileSnapshot>,
 }
 
-/// One `CreateSession` request's session-shaping inputs, exactly as sent.
+/// The launch inputs retained after a create's wire shape is fingerprinted.
 ///
 /// A bundle rather than a parameter list because the idempotency state
-/// machine threads these through three functions unchanged, and because
-/// the SET of them is itself a contract: these — and only these — are what
-/// `create_fingerprint` binds an intent key to. Terminal dimensions ride
-/// along despite shaping the attachment rather than the session (and are
-/// deliberately absent from the fingerprint for exactly that reason), since
-/// the launch does need them.
+/// machine threads these through three functions unchanged. `parent` is
+/// absent deliberately: item 2 binds it into the fingerprint before this
+/// point, while PLAN_M7.md item 4 gives it serving semantics. Terminal
+/// dimensions ride along despite shaping the attachment rather than the
+/// session (and are deliberately absent from the fingerprint), since the
+/// launch does need them.
 pub(crate) struct CreateInputs<'a> {
     pub(crate) cwd: &'a str,
-    /// Which of the two creation modes this request selected, already
-    /// resolved to one (PLAN_M6_75.md item 3).
+    /// Which launch selector this request chose, already resolved to one.
     pub(crate) mode: CreateMode,
     pub(crate) title: Option<String>,
     pub(crate) cols: u16,
     pub(crate) rows: u16,
 }
 
-/// Which of `CreateSession`'s two creation modes a request selected, once
-/// it has been shown to select exactly one (PLAN_M6_75.md item 3).
+/// Which launch selector a `CreateSession` chose, once it has been shown
+/// to select exactly one (PLAN_M7.md item 2).
 ///
 /// A resolved value rather than a pair of `Option`s, so that everything
 /// downstream of `handlers::create_mode` is working from a request whose
 /// meaning is settled: there is deliberately no way to construct a
-/// `CreateMode` that names both modes, or neither, or a profile alongside
+/// `CreateMode` that names multiple selectors, no selector, or a profile alongside
 /// the raw-mode overrides. The overrides live INSIDE the raw variant for
 /// that last reason — an earlier shape carried them beside the mode as
 /// their own fields, which made "a profile-backed create must not carry
@@ -1238,6 +1271,10 @@ pub(crate) enum CreateMode {
     /// its submit fails the create visibly, before any launch, with no
     /// session left behind.
     Profile { profile_id: String },
+    /// The caller named a profile by its human-facing name. Resolution is
+    /// deliberately absent until PLAN_M7.md item 4 can do it atomically
+    /// with restricted-peer admission and reservation creation.
+    ProfileName { profile_name: String },
 }
 
 /// Everything durable a session knows about resuming itself: its
@@ -3529,6 +3566,9 @@ impl Supervisor {
                 row.id.clone(),
                 Arc::new(SessionEntry {
                     info: SessionInfo {
+                        creation_seq: None,
+                        parent: None,
+                        archived: false,
                         id: row.id,
                         title: row.title,
                         created_at: row.created_at,
@@ -4123,6 +4163,16 @@ impl Supervisor {
                     }),
                 )
             }
+            CreateMode::ProfileName { .. } => {
+                return Err(RequestError::new(
+                    ErrorKind::InvalidRequest,
+                    // This PR fixes and fingerprints the vocabulary only.
+                    // PLAN_M7.md item 4 replaces this seam with atomic name
+                    // resolution before reservation or launch.
+                    "profile-name session creation is not available in this build",
+                )
+                .into());
+            }
         };
         let cwd_path = PathBuf::from(cwd);
         ensure_cwd_usable(cwd).await?;
@@ -4603,6 +4653,9 @@ impl Supervisor {
                     existence: ProfileExistence::Present,
                 });
                 let info = SessionInfo {
+                    creation_seq: None,
+                    parent: None,
+                    archived: false,
                     restart_offer: snapshot.restart_offer(row.captured_conversation.as_deref()),
                     id: row.id,
                     title: row.title,
@@ -5154,6 +5207,9 @@ impl Supervisor {
         self.simulate_crash(CreateStage::DuringLaunch)?;
 
         let info = SessionInfo {
+            creation_seq: None,
+            parent: None,
+            archived: false,
             id: id.clone(),
             title,
             // The same value just persisted: a fresh mint for a first-time
@@ -6441,6 +6497,9 @@ impl Supervisor {
             )
         };
         let info = SessionInfo {
+            creation_seq: None,
+            parent: None,
+            archived: false,
             id: entry.info.id.clone(),
             title: entry.info.title.clone(),
             // A restart is a new LAUNCH GENERATION of the same session, not
@@ -9043,6 +9102,9 @@ pub(crate) mod tests {
     pub(crate) fn entry_with(terminal: Option<Terminal>, outcome: LastOutcome) -> SessionEntry {
         SessionEntry {
             info: SessionInfo {
+                creation_seq: None,
+                parent: None,
+                archived: false,
                 id: "s1".to_string(),
                 title: "t".to_string(),
                 created_at: 1_700_000_000,
@@ -9907,6 +9969,8 @@ pub(crate) mod tests {
             &sup,
             ControlMsg::CreateSession {
                 req_id: 1,
+                parent: None,
+                profile_name: None,
                 cwd: "/".to_string(),
                 invocation: Some("agent".to_string()),
                 profile_id: None,
@@ -10010,6 +10074,7 @@ pub(crate) mod tests {
             ),
             (
                 create_fingerprint(
+                    None,
                     "/work",
                     &CreateMode::Profile {
                         profile_id: "prof-1".to_string(),
@@ -10017,6 +10082,30 @@ pub(crate) mod tests {
                     Some("t"),
                 ),
                 "the create MODE",
+            ),
+            (
+                create_fingerprint(
+                    Some("parent-1"),
+                    "/work",
+                    &CreateMode::Raw {
+                        invocation: "agent --flag".to_string(),
+                        agent_kind: None,
+                        resume_template: None,
+                    },
+                    Some("t"),
+                ),
+                "the parent",
+            ),
+            (
+                create_fingerprint(
+                    None,
+                    "/work",
+                    &CreateMode::ProfileName {
+                        profile_name: "Claude Code".to_string(),
+                    },
+                    Some("t"),
+                ),
+                "the profile-name selector",
             ),
         ];
         for (fingerprint, what) in cases {
@@ -10051,6 +10140,67 @@ pub(crate) mod tests {
             profile_fingerprint("/work", "prof-1", None),
             profile_fingerprint("/work", "prof-2", None),
         );
+        assert_ne!(
+            create_fingerprint(
+                Some("parent-1"),
+                "/work",
+                &CreateMode::Raw {
+                    invocation: "agent".to_string(),
+                    agent_kind: None,
+                    resume_template: None,
+                },
+                None,
+            ),
+            create_fingerprint(
+                Some("parent-2"),
+                "/work",
+                &CreateMode::Raw {
+                    invocation: "agent".to_string(),
+                    agent_kind: None,
+                    resume_template: None,
+                },
+                None,
+            ),
+            "same key with a different parent must conflict"
+        );
+        assert_ne!(
+            create_fingerprint(
+                Some("parent-1"),
+                "/work",
+                &CreateMode::Profile {
+                    profile_id: "prof-1".to_string(),
+                },
+                None,
+            ),
+            create_fingerprint(
+                Some("parent-2"),
+                "/work",
+                &CreateMode::Profile {
+                    profile_id: "prof-1".to_string(),
+                },
+                None,
+            ),
+            "a profile-id create's parent must change its fingerprint"
+        );
+        assert_ne!(
+            create_fingerprint(
+                Some("parent-1"),
+                "/work",
+                &CreateMode::ProfileName {
+                    profile_name: "Claude Code".to_string(),
+                },
+                None,
+            ),
+            create_fingerprint(
+                Some("parent-2"),
+                "/work",
+                &CreateMode::ProfileName {
+                    profile_name: "Claude Code".to_string(),
+                },
+                None,
+            ),
+            "a profile-name create's parent must change its fingerprint"
+        );
     }
 
     /// [`create_fingerprint`] of a RAW-mode request, spelled as the fields
@@ -10068,6 +10218,7 @@ pub(crate) mod tests {
         resume_template: Option<&[&str]>,
     ) -> String {
         create_fingerprint(
+            None,
             cwd,
             &CreateMode::Raw {
                 invocation: invocation.to_string(),
@@ -10083,6 +10234,7 @@ pub(crate) mod tests {
     /// [`raw_fingerprint`].
     fn profile_fingerprint(cwd: &str, profile_id: &str, title: Option<&str>) -> String {
         create_fingerprint(
+            None,
             cwd,
             &CreateMode::Profile {
                 profile_id: profile_id.to_string(),
@@ -10132,6 +10284,30 @@ pub(crate) mod tests {
         assert_eq!(
             profile_fingerprint("/work", "prof-7", Some("title")),
             r#"["profile","/work","title","prof-7"]"#
+        );
+        assert_eq!(
+            create_fingerprint(
+                Some("parent-1"),
+                "/work",
+                &CreateMode::Raw {
+                    invocation: "agent".to_string(),
+                    agent_kind: None,
+                    resume_template: None,
+                },
+                None,
+            ),
+            r#"["parented_raw","parent-1","/work","agent",null,null,null]"#
+        );
+        assert_eq!(
+            create_fingerprint(
+                None,
+                "/work",
+                &CreateMode::ProfileName {
+                    profile_name: "Claude Code".to_string(),
+                },
+                None,
+            ),
+            r#"["profile_name",null,"/work",null,"Claude Code"]"#
         );
     }
 
@@ -10208,6 +10384,7 @@ pub(crate) mod tests {
                 Some(IntentClaim {
                     intent_key: "v9-key".to_string(),
                     fingerprint: V9_STORED_FINGERPRINT.to_string(),
+                    dedup_scope: DedupScope::Permanent,
                 }),
             )
             .await
@@ -10223,6 +10400,7 @@ pub(crate) mod tests {
                 Some(IntentClaim {
                     intent_key: "v9-key".to_string(),
                     fingerprint: raw_fingerprint("/", "agent", None, None, None),
+                    dedup_scope: DedupScope::Permanent,
                 }),
             )
             .await
@@ -10280,6 +10458,7 @@ pub(crate) mod tests {
                 Some(IntentClaim {
                     intent_key: "v9-key".to_string(),
                     fingerprint: V9_STORED_FINGERPRINT.to_string(),
+                    dedup_scope: DedupScope::Permanent,
                 }),
             )
             .await
@@ -10295,6 +10474,7 @@ pub(crate) mod tests {
                 Some(IntentClaim {
                     intent_key: "v9-key".to_string(),
                     fingerprint: raw_fingerprint("/", "agent", None, None, None),
+                    dedup_scope: DedupScope::Permanent,
                 }),
             )
             .await
@@ -10454,6 +10634,8 @@ pub(crate) mod tests {
         let launch_dir = state.path().join("launch");
         let request = |req_id: u64, agent_kind: Option<AgentKind>| ControlMsg::CreateSession {
             req_id,
+            parent: None,
+            profile_name: None,
             cwd: "/".to_string(),
             invocation: Some("agent".to_string()),
             profile_id: None,
@@ -10663,6 +10845,7 @@ pub(crate) mod tests {
                 Some(IntentClaim {
                     intent_key: "key".to_string(),
                     fingerprint: raw_fingerprint("/", "agent", None, None, None),
+                    dedup_scope: DedupScope::Permanent,
                 }),
             )
             .await
@@ -10698,6 +10881,7 @@ pub(crate) mod tests {
                 Some(IntentClaim {
                     intent_key: "key".to_string(),
                     fingerprint: raw_fingerprint("/", "agent", None, None, None),
+                    dedup_scope: DedupScope::Permanent,
                 }),
             )
             .await
@@ -10737,6 +10921,7 @@ pub(crate) mod tests {
         let claim = |fingerprint_cwd: &str, invocation: &str| IntentClaim {
             intent_key: "one-intent".to_string(),
             fingerprint: raw_fingerprint(fingerprint_cwd, invocation, None, None, None),
+            dedup_scope: DedupScope::Permanent,
         };
 
         let first = sup
@@ -10870,6 +11055,7 @@ pub(crate) mod tests {
                 Some(IntentClaim {
                     intent_key: "key".to_string(),
                     fingerprint: fingerprint.clone(),
+                    dedup_scope: DedupScope::Permanent,
                 }),
             )
             .await
@@ -10889,6 +11075,7 @@ pub(crate) mod tests {
                 Some(IntentClaim {
                     intent_key: "key".to_string(),
                     fingerprint,
+                    dedup_scope: DedupScope::Permanent,
                 }),
             )
             .await
@@ -10948,6 +11135,7 @@ pub(crate) mod tests {
                 Some(IntentClaim {
                     intent_key: "key".to_string(),
                     fingerprint: fingerprint.clone(),
+                    dedup_scope: DedupScope::Permanent,
                 }),
             )
             .await
@@ -10967,6 +11155,7 @@ pub(crate) mod tests {
                 Some(IntentClaim {
                     intent_key: "key".to_string(),
                     fingerprint,
+                    dedup_scope: DedupScope::Permanent,
                 }),
             )
             .await
@@ -11036,6 +11225,8 @@ pub(crate) mod tests {
                 &sup,
                 ControlMsg::CreateSession {
                     req_id,
+                    parent: None,
+                    profile_name: None,
                     cwd: "/".to_string(),
                     invocation: Some("agent".to_string()),
                     profile_id: None,
@@ -11082,6 +11273,8 @@ pub(crate) mod tests {
             &sup,
             ControlMsg::CreateSession {
                 req_id: 6,
+                parent: None,
+                profile_name: None,
                 cwd: "/".to_string(),
                 invocation: Some("agent".to_string()),
                 profile_id: None,
@@ -11139,6 +11332,8 @@ pub(crate) mod tests {
             &sup,
             ControlMsg::CreateSession {
                 req_id: 1,
+                parent: None,
+                profile_name: None,
                 cwd: evil.to_str().expect("tempdir paths are UTF-8").to_string(),
                 invocation: Some("agent".to_string()),
                 profile_id: None,
@@ -11212,6 +11407,8 @@ pub(crate) mod tests {
         let mut tasks = tokio::task::JoinSet::new();
         let request = |req_id: u64, title: &str| ControlMsg::CreateSession {
             req_id,
+            parent: None,
+            profile_name: None,
             cwd: "/".to_string(),
             invocation: Some("agent".to_string()),
             profile_id: None,
@@ -11357,6 +11554,7 @@ pub(crate) mod tests {
                         None,
                         None,
                     ),
+                    dedup_scope: DedupScope::Permanent,
                 }),
             )
             .await
@@ -11438,6 +11636,7 @@ pub(crate) mod tests {
                 Some(IntentClaim {
                     intent_key: "key".to_string(),
                     fingerprint: fingerprint.clone(),
+                    dedup_scope: DedupScope::Permanent,
                 }),
             )
             .await
@@ -11456,6 +11655,7 @@ pub(crate) mod tests {
                 Some(IntentClaim {
                     intent_key: "key".to_string(),
                     fingerprint,
+                    dedup_scope: DedupScope::Permanent,
                 }),
             )
             .await
@@ -11523,6 +11723,7 @@ pub(crate) mod tests {
                 Some(IntentClaim {
                     intent_key: "key".to_string(),
                     fingerprint: fingerprint.clone(),
+                    dedup_scope: DedupScope::Permanent,
                 }),
             )
             .await
@@ -11551,6 +11752,7 @@ pub(crate) mod tests {
                 Some(IntentClaim {
                     intent_key: "key".to_string(),
                     fingerprint,
+                    dedup_scope: DedupScope::Permanent,
                 }),
             )
             .await
@@ -11633,6 +11835,7 @@ pub(crate) mod tests {
                 Some(IntentClaim {
                     intent_key: "key".to_string(),
                     fingerprint: raw_fingerprint("/", "agent", None, None, None),
+                    dedup_scope: DedupScope::Permanent,
                 }),
             )
             .await
@@ -11857,6 +12060,7 @@ pub(crate) mod tests {
             .await
             .expect("supervisor");
         let fingerprint = create_fingerprint(
+            None,
             "/",
             &CreateMode::Profile {
                 profile_id: "starter-claude".to_string(),
@@ -11895,6 +12099,7 @@ pub(crate) mod tests {
                 Some(IntentClaim {
                     intent_key: "key".to_string(),
                     fingerprint: fingerprint.clone(),
+                    dedup_scope: DedupScope::Permanent,
                 }),
             )
             .await
@@ -11929,6 +12134,7 @@ pub(crate) mod tests {
                 Some(IntentClaim {
                     intent_key: "key".to_string(),
                     fingerprint,
+                    dedup_scope: DedupScope::Permanent,
                 }),
             )
             .await
@@ -11964,6 +12170,7 @@ pub(crate) mod tests {
             .await
             .expect("supervisor");
         let fingerprint = create_fingerprint(
+            None,
             "/",
             &CreateMode::Profile {
                 profile_id: "starter-codex".to_string(),
@@ -12002,6 +12209,7 @@ pub(crate) mod tests {
                 Some(IntentClaim {
                     intent_key: "key".to_string(),
                     fingerprint: fingerprint.clone(),
+                    dedup_scope: DedupScope::Permanent,
                 }),
             )
             .await
@@ -12027,6 +12235,7 @@ pub(crate) mod tests {
                 Some(IntentClaim {
                     intent_key: "key".to_string(),
                     fingerprint,
+                    dedup_scope: DedupScope::Permanent,
                 }),
             )
             .await
@@ -12282,6 +12491,7 @@ pub(crate) mod tests {
                 Some(IntentClaim {
                     intent_key: "key".to_string(),
                     fingerprint: fingerprint.clone(),
+                    dedup_scope: DedupScope::Permanent,
                 }),
             )
             .await
@@ -12301,6 +12511,7 @@ pub(crate) mod tests {
                 Some(IntentClaim {
                     intent_key: "key".to_string(),
                     fingerprint,
+                    dedup_scope: DedupScope::Permanent,
                 }),
             )
             .await
@@ -12582,6 +12793,7 @@ pub(crate) mod tests {
                 Some(IntentClaim {
                     intent_key: "key".to_string(),
                     fingerprint: "fp".to_string(),
+                    dedup_scope: DedupScope::Permanent,
                 }),
             )
             .await
@@ -12596,6 +12808,7 @@ pub(crate) mod tests {
             fingerprint: "fp".to_string(),
             session_id: "stranded".to_string(),
             tmux_name: "fh-stranded".to_string(),
+            dedup_scope: DedupScope::Permanent,
             outcome: ReservationOutcome::Pending,
         };
         let reply = sup
@@ -12713,6 +12926,7 @@ pub(crate) mod tests {
                 Some(IntentClaim {
                     intent_key: "key".to_string(),
                     fingerprint: fingerprint.clone(),
+                    dedup_scope: DedupScope::Permanent,
                 }),
             )
             .await
@@ -12727,6 +12941,7 @@ pub(crate) mod tests {
                 Some(IntentClaim {
                     intent_key: "key".to_string(),
                     fingerprint,
+                    dedup_scope: DedupScope::Permanent,
                 }),
             )
             .await
@@ -12927,6 +13142,7 @@ pub(crate) mod tests {
                 Some(IntentClaim {
                     intent_key: "key".to_string(),
                     fingerprint: fingerprint.clone(),
+                    dedup_scope: DedupScope::Permanent,
                 }),
             )
             .await
@@ -12941,6 +13157,7 @@ pub(crate) mod tests {
             Some(IntentClaim {
                 intent_key: "key".to_string(),
                 fingerprint,
+                dedup_scope: DedupScope::Permanent,
             }),
         )
         .await

@@ -23,17 +23,16 @@ members = [
 # by the very mechanism meant to prevent it.
 #
 # So any change to the vocabulary a bundle and a helm must agree on MUST
-# move this number, whether or not anything is being released. 0.0.2 is
-# PLAN_M6_75.md item 3's `PROTOCOL_VERSION` 10: the live-status split
-# REPLACED `alive`, so a v9-era bundle cannot decode `running` at all — it
-# does not degrade, it fails — and the only thing that can tell its user why
-# is a stamp that disagrees.
+# move this number, whether or not anything is being released. 0.0.3 is
+# PLAN_M7.md item 2's `PROTOCOL_VERSION` 11: restricted-peer attribution,
+# archive messages, and `Unauthorized` all change what an older peer can
+# safely understand, so the browser-edge stamp moves with the wire bump.
 #
 # The helm↔supervisor edge does NOT rely on this: it has a real handshake
 # (`PROTOCOL_VERSION`) and refuses at connect. This number is what stands in
 # for that handshake on the browser edge, which has none.
 [workspace.package]
-version = "0.0.2"
+version = "0.0.3"
 edition = "2024"
 license = "MIT"
 repository = "https://github.com/scode/farhelm"

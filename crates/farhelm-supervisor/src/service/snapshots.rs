@@ -448,6 +448,9 @@ mod tests {
             session_id.clone(),
             Arc::new(SessionEntry {
                 info: SessionInfo {
+                    creation_seq: None,
+                    parent: None,
+                    archived: false,
                     id: session_id.clone(),
                     title: "t".to_string(),
                     created_at: 1_700_000_000,

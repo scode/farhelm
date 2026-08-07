@@ -1560,6 +1560,8 @@ mod tests {
                 let (mut reader, mut writer) = peer_up(peer_side).await;
                 let ControlMsg::CreateSession {
                     req_id,
+                    parent: None,
+                    profile_name: None,
                     invocation,
                     profile_id,
                     cwd,

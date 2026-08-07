@@ -69,6 +69,17 @@ use serde::{Deserialize, Serialize};
 
 pub mod io;
 
+/// Longest session identity accepted from a protocol peer.
+///
+/// Farhelm currently mints UUIDs (36 bytes), but the wire treats the value
+/// as opaque and the helm embeds it verbatim in list cursors. One kibibyte
+/// leaves ample room for a future identity format while keeping those
+/// cursors replayable through the HTTP request-head limits that carry them.
+/// The handshake applies the same bound to `SessionAuth::session_id`, so an
+/// authenticated connection cannot retain an identity the rest of the
+/// protocol would later refuse.
+pub const MAX_SESSION_ID_BYTES: usize = 1024;
+
 /// Protocol version exchanged in the hello. Bumped only for incompatible
 /// frame or message changes; the receiving side refuses a mismatch with a
 /// clear error per SPEC.md's version-skew rule. Build versions travel
@@ -99,7 +110,7 @@ pub mod io;
 /// connection loops treat that error as fatal — an unknown variant tears
 /// down an already-established connection instead of being ignored. A new
 /// variant is exactly the "cannot be additive" case that earns its own
-/// bump, per version 3's own docs above; `protocol_version_is_pinned_at_10`
+/// bump, per version 3's own docs above; `protocol_version_is_pinned_at_11`
 /// (renamed at every bump since `_at_4`) and
 /// `unknown_control_message_tag_fails_decode` below (plus the
 /// loop-level teardown test in the farhelm crate's e2e suite) pin both the
@@ -312,12 +323,22 @@ pub mod io;
 /// `profile_id` before it ever sends a create — there is nothing for this
 /// protocol to carry.
 ///
-/// Within version 10 the additive discipline of every prior version
+/// Bumped to 11 for all M7 wire vocabulary in one move (PLAN_M7.md item
+/// 2). Ignoring [`ControlMsg::Hello`] authentication would widen a
+/// restricted peer to full authority, while [`ControlMsg::ArchiveSession`],
+/// [`ControlMsg::SessionArchived`], and [`ErrorKind::Unauthorized`] are new
+/// tagged variants an older decoder refuses. The remaining additions ride
+/// the same milestone bump: spawn parent/profile-name fields and archive
+/// metadata. `SessionArchived` has carried its required post-teardown
+/// `session` from version 11's first published shape; it was never an
+/// additive field within an already-established version.
+///
+/// Within version 11 the additive discipline of every prior version
 /// continues to apply, with version 9's sharper reading intact: new
 /// optional fields with decode defaults are fine WHEN ignoring one is
 /// harmless; a field whose omission changes behavior, a new tagged variant,
 /// a new REQUIRED field, or a field REMOVAL earns the next bump.
-pub const PROTOCOL_VERSION: u32 = 10;
+pub const PROTOCOL_VERSION: u32 = 11;
 
 /// The build version compiled into this binary, carried in the hello for
 /// diagnostics.
@@ -376,6 +397,9 @@ pub enum ErrorKind {
     /// request alone) fits: only `Conflict` names "this identifier already
     /// has a meaning, and it is not the one you just sent."
     Conflict,
+    /// The peer failed connection admission or a restricted peer requested
+    /// an operation outside its permitted slice (PLAN_M7.md item 2).
+    Unauthorized,
 }
 
 /// Frames larger than this are rejected at decode time. Terminal output is
@@ -765,6 +789,11 @@ impl SessionStatus {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct SessionInfo {
     pub id: String,
+    /// The session that created this one through `farhelm spawn`, if any
+    /// (PLAN_M7.md item 2). `None` covers interactive sessions,
+    /// deliberately parentless spawned sessions, and senders predating the
+    /// field; all three mean that no trustworthy parent is known.
+    pub parent: Option<String>,
     pub title: String,
     /// Seconds since the Unix epoch when this session was created —
     /// `StoredSession::created_at`'s own value, carried onto the wire
@@ -795,6 +824,14 @@ pub struct SessionInfo {
     /// way through the `id` tiebreak.
     #[serde(default)]
     pub created_at: i64,
+    /// Monotonic creation order assigned by this session's supervisor.
+    ///
+    /// `None` means the sender predates the field. Consumers comparing
+    /// provenance must then fall back to the older `(created_at, id)`
+    /// ordering; they must not compare a present sequence with an absent
+    /// one as though absence meant zero.
+    #[serde(default)]
+    pub creation_seq: Option<u64>,
     /// Working directory the session was created in. UTF-8-only by
     /// construction (see the module-level "Paths are UTF-8-only" note) —
     /// a non-UTF-8 host path cannot reach this field; it must have been
@@ -863,6 +900,11 @@ pub struct SessionInfo {
     /// tabs known.
     #[serde(default)]
     pub tabs: Vec<TabInfo>,
+    /// Durable archive metadata, not a session status (PLAN_M7.md item 2).
+    /// An older sender has no archive vocabulary, so absence honestly
+    /// decodes as `false`.
+    #[serde(default)]
+    pub archived: bool,
     /// The profile this session was CREATED from, if it was created from
     /// one at all (PLAN_M6_75.md item 3). `None` means raw-created — the
     /// session names an invocation and no profile ever shaped it — which is
@@ -880,6 +922,37 @@ pub struct SessionInfo {
     /// version 8 shipped `Hello::host_identity` under, and it makes the
     /// absent case the one every current consumer must handle correctly.
     pub source_profile: Option<SourceProfile>,
+}
+
+/// A spawned session's attribution credential, presented once in its
+/// connection hello (PLAN_M7.md item 2).
+///
+/// Presence asks the supervisor to treat the peer as restricted. This is
+/// deliberate self-scoping rather than a same-uid security boundary: a
+/// local process can still omit the credential and connect through the
+/// user's protected socket. Admission and operation filtering arrive in
+/// PLAN_M7.md item 4; this type only fixes the wire shape.
+#[derive(Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct SessionAuth {
+    /// The session identity this credential authenticates. It is distinct
+    /// from `CreateSession::parent`, which is optional ancestry metadata,
+    /// and is capped at [`MAX_SESSION_ID_BYTES`] during the handshake.
+    pub session_id: String,
+    /// The unguessable bearer value minted specifically for that session.
+    /// It remains opaque, but the handshake bounds its encoded length; see
+    /// [`io::MAX_SESSION_AUTH_TOKEN_BYTES`].
+    pub token: String,
+}
+
+impl std::fmt::Debug for SessionAuth {
+    /// Keep attribution useful in diagnostics without exposing the bearer
+    /// value through `ControlMsg`'s derived `Debug` implementation.
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("SessionAuth")
+            .field("session_id", &self.session_id)
+            .field("token", &"<redacted>")
+            .finish()
+    }
 }
 
 /// Which profile a session was created from, as the session itself
@@ -1340,7 +1413,9 @@ pub enum ControlMsg {
     Hello {
         protocol_version: u32,
         build_version: String,
-        /// "helm" or "supervisor"; diagnostic only.
+        /// Diagnostic free text such as "helm" or "supervisor". It is
+        /// never an authorization input; only `auth` selects restricted
+        /// admission.
         role: String,
         /// The supervisor's identity (PLAN_M6.md item 2): a UUIDv4 minted
         /// once at first run (`SessionStore::ensure_host_identity`) and
@@ -1356,30 +1431,38 @@ pub enum ControlMsg {
         /// (PLAN_M6.md item 4, a later PR: this one only fills the field,
         /// it does not yet act on a mismatch).
         host_identity: Option<String>,
+        /// Attribution and deliberate self-scoping for a spawned peer.
+        /// Presence, never `role`, selects restricted admission. The
+        /// admission logic itself arrives in PLAN_M7.md item 4.
+        auth: Option<SessionAuth>,
     },
     /// Create and launch a session. This is the one true creation path:
     /// the M1 CLI flags and any future UI dialog both land here
     /// (PLAN_M1.md: flags bypass the creation UI, never the creation API).
     ///
-    /// ## Two modes, exactly one per request (`PROTOCOL_VERSION` 10)
+    /// ## Three launch selectors, exactly one per request
     ///
-    /// PLAN_M6_75.md item 3 gives this message a profile-backed mode
-    /// alongside the raw-invocation mode it has always had:
+    /// PLAN_M7.md item 2 adds name-based profile selection to the raw and
+    /// profile-id selectors version 10 already carried:
     ///
     /// - **Raw**: `invocation` names a command line, and `agent_kind` /
     ///   `resume_template` optionally override what would be derived from
-    ///   it. `profile_id` is `None`. This mode stays — the API, the e2e
-    ///   harness, and the CLI use it, and a profile would be ceremony
-    ///   there.
-    /// - **Profile**: `profile_id` names one of the target host's profiles
+    ///   it. Both profile selectors are `None`.
+    /// - **Profile id**: `profile_id` names one of the target host's profiles
     ///   and the SUPERVISOR resolves every launch-shaping value from it.
-    ///   `invocation`, `agent_kind` and `resume_template` are all `None`.
+    /// - **Profile name**: `profile_name` carries spawn's human-facing
+    ///   `--agent` value. PLAN_M7.md item 4 resolves it inside creation,
+    ///   before reserving or launching anything, so a restricted peer
+    ///   needs no catalog-read authority and cannot race a list result.
     ///
-    /// **A request naming BOTH modes is refused with
-    /// [`ErrorKind::InvalidRequest`], and so is one naming NEITHER.** The
-    /// exclusivity is stated here and enforced by the supervisor's create
-    /// handler rather than made structurally impossible by the type,
-    /// deliberately: a hybrid — a profile plus a hand-written override —
+    /// **A request naming more than one selector is refused with
+    /// [`ErrorKind::InvalidRequest`].** A full-authority peer naming none is
+    /// refused too. A session-authenticated peer is the sole exception:
+    /// omitting all three means derive the host's last-used profile, which
+    /// is the `farhelm spawn --cwd ...` default. The exclusivity is stated
+    /// here and enforced by the supervisor's create handler rather than
+    /// made structurally impossible by the type, deliberately: a hybrid —
+    /// a profile plus a hand-written override —
     /// is exactly the request whose meaning nobody can pin down (does the
     /// override win? does the session's snapshot then still belong to the
     /// profile it names?), and the honest answer to an ambiguous request is
@@ -1387,10 +1470,10 @@ pub enum ControlMsg {
     /// it explicitly also means the refusal has a MESSAGE, which a type
     /// that simply could not express the request would not.
     ///
-    /// The chosen mode and the profile identity BOTH join the idempotency
-    /// fingerprint (`intent_key` below): a retry that flips modes, or names
-    /// a different profile, is a different request and is refused as a key
-    /// reuse rather than silently launching the other thing.
+    /// The chosen selector and its value join the idempotency fingerprint
+    /// (`intent_key` below), as does `parent`: a retry that changes any of
+    /// them is refused as key reuse rather than silently launching a
+    /// different child.
     ///
     /// A profile-mode create names a profile that may have been deleted
     /// between the picker read and the submit — a real race, not a
@@ -1399,18 +1482,23 @@ pub enum ControlMsg {
     /// (PLAN_M6_75.md item 4, checked before launch).
     CreateSession {
         req_id: u64,
+        /// The spawning session, when this create came from `farhelm
+        /// spawn`. PLAN_M7.md item 4 validates it against the connection's
+        /// authenticated identity; this vocabulary-only step carries and
+        /// fingerprints the caller's value without trusting it.
+        parent: Option<String>,
         /// Working directory to launch the agent in. UTF-8-only (see the
         /// module-level "Paths are UTF-8-only" note); the sender must
         /// reject a non-UTF-8 host path before it ever reaches this
         /// field, not launder it through a lossy conversion.
         ///
-        /// Required in BOTH modes: a profile says what to run, never where.
-        /// SPEC.md's session identity is an agent in a directory, and the
-        /// directory is always the caller's choice.
+        /// Required under every selector: a profile says what to run,
+        /// never where. SPEC.md's session identity is an agent in a
+        /// directory, and the directory is always the caller's choice.
         cwd: String,
-        /// The agent command line, in RAW mode. `None` selects profile
-        /// mode, where the profile supplies it — see this variant's own
-        /// docs for the exclusivity contract.
+        /// The agent command line under the raw selector. `None` means one
+        /// of the profile selectors supplies it — see this variant's own
+        /// exclusivity contract.
         ///
         /// Was a required `String` before `PROTOCOL_VERSION` 10, which is
         /// part of what forced that bump. A profile-mode request reaches a
@@ -1426,7 +1514,7 @@ pub enum ControlMsg {
         /// The profile to create from, in PROFILE mode — a [`Profile::id`]
         /// belonging to the supervisor being asked (profiles are
         /// per-host and never synced, so an id from another host means
-        /// nothing here). `None` selects raw mode.
+        /// nothing here). `None` means another selector was chosen.
         ///
         /// A REMEMBERED default profile is not on this wire and never will
         /// be: the helm owns per-host last-used defaults in helm.db and
@@ -1436,6 +1524,11 @@ pub enum ControlMsg {
         /// when the remembered profile is gone — in the one component that
         /// can actually ask the user.
         profile_id: Option<String>,
+        /// A human-facing profile name selected by `farhelm spawn`.
+        /// Exactly one of `invocation`, `profile_id`, or `profile_name` is
+        /// present. PLAN_M7.md item 4 resolves the name atomically inside
+        /// creation before reserving or launching anything.
+        profile_name: Option<String>,
         title: Option<String>,
         cols: u16,
         rows: u16,
@@ -1444,12 +1537,10 @@ pub enum ControlMsg {
         /// every session-shaping field (this struct's fields below
         /// included, but never `cols`/`rows` — those shape the
         /// attachment, not the session) replays the original outcome
-        /// instead of launching a second process. As of
-        /// `PROTOCOL_VERSION` 10 the SELECTED MODE and the profile
-        /// identity are part of that fingerprint too, which is what makes
-        /// a retry unable to flip a raw create into a profile create (or
-        /// into a different profile) under cover of the same key — it is
-        /// refused as a key reuse instead. `None` preserves
+        /// instead of launching a second process. The selected launch
+        /// selector and value join the fingerprint, and version 11 adds
+        /// `parent`; a retry cannot change any of them under cover of the
+        /// same key. `None` preserves
         /// pre-M3 behavior exactly: every request is its own create, with
         /// no deduplication — the safe default for raw API callers (curl,
         /// an older UI build) that never learned this field exists, so
@@ -1468,8 +1559,8 @@ pub enum ControlMsg {
         ///
         /// RAW MODE ONLY. A profile already states its kind
         /// ([`Profile::agent_kind`], where `Generic` is the explicit "no
-        /// kind" spelling), so this field alongside a `profile_id` is one
-        /// of the both-modes requests refused as invalid — see this
+        /// kind" spelling), so this field alongside either profile
+        /// selector is one of the ambiguous requests refused as invalid — see this
         /// variant's own docs.
         agent_kind: Option<AgentKind>,
         /// Explicit override of the resume invocation template PLAN_M3.md
@@ -1648,6 +1739,18 @@ pub enum ControlMsg {
     /// handle on a possibly-running agent is the one outcome that must
     /// never happen silently).
     SessionDeleted { req_id: u64 },
+    /// Tear a session down and hide it from the default merged view while
+    /// retaining its metadata (PLAN_M7.md item 5). Confirmation is a client
+    /// obligation, so no confirmation flag appears on the wire.
+    ArchiveSession { req_id: u64, session_id: String },
+    /// Acknowledges [`ControlMsg::ArchiveSession`] with the session as it
+    /// stands after teardown. Returning the row makes an ambiguous retry
+    /// and an already-archived request the same successful answer, and lets
+    /// the helm update its cache before it answers its own caller.
+    ///
+    /// There is deliberately no unarchive message; restarting an archived
+    /// session clears the flag in PLAN_M7.md item 5.
+    SessionArchived { req_id: u64, session: SessionInfo },
     /// Relaunch a session's agent (PLAN_M3.md item 9) — the only relaunch
     /// mechanism SPEC.md's lifecycle "restart" names; the resume offered
     /// when opening an interrupted session sends this same message, not a
@@ -1725,10 +1828,8 @@ pub enum ControlMsg {
     /// re-list to see it.
     SessionRestarted { req_id: u64, session: SessionInfo },
     /// Rename a session (PLAN_M5.md item 1) — SPEC.md's v1 client-surface
-    /// rename verb, closing one of the two still unimplemented since M1
-    /// (archive is the other, deliberately M7's). This crate fixes only
-    /// the WIRE contract below; the handler enforcing it (PLAN_M5.md item
-    /// 3) is a later PR, not this one.
+    /// rename verb. The supervisor is the authority on accepted title text;
+    /// clients carry it verbatim and render any refusal.
     ///
     /// Validation is supervisor-authoritative, and deliberately identical
     /// in shape to `CreateSession`'s explicit-title rule rather than a
@@ -2257,6 +2358,7 @@ impl ControlMsg {
             build_version: BUILD_VERSION.to_string(),
             role: role.to_string(),
             host_identity: None,
+            auth: None,
         }
     }
 
@@ -2301,6 +2403,7 @@ impl ControlMsg {
             | ControlMsg::SessionList { req_id, .. }
             | ControlMsg::SessionStopped { req_id, .. }
             | ControlMsg::SessionDeleted { req_id, .. }
+            | ControlMsg::SessionArchived { req_id, .. }
             | ControlMsg::SessionRestarted { req_id, .. }
             | ControlMsg::SessionRenamed { req_id, .. }
             | ControlMsg::ProfileList { req_id, .. }
@@ -2321,6 +2424,7 @@ impl ControlMsg {
             | ControlMsg::ListSessions { .. }
             | ControlMsg::StopSession { .. }
             | ControlMsg::DeleteSession { .. }
+            | ControlMsg::ArchiveSession { .. }
             | ControlMsg::RestartSession { .. }
             | ControlMsg::RenameSession { .. }
             | ControlMsg::ListProfiles { .. }
@@ -2335,6 +2439,60 @@ impl ControlMsg {
             // The handshake, and the channel-correlated events: nothing
             // here has a `req_id` field to return in the first place.
             ControlMsg::Hello { .. }
+            | ControlMsg::Detach { .. }
+            | ControlMsg::Detached { .. }
+            | ControlMsg::ReplayComplete { .. }
+            | ControlMsg::Resize { .. }
+            | ControlMsg::PauseOutput { .. }
+            | ControlMsg::ResumeOutput { .. }
+            | ControlMsg::UploadAck { .. }
+            | ControlMsg::AbortUpload { .. }
+            | ControlMsg::UploadAborted { .. } => None,
+        }
+    }
+
+    /// The request id a server must correlate a refusal with.
+    ///
+    /// Restricted peers are rejected before ordinary dispatch. Keeping the
+    /// request classification here lets that authorization gate answer the
+    /// caller instead of sending an uncorrelated error that would leave its
+    /// request waiting forever.
+    pub fn request_req_id(&self) -> Option<u64> {
+        match self {
+            ControlMsg::CreateSession { req_id, .. }
+            | ControlMsg::ListSessions { req_id, .. }
+            | ControlMsg::StopSession { req_id, .. }
+            | ControlMsg::DeleteSession { req_id, .. }
+            | ControlMsg::ArchiveSession { req_id, .. }
+            | ControlMsg::RestartSession { req_id, .. }
+            | ControlMsg::RenameSession { req_id, .. }
+            | ControlMsg::ListProfiles { req_id, .. }
+            | ControlMsg::CreateProfile { req_id, .. }
+            | ControlMsg::UpdateProfile { req_id, .. }
+            | ControlMsg::DeleteProfile { req_id, .. }
+            | ControlMsg::OpenTab { req_id, .. }
+            | ControlMsg::CloseTab { req_id, .. }
+            | ControlMsg::Attach { req_id, .. }
+            | ControlMsg::BeginUpload { req_id, .. }
+            | ControlMsg::CommitUpload { req_id, .. } => Some(*req_id),
+            ControlMsg::Hello { .. }
+            | ControlMsg::SessionCreated { .. }
+            | ControlMsg::SessionList { .. }
+            | ControlMsg::SessionStopped { .. }
+            | ControlMsg::SessionDeleted { .. }
+            | ControlMsg::SessionArchived { .. }
+            | ControlMsg::SessionRestarted { .. }
+            | ControlMsg::SessionRenamed { .. }
+            | ControlMsg::ProfileList { .. }
+            | ControlMsg::ProfileCreated { .. }
+            | ControlMsg::ProfileUpdated { .. }
+            | ControlMsg::ProfileDeleted { .. }
+            | ControlMsg::Attached { .. }
+            | ControlMsg::TabOpened { .. }
+            | ControlMsg::TabClosed { .. }
+            | ControlMsg::UploadStarted { .. }
+            | ControlMsg::UploadCommitted { .. }
+            | ControlMsg::Error { .. }
             | ControlMsg::Detach { .. }
             | ControlMsg::Detached { .. }
             | ControlMsg::ReplayComplete { .. }
@@ -2703,6 +2861,22 @@ mod tests {
             serde_json::to_value(ErrorKind::Conflict).unwrap(),
             serde_json::json!("conflict")
         );
+        let unauthorized = ControlMsg::Error {
+            req_id: 8,
+            message: "session credential rejected".to_string(),
+            kind: ErrorKind::Unauthorized,
+        };
+        let expected = serde_json::json!({
+            "type": "error",
+            "req_id": 8,
+            "message": "session credential rejected",
+            "kind": "unauthorized",
+        });
+        assert_eq!(serde_json::to_value(&unauthorized).unwrap(), expected);
+        assert_eq!(
+            serde_json::from_value::<ControlMsg>(expected).unwrap(),
+            unauthorized
+        );
     }
 
     /// `Hello::host_identity` (PLAN_M6.md item 1), golden-pinned in both
@@ -2729,6 +2903,7 @@ mod tests {
                     build_version: "1.2.3".to_string(),
                     role: "supervisor".to_string(),
                     host_identity: None,
+                    auth: None,
                 },
                 serde_json::json!({
                     "type": "hello",
@@ -2736,6 +2911,7 @@ mod tests {
                     "build_version": "1.2.3",
                     "role": "supervisor",
                     "host_identity": null,
+                    "auth": null,
                 }),
             ),
             (
@@ -2744,6 +2920,7 @@ mod tests {
                     build_version: "1.2.3".to_string(),
                     role: "supervisor".to_string(),
                     host_identity: Some("11111111-1111-1111-1111-111111111111".to_string()),
+                    auth: None,
                 },
                 serde_json::json!({
                     "type": "hello",
@@ -2751,6 +2928,30 @@ mod tests {
                     "build_version": "1.2.3",
                     "role": "supervisor",
                     "host_identity": "11111111-1111-1111-1111-111111111111",
+                    "auth": null,
+                }),
+            ),
+            (
+                ControlMsg::Hello {
+                    protocol_version: 11,
+                    build_version: "0.0.3".to_string(),
+                    role: "spawn".to_string(),
+                    host_identity: None,
+                    auth: Some(SessionAuth {
+                        session_id: "parent-1".to_string(),
+                        token: "secret-token".to_string(),
+                    }),
+                },
+                serde_json::json!({
+                    "type": "hello",
+                    "protocol_version": 11,
+                    "build_version": "0.0.3",
+                    "role": "spawn",
+                    "host_identity": null,
+                    "auth": {
+                        "session_id": "parent-1",
+                        "token": "secret-token",
+                    },
                 }),
             ),
         ] {
@@ -2758,6 +2959,35 @@ mod tests {
             let decoded: ControlMsg = serde_json::from_value(expected).unwrap();
             assert_eq!(decoded, msg);
         }
+    }
+
+    /// Debugging a hello must retain the authenticated session identity
+    /// without copying its bearer secret into logs or panic output.
+    #[test]
+    fn session_auth_debug_redacts_the_bearer_token() {
+        let token = "token-that-must-never-appear";
+        let hello = ControlMsg::Hello {
+            protocol_version: PROTOCOL_VERSION,
+            build_version: BUILD_VERSION.to_string(),
+            role: "spawn".to_string(),
+            host_identity: None,
+            auth: Some(SessionAuth {
+                session_id: "session-1".to_string(),
+                token: token.to_string(),
+            }),
+        };
+        let rendered = format!("{hello:?}");
+        assert!(
+            rendered.contains("session-1") && rendered.contains("<redacted>"),
+            "the diagnostic must retain attribution and mark the omitted secret: {rendered}"
+        );
+        assert!(
+            !rendered
+                .as_bytes()
+                .windows(token.len())
+                .any(|bytes| bytes == token.as_bytes()),
+            "the bearer token bytes must not appear in Debug output: {rendered}"
+        );
     }
 
     /// The case the golden test above cannot reach: a hello whose JSON
@@ -2781,13 +3011,19 @@ mod tests {
         }"#;
         let decoded: ControlMsg = serde_json::from_str(raw)
             .expect("a hello JSON object with no host_identity key at all must still decode");
-        let ControlMsg::Hello { host_identity, .. } = decoded else {
+        let ControlMsg::Hello {
+            host_identity,
+            auth,
+            ..
+        } = decoded
+        else {
             panic!("expected ControlMsg::Hello, got {decoded:?}");
         };
         assert_eq!(
             host_identity, None,
             "an absent key must decode the same as an explicit null"
         );
+        assert_eq!(auth, None, "a v10 hello has no session attribution");
     }
 
     /// The REVERSE direction from the two tests above, following the
@@ -2819,6 +3055,7 @@ mod tests {
             build_version: "1.2.3".to_string(),
             role: "supervisor".to_string(),
             host_identity: Some("11111111-1111-1111-1111-111111111111".to_string()),
+            auth: None,
         };
         let json = serde_json::to_value(&new_msg).unwrap();
 
@@ -2965,9 +3202,12 @@ mod tests {
     #[test]
     fn session_info_created_at_json_shape_is_pinned() {
         let info = SessionInfo {
+            parent: None,
+            archived: false,
             id: "s1".to_string(),
             title: "demo".to_string(),
             created_at: 1_700_000_000,
+            creation_seq: None,
             cwd: "/tmp".to_string(),
             invocation: "agent".to_string(),
             status: SessionStatus::default(),
@@ -2982,11 +3222,46 @@ mod tests {
         );
     }
 
+    /// PLAN_M7.md item 2's parent and archive flag, including both default
+    /// and populated wire shapes. Archive remains metadata beside status;
+    /// it is never serialized as a status variant.
+    #[test]
+    fn session_info_parent_and_archived_json_shapes_are_pinned() {
+        for (parent, archived, expected_parent) in [
+            (None, false, serde_json::Value::Null),
+            (
+                Some("parent-1".to_string()),
+                true,
+                serde_json::json!("parent-1"),
+            ),
+        ] {
+            let info = SessionInfo {
+                id: "child-1".to_string(),
+                parent,
+                title: "child".to_string(),
+                created_at: 1_700_000_000,
+                creation_seq: None,
+                cwd: "/tmp".to_string(),
+                invocation: "agent".to_string(),
+                status: SessionStatus::Unknown,
+                annotation: None,
+                restart_offer: RestartOffer::FreshOnly,
+                tabs: Vec::new(),
+                archived,
+                source_profile: None,
+            };
+            let json = serde_json::to_value(&info).unwrap();
+            assert_eq!(json["parent"], expected_parent);
+            assert_eq!(json["archived"], serde_json::json!(archived));
+            assert_eq!(serde_json::from_value::<SessionInfo>(json).unwrap(), info);
+        }
+    }
+
     /// `PROTOCOL_VERSION` is a load-bearing constant (see the const's own
     /// docs for the M2 bump to 3, the M2.5 bump to 4, the M3 bump to 5,
     /// the M4 bump to 6, the M5 bump to 7, the M6 bump to 8, the
-    /// non-displacing attach's bump to 9, and the M6.75 bump to 10):
-    /// pinning its value here makes an
+    /// non-displacing attach's bump to 9, the M6.75 bump to 10, and M7's
+    /// vocabulary bump to 11): pinning its value here makes an
     /// accidental re-bump (or a forgotten one, if a later change needed
     /// it) a loud test failure rather than a silent drift discovered only
     /// by two builds refusing to talk to each other.
@@ -2997,8 +3272,8 @@ mod tests {
     /// an edit per bump; this test is the one place the number itself is
     /// asserted.
     #[test]
-    fn protocol_version_is_pinned_at_10() {
-        assert_eq!(PROTOCOL_VERSION, 10);
+    fn protocol_version_is_pinned_at_11() {
+        assert_eq!(PROTOCOL_VERSION, 11);
     }
 
     /// Pins the decode half of the failure PLAN_M2_5.md's version bump
@@ -3131,6 +3406,69 @@ mod tests {
                 serde_json::from_slice::<ControlMsg>(&frame.body).unwrap(),
                 msg
             );
+        }
+    }
+
+    /// Archive's request and fresh-session reply are golden-pinned here.
+    /// The reply carries the archived row so an idempotent retry returns
+    /// the same useful answer as the first request.
+    #[test]
+    fn archive_session_json_shapes_are_pinned() {
+        let session = SessionInfo {
+            parent: None,
+            archived: true,
+            id: "s1".to_string(),
+            title: "demo".to_string(),
+            created_at: 1_700_000_000,
+            creation_seq: Some(7),
+            cwd: "/tmp".to_string(),
+            invocation: "agent".to_string(),
+            status: SessionStatus::Exited { exit_code: None },
+            annotation: Some(STOP_ANNOTATION.to_string()),
+            restart_offer: RestartOffer::FreshOnly,
+            tabs: Vec::new(),
+            source_profile: None,
+        };
+        for (msg, expected) in [
+            (
+                ControlMsg::ArchiveSession {
+                    req_id: 13,
+                    session_id: "s1".to_string(),
+                },
+                serde_json::json!({
+                    "type": "archive_session",
+                    "req_id": 13,
+                    "session_id": "s1",
+                }),
+            ),
+            (
+                ControlMsg::SessionArchived {
+                    req_id: 13,
+                    session: session.clone(),
+                },
+                serde_json::json!({
+                    "type": "session_archived",
+                    "req_id": 13,
+                    "session": {
+                        "id": "s1",
+                        "parent": null,
+                        "title": "demo",
+                        "created_at": 1_700_000_000,
+                        "creation_seq": 7,
+                        "cwd": "/tmp",
+                        "invocation": "agent",
+                        "status": { "state": "exited", "exit_code": null },
+                        "annotation": STOP_ANNOTATION,
+                        "restart_offer": "fresh_only",
+                        "tabs": [],
+                        "archived": true,
+                        "source_profile": null,
+                    },
+                }),
+            ),
+        ] {
+            assert_eq!(serde_json::to_value(&msg).unwrap(), expected);
+            assert_eq!(serde_json::from_value::<ControlMsg>(expected).unwrap(), msg);
         }
     }
 
@@ -3461,6 +3799,128 @@ mod tests {
             .expect_err("a v4 decoder must fail on `conflict`, not silently ignore or default it");
     }
 
+    /// The v10 error-kind vocabulary, before PLAN_M7.md item 2 added
+    /// `Unauthorized`.
+    #[derive(Debug, Deserialize)]
+    #[serde(rename_all = "snake_case")]
+    enum LegacyV10ErrorKind {
+        NotFound,
+        InvalidRequest,
+        Internal,
+        Conflict,
+    }
+
+    /// The v10 control slice needed to prove the bump-earning archive
+    /// request/reply tags and unauthorized error kind. Unknown enum tags
+    /// fail before any handler could accidentally assign them an older
+    /// meaning.
+    #[derive(Debug, Deserialize)]
+    #[serde(tag = "type", rename_all = "snake_case")]
+    enum LegacyV10ControlMsg {
+        #[allow(dead_code)]
+        DeleteSession { req_id: u64, session_id: String },
+        #[allow(dead_code)]
+        SessionDeleted { req_id: u64 },
+        #[allow(dead_code)]
+        Error {
+            req_id: u64,
+            message: String,
+            kind: LegacyV10ErrorKind,
+        },
+    }
+
+    /// A v10 decoder cannot mistake v11's authorization failure for an
+    /// older error kind; it must reject the tagged value.
+    #[test]
+    fn unauthorized_error_fails_under_a_legacy_v10_decoder() {
+        let error = ControlMsg::Error {
+            req_id: 1,
+            message: "credential rejected".to_string(),
+            kind: ErrorKind::Unauthorized,
+        };
+        serde_json::from_value::<LegacyV10ControlMsg>(serde_json::to_value(error).unwrap())
+            .expect_err("a v10 decoder must fail on the v11 unauthorized error kind");
+    }
+
+    /// A v10 decoder has neither archive tag and must reject both messages
+    /// rather than ignore either as an additive field on an older operation.
+    #[test]
+    fn archive_messages_fail_under_a_legacy_v10_decoder() {
+        for archive in [
+            ControlMsg::ArchiveSession {
+                req_id: 2,
+                session_id: "s1".to_string(),
+            },
+            ControlMsg::SessionArchived {
+                req_id: 2,
+                session: SessionInfo {
+                    parent: None,
+                    archived: true,
+                    id: "s1".to_string(),
+                    title: "demo".to_string(),
+                    created_at: 0,
+                    creation_seq: Some(1),
+                    cwd: "/tmp".to_string(),
+                    invocation: "agent".to_string(),
+                    status: SessionStatus::Exited { exit_code: None },
+                    annotation: Some(STOP_ANNOTATION.to_string()),
+                    restart_offer: RestartOffer::FreshOnly,
+                    tabs: Vec::new(),
+                    source_profile: None,
+                },
+            },
+        ] {
+            let decoded = serde_json::from_value::<LegacyV10ControlMsg>(
+                serde_json::to_value(&archive).unwrap(),
+            );
+            assert!(
+                decoded.is_err(),
+                "a v10 decoder accepted a v11 archive tag: {archive:?}"
+            );
+        }
+    }
+
+    /// Version 11 has one archive-reply shape: the post-teardown session is
+    /// required, not an optional field a same-version peer may omit.
+    #[test]
+    fn original_v11_archive_reply_requires_the_session() {
+        #[derive(Debug, Deserialize)]
+        #[serde(tag = "type", rename_all = "snake_case")]
+        enum OriginalV11Reply {
+            SessionArchived { req_id: u64, session: SessionInfo },
+        }
+
+        let value = serde_json::to_value(ControlMsg::SessionArchived {
+            req_id: 9,
+            session: SessionInfo {
+                parent: None,
+                archived: true,
+                id: "s1".to_string(),
+                title: "demo".to_string(),
+                created_at: 0,
+                creation_seq: Some(1),
+                cwd: "/tmp".to_string(),
+                invocation: "agent".to_string(),
+                status: SessionStatus::Exited { exit_code: None },
+                annotation: Some(STOP_ANNOTATION.to_string()),
+                restart_offer: RestartOffer::FreshOnly,
+                tabs: Vec::new(),
+                source_profile: None,
+            },
+        })
+        .unwrap();
+        let OriginalV11Reply::SessionArchived { req_id, session } =
+            serde_json::from_value(value).expect("the current reply is the original v11 shape");
+        assert_eq!(req_id, 9);
+        assert!(session.archived);
+
+        serde_json::from_value::<OriginalV11Reply>(serde_json::json!({
+            "type": "session_archived",
+            "req_id": 9,
+        }))
+        .expect_err("a v11 archive reply without its session must fail");
+    }
+
     /// `SessionList`'s `total`/`next_cursor` shape at `PROTOCOL_VERSION` 8
     /// (PLAN_M6.md item 1), golden-pinned in both the exhaustion and
     /// continuation cases: `next_cursor: None` (a page that reached the
@@ -3572,6 +4032,12 @@ mod tests {
             SessionStatus::Unknown,
             "a SessionInfo with no state field must decode as Unknown, never a guess"
         );
+        assert_eq!(sessions[0].parent, None, "a v10 session has no parent");
+        assert_eq!(
+            sessions[0].creation_seq, None,
+            "an older sender has no supervisor creation sequence"
+        );
+        assert!(!sessions[0].archived, "a v10 session is not archived");
     }
 
     /// The REVERSE direction from the test above: a hand-rolled decoder
@@ -3620,9 +4086,12 @@ mod tests {
         let new_msg = ControlMsg::SessionList {
             req_id: 4,
             sessions: vec![SessionInfo {
+                parent: None,
+                archived: false,
                 id: "s1".to_string(),
                 title: "demo".to_string(),
                 created_at: 1_700_000_000,
+                creation_seq: None,
                 cwd: "/tmp".to_string(),
                 invocation: "agent".to_string(),
                 status: SessionStatus::Exited { exit_code: Some(1) },
@@ -3673,9 +4142,12 @@ mod tests {
     #[test]
     fn session_info_annotation_and_restart_offer_json_shapes_are_pinned() {
         let bare = SessionInfo {
+            parent: None,
+            archived: false,
             id: "s1".to_string(),
             title: "demo".to_string(),
             created_at: 1_700_000_000,
+            creation_seq: None,
             cwd: "/tmp".to_string(),
             invocation: "agent".to_string(),
             status: SessionStatus::default(),
@@ -3688,14 +4160,17 @@ mod tests {
             serde_json::to_value(&bare).unwrap(),
             serde_json::json!({
                 "id": "s1",
+                "parent": null,
                 "title": "demo",
                 "created_at": 1_700_000_000,
+                "creation_seq": null,
                 "cwd": "/tmp",
                 "invocation": "agent",
                 "status": { "state": "unknown" },
                 "annotation": null,
                 "restart_offer": "fresh_only",
                 "tabs": [],
+                "archived": false,
                 "source_profile": null,
             })
         );
@@ -3738,6 +4213,9 @@ mod tests {
         });
         let decoded: SessionInfo = serde_json::from_value(old_shape).unwrap();
         assert_eq!(decoded.annotation, None);
+        assert_eq!(decoded.parent, None);
+        assert_eq!(decoded.creation_seq, None);
+        assert!(!decoded.archived);
         assert_eq!(decoded.restart_offer, RestartOffer::FreshOnly);
         assert_eq!(
             decoded.tabs,
@@ -3762,9 +4240,12 @@ mod tests {
     #[test]
     fn session_info_tabs_json_shape_is_pinned() {
         let info = SessionInfo {
+            parent: None,
+            archived: false,
             id: "s1".to_string(),
             title: "demo".to_string(),
             created_at: 1_700_000_000,
+            creation_seq: None,
             cwd: "/tmp".to_string(),
             invocation: "agent".to_string(),
             status: SessionStatus::Running,
@@ -4107,6 +4588,8 @@ mod tests {
     fn create_session_snapshot_override_fields_json_shape_is_pinned() {
         let msg = ControlMsg::CreateSession {
             req_id: 1,
+            parent: None,
+            profile_name: None,
             cwd: "/some/dir".to_string(),
             invocation: Some("/opt/bin/claude".to_string()),
             profile_id: None,
@@ -4126,6 +4609,8 @@ mod tests {
             serde_json::json!({
                 "type": "create_session",
                 "req_id": 1,
+                "parent": null,
+                "profile_name": null,
                 "cwd": "/some/dir",
                 "invocation": "/opt/bin/claude",
                 "profile_id": null,
@@ -4153,6 +4638,8 @@ mod tests {
     fn create_session_profile_mode_json_shape_is_pinned() {
         let msg = ControlMsg::CreateSession {
             req_id: 2,
+            parent: None,
+            profile_name: None,
             cwd: "/some/dir".to_string(),
             invocation: None,
             profile_id: Some("prof-7".to_string()),
@@ -4166,6 +4653,8 @@ mod tests {
         let expected = serde_json::json!({
             "type": "create_session",
             "req_id": 2,
+            "parent": null,
+            "profile_name": null,
             "cwd": "/some/dir",
             "invocation": null,
             "profile_id": "prof-7",
@@ -4183,6 +4672,44 @@ mod tests {
             body: expected.to_string().into_bytes(),
         };
         assert_eq!(crate::io::parse_control(&golden_frame).unwrap(), msg);
+    }
+
+    /// PLAN_M7.md item 2's spawn selector and parent reference, pinned in
+    /// both directions. Together with the raw and profile-id goldens above,
+    /// this covers every selector present once and null twice.
+    #[test]
+    fn create_session_profile_name_and_parent_json_shape_is_pinned() {
+        let msg = ControlMsg::CreateSession {
+            req_id: 3,
+            parent: Some("parent-1".to_string()),
+            cwd: "/some/dir".to_string(),
+            invocation: None,
+            profile_id: None,
+            profile_name: Some("Claude Code".to_string()),
+            title: None,
+            cols: 80,
+            rows: 24,
+            intent_key: Some("spawn-key".to_string()),
+            agent_kind: None,
+            resume_template: None,
+        };
+        let expected = serde_json::json!({
+            "type": "create_session",
+            "req_id": 3,
+            "parent": "parent-1",
+            "cwd": "/some/dir",
+            "invocation": null,
+            "profile_id": null,
+            "profile_name": "Claude Code",
+            "title": null,
+            "cols": 80,
+            "rows": 24,
+            "intent_key": "spawn-key",
+            "agent_kind": null,
+            "resume_template": null,
+        });
+        assert_eq!(serde_json::to_value(&msg).unwrap(), expected);
+        assert_eq!(serde_json::from_value::<ControlMsg>(expected).unwrap(), msg);
     }
 
     /// The both-modes request EXISTS on the wire and decodes cleanly — it
@@ -4204,6 +4731,8 @@ mod tests {
         ] {
             let msg = ControlMsg::CreateSession {
                 req_id: 3,
+                parent: None,
+                profile_name: None,
                 cwd: "/some/dir".to_string(),
                 invocation,
                 profile_id,
@@ -4252,8 +4781,10 @@ mod tests {
         });
         let decoded: ControlMsg = serde_json::from_value(old_shape).unwrap();
         let ControlMsg::CreateSession {
+            parent,
             invocation,
             profile_id,
+            profile_name,
             intent_key,
             agent_kind,
             resume_template,
@@ -4265,6 +4796,8 @@ mod tests {
         assert_eq!(intent_key, None, "an old sender never had this field");
         assert_eq!(agent_kind, None, "an old sender never had this field");
         assert_eq!(resume_template, None, "an old sender never had this field");
+        assert_eq!(parent, None, "a v10 create has no spawn parent");
+        assert_eq!(profile_name, None, "a v10 create cannot select by name");
         // Version 10's mode selection read against a request that predates
         // it: a bare `invocation` with no `profile_id` key IS the raw mode,
         // which is what keeps every pre-10 caller meaning exactly what it
@@ -4306,6 +4839,8 @@ mod tests {
     fn new_create_session_json_decodes_under_a_legacy_pre_snapshot_decoder() {
         let new_msg = ControlMsg::CreateSession {
             req_id: 6,
+            parent: None,
+            profile_name: None,
             cwd: "/some/dir".to_string(),
             // RAW mode deliberately: a legacy decoder's `invocation` is a
             // required `String`, so the PROFILE mode's `null` would fail
@@ -4394,6 +4929,8 @@ mod tests {
     fn a_profile_mode_create_cannot_decode_under_a_legacy_v9_decoder() {
         let raw = ControlMsg::CreateSession {
             req_id: 1,
+            parent: None,
+            profile_name: None,
             cwd: "/some/dir".to_string(),
             invocation: Some("agent".to_string()),
             profile_id: None,
@@ -4414,6 +4951,8 @@ mod tests {
 
         let profile_mode = ControlMsg::CreateSession {
             req_id: 2,
+            parent: None,
+            profile_name: None,
             cwd: "/some/dir".to_string(),
             invocation: None,
             profile_id: Some("prof-7".to_string()),
@@ -4464,9 +5003,12 @@ mod tests {
         let reply = ControlMsg::SessionRestarted {
             req_id: 42,
             session: SessionInfo {
+                parent: None,
+                archived: false,
                 id: "s1".to_string(),
                 title: "demo".to_string(),
                 created_at: 1_700_000_000,
+                creation_seq: None,
                 cwd: "/tmp".to_string(),
                 invocation: "claude".to_string(),
                 status: SessionStatus::Running,
@@ -4554,9 +5096,12 @@ mod tests {
         let msg = ControlMsg::SessionRestarted {
             req_id: 8,
             session: SessionInfo {
+                parent: None,
+                archived: false,
                 id: "s1".to_string(),
                 title: "demo".to_string(),
                 created_at: 1_700_000_000,
+                creation_seq: None,
                 cwd: "/tmp".to_string(),
                 invocation: "claude".to_string(),
                 status: SessionStatus::Running,
@@ -4573,14 +5118,17 @@ mod tests {
                 "req_id": 8,
                 "session": {
                     "id": "s1",
+                    "parent": null,
                     "title": "demo",
                     "created_at": 1_700_000_000,
+                    "creation_seq": null,
                     "cwd": "/tmp",
                     "invocation": "claude",
                     "status": { "state": "running" },
                     "annotation": null,
                     "restart_offer": "resume",
                     "tabs": [],
+                    "archived": false,
                     "source_profile": null,
                 },
             })
@@ -4669,9 +5217,12 @@ mod tests {
                 ControlMsg::SessionRenamed {
                     req_id: 50,
                     session: SessionInfo {
+                        parent: None,
+                        archived: false,
                         id: "s1".to_string(),
                         title: "renamed title".to_string(),
                         created_at: 1_700_000_000,
+                        creation_seq: None,
                         cwd: "/tmp".to_string(),
                         invocation: "claude".to_string(),
                         status: SessionStatus::Running,
@@ -4686,14 +5237,17 @@ mod tests {
                     "req_id": 50,
                     "session": {
                         "id": "s1",
+                        "parent": null,
                         "title": "renamed title",
                         "created_at": 1_700_000_000,
+                        "creation_seq": null,
                         "cwd": "/tmp",
                         "invocation": "claude",
                         "status": { "state": "running" },
                         "annotation": null,
                         "restart_offer": "resume",
                         "tabs": [],
+                        "archived": false,
                         "source_profile": null,
                     },
                 }),
@@ -5050,9 +5604,12 @@ mod tests {
                 ProfileExistence::Deleted => "deleted",
             };
             let info = SessionInfo {
+                parent: None,
+                archived: false,
                 id: "s1".to_string(),
                 title: "demo".to_string(),
                 created_at: 1_700_000_000,
+                creation_seq: None,
                 cwd: "/tmp".to_string(),
                 invocation: "claude".to_string(),
                 status: SessionStatus::Running,
