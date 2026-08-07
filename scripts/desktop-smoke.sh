@@ -1,21 +1,21 @@
 #!/usr/bin/env bash
-# EXPERIMENTAL desktop smoke test — run on demand, wired to no gate, and
-# expected to be flaky past the boot phases. webkit2gtk under Xvfb paints
+# The default transport/state phase is the CI desktop integration gate. Its
+# optional pixel-driven interaction phase remains experimental because
+# webkit2gtk under Xvfb paints
 # unreliably in this repo's testing so far: the window intermittently
 # stays black (tried: a window manager, resize nudges,
 # WEBKIT_DISABLE_COMPOSITING_MODE=1 — none fully cured it), and when it
-# does not paint, the UI-driving phases below cannot see or click
-# anything. The boot phases (supervisor + helm + bundled app + window
-# appears) are reliable and are the part worth keeping today; treat a
-# failure past them as "inspect the failure screenshot", not "the product
-# regressed". The interaction recipe is kept because it HAS driven the
+# does not paint, the UI-driving phase cannot see or click anything. Item 8's
+# bootstrap assertions are transport/state based and form the default smoke;
+# set DESKTOP_SMOKE_LEGACY_INTERACTION=1 to run the pixel-driven create and
+# terminal round-trip too. The interaction recipe is kept because it has driven the
 # real UI end to end on this host (created sessions through the form,
 # typed into the terminal) and is the starting point for making this a
-# real gate later.
+# broader interaction path on this host.
 #
-# Boots a real supervisor + helm + the dx-bundled Linux desktop app
-# (webkit2gtk) under Xvfb, drives the UI with xdotool, and asserts
-# pass/fail through side effects — the HTTP API and tmux capture-pane.
+# Boots the dx-bundled Linux desktop app under Xvfb. The app itself owns the
+# embedded helm and managed local supervisor; starting either one here would
+# preserve the old thin-client shape this harness exists to retire.
 # The one pixel-based check (ImageMagick, region-brightness) is an
 # interaction GATE, not an assertion: it only answers "has the create
 # form visibly opened yet, so it's safe to click into it" and retries
@@ -30,8 +30,7 @@
 # dioxus-desktop code paths on the same engine family (WebKitGTK), so that
 # class of regression fails here first. It is NOT the final word on real
 # WKWebView behavior — macOS-specific quirks still need a manual pass —
-# and it is run on demand, not in CI (GUI-under-Xvfb brings flake risk the
-# CI gate does not want; same pattern as the cgroup tests' documented run).
+# while macOS-specific quirks still need the documented manual pass.
 #
 # Prereqs (apt): xvfb xdotool openbox imagemagick curl python3, plus the
 # webkit2gtk dev stack the desktop feature already needs, dioxus-cli
@@ -59,10 +58,17 @@ set -u
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
 
 # Preflight, before anything is created or spawned: every external binary
-# the phases below shell out to, so a missing tool is a clean SKIP instead
-# of a confusing failure partway through.
+# the phases below shell out to. Local optional runs skip cleanly; CI must
+# fail because a green integration gate that exercised nothing is false.
 for tool in Xvfb xdotool openbox import convert curl python3 tmux dx; do
-  command -v "$tool" >/dev/null || { echo "SKIPPED desktop-smoke: $tool not installed" >&2; exit 0; }
+  if ! command -v "$tool" >/dev/null; then
+    if [ "${CI:-}" = true ]; then
+      echo "FAIL: desktop-smoke requires $tool in CI" >&2
+      exit 1
+    fi
+    echo "SKIPPED desktop-smoke: $tool not installed" >&2
+    exit 0
+  fi
 done
 
 PORT="${DESKTOP_SMOKE_PORT:-7493}"
@@ -99,6 +105,21 @@ fail() {
   exit 1
 }
 
+# Curl reads the bearer header from this private file so the secret never
+# appears in a process listing. Every loopback request bypasses ambient proxy
+# configuration as the desktop clients do.
+CURL_AUTH_CONFIG="$X/curl-auth.conf"
+write_curl_auth() {
+  printf 'header = "Authorization: Bearer %s"\n' "$NATIVE_SECRET" >"$CURL_AUTH_CONFIG"
+  chmod 600 "$CURL_AUTH_CONFIG"
+}
+curl_local() {
+  curl --noproxy '*' "$@"
+}
+curl_auth() {
+  curl --noproxy '*' --config "$CURL_AUTH_CONFIG" "$@"
+}
+
 # Teardown is a trap, not a function called at each exit site: registering
 # it before anything is spawned means even a SIGTERM mid-boot (or a `fail`
 # three phases in) still reaps every daemon this run started. Idempotent
@@ -119,9 +140,9 @@ teardown() {
   # kills below and the unit-stop fallback further down are usually
   # no-ops. Best-effort: teardown must proceed even if the helm is
   # already gone or wedged.
-  [ -n "$SID" ] && curl -s --max-time 5 -X DELETE "$API/api/sessions/$SID" >/dev/null 2>&1
+  [ -n "$SID" ] && [ -s "$CURL_AUTH_CONFIG" ] && curl_auth -s --max-time 5 -X DELETE "$API/api/sessions/$SID" >/dev/null 2>&1
 
-  for p in desktop helm supervisor openbox xvfb; do
+  for p in desktop openbox xvfb; do
     [ -f "$X/$p.pid" ] && kill "$(cat "$X/$p.pid")" 2>/dev/null
   done
   tmux -S "$X/state/tmux.sock" kill-server 2>/dev/null
@@ -139,7 +160,7 @@ teardown() {
   fi
 
   if [ -n "$PASS" ]; then
-    rm -rf "$X"
+    rm -r -- "$X"
   else
     echo "state kept at $X" >&2
   fi
@@ -147,27 +168,31 @@ teardown() {
 trap teardown EXIT
 trap 'exit 143' INT TERM
 
-echo "== building (cargo + dx desktop bundle)"
-(cd "$REPO" && cargo build --quiet) || fail "cargo build"
-(cd "$REPO/crates/farhelm-ui" && dx build --platform desktop >"$X/dx.log" 2>&1) || fail "dx desktop build (see $X/dx.log)"
-APP="$REPO/target/dx/farhelm-ui/debug/linux/app/farhelm-ui"
-[ -x "$APP" ] || fail "bundled app missing at $APP"
+echo "== building (cargo + web bundle + dx desktop bundle)"
+(cd "$REPO" && flock --close /tmp/fh-build.lock -c 'ulimit -c unlimited && cargo build --quiet') || fail "cargo build"
+(cd "$REPO/crates/farhelm-ui" && flock --close /tmp/fh-build.lock -c 'ulimit -c unlimited && dx build --platform web --release' >"$X/dx-web.log" 2>&1) || fail "dx web build (see $X/dx-web.log)"
+(cd "$REPO/crates/farhelm-ui" && flock --close /tmp/fh-build.lock -c 'ulimit -c unlimited && dx build --platform desktop' >"$X/dx.log" 2>&1) || fail "dx desktop build (see $X/dx.log)"
+BUILT_APP="$REPO/target/dx/farhelm-ui/debug/linux/app/farhelm-ui"
+[ -x "$BUILT_APP" ] || fail "bundled app missing at $BUILT_APP"
 
-echo "== booting supervisor, helm, Xvfb, openbox, app"
-"$REPO/target/debug/farhelm" supervisor run --state-dir "$X/state" >"$X/supervisor.log" 2>&1 &
-echo $! >"$X/supervisor.pid"
-sleep 2
-"$REPO/target/debug/farhelm" helm run --port "$PORT" --state-dir "$X/state" >"$X/helm.log" 2>&1 &
-HELM_PID=$!
-echo "$HELM_PID" >"$X/helm.pid"
-sleep 2
-curl -sf --max-time 5 "$API/api/sessions" >/dev/null || fail "helm API not answering"
-# The port is configurable (DESKTOP_SMOKE_PORT) but a squatter already
-# bound to it is only DETECTED here, not avoided: curl above would happily
-# succeed against someone else's server on the same port. Confirming our
-# own child is still alive turns that into a loud failure instead of the
-# rest of the script silently driving a stack we didn't start.
-kill -0 "$HELM_PID" 2>/dev/null || fail "helm API answered but our helm process is gone (port collision with another process?)"
+# Stage the release shape and make its tmux a sentinel wrapper around the
+# preflighted host binary. The app starts with a deliberately small PATH; the
+# marker proves DesktopBootstrap prepended the CLI's sibling directory and
+# the supervisor resolved this exact `tmux` entry rather than the host copy.
+APP_CONTENTS="$X/Farhelm.app/Contents"
+mkdir -p "$APP_CONTENTS/MacOS" "$APP_CONTENTS/Resources/web"
+cp "$BUILT_APP" "$APP_CONTENTS/MacOS/farhelm-ui"
+cp "$REPO/target/debug/farhelm" "$APP_CONTENTS/MacOS/farhelm"
+cp -R "$REPO/target/dx/farhelm-ui/release/web/public/." "$APP_CONTENTS/Resources/web/"
+APP="$APP_CONTENTS/MacOS/farhelm-ui"
+HOST_TMUX=$(command -v tmux)
+printf '%s\n' \
+  '#!/bin/sh' \
+  'printf used >"$FARHELM_SMOKE_TMUX_MARKER"' \
+  "exec \"$HOST_TMUX\" \"\$@\"" >"$APP_CONTENTS/MacOS/tmux"
+chmod 700 "$APP_CONTENTS/MacOS/farhelm" "$APP_CONTENTS/MacOS/tmux"
+
+echo "== booting Xvfb, openbox, and the self-contained app"
 
 # Allocate the display dynamically instead of a fixed :97: a fixed number
 # is a predictable resource another concurrent run (or another local
@@ -188,13 +213,62 @@ DISP=":$DISPNUM"
 DISPLAY=$DISP openbox >"$X/openbox.log" 2>&1 &
 echo $! >"$X/openbox.pid"
 sleep 1
-DISPLAY=$DISP FARHELM_URL="$API" "$APP" >"$X/desktop.log" 2>&1 &
+DISPLAY=$DISP \
+  PATH="$APP_CONTENTS/MacOS:/usr/bin:/bin" \
+  FARHELM_SMOKE_TMUX_MARKER="$X/bundled-tmux-used" \
+  FARHELM_DESKTOP_PORT="$PORT" \
+  FARHELM_DESKTOP_STATE_DIR="$X/state" \
+  "$APP" >"$X/desktop.log" 2>&1 &
 echo $! >"$X/desktop.pid"
+
+for _ in $(seq 1 30); do
+  curl_local -sf --max-time 2 "$API/" >/dev/null 2>&1 && break
+  sleep 1
+done
+curl_local -sf --max-time 5 "$API/" | grep -q '<!DOCTYPE html>' || fail "embedded helm did not serve the bundled UI"
+
+for _ in $(seq 1 30); do
+  [ -f "$X/state/desktop-client.json" ] && break
+  sleep 1
+done
+[ -f "$X/state/desktop-client.json" ] || fail "desktop credentials were not persisted"
+NATIVE_SECRET=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["native_device_secret"])' "$X/state/desktop-client.json")
+write_curl_auth
+LOCAL_READY=""
+for _ in $(seq 1 30); do
+  if curl_auth -sf --max-time 5 "$API/api/hosts" | python3 -c '
+import json,sys
+hosts=json.load(sys.stdin)["hosts"]
+assert any(h["kind"] == "local" and h["state"]["phase"] == "connected" for h in hosts)
+' 2>/dev/null; then
+    LOCAL_READY=1
+    break
+  fi
+  sleep 1
+done
+[ -n "$LOCAL_READY" ] || fail "authenticated native API or managed local supervisor was not reachable"
+[ -s "$X/bundled-tmux-used" ] || fail "managed supervisor did not resolve the bundle-shaped tmux sentinel"
+for _ in $(seq 1 30); do
+  WEBVIEW_SECRET=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get("webview_device_secret") or "")' "$X/state/desktop-client.json")
+  WEBVIEW_GENERATION=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get("webview_auth_generation") or 0)' "$X/state/desktop-client.json")
+  [ -n "$WEBVIEW_SECRET" ] && [ "$WEBVIEW_GENERATION" -ge 1 ] && break
+  sleep 1
+done
+[ -n "$WEBVIEW_SECRET" ] && [ "$WEBVIEW_GENERATION" -ge 1 ] || fail "the webview JavaScript stack did not authenticate its event socket"
+
+DEVICE_ROWS=$(python3 -c 'import sqlite3,sys; print(sqlite3.connect(sys.argv[1]).execute("select count(*) from device_sessions").fetchone()[0])' "$X/state/helm.db")
+[ "$DEVICE_ROWS" = 2 ] || fail "desktop bootstrap minted $DEVICE_ROWS device rows instead of two"
+
+echo "== creating a bundle-substrate session before the hard restart"
+CREATE_BODY=$(python3 -c 'import json,sys; print(json.dumps({"cwd": sys.argv[1], "invocation": "bash", "title": "desktop-restart-smoke"}))' "$X/work") || fail "encoding smoke session"
+SID=$(curl_auth -sf --max-time 10 -H 'content-type: application/json' -d "$CREATE_BODY" "$API/api/sessions" | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])') || fail "creating the pre-restart smoke session"
+[ -n "$SID" ] || fail "the pre-restart create returned no session id"
+tmux -S "$X/state/tmux.sock" has-session -t "fh-$SID" 2>/dev/null || fail "the created session did not reach bundle-local tmux"
 
 echo "== waiting for the window and nudging it to render"
 WID=""
 for _ in $(seq 1 20); do
-  WID=$(DISPLAY=$DISP xdotool search --name farhelm 2>/dev/null | head -1)
+  WID=$(DISPLAY=$DISP xdotool search --name farhelm 2>/dev/null | tail -1)
   [ -n "$WID" ] && break
   sleep 1
 done
@@ -207,6 +281,119 @@ for _ in $(seq 1 10); do
 done
 [ "$GEOM" = "1200x900" ] || fail "window never took a sane size (got: ${GEOM:-none})"
 sleep 3
+
+echo "== killing the app without Rust cleanup and reusing both device sessions"
+OLD_DESKTOP_PID=$(cat "$X/desktop.pid")
+SUPERVISOR_PID=$(ps -eo pid=,ppid=,args= | awk -v parent="$OLD_DESKTOP_PID" '$2 == parent && /supervisor run/ { print $1; exit }')
+[ -n "$SUPERVISOR_PID" ] || fail "could not identify the managed supervisor child"
+kill -KILL "$OLD_DESKTOP_PID" || fail "terminating desktop app without graceful cleanup"
+for _ in $(seq 1 20); do
+  DESKTOP_STAT=$(ps -o stat= -p "$OLD_DESKTOP_PID" 2>/dev/null | tr -d ' ')
+  [ -z "$DESKTOP_STAT" ] || [ "${DESKTOP_STAT#Z}" != "$DESKTOP_STAT" ] && break
+  sleep 0.5
+done
+DESKTOP_STAT=$(ps -o stat= -p "$OLD_DESKTOP_PID" 2>/dev/null | tr -d ' ')
+[ -z "$DESKTOP_STAT" ] || [ "${DESKTOP_STAT#Z}" != "$DESKTOP_STAT" ] || fail "desktop app did not exit after its window closed"
+wait "$OLD_DESKTOP_PID" 2>/dev/null
+KILLED_STATUS=$?
+[ "$KILLED_STATUS" -ne 0 ] || fail "desktop app unexpectedly reported graceful success after SIGKILL"
+SUPERVISOR_GONE=""
+for _ in $(seq 1 20); do
+  if ! kill -0 "$SUPERVISOR_PID" 2>/dev/null; then
+    SUPERVISOR_GONE=1
+    break
+  fi
+  sleep 0.25
+done
+[ -n "$SUPERVISOR_GONE" ] || fail "managed supervisor outlived the desktop app"
+for _ in $(seq 1 20); do
+  curl_local -sf --max-time 1 "$API/" >/dev/null 2>&1 || break
+  sleep 0.25
+done
+
+DISPLAY=$DISP \
+  PATH="$APP_CONTENTS/MacOS:/usr/bin:/bin" \
+  FARHELM_SMOKE_TMUX_MARKER="$X/bundled-tmux-used" \
+  FARHELM_DESKTOP_PORT="$PORT" \
+  FARHELM_DESKTOP_STATE_DIR="$X/state" \
+  "$APP" >"$X/desktop-restart.log" 2>&1 &
+echo $! >"$X/desktop.pid"
+for _ in $(seq 1 30); do
+  curl_local -sf --max-time 2 "$API/" >/dev/null 2>&1 && break
+  sleep 1
+done
+for _ in $(seq 1 30); do
+  RESTART_WEBVIEW_GENERATION=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get("webview_auth_generation") or 0)' "$X/state/desktop-client.json")
+  [ "$RESTART_WEBVIEW_GENERATION" -gt "$WEBVIEW_GENERATION" ] && break
+  sleep 1
+done
+[ "$RESTART_WEBVIEW_GENERATION" -gt "$WEBVIEW_GENERATION" ] || fail "restarted webview never completed authenticated readiness"
+curl_auth -sf --max-time 5 "$API/api/hosts" >/dev/null || fail "restarted app did not reuse native authentication"
+RESTART_ROWS=$(python3 -c 'import sqlite3,sys; print(sqlite3.connect(sys.argv[1]).execute("select count(*) from device_sessions").fetchone()[0])' "$X/state/helm.db")
+[ "$RESTART_ROWS" = "$DEVICE_ROWS" ] || fail "restart minted device rows ($DEVICE_ROWS before, $RESTART_ROWS after)"
+RESTART_NATIVE=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["native_device_secret"])' "$X/state/desktop-client.json")
+RESTART_WEBVIEW=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["webview_device_secret"])' "$X/state/desktop-client.json")
+[ "$RESTART_NATIVE" = "$NATIVE_SECRET" ] || fail "restart replaced the persisted native device session"
+[ "$RESTART_WEBVIEW" = "$WEBVIEW_SECRET" ] || fail "restart replaced the persisted webview device session"
+tmux -S "$X/state/tmux.sock" has-session -t "fh-$SID" 2>/dev/null || fail "the tmux-held session did not survive the app restart"
+SESSION_REDISCOVERED=""
+for _ in $(seq 1 30); do
+  if curl_auth -sf --max-time 5 "$API/api/sessions/$SID" >/dev/null; then
+    SESSION_REDISCOVERED=1
+    break
+  fi
+  sleep 1
+done
+[ -n "$SESSION_REDISCOVERED" ] || fail "the restarted app did not rediscover the surviving session"
+
+echo "== rotating the token and refreshing both client stacks on 401"
+"$APP_CONTENTS/MacOS/farhelm" helm token rotate --state-dir "$X/state" >/dev/null || fail "rotating desktop helm token"
+ROTATED=""
+for _ in $(seq 1 30); do
+  NEXT_NATIVE=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get("native_device_secret") or "")' "$X/state/desktop-client.json")
+  NEXT_WEBVIEW=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get("webview_device_secret") or "")' "$X/state/desktop-client.json")
+  NEXT_WEBVIEW_GENERATION=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get("webview_auth_generation") or 0)' "$X/state/desktop-client.json")
+  if [ -n "$NEXT_NATIVE" ] && [ -n "$NEXT_WEBVIEW" ] && [ "$NEXT_NATIVE" != "$NATIVE_SECRET" ] && [ "$NEXT_WEBVIEW" != "$WEBVIEW_SECRET" ] && [ "$NEXT_WEBVIEW_GENERATION" -gt "$RESTART_WEBVIEW_GENERATION" ]; then
+    ROTATED=1
+    break
+  fi
+  sleep 1
+done
+[ -n "$ROTATED" ] || fail "both desktop client stacks did not exchange after rotation"
+NATIVE_SECRET="$NEXT_NATIVE"
+WEBVIEW_SECRET="$NEXT_WEBVIEW"
+write_curl_auth
+ROTATED_ROWS=$(python3 -c 'import sqlite3,sys; print(sqlite3.connect(sys.argv[1]).execute("select count(*) from device_sessions").fetchone()[0])' "$X/state/helm.db")
+[ "$ROTATED_ROWS" = 2 ] || fail "rotation recovery left $ROTATED_ROWS device rows instead of two"
+curl_auth -sf --max-time 5 "$API/api/hosts" >/dev/null || fail "refreshed native credential was not accepted"
+
+WID=""
+for _ in $(seq 1 20); do
+  WID=$(DISPLAY=$DISP xdotool search --name farhelm 2>/dev/null | tail -1)
+  [ -n "$WID" ] && break
+  sleep 1
+done
+[ -n "$WID" ] || fail "restarted app window never appeared"
+DISPLAY=$DISP xdotool windowsize "$WID" 1200 900
+sleep 3
+
+curl_auth -sf --max-time 5 -X DELETE "$API/api/sessions/$SID" >/dev/null || fail "cleaning up the persisted smoke session"
+SID=""
+if [ "${DESKTOP_SMOKE_LEGACY_INTERACTION:-}" != 1 ]; then
+  DISPLAY=$DISP xdotool windowactivate "$WID" key alt+F4
+  FINAL_DESKTOP_PID=$(cat "$X/desktop.pid")
+  for _ in $(seq 1 20); do
+    DESKTOP_STAT=$(ps -o stat= -p "$FINAL_DESKTOP_PID" 2>/dev/null | tr -d ' ')
+    [ -z "$DESKTOP_STAT" ] || [ "${DESKTOP_STAT#Z}" != "$DESKTOP_STAT" ] && break
+    sleep 0.5
+  done
+  DESKTOP_STAT=$(ps -o stat= -p "$FINAL_DESKTOP_PID" 2>/dev/null | tr -d ' ')
+  [ -z "$DESKTOP_STAT" ] || [ "${DESKTOP_STAT#Z}" != "$DESKTOP_STAT" ] || fail "desktop app did not exit cleanly"
+  wait "$FINAL_DESKTOP_PID" || fail "desktop app exited unsuccessfully"
+  echo "== PASS: embedded helm, dual auth, local supervisor, and a tmux-held session survive restart"
+  PASS=1
+  exit 0
+fi
 
 echo "== creating a session through the real create form"
 # Layout constants for the styled 1200x900 window: the new-session button,
@@ -221,12 +408,12 @@ echo "== creating a session through the real create form"
 # the header, not a pass/fail assertion.
 form_region_mean() {
   DISPLAY=$DISP import -window root png:- 2>/dev/null |
-    convert - -crop 700x180+30+90 -format "%[fx:mean]" info: 2>/dev/null
+    convert - -crop 700x280+30+300 -format "%[fx:mean]" info: 2>/dev/null
 }
 BASE=$(form_region_mean)
 FORM_OPEN=""
 for _ in $(seq 1 15); do
-  DISPLAY=$DISP xdotool mousemove 65 67 click 1
+  DISPLAY=$DISP xdotool mousemove 65 290 click 1
   sleep 1.5
   NOW=$(form_region_mean)
   if python3 -c "import sys; sys.exit(0 if abs(float('$NOW')-float('$BASE'))>0.01 else 1)" 2>/dev/null; then
@@ -235,9 +422,9 @@ for _ in $(seq 1 15); do
   fi
 done
 [ -n "$FORM_OPEN" ] || fail "create form never opened (webview unresponsive to clicks?)"
-DISPLAY=$DISP xdotool mousemove 400 128 click 1 sleep 0.3 type --delay 120 "$X/work"
-DISPLAY=$DISP xdotool mousemove 400 177 click 1 sleep 0.3 type --delay 120 "bash"
-DISPLAY=$DISP xdotool mousemove 400 226 click 1 sleep 0.3 type --delay 120 "smoke"
+DISPLAY=$DISP xdotool mousemove 400 425 click 1 sleep 0.3 type --delay 120 "$X/work"
+DISPLAY=$DISP xdotool mousemove 400 475 click 1 sleep 0.3 type --delay 120 "bash"
+DISPLAY=$DISP xdotool mousemove 400 525 click 1 sleep 0.3 type --delay 120 "smoke"
 
 # Identify the created session by set difference, not by title: matching
 # "any title starting with smo" would happily grab an unrelated pre-
@@ -246,14 +433,14 @@ DISPLAY=$DISP xdotool mousemove 400 226 click 1 sleep 0.3 type --delay 120 "smok
 # pane. Snapshotting ids before the submit click and requiring exactly
 # one new id afterward is unambiguous regardless of what titles already
 # exist.
-BEFORE_IDS=$(curl -s --max-time 5 "$API/api/sessions" | python3 -c "
+BEFORE_IDS=$(curl_auth -s --max-time 5 "$API/api/sessions" | python3 -c "
 import json, sys
 d = json.load(sys.stdin)
 print(' '.join(sorted(s['id'] for s in d['sessions'])))" 2>/dev/null)
-DISPLAY=$DISP xdotool mousemove 60 259 click 1
+DISPLAY=$DISP xdotool mousemove 60 565 click 1
 SID=""
 for _ in $(seq 1 15); do
-  SID=$(curl -s --max-time 5 "$API/api/sessions" | BEFORE_IDS="$BEFORE_IDS" python3 -c "
+  SID=$(curl_auth -s --max-time 5 "$API/api/sessions" | BEFORE_IDS="$BEFORE_IDS" python3 -c "
 import json, os, sys
 before = set(os.environ.get('BEFORE_IDS', '').split())
 d = json.load(sys.stdin)
@@ -281,6 +468,19 @@ for _ in $(seq 1 10); do
 done
 [ -n "$OK" ] || fail "typed input never reached the pane"
 
-echo "== PASS: desktop create + terminal round-trip work"
+curl_auth -sf --max-time 5 -X DELETE "$API/api/sessions/$SID" >/dev/null || fail "cleaning up smoke session"
+SID=""
+DISPLAY=$DISP xdotool windowactivate "$WID" key alt+F4
+FINAL_DESKTOP_PID=$(cat "$X/desktop.pid")
+for _ in $(seq 1 20); do
+  DESKTOP_STAT=$(ps -o stat= -p "$FINAL_DESKTOP_PID" 2>/dev/null | tr -d ' ')
+  [ -z "$DESKTOP_STAT" ] || [ "${DESKTOP_STAT#Z}" != "$DESKTOP_STAT" ] && break
+  sleep 0.5
+done
+DESKTOP_STAT=$(ps -o stat= -p "$FINAL_DESKTOP_PID" 2>/dev/null | tr -d ' ')
+[ -z "$DESKTOP_STAT" ] || [ "${DESKTOP_STAT#Z}" != "$DESKTOP_STAT" ] || fail "desktop app did not exit cleanly"
+wait "$FINAL_DESKTOP_PID" || fail "desktop app exited unsuccessfully"
+
+echo "== PASS: embedded helm, dual auth, local supervisor, restart reuse, and terminal round-trip work"
 PASS=1
 exit 0

@@ -316,16 +316,26 @@ fn encode_bytes(value: &str, keep: impl Fn(u8) -> bool) -> String {
 /// call sites did before this function existed. A shared client is the
 /// obvious-looking improvement and is a real behavior change, not a
 /// refactor: `reqwest::Client` owns the connection pool, and it also captures
-/// proxy settings, TLS configuration and the DNS resolver at construction, so
-/// hoisting one into a `static` freezes all of that at whatever the process
-/// looked like on the first request and keeps connections alive across the
-/// whole run.
+/// TLS configuration and the DNS resolver at construction, so hoisting one
+/// into a `static` freezes all of that at whatever the process looked like on
+/// the first request and keeps connections alive across the whole run. Native
+/// desktop clients deliberately disable proxies at construction because this
+/// funnel attaches a loopback bearer credential; browser builds retain their
+/// platform transport behavior.
 ///
 /// The device session does not live in this object. Browser localStorage owns
 /// it under the helm's complete origin, and [`send_within`] reads it for each
 /// request before adding the explicit Authorization header. A shared client
 /// would therefore add connection pooling, not authentication semantics.
 fn client() -> reqwest::Client {
+    #[cfg(all(feature = "desktop", not(target_arch = "wasm32")))]
+    {
+        return reqwest::Client::builder()
+            .no_proxy()
+            .build()
+            .expect("proxy-free desktop HTTP client construction is infallible");
+    }
+    #[cfg(not(all(feature = "desktop", not(target_arch = "wasm32"))))]
     reqwest::Client::new()
 }
 
@@ -413,16 +423,29 @@ fn send_error_text(error: SendError) -> String {
 /// a budget of its own to divide up. Both are protected requests: this function
 /// attaches Authorization and classifies the structured auth marker. The
 /// public bootstrap exchange is the sole bypass and performs its own stamp
-/// handling.
+/// handling. In the desktop build, a recognized 401 refreshes the native
+/// credential, remounts the independently authenticated webview gate, and
+/// retries once; browser builds retain the ordinary full-page token prompt.
+/// The desktop deadline is absolute across the original response body,
+/// serialized credential refresh, and retry. Recovery therefore cannot turn a
+/// listing walk's remaining page budget into two fresh request budgets.
 async fn send_within(
     mut request: reqwest::RequestBuilder,
     timeout: std::time::Duration,
 ) -> Result<reqwest::Response, SendError> {
+    #[cfg(all(feature = "desktop", not(target_arch = "wasm32")))]
+    let deadline = tokio::time::Instant::now() + timeout;
     if let Some(secret) = crate::auth::device_secret() {
         request = request.bearer_auth(secret);
     }
+    #[cfg(all(feature = "desktop", not(target_arch = "wasm32")))]
+    let retry = request.try_clone();
+    #[cfg(all(feature = "desktop", not(target_arch = "wasm32")))]
+    let request_timeout = remaining(deadline)?;
+    #[cfg(not(all(feature = "desktop", not(target_arch = "wasm32"))))]
+    let request_timeout = timeout;
     let resp = request
-        .timeout(timeout)
+        .timeout(request_timeout)
         .send()
         .await
         .map_err(|error| SendError::Request(error.to_string()))?;
@@ -431,14 +454,34 @@ async fn send_within(
     // the value is unchanged and the point is entirely the side effect.
     skew::note_build(&resp);
     if resp.status() == reqwest::StatusCode::UNAUTHORIZED {
+        #[cfg(all(feature = "desktop", not(target_arch = "wasm32")))]
+        let body = tokio::time::timeout_at(deadline, resp.text())
+            .await
+            .map_err(|_| SendError::Request("request deadline elapsed".to_string()))?
+            .map_err(|error| SendError::Request(error.to_string()))?;
+        #[cfg(not(all(feature = "desktop", not(target_arch = "wasm32"))))]
         let body = resp
             .text()
             .await
             .map_err(|error| SendError::Request(error.to_string()))?;
         if device_auth_required(&body) {
+            #[cfg(all(feature = "desktop", not(target_arch = "wasm32")))]
+            if !skew::build_skew_detected_now()
+                && let Some(retry) = retry
+            {
+                return retry_desktop_request(retry, deadline, || async {
+                    crate::desktop::refresh_native_device()
+                        .await
+                        .map_err(|error| error.to_string())
+                })
+                .await;
+            }
             // Stamp classification happens first. A bundle that disagrees
             // with the helm cannot safely interpret even this marker, so the
-            // skew prompt wins and this one stays dormant.
+            // skew prompt wins and this one stays dormant. Only the browser
+            // owns the token prompt; desktop recovery is native and the
+            // webview gate cannot repair the native request from that form.
+            #[cfg(not(all(feature = "desktop", not(target_arch = "wasm32"))))]
             if !skew::build_skew_detected_now() {
                 crate::auth::require_token();
             }
@@ -454,9 +497,67 @@ async fn send_within(
     Ok(resp)
 }
 
+/// Refresh and retry inside the original request's absolute deadline.
+///
+/// The injected refresh future is a narrow test seam for the deadline span;
+/// production still has exactly one caller and one native refresh operation.
+#[cfg(all(feature = "desktop", not(target_arch = "wasm32")))]
+async fn retry_desktop_request<Refresh, Refreshed>(
+    retry: reqwest::RequestBuilder,
+    deadline: tokio::time::Instant,
+    refresh: Refresh,
+) -> Result<reqwest::Response, SendError>
+where
+    Refresh: FnOnce() -> Refreshed,
+    Refreshed: std::future::Future<Output = Result<(String, bool), String>>,
+{
+    let (secret, replaced) = tokio::time::timeout_at(deadline, refresh())
+        .await
+        .map_err(|_| SendError::Request("request deadline elapsed".to_string()))?
+        .map_err(SendError::Request)?;
+    if replaced {
+        crate::auth::require_desktop_webview_reauth();
+    }
+    let retried = retry
+        .bearer_auth(secret)
+        .timeout(remaining(deadline)?)
+        .send()
+        .await
+        .map_err(|error| SendError::Request(error.to_string()))?;
+    skew::note_build(&retried);
+    if retried.status() != reqwest::StatusCode::UNAUTHORIZED {
+        return Ok(retried);
+    }
+    let retry_body = tokio::time::timeout_at(deadline, retried.text())
+        .await
+        .map_err(|_| SendError::Request("request deadline elapsed".to_string()))?
+        .map_err(|error| SendError::Request(error.to_string()))?;
+    if device_auth_required(&retry_body) {
+        // Desktop recovery already remounted the webview's independent gate.
+        // The browser token prompt cannot persist a native credential.
+        return Err(SendError::Unauthenticated);
+    }
+    let detail = retry_body.trim();
+    Err(SendError::Request(if detail.is_empty() {
+        "the helm refused this request as unauthorized".to_string()
+    } else {
+        detail.to_string()
+    }))
+}
+
+/// Remaining time in one request's absolute budget, including desktop
+/// credential recovery and its single retry.
+#[cfg(all(feature = "desktop", not(target_arch = "wasm32")))]
+fn remaining(deadline: tokio::time::Instant) -> Result<std::time::Duration, SendError> {
+    deadline
+        .checked_duration_since(tokio::time::Instant::now())
+        .filter(|remaining| !remaining.is_zero())
+        .ok_or_else(|| SendError::Request("request deadline elapsed".to_string()))
+}
+
 /// Only the authentication middleware emits this structured error code;
 /// supervisor authorization refusals may share status 401 but not meaning.
-fn device_auth_required(body: &str) -> bool {
+pub(crate) fn device_auth_required(body: &str) -> bool {
     serde_json::from_str::<serde_json::Value>(body)
         .ok()
         .is_some_and(|value| {
@@ -1626,6 +1727,15 @@ pub(crate) async fn fetch_hosts(base: &str) -> Result<Vec<Host>, String> {
     if !resp.status().is_success() {
         return Err(read_failure("GET", &url, resp).await);
     }
+    decode_hosts(resp).await
+}
+
+/// Decode the frozen host-list envelope for the desktop bootstrap and the
+/// ordinary UI client alike. Bootstrap cannot call [`fetch_hosts`] before a
+/// Dioxus runtime exists because the shared send funnel updates UI signals;
+/// sharing this typed boundary still prevents it from inventing a second
+/// `serde_json::Value` interpretation of the same wire contract.
+pub(crate) async fn decode_hosts(resp: reqwest::Response) -> Result<Vec<Host>, String> {
     resp.json::<HostListing>()
         .await
         .map(|listing| listing.hosts)
@@ -2339,6 +2449,37 @@ mod tests {
             r#"{"error":"spawn identity is unauthorized"}"#
         ));
         assert!(!device_auth_required("spawn identity is unauthorized"));
+    }
+
+    /// Time spent on the first response and serialized refresh must reduce
+    /// the retry's allowance; otherwise one page can consume two advertised
+    /// request budgets while claiming to remain bounded by one.
+    #[cfg(all(feature = "desktop", not(target_arch = "wasm32")))]
+    #[tokio::test]
+    async fn desktop_refresh_and_retry_share_the_original_deadline() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move {
+            let (_stream, _) = listener.accept().await.unwrap();
+            tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+        });
+        let started = tokio::time::Instant::now();
+        let deadline = started + std::time::Duration::from_millis(150);
+        tokio::time::sleep(std::time::Duration::from_millis(80)).await;
+
+        let result = retry_desktop_request(
+            client().get(format!("http://{addr}/stalled-retry")),
+            deadline,
+            || async {
+                tokio::time::sleep(std::time::Duration::from_millis(40)).await;
+                Ok(("replacement".to_string(), false))
+            },
+        )
+        .await;
+
+        assert!(matches!(result, Err(SendError::Request(_))));
+        assert!(started.elapsed() < std::time::Duration::from_millis(250));
+        server.abort();
     }
 
     /// A blank install field must reach the wire as ABSENT, and a non-blank

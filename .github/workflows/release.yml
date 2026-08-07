@@ -1,0 +1,233 @@
+name: Release
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: Existing release tag to receive all assets
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+env:
+  RELEASE_TAG: ${{ inputs.release_tag || github.event.release.tag_name }}
+
+jobs:
+  validate:
+    runs-on: ubicloud
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          ref: refs/tags/${{ env.RELEASE_TAG }}
+          persist-credentials: false
+      - name: Verify release source
+        run: test "$(git rev-parse HEAD)" = "$(git rev-list -n 1 "refs/tags/$RELEASE_TAG")"
+      - name: Validate release graph
+        run: |
+          python3 -m venv .release-python
+          .release-python/bin/pip install pyyaml==6.0.2
+          PATH="$PWD/.release-python/bin:$PATH" scripts/validate-release-workflow.sh
+
+  linux:
+    needs: validate
+    runs-on: ubicloud
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          ref: refs/tags/${{ env.RELEASE_TAG }}
+          persist-credentials: false
+      - name: Verify release source
+        run: test "$(git rev-parse HEAD)" = "$(git rev-list -n 1 "refs/tags/$RELEASE_TAG")"
+      - uses: actions/cache@5a3ec84eff668545956fd18022155c47e93e2684 # v4.2.3
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: linux-release-cargo-${{ hashFiles('**/Cargo.lock') }}
+      - uses: actions-rust-lang/setup-rust-toolchain@166cdcfd11aee3cb47222f9ddb555ce30ddb9659 # v1
+        with:
+          target: wasm32-unknown-unknown,x86_64-unknown-linux-musl,aarch64-unknown-linux-musl
+          cache: false
+          rustflags: ""
+      - name: Install release builders
+        run: |
+          python3 -m venv .release-python
+          .release-python/bin/pip install --require-hashes -r .github/release/ziglang-requirements.txt
+          zig=$(.release-python/bin/python -c 'import pathlib, ziglang; print(pathlib.Path(ziglang.__file__).parent / "zig")')
+          echo "ZIG=$zig" >> "$GITHUB_ENV"
+          echo "CARGO_ZIGBUILD_ZIG_PATH=$zig" >> "$GITHUB_ENV"
+          cargo install --locked cargo-zigbuild --version 0.20.1
+          cargo install --locked dioxus-cli --version 0.7.9
+      - name: Restore private tmux builds
+        id: tmux-cache
+        uses: actions/cache@5a3ec84eff668545956fd18022155c47e93e2684 # v4.2.3
+        with:
+          path: release-stage/payloads/tmux-*
+          key: tmux-linux-x64-ziglang-0.14.1-${{ hashFiles('.github/release/source-pins.env', 'scripts/build-private-tmux.sh') }}-linux-musl
+      - name: Build private tmux
+        if: steps.tmux-cache.outputs.cache-hit != 'true'
+        run: |
+          mkdir -p release-stage/payloads
+          scripts/build-private-tmux.sh x86_64-unknown-linux-musl release-stage/payloads/tmux-x86_64-unknown-linux-musl
+          scripts/build-private-tmux.sh aarch64-unknown-linux-musl release-stage/payloads/tmux-aarch64-unknown-linux-musl
+      - name: Build provisioning binaries
+        run: |
+          cargo zigbuild --release -p farhelm --target x86_64-unknown-linux-musl
+          cargo zigbuild --release -p farhelm --target aarch64-unknown-linux-musl
+          cp target/x86_64-unknown-linux-musl/release/farhelm release-stage/payloads/farhelm-x86_64-unknown-linux-musl
+          cp target/aarch64-unknown-linux-musl/release/farhelm release-stage/payloads/farhelm-aarch64-unknown-linux-musl
+      - name: Verify Linux payload architecture and static linkage
+        run: |
+          for arch in x86_64 aarch64; do
+            case "$arch" in
+              x86_64) machine='Advanced Micro Devices X86-64' ;;
+              aarch64) machine='AArch64' ;;
+            esac
+            for program in farhelm tmux; do
+              payload="release-stage/payloads/$program-$arch-unknown-linux-musl"
+              file "$payload" | grep -Eq 'statically linked|static-pie linked'
+              readelf -h "$payload" | grep -Fq "Machine:                           $machine"
+              if readelf -l "$payload" | grep -q INTERP; then
+                echo "$payload unexpectedly carries a dynamic interpreter" >&2
+                exit 1
+              fi
+            done
+          done
+      - name: Build cached web bundle
+        run: cd crates/farhelm-ui && dx build --platform web --release
+      - name: Build payload-carrying Linux helm
+        env:
+          FARHELM_PAYLOAD_DIR: ${{ github.workspace }}/release-stage/payloads
+        run: cargo build --release -p farhelm
+      - name: Assemble Linux release
+        run: |
+          mkdir -p release-stage/linux/web release-stage/linux/units release-stage/inputs/web
+          cp target/release/farhelm release-stage/linux/farhelm
+          cp -R target/dx/farhelm-ui/release/web/public/. release-stage/linux/web/
+          cp release/farhelm-helm.service release/farhelm-supervisor.service.in release-stage/linux/units/
+          cp release-stage/payloads/* release-stage/linux/
+          cp -R release-stage/payloads release-stage/inputs/payloads
+          cp -R target/dx/farhelm-ui/release/web/public/. release-stage/inputs/web/
+          tar czf farhelm-linux-x86_64.tar.gz -C release-stage/linux .
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: release-inputs
+          path: release-stage/inputs/
+          retention-days: 1
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: linux-release-assets
+          path: farhelm-linux-x86_64.tar.gz
+          retention-days: 1
+
+  publish-linux:
+    needs: linux
+    runs-on: ubicloud
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          ref: refs/tags/${{ env.RELEASE_TAG }}
+          persist-credentials: false
+      - name: Verify release source
+        run: test "$(git rev-parse HEAD)" = "$(git rev-list -n 1 "refs/tags/$RELEASE_TAG")"
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: linux-release-assets
+      - name: Publish Linux assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload "$RELEASE_TAG" farhelm-linux-x86_64.tar.gz --clobber
+
+  macos:
+    if: github.event_name == 'workflow_dispatch'
+    needs: [validate, linux]
+    runs-on: macos-14
+    # Per-attempt cap; the 180-minute total is tracked outside CI by the
+    # dispatching operator. A hung run must leave room for a useful retry.
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          ref: refs/tags/${{ env.RELEASE_TAG }}
+          persist-credentials: false
+      - name: Verify release source
+        run: test "$(git rev-parse HEAD)" = "$(git rev-list -n 1 "refs/tags/$RELEASE_TAG")"
+      - uses: actions/cache@5a3ec84eff668545956fd18022155c47e93e2684 # v4.2.3
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: macos-release-cargo-${{ hashFiles('**/Cargo.lock') }}
+      - uses: actions-rust-lang/setup-rust-toolchain@166cdcfd11aee3cb47222f9ddb555ce30ddb9659 # v1
+        with:
+          target: aarch64-apple-darwin
+          cache: false
+          rustflags: ""
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: release-inputs
+          path: release-inputs
+      - name: Install Dioxus CLI
+        run: cargo install --locked dioxus-cli --version 0.7.9
+      - name: Restore Apple arm64 tmux
+        id: tmux-cache
+        uses: actions/cache@5a3ec84eff668545956fd18022155c47e93e2684 # v4.2.3
+        with:
+          path: release-stage/tmux-aarch64-apple-darwin
+          key: tmux-macos-14-arm64-clang-${{ hashFiles('.github/release/source-pins.env', 'scripts/build-private-tmux.sh') }}-apple-arm64
+      - name: Build Apple arm64 tmux
+        if: steps.tmux-cache.outputs.cache-hit != 'true'
+        run: |
+          mkdir -p release-stage
+          scripts/build-private-tmux.sh aarch64-apple-darwin release-stage/tmux-aarch64-apple-darwin
+      - name: Build bundled CLI and desktop app
+        env:
+          FARHELM_PAYLOAD_DIR: ${{ github.workspace }}/release-inputs/payloads
+        run: |
+          cargo build --release -p farhelm --target aarch64-apple-darwin
+          cd crates/farhelm-ui
+          dx bundle --platform macos --release --package-types macos --target aarch64-apple-darwin --out-dir ../../release-stage/bundle
+      - name: Complete and archive app bundle
+        run: |
+          app=$(find release-stage/bundle -maxdepth 3 -type d -name '*.app' -print -quit)
+          test -n "$app"
+          mv "$app" release-stage/Farhelm.app
+          cp target/aarch64-apple-darwin/release/farhelm release-stage/Farhelm.app/Contents/MacOS/farhelm
+          cp release-stage/tmux-aarch64-apple-darwin release-stage/Farhelm.app/Contents/MacOS/tmux
+          mkdir -p release-stage/Farhelm.app/Contents/Resources/web
+          cp -R release-inputs/web/. release-stage/Farhelm.app/Contents/Resources/web/
+          ditto -c -k --sequesterRsrc --keepParent release-stage/Farhelm.app Farhelm-macos-aarch64.zip
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: macos-release-assets
+          path: Farhelm-macos-aarch64.zip
+          retention-days: 1
+
+  publish-macos:
+    if: github.event_name == 'workflow_dispatch'
+    needs: macos
+    runs-on: ubicloud
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          ref: refs/tags/${{ env.RELEASE_TAG }}
+          persist-credentials: false
+      - name: Verify release source
+        run: test "$(git rev-parse HEAD)" = "$(git rev-list -n 1 "refs/tags/$RELEASE_TAG")"
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: macos-release-assets
+      - name: Publish Mac release asset
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload "$RELEASE_TAG" Farhelm-macos-aarch64.zip --clobber

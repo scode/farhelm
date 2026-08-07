@@ -1136,6 +1136,7 @@
     // otherwise keep a stuck read (and its timer) alive past the island.
     const readers = new Set();
     let errors = [];
+    let clipboardFacts = null;
     let disposed = false;
 
     /**
@@ -1165,9 +1166,20 @@
         line.textContent = message;
         node.appendChild(line);
       }
+      if (clipboardFacts) {
+        const details = document.createElement("details");
+        details.className = "clipboard-facts";
+        const summary = document.createElement("summary");
+        summary.textContent = "clipboard facts";
+        const dump = document.createElement("pre");
+        dump.textContent = JSON.stringify(clipboardFacts, null, 2);
+        details.appendChild(summary);
+        details.appendChild(dump);
+        node.appendChild(details);
+      }
       // Cleared back to the stylesheet's own `display: none` when there is
       // nothing to say, so a finished upload leaves no empty strip behind.
-      node.style.display = lines.length ? "block" : "";
+      node.style.display = lines.length || clipboardFacts ? "block" : "";
     }
 
     function fail(message) {
@@ -1221,9 +1233,11 @@
     }
 
     /**
-     * The extension a generated name gets for this MIME type — the JS half
-     * of `image_extension_for` in farhelm-ui/src/attachments.rs, whose
-     * docs carry the reasoning for each step.
+     * The extension a generated name gets for this MIME type — delegated to
+     * clipboard-name.js so clipboard policy and drag/drop plumbing cannot
+     * grow separate MIME normalizers. It remains the JS half of
+     * `image_extension_for` in farhelm-ui/src/attachments.rs, whose docs
+     * carry the reasoning for each step.
      *
      * Derived rather than looked up because PLAN_M4.md item 7 says the
      * extension comes from the MIME type, and no shipped list can cover
@@ -1231,15 +1245,7 @@
      * in the policy (`extensionAliases`).
      */
     function extensionFor(mime) {
-      const normalized = normalizeMime(mime);
-      const fallback = policy.fallbackExtension || "bin";
-      if (normalized.indexOf("image/") !== 0) return fallback;
-      let token = normalized.slice("image/".length).split("+")[0];
-      token = token.slice(token.lastIndexOf(".") + 1);
-      if (token.indexOf("x-") === 0) token = token.slice(2);
-      token = token.replace(/[^a-z0-9]/g, "");
-      if (!token || token.length > (policy.maxExtensionLength || 12)) return fallback;
-      return (policy.extensionAliases || {})[token] || token;
+      return window.farhelmClipboardNames.extensionFor(mime, policy);
     }
 
     /**
@@ -1291,36 +1297,55 @@
      *
      * Every entry lands in exactly one bucket and carries the name it will
      * be uploaded under, decided here so that nothing downstream has to
-     * re-derive it: `files` holds file references (each keeping its own
-     * name) and `images` holds raw clipboard data (each getting a
-     * generated one).
+     * re-derive it. Clipboard items use the event-time facts captured by
+     * `clipboard-name.js`: real file names survive, while a nameless or
+     * freshly synthesized screenshot gets Farhelm's generated name.
      */
-    function payloadFrom(source, data) {
+    function payloadFrom(source, data, capturedFacts) {
       const files = [];
       const images = [];
       const directories = [];
       let text = "";
       if (!data) return { files, images, directories, text };
-      const place = (file) => {
-        const generated = isRawClipboardImage(source, file);
-        const entry = { file, name: attachmentName(file, generated) };
+      const place = (file, order, collection) => {
+        const capturedName = source === "clipboard"
+          ? window.farhelmClipboardNames.chooseName(
+            capturedFacts, order, Date.now(), policy, collection
+          )
+          : undefined;
+        const generated = capturedName === null
+          || (capturedName === undefined && isRawClipboardImage(source, file));
+        const entry = { file, name: capturedName || attachmentName(file, generated) };
         (generated ? images : files).push(entry);
       };
       const items = data.items ? Array.prototype.slice.call(data.items) : [];
       let sawFileItem = false;
-      for (const item of items) {
+      for (let order = 0; order < items.length; order += 1) {
+        const item = items[order];
         if (item.kind !== "file") continue;
         sawFileItem = true;
         const entry = item.webkitGetAsEntry ? item.webkitGetAsEntry() : null;
-        const file = item.getAsFile ? item.getAsFile() : null;
+        let file = null;
+        try {
+          file = item.getAsFile ? item.getAsFile() : null;
+        } catch (err) {
+          // WKWebView can expose a file item while refusing its File
+          // projection. The facts captured before classification are still
+          // useful evidence, but a missing File leaves nothing Farhelm can
+          // upload and therefore nothing this handler should intercept.
+          file = null;
+        }
         if (entry && entry.isDirectory) {
           directories.push(entry.name || (file && file.name) || "the dropped item");
           continue;
         }
-        if (file) place(file);
+        if (file) place(file, order, "items");
       }
       if (!sawFileItem && data.files) {
-        for (const file of Array.prototype.slice.call(data.files)) place(file);
+        const fallback = Array.prototype.slice.call(data.files);
+        for (let order = 0; order < fallback.length; order += 1) {
+          place(fallback[order], order, "files");
+        }
       }
       // Guarded because `getData` is only legal during the event itself on
       // some engines, and a throw here would take the whole drop down.
@@ -1577,20 +1602,33 @@
     }
 
     const onPaste = (ev) => {
-      const payload = payloadFrom("clipboard", ev.clipboardData);
+      const facts = window.farhelmClipboardNames
+        ? window.farhelmClipboardNames.capture(ev.clipboardData)
+        : null;
+      const payload = payloadFrom("clipboard", ev.clipboardData, facts);
       const flavor = interpret(payload);
+      // Render the event-time evidence before any classification return. A
+      // plain-text paste or failed File projection can be the observation
+      // needed to explain why this handler correctly declined the event.
+      clipboardFacts = facts;
+      render();
       // Text and empty payloads are none of this handler's business:
       // returning without touching the event leaves xterm's own paste
-      // path exactly as it was.
-      if (flavor !== "file" && flavor !== "image") return;
+      // path exactly as it was. File facts remain visible even when the
+      // engine refused to project a File; that unsupported case is precisely
+      // what the diagnostic affordance exists to capture.
+      if (flavor !== "file" && flavor !== "image") {
+        return;
+      }
       ev.preventDefault();
       ev.stopPropagation();
       accept(payload, flavor);
+      render();
     };
 
     const onDrop = (ev) => {
       ev.preventDefault();
-      const payload = payloadFrom("drag", ev.dataTransfer);
+      const payload = payloadFrom("drag", ev.dataTransfer, null);
       const flavor = interpret(payload);
       // Nothing this island knows how to act on. Returning before
       // `accept()` is what keeps an empty or unsupported drag from
@@ -2090,6 +2128,7 @@
           window.Terminal &&
           window.FitAddon &&
           window.farhelmTermBytes &&
+          window.farhelmClipboardNames &&
           document.getElementById(spec.el)
         ) {
           pendings.delete(spec.el);
@@ -2112,10 +2151,10 @@
      * separator is correct rather than an unconditional `?`.
      *
      * baseUrl is the helm's absolute HTTP origin in both builds — the
-     * page's own origin for the web build, FARHELM_URL for the desktop
-     * webview (whose origin is not the helm). An empty string falls back
-     * to the current page's host, which only happens if origin lookup
-     * failed.
+     * page's own origin for the web build, and the in-process bootstrap's
+     * origin for the desktop webview (whose origin is not the helm). An
+     * empty string falls back to the current page's host, which only happens
+     * if origin lookup failed.
      *
      * `reconnect` is the auto-reconnect policy (PLAN_M6.md item 7). This
      * mount resolves its OWN controls from it, exactly as it resolves its

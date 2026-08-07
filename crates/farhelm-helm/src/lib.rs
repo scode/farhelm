@@ -131,7 +131,7 @@ pub mod manager;
 
 /// The layers wrapped around the routes: the loopback-origin guard and the
 /// build stamp, which every response passes through, plus the CORS headers
-/// scoped to the attachment route alone.
+/// scoped to the desktop webview's token-exchange and attachment routes.
 mod middleware;
 
 /// The optional preconditions a mutation may carry — which install it was
@@ -142,6 +142,7 @@ mod precondition;
 /// Discovery-first supervisor setup, explicit update, and host-scoped run
 /// progress (PLAN_M7.md item 6).
 mod provisioning;
+pub use provisioning::{LocalSupervisorDiscovery, discover_local_supervisor};
 
 /// `/api/hosts/{id}/profiles` — agent profile CRUD, proxied to the owning
 /// supervisor, plus the helm-owned remembered default served beside it.
@@ -402,7 +403,7 @@ impl AppState {
 /// afterwards. Keeping both boundaries structural avoids relying on each
 /// future route to remember whether it belongs inside authentication.
 fn api_router(state: Arc<AppState>) -> Router {
-    Router::new()
+    let protected = Router::new()
         .route(
             "/api/sessions",
             get(sessions::list_sessions).post(sessions::create_session),
@@ -434,23 +435,6 @@ fn api_router(state: Arc<AppState>) -> Router {
         .route(
             "/api/sessions/{id}/tabs/{tab_id}",
             axum::routing::delete(sessions::close_tab),
-        )
-        .route(
-            "/api/sessions/{id}/attachments",
-            // SPEC.md's "no size cap in v1" is a promise about MEMORY,
-            // not about axum's own 2 MiB default request-body limit —
-            // this route disables that default so a large screenshot or
-            // recording is refused nowhere in the helm at all, while every
-            // other route (small JSON bodies) keeps the default's
-            // protection against a runaway control-message body.
-            axum::routing::post(uploads::upload_attachment)
-                .layer(axum::extract::DefaultBodyLimit::disable())
-                // Scoped to this ONE route rather than the router: it is
-                // the only endpoint a cross-origin caller has any reason
-                // to reach (see `attachment_cors`), and a CORS header on
-                // the session list or the delete route would widen what a
-                // custom-scheme page can read for no benefit.
-                .layer(axum::middleware::from_fn(middleware::attachment_cors)),
         )
         .route("/api/sessions/{id}/term", get(terminal::term_ws))
         // The non-displacing attach lives at its own PATH rather than
@@ -534,19 +518,52 @@ fn api_router(state: Arc<AppState>) -> Router {
         .route_layer(axum::middleware::from_fn_with_state(
             Arc::clone(&state),
             auth::require_device_session,
+        ));
+    // Validation is protected like every other read, but its webview caller
+    // must be able to distinguish the auth middleware's 401 from a transport
+    // failure. Keeping CORS outside this small router makes that refusal
+    // readable without widening any ordinary REST route.
+    let desktop_device = Router::new()
+        .route("/api/auth/device", get(auth::validate_device))
+        .route_layer(axum::middleware::from_fn_with_state(
+            Arc::clone(&state),
+            auth::require_device_session,
         ))
-        // A CORS preflight cannot carry the Authorization header it is asking
-        // permission to send. Added after `route_layer` so OPTIONS alone is
-        // public; the POST method above remains inside device authentication.
+        .route(
+            "/api/auth/device",
+            axum::routing::options(middleware::desktop_webview_preflight),
+        )
+        .layer(axum::middleware::from_fn(middleware::desktop_webview_cors));
+    // Upload authentication remains mandatory, but CORS must wrap that
+    // middleware so a custom-scheme webview can read its structured 401.
+    let desktop_attachment = Router::new()
         .route(
             "/api/sessions/{id}/attachments",
-            axum::routing::options(middleware::attachment_preflight)
-                .layer(axum::middleware::from_fn(middleware::attachment_cors)),
+            // SPEC.md's "no size cap in v1" is a promise about memory, not
+            // axum's 2 MiB default. Other small control messages retain it.
+            axum::routing::post(uploads::upload_attachment)
+                .layer(axum::extract::DefaultBodyLimit::disable()),
         )
+        .route_layer(axum::middleware::from_fn_with_state(
+            Arc::clone(&state),
+            auth::require_device_session,
+        ))
+        // Preflight cannot carry the Authorization header it requests.
+        .route(
+            "/api/sessions/{id}/attachments",
+            axum::routing::options(middleware::desktop_webview_preflight),
+        )
+        .layer(axum::middleware::from_fn(middleware::desktop_webview_cors));
+
+    protected
+        .merge(desktop_device)
+        .merge(desktop_attachment)
         .route(
             "/api/auth/token",
             axum::routing::post(auth::exchange_token)
-                .layer(axum::extract::DefaultBodyLimit::max(256)),
+                .layer(axum::extract::DefaultBodyLimit::max(256))
+                .options(middleware::desktop_webview_preflight)
+                .layer(axum::middleware::from_fn(middleware::desktop_webview_cors)),
         )
         .with_state(state)
 }
@@ -609,6 +626,35 @@ fn build_router(state: Arc<AppState>, ui_dist: Option<&std::path::Path>, port: u
 /// none is needed: SPEC.md's whole durability promise is that killing the
 /// helm does nothing to any session.
 pub async fn run(args: HelmArgs) -> anyhow::Result<()> {
+    run_with_ready(args, None, None).await
+}
+
+/// Run an embedded helm and report its bound address once every serving
+/// dependency is ready.
+///
+/// The desktop shell chooses its documented stable port, but it must not launch the UI
+/// until the HTTP listener, durable token, local-host actor, and token-control
+/// socket all exist. A synchronous channel keeps that startup boundary out of
+/// the Dioxus runtime and, unlike parsing stdout, cannot confuse another log
+/// line for readiness. The explicit shutdown receiver gives `DesktopBootstrap`
+/// a teardown path it can join; dropping its sender carries the same owner-
+/// disappeared meaning as sending the signal.
+pub async fn run_embedded(
+    args: HelmArgs,
+    ready: std::sync::mpsc::Sender<SocketAddr>,
+    shutdown: tokio::sync::oneshot::Receiver<()>,
+) -> anyhow::Result<()> {
+    run_with_ready(args, Some(ready), Some(shutdown)).await
+}
+
+/// Shared process and embedded-app serving path. There is deliberately one
+/// startup sequence so the desktop cannot acquire a weaker auth or transport
+/// boundary than `farhelm helm run`.
+async fn run_with_ready(
+    args: HelmArgs,
+    ready: Option<std::sync::mpsc::Sender<SocketAddr>>,
+    shutdown: Option<tokio::sync::oneshot::Receiver<()>>,
+) -> anyhow::Result<()> {
     let state_dir = match args.state_dir.clone() {
         Some(dir) => dir,
         None => farhelm_supervisor::default_state_dir()?,
@@ -651,13 +697,29 @@ pub async fn run(args: HelmArgs) -> anyhow::Result<()> {
     let mut token_control = token_control::serve(&state_dir, state.auth.clone()).await?;
     let app = build_router(Arc::clone(&state), args.ui_dist.as_deref(), addr.port());
 
+    if let Some(ready) = ready {
+        let _ = ready.send(addr);
+    }
+
     // Printed on stdout, not logged: the README tells the user to open
     // this URL, and tracing goes to stderr behind an env filter.
     println!("farhelm helm: http://{addr}/");
+    let embedded_shutdown = async move {
+        match shutdown {
+            Some(receiver) => {
+                // Sender cancellation means the desktop owner disappeared;
+                // it is the same lifetime boundary as an explicit signal.
+                let _ = receiver.await;
+            }
+            None => std::future::pending::<()>().await,
+        }
+    };
     tokio::select! {
         result = axum::serve(listener, app) => result.context("serving helm HTTP")?,
         result = token_control.failed() => result?,
+        () = embedded_shutdown => {}
     }
+    state.manager.shutdown();
     Ok(())
 }
 

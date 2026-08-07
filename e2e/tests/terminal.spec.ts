@@ -1156,6 +1156,32 @@ test("backing out before a terminal is ready, then opening a different session, 
   }
 });
 
+// Asset tags are registered in order but execute asynchronously. Clipboard
+// naming is part of mount readiness, not an optional paste enhancement: an
+// island mounted before this helper exists would silently use no captured
+// policy at all for its first paste.
+test("terminal mounting waits for the clipboard naming helper", async ({ page }) => {
+  await page.goto("/");
+  await expect(sharedSessionRow(page)).toBeVisible();
+  await page.evaluate(() => {
+    (window as any).__testClipboardNames = (window as any).farhelmClipboardNames;
+    delete (window as any).farhelmClipboardNames;
+  });
+
+  await sharedSessionRow(page).click();
+  await page.waitForTimeout(150);
+  expect(
+    await page.evaluate(() => Boolean((window as any).__farhelmIslands?.terminal)),
+    "the terminal must remain unmounted while its clipboard policy is unavailable",
+  ).toBe(false);
+
+  await page.evaluate(() => {
+    (window as any).farhelmClipboardNames = (window as any).__testClipboardNames;
+    delete (window as any).__testClipboardNames;
+  });
+  await page.waitForFunction(() => Boolean((window as any).__farhelmIslands?.terminal));
+});
+
 // Playwright-level coverage for the PARTIAL-MOUNT ROLLBACK finding:
 // mount() sets its guard (`active`, since terminal.js's simplification —
 // see its docs) only at the very end of a successful mount, so an
@@ -7564,6 +7590,8 @@ interface PayloadEntry {
   content?: string;
   directory?: boolean;
   unreadable?: boolean;
+  /** Make `DataTransferItem.getAsFile()` throw before any `File` exists. */
+  projectionFails?: boolean;
   /**
    * `File.lastModified`, in ms. Left alone (so the engine stamps "now")
    * for the raw-clipboard-data cases; set to something old for the tests
@@ -7649,6 +7677,15 @@ async function dispatchPayload(
             type: "",
             getAsFile: () => null,
             webkitGetAsEntry: () => ({ isDirectory: true, name: entry.name }),
+          });
+          continue;
+        }
+        if (entry.projectionFails) {
+          items.push({
+            kind: "file",
+            type: entry.mime,
+            getAsFile: () => { throw new Error("synthetic File projection failure"); },
+            webkitGetAsEntry: () => null,
           });
           continue;
         }
@@ -8421,7 +8458,12 @@ test("a clipboard payload of two real files uploads both, each under its own nam
 
     await dispatchPayload(page, "terminal", "paste", {
       entries: [
-        { name: `notes-${stamp}.txt`, mime: "text/plain", content: "document body" },
+        {
+          name: `notes-${stamp}.txt`,
+          mime: "text/plain",
+          content: "document body",
+          lastModified: stamp - 14 * 24 * 60 * 60 * 1000,
+        },
         {
           name: `holiday-${stamp}.png`,
           mime: "image/png",
@@ -8446,10 +8488,77 @@ test("a clipboard payload of two real files uploads both, each under its own nam
       expect(hostPath).toContain(`/attachments/${id}/`);
       expect(fs.readFileSync(hostPath, "utf8")).toBe(expected);
     }
+    const facts = page.locator(".clipboard-facts");
+    await expect(facts).toBeVisible();
+    await facts.evaluate((details: HTMLDetailsElement) => { details.open = true; });
+    const captured = JSON.parse((await facts.locator("pre").textContent()) || "null");
+    expect(
+      captured.items.map(({ order, kind, type, fileName }: any) => ({
+        order,
+        kind,
+        type,
+        fileName,
+      })),
+    ).toEqual([
+      { order: 0, kind: "file", type: "text/plain", fileName: `notes-${stamp}.txt` },
+      { order: 1, kind: "file", type: "image/png", fileName: `holiday-${stamp}.png` },
+    ]);
+    expect(
+      captured.files.map(({ order, kind, type, fileName }: any) => ({
+        order,
+        kind,
+        type,
+        fileName,
+      })),
+    ).toEqual([
+      { order: 0, kind: "file", type: "text/plain", fileName: `notes-${stamp}.txt` },
+      { order: 1, kind: "file", type: "image/png", fileName: `holiday-${stamp}.png` },
+    ]);
     expect(
       await islandLogicalText(page, "terminal"),
       "a copied image FILE keeps its own name; only raw clipboard data is renamed",
     ).not.toContain("pasted-");
+  } finally {
+    if (id) await cleanupSession(request, id);
+  }
+});
+
+// A Mac-only failure can expose a file item while refusing its `File` object.
+// The event remains xterm's business, but its serializable evidence must stay
+// on screen so the manual run can carry the exact item shape into a fixture.
+test("clipboard facts survive a failed File projection without intercepting paste", async ({
+  page,
+  request,
+}) => {
+  let id: string | undefined;
+  try {
+    const session = await openAttachmentSession(page, request, `attach-facts-failure-${Date.now()}`);
+    id = session.id;
+    const dispatched = await dispatchPayload(page, "terminal", "paste", {
+      entries: [{
+        name: "unavailable.tiff",
+        mime: "image/tiff",
+        projectionFails: true,
+      }],
+    });
+    expect(dispatched.event.defaultPrevented).toBe(false);
+    expect(
+      dispatched.event.reachedTarget,
+      "the diagnostic observer must not stop the unsupported paste before xterm sees it",
+    ).toBe(true);
+
+    const facts = page.locator(".clipboard-facts");
+    await expect(facts).toBeVisible();
+    await facts.evaluate((details: HTMLDetailsElement) => { details.open = true; });
+    const captured = JSON.parse((await facts.locator("pre").textContent()) || "null");
+    expect(captured.items).toEqual([{
+      order: 0,
+      kind: "file",
+      type: "image/tiff",
+      fileName: null,
+      fileType: null,
+      lastModified: null,
+    }]);
   } finally {
     if (id) await cleanupSession(request, id);
   }

@@ -568,9 +568,9 @@ mod tests {
     /// a credential-free `OPTIONS` route that permits both headers, the
     /// browser stops there and the desktop attachment flow never sends a byte.
     ///
-    /// Pinned per header rather than "some CORS headers exist": each one
-    /// is separately load-bearing, and a preflight missing any of them
-    /// fails in a way whose only symptom is an upload that never happens.
+    /// Pinned per header rather than "some CORS headers exist": each one is
+    /// separately load-bearing. The POST rejection also proves CORS remains
+    /// outside device authentication, where the webview can read its 401.
     #[tokio::test]
     async fn attachment_preflight_answers_the_desktop_webview_origin() {
         use tower::ServiceExt;
@@ -598,7 +598,10 @@ mod tests {
             headers["access-control-allow-origin"], "dioxus://index.html",
             "the origin is echoed, not answered with a wildcard"
         );
-        assert_eq!(headers["access-control-allow-methods"], "POST, OPTIONS");
+        assert_eq!(
+            headers["access-control-allow-methods"],
+            "GET, POST, OPTIONS"
+        );
         assert_eq!(
             headers["access-control-allow-headers"],
             "authorization, content-type"
@@ -622,6 +625,15 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(response.status(), axum::http::StatusCode::UNAUTHORIZED);
+        assert_eq!(
+            response.headers()["access-control-allow-origin"],
+            "dioxus://index.html",
+            "CORS must wrap authentication so the webview can read its 401"
+        );
+        assert!(
+            response.headers().contains_key(BUILD_STAMP_HEADER),
+            "the ordinary response envelope must survive the rejected upload"
+        );
     }
 
     /// The upload itself: a successful POST from the desktop webview's

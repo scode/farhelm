@@ -10,9 +10,9 @@
 //!
 //! The scopes differ, and deliberately. The origin guard and the build
 //! stamp wrap the whole router, because both answer questions that have
-//! nothing to do with which route was asked for. The CORS headers wrap ONE
-//! route, because widening them is widening what a cross-origin page may
-//! read.
+//! nothing to do with which route was asked for. The CORS headers wrap the
+//! three desktop-webview fetch edges, because widening them is widening what
+//! a cross-origin page may read.
 //!
 //! ## The loopback guard is a real security boundary
 //!
@@ -28,10 +28,9 @@
 //!
 //! The web build is served BY the helm, so nothing it does is
 //! cross-origin. The desktop build's page comes from a custom webview
-//! scheme, so its uploads are — and a response the webview will not hand
-//! back is an upload that appears to fail after it has already succeeded.
-//! `attachment_cors` closes that on exactly one route, for exactly the
-//! origins `is_desktop_webview_origin` recognizes.
+//! scheme, so its credential validation, token exchange, and uploads are.
+//! `desktop_webview_cors` closes that gap on exactly those three routes, for exactly the origins
+//! `is_desktop_webview_origin` recognizes.
 //!
 //! ## The build stamp is how a stale tab finds out
 //!
@@ -140,7 +139,7 @@ fn origin_is_allowed(headers: &axum::http::HeaderMap, port: u16) -> bool {
 ///
 /// The single definition of "the desktop app is calling", shared by
 /// [`origin_is_allowed`] (which decides whether the request is answered at
-/// all) and [`attachment_cors`] (which decides whether the ANSWER may be
+/// all) and [`desktop_webview_cors`] (which decides whether the ANSWER may be
 /// read). Two lists would be a way for those to disagree, and disagreeing
 /// means either the desktop build breaks or a web page gets CORS access it
 /// was never meant to have.
@@ -151,21 +150,17 @@ fn is_desktop_webview_origin(origin: &str) -> bool {
     origin.starts_with("dioxus://") || origin.starts_with("wry://")
 }
 
-/// The CORS headers the attachment upload route answers desktop callers
-/// with — and the reason SPEC.md's "the two client forms have the same
-/// capabilities" survives contact with the desktop build.
+/// The CORS headers for the desktop webview's three cross-origin fetch edges.
 ///
 /// The web build has no CORS problem: the helm serves the page, so its
 /// uploads are same-origin. The desktop build does. Its page is served by
 /// wry from a custom scheme while the helm answers on
-/// `http://127.0.0.1:<port>`, so every `fetch` from it is cross-origin —
-/// and unlike the terminal WebSocket (upgrades are not CORS-gated, which
-/// is why terminals have always worked there), an upload is a plain
-/// request the WEBVIEW will refuse to hand back unless the response says
-/// the caller may read it. Without this the desktop attachment flow fails
-/// in the worst way available: the bytes reach the supervisor and publish,
-/// the reply carrying the path is withheld from the page, and the user is
-/// told their attachment failed while a copy of it sits on the host.
+/// `http://127.0.0.1:<port>`, so every JavaScript `fetch` from it is
+/// cross-origin. Today those fetches are credential validation, the
+/// bootstrap-token exchange, and attachment upload. The terminal and
+/// invalidation WebSockets are governed
+/// by the origin guard and explicit subprotocol credential instead: WebSocket
+/// upgrades are not CORS-gated.
 ///
 /// Deliberately narrow in every direction:
 ///
@@ -173,13 +168,15 @@ fn is_desktop_webview_origin(origin: &str) -> bool {
 ///   same origins the loopback guard already lets through, echoed back
 ///   rather than answered with `*`, with `Vary: Origin` so nothing caches
 ///   one origin's answer for another.
-/// - Only this route carries it (see `build_router`). The session list and
-///   the delete route have no cross-origin caller, so they get no
-///   cross-origin readability.
-/// - Only the method and headers this route actually needs: `POST` (plus the
-///   `OPTIONS` preflight itself), `authorization` for the explicit device
-///   secret, and `content-type`, which `fetch(url, {body: file})` sets from
-///   the blob and may itself make non-simple.
+/// - Only the credential-validation, token-exchange, and attachment routes
+///   carry it (see `build_router`). The ordinary REST client is native, so
+///   the other routes have no cross-origin caller and get no cross-origin
+///   readability.
+/// - Only the methods and headers those routes need: `GET` for credential
+///   validation, `POST` for exchange/upload (plus the `OPTIONS` preflight
+///   itself), `authorization` for the explicit device secret, and
+///   `content-type`, which `fetch(url, {body: file})` sets from the blob and
+///   may itself make non-simple.
 ///
 /// Applied as a middleware rather than inside the handler because the
 /// headers have to be on EVERY answer, error ones included: a 500 the page
@@ -188,7 +185,7 @@ fn is_desktop_webview_origin(origin: &str) -> bool {
 /// out. The one response it deliberately does not reach is the loopback
 /// guard's own 403, which is outside this layer — an origin that was
 /// refused must not be handed the means to read the refusal.
-pub(crate) async fn attachment_cors(
+pub(crate) async fn desktop_webview_cors(
     req: axum::extract::Request,
     next: axum::middleware::Next,
 ) -> axum::response::Response {
@@ -216,7 +213,7 @@ pub(crate) async fn attachment_cors(
     );
     headers.insert(
         axum::http::header::ACCESS_CONTROL_ALLOW_METHODS,
-        axum::http::HeaderValue::from_static("POST, OPTIONS"),
+        axum::http::HeaderValue::from_static("GET, POST, OPTIONS"),
     );
     headers.insert(
         axum::http::header::ACCESS_CONTROL_ALLOW_HEADERS,
@@ -224,11 +221,8 @@ pub(crate) async fn attachment_cors(
     );
     // The build stamp is READABLE cross-origin, and only it. A
     // cross-origin response exposes none of its headers to script by
-    // default — so without this the desktop webview's upload path, the one
-    // request this UI makes with `fetch` rather than through its own HTTP
-    // client, could not see the stamp it is supposed to be checking on
-    // every reply (PLAN_M6.md item 6). Nothing else is exposed: this list
-    // is the same deliberate minimum the methods and headers above are.
+    // default. Nothing else is exposed: this list is the same deliberate
+    // minimum as the methods and headers above.
     headers.insert(
         axum::http::header::ACCESS_CONTROL_EXPOSE_HEADERS,
         axum::http::HeaderValue::from_static(BUILD_STAMP_HEADER),
@@ -243,14 +237,15 @@ pub(crate) async fn attachment_cors(
     response
 }
 
-/// The upload route's CORS preflight. Answers nothing itself — the body is
-/// empty and the meaning is entirely in the headers [`attachment_cors`]
-/// attaches on the way out.
+/// The desktop webview routes' CORS preflight.
+///
+/// The empty body is intentional: the permission is entirely in the headers
+/// [`desktop_webview_cors`] attaches on the way out.
 ///
 /// Present as a real route because a preflight is a real request: without
 /// it, `OPTIONS /api/sessions/{id}/attachments` is a 405 the browser reads
 /// as "not allowed", and the desktop build's upload never leaves the page.
-pub(crate) async fn attachment_preflight() -> axum::response::Response {
+pub(crate) async fn desktop_webview_preflight() -> axum::response::Response {
     axum::http::StatusCode::NO_CONTENT.into_response()
 }
 

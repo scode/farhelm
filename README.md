@@ -40,10 +40,45 @@ user via `ps`, so credentials do not belong in it.
 
 ## Trying it (M7)
 
-Prerequisites: Rust with the `wasm32-unknown-unknown` target (`rustup target add wasm32-unknown-unknown`) and
-`cargo binstall dioxus-cli@0.7.9` (or `cargo install dioxus-cli@0.7.9` — match the workspace's dioxus version) for the
-web UI build. A manually started supervisor also needs tmux 3.3 or newer on that host. Automatic setup checks tmux and
-installs Farhelm's suitable bundled build when the host does not already have one.
+NOTE: The Mac app is not signed or notarized in v1. macOS will treat it as an untrusted downloaded app; codesigning is
+deliberately deferred until there is an Apple Developer identity to build with. After extracting the archive,
+Control-click `Farhelm.app` in Finder, choose **Open**, then confirm **Open**. If macOS offers no confirmation there,
+attempt one normal launch and use **System Settings → Privacy & Security → Open Anyway** for Farhelm before trying
+again.
+
+Use a release artifact. The Linux archive contains the helm, web bundle, provisioning payloads for x86_64 and aarch64
+Linux hosts, and the user-level systemd units. The Mac archive contains `Farhelm.app`, its embedded helm, the managed
+local supervisor, private tmux, the same Linux provisioning payloads, and the CLI at
+`Farhelm.app/Contents/MacOS/farhelm`.
+
+On Linux:
+
+- Extract `farhelm-linux-x86_64.tar.gz` into `~/.local/lib/farhelm/`.
+- Run `mkdir -p ~/.config/systemd/user`, then copy `~/.local/lib/farhelm/units/farhelm-helm.service` to
+  `~/.config/systemd/user/farhelm-helm.service`.
+- Run `systemctl --user daemon-reload && systemctl --user enable --now farhelm-helm.service`.
+- Run `loginctl enable-linger "$USER"` so the user manager and helm can start at boot and survive logout. Some managed
+  machines refuse this; in that case the unit starts only after login and stops when the last login session ends.
+- Open `http://127.0.0.1:7433/`. At first use, run `~/.local/lib/farhelm/farhelm helm token show` and paste the printed
+  token into the page.
+- Open the hosts panel. The local row offers setup when no supervisor is present; review the concrete file and unit
+  plan, then confirm it. Add remote Ubuntu hosts the same way. Farhelm inspects first and does nothing until you confirm
+  the displayed plan.
+
+On macOS:
+
+- Extract `Farhelm-macos-aarch64.zip` and start `Farhelm.app`. The app starts its embedded helm and managed local
+  supervisor; both stop when the app exits in v1. The embedded web UI is always `http://127.0.0.1:7433/`, including
+  after an app restart. If another process already owns that port, the app refuses to start instead of choosing an
+  undiscoverable origin; stop the conflicting service before relaunching Farhelm.
+- For token management, run `Farhelm.app/Contents/MacOS/farhelm helm token show` or
+  `Farhelm.app/Contents/MacOS/farhelm helm token rotate`. There is no in-app token-management surface.
+- Add remote Ubuntu hosts from the hosts panel. Setup uses your existing passwordless SSH configuration, writes only
+  user-owned files and user-level systemd units, and requires no root.
+
+Automatic setup checks tmux and installs Farhelm's pinned private build when the host does not already have a supported
+one. The manual Mac runtime, clipboard-facts, and remote-paste checks are in
+[`docs/manual-mac-checklist.md`](docs/manual-mac-checklist.md).
 
 NOTE on tmux versions: 3.3 or newer runs everything. Two fidelity details depend on the version, and neither stops a
 session working:
@@ -57,46 +92,23 @@ session working:
 
 Ubuntu 24.04 ships 3.4.
 
-- Build: `cargo build`, then `(cd crates/farhelm-ui && dx build --platform web --release)`.
-- On the host that will run the agent (or this machine): `target/debug/farhelm supervisor run`.
-- Locally: `target/debug/farhelm helm run --ui-dist target/dx/farhelm-ui/release/web/public`. The helm drives every host
-  in its registry at once, and the machine it runs on is always one of them — so a supervisor started on this machine
-  needs no registering at all.
-- To include a remote host (passwordless ssh assumed; copy the binary there first), write a JSON5 file listing it and
-  pass `--ensure-hosts <file>`. The helm guarantees those hosts are registered at startup, adding what is missing and
-  changing nothing else:
-
-  ```json5
-  {
-    hosts: [
-      // remote_farhelm and remote_state_dir are optional; omit them to use
-      // the remote's own defaults.
-      { ssh: "user@host", remote_farhelm: "/path/to/farhelm" },
-    ],
-  }
-  ```
-
-  A registered host that is switched off is not an error: it is registered anyway, and its connection state says what
-  was found.
 - Sessions are normally created in the UI. A process already inside a Farhelm session can also run
   `farhelm spawn --cwd PATH`; the launch injects the session credential and supervisor socket that authorize it. Spawn
   joins a relative path to that process's current directory and otherwise preserves the path's lexical spelling; UI
   creation sends paths literally and requires an absolute path on the selected host. Neither form expands `~` or shell
   variables.
-- Open the printed loopback URL in a browser. At first use, run `target/debug/farhelm helm token show` on the helm's
-  machine and paste that token into the in-page authentication form. The authenticated page is a hosts panel above a
-  session list. Every registered host is listed with its connection state in the helm's own words — connecting,
-  unreachable-reprobing, connected, version-skew, identity-mismatch, identity-unverified, duplicate, retired — plus the
-  evidence behind it (both versions on a skew, both identities on a mismatch) and, where there is one, what to do about
-  it. "add host" first discovers the destination. An answering supervisor is registered as-is; positive absence shows
-  the exact setup plan and does nothing until you confirm it; unsupported hosts keep the concrete manual fallback. A
-  confirmed run registers its row before execution and retains step-by-step progress and failures there, so a reload or
-  another browser can follow or rerun it. Each registered row also has an explicit update action with the same
-  plan-then-confirm handshake. Optional remote Farhelm and state-directory fields still describe installs that are not
-  on the remote's `PATH` or use a non-default state directory. Each ssh row can be retargeted in place or removed, every
-  row can be retried, and a host reporting an identity that does not match the one on record offers to adopt it.
-  Removing forgets the host and the helm's cached view of its sessions — the supervisor and its agents keep running, and
-  re-adding the destination finds them again.
+- The authenticated page is a hosts panel above a session list. Every registered host is listed with its connection
+  state in the helm's own words — connecting, unreachable-reprobing, connected, version-skew, identity-mismatch,
+  identity-unverified, duplicate, retired — plus the evidence behind it (both versions on a skew, both identities on a
+  mismatch) and, where there is one, what to do about it. "add host" first discovers the destination. An answering
+  supervisor is registered as-is; positive absence shows the exact setup plan and does nothing until you confirm it;
+  unsupported hosts keep the concrete manual fallback. A confirmed run registers its row before execution and retains
+  step-by-step progress and failures there, so a reload or another browser can follow or rerun it. Each registered row
+  also has an explicit update action with the same plan-then-confirm handshake. Optional remote Farhelm and
+  state-directory fields still describe installs that are not on the remote's `PATH` or use a non-default state
+  directory. Each ssh row can be retargeted in place or removed, every row can be retried, and a host reporting an
+  identity that does not match the one on record offers to adopt it. Removing forgets the host and the helm's cached
+  view of its sessions — the supervisor and its agents keep running, and re-adding the destination finds them again.
 - Each host row also opens its "profiles": the named agent definitions sessions on that host are launched from. A
   profile is a name, an invocation, an agent kind (Claude Code, Codex, or generic — the kind is what selects a
   supervisor's status heuristics and conversation capture, and is not user-authored beyond picking one), and an optional
@@ -211,10 +223,13 @@ Ubuntu 24.04 ships 3.4.
   UNATTENDED against a helm it does not match, so a terminal on a mismatched page waits for you to press "reconnect now"
   rather than reconnecting on its own.
 
-The desktop window is the same UI in a wry webview: `cargo run -p farhelm-ui --features desktop` with `FARHELM_URL`
-pointing at the helm (default `http://127.0.0.1:7433`).
-
 ## Development
+
+Development builds intentionally carry no provisioning payloads; asking one to install a host reports
+`this build carries no provisioning payloads`. Build the web UI with
+`(cd crates/farhelm-ui && dx build --platform web --release)` after `cargo build`, then run the supervisor and helm
+manually when working on the browser surface. The desktop smoke harness supplies those development paths while testing
+the app-owned bootstrap.
 
 `AGENTS.md` has the conventions and the finish-work checks. End-to-end tests: `cargo test -- --show-output` (Rust,
 including real-tmux integration; `--show-output` is what surfaces the skip reasons from tests that need a systemd user

@@ -25,6 +25,9 @@ use farhelm_proto::io::{ClosedBeforeHello, FrameReader, FrameWriter, handshake};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::collections::{HashMap, VecDeque};
+use std::io::Write as _;
+#[cfg(unix)]
+use std::os::unix::fs::PermissionsExt as _;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::sync::Arc;
@@ -142,7 +145,7 @@ enum ProvisioningTarget {
 
 /// Installation artifacts selected independently; callers must never use a
 /// Farhelm executable to satisfy a tmux request or vice versa.
-#[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq, Hash)]
 #[serde(rename_all = "kebab-case")]
 pub enum PayloadKind {
     Farhelm,
@@ -151,7 +154,7 @@ pub enum PayloadKind {
 
 /// Architectures with release payloads. Reach inspection maps the remote
 /// machine to one of these before confirmation, never during execution.
-#[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq, Hash)]
 #[serde(rename_all = "kebab-case")]
 pub enum PayloadArch {
     X86_64,
@@ -401,6 +404,36 @@ enum ProbeObservation {
     Absent,
 }
 
+/// Result of applying provisioning's positive-absence probe to the local row.
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+pub enum LocalSupervisorDiscovery {
+    /// A supervisor completed the protocol hello and should be reused as-is.
+    Answering,
+    /// Every probe failure was one the convergence classifier proves absent.
+    Absent,
+}
+
+/// Discover the reserved local supervisor without installing or registering it.
+///
+/// Desktop startup uses the same hello and positive-absence classifier as the
+/// shipped provisioning workflow. An answering supervisor is therefore an
+/// ownership boundary: callers must reuse it rather than start a rival process.
+pub async fn discover_local_supervisor(
+    farhelm: &Path,
+    state_dir: &Path,
+) -> anyhow::Result<LocalSupervisorDiscovery> {
+    let backend = SystemBackend::new(state_dir.to_path_buf());
+    let target = ProbeTarget {
+        transport: ProvisioningTarget::Local,
+        probe_farhelm: farhelm.to_path_buf(),
+        probe_state_dir: Some(state_dir.to_path_buf()),
+    };
+    match backend.probe(&target).await.map_err(anyhow::Error::new)? {
+        ProbeObservation::Supervisor { .. } => Ok(LocalSupervisorDiscovery::Answering),
+        ProbeObservation::Absent => Ok(LocalSupervisorDiscovery::Absent),
+    }
+}
+
 /// Host facts needed to select payloads and render absolute install paths,
 /// including the unit directory the running user manager actually searches.
 #[derive(Debug, Clone)]
@@ -535,6 +568,127 @@ impl PayloadSource for NoPayloads {
     fn path(&self, _payload: PayloadKind, _arch: PayloadArch) -> anyhow::Result<PathBuf> {
         bail!("this build carries no provisioning payloads")
     }
+}
+
+include!(concat!(env!("OUT_DIR"), "/embedded_payloads.rs"));
+
+/// Release payloads compiled into the helm and materialized below helm state.
+///
+/// Keeping materialization here avoids teaching provisioning about release
+/// layout or byte blobs. Development builds generate an empty table and keep
+/// using [`NoPayloads`], so an ordinary cargo build never depends on foreign
+/// target artifacts. The directory is app-owned rather than system-temporary:
+/// a tmp cleaner must not be able to remove provisioning support from a helm
+/// that is still running.
+struct EmbeddedPayloads {
+    root: PathBuf,
+    state: std::sync::Mutex<EmbeddedPayloadState>,
+}
+
+/// Process-local cache for the generation this helm binary embeds.
+struct EmbeddedPayloadState {
+    prepared: bool,
+    paths: std::collections::HashMap<(PayloadKind, PayloadArch), PathBuf>,
+}
+
+impl EmbeddedPayloads {
+    /// Create a lazy source without touching the filesystem at helm startup.
+    ///
+    /// Only a confirmed plan needing a payload pays the write and fsync cost.
+    /// Files stay in app-owned state for reuse; the next access removes names
+    /// that no longer belong to the embedded generation.
+    fn load(helm_state_dir: &Path) -> anyhow::Result<Option<Self>> {
+        if EMBEDDED_PAYLOADS.is_empty() {
+            return Ok(None);
+        }
+        Ok(Some(Self {
+            root: helm_state_dir.join("embedded-payloads"),
+            state: std::sync::Mutex::new(EmbeddedPayloadState {
+                prepared: false,
+                paths: std::collections::HashMap::new(),
+            }),
+        }))
+    }
+
+    /// Prepare the private cache and discard files from older manifests.
+    fn prepare_root(&self) -> anyhow::Result<()> {
+        let root = &self.root;
+        std::fs::create_dir_all(root)
+            .context("creating the app-owned embedded payload directory")?;
+        #[cfg(unix)]
+        std::fs::set_permissions(root, std::fs::Permissions::from_mode(0o700))?;
+        for entry in std::fs::read_dir(root).context("reading the embedded payload directory")? {
+            let entry = entry.context("reading an embedded payload directory entry")?;
+            if EMBEDDED_PAYLOADS
+                .iter()
+                .any(|payload| entry.file_name() == std::ffi::OsStr::new(payload.filename))
+            {
+                continue;
+            }
+            let file_type = entry.file_type().with_context(|| {
+                format!(
+                    "inspecting stale embedded payload {}",
+                    entry.path().display()
+                )
+            })?;
+            if file_type.is_dir() {
+                std::fs::remove_dir_all(entry.path())?;
+            } else {
+                std::fs::remove_file(entry.path())?;
+            }
+        }
+        Ok(())
+    }
+}
+
+impl PayloadSource for EmbeddedPayloads {
+    fn path(&self, payload: PayloadKind, arch: PayloadArch) -> anyhow::Result<PathBuf> {
+        let embedded = EMBEDDED_PAYLOADS
+            .iter()
+            .find(|embedded| embedded.kind == payload && embedded.arch == arch)
+            .with_context(|| {
+                format!("this build carries no {payload:?} provisioning payload for {arch:?}")
+            })?;
+        let mut state = self
+            .state
+            .lock()
+            .map_err(|_| anyhow::anyhow!("embedded payload cache lock was poisoned"))?;
+        if !state.prepared {
+            self.prepare_root()?;
+            state.prepared = true;
+        }
+        if let Some(path) = state.paths.get(&(payload, arch)) {
+            return Ok(path.clone());
+        }
+
+        let path = self.root.join(embedded.filename);
+        let mut staged = tempfile::NamedTempFile::new_in(&self.root)
+            .with_context(|| format!("staging embedded payload {}", embedded.filename))?;
+        staged
+            .write_all(embedded.bytes)
+            .with_context(|| format!("materializing embedded payload {}", embedded.filename))?;
+        staged.as_file().sync_all()?;
+        #[cfg(unix)]
+        staged
+            .as_file()
+            .set_permissions(std::fs::Permissions::from_mode(0o700))?;
+        staged
+            .persist(&path)
+            .map_err(|error| error.error)
+            .with_context(|| format!("installing embedded payload {}", embedded.filename))?;
+        std::fs::File::open(&self.root)?.sync_all()?;
+        state.paths.insert((payload, arch), path.clone());
+        Ok(path)
+    }
+}
+
+/// Select release payloads when this build embeds them, preserving the
+/// explicit no-payload source used by ordinary development builds.
+fn production_payloads(helm_state_dir: &Path) -> anyhow::Result<Arc<dyn PayloadSource>> {
+    Ok(match EmbeddedPayloads::load(helm_state_dir)? {
+        Some(payloads) => Arc::new(payloads),
+        None => Arc::new(NoPayloads),
+    })
 }
 
 const E2E_BACKEND_ENV: &str = "FARHELM_E2E_PROVISIONING_BACKEND_DIR";
@@ -1025,7 +1179,41 @@ fn systemd_arg(path: &Path) -> Result<String, BackendFailure> {
     ))
 }
 
+const SUPERVISOR_UNIT_TEMPLATE: &str =
+    include_str!("../../../release/farhelm-supervisor.service.in");
+
+/// Substitute the three reviewed unit-template fields without rescanning
+/// inserted path text as template syntax.
+///
+/// A path may legally contain strings such as `@STATE_DIR@`. Appending each
+/// replacement directly, instead of chaining `str::replace`, keeps that text
+/// literal and preserves the path contract provisioning already accepts.
+fn render_supervisor_unit_template(farhelm: &str, state_dir: &str, search: &str) -> String {
+    let values = [
+        ("@FARHELM@", farhelm),
+        ("@STATE_DIR@", state_dir),
+        ("@PATH@", search),
+    ];
+    let mut rendered = String::with_capacity(SUPERVISOR_UNIT_TEMPLATE.len() + 128);
+    let mut rest = SUPERVISOR_UNIT_TEMPLATE;
+    while let Some((offset, token, value)) = values
+        .iter()
+        .filter_map(|(token, value)| rest.find(token).map(|offset| (offset, *token, *value)))
+        .min_by_key(|(offset, _, _)| *offset)
+    {
+        rendered.push_str(&rest[..offset]);
+        rendered.push_str(value);
+        rest = &rest[offset + token.len()..];
+    }
+    rendered.push_str(rest);
+    rendered
+}
+
 /// Render the supervisor unit from the paths carried by the plan.
+///
+/// `release/farhelm-supervisor.service.in` is the canonical unit. Keeping its
+/// fixed policy in one reviewed file prevents release packaging and remote
+/// provisioning from quietly shipping different lifecycle behavior.
 ///
 /// The existing tmux directory is retained because a user-manager process
 /// does not necessarily inherit the login shell PATH that the reach check
@@ -1067,14 +1255,10 @@ fn supervisor_unit(
         .replace('\\', "\\\\")
         .replace('"', "\\\"")
         .replace('%', "%%");
-    Ok(format!(
-        "[Unit]\nDescription=Farhelm supervisor\nAfter=default.target\n\n\
-         [Service]\nType=simple\nExecStart={} supervisor run --state-dir {}\n\
-         Environment=\"PATH={}\"\nKillMode=process\nRestart=on-failure\n\n\
-         [Install]\nWantedBy=default.target\n",
-        systemd_arg(farhelm)?,
-        systemd_arg(state_dir)?,
-        search
+    Ok(render_supervisor_unit_template(
+        &systemd_arg(farhelm)?,
+        &systemd_arg(state_dir)?,
+        &search,
     ))
 }
 
@@ -1194,7 +1378,7 @@ impl ProvisioningService {
         }
         Ok(Arc::new(Self {
             backend: Arc::new(SystemBackend::new(helm_state_dir.clone())),
-            payloads: Arc::new(NoPayloads),
+            payloads: production_payloads(&helm_state_dir)?,
             store,
             manager,
             layout: PlanLayout::production(helm_state_dir),
@@ -3736,6 +3920,113 @@ mod tests {
     use std::sync::Mutex;
     use tower::ServiceExt;
 
+    const PAYLOAD_CHILD_ENV: &str = "FARHELM_EMBEDDED_PAYLOAD_TEST_CHILD";
+
+    /// Build the real helm crate in a child Cargo process so `build.rs`, the
+    /// generated manifest, and `production_payloads()` are tested as one
+    /// boundary rather than as three independently plausible pieces.
+    #[test]
+    fn embedded_payload_build_maps_every_sentinel_to_its_runtime_selection() {
+        let fixture = tempfile::tempdir().unwrap();
+        let payload_root = fixture.path().join("payloads");
+        std::fs::create_dir(&payload_root).unwrap();
+        for (filename, bytes) in [
+            (
+                "farhelm-x86_64-unknown-linux-musl",
+                b"farhelm-x86".as_slice(),
+            ),
+            ("tmux-x86_64-unknown-linux-musl", b"tmux-x86".as_slice()),
+            (
+                "farhelm-aarch64-unknown-linux-musl",
+                b"farhelm-arm".as_slice(),
+            ),
+            ("tmux-aarch64-unknown-linux-musl", b"tmux-arm".as_slice()),
+        ] {
+            std::fs::write(payload_root.join(filename), bytes).unwrap();
+        }
+        let workspace = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .and_then(Path::parent)
+            .unwrap();
+        let status = std::process::Command::new(env!("CARGO"))
+            .current_dir(workspace)
+            .args([
+                "test",
+                "--quiet",
+                "-p",
+                "farhelm-helm",
+                "provisioning::tests::embedded_payload_child_reads_exact_manifest_bytes",
+                "--",
+                "--exact",
+                "--nocapture",
+            ])
+            .env("CARGO_TARGET_DIR", fixture.path().join("target"))
+            .env("FARHELM_PAYLOAD_DIR", &payload_root)
+            .env(PAYLOAD_CHILD_ENV, &payload_root)
+            .status()
+            .unwrap();
+        assert!(status.success(), "child payload build failed with {status}");
+    }
+
+    /// Child half of the build-script integration test. A normal test run
+    /// has no marker and returns immediately; the parent rebuild supplies
+    /// four distinct bytes and this test reads them only through production's
+    /// materialized payload source.
+    #[test]
+    fn embedded_payload_child_reads_exact_manifest_bytes() {
+        let Some(root) = std::env::var_os(PAYLOAD_CHILD_ENV).map(PathBuf::from) else {
+            return;
+        };
+        let materialized_root = tempfile::tempdir().unwrap();
+        let payloads = production_payloads(materialized_root.path()).unwrap();
+        let cache_root = materialized_root.path().join("embedded-payloads");
+        assert!(
+            !cache_root.exists(),
+            "constructing the release source must not eagerly write every payload"
+        );
+        std::fs::create_dir(&cache_root).unwrap();
+        let stale = cache_root.join("payload-from-older-generation");
+        std::fs::write(&stale, b"stale").unwrap();
+        for (kind, arch, filename) in [
+            (
+                PayloadKind::Farhelm,
+                PayloadArch::X86_64,
+                "farhelm-x86_64-unknown-linux-musl",
+            ),
+            (
+                PayloadKind::Tmux,
+                PayloadArch::X86_64,
+                "tmux-x86_64-unknown-linux-musl",
+            ),
+            (
+                PayloadKind::Farhelm,
+                PayloadArch::Aarch64,
+                "farhelm-aarch64-unknown-linux-musl",
+            ),
+            (
+                PayloadKind::Tmux,
+                PayloadArch::Aarch64,
+                "tmux-aarch64-unknown-linux-musl",
+            ),
+        ] {
+            let materialized = payloads.path(kind, arch).unwrap();
+            assert!(
+                !stale.exists(),
+                "first payload access must clean files absent from the current manifest"
+            );
+            assert!(
+                materialized.starts_with(materialized_root.path().join("embedded-payloads")),
+                "embedded payload escaped the app-owned state directory: {}",
+                materialized.display()
+            );
+            assert_eq!(
+                std::fs::read(materialized).unwrap(),
+                std::fs::read(root.join(filename)).unwrap(),
+                "{kind:?}/{arch:?} selected the wrong embedded payload"
+            );
+        }
+    }
+
     /// A payload source whose bytes are irrelevant to the fake executor.
     struct FixedPayloads(PathBuf);
 
@@ -5811,6 +6102,10 @@ mod tests {
         assert!(unit.contains("/tmp/%%h/farhelm"));
         assert!(unit.contains("PATH=/tmp/%%h:"));
         assert!(unit.contains("KillMode=process"));
+        assert!(!unit.contains("After=default.target"));
+        assert!(!unit.contains("@FARHELM@"));
+        assert!(!unit.contains("@STATE_DIR@"));
+        assert!(!unit.contains("@PATH@"));
         assert!(
             supervisor_unit(
                 Path::new("/tmp/farhelm"),

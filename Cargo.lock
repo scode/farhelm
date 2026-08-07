@@ -1801,11 +1801,15 @@ dependencies = [
 name = "farhelm-ui"
 version = "0.0.3"
 dependencies = [
+ "anyhow",
  "dioxus",
+ "farhelm-helm",
+ "farhelm-supervisor",
  "gloo-timers",
  "reqwest",
  "serde",
  "serde_json",
+ "tempfile",
  "tokio",
  "uuid",
  "web-sys",

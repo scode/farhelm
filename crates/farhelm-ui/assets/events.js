@@ -112,8 +112,8 @@
   /**
    * The feed's WebSocket URL for an API base.
    *
-   * `base` is the helm's absolute origin — the page's own on web, and
-   * `FARHELM_URL` on desktop, where the webview's origin is NOT the helm.
+   * `base` is the helm's absolute origin — the page's own on web, and the
+   * embedded bootstrap's on desktop, where the webview's origin is NOT the helm.
    * Swapping the scheme's `http` prefix covers both `http` and `https` in
    * one substitution, which is the same trick terminal.js uses for the
    * terminal sockets.

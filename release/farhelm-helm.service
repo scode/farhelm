@@ -1,0 +1,9 @@
+[Unit]
+Description=Farhelm helm
+
+[Service]
+ExecStart=%h/.local/lib/farhelm/farhelm helm run --ui-dist %h/.local/lib/farhelm/web
+Restart=on-failure
+
+[Install]
+WantedBy=default.target

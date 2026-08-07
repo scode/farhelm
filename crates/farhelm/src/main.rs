@@ -99,6 +99,13 @@ enum SupervisorCmd {
         /// State directory (default: ~/.local/state/farhelm).
         #[arg(long)]
         state_dir: Option<PathBuf>,
+        /// Exit when the spawning desktop app closes its inherited pipe.
+        ///
+        /// Hidden because ordinary foreground and systemd supervisors own
+        /// their own lifetime; only the bundled desktop launcher holds the
+        /// corresponding pipe open.
+        #[arg(long, hide = true)]
+        exit_on_stdin_close: bool,
     },
 }
 
@@ -177,14 +184,18 @@ fn main() -> anyhow::Result<()> {
             Ok(())
         }
         Cmd::Supervisor {
-            command: SupervisorCmd::Run { state_dir },
+            command:
+                SupervisorCmd::Run {
+                    state_dir,
+                    exit_on_stdin_close,
+                },
         } => {
             init_tracing();
             let dir = match state_dir {
                 Some(dir) => dir,
                 None => farhelm_supervisor::default_state_dir()?,
             };
-            runtime()?.block_on(farhelm_supervisor::service::run(&dir))
+            runtime()?.block_on(run_supervisor(&dir, exit_on_stdin_close))
         }
         Cmd::Internal { command } => match command {
             InternalCmd::Stdio { state_dir } => {
@@ -210,6 +221,40 @@ fn main() -> anyhow::Result<()> {
                 record_home,
             } => fake_agent::run(script, record_home),
         },
+    }
+}
+
+/// Run a supervisor with the optional desktop-app lifetime tether.
+///
+/// Child destructors are not reliable when a GUI framework terminates its
+/// process directly. A pipe is an operating-system lifetime primitive: every
+/// exit path closes the desktop parent's write end, so EOF releases the child
+/// even when Rust cleanup never runs. The blocking read lives on a detached OS
+/// thread, not Tokio's blocking pool: if the supervisor itself fails first,
+/// runtime shutdown cannot wait forever for an uncancellable stdin read.
+async fn run_supervisor(
+    state_dir: &std::path::Path,
+    exit_on_stdin_close: bool,
+) -> anyhow::Result<()> {
+    use anyhow::Context as _;
+
+    if !exit_on_stdin_close {
+        return farhelm_supervisor::service::run(state_dir).await;
+    }
+    let (stdin_closed_tx, stdin_closed) = tokio::sync::oneshot::channel();
+    std::thread::Builder::new()
+        .name("farhelm-supervisor-stdin-tether".to_string())
+        .spawn(move || {
+            let result = std::io::copy(&mut std::io::stdin(), &mut std::io::sink()).map(|_| ());
+            let _ = stdin_closed_tx.send(result);
+        })
+        .context("starting desktop supervisor stdin watcher")?;
+    tokio::select! {
+        result = farhelm_supervisor::service::run(state_dir) => result,
+        result = stdin_closed => {
+            result.context("desktop supervisor stdin watcher stopped without reporting EOF")??;
+            Ok(())
+        }
     }
 }
 

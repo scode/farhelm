@@ -2,11 +2,9 @@
 //!
 //! Web (built by `dx build --platform web`, served by the helm): the API
 //! base is the page's own origin. Desktop (wry webview): the webview's
-//! origin is not the helm, so the base comes from FARHELM_URL (default
-//! http://127.0.0.1:7433) and the window is chrome around the same
-//! components. The desktop is, for now, deliberately a thin client
-//! (SPEC.md's packaged native app — embedded helm and supervisor — is
-//! still to come); see lore/2026-07-26-m1-desktop-is-a-thin-client.md.
+//! origin is not the helm. The desktop bootstrap owns an embedded loopback
+//! helm and bundled local supervisor, then hands their stable loopback origin
+//! to the same component tree the browser uses.
 //!
 //! A renderer feature (`web` or `desktop`) selects the target. Plain
 //! `cargo build`/`clippy` compile with neither so the workspace checks
@@ -17,6 +15,10 @@
 fn main() {
     use farhelm_ui::{ApiBase, App};
 
+    #[cfg(all(feature = "desktop", not(target_arch = "wasm32")))]
+    let desktop = farhelm_ui::desktop::DesktopBootstrap::start()
+        .unwrap_or_else(|error| panic!("desktop bootstrap failed: {error:#}"));
+
     // reqwest requires absolute URLs even on wasm, so the web build
     // derives its API base from the page's own origin rather than using
     // relative paths — same origin either way, since the helm serves
@@ -25,17 +27,13 @@ fn main() {
     let base = web_sys::window()
         .and_then(|w| w.location().origin().ok())
         .unwrap_or_default();
-    #[cfg(not(target_arch = "wasm32"))]
-    let base = std::env::var("FARHELM_URL").unwrap_or_else(|_| "http://127.0.0.1:7433".to_string());
-
-    // The helm prints its URL with a trailing slash, and pasting that
-    // into FARHELM_URL is the obvious move — an untrimmed base would
-    // yield "//api/..." paths that miss the routes and break the
-    // terminal WebSocket. Origins from the browser come without one,
-    // so this is a no-op on the web path.
-    let base = base.trim_end_matches('/').to_string();
+    #[cfg(all(not(target_arch = "wasm32"), feature = "desktop"))]
+    let base = desktop.api_base().to_string();
 
     let builder = dioxus::LaunchBuilder::new().with_context(ApiBase(base));
+
+    #[cfg(all(feature = "desktop", not(target_arch = "wasm32")))]
+    let builder = builder.with_context(desktop.webview_bootstrap());
 
     // Desktop windows need an explicit WindowBuilder, and not only for the
     // title: dioxus-desktop's `Config::new()` marks debug-build windows

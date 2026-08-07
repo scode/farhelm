@@ -82,9 +82,10 @@
 //!   comparison itself plus the one signal `App` renders its reload prompt
 //!   from, so a tab left open across a helm upgrade says so instead of
 //!   failing in ways nothing explains.
-//! - `auth`: the full-page bootstrap-token exchange (PLAN_M7.md item 3),
-//!   raised by `api`'s typed 401 funnel and unmounted after exchange so every
-//!   authenticated reader starts again from a clean state.
+//! - `auth`: the browser's full-page bootstrap-token exchange and the desktop
+//!   webview's IPC exchange (PLAN_M7.md items 3 and 8). Both remount the
+//!   authenticated component tree after a credential change so every reader
+//!   starts again from a clean state.
 //! - `rename`: `RenameForm`, the one control both rename surfaces share
 //!   (PLAN_M5.md item 6) — a single-line field that sends what the user
 //!   typed verbatim, with the request, the optimistic paint, and the
@@ -111,6 +112,8 @@ mod api;
 mod archive;
 mod attachments;
 mod auth;
+#[cfg(all(feature = "desktop", not(target_arch = "wasm32")))]
+pub mod desktop;
 mod feed;
 mod hosts;
 mod list;
@@ -135,8 +138,8 @@ use session_view::SessionView;
 ///
 /// Both targets carry a real origin rather than a relative path: reqwest
 /// requires absolute URLs even on wasm, so the web build reads the
-/// page's own origin (it is served by the helm) and the desktop build
-/// takes `FARHELM_URL`, since a wry webview's origin is not the helm.
+/// page's own origin (it is served by the helm) and the desktop build takes
+/// the origin reported by its in-process helm bootstrap.
 #[derive(Clone, PartialEq)]
 pub struct ApiBase(pub String);
 
@@ -728,6 +731,12 @@ const VENDOR_FIT_JS: Asset = asset!("/assets/vendor/addon-fit.js");
 // Registration order is not execution order (script injection is async);
 // terminal.js's mount readiness gate waits for the helper's global.
 const TERM_BYTES_JS: Asset = asset!("/assets/term-bytes.js");
+// Clipboard fact capture, MIME-extension policy, and the pure filename
+// decision terminal.js calls. Kept as its own asset so node --test executes
+// the shipped functions rather than test-only copies; terminal.js also treats
+// this global as a mount prerequisite, so paste can never fall back to a
+// second naming rule while asynchronous scripts are still loading.
+const CLIPBOARD_NAME_JS: Asset = asset!("/assets/clipboard-name.js");
 const TERMINAL_JS: Asset = asset!("/assets/terminal.js");
 // The invalidation feed's socket (PLAN_M6_75.md item 6) — its own asset
 // rather than a corner of terminal.js, because it has nothing to do with a
@@ -756,6 +765,19 @@ const APP_CSS: Asset = asset!("/assets/app.css");
 /// session the user backed out of is not open.
 #[component]
 pub fn App() -> Element {
+    #[cfg(all(feature = "desktop", not(target_arch = "wasm32")))]
+    {
+        return rsx! { auth::DesktopBootstrapGate {} };
+    }
+
+    #[cfg(not(all(feature = "desktop", not(target_arch = "wasm32"))))]
+    return rsx! { AppBody {} };
+}
+
+/// The renderer-independent application mounted only after desktop IPC auth
+/// has completed. Browser builds mount it immediately.
+#[component]
+fn AppBody() -> Element {
     let mut current = use_signal(|| None::<Session>);
     let build_skew = skew::build_skew_detected();
     let token_required = *auth::TOKEN_REQUIRED.read();
@@ -766,6 +788,7 @@ pub fn App() -> Element {
         document::Script { src: VENDOR_XTERM_JS }
         document::Script { src: VENDOR_FIT_JS }
         document::Script { src: TERM_BYTES_JS }
+        document::Script { src: CLIPBOARD_NAME_JS }
         document::Script { src: TERMINAL_JS }
         document::Script { src: EVENTS_JS }
         // Above both views and outside the match, deliberately: a build

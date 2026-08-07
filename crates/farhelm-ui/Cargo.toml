@@ -29,6 +29,9 @@ web-sys = { workspace = true, features = ["Performance", "Storage"] }
 gloo-timers.workspace = true
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+anyhow.workspace = true
+farhelm-helm.workspace = true
+farhelm-supervisor.workspace = true
 # Non-wasm half of the list-view and session-detail poll sleep (src/list.rs,
 # src/session_view.rs). Not a new runtime dependency in practice:
 # `dioxus-desktop` already constructs and drives a multi-thread tokio
@@ -47,3 +50,6 @@ uuid.workspace = true
 default = []
 web = ["dioxus/web"]
 desktop = ["dioxus/desktop"]
+
+[dev-dependencies]
+tempfile.workspace = true

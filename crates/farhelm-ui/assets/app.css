@@ -1661,3 +1661,13 @@ body,
 .status.error {
   color: #e08080;
 }
+.clipboard-facts {
+  margin-top: 0.4rem;
+}
+
+.clipboard-facts pre {
+  max-height: 14rem;
+  overflow: auto;
+  white-space: pre-wrap;
+  user-select: text;
+}

@@ -239,6 +239,16 @@ pub(crate) async fn exchange_token(
     }
 }
 
+/// `GET /api/auth/device`: prove that one persisted desktop credential is
+/// still valid without minting a replacement on transport failures.
+///
+/// Authentication middleware runs before this handler. Reaching it is the
+/// entire success condition; the empty response carries no credential or
+/// account data across the webview's custom origin.
+pub(crate) async fn validate_device() -> StatusCode {
+    StatusCode::NO_CONTENT
+}
+
 /// Require an explicit device secret before any protected REST handler or
 /// WebSocket upgrade is reached.
 pub(crate) async fn require_device_session(
@@ -527,6 +537,54 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(response.status(), StatusCode::OK);
+
+        let validate = Request::builder()
+            .uri("/api/auth/device")
+            .header(header::HOST, "127.0.0.1:7433")
+            .header(header::ORIGIN, "dioxus://index.html")
+            .header(header::AUTHORIZATION, format!("Bearer {secret}"))
+            .body(Body::empty())
+            .unwrap();
+        let response = harness
+            .unauthenticated_router()
+            .oneshot(validate)
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::NO_CONTENT);
+        assert_eq!(
+            response
+                .headers()
+                .get(header::ACCESS_CONTROL_ALLOW_ORIGIN)
+                .unwrap(),
+            "dioxus://index.html"
+        );
+
+        let rejected = Request::builder()
+            .uri("/api/auth/device")
+            .header(header::HOST, "127.0.0.1:7433")
+            .header(header::ORIGIN, "dioxus://index.html")
+            .header(header::AUTHORIZATION, "Bearer rejected")
+            .body(Body::empty())
+            .unwrap();
+        let response = harness
+            .unauthenticated_router()
+            .oneshot(rejected)
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+        assert_eq!(
+            response
+                .headers()
+                .get(header::ACCESS_CONTROL_ALLOW_ORIGIN)
+                .unwrap(),
+            "dioxus://index.html",
+            "the webview must be allowed to distinguish auth rejection from transport failure"
+        );
+        assert_eq!(
+            harness.store.device_session_count().await.unwrap(),
+            1,
+            "validation must never mint a replacement device row"
+        );
     }
 
     /// A browser must be able to load the application before it has a credential;

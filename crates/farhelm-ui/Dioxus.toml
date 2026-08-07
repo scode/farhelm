@@ -1,0 +1,9 @@
+[application]
+name = "Farhelm"
+
+[bundle]
+identifier = "dev.scode.farhelm"
+publisher = "scode"
+
+[bundle.macos]
+bundle_name = "Farhelm"

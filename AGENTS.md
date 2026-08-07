@@ -35,6 +35,9 @@ Before creating or updating a PR, or claiming work is done, run exactly what CI 
   CI pins no node version.
 - `cargo check -p farhelm-ui --features desktop` — the desktop renderer compiles nowhere else; needs the webkit2gtk/gtk
   dev packages (see the CI job for the apt list).
+- `scripts/desktop-smoke.sh` — the non-pixel Xvfb integration gate for the embedded helm, managed supervisor, desktop
+  authentication, bundle-local tmux, hard-exit tether, and restart persistence. The optional coordinate-driven leg is
+  not part of CI.
 - `dprint check`
 - `cd e2e && npx playwright test` — the browser end-to-end suite, run against both Chromium and WebKit (the latter
   stands in for the desktop app's actual engine family). It needs `cargo build` and

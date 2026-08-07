@@ -60,9 +60,8 @@
 //! the Playwright suite drives the web build with a synthesized event
 //! object (its own interception section says so in detail), so a real OS
 //! drag and a real clipboard image have never been exercised anywhere.
-//! What the operator has to do, on a desktop build started against a live
-//! helm (`cargo run -p farhelm-ui --features desktop`, `FARHELM_URL`
-//! pointing at it):
+//! What the operator has to do in the self-contained desktop app (a release
+//! bundle, or the development bundle started by `scripts/desktop-smoke.sh`):
 //!
 //! 1. Drag a real file from the file manager onto the AGENT terminal of an
 //!    open session. Expect: an "attaching …" line, then the host path
@@ -73,11 +72,13 @@
 //! 2. Do the same onto a TAB's terminal, with the agent terminal visible
 //!    beside it. Expect the path in the tab and nothing in the agent
 //!    terminal.
-//! 3. Take a real screenshot to the clipboard and paste it into a
-//!    terminal. Expect a `pasted-<n>.png` name and the same insertion.
-//!    This is the SPEC.md acceptance walkthrough's own step, and the one
-//!    with the most engine-specific clipboard behavior behind it. While
-//!    there, check the other side of [`classify`]'s naming rule: copy an
+//! 3. Take a real screenshot to the clipboard and paste it into a terminal.
+//!    Expect the engine's real filename when it supplies one, or a
+//!    `pasted-<n>.png` name for synthetic image data, and the same insertion.
+//!    This is the SPEC.md acceptance walkthrough's own step, and the one with
+//!    the most engine-specific clipboard behavior behind it. Expand the
+//!    on-screen clipboard-facts dump, then check the other side of
+//!    [`classify`]'s naming rule: copy an
 //!    image FILE in the file manager, paste it, and expect its own name to
 //!    survive rather than a generated one. Record what each engine
 //!    actually put on the clipboard (the `File`'s name and `lastModified`,
@@ -102,7 +103,7 @@
 //! custom scheme while the helm answers on loopback — is handled rather
 //! than left for this pass to discover: the helm answers the attachments
 //! route with CORS headers for exactly the custom-scheme origins its
-//! loopback guard already trusts (farhelm-helm's `attachment_cors`). Step
+//! loopback guard already trusts (farhelm-helm's `desktop_webview_cors`). Step
 //! 1 failing with the file present on disk but the UI reporting an error
 //! would be that mechanism regressing.
 
