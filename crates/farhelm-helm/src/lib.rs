@@ -354,15 +354,17 @@ impl AppState {
     }
 }
 
-/// Assemble the routes, optional static UI service, and loopback-origin
-/// middleware that `run()` serves.
+/// Assemble the API and WebSocket routes that share the helm's application
+/// state.
 ///
-/// Pulled out of `run()` so tests can drive the real middleware stack
-/// in-process (via `tower::ServiceExt::oneshot`) against a scripted fleet,
-/// instead of only exercising handlers directly and silently skipping the
-/// origin guard and its response headers.
-fn build_router(state: Arc<AppState>, ui_dist: Option<&std::path::Path>, port: u16) -> Router {
-    let mut app = Router::new()
+/// The static UI deliberately does not live here: it must remain reachable
+/// before a browser has authenticated, and M7's auth boundary (PLAN_M7.md
+/// item 3) will cover exactly this group and nothing outside it. Assembling
+/// the control-plane routes as one group is what makes that coming boundary
+/// structural instead of a per-route discipline each future route would have
+/// to remember.
+fn api_router(state: Arc<AppState>) -> Router {
+    Router::new()
         .route(
             "/api/sessions",
             get(sessions::list_sessions).post(sessions::create_session),
@@ -464,7 +466,18 @@ fn build_router(state: Arc<AppState>, ui_dist: Option<&std::path::Path>, port: u
         // with nothing else in common: it names no session, carries no data,
         // and holds no attachment.
         .route("/api/events", get(events::events_ws))
-        .with_state(state);
+        .with_state(state)
+}
+
+/// Compose the API with the optional static UI service and the
+/// loopback-origin middleware that `run()` serves.
+///
+/// Pulled out of `run()` so tests can drive the real middleware stack
+/// in-process (via `tower::ServiceExt::oneshot`) against a scripted fleet,
+/// instead of only exercising handlers directly and silently skipping the
+/// origin guard and its response headers.
+fn build_router(state: Arc<AppState>, ui_dist: Option<&std::path::Path>, port: u16) -> Router {
+    let mut app = api_router(state);
 
     if let Some(dist) = ui_dist {
         let serve = tower_http::services::ServeDir::new(dist).fallback(
