@@ -756,7 +756,10 @@ async fn answer_queued_commits(
 /// a delete (and is then cancelled and swept by it) or wholly after (and
 /// finds no session at all). Without the claim there is an interleaving
 /// where this creates the directory in the gap between the delete
-/// detaching it and the delete removing the session's row.
+/// detaching it and the delete removing the session's row. Archive retains
+/// the row, so staging also rechecks its archive flag under the claim: a
+/// begin admitted after archive drained the transfer table must not start
+/// writing when the claim is released.
 ///
 /// The claim is released the moment the staging file exists: a transfer
 /// holds no lifecycle claim while it streams, or a large upload would
@@ -801,11 +804,29 @@ async fn stage_upload(
         }
         claim = sup.lifecycle_locks.claim(session_id) => claim,
     };
-    if !sup.sessions.lock().await.contains_key(session_id) {
-        return Err(RequestError::new(
-            ErrorKind::NotFound,
-            format!("no such session: {}", truncate_for_error(session_id)),
-        ));
+    match sup
+        .sessions
+        .lock()
+        .await
+        .get(session_id)
+        .map(|entry| entry.info.archived)
+    {
+        None => {
+            return Err(RequestError::new(
+                ErrorKind::NotFound,
+                format!("no such session: {}", truncate_for_error(session_id)),
+            ));
+        }
+        Some(true) => {
+            return Err(RequestError::new(
+                ErrorKind::InvalidRequest,
+                format!(
+                    "session {} is archived; restart it before uploading attachments",
+                    truncate_for_error(session_id)
+                ),
+            ));
+        }
+        Some(false) => {}
     }
     let dir = crate::attachments::session_dir(&sup.state_dir, session_id);
     crate::attachments::ensure_session_dirs(&sup.state_dir, session_id)
@@ -1238,16 +1259,25 @@ async fn abandon_upload(sup: &Arc<Supervisor>, staged: crate::files::StagedStrea
 /// Cancel every upload in flight for `session_id` and wait for each to
 /// finish cleaning up.
 ///
-/// `DeleteSession`'s first step, and the reason its directory handling is
-/// safe: once this returns, no task can still write into (or publish
-/// into) that session's attachments directory. The wait is what makes
-/// that a guarantee rather than a hope — firing the signals and moving on
-/// would race the delete against a transfer's last write.
+/// A whole-session teardown's first step. Once this returns, no task can
+/// still write into or publish into that session's attachments directory.
+/// The wait is what makes that a guarantee rather than a hope — firing the
+/// signals and moving on would race teardown against a transfer's last
+/// write.
+///
+/// `session_gone` distinguishes delete from archive. Both cancel the
+/// transfer, but only delete may turn a late commit into `NotFound`; an
+/// archived session still exists and must not be described as deleted.
 ///
 /// Callers must hold the session's lifecycle claim, which is what keeps a
 /// NEW transfer from staging into the directory between this call and the
 /// delete that follows it (see `stage_upload`).
-pub(crate) async fn abort_session_uploads(sup: &Supervisor, session_id: &str, reason: &str) {
+pub(crate) async fn abort_session_uploads(
+    sup: &Supervisor,
+    session_id: &str,
+    reason: &str,
+    session_gone: bool,
+) {
     let doomed: Vec<UploadHandle> = {
         let mut uploads = sup.uploads.lock().await;
         uploads
@@ -1265,7 +1295,7 @@ pub(crate) async fn abort_session_uploads(sup: &Supervisor, session_id: &str, re
         let _ = handle.signals.try_send(UploadSignal {
             reason: reason.to_string(),
             tell_client: true,
-            session_gone: true,
+            session_gone,
         });
     }
     for handle in doomed {

@@ -102,6 +102,9 @@ struct SessionPage {
 /// the list instead of erroring.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub(crate) struct SessionFilter {
+    /// Whether the list includes archived sessions. False is the ordinary
+    /// view and therefore still an active server-side predicate.
+    pub(crate) include_archived: bool,
     /// A registered host's id, from `GET /api/hosts`.
     pub(crate) host: Option<HostId>,
     /// The exact session id whose direct children should be listed.
@@ -130,12 +133,10 @@ impl SessionFilter {
     /// treat absence as departure are held back for one (see
     /// `list::ListView`'s commit path).
     pub(crate) fn is_active(&self) -> bool {
-        self.host.is_some()
-            || !self.parent.is_empty()
-            || !self.directory.is_empty()
-            || !self.profile.is_empty()
-            || !self.status.is_empty()
-            || !self.title.is_empty()
+        self != &SessionFilter {
+            include_archived: true,
+            ..SessionFilter::default()
+        }
     }
 
     /// This filter as the query string's parameters, percent-encoded and
@@ -150,6 +151,9 @@ impl SessionFilter {
     /// their filter.
     fn query(&self) -> String {
         let mut parts: Vec<String> = Vec::new();
+        if self.include_archived {
+            parts.push("include_archived=true".to_string());
+        }
         if let Some(host) = self.host {
             parts.push(format!("host={host}"));
         }
@@ -1372,6 +1376,21 @@ pub(crate) async fn rename_session(base: &str, id: &str, title: &str) -> Result<
     resp.json::<Session>().await.map_err(|e| e.to_string())
 }
 
+/// Archive a session and return its retained, terminal-less state.
+///
+/// The response is authoritative even for a retry: archive is idempotent,
+/// so an ambiguous first request can be repeated without turning recovery
+/// into an error. The caller uses the returned `archived` flag rather than
+/// guessing from an emptied tab list or an exited status.
+pub(crate) async fn archive_session(base: &str, id: &str) -> Result<Session, String> {
+    let url = format!("{base}/api/sessions/{}/archive", encode_path_segment(id));
+    let resp = send(client().post(&url)).await?;
+    if !resp.status().is_success() {
+        return Err(refusal_text("POST", &url, resp).await);
+    }
+    resp.json::<Session>().await.map_err(|e| e.to_string())
+}
+
 /// DELETE a session. See `stop_session`'s docs — same error-surfacing
 /// shape (including the body-read-failure context), different verb and
 /// endpoint.
@@ -2525,18 +2544,19 @@ mod tests {
         );
     }
 
-    /// An empty filter must produce an empty query string — a request byte
-    /// for byte identical to the unfiltered one this UI has always sent.
+    /// The default archive exclusion uses an empty query string while still
+    /// counting as an active predicate.
     ///
-    /// Not tidiness: the helm caps a FILTERED page lower than an unfiltered
-    /// one and counts a request as filtered by what it carries, so a filter
-    /// that sent `?title=` for a cleared search box would narrow nothing
-    /// while paying the filtered path's ceiling — and would make the banner
-    /// claim a filter is active when none is.
+    /// Omission is the wire spelling of `include_archived=false`; the helm
+    /// still applies and counts it. Sending an explicit empty text field
+    /// would add noise without changing that predicate or the result set.
     #[test]
-    fn an_empty_filter_asks_for_exactly_what_an_unfiltered_walk_asks_for() {
+    fn the_default_archive_exclusion_is_an_active_implicit_filter() {
         let empty = SessionFilter::default();
-        assert!(!empty.is_active());
+        assert!(
+            empty.is_active(),
+            "the ordinary view excludes archived rows and therefore expects a matching count"
+        );
         assert_eq!(empty.query(), "");
     }
 
@@ -2550,6 +2570,7 @@ mod tests {
     #[test]
     fn every_filter_dimension_travels_under_its_own_encoded_parameter() {
         let filter = SessionFilter {
+            include_archived: true,
             host: Some(7),
             parent: "session/root".to_string(),
             directory: "/srv/my project".to_string(),
@@ -2560,7 +2581,7 @@ mod tests {
         assert!(filter.is_active());
         assert_eq!(
             filter.query(),
-            "host=7&parent=session%2Froot&directory=%2Fsrv%2Fmy%20project&\
+            "include_archived=true&host=7&parent=session%2Froot&directory=%2Fsrv%2Fmy%20project&\
              profile=claude%20code&status=waiting&title=a%26b"
         );
     }
@@ -2576,19 +2597,21 @@ mod tests {
     #[test]
     fn only_an_exactly_empty_value_clears_a_dimension() {
         let blank = SessionFilter {
+            include_archived: true,
             title: String::new(),
             ..SessionFilter::default()
         };
         assert!(!blank.is_active(), "an empty box filters nothing");
 
         let spaced = SessionFilter {
+            include_archived: true,
             title: " ".to_string(),
             ..SessionFilter::default()
         };
         assert!(spaced.is_active());
         assert_eq!(
             spaced.query(),
-            "title=%20",
+            "include_archived=true&title=%20",
             "a space is a search for a space, not a cleared filter"
         );
 
@@ -2597,6 +2620,7 @@ mod tests {
         // blank.
         assert!(
             SessionFilter {
+                include_archived: true,
                 host: Some(0),
                 ..SessionFilter::default()
             }

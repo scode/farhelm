@@ -1799,6 +1799,30 @@ impl SupervisorClient {
         }
     }
 
+    /// Archive a session, returning its retained post-teardown metadata.
+    ///
+    /// Success means the agent, tabs, and terminal are gone and the durable
+    /// row is marked archived; attachments deliberately remain available to
+    /// a later restart. Repeating the request is successful and returns the
+    /// same current state, which lets a caller recover from an ambiguous
+    /// transport failure without guessing whether the first request landed.
+    pub async fn archive_session(&self, id: &str) -> anyhow::Result<SessionInfo> {
+        let req_id = self.req_id();
+        match self
+            .request(
+                req_id,
+                ControlMsg::ArchiveSession {
+                    req_id,
+                    session_id: id.to_string(),
+                },
+            )
+            .await?
+        {
+            ControlMsg::SessionArchived { session, .. } => Ok(session),
+            other => bail!("unexpected reply to archive_session: {other:?}"),
+        }
+    }
+
     /// Remove a session and all its stored state, in any state (SPEC.md's
     /// "delete"). After this returns `Ok`, the session no longer appears
     /// in `list_sessions` and `attach` against its id fails as unknown.

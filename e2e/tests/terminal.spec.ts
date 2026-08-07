@@ -3899,6 +3899,10 @@ test("truncation banner shows when the listing reports truncated", async ({
           { id: "synthetic-2", title: "synthetic-2", cwd: "/tmp", invocation: "true" },
         ],
         total: 700,
+        // The ordinary request excludes archived rows, so it is a filter
+        // even though the query string is empty. Keep the fixture on the
+        // current helm contract instead of exercising the old-peer fallback.
+        matching: 700,
         truncated: true,
       }),
     }),
@@ -3906,8 +3910,8 @@ test("truncation banner shows when the listing reports truncated", async ({
 
   await page.goto("/");
   await expect(page.locator(".truncation-banner")).toBeVisible();
-  await expect(page.locator(".truncation-banner")).toContainText(
-    "showing 2 of 700 sessions",
+  await expect(page.locator(".truncation-banner")).toHaveText(
+    "showing 2 of 700 matching sessions (700 in all)",
   );
 });
 
@@ -14161,6 +14165,9 @@ test.describe("multi-host", () => {
               stale: false,
             })),
             total: 4,
+            // No explicit search is still the default archive-exclusion
+            // filter. `total` is the fleet; `matching` is the walk's size.
+            matching: 4,
             truncated: !!served.next,
             next_cursor: served.next,
           }),
@@ -14183,9 +14190,10 @@ test.describe("multi-host", () => {
     // The cursors were replayed verbatim, in order, starting with none.
     expect(requested.slice(0, 4)).toEqual(["", "cursor-1", "cursor-2", "cursor-3"]);
 
-    // A completed walk shows the total and does NOT claim to be showing a
-    // subset: "showing N of M" is reserved for a walk that stopped short.
-    await expect(page.locator(".session-count")).toHaveText("4 sessions");
+    // A completed walk does NOT claim to be showing a subset: "showing N of
+    // M" is reserved for a walk that stopped short. The ordinary request is
+    // still a filter, so the complete form reports both counts.
+    await expect(page.locator(".session-count")).toHaveText("4 matching of 4 sessions");
     await expect(page.locator(".truncation-banner")).toHaveCount(0);
   });
 

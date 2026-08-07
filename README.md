@@ -8,34 +8,35 @@ NOTE: This is milestone-7 software: several sessions at once, across every host 
 registered by SSH destination — through `--ensure-hosts` at startup, the API, or the UI's own hosts panel — and the
 machine running the helm is always one of them without being registered at all; one flat session list spans them, each
 row naming its host, with a host that goes dark keeping its sessions listed and marked stale. The list is filtered and
-searched by host, parent session, directory, agent profile, status and title, and every client updates itself: a create,
-rename, stop, delete, status change or host going down shows up in every open browser without a refresh, and while that
-channel is healthy the browser polls for none of it (it falls back to refetching every few seconds while the channel is
-down). Agents are launched from named profiles — per host, editable, with starter definitions for Claude Code and Codex
-on every fresh supervisor — or from a command typed into the create dialog. The hosts panel shows every host's
-connection state at all times and is where hosts are added, retargeted, removed, retried, where an identity change is
-decided, and where each host's profiles are defined; opening a stale session shows its metadata behind a notice naming
-its host's actual state instead of a terminal, and the create dialog picks which host a session is launched on.
-Reopening a session lands at the tail of its history instead of replaying it as a scroll animation — for any replay
-within the client's buffering bounds, which is every ordinary one; an unusually large replay, or one that stalls
-part-way, falls back to showing the catch-up as it arrives instead of hiding it. A session can be renamed from either
-the list or its own view. Sessions survive a supervisor restart (persisted metadata, and a still-viewable terminal
-whenever the private tmux server survived too), a host reboot classifies previously-running sessions as interrupted
-rather than guessing, and a user-stopped session keeps its "stopped by user" qualifier durably. A terminal that loses
-its connection — a closed laptop, a network that went away — gets itself back without you closing and reopening the
-session. Restart is live too: an interrupted (or exited, or errored) session relaunches its agent — resuming its own
-Claude Code or Codex conversation where that conversation was captured, and saying plainly that it is launching fresh
-where it was not. On Linux hosts with a systemd user manager, stopping a session also kills its launch's own cgroup
-before the portable process sweep, which catches descendants that daemonized away from both (see SPEC_impl.md for what
-that does and does not promise). Usable for real work, minimal in everything else. On first run the helm creates a
-recoverable web token. A browser enters the value printed by `farhelm helm token show` once, receives an
-origin-and-port-scoped device secret, and sends that secret explicitly on later REST and WebSocket requests; the helm
-stores only its SHA-256 digest. `farhelm helm
-token rotate` replaces the bootstrap token, invalidates every device
-secret, and closes authenticated live sockets. The state directory remains private to the helm account, and a script
-running in the authenticated UI origin has that device's API authority. One further caveat worth knowing before real
-work: every agent invocation entered through the GUI, whether typed into the create dialog or stored in a profile, is
-ordinary argv, visible to every local user via `ps`, so credentials do not belong in it.
+searched by host, parent session, directory, agent profile, status and title; archived sessions are excluded by default
+and an "include archived" switch widens that same query. Every client updates itself: a create, rename, stop, archive,
+delete, status change or host going down shows up in every open browser without a refresh, and while that channel is
+healthy the browser polls for none of it (it falls back to refetching every few seconds while the channel is down).
+Agents are launched from named profiles — per host, editable, with starter definitions for Claude Code and Codex on
+every fresh supervisor — or from a command typed into the create dialog. The hosts panel shows every host's connection
+state at all times and is where hosts are added, retargeted, removed, retried, where an identity change is decided, and
+where each host's profiles are defined; opening a stale session shows its metadata behind a notice naming its host's
+actual state instead of a terminal, and the create dialog picks which host a session is launched on. Reopening a session
+lands at the tail of its history instead of replaying it as a scroll animation — for any replay within the client's
+buffering bounds, which is every ordinary one; an unusually large replay, or one that stalls part-way, falls back to
+showing the catch-up as it arrives instead of hiding it. A session can be renamed from either the list or its own view.
+Sessions survive a supervisor restart (persisted metadata, and a still-viewable terminal whenever the private tmux
+server survived too), a host reboot classifies previously-running sessions as interrupted rather than guessing, and a
+user-stopped session keeps its "stopped by user" qualifier durably. A terminal that loses its connection — a closed
+laptop, a network that went away — gets itself back without you closing and reopening the session. Restart is live too:
+an interrupted (or exited, or errored) session relaunches its agent — resuming its own Claude Code or Codex conversation
+where that conversation was captured, and saying plainly that it is launching fresh where it was not. On Linux hosts
+with a systemd user manager, stopping a session also kills its launch's own cgroup before the portable process sweep,
+which catches descendants that daemonized away from both (see SPEC_impl.md for what that does and does not promise).
+Usable for real work, minimal in everything else. On first run the helm creates a recoverable web token. A browser
+enters the value printed by `farhelm helm token show` once, receives an origin-and-port-scoped device secret, and sends
+that secret explicitly on later REST and WebSocket requests; the helm stores only its SHA-256 digest.
+`farhelm helm
+token rotate` replaces the bootstrap token, invalidates every device secret, and closes authenticated live
+sockets. The state directory remains private to the helm account, and a script running in the authenticated UI origin
+has that device's API authority. One further caveat worth knowing before real work: every agent invocation entered
+through the GUI, whether typed into the create dialog or stored in a profile, is ordinary argv, visible to every local
+user via `ps`, so credentials do not belong in it.
 
 ## Trying it (M7)
 
@@ -120,12 +121,13 @@ Ubuntu 24.04 ships 3.4.
   Reopening shows a brief "connecting — catching up" line instead of the history flying past: the terminal appears once,
   already at the end of what you missed. A replay that outgrows the client's buffer, or that goes quiet part-way,
   degrades to showing the rest as it arrives — visible catch-up rather than a hidden terminal, and never dropped output.
-- Above the list, filtering and search: host, parent session, working directory, agent profile, status, and a title
-  search, applied when you submit rather than on every keystroke. The helm answers the query — the whole fleet is
-  filtered before it is paginated, so the count above the rows ("N matching of M sessions") is about the fleet and not
-  about the page you happen to be holding. The parent field takes an exact session id. The profile field is free text
-  rather than a menu on purpose: it matches a profile's id or the name a session snapshotted at creation, which is what
-  keeps a deleted profile's sessions findable.
+- Above the list, filtering and search: host, parent session, working directory, agent profile, status, archived
+  sessions, and a title search, applied when you submit rather than on every keystroke. The helm answers the query — the
+  whole fleet is filtered before it is paginated, so the count above the rows ("N matching of M sessions") is about the
+  fleet and not about the page you happen to be holding. Archived sessions are hidden by default; "include archived"
+  widens the matching set without changing the fleet total. The parent field takes an exact session id. The profile
+  field is free text rather than a menu on purpose: it matches a profile's id or the name a session snapshotted at
+  creation, which is what keeps a deleted profile's sessions findable.
 - "new session" opens an inline form: host, agent, working directory (required), title (optional, auto-generated when
   omitted). Submitting launches the agent and takes you straight into its terminal. The host selector lists every
   registered host and defaults to the machine running the helm (SPEC.md's rule names the host of the currently open
@@ -151,11 +153,14 @@ Ubuntu 24.04 ships 3.4.
   moves it for you. A key whose session you have since deleted is spent: the form says so rather than quietly recreating
   it. The create API additionally accepts explicit agent-kind and resume-template overrides for invocations that
   basename recognition cannot classify (a wrapper script, `env claude`), which the form does not expose.
-- Each row also has rename, stop and delete. Rename opens a field in place — the same control the session view's header
-  has — and what you type is sent exactly as typed; a title the supervisor refuses (control characters in it) comes back
-  with the supervisor's own words while the old name stays. Stop kills the agent and its whole process tree; the session
-  stays listed, its terminal still viewable. Delete removes the session and its stored state — with an inline
-  confirmation first whenever the agent might still be alive.
+- Each row also has rename, stop, archive and delete. Rename opens a field in place — the same control the session
+  view's header has — and what you type is sent exactly as typed; a title the supervisor refuses (control characters in
+  it) comes back with the supervisor's own words while the old name stays. Stop kills the agent and its whole process
+  tree; the session stays listed, its terminal still viewable. Archive is available on both the row and session view; it
+  confirms whenever the agent, a prior process tree, or terminal tabs may still be destroyed, then removes the agent,
+  tabs and terminal while retaining the session's metadata and attachments. Archived rows are hidden by default and
+  restart is the only unarchive path. Delete removes the session and its stored state — with an inline confirmation
+  first whenever the agent might still be alive.
 - Opening a session leads with what restarting it would do to the conversation, and the control says which: "resume
   conversation" when this session's own agent conversation was captured, "restart (fresh launch)" when it was not. A
   restart reuses the session's terminal when it still exists — the previous run stays above the new one in scrollback —

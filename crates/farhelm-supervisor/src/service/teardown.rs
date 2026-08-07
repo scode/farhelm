@@ -51,19 +51,29 @@
 //! channel. The handler still owns every byte that answers the
 //! `DeleteSession` itself.
 //!
-//! Delete semantics only. SPEC.md's archive is a different operation with
-//! a different retention story; nothing here is parameterized for it, and
-//! a future archive path should say what IT does rather than inherit a
-//! mode flag from this one.
+//! ## Archive is its own teardown
+//!
+//! Archive shares the process and terminal reach of delete, but not its
+//! retention story. It cancels in-flight uploads, reaps the agent and every
+//! tab, removes terminal-only launch artifacts and snapshots, and detaches
+//! every viewer. It then KEEPS the database row and committed attachment
+//! directory, marks the row archived, and records the deliberate teardown
+//! as `Exited` with `STOP_ANNOTATION`. That separate path is intentional:
+//! treating archive as a delete mode would make the files it must preserve
+//! depend on branches inside delete's fail-closed removal sequence.
 
 use super::connection::notify_detached;
-use super::core::{SessionEntry, Supervisor};
+use super::core::{ArchiveStage, SessionEntry, Supervisor};
 use super::launch_artifacts::{remove_fail_closed, remove_launch_artifacts_for_session};
 use super::snapshots::snapshot_path;
 use super::sweep::{SweepTarget, reap_process_tree};
 use super::terminals::ActiveAttach;
+use super::ticker::ActivitySample;
 use super::uploads::abort_session_uploads;
+use crate::store::LastOutcome;
+use farhelm_proto::{STOP_ANNOTATION, SessionStatus};
 use std::path::PathBuf;
+use std::sync::Arc;
 use tracing::debug;
 
 /// Every way a teardown can fail before the session is gone, as one
@@ -114,7 +124,238 @@ pub(crate) enum TeardownError {
     FailClosed(String),
 }
 
+/// Failures that prevent archive from truthfully claiming the session is
+/// terminal-less and archived.
+///
+/// Every variant is fail-closed: the archived flag is written only after
+/// the process sweep and tmux teardown have succeeded. The handler owns
+/// rendering because these messages are part of the wire contract.
+pub(crate) enum ArchiveError {
+    PaneProbe(anyhow::Error),
+    TabRediscovery(anyhow::Error),
+    TabScopeEnumeration(anyhow::Error),
+    Sweep(anyhow::Error),
+    FailClosed(String),
+}
+
 impl Supervisor {
+    /// Shut down an entire session while preserving its durable metadata
+    /// and committed attachments.
+    ///
+    /// The caller holds the session lifecycle claim across this function.
+    /// The archive flag is committed only after every process, tab, tmux
+    /// terminal, and terminal-only artifact is gone; a failure therefore
+    /// leaves an ordinary visible session that can be retried. Committed
+    /// attachment files are never moved or removed.
+    pub(crate) async fn teardown_for_archive(
+        &self,
+        entry: &SessionEntry,
+        session_id: &str,
+    ) -> Result<Arc<SessionEntry>, ArchiveError> {
+        // The in-memory entry deliberately has no `Terminal` during a
+        // restart gap, but the durable tmux name exists for the whole row's
+        // lifetime. Archive must still kill a same-named husk in that state;
+        // tying the whole-session kill to the agent pane would leave tabs or
+        // a dead retained window behind while publishing a terminal-less
+        // archive.
+        let tmux_name = self
+            .store
+            .session(session_id)
+            .await
+            .map_err(|error| {
+                ArchiveError::FailClosed(format!(
+                    "reading the durable tmux name before archive: {error:#}"
+                ))
+            })?
+            .ok_or_else(|| {
+                ArchiveError::FailClosed(format!(
+                    "session {session_id} vanished before its tmux terminal could be removed"
+                ))
+            })?
+            .tmux_name;
+
+        let live_pane = match entry.terminal.as_ref() {
+            Some(terminal) => {
+                if let Some(gate) = &self.seams.archive_gate {
+                    gate(ArchiveStage::PaneProbe)
+                        .await
+                        .map_err(ArchiveError::PaneProbe)?;
+                }
+                self.tmux
+                    .pane_process(&terminal.tmux_name, &terminal.pane)
+                    .await
+                    .map_err(ArchiveError::PaneProbe)?
+            }
+            None => None,
+        };
+        let root_pid = live_pane.filter(|pane| !pane.dead).map(|pane| pane.pid);
+
+        // Archive reaches the same whole-session ownership boundary as
+        // delete: tabs carry separate cgroup units, and the manager is the
+        // only source left when tmux died before its scrubbed daemon did.
+        let mut units = entry.scope.clone().into_iter().collect::<Vec<_>>();
+        if let Some(terminal) = entry.terminal.as_ref() {
+            if let Some(gate) = &self.seams.archive_gate {
+                gate(ArchiveStage::TabRediscovery)
+                    .await
+                    .map_err(ArchiveError::TabRediscovery)?;
+            }
+            let tabs = self
+                .session_tabs(terminal)
+                .await
+                .map_err(ArchiveError::TabRediscovery)?;
+            units.extend(
+                tabs.iter()
+                    .filter_map(|tab| crate::scope::tab_unit_name(session_id, &tab.id)),
+            );
+        }
+        if let Some(glob) = crate::scope::tab_unit_glob(session_id) {
+            if let Some(gate) = &self.seams.archive_gate {
+                gate(ArchiveStage::ScopeEnumeration)
+                    .await
+                    .map_err(ArchiveError::TabScopeEnumeration)?;
+            }
+            match self.seams.scopes.units_matching(&glob).await {
+                Ok(found) => units.extend(found),
+                Err(error) if !self.seams.scopes.available().await => debug!(
+                    session = %session_id,
+                    error = %format!("{error:#}"),
+                    "no systemd user manager to enumerate this archived session's tab scopes; \
+                     the process-tree sweep is the whole mechanism"
+                ),
+                Err(error) => return Err(ArchiveError::TabScopeEnumeration(error)),
+            }
+        }
+        units.sort();
+        units.dedup();
+        if let Some(gate) = &self.seams.archive_gate {
+            gate(ArchiveStage::Sweep)
+                .await
+                .map_err(ArchiveError::Sweep)?;
+        }
+        // Everything above is a read-only preflight. Keep transfers alive
+        // until those checks have proved teardown can start: a refused
+        // archive must not discard an upload and then claim nothing changed.
+        // Once the checks pass, cancelling and joining immediately before
+        // the first process kill closes the other side of the contract — no
+        // transfer can publish into a session while it is being made
+        // terminal-less. Committed attachments remain untouched.
+        abort_session_uploads(self, session_id, "the session was archived", false).await;
+        reap_process_tree(
+            &self.seams.scopes,
+            &units,
+            root_pid,
+            session_id,
+            &SweepTarget::WholeSession,
+        )
+        .await
+        .map_err(ArchiveError::Sweep)?;
+
+        // From here through publication, the attachment-map guard prevents
+        // a racing attach from installing a viewer on the terminal being
+        // removed. Notices are initiated before the guard drops, matching
+        // the ordering guarantee described in the module docs.
+        let mut attachments = self.attachments.lock().await;
+        let doomed: Vec<ActiveAttach> = attachments
+            .extract_if(|key, _| key.session == session_id)
+            .map(|(_, attachment)| attachment)
+            .collect();
+        for old in &doomed {
+            old.forwarder.abort();
+        }
+        let mut notify_detach = Vec::with_capacity(doomed.len());
+        for ActiveAttach {
+            channel,
+            notify,
+            forwarder,
+            ..
+        } in doomed
+        {
+            let _ = forwarder.await;
+            notify_detach.push((channel, notify));
+        }
+
+        let teardown: Result<(), String> = async {
+            self.tmux
+                .kill_session(&tmux_name)
+                .await
+                .map_err(|error| format!("killing tmux session: {error:#}"))?;
+            if let Some(gate) = &self.seams.archive_gate {
+                gate(ArchiveStage::ArtifactRemoval)
+                    .await
+                    .map_err(|error| format!("removing archive artifacts: {error:#}"))?;
+            }
+            // Launch specs can contain credentials and the snapshot is
+            // terminal content. Neither is metadata an archive promises to
+            // retain, and keeping either would contradict the explicit
+            // "terminal contents are gone" contract.
+            remove_launch_artifacts_for_session(&self.state_dir, session_id).await?;
+            remove_fail_closed(
+                &snapshot_path(&self.state_dir, session_id),
+                "alt-screen snapshot",
+            )
+            .await?;
+            self.store
+                .archive_session(session_id)
+                .await
+                .map_err(|error| format!("recording the archived session: {error:#}"))?
+                .ok_or_else(|| {
+                    format!(
+                        "session {session_id} vanished before its archive metadata could be recorded"
+                    )
+                })?;
+            Ok(())
+        }
+        .await;
+
+        if let Err(message) = teardown {
+            for (channel, notify) in &notify_detach {
+                notify_detached(
+                    notify,
+                    *channel,
+                    format!("detached during a failed archive: {message}"),
+                );
+            }
+            drop(attachments);
+            return Err(ArchiveError::FailClosed(message));
+        }
+
+        let outcome = LastOutcome::Exited {
+            exit_code: None,
+            annotation: Some(STOP_ANNOTATION.to_string()),
+        };
+        let mut info = entry.info.clone();
+        info.archived = true;
+        info.status = SessionStatus::Exited { exit_code: None };
+        info.annotation = Some(STOP_ANNOTATION.to_string());
+        info.tabs.clear();
+        let archived = Arc::new(SessionEntry {
+            info,
+            terminal: None,
+            outcome: Arc::new(std::sync::Mutex::new(outcome)),
+            snapshot: entry.snapshot.clone(),
+            canonical_cwd: entry.canonical_cwd.clone(),
+            first_input: Arc::clone(&entry.first_input),
+            capture: Arc::clone(&entry.capture),
+            activity: ActivitySample::unsampled(),
+            generation: entry.generation,
+            // Keep the prior launch's scope identity so a restart can run
+            // its ordinary leftover sweep. Archive has already emptied it,
+            // but losing the identity would weaken that defense after a
+            // partial external cleanup.
+            scope: entry.scope.clone(),
+        });
+        self.sessions
+            .lock()
+            .await
+            .insert(session_id.to_string(), Arc::clone(&archived));
+        for (channel, notify) in &notify_detach {
+            notify_detached(notify, *channel, "session archived".to_string());
+        }
+        drop(attachments);
+        Ok(archived)
+    }
+
     /// Tear this session down completely: cancel its transfers, kill
     /// everything it launched, remove its terminal, its files, and its
     /// row.
@@ -161,7 +402,7 @@ impl Supervisor {
         // into (or publish into) that directory, and the lifecycle
         // claim the caller has held since its first line keeps a
         // new transfer from staging into it (see `stage_upload`).
-        abort_session_uploads(self, session_id, "the session was deleted").await;
+        abort_session_uploads(self, session_id, "the session was deleted", true).await;
 
         // The process-tree sweep runs BEFORE any lock is held: it can
         // take seconds (a grace period plus several /proc walks), and

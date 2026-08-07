@@ -367,6 +367,10 @@ pub struct CachePage {
 /// dimensions belong to which half. The split below follows the
 /// shape of the data rather than the wording:
 ///
+/// - **archive is a default-off inclusion switch.** Withholding archived
+///   rows is the ordinary view; enabling the switch removes that predicate
+///   rather than selecting archived rows alone. The fleet total still counts
+///   both, so the default view can say how much durable history it hides.
 /// - **host, parent, status, profile — EXACT.** Each is an identifier or a
 ///   value chosen from a finite set
 ///   the client already has in hand (the hosts list, the status vocabulary,
@@ -396,6 +400,10 @@ pub struct CachePage {
 /// by any profile.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct SessionFilter {
+    /// Whether archived rows participate in this view. False is the public
+    /// default: archive removes a session from ordinary browsing without
+    /// removing it from the fleet or its durable history.
+    include_archived: bool,
     host: Option<HostId>,
     parent: Option<String>,
     directory: Option<Folded>,
@@ -477,6 +485,16 @@ pub fn parse_status_key(text: &str) -> Option<&'static str> {
 }
 
 impl SessionFilter {
+    /// Admit archived rows as well as active ones.
+    ///
+    /// This is an inclusion switch, not a value to compare against: callers
+    /// cannot ask for archived-only rows, and turning it on removes the
+    /// implicit default predicate rather than adding a new one.
+    pub fn include_archived(mut self, include: bool) -> SessionFilter {
+        self.include_archived = include;
+        self
+    }
+
     /// Narrow to one host.
     pub fn host(mut self, host: HostId) -> SessionFilter {
         self.host = Some(host);
@@ -518,7 +536,7 @@ impl SessionFilter {
     /// unfiltered fast path (an indexed `COUNT(*)`, a `LIMIT`ed scan)
     /// instead of walking rows to find out.
     pub fn is_empty(&self) -> bool {
-        *self == SessionFilter::default()
+        *self == SessionFilter::default().include_archived(true)
     }
 
     /// The one host this filter admits, if it names one.
@@ -555,6 +573,11 @@ impl SessionFilter {
             }
         }
         let mut out = String::new();
+        field(
+            &mut out,
+            'i',
+            Some(if self.include_archived { "1" } else { "0" }),
+        );
         field(
             &mut out,
             'h',
@@ -641,6 +664,9 @@ impl SessionFilter {
     /// question about a row, and there is no row this can fail to answer
     /// for.
     pub fn matches(&self, host: HostId, info: &SessionInfo) -> bool {
+        if info.archived && !self.include_archived {
+            return false;
+        }
         if let Some(wanted) = self.host
             && wanted != host
         {
@@ -7983,9 +8009,10 @@ mod tests {
                 .matches(1, &info)
         );
         assert!(
-            SessionFilter::default().is_empty(),
-            "an unset filter must take the unfiltered fast paths"
+            !SessionFilter::default().is_empty(),
+            "the default archive exclusion requires the predicate scan"
         );
+        assert!(SessionFilter::default().include_archived(true).is_empty());
         assert!(!SessionFilter::default().title("x").is_empty());
         assert!(!SessionFilter::default().parent("parent-7").is_empty());
     }
@@ -8273,6 +8300,13 @@ mod tests {
         assert_ne!(
             SessionFilter::default().fingerprint(),
             SessionFilter::default().title("").fingerprint()
+        );
+        assert_ne!(
+            SessionFilter::default().fingerprint(),
+            SessionFilter::default()
+                .include_archived(true)
+                .fingerprint(),
+            "a cursor minted with archived rows hidden must not replay after the toggle changes"
         );
 
         // The digest inherits both properties — it is what actually travels,

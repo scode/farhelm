@@ -108,6 +108,7 @@ use dioxus::prelude::*;
 use serde::Deserialize;
 
 mod api;
+mod archive;
 mod attachments;
 mod auth;
 mod feed;
@@ -336,6 +337,12 @@ pub struct Session {
     /// tolerance as `status`, defaulting to the safe `FreshOnly`.
     #[serde(default)]
     pub restart_offer: RestartOffer,
+    /// Whether archive has deliberately removed this session's processes
+    /// and terminal while retaining the conversation metadata and committed
+    /// attachments.
+    /// Missing on older helm replies, where no session could be archived.
+    #[serde(default)]
+    pub archived: bool,
     /// The session's terminal tabs, in the supervisor's creation order
     /// (PLAN_M4.md item 6). This is the ONE authoritative statement of
     /// which tabs exist and in what order — a tab-open reply deliberately

@@ -1680,11 +1680,12 @@ impl TmuxDriver {
 
     /// Kill a tmux session by name, tolerating its absence.
     ///
-    /// Three callers, all of them tearing something down: a create
+    /// Four callers, all of them tearing something down: a create
     /// unwinding a window whose SQLite insert failed (`create_session`'s
-    /// failure-ordering contract), `DeleteSession`'s teardown, and a
-    /// RESTART clearing the husk of a tmux session whose pane it can no
-    /// longer find before building a fresh terminal under the same name. The already-gone case this tolerates is NOT the agent
+    /// failure-ordering contract), `DeleteSession`, archive, and a RESTART
+    /// clearing the husk of a tmux session whose pane it can no longer find
+    /// before building a fresh terminal under the same name. The
+    /// already-gone case this tolerates is NOT the agent
     /// exiting on its own — `remain-on-exit on` keeps a pane (and so its
     /// session) around after the process inside it dies, so that never
     /// races this call — but something outside the supervisor's own

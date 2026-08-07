@@ -56,6 +56,18 @@ pub(crate) struct CaptureFixtures {
     bin: tempfile::TempDir,
 }
 
+impl CaptureFixtures {
+    /// Private record root observed by the supervisor and fake agents.
+    pub(crate) fn home(&self) -> &std::path::Path {
+        self.home.path()
+    }
+
+    /// Directory containing the kind-named fake-agent entry points.
+    pub(crate) fn bin(&self) -> &std::path::Path {
+        self.bin.path()
+    }
+}
+
 /// A harness whose supervisor observes a private agent home, with the
 /// short capture window above.
 pub(crate) async fn capture_harness() -> (Harness, CaptureFixtures) {
@@ -1040,6 +1052,7 @@ async fn capture_considers_sessions_beyond_the_list_reply_cap() {
         store
             .insert_session(
                 StoredSession {
+                    archived: false,
                     id: format!("extra-{i}"),
                     parent: None,
                     title: format!("extra-{i}"),

@@ -455,7 +455,7 @@ test.describe("the M6.5 test debts", () => {
 
     const banner = page.locator(".truncation-banner");
     await expect(banner).toBeVisible({ timeout: 20_000 });
-    await expect(banner).toContainText("showing 2 of 1 sessions");
+    await expect(banner).toContainText("showing 2 of 1 matching sessions (1 in all)");
     await expect(banner).toContainText("the list changed while it was being read");
     // Two runs, not one sentence: the count and the note are separate text
     // nodes inside the banner.

@@ -109,7 +109,7 @@ const BUSY_TIMEOUT: Duration = Duration::from_secs(5);
 /// step in `apply_schema`: version 2 (PLAN_M3.md item 2 — the durable
 /// last-known outcome and the boot id) is the first real migration this
 /// database has ever had, and the template every later one follows.
-const SCHEMA_VERSION: i64 = 11;
+const SCHEMA_VERSION: i64 = 12;
 
 /// Random payload size behind one URL-safe session bearer.
 const SESSION_TOKEN_BYTES: usize = 32;
@@ -851,6 +851,10 @@ pub struct OfferBasis {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PriorRun {
     pub outcome: LastOutcome,
+    /// The session-level archive flag a successful restart clears.
+    /// Restored when a restart fails before touching anything external, so
+    /// a failed attempt cannot make an archived session appear active.
+    pub archived: bool,
     /// The pane the previous run confirmed, or empty for a launch that
     /// never confirmed one. Restored alongside the outcome so an aborted
     /// restart leaves the row describing the same terminal it did before.
@@ -875,7 +879,7 @@ pub struct PriorRun {
 /// Named only because the tuple is wide enough that clippy (rightly) asks
 /// for it; it has exactly one producer and one consumer, both inside that
 /// function's transaction.
-type RelaunchBasisColumns = (OutcomeColumns, String, i64, Option<String>, i64, i64);
+type RelaunchBasisColumns = (OutcomeColumns, String, i64, Option<String>, i64, i64, i64);
 
 /// The new launch generation a restart claimed, and what it replaced.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -1135,6 +1139,13 @@ pub struct StoredSession {
     pub id: String,
     /// Direct parent metadata, or `None` for an ordinary root session.
     pub parent: Option<String>,
+    /// Whether the session is hidden from the default list and has no
+    /// terminal until restart opens a new launch generation.
+    ///
+    /// This is metadata rather than an outcome state. The outcome records
+    /// the deliberate teardown as an annotated exit; this flag explains
+    /// why the row remains while its terminal does not.
+    pub archived: bool,
     pub title: String,
     /// Seconds since the Unix epoch when this row was inserted (`now_unix`,
     /// called once by the caller so the exact instant matches what
@@ -1430,6 +1441,8 @@ pub struct SessionStore {
 /// - 11: PR #118's spawn review — a supervisor-monotonic creation sequence.
 ///   The counter lives in `supervisor_meta`, so deleting the newest session
 ///   cannot make its value reusable the way a bare SQLite rowid could.
+/// - 12: PLAN_M7.md item 5 — `sessions.archived`, durable metadata kept
+///   separate from the recorded exit outcome it accompanies.
 ///
 /// `may_migrate` is the caller's assertion that it holds this state
 /// directory's exclusivity (see `service::StateDirOwnership`). Upgrading a
@@ -1484,7 +1497,8 @@ fn apply_schema(conn: &Connection, may_migrate: bool) -> anyhow::Result<()> {
                  source_profile_name   TEXT,
                  parent                TEXT,
                  session_token         TEXT,
-                 creation_seq          INTEGER
+                 creation_seq          INTEGER,
+                 archived              INTEGER NOT NULL DEFAULT 0
              ) STRICT;
              CREATE TABLE supervisor_meta (
                  id            INTEGER PRIMARY KEY CHECK (id = 0),
@@ -1507,7 +1521,7 @@ fn apply_schema(conn: &Connection, may_migrate: bool) -> anyhow::Result<()> {
                  ON create_reservations (session_id) WHERE state = 'pending';
              {PROFILES_SCHEMA}
              {STARTER_PROFILES}
-             PRAGMA user_version = 11;
+             PRAGMA user_version = 12;
              COMMIT;"
         ))
         .context("creating schema")?;
@@ -1830,6 +1844,16 @@ fn apply_schema(conn: &Connection, may_migrate: bool) -> anyhow::Result<()> {
             .context("committing schema migration from version 10 to 11")?;
         version = 11;
     }
+    if version == 11 {
+        conn.execute_batch(
+            "BEGIN;
+             ALTER TABLE sessions ADD COLUMN archived INTEGER NOT NULL DEFAULT 0;
+             PRAGMA user_version = 12;
+             COMMIT;",
+        )
+        .context("migrating schema from version 11 to 12")?;
+        version = 12;
+    }
     if version == SCHEMA_VERSION {
         return Ok(());
     }
@@ -1965,9 +1989,9 @@ fn insert_session_row(
           outcome_state, exit_code, annotation, error_detail, \
           agent_kind, resume_template, canonical_cwd, captured_conversation, \
           captured_record, capture_ambiguous, first_input_at, generation, launch_scoped, \
-          source_profile_id, source_profile_name, parent, session_token) \
+          source_profile_id, source_profile_name, parent, session_token, archived) \
          VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, \
-                 ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25)",
+                 ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26)",
         rusqlite::params![
             row.id,
             row.title,
@@ -1997,6 +2021,7 @@ fn insert_session_row(
             row.source_profile.as_ref().map(|profile| &profile.name),
             row.parent,
             session_token,
+            i64::from(row.archived),
         ],
     )
     .context("inserting session row")?;
@@ -2024,7 +2049,8 @@ const SESSION_COLUMNS: &str = "id, title, cwd, invocation, tmux_name, pane, \
                                agent_kind, resume_template, canonical_cwd, \
                                captured_conversation, captured_record, capture_ambiguous, \
                                first_input_at, generation, launch_scoped, created_at, \
-                               source_profile_id, source_profile_name, parent, creation_seq";
+                               source_profile_id, source_profile_name, parent, creation_seq, \
+                               archived";
 
 /// The raw columns of one session row, before the fallible decoding that
 /// cannot happen inside a rusqlite row mapper (whose error type is
@@ -2073,6 +2099,7 @@ fn read_session_columns(r: &rusqlite::Row<'_>) -> rusqlite::Result<SessionColumn
             created_at: r.get(19)?,
             creation_seq: 0,
             source_profile: None,
+            archived: r.get::<_, i64>(24)? != 0,
         },
         (r.get(6)?, r.get(7)?, r.get(8)?, r.get(9)?),
         r.get(10)?,
@@ -2833,6 +2860,10 @@ impl SessionStore {
     ///   selection belongs to a launch and not to a session (PLAN_M3.md item
     ///   10): a host that lost its user manager between two launches must
     ///   not leave the new run claiming a scope nothing created.
+    /// - `archived` is cleared because restart is the only unarchive path.
+    ///   The prior value rides in [`PriorRun`] so a definitive launch
+    ///   failure can restore the archived row rather than exposing it as an
+    ///   active session with no terminal.
     ///
     /// The immutable create-time snapshot (kind, template, invocation, cwd)
     /// is untouched in every case.
@@ -2853,7 +2884,8 @@ impl SessionStore {
             let current: Option<RelaunchBasisColumns> = tx
                 .query_row(
                     "SELECT outcome_state, exit_code, annotation, error_detail, pane, \
-                     generation, captured_conversation, capture_ambiguous, launch_scoped \
+                     generation, captured_conversation, capture_ambiguous, launch_scoped, \
+                     archived \
                      FROM sessions WHERE id = ?1",
                     rusqlite::params![id],
                     |r| {
@@ -2864,6 +2896,7 @@ impl SessionStore {
                             r.get(6)?,
                             r.get(7)?,
                             r.get(8)?,
+                            r.get(9)?,
                         ))
                     },
                 )
@@ -2876,6 +2909,7 @@ impl SessionStore {
                 captured_conversation,
                 capture_ambiguous,
                 scoped,
+                archived,
             )) = current
             else {
                 return Ok(RelaunchDecision::Gone);
@@ -2888,6 +2922,7 @@ impl SessionStore {
             let prior = PriorRun {
                 outcome: LastOutcome::from_columns(&state, exit_code, annotation, error_detail)
                     .with_context(|| format!("session {id}"))?,
+                archived: archived != 0,
                 pane,
                 scoped: scoped != 0,
             };
@@ -2900,6 +2935,7 @@ impl SessionStore {
             tx.execute(
                 "UPDATE sessions SET outcome_state = ?2, exit_code = ?3, annotation = ?4, \
                  error_detail = ?5, pane = '', generation = ?6, launch_scoped = ?7, \
+                 archived = 0, \
                  first_input_at = CASE WHEN ?8 THEN NULL ELSE first_input_at END, \
                  captured_conversation = \
                      CASE WHEN ?8 THEN NULL ELSE captured_conversation END, \
@@ -2972,12 +3008,13 @@ impl SessionStore {
         );
         let pane = prior.pane.clone();
         let scoped = i64::from(prior.scoped);
+        let archived = i64::from(prior.archived);
         tokio::task::spawn_blocking(move || -> anyhow::Result<bool> {
             let conn = conn.lock().expect("session db mutex poisoned");
             let restored = conn
                 .execute(
                     "UPDATE sessions SET outcome_state = ?2, exit_code = ?3, annotation = ?4, \
-                     error_detail = ?5, pane = ?6, launch_scoped = ?8 \
+                     error_detail = ?5, pane = ?6, launch_scoped = ?8, archived = ?9 \
                      WHERE id = ?1 AND generation = ?7",
                     rusqlite::params![
                         id,
@@ -2987,7 +3024,8 @@ impl SessionStore {
                         error_detail,
                         pane,
                         generation,
-                        scoped
+                        scoped,
+                        archived,
                     ],
                 )
                 .context("restoring the outcome a failed restart replaced")?;
@@ -3310,23 +3348,44 @@ impl SessionStore {
                 .context("beginning outcome transition transaction")?;
             let mut committed = HashMap::new();
             for (id, generation, transition) in transitions {
-                let current: Option<(OutcomeColumns, i64)> = tx
+                let current: Option<(OutcomeColumns, i64, bool)> = tx
                     .query_row(
-                        "SELECT outcome_state, exit_code, annotation, error_detail, generation \
+                        "SELECT outcome_state, exit_code, annotation, error_detail, generation, \
+                             archived \
                              FROM sessions WHERE id = ?1",
                         rusqlite::params![id],
-                        |r| Ok(((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?), r.get(4)?)),
+                        |r| {
+                            Ok((
+                                (r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?),
+                                r.get(4)?,
+                                r.get::<_, i64>(5)? != 0,
+                            ))
+                        },
                     )
                     .optional()
                     .context("reading the current outcome")?;
-                let Some(((state, exit_code, annotation, error_detail), current_generation)) =
-                    current
+                let Some((
+                    (state, exit_code, annotation, error_detail),
+                    current_generation,
+                    archived,
+                )) = current
                 else {
                     continue;
                 };
                 let current =
                     LastOutcome::from_columns(&state, exit_code, annotation, error_detail)
                         .with_context(|| format!("session {id}"))?;
+                // Archive is an outcome fence of its own. The observation
+                // may have cloned this launch before archive reached
+                // SQLite; once the flag lands, no delayed pane or exit
+                // observation may restore terminal state to the row.
+                // Checked in the same transaction as the outcome write, so
+                // either commit order converges on archive's deliberate
+                // terminal-less exit.
+                if archived {
+                    committed.insert(id, current);
+                    continue;
+                }
                 // The generation fence (see `StoredSession::generation`).
                 // Reported as the CURRENT outcome rather than as an error
                 // or an absence: the caller's observation was simply about
@@ -3420,6 +3479,49 @@ impl SessionStore {
         })
         .await
         .context("session rename task panicked")?
+    }
+
+    /// Mark a session archived after its process tree and terminals are
+    /// gone, preserving every other piece of session metadata.
+    ///
+    /// The flag and the deliberate annotated exit land in one transaction,
+    /// so no reader can observe an archived row that still claims a live or
+    /// interrupted outcome. `Ok(None)` means the row vanished. `Some(false)`
+    /// is the idempotent already-archived case; `Some(true)` means this call
+    /// performed the transition.
+    pub async fn archive_session(&self, id: &str) -> anyhow::Result<Option<bool>> {
+        let conn = Arc::clone(&self.conn);
+        let id = id.to_string();
+        tokio::task::spawn_blocking(move || -> anyhow::Result<Option<bool>> {
+            let mut conn = conn.lock().expect("session db mutex poisoned");
+            let tx = conn
+                .transaction()
+                .context("beginning the session archive transaction")?;
+            let archived = tx
+                .query_row(
+                    "SELECT archived FROM sessions WHERE id = ?1",
+                    rusqlite::params![id],
+                    |row| row.get::<_, i64>(0),
+                )
+                .optional()
+                .context("reading the session archive flag")?;
+            let Some(archived) = archived else {
+                return Ok(None);
+            };
+            if archived != 0 {
+                return Ok(Some(false));
+            }
+            tx.execute(
+                "UPDATE sessions SET archived = 1, pane = '', outcome_state = 'exited', \
+                 exit_code = NULL, annotation = ?2, error_detail = NULL WHERE id = ?1",
+                rusqlite::params![id, farhelm_proto::STOP_ANNOTATION],
+            )
+            .context("archiving the session row")?;
+            tx.commit().context("committing the session archive")?;
+            Ok(Some(true))
+        })
+        .await
+        .context("session archive task panicked")?
     }
 
     /// Record when this session first had input forwarded to it
@@ -4471,6 +4573,7 @@ mod tests {
                 StoredSession {
                     id: id.to_string(),
                     parent: None,
+                    archived: false,
                     title: id.to_string(),
                     created_at: now_unix(),
                     creation_seq: 0,
@@ -5365,6 +5468,7 @@ mod tests {
                 StoredSession {
                     id: "s1".to_string(),
                     parent: None,
+                    archived: false,
                     title: "demo".to_string(),
                     created_at: now_unix(),
                     creation_seq: 0,
@@ -5414,6 +5518,7 @@ mod tests {
                     id: "s1".to_string(),
                     title: "demo".to_string(),
                     parent: None,
+                    archived: false,
                     created_at: now_unix(),
                     creation_seq: 0,
                     cwd: "/tmp/work".to_string(),
@@ -6015,6 +6120,7 @@ mod tests {
                 StoredSession {
                     id: "s1".to_string(),
                     parent: Some("parent-7".to_string()),
+                    archived: false,
                     title: "demo".to_string(),
                     created_at: now_unix(),
                     creation_seq: 0,
@@ -6342,6 +6448,7 @@ mod tests {
                 StoredSession {
                     id: "s1".to_string(),
                     parent: None,
+                    archived: false,
                     title: "s1".to_string(),
                     created_at: SENTINEL_CREATED_AT,
                     creation_seq: 0,
@@ -6401,6 +6508,7 @@ mod tests {
             capture_ambiguous: false,
             id: id.to_string(),
             parent: None,
+            archived: false,
             title: id.to_string(),
             created_at: now_unix(),
             creation_seq: 0,
@@ -7255,6 +7363,7 @@ mod tests {
                 StoredSession {
                     id: "s1".to_string(),
                     parent: None,
+                    archived: false,
                     title: "t".to_string(),
                     created_at: now_unix(),
                     creation_seq: 0,
@@ -7550,6 +7659,129 @@ mod tests {
             RelaunchDecision::Claimed(claim) => claim,
             other => panic!("expected a claimed generation, got {other:?}"),
         }
+    }
+
+    /// Archive keeps the row, records the deliberate stopped outcome, and
+    /// is idempotent. Restart clears the flag as part of opening the next
+    /// generation, while an aborted restart restores it with the prior run.
+    #[tokio::test]
+    async fn archive_is_durable_idempotent_and_restored_by_an_aborted_restart() {
+        let (_dir, store) = fresh_store().await;
+        insert_running(&store, "s1").await;
+
+        assert_eq!(store.archive_session("s1").await.unwrap(), Some(true));
+        assert_eq!(store.archive_session("s1").await.unwrap(), Some(false));
+        let archived = store.session("s1").await.unwrap().unwrap();
+        assert!(archived.archived);
+        assert_eq!(archived.title, "s1", "session metadata survives archive");
+        assert_eq!(archived.pane, "", "archive removes the terminal handle");
+        assert_eq!(
+            archived.outcome,
+            LastOutcome::Exited {
+                exit_code: None,
+                annotation: Some(farhelm_proto::STOP_ANNOTATION.to_string()),
+            }
+        );
+
+        let claim = claimed(
+            store
+                .begin_relaunch("s1", uncaptured_basis(), true, false)
+                .await
+                .unwrap(),
+        );
+        assert!(claim.prior.archived);
+        assert!(!store.session("s1").await.unwrap().unwrap().archived);
+
+        assert!(
+            store
+                .abort_relaunch("s1", claim.generation, &claim.prior)
+                .await
+                .unwrap()
+        );
+        let restored = store.session("s1").await.unwrap().unwrap();
+        assert!(restored.archived);
+        assert_eq!(restored.outcome, archived.outcome);
+        assert_eq!(
+            crate::service::recovered_archive_flag(true, claim.prior.archived),
+            restored.archived,
+            "definitive recovery must agree in memory and SQLite"
+        );
+
+        let ambiguous = claimed(
+            store
+                .begin_relaunch("s1", uncaptured_basis(), true, false)
+                .await
+                .unwrap(),
+        );
+        let durable = store.session("s1").await.unwrap().unwrap();
+        assert!(!durable.archived);
+        assert_eq!(
+            crate::service::recovered_archive_flag(false, ambiguous.prior.archived),
+            durable.archived,
+            "ambiguous recovery must keep both representations visible"
+        );
+    }
+
+    /// Once archive commits, a delayed observation from the retired pane
+    /// cannot repopulate either its terminal handle or its prior outcome.
+    #[tokio::test]
+    async fn archive_fences_a_stale_outcome_observation() {
+        let (_dir, store) = fresh_store().await;
+        insert_running(&store, "s1").await;
+        store.archive_session("s1").await.unwrap();
+
+        let committed = store
+            .transition(
+                "s1",
+                0,
+                Transition::RediscoveredExit {
+                    pane: "%late".to_string(),
+                    exit_code: Some(17),
+                },
+            )
+            .await
+            .unwrap()
+            .unwrap();
+        let row = store.session("s1").await.unwrap().unwrap();
+        assert!(row.archived);
+        assert_eq!(row.pane, "");
+        assert_eq!(committed, row.outcome);
+        assert_eq!(
+            row.outcome,
+            LastOutcome::Exited {
+                exit_code: None,
+                annotation: Some(farhelm_proto::STOP_ANNOTATION.to_string()),
+            }
+        );
+    }
+
+    /// The v11-to-v12 migration preserves every preexisting row and gives
+    /// each one the only truthful historical value: it was not archived.
+    #[tokio::test]
+    async fn schema_11_rows_migrate_as_unarchived() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let db_path = dir.path().join("supervisor.db");
+        let store = SessionStore::open(&db_path, true)
+            .await
+            .expect("create current db");
+        insert_running(&store, "s1").await;
+        drop(store);
+
+        let conn = Connection::open(&db_path).expect("open fixture");
+        conn.execute_batch(
+            "ALTER TABLE sessions DROP COLUMN archived;
+             PRAGMA user_version = 11;",
+        )
+        .expect("downgrade the fixture to the pre-archive schema");
+        drop(conn);
+
+        let migrated = SessionStore::open(&db_path, true)
+            .await
+            .expect("migrate v11");
+        let row = migrated.session("s1").await.unwrap().unwrap();
+        assert!(!row.archived);
+        assert_eq!(row.title, "s1");
+        assert_eq!(row.pane, "%0");
     }
 
     /// PLAN_M3.md items 4 and 9: a restart's new generation reopens a
@@ -8318,6 +8550,7 @@ mod tests {
                 StoredSession {
                     id: "s1".to_string(),
                     parent: None,
+                    archived: false,
                     title: "s1".to_string(),
                     created_at: now_unix(),
                     creation_seq: 0,
@@ -8525,6 +8758,7 @@ mod tests {
         let stranded = |title: &str| StoredSession {
             id: "s1".to_string(),
             parent: None,
+            archived: false,
             title: title.to_string(),
             created_at: 1_700_000_000,
             creation_seq: 0,

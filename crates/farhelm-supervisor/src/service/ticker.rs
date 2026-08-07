@@ -2024,6 +2024,7 @@ mod tests {
                 StoredSession {
                     id: id.to_string(),
                     parent: None,
+                    archived: false,
                     title: id.to_string(),
                     created_at: now_unix(),
                     creation_seq: 0,

@@ -6,7 +6,7 @@ use crate::harness::*;
 use crate::boot_id_durable_outcome::{listed, wait_for_dead_pane};
 use crate::conversation_identity_capture::{
     capture_harness, marker_value, provoke_record, record_session, settle_past_horizon,
-    snapshot_of, test_capture_bounds,
+    snapshot_of, test_capture_bounds, wait_for_capture,
 };
 
 // ---------------------------------------------------------------------
@@ -510,6 +510,86 @@ fn resumed_record_file(
         }
         other => panic!("resumed_record_file: unknown kind {other}"),
     }
+}
+
+/// Archive preserves both a captured conversation identity and committed
+/// attachments, and resume uses those two retained facts together.
+#[tokio::test]
+async fn an_archived_capture_backed_session_resumes_exactly_and_reads_its_attachment() {
+    let (h, fixtures) = capture_harness().await;
+    let work = tempfile::tempdir().expect("workdir");
+    let wrapper = work.path().join("resume-wrapper.sh");
+    let invocation = format!(
+        "{} internal fake-agent --script claude-record --record-home {}",
+        shell_words::quote(&fixtures.bin().join("claude").to_string_lossy()),
+        shell_words::quote(&fixtures.home().to_string_lossy())
+    );
+    let session = h
+        .client
+        .create_session_with_extras(
+            &work.path().to_string_lossy(),
+            &invocation,
+            None,
+            80,
+            24,
+            farhelm_helm::CreateExtras {
+                resume_template: Some(vec![
+                    wrapper.to_string_lossy().into_owned(),
+                    farhelm_supervisor::agent_kind::CONVERSATION_PLACEHOLDER.to_string(),
+                ]),
+                ..farhelm_helm::CreateExtras::default()
+            },
+        )
+        .await
+        .expect("create capture-backed session");
+    let (_channel, _stream, _seen, conversation) = provoke_record(&h, &session).await;
+    assert_eq!(wait_for_capture(&h, &session.id, 30).await, conversation);
+
+    farhelm_supervisor::attachments::ensure_session_dirs(h.state.path(), &session.id)
+        .await
+        .expect("create attachment directories");
+    let attachment =
+        farhelm_supervisor::attachments::session_dir(h.state.path(), &session.id).join("kept.txt");
+    std::fs::write(&attachment, b"ARCHIVE_RESUME_ATTACHMENT\n").expect("write attachment");
+    std::fs::write(
+        &wrapper,
+        format!(
+            "#!/bin/sh\ncat {}\n{}=\"$1\" exec {} internal fake-agent --script claude-record --record-home {}\n",
+            shell_words::quote(&attachment.to_string_lossy()),
+            FAKE_AGENT_RESUME_ENV,
+            shell_words::quote(&fixtures.bin().join("claude").to_string_lossy()),
+            shell_words::quote(&fixtures.home().to_string_lossy()),
+        ),
+    )
+    .expect("write resume wrapper");
+    use std::os::unix::fs::PermissionsExt;
+    std::fs::set_permissions(&wrapper, std::fs::Permissions::from_mode(0o700))
+        .expect("make resume wrapper executable");
+
+    let archived = h
+        .client
+        .archive_session(&session.id)
+        .await
+        .expect("archive");
+    assert_eq!(archived.restart_offer, farhelm_proto::RestartOffer::Resume);
+    h.client
+        .restart_session(&session.id, farhelm_proto::RestartMode::Resume, false)
+        .await
+        .expect("resume archived session");
+    let (_channel, mut stream) = h.client.attach(&session.id, 80, 24).await.expect("attach");
+    let mut seen = Vec::new();
+    wait_for(&mut stream, &mut seen, "ARCHIVE_RESUME_ATTACHMENT", 30).await;
+    wait_for(
+        &mut stream,
+        &mut seen,
+        &format!("RECORD-RESUMED:{conversation}"),
+        30,
+    )
+    .await;
+    assert!(
+        attachment.exists(),
+        "resume must not consume the retained attachment"
+    );
 }
 
 /// M3 acceptance 9 and 8 together: a session INTERRUPTED by a (simulated)

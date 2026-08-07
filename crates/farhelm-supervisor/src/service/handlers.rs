@@ -20,8 +20,8 @@ use super::connection::{
     spawn_admitted,
 };
 use super::core::{
-    CreateInputs, CreateMode, SessionEntry, Supervisor, create_fingerprint, ensure_title_printable,
-    error_kind, truncate_for_error,
+    CreateInputs, CreateMode, RequestError, SessionEntry, Supervisor, create_fingerprint,
+    ensure_title_printable, error_kind, truncate_for_error,
 };
 use super::launch_artifacts::{
     cleanup_launch_artifacts, read_launch_sentinel, sentinel_could_still_apply,
@@ -33,7 +33,7 @@ use super::listing::{
 use super::snapshots::{capture_alt_screen_before_stop, publish_alt_screen_snapshot};
 use super::status::{dead_pane_exit_code, entry_info, observe_entry};
 use super::sweep::{StopFailure, SweepTarget, reap_process_tree, stop_live_agent};
-use super::teardown::TeardownError;
+use super::teardown::{ArchiveError, TeardownError};
 use super::terminals::{
     ActiveAttach, AttachmentKey, DETACH_REASON_REPLACED, DETACH_REASON_TAKEOVER, InputRoute,
     MAX_LEASE_BYTES, Terminal, TerminalId, displaced_by_attach, resolve_terminal,
@@ -977,19 +977,10 @@ async fn handle_stop_session(
     .await;
 }
 
-/// Spawned for the same reason as `StopSession` — the same
-/// process-tree sweep, plus tmux teardown and SQLite writes on
-/// top — and, being the slowest of the six handlers spawned
-/// here, the one spawning matters most for. Safe for the
-/// same reason: everything this handler touches (`sessions`,
-/// `attachments`, `tmux`, `store`) is already designed to
-/// tolerate concurrent requests interleaving (see the
-/// `Supervisor` struct's lock-discipline docs, and
-/// `Supervisor::teardown_session`'s own comments on why the
-/// sweep runs before any lock is held at all). Tracked and
-/// admitted exactly like
-/// `ListSessions` above — see
-/// `HANDLER_ADMISSION_PERMITS`/`HANDLER_SHUTDOWN_TIMEOUT`.
+/// Delete's mutation belongs to the supervisor, not to the connection that
+/// requested it. The connection-owned task waits only to deliver the reply;
+/// forced connection shutdown may abort that waiter, but cannot interrupt a
+/// process sweep after it has begun or release its admission slot early.
 async fn handle_delete_session(
     sup: &Arc<Supervisor>,
     tx: &mpsc::Sender<Frame>,
@@ -997,73 +988,202 @@ async fn handle_delete_session(
     req_id: u64,
     session_id: String,
 ) {
-    let sup2 = Arc::clone(sup);
-    let tx = tx.clone();
-    spawn_admitted(&sup.admission, tasks, async move {
-        let sup = sup2;
-        // Same claim the stop and restart paths take, and the
-        // reason delete-vs-restart resolves to one winner: without
-        // it, a delete can tear down the tmux session a restart is
-        // mid-way through respawning into, leaving the loser to
-        // report a half-finished teardown rather than an honest
-        // "it was deleted". See `Supervisor::lifecycle_locks`.
-        let _lifecycle = sup.lifecycle_locks.claim(&session_id).await;
-        let entry = sup.sessions.lock().await.get(&session_id).cloned();
-        let Some(entry) = entry else {
-            send_reply(
-                &tx,
-                &ControlMsg::Error {
-                    req_id,
-                    message: format!(
-                        "no such session: {}",
-                        truncate_for_error(&session_id)
+    let permit = Arc::clone(&sup.admission)
+        .acquire_owned()
+        .await
+        .expect("admission semaphore is never closed");
+    let mutation_sup = Arc::clone(sup);
+    let mutation_id = session_id.clone();
+    // Spawned before the connection-owned waiter exists: once this returns
+    // a handle, disconnect shutdown can abort reply delivery but not the
+    // teardown or release its admission slot early.
+    let mutation = tokio::spawn(async move {
+        let outcome = async {
+            let _lifecycle = mutation_sup.lifecycle_locks.claim(&mutation_id).await;
+            let entry = mutation_sup
+                .sessions
+                .lock()
+                .await
+                .get(&mutation_id)
+                .cloned()
+                .ok_or_else(|| {
+                    RequestError::new(
+                        ErrorKind::NotFound,
+                        format!("no such session: {}", truncate_for_error(&mutation_id)),
+                    )
+                })?;
+            mutation_sup
+                .teardown_session(&entry, &mutation_id)
+                .await
+                .map_err(|error| {
+                let message = match error {
+                    TeardownError::PaneProbe(error) => {
+                        format!("querying pane process: {error:#}")
+                    }
+                    TeardownError::TabRediscovery(error) => format!(
+                        "could not determine this session's terminal tabs, so nothing was \
+                         deleted: {error:#}"
                     ),
-                    kind: ErrorKind::NotFound,
-                },
-            )
-            .await;
-            return;
-        };
-
-        // The teardown owns everything the delete DOES, including the
-        // detach notices its aborted forwarders leave owing (they have to
-        // be enqueued under the attachment lock — see that module's own
-        // docs). All that is left here is the reply.
-        //
-        // Errors are mapped back one for one onto what each failure site
-        // used to send inline, so the wire text is unchanged by the
-        // teardown living elsewhere. Every one of them is fail-closed —
-        // the row is retained for a retry — which is why they are all
-        // `Internal` rather than anything a caller could act on
-        // differently.
-        if let Err(e) = sup.teardown_session(&entry, &session_id).await {
-            let message = match e {
-                TeardownError::PaneProbe(e) => format!("querying pane process: {e:#}"),
-                TeardownError::TabRediscovery(e) => format!(
-                    "could not determine this session's terminal tabs, so                                          nothing was deleted: {e:#}"
-                ),
-                TeardownError::TabScopeEnumeration(e) => format!(
-                    "this host has a systemd user manager but its terminal-\
-                     tab scopes could not be enumerated, so nothing was \
-                     deleted: {e:#}"
-                ),
-                TeardownError::Sweep(e) => format!("killing process tree: {e:#}"),
-                TeardownError::FailClosed(message) => message,
-            };
-            send_reply(
-                &tx,
-                &ControlMsg::Error {
-                    req_id,
-                    message,
-                    kind: ErrorKind::Internal,
-                },
-            )
-            .await;
-            return;
+                    TeardownError::TabScopeEnumeration(error) => format!(
+                        "this host has a systemd user manager but its terminal-tab scopes could \
+                         not be enumerated, so nothing was deleted: {error:#}"
+                    ),
+                    TeardownError::Sweep(error) => format!("killing process tree: {error:#}"),
+                    TeardownError::FailClosed(message) => message,
+                };
+                RequestError::new(ErrorKind::Internal, message)
+                })
         }
-        send_reply(&tx, &ControlMsg::SessionDeleted { req_id }).await;
-    })
-    .await;
+        .await;
+        (outcome, permit)
+    });
+    let tx = tx.clone();
+    tasks.spawn(async move {
+        match mutation.await {
+            Ok((Ok(()), _permit)) => send_reply(&tx, &ControlMsg::SessionDeleted { req_id }).await,
+            Ok((Err(error), _permit)) => {
+                send_reply(
+                    &tx,
+                    &ControlMsg::Error {
+                        req_id,
+                        message: error.message,
+                        kind: error.kind,
+                    },
+                )
+                .await;
+            }
+            Err(join) => {
+                send_reply(
+                    &tx,
+                    &ControlMsg::Error {
+                        req_id,
+                        message: format!("the session delete task failed: {join}"),
+                        kind: ErrorKind::Internal,
+                    },
+                )
+                .await;
+            }
+        }
+    });
+}
+
+/// Archive is a whole-session teardown that keeps the row and attachment
+/// directory, then returns the freshly derived row to the caller.
+///
+/// Like delete, the mutation is supervisor-owned while the connection owns
+/// only reply delivery. The lifecycle claim makes archive, restart, stop,
+/// rename, and delete resolve to one winner for this session. An
+/// already-archived row skips teardown entirely and returns the same current
+/// `SessionInfo`, which makes a retry after an ambiguous transport failure
+/// idempotent.
+async fn handle_archive_session(
+    sup: &Arc<Supervisor>,
+    tx: &mpsc::Sender<Frame>,
+    tasks: &mut tokio::task::JoinSet<()>,
+    req_id: u64,
+    session_id: String,
+) {
+    let permit = Arc::clone(&sup.admission)
+        .acquire_owned()
+        .await
+        .expect("admission semaphore is never closed");
+    let mutation_sup = Arc::clone(sup);
+    let mutation_id = session_id.clone();
+    let mutation = tokio::spawn(async move {
+        let outcome = async {
+            let _lifecycle = mutation_sup.lifecycle_locks.claim(&mutation_id).await;
+            let entry = mutation_sup
+                .sessions
+                .lock()
+                .await
+                .get(&mutation_id)
+                .cloned()
+                .ok_or_else(|| {
+                    RequestError::new(
+                        ErrorKind::NotFound,
+                        format!("no such session: {}", truncate_for_error(&mutation_id)),
+                    )
+                })?;
+            if entry.info.archived {
+                return Ok(entry);
+            }
+            mutation_sup
+                .teardown_for_archive(&entry, &mutation_id)
+                .await
+                .map_err(|error| {
+                let message = match error {
+                    ArchiveError::PaneProbe(error) => {
+                        format!("querying pane process before archive: {error:#}")
+                    }
+                    ArchiveError::TabRediscovery(error) => format!(
+                        "could not determine this session's terminal tabs, so nothing was \
+                         archived: {error:#}"
+                    ),
+                    ArchiveError::TabScopeEnumeration(error) => format!(
+                        "this host has a systemd user manager but its terminal-tab scopes could \
+                         not be enumerated, so nothing was archived: {error:#}"
+                    ),
+                    ArchiveError::Sweep(error) => {
+                        format!("killing process tree for archive: {error:#}")
+                    }
+                    ArchiveError::FailClosed(message) => message,
+                };
+                RequestError::new(ErrorKind::Internal, message)
+                })
+        }
+        .await;
+        (outcome, permit)
+    });
+    let reply_sup = Arc::clone(sup);
+    let tx = tx.clone();
+    tasks.spawn(async move {
+        let entry = match mutation.await {
+            Ok((Ok(entry), _permit)) => entry,
+            Ok((Err(error), _permit)) => {
+                send_reply(
+                    &tx,
+                    &ControlMsg::Error {
+                        req_id,
+                        message: error.message,
+                        kind: error.kind,
+                    },
+                )
+                .await;
+                return;
+            }
+            Err(join) => {
+                send_reply(
+                    &tx,
+                    &ControlMsg::Error {
+                        req_id,
+                        message: format!("the session archive task failed: {join}"),
+                        kind: ErrorKind::Internal,
+                    },
+                )
+                .await;
+                return;
+            }
+        };
+        match session_info_now(&reply_sup, &entry).await {
+            Ok(session) => {
+                send_reply(&tx, &ControlMsg::SessionArchived { req_id, session }).await;
+            }
+            Err(error) => {
+                send_reply(
+                    &tx,
+                    &ControlMsg::Error {
+                        req_id,
+                        message: format!(
+                            "the session was archived, but its fresh metadata could not be read: \
+                             {error:#}"
+                        ),
+                        kind: ErrorKind::Internal,
+                    },
+                )
+                .await;
+            }
+        }
+    });
 }
 
 /// Every request-shape check the attach can make lives here,
@@ -1148,6 +1268,21 @@ async fn handle_attach(
         .await;
         return;
     };
+    if entry.info.archived {
+        send_reply(
+            tx,
+            &ControlMsg::Error {
+                req_id,
+                message: format!(
+                    "session {} is archived and has no terminal; restart it before attaching",
+                    truncate_for_error(&session_id)
+                ),
+                kind: ErrorKind::InvalidRequest,
+            },
+        )
+        .await;
+        return;
+    }
     // Which terminal this attach is FOR, resolved once here and
     // used for everything below: the tmux handles to drive, and
     // the second half of the attachment key.
@@ -1248,7 +1383,10 @@ async fn handle_attach(
     // treating it as one made a rename racing an attach fail with a
     // spurious `Conflict` (PLAN_M5.md item 3 publishes a rebuilt
     // entry for a title change — same run, same pane, same
-    // generation). So a replacement is accepted when it still
+    // generation). Archive is the other same-generation replacement and
+    // is refused explicitly: it retains the row while removing the terminal,
+    // so calling it a restart or delete would describe neither winner. A
+    // replacement is accepted when it still
     // describes what this attach resolved: same generation, same
     // terminal identity. Everything else is refused exactly as
     // before — a changed generation is a restart, a vanished entry
@@ -1265,6 +1403,19 @@ async fn handle_attach(
     };
     let current = sup.sessions.lock().await.get(&session_id).cloned();
     let entry = match current {
+        Some(current) if current.info.archived => {
+            drop(attachments);
+            permit.send(reply_frame(&ControlMsg::Error {
+                req_id,
+                message: format!(
+                    "session {} was archived while this attach was being set up; restart it \
+                     before attaching",
+                    truncate_for_error(&session_id)
+                ),
+                kind: ErrorKind::InvalidRequest,
+            }));
+            return;
+        }
         Some(current)
             if Arc::ptr_eq(&current, &entry)
                 || (current.generation == entry.generation
@@ -2426,19 +2577,8 @@ pub(crate) async fn handle_control(sup: &Arc<Supervisor>, msg: ControlMsg, ctx: 
         ControlMsg::DeleteSession { req_id, session_id } => {
             handle_delete_session(sup, ctx.tx, ctx.tasks, req_id, session_id).await
         }
-        ControlMsg::ArchiveSession { req_id, .. } => {
-            // PLAN_M7.md item 5 supplies archive semantics. A same-version
-            // caller must receive a correlated refusal until then, never
-            // wait forever on a request the dispatcher only logged.
-            send_reply(
-                ctx.tx,
-                &ControlMsg::Error {
-                    req_id,
-                    message: "archive is not available in this build".to_string(),
-                    kind: ErrorKind::InvalidRequest,
-                },
-            )
-            .await
+        ControlMsg::ArchiveSession { req_id, session_id } => {
+            handle_archive_session(sup, ctx.tx, ctx.tasks, req_id, session_id).await
         }
         ControlMsg::Attach {
             req_id,
@@ -2704,8 +2844,8 @@ pub(crate) async fn handle_restricted_control(
 #[cfg(test)]
 mod tests {
     use super::super::connection::CONNECTION_WRITER_QUEUE;
-    use super::super::core::tests::{StateDir, dummy_exe, no_uploads};
-    use super::super::core::{CaptureState, FirstInput};
+    use super::super::core::tests::{StateDir, dummy_exe, entry_with, no_uploads};
+    use super::super::core::{ArchiveStage, CaptureState, FirstInput, SupervisorSeams};
     use super::super::listing::encode_list_cursor;
     use super::super::terminals::Terminal;
     use super::*;
@@ -2733,6 +2873,7 @@ mod tests {
                 crate::store::StoredSession {
                     id: id.to_string(),
                     parent: None,
+                    archived: false,
                     title: id.to_string(),
                     created_at: crate::store::now_unix(),
                     creation_seq: 0,
@@ -3215,11 +3356,10 @@ mod tests {
         assert!(sup.store.load_all().await.expect("load").is_empty());
     }
 
-    /// Archive is wire vocabulary before PLAN_M7.md item 5 serves it, but
-    /// it is still a request: the dispatcher must answer with a correlated,
-    /// actionable refusal instead of dropping it into the event wildcard.
+    /// Archive is a real lifecycle request: even a missing row is answered
+    /// by the archive handler with the ordinary correlated not-found shape.
     #[tokio::test]
-    async fn archive_is_answered_while_its_semantics_are_unavailable() {
+    async fn archive_of_a_missing_session_is_answered_by_the_real_handler() {
         let state = StateDir::new();
         let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
             .await
@@ -3243,6 +3383,11 @@ mod tests {
             },
         )
         .await;
+        tasks
+            .join_next()
+            .await
+            .expect("archive handler was spawned")
+            .expect("archive handler completed");
 
         let frame = rx.try_recv().expect("archive must receive a reply");
         let ControlMsg::Error {
@@ -3251,11 +3396,464 @@ mod tests {
             message,
         } = serde_json::from_slice(&frame.body).expect("decode")
         else {
-            panic!("unavailable archive must return a correlated error");
+            panic!("missing archive target must return a correlated error");
         };
         assert_eq!(req_id, 41);
+        assert_eq!(kind, ErrorKind::NotFound);
+        assert!(message.contains("no such session") && message.contains("session-1"));
+    }
+
+    /// Repeating archive against the state already requested does no
+    /// teardown and returns the current archived row.
+    #[tokio::test]
+    async fn archive_of_an_archived_session_is_an_idempotent_success() {
+        let state = StateDir::new();
+        let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
+            .await
+            .unwrap();
+        let mut entry = entry_with(
+            None,
+            LastOutcome::Exited {
+                exit_code: None,
+                annotation: Some(farhelm_proto::STOP_ANNOTATION.to_string()),
+            },
+        );
+        entry.info.archived = true;
+        entry.info.annotation = Some(farhelm_proto::STOP_ANNOTATION.to_string());
+        sup.sessions
+            .lock()
+            .await
+            .insert("session-1".to_string(), Arc::new(entry));
+
+        let (tx, mut rx) = mpsc::channel(CONNECTION_WRITER_QUEUE);
+        let mut input_routes = HashMap::new();
+        let mut tasks = tokio::task::JoinSet::new();
+        handle_control(
+            &sup,
+            ControlMsg::ArchiveSession {
+                req_id: 42,
+                session_id: "session-1".to_string(),
+            },
+            ConnectionCtx {
+                tx: &tx,
+                priority: &tx,
+                input_routes: &mut input_routes,
+                upload_routes: &mut no_uploads(),
+                tasks: &mut tasks,
+            },
+        )
+        .await;
+        tasks.join_next().await.unwrap().unwrap();
+
+        let reply: ControlMsg = serde_json::from_slice(&rx.try_recv().unwrap().body).unwrap();
+        let ControlMsg::SessionArchived { req_id, session } = reply else {
+            panic!("double archive must return the archived row");
+        };
+        assert_eq!(req_id, 42);
+        assert!(session.archived);
+        assert!(session.tabs.is_empty());
+        assert_eq!(
+            session.annotation.as_deref(),
+            Some(farhelm_proto::STOP_ANNOTATION)
+        );
+    }
+
+    /// Aborting the connection-owned reply waiter cannot cancel archive's
+    /// supervisor-owned mutation or release its lifecycle claim early.
+    #[tokio::test]
+    async fn archive_survives_connection_task_cancellation() {
+        let state = StateDir::new();
+        let entered = Arc::new(tokio::sync::Notify::new());
+        let release = Arc::new(tokio::sync::Notify::new());
+        let gate_entered = Arc::clone(&entered);
+        let gate_release = Arc::clone(&release);
+        let sup = Supervisor::new_with_seams(
+            state.path(),
+            dummy_exe(),
+            super::super::core::SupervisorTimeouts::default(),
+            SupervisorSeams {
+                archive_gate: Some(Arc::new(move |stage| {
+                    let entered = Arc::clone(&gate_entered);
+                    let release = Arc::clone(&gate_release);
+                    Box::pin(async move {
+                        if stage == ArchiveStage::Sweep {
+                            entered.notify_one();
+                            release.notified().await;
+                        }
+                        Ok(())
+                    })
+                })),
+                ..SupervisorSeams::default()
+            },
+        )
+        .await
+        .unwrap();
+        sup.store
+            .insert_session(
+                crate::store::StoredSession {
+                    id: "s1".to_string(),
+                    parent: None,
+                    archived: false,
+                    title: "t".to_string(),
+                    created_at: 1_700_000_000,
+                    creation_seq: 0,
+                    cwd: "/tmp".to_string(),
+                    invocation: "agent".to_string(),
+                    tmux_name: "fh-s1".to_string(),
+                    pane: String::new(),
+                    outcome: LastOutcome::Running,
+                    agent_kind: AgentKind::Generic,
+                    resume_template: None,
+                    canonical_cwd: None,
+                    captured_conversation: None,
+                    captured_record: None,
+                    capture_ambiguous: false,
+                    first_input_at: None,
+                    generation: 0,
+                    launch_scoped: false,
+                    source_profile: None,
+                },
+                None,
+            )
+            .await
+            .unwrap();
+        sup.sessions
+            .lock()
+            .await
+            .insert("s1".to_string(), fake_entry("s1", 1_700_000_000));
+        sup.tmux
+            .create_session(
+                "fh-s1",
+                "/",
+                80,
+                24,
+                &[],
+                &["sleep".to_string(), "120".to_string()],
+            )
+            .await
+            .expect("plant a durable-name tmux husk without an entry terminal");
+
+        let (tx, _rx) = mpsc::channel(CONNECTION_WRITER_QUEUE);
+        let mut input_routes = HashMap::new();
+        let mut tasks = tokio::task::JoinSet::new();
+        handle_control(
+            &sup,
+            ControlMsg::ArchiveSession {
+                req_id: 44,
+                session_id: "s1".to_string(),
+            },
+            ConnectionCtx {
+                tx: &tx,
+                priority: &tx,
+                input_routes: &mut input_routes,
+                upload_routes: &mut no_uploads(),
+                tasks: &mut tasks,
+            },
+        )
+        .await;
+        tokio::time::timeout(Duration::from_secs(5), entered.notified())
+            .await
+            .expect("archive reached the blocked supervisor-owned task");
+        tasks.abort_all();
+        while tasks.join_next().await.is_some() {}
+        release.notify_waiters();
+
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
+        loop {
+            if sup.store.session("s1").await.unwrap().unwrap().archived {
+                break;
+            }
+            assert!(
+                tokio::time::Instant::now() < deadline,
+                "archive was cancelled with its reply waiter"
+            );
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        assert!(
+            !sup.tmux.has_session("fh-s1").await.unwrap(),
+            "archive must kill the durable tmux name even when SessionEntry has no Terminal"
+        );
+    }
+
+    /// Archive keeps the lifecycle claim for its complete teardown, so a
+    /// restart queues behind it and observes the retained archived row.
+    ///
+    /// The archive seam parks the real handler before its first destructive
+    /// step. If the handler omitted the claim or released it around the slow
+    /// teardown, restart could act on the still-live pre-archive entry and
+    /// report a competing mutation while archive was still in flight.
+    #[tokio::test]
+    async fn restart_waits_for_a_blocked_archive_lifecycle_claim() {
+        let (_state, sup, entered, release) = blocked_archive_supervisor().await;
+        let (mut archive_tasks, mut archive_rx) = dispatch_for_test(
+            &sup,
+            ControlMsg::ArchiveSession {
+                req_id: 45,
+                session_id: "s1".to_string(),
+            },
+        )
+        .await;
+        entered.notified().await;
+        assert!(sup.lifecycle_locks.claimed_for_test("s1"));
+
+        let (mut restart_tasks, mut restart_rx) = dispatch_for_test(
+            &sup,
+            ControlMsg::RestartSession {
+                req_id: 46,
+                session_id: "s1".to_string(),
+                mode: RestartMode::Fresh,
+                stop_if_running: false,
+            },
+        )
+        .await;
+        tokio::task::yield_now().await;
+        assert!(
+            matches!(
+                restart_rx.try_recv(),
+                Err(tokio::sync::mpsc::error::TryRecvError::Empty)
+            ),
+            "restart must not answer while archive holds the lifecycle claim"
+        );
+
+        release.notify_one();
+        archive_tasks.join_next().await.unwrap().unwrap();
+        let archived: ControlMsg =
+            serde_json::from_slice(&archive_rx.try_recv().unwrap().body).unwrap();
+        assert!(matches!(
+            archived,
+            ControlMsg::SessionArchived { req_id: 45, .. }
+        ));
+
+        restart_tasks.join_next().await.unwrap().unwrap();
+        let restarted: ControlMsg =
+            serde_json::from_slice(&restart_rx.try_recv().unwrap().body).unwrap();
+        let ControlMsg::SessionRestarted {
+            req_id: 46,
+            session,
+        } = restarted
+        else {
+            panic!("restart after archive must succeed, got {restarted:?}");
+        };
+        assert!(!session.archived);
+        assert!(
+            !sup.store.session("s1").await.unwrap().unwrap().archived,
+            "the serialized restart must clear the durable archive state"
+        );
+    }
+
+    /// Archive keeps the lifecycle claim for its complete teardown, so a
+    /// delete cannot remove the row from underneath archive publication.
+    ///
+    /// Once the blocked archive finishes, delete sees the archived entry
+    /// and removes it normally. Without the shared claim, either handler can
+    /// make the other's stale entry authoritative and resurrect a row.
+    #[tokio::test]
+    async fn delete_waits_for_a_blocked_archive_lifecycle_claim() {
+        let (_state, sup, entered, release) = blocked_archive_supervisor().await;
+        let (mut archive_tasks, mut archive_rx) = dispatch_for_test(
+            &sup,
+            ControlMsg::ArchiveSession {
+                req_id: 47,
+                session_id: "s1".to_string(),
+            },
+        )
+        .await;
+        entered.notified().await;
+        assert!(sup.lifecycle_locks.claimed_for_test("s1"));
+
+        let (mut delete_tasks, mut delete_rx) = dispatch_for_test(
+            &sup,
+            ControlMsg::DeleteSession {
+                req_id: 48,
+                session_id: "s1".to_string(),
+            },
+        )
+        .await;
+        tokio::task::yield_now().await;
+        assert!(
+            matches!(
+                delete_rx.try_recv(),
+                Err(tokio::sync::mpsc::error::TryRecvError::Empty)
+            ),
+            "delete must not answer while archive holds the lifecycle claim"
+        );
+
+        release.notify_one();
+        archive_tasks.join_next().await.unwrap().unwrap();
+        let archived: ControlMsg =
+            serde_json::from_slice(&archive_rx.try_recv().unwrap().body).unwrap();
+        assert!(matches!(
+            archived,
+            ControlMsg::SessionArchived { req_id: 47, .. }
+        ));
+
+        delete_tasks.join_next().await.unwrap().unwrap();
+        let deleted: ControlMsg =
+            serde_json::from_slice(&delete_rx.try_recv().unwrap().body).unwrap();
+        assert!(matches!(deleted, ControlMsg::SessionDeleted { req_id: 48 }));
+        assert!(sup.store.session("s1").await.unwrap().is_none());
+        assert!(!sup.sessions.lock().await.contains_key("s1"));
+    }
+
+    /// Build one terminal-less live row and park archive immediately before
+    /// its process sweep. The durable tmux name makes teardown real while
+    /// avoiding an attachment or pane fixture unrelated to claim ordering.
+    async fn blocked_archive_supervisor() -> (
+        StateDir,
+        Arc<Supervisor>,
+        Arc<tokio::sync::Notify>,
+        Arc<tokio::sync::Notify>,
+    ) {
+        let state = StateDir::new();
+        let entered = Arc::new(tokio::sync::Notify::new());
+        let release = Arc::new(tokio::sync::Notify::new());
+        let gate_entered = Arc::clone(&entered);
+        let gate_release = Arc::clone(&release);
+        let sup = Supervisor::new_with_seams(
+            state.path(),
+            dummy_exe(),
+            super::super::core::SupervisorTimeouts::default(),
+            SupervisorSeams {
+                archive_gate: Some(Arc::new(move |stage| {
+                    let entered = Arc::clone(&gate_entered);
+                    let release = Arc::clone(&gate_release);
+                    Box::pin(async move {
+                        if stage == ArchiveStage::Sweep {
+                            entered.notify_one();
+                            release.notified().await;
+                        }
+                        Ok(())
+                    })
+                })),
+                ..SupervisorSeams::default()
+            },
+        )
+        .await
+        .unwrap();
+        sup.store
+            .insert_session(
+                crate::store::StoredSession {
+                    id: "s1".to_string(),
+                    parent: None,
+                    archived: false,
+                    title: "t".to_string(),
+                    created_at: 1_700_000_000,
+                    creation_seq: 0,
+                    cwd: "/tmp".to_string(),
+                    invocation: "agent".to_string(),
+                    tmux_name: "fh-s1".to_string(),
+                    pane: String::new(),
+                    outcome: LastOutcome::Running,
+                    agent_kind: AgentKind::Generic,
+                    resume_template: None,
+                    canonical_cwd: None,
+                    captured_conversation: None,
+                    captured_record: None,
+                    capture_ambiguous: false,
+                    first_input_at: None,
+                    generation: 0,
+                    launch_scoped: false,
+                    source_profile: None,
+                },
+                None,
+            )
+            .await
+            .unwrap();
+        sup.sessions
+            .lock()
+            .await
+            .insert("s1".to_string(), fake_entry("s1", 1_700_000_000));
+        sup.tmux
+            .create_session(
+                "fh-s1",
+                "/",
+                80,
+                24,
+                &[],
+                &["sleep".to_string(), "120".to_string()],
+            )
+            .await
+            .expect("plant the durable tmux session archive will remove");
+        (state, sup, entered, release)
+    }
+
+    /// Dispatch one request exactly as a connection would, retaining its
+    /// task set and reply queue so race tests can observe the in-flight
+    /// interval before joining it.
+    async fn dispatch_for_test(
+        sup: &Arc<Supervisor>,
+        message: ControlMsg,
+    ) -> (tokio::task::JoinSet<()>, mpsc::Receiver<Frame>) {
+        let (tx, rx) = mpsc::channel(CONNECTION_WRITER_QUEUE);
+        let mut input_routes = HashMap::new();
+        let mut tasks = tokio::task::JoinSet::new();
+        handle_control(
+            sup,
+            message,
+            ConnectionCtx {
+                tx: &tx,
+                priority: &tx,
+                input_routes: &mut input_routes,
+                upload_routes: &mut no_uploads(),
+                tasks: &mut tasks,
+            },
+        )
+        .await;
+        (tasks, rx)
+    }
+
+    /// An archived session still exists, so attach names that state as an
+    /// invalid request instead of misreporting the row as not found.
+    #[tokio::test]
+    async fn attach_to_an_archived_session_is_refused_by_state() {
+        let state = StateDir::new();
+        let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
+            .await
+            .unwrap();
+        let mut entry = entry_with(
+            None,
+            LastOutcome::Exited {
+                exit_code: None,
+                annotation: Some(farhelm_proto::STOP_ANNOTATION.to_string()),
+            },
+        );
+        entry.info.archived = true;
+        sup.sessions
+            .lock()
+            .await
+            .insert("session-1".to_string(), Arc::new(entry));
+
+        let (tx, mut rx) = mpsc::channel(CONNECTION_WRITER_QUEUE);
+        let mut input_routes = HashMap::new();
+        let mut tasks = tokio::task::JoinSet::new();
+        handle_control(
+            &sup,
+            ControlMsg::Attach {
+                req_id: 43,
+                session_id: "session-1".to_string(),
+                channel: 1,
+                cols: 80,
+                rows: 24,
+                terminal: TerminalSelector::Agent,
+                lease: "archive-test".to_string(),
+                if_unowned: false,
+            },
+            ConnectionCtx {
+                tx: &tx,
+                priority: &tx,
+                input_routes: &mut input_routes,
+                upload_routes: &mut no_uploads(),
+                tasks: &mut tasks,
+            },
+        )
+        .await;
+
+        let reply: ControlMsg = serde_json::from_slice(&rx.try_recv().unwrap().body).unwrap();
+        let ControlMsg::Error { kind, message, .. } = reply else {
+            panic!("archived attach must be refused");
+        };
         assert_eq!(kind, ErrorKind::InvalidRequest);
-        assert!(message.contains("archive") && message.contains("not available"));
+        assert!(message.contains("archived") && message.contains("restart"));
     }
 
     /// Every profile CRUD verb, driven through the real dispatcher against
@@ -4472,6 +5070,7 @@ mod tests {
                 crate::store::StoredSession {
                     id: "new-default-source".to_string(),
                     parent: None,
+                    archived: false,
                     title: "new default source".to_string(),
                     created_at: crate::store::now_unix(),
                     creation_seq: 0,

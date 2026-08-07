@@ -14,13 +14,14 @@ use std::collections::{HashMap, HashSet};
 use dioxus::prelude::*;
 
 use crate::api::{
-    close_tab, fetch_hosts, fetch_session, mint_lease, open_tab, rename_session, restart_mode_for,
-    restart_session,
+    archive_session, close_tab, fetch_hosts, fetch_session, mint_lease, open_tab, rename_session,
+    restart_mode_for, restart_session,
 };
+use crate::archive::confirmation as archive_confirmation;
 use crate::attachments::{attachment_policy, attachment_status_element_id};
 use crate::feed::{fallback_polls_now, fallback_sleep, use_feed_reader};
 use crate::hosts::{HostLookup, HostsRead, is_connected, stale_session_notice};
-use crate::ops::ReadGate;
+use crate::ops::{ReadGate, use_op_lock};
 use crate::peer::PeerLine;
 use crate::reader::{SurfaceReader, Trigger, request_read};
 use crate::reconnect::reconnect_policy;
@@ -151,6 +152,15 @@ use crate::{ApiBase, RestartOffer, Session, SessionStatus};
 /// helm's own words, which is the same bargain the list's stale rows make
 /// with their lifecycle controls.
 ///
+/// ## An archived session retains metadata, not terminals (PLAN_M7.md item 5)
+///
+/// Archive is a stronger terminal boundary than host staleness: the absence
+/// is deliberate and durable rather than last-known. The view therefore
+/// mounts no terminal, states that the agent and tabs were removed, and keeps
+/// the metadata plus restart affordance in place. Restart is the one route
+/// back; its fresh detail reply clears `archived`, and only then may the
+/// terminal island mount again.
+///
 /// ## Mount/unmount lifecycle (PLAN_M2.md step 7)
 ///
 /// M1 never unmounted this component (it was the only view), so
@@ -266,6 +276,18 @@ pub(crate) fn SessionView(session: Session, on_back: EventHandler<()>) -> Elemen
     let mut restarting = use_signal(|| false);
     let mut confirming = use_signal(|| false);
     let mut restart_error = use_signal(|| None::<String>);
+    // Archive has its own in-flight and confirmation state because it
+    // destroys every terminal while retaining this view. A successful call
+    // therefore changes what the component may mount rather than navigating
+    // away as delete would.
+    let mut archiving = use_signal(|| false);
+    let mut confirming_archive = use_signal(|| false);
+    let mut archive_error = use_signal(|| None::<String>);
+    // Restart, archive, and rename all change the assumptions the other two
+    // present to the user. One synchronously claimed token covers their
+    // prompts as well as their requests, so two clicks in one render frame
+    // cannot authorize operations from two different snapshots.
+    let mut lifecycle = use_op_lock();
     // The rename affordance (PLAN_M5.md item 6): whether the field is
     // open, whether its request is in flight, the supervisor's own words
     // if it refused, and this view's optimistic correction over `current`.
@@ -544,6 +566,14 @@ pub(crate) fn SessionView(session: Session, on_back: EventHandler<()>) -> Elemen
                     if settled {
                         renamed.set(None);
                     }
+                    if fresh.archived {
+                        confirming.set(false);
+                        confirming_archive.set(false);
+                        renaming.set(false);
+                        if !restarting() && !archiving() && !renaming_pending() {
+                            lifecycle.release();
+                        }
+                    }
                     current.set(fresh);
                     true
                 }
@@ -793,6 +823,7 @@ pub(crate) fn SessionView(session: Session, on_back: EventHandler<()>) -> Elemen
     let refresh_after_restart = request_detail.clone();
     let restart = move |stop_if_running: bool| {
         if restarting() {
+            lifecycle.release();
             return;
         }
         restarting.set(true);
@@ -838,6 +869,7 @@ pub(crate) fn SessionView(session: Session, on_back: EventHandler<()>) -> Elemen
             // that is the safe direction, because the status it still holds
             // is the pre-restart one, which confirms.
             restarting.set(false);
+            lifecycle.release();
             // The authoritative refresh, asked for through the SAME door
             // every other read uses and issued after the final bump so it
             // carries the epoch it will be judged against.
@@ -873,6 +905,54 @@ pub(crate) fn SessionView(session: Session, on_back: EventHandler<()>) -> Elemen
     // same request shape and share the same in-flight guard.
     let mut confirm_restart = restart.clone();
     let mut fresh_restart = restart;
+
+    let archive_base = base.clone();
+    let refresh_after_archive = request_detail.clone();
+    let run_archive = move || {
+        // Tab opening deliberately does not hold the lifecycle token: the
+        // user may leave this view while it runs. It still excludes archive,
+        // because a tab whose POST is already in flight is live work the
+        // archive prompt could not have named. The render-time disabled
+        // state below mirrors this handler guard but does not replace it.
+        if archiving() || opening_tab() || current.peek().archived {
+            lifecycle.release();
+            return;
+        }
+        archiving.set(true);
+        archive_error.set(None);
+        restart_epoch += 1;
+        let base = archive_base.clone();
+        let before = current.peek().clone();
+        let id = before.id.clone();
+        let refresh = refresh_after_archive.clone();
+        spawn(async move {
+            match archive_session(&base, &id).await {
+                Ok(mut archived) => {
+                    // The mutation reply is bare `SessionInfo`; retain the
+                    // helm-owned routing labels from the detail row while the
+                    // authoritative follow-up read is in flight.
+                    archived.host = before.host;
+                    archived.host_name = before.host_name;
+                    archived.stale = before.stale;
+                    current.set(archived);
+                    confirming.set(false);
+                    confirming_archive.set(false);
+                    renaming.set(false);
+                    opened_tabs.write().clear();
+                    closed_tabs.write().clear();
+                    selected.set(None);
+                    mount_generation += 1;
+                }
+                Err(e) => archive_error.set(Some(e)),
+            }
+            restart_epoch += 1;
+            archiving.set(false);
+            lifecycle.release();
+            refresh(Trigger::Explicit);
+        });
+    };
+    let mut confirm_archive = run_archive.clone();
+    let mut direct_archive = run_archive;
 
     // The rename field's submit (PLAN_M5.md item 6). What the user typed
     // goes to the supervisor verbatim (`api::rename_session`); what is
@@ -920,6 +1000,7 @@ pub(crate) fn SessionView(session: Session, on_back: EventHandler<()>) -> Elemen
                 Err(e) => rename_error.set(Some(e)),
             }
             renaming_pending.set(false);
+            lifecycle.release();
         });
     };
 
@@ -933,6 +1014,9 @@ pub(crate) fn SessionView(session: Session, on_back: EventHandler<()>) -> Elemen
     let add_base = base.clone();
     let add_session_id = session.id.clone();
     let on_add_tab = move |_| {
+        if lifecycle.busy_now() {
+            return;
+        }
         // Signal-level re-entry check, not just the `disabled` attribute:
         // the attribute's DOM update from a rerender is not synchronous
         // with a click event, so a second click landing in that gap would
@@ -1079,7 +1163,7 @@ pub(crate) fn SessionView(session: Session, on_back: EventHandler<()>) -> Elemen
         // sync is what tears down islands belonging to a host that went away
         // while this view was open, which returning `None` (the
         // lease-not-yet-minted case) would leave mounted and silently dead.
-        if session.stale {
+        if session.stale || session.archived {
             return Some("[]".to_string());
         }
         let tabs = visible_tabs(&session.tabs, &opened_tabs.read(), &closed_tabs.read());
@@ -1218,6 +1302,7 @@ pub(crate) fn SessionView(session: Session, on_back: EventHandler<()>) -> Elemen
     let shown = current.read().clone();
     let alive = shown.status.is_live();
     let tabs = visible_tabs(&shown.tabs, &opened_tabs.read(), &closed_tabs.read());
+    let archive_requires_confirmation = archive_confirmation(&shown, tabs.len()).is_some();
     // Both of these are DERIVED rather than written back to their signals
     // when they go stale, and that is safe precisely because tab ids are
     // never reused (farhelm-proto's `TabInfo::id`): an id that has left the
@@ -1285,9 +1370,9 @@ pub(crate) fn SessionView(session: Session, on_back: EventHandler<()>) -> Elemen
                     // the supervisor's refusal — so a rename could fail
                     // with nothing said about it anywhere, which SPEC.md's
                     // visible-failure rule does not allow.
-                    disabled: renaming_pending(),
+                    disabled: lifecycle.busy(),
                     onclick: move |_| {
-                        if renaming_pending() {
+                        if lifecycle.busy_now() {
                             return;
                         }
                         on_back.call(());
@@ -1310,6 +1395,7 @@ pub(crate) fn SessionView(session: Session, on_back: EventHandler<()>) -> Elemen
                         on_submit: on_rename_submit,
                         on_cancel: move |_| {
                             renaming.set(false);
+                            lifecycle.release();
                             // The refusal goes with the field that
                             // produced it: leaving it on screen after the
                             // user backed out would describe an edit that
@@ -1321,7 +1407,11 @@ pub(crate) fn SessionView(session: Session, on_back: EventHandler<()>) -> Elemen
                     button {
                         r#type: "button",
                         class: "btn session-rename",
+                        disabled: lifecycle.busy(),
                         onclick: move |_| {
+                            if !lifecycle.claim() {
+                                return;
+                            }
                             // Seeded from the title on screen right now, so
                             // reopening the field starts from what the
                             // session is currently called; the draft
@@ -1350,6 +1440,64 @@ pub(crate) fn SessionView(session: Session, on_back: EventHandler<()>) -> Elemen
             if let Some(err) = rename_error.read().clone() {
                 div { class: "rename-error", "{err}" }
             }
+            if !shown.archived {
+                div { class: "archive-offer",
+                    if confirming_archive() {
+                        if let Some(archive_text) = archive_confirmation(&shown, tabs.len()) {
+                            span { class: "confirm-consequence", "{archive_text}:" }
+                        } else {
+                            span { class: "confirm-consequence", "archiving removes the terminal:" }
+                        }
+                        button {
+                            r#type: "button",
+                            class: "btn archive-confirm",
+                            disabled: archiving() || opening_tab(),
+                            onclick: move |_| {
+                                if confirming_archive() && !opening_tab() {
+                                    confirming_archive.set(false);
+                                    confirm_archive();
+                                }
+                            },
+                            "confirm archive"
+                        }
+                        button {
+                            r#type: "button",
+                            class: "btn archive-cancel",
+                            autofocus: true,
+                            disabled: archiving(),
+                            onclick: move |_| {
+                                confirming_archive.set(false);
+                                lifecycle.release();
+                            },
+                            "cancel"
+                        }
+                    } else {
+                        button {
+                            r#type: "button",
+                            class: "btn archive-primary",
+                            "data-confirms": "{archive_requires_confirmation}",
+                            disabled: lifecycle.busy() || opening_tab(),
+                            onclick: move |_| {
+                                if opening_tab() {
+                                    return;
+                                }
+                                if !lifecycle.claim() {
+                                    return;
+                                }
+                                if archive_requires_confirmation {
+                                    confirming_archive.set(true);
+                                } else {
+                                    direct_archive();
+                                }
+                            },
+                            "archive"
+                        }
+                    }
+                    if let Some(err) = archive_error.read().clone() {
+                        div { class: "archive-error", "{err}" }
+                    }
+                }
+            }
             // SPEC.md: "Opening an interrupted session offers
             // restart-with-resume" — which is why this leads the view
             // rather than hiding behind a menu, and why its wording states
@@ -1373,7 +1521,7 @@ pub(crate) fn SessionView(session: Session, on_back: EventHandler<()>) -> Elemen
                     button {
                         r#type: "button",
                         class: "btn restart-confirm",
-                        disabled: restarting(),
+                        disabled: restarting() || archiving(),
                         onclick: move |_| {
                             if !confirming() {
                                 return;
@@ -1391,7 +1539,10 @@ pub(crate) fn SessionView(session: Session, on_back: EventHandler<()>) -> Elemen
                         r#type: "button",
                         class: "btn restart-cancel",
                         autofocus: true,
-                        onclick: move |_| confirming.set(false),
+                        onclick: move |_| {
+                            confirming.set(false);
+                            lifecycle.release();
+                        },
                         "cancel"
                     }
                 } else {
@@ -1404,9 +1555,9 @@ pub(crate) fn SessionView(session: Session, on_back: EventHandler<()>) -> Elemen
                         // browser suite waits on it) instead of only
                         // observable after the fact by clicking.
                         "data-confirms": "{alive}",
-                        disabled: restarting(),
+                        disabled: lifecycle.busy(),
                         onclick: move |_| {
-                            if restarting() {
+                            if !lifecycle.claim() {
                                 return;
                             }
                             if alive {
@@ -1453,19 +1604,25 @@ pub(crate) fn SessionView(session: Session, on_back: EventHandler<()>) -> Elemen
             // session metadata behind a notice and NO terminal, and an
             // empty strip beside a dead pane would be exactly the
             // unexplained blankness that rule exists to prevent.
-            if let Some(notice) = stale_notice {
+            if shown.archived {
+                div { class: "archived-notice",
+                    "this session is archived — its metadata and attachments remain, but its agent, tabs, and terminal were removed. restart creates a fresh terminal and resumes wherever this session's restart offer supports it."
+                }
+            }
+            if let Some(notice) = &stale_notice {
                 // The notice is rendered as PARTS, not as one interpolated
                 // string: every peer-supplied value in it (the host's name,
                 // its identities, the transport's own words) gets its own
                 // direction-isolated element, so none of them can rearrange
                 // the sentence explaining why this session has no terminal.
-                PeerLine { class: "host-stale-notice", parts: notice }
+                PeerLine { class: "host-stale-notice", parts: notice.clone() }
                 if let Some((badge_class, badge_text)) = stale_badge {
                     div { class: "stale-metadata",
                         span { class: "status-badge {badge_class}", "{badge_text}" }
                     }
                 }
-            } else {
+            }
+            if !shown.archived && stale_notice.is_none() {
                 // The tab strip: the agent terminal first and unclosable
                 // (SPEC.md gives a session one agent terminal, and closing it
                 // is not one of the operations that exist), then every open
@@ -1500,7 +1657,7 @@ pub(crate) fn SessionView(session: Session, on_back: EventHandler<()>) -> Elemen
                     button {
                         r#type: "button",
                         class: "btn tab-add",
-                        disabled: opening_tab(),
+                        disabled: opening_tab() || lifecycle.busy(),
                         onclick: on_add_tab,
                         "+ terminal"
                     }

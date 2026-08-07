@@ -400,6 +400,32 @@ pub type SampleFault = Arc<dyn Fn(SampleRead<'_>) -> Option<String> + Send + Syn
 pub type CaptureGate =
     Arc<dyn Fn() -> std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send>> + Send + Sync>;
 
+/// A named boundary in archive teardown where tests may pause or fail the
+/// operation before it publishes the archived row.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ArchiveStage {
+    PaneProbe,
+    TabRediscovery,
+    ScopeEnumeration,
+    Sweep,
+    ArtifactRemoval,
+}
+
+/// An asynchronous archive fault seam.
+///
+/// Archive correctness depends on failures and disconnects at boundaries
+/// that real tmux, systemd, and filesystem calls cannot produce reliably.
+/// Production installs no hook; tests use one to prove every such boundary
+/// fails closed and that a connection disappearing cannot cancel teardown.
+pub type ArchiveGate = Arc<
+    dyn Fn(
+            ArchiveStage,
+        )
+            -> std::pin::Pin<Box<dyn std::future::Future<Output = anyhow::Result<()>> + Send>>
+        + Send
+        + Sync,
+>;
+
 /// The injectable seams a `Supervisor` is built with. All default to
 /// production behavior; grouped into one struct so a new injection point
 /// does not grow the constructor's signature again.
@@ -432,6 +458,8 @@ pub struct SupervisorSeams {
     pub capture_store_fault: Option<CaptureStoreFault>,
     /// See [`CaptureGate`]. `None` in production.
     pub capture_gate: Option<CaptureGate>,
+    /// See [`ArchiveGate`]. `None` in production.
+    pub archive_gate: Option<ArchiveGate>,
     /// See [`SampleFault`]. `None` in production.
     pub sample_fault: Option<SampleFault>,
     /// How often the supervisor's own periodic task fires — see
@@ -549,6 +577,7 @@ impl Default for SupervisorSeams {
             capture_window: CaptureWindowBounds::default(),
             capture_store_fault: None,
             capture_gate: None,
+            archive_gate: None,
             sample_fault: None,
             ticker_interval: TICKER_INTERVAL,
             launch_env: Vec::new(),
@@ -1029,6 +1058,24 @@ impl KeyedLocks {
             _held: lock.lock_owned().await,
         }
     }
+
+    /// Report whether a key is held at this instant for deterministic
+    /// lifecycle-race tests.
+    ///
+    /// This is observation only: production code must acquire the claim and
+    /// let serialization decide when work may proceed. Tests use the probe
+    /// while another operation is parked at an injected teardown boundary,
+    /// where the answer cannot race the holder's normal completion.
+    #[cfg(test)]
+    pub(crate) fn claimed_for_test(&self, key: &str) -> bool {
+        let lock = self
+            .locks
+            .lock()
+            .expect("keyed lock map poisoned")
+            .get(key)
+            .and_then(std::sync::Weak::upgrade);
+        lock.is_some_and(|lock| lock.try_lock().is_err())
+    }
 }
 
 /// One holder's exclusive claim on a key; see [`KeyedLocks`].
@@ -1432,6 +1479,14 @@ enum RelaunchDisposition {
     /// assume — but the published state stands, and the next list describes
     /// the session correctly.
     Published,
+}
+
+/// Archive-state half of failed-relaunch recovery.
+///
+/// Only a definitive failure restores the prior durable generation; an
+/// ambiguous failure may have launched an agent and must remain visible.
+pub(crate) fn recovered_archive_flag(definitive: bool, prior_archived: bool) -> bool {
+    definitive && prior_archived
 }
 
 /// Why a relaunch failed, and what the caller may do about it.
@@ -3300,6 +3355,14 @@ impl Supervisor {
                 continue;
             }
 
+            // Archive is durable evidence that this session intentionally
+            // has no terminal. Do not rediscover a same-named tmux husk as
+            // its agent: restart is the only operation allowed to clear the
+            // flag and create a new terminal generation.
+            if row.archived {
+                continue;
+            }
+
             // Deterministic pane lookup, computed ONCE and reused by both
             // the sentinel branch below and the ordinary reconciliation
             // branch further down (item 6 of the review-swarm fix batch):
@@ -3600,7 +3663,7 @@ impl Supervisor {
                 Arc::new(SessionEntry {
                     info: SessionInfo {
                         parent: row.parent,
-                        archived: false,
+                        archived: row.archived,
                         id: row.id,
                         title: row.title,
                         created_at: row.created_at,
@@ -4832,7 +4895,7 @@ impl Supervisor {
                 });
                 let info = SessionInfo {
                     parent: row.parent,
-                    archived: false,
+                    archived: row.archived,
                     restart_offer: snapshot.restart_offer(row.captured_conversation.as_deref()),
                     id: row.id,
                     title: row.title,
@@ -5093,6 +5156,7 @@ impl Supervisor {
             let row = StoredSession {
                 id: id.clone(),
                 parent: parent.clone(),
+                archived: false,
                 title: title.clone(),
                 created_at,
                 creation_seq: 0,
@@ -5219,6 +5283,7 @@ impl Supervisor {
                     StoredSession {
                         id: id.clone(),
                         parent: parent.clone(),
+                        archived: false,
                         title: title.clone(),
                         created_at,
                         creation_seq: 0,
@@ -6177,11 +6242,17 @@ impl Supervisor {
                     }
                 };
                 if still_exists {
+                    let mut recovered_info = entry.info.clone();
+                    // An ambiguous launch may be running. Keeping the
+                    // archived flag would hide the only row that can be
+                    // used to stop, inspect, or restart it.
+                    recovered_info.archived =
+                        recovered_archive_flag(definitive, claim.prior.archived);
                     self.sessions.lock().await.insert(
                         id.clone(),
                         relaunched_entry(
                             entry,
-                            entry.info.clone(),
+                            recovered_info,
                             entry.terminal.clone(),
                             claim.generation,
                             scope,
@@ -9611,6 +9682,7 @@ pub(crate) mod tests {
                     StoredSession {
                         id: id.to_string(),
                         parent: None,
+                        archived: false,
                         title: id.to_string(),
                         created_at: now_unix(),
                         creation_seq: 0,
@@ -9750,6 +9822,7 @@ pub(crate) mod tests {
                 StoredSession {
                     id: scoped_id.clone(),
                     parent: None,
+                    archived: false,
                     title: "scoped".to_string(),
                     created_at: now_unix(),
                     creation_seq: 0,
@@ -9829,6 +9902,7 @@ pub(crate) mod tests {
                     StoredSession {
                         id: id.to_string(),
                         parent: None,
+                        archived: false,
                         title: id.to_string(),
                         created_at: now_unix(),
                         creation_seq: 0,
@@ -9932,6 +10006,7 @@ pub(crate) mod tests {
                 StoredSession {
                     id: "s1".to_string(),
                     parent: None,
+                    archived: false,
                     title: "t".to_string(),
                     created_at: now_unix(),
                     creation_seq: 0,
@@ -10020,6 +10095,7 @@ pub(crate) mod tests {
                 StoredSession {
                     id: "s1".to_string(),
                     parent: None,
+                    archived: false,
                     title: "t".to_string(),
                     created_at: now_unix(),
                     creation_seq: 0,
@@ -10096,6 +10172,7 @@ pub(crate) mod tests {
                 StoredSession {
                     id: "s1".to_string(),
                     parent: None,
+                    archived: false,
                     title: "t".to_string(),
                     created_at: now_unix(),
                     creation_seq: 0,
@@ -10717,6 +10794,7 @@ pub(crate) mod tests {
                 StoredSession {
                     id: "stranded".to_string(),
                     parent: None,
+                    archived: false,
                     title: "stranded".to_string(),
                     created_at: now_unix(),
                     creation_seq: 0,
@@ -11010,6 +11088,7 @@ pub(crate) mod tests {
             |id: &str, title: &str, profile: crate::store::ProfileSnapshot| StoredSession {
                 id: id.to_string(),
                 parent: None,
+                archived: false,
                 title: title.to_string(),
                 created_at: SEEDED_CREATED_AT,
                 creation_seq: 0,
@@ -11539,6 +11618,7 @@ pub(crate) mod tests {
                 StoredSession {
                     id: "stranded".to_string(),
                     parent: None,
+                    archived: false,
                     title: "stranded".to_string(),
                     created_at: now_unix(),
                     creation_seq: 0,
@@ -11621,6 +11701,7 @@ pub(crate) mod tests {
                 StoredSession {
                     id: "ended".to_string(),
                     parent: None,
+                    archived: false,
                     title: "ended".to_string(),
                     created_at: now_unix(),
                     creation_seq: 0,
@@ -12124,6 +12205,7 @@ pub(crate) mod tests {
                 StoredSession {
                     id: "stranded".to_string(),
                     parent: None,
+                    archived: false,
                     title: "stranded".to_string(),
                     created_at: now_unix(),
                     creation_seq: 0,
@@ -12213,6 +12295,7 @@ pub(crate) mod tests {
                 StoredSession {
                     id: "stranded".to_string(),
                     parent: None,
+                    archived: false,
                     title: "stranded".to_string(),
                     created_at: now_unix(),
                     creation_seq: 0,
@@ -12585,6 +12668,7 @@ pub(crate) mod tests {
                 StoredSession {
                     id: "stranded".to_string(),
                     parent: None,
+                    archived: false,
                     title: "stranded".to_string(),
                     created_at: now_unix(),
                     creation_seq: 0,
@@ -12698,6 +12782,7 @@ pub(crate) mod tests {
                 StoredSession {
                     id: "stranded".to_string(),
                     parent: None,
+                    archived: false,
                     title: "stranded".to_string(),
                     created_at: now_unix(),
                     creation_seq: 0,
@@ -12985,6 +13070,7 @@ pub(crate) mod tests {
                 StoredSession {
                     id: "stranded".to_string(),
                     parent: None,
+                    archived: false,
                     title: "stranded".to_string(),
                     created_at: now_unix(),
                     creation_seq: 0,
@@ -13295,6 +13381,7 @@ pub(crate) mod tests {
         let stranded = StoredSession {
             id: "stranded".to_string(),
             parent: None,
+            archived: false,
             title: "as created".to_string(),
             created_at: now_unix(),
             creation_seq: 0,
@@ -13434,6 +13521,7 @@ pub(crate) mod tests {
                 StoredSession {
                     id: "stranded".to_string(),
                     parent: None,
+                    archived: false,
                     title: "stranded".to_string(),
                     created_at: now_unix(),
                     creation_seq: 0,
@@ -13652,6 +13740,7 @@ pub(crate) mod tests {
                 StoredSession {
                     id: "stranded".to_string(),
                     parent: None,
+                    archived: false,
                     title: "stranded".to_string(),
                     created_at: now_unix(),
                     creation_seq: 0,

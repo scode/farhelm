@@ -393,6 +393,10 @@ fn api_router(state: Arc<AppState>) -> Router {
             axum::routing::post(sessions::rename_session),
         )
         .route(
+            "/api/sessions/{id}/archive",
+            axum::routing::post(sessions::archive_session),
+        )
+        .route(
             "/api/sessions/{id}",
             get(sessions::get_session).delete(sessions::delete_session),
         )

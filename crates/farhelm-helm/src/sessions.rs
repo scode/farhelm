@@ -40,7 +40,7 @@
 //!
 //! ## Mutations write back what the host just said
 //!
-//! Create, restart, and rename all record their reply
+//! Create, restart, rename, and archive all record their reply
 //! (`record_session`), and delete forgets (`forget_session`). Without
 //! that, the list — which is served from the recording, not from the host —
 //! would show the user their own successful action as a no-op for up to a
@@ -61,11 +61,10 @@ use tracing::warn;
 /// Query parameters for `GET /api/sessions` — the helm-level page walk
 /// (PLAN_M6.md item 5) and, as of PLAN_M6_75.md item 5, its filters.
 ///
-/// Everything here is absent-by-default, which is the whole compatibility
-/// story for this route's query string: it has only ever GAINED optional
-/// parameters, and a caller sending none gets a fresh unfiltered walk of the
-/// first [`aggregate::DEFAULT_PAGE_LIMIT`] entries — exactly what every
-/// pre-M6 caller sends.
+/// Everything except the archive inclusion switch is absent-by-default.
+/// A caller sending no query sees the ordinary, non-archived fleet view;
+/// `include_archived=true` widens that view without changing any of the
+/// search dimensions.
 ///
 /// The filter parameters are SPEC.md's session-list dimensions: host,
 /// parent, directory, profile, status, and title. Their match semantics live on
@@ -105,6 +104,10 @@ pub(crate) struct ListQuery {
     /// A limit of zero is refused too — it could never make progress through
     /// the pages.
     limit: Option<usize>,
+    /// Include archived sessions. They remain part of the fleet total even
+    /// when this default-off switch hides them from the result rows.
+    #[serde(default)]
+    include_archived: bool,
     /// Only sessions on this registered host (a `HostView::id`).
     host: Option<store::HostId>,
     /// Only direct children of this session id.
@@ -151,7 +154,7 @@ fn list_filter(q: &ListQuery) -> anyhow::Result<store::SessionFilter> {
             .filter(|text| !text.is_empty())
             .map(str::to_string)
     };
-    let mut filter = store::SessionFilter::default();
+    let mut filter = store::SessionFilter::default().include_archived(q.include_archived);
     if let Some(host) = q.host {
         filter = filter.host(host);
     }
@@ -194,11 +197,13 @@ fn list_filter(q: &ListQuery) -> anyhow::Result<store::SessionFilter> {
 /// The body keeps its M2 shape (`sessions`/`total`/`truncated`) with the
 /// host fields added to each row and `next_cursor` and `matching` added
 /// alongside, so the UI that predates multi-host keeps decoding it
-/// unchanged. `matching` is present only for a FILTERED request — an
-/// unfiltered listing makes no matching claim, and a client that wants a
-/// number substitutes `total`, which is what it would have been handed
-/// anyway (see [`aggregate::SessionPageBody::matching`] for why equating the
-/// two would have been a small lie). `total` now counts the merged view
+/// unchanged. `matching` is present whenever a predicate is active. That
+/// includes the ordinary request, whose implicit archive exclusion is a
+/// real predicate even though its false value is omitted from the query
+/// string. Only `include_archived=true` with no search dimensions is fully
+/// unfiltered and makes no matching claim (see
+/// [`aggregate::SessionPageBody::matching`] for why equating that claim with
+/// `total` would have been a small lie). `total` now counts the merged view
 /// rather than one supervisor's list, and `truncated` now means
 /// "there is a next page"
 /// rather than "entries were held back" — see [`aggregate::SessionPageBody`]
@@ -1245,8 +1250,7 @@ pub(crate) struct RenameReq {
 }
 
 /// `POST /api/sessions/{id}/rename` — SPEC.md's rename verb (PLAN_M5.md
-/// item 4), closing one of the two v1 client-surface operations
-/// unimplemented since M1 (archive is the other, deliberately M7's).
+/// item 4).
 ///
 /// Pure passthrough, deliberately: `req.title` reaches
 /// `SupervisorClient::rename_session` VERBATIM, with no trimming and no
@@ -1270,6 +1274,32 @@ pub(crate) async fn rename_session(
         Err(e) => return http_error(e),
     };
     match client.rename_session(&id, &req.title).await {
+        Ok(session) => {
+            record_session(&state, &claim, &session).await;
+            axum::Json(session).into_response()
+        }
+        Err(e) => http_error(e),
+    }
+}
+
+/// `POST /api/sessions/{id}/archive` — stop the session's agent and tabs,
+/// remove its terminal, and retain its metadata and attachments.
+///
+/// The supervisor returns the durable post-teardown state, including for an
+/// idempotent retry. Recording that exact reply before answering makes the
+/// default list hide the row immediately and publishes the ordinary
+/// changed-only fleet event. Owner routing happens first, so an archive on
+/// an unreachable host is refused with that host's state rather than
+/// pretending the retained session is missing.
+pub(crate) async fn archive_session(
+    State(state): State<Arc<AppState>>,
+    AxPath(id): AxPath<String>,
+) -> impl IntoResponse {
+    let (claim, client) = match route_session(&state, &id).await {
+        Ok(routed) => routed,
+        Err(e) => return http_error(e),
+    };
+    match client.archive_session(&id).await {
         Ok(session) => {
             record_session(&state, &claim, &session).await;
             axum::Json(session).into_response()
@@ -4273,7 +4303,10 @@ mod tests {
         );
         let (status, _) = get_json(
             &harness,
-            &format!("/api/sessions?limit={}", crate::aggregate::MAX_PAGE_LIMIT),
+            &format!(
+                "/api/sessions?include_archived=true&limit={}",
+                crate::aggregate::MAX_PAGE_LIMIT
+            ),
         )
         .await;
         assert_eq!(
@@ -4354,6 +4387,18 @@ mod tests {
         );
         assert_eq!(value["sessions"][0]["stale"], true);
         assert_eq!(value["sessions"][0]["host_name"], "user@remembered");
+
+        let (status, body) = post_text(
+            &restarted,
+            "/api/sessions/survivor/archive",
+            serde_json::json!({}),
+        )
+        .await;
+        assert_eq!(status, axum::http::StatusCode::CONFLICT);
+        assert!(
+            body.contains("unreachable-reprobing") && body.contains(&host.to_string()),
+            "archive must name the stale owner's host and current state: {body}"
+        );
 
         let (_, hosts) = get_json(&restarted, "/api/hosts").await;
         let row = hosts["hosts"]
@@ -4456,9 +4501,8 @@ mod tests {
         peer.abort();
     }
 
-    /// A restart's reply must reach the LIST immediately, not at the owning
-    /// host's next refresh tick — and a delete must leave it immediately
-    /// too.
+    /// Lifecycle mutation replies must reach the list immediately rather
+    /// than waiting for the owning host's next refresh tick.
     ///
     /// The browser suite caught both as user-visible lies. A restart of an
     /// exited session succeeded while the list went on saying `exited` for a
@@ -4468,7 +4512,7 @@ mod tests {
     /// the helm has RECORDED, so every mutation that changes what a session
     /// is — or whether it is — records the result.
     #[tokio::test]
-    async fn a_restart_and_a_rename_reach_the_list_without_waiting_for_a_refresh() {
+    async fn lifecycle_mutations_reach_the_list_without_waiting_for_a_refresh() {
         use farhelm_proto::ControlMsg;
         use farhelm_proto::io::{FrameReader, FrameWriter, handshake, parse_control};
 
@@ -4479,6 +4523,12 @@ mod tests {
         let (client_side, peer_side) = tokio::io::duplex(64 * 1024);
         let renamed = farhelm_proto::SessionInfo {
             title: "renamed-later".to_string(),
+            ..rest_harness::session("sess-1", 500)
+        };
+        let archived = farhelm_proto::SessionInfo {
+            archived: true,
+            title: "renamed-later".to_string(),
+            status: farhelm_proto::SessionStatus::Exited { exit_code: None },
             ..rest_harness::session("sess-1", 500)
         };
         let peer = tokio::spawn(async move {
@@ -4506,6 +4556,13 @@ mod tests {
                         .write_control(&ControlMsg::SessionRenamed {
                             req_id,
                             session: renamed.clone(),
+                        })
+                        .await
+                        .unwrap(),
+                    Ok(ControlMsg::ArchiveSession { req_id, .. }) => writer
+                        .write_control(&ControlMsg::SessionArchived {
+                            req_id,
+                            session: archived.clone(),
                         })
                         .await
                         .unwrap(),
@@ -4549,6 +4606,47 @@ mod tests {
         assert_eq!(
             after["sessions"][0]["title"], "renamed-later",
             "and a completed rename must not either"
+        );
+
+        let before_archive_revision = harness.manager.events().revision();
+        let (status, body) = post_text(
+            &harness,
+            "/api/sessions/sess-1/archive",
+            serde_json::json!({}),
+        )
+        .await;
+        assert_eq!(status, axum::http::StatusCode::OK, "{body}");
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(&body).unwrap()["archived"],
+            true
+        );
+        assert!(
+            harness.manager.events().revision() > before_archive_revision,
+            "recording a changed archive reply must wake feed subscribers"
+        );
+        let (_, ordinary) = get_json(&harness, "/api/sessions").await;
+        assert!(row_ids(&ordinary).is_empty());
+        assert_eq!(ordinary["matching"], 0);
+        assert_eq!(
+            ordinary["total"], 1,
+            "archive changes the default match set, not the fleet size"
+        );
+        let (_, retained) = get_json(&harness, "/api/sessions?include_archived=true").await;
+        assert_eq!(row_ids(&retained), vec!["sess-1"]);
+        assert_eq!(retained["sessions"][0]["archived"], true);
+
+        let archived_revision = harness.manager.events().revision();
+        let (status, body) = post_text(
+            &harness,
+            "/api/sessions/sess-1/archive",
+            serde_json::json!({}),
+        )
+        .await;
+        assert_eq!(status, axum::http::StatusCode::OK, "{body}");
+        assert_eq!(
+            harness.manager.events().revision(),
+            archived_revision,
+            "an idempotent archive reply must not publish another fleet revision"
         );
 
         // A delete is the quadrant the browser suite found missing: the row
@@ -5264,6 +5362,7 @@ mod tests {
             format!("/api/sessions?status=running&limit=1&cursor={cursor}"),
             format!("/api/sessions?profile=p-claude&status=exited&limit=1&cursor={cursor}"),
             format!("/api/sessions?profile=p-claude&parent=root-session&limit=1&cursor={cursor}"),
+            format!("/api/sessions?profile=p-claude&include_archived=true&limit=1&cursor={cursor}"),
         ] {
             let (status, body) = get_json(&harness, &changed).await;
             assert_eq!(
@@ -5288,8 +5387,8 @@ mod tests {
         assert_eq!(row_ids(&second), vec!["alpha-exited"]);
     }
 
-    /// An unfiltered list reports the fleet total and makes NO matching
-    /// claim — the `matching` key is absent from the body entirely.
+    /// The default list excludes archived rows, so it reports a matching
+    /// count beside the fleet total even when no text dimension is present.
     ///
     /// Reporting `total` there would have been the convenient answer and is
     /// not a true one: `total` counts every cached row including any whose
@@ -5301,23 +5400,19 @@ mod tests {
     /// A client that wants a number has `total` in hand and substitutes it,
     /// which is what it would have been handed anyway.
     #[tokio::test]
-    async fn an_unfiltered_list_makes_no_matching_claim() {
+    async fn the_default_archive_predicate_reports_both_counts() {
         let (harness, _local, _alpha) = filterable_fleet().await;
 
         let (status, value) = get_json(&harness, "/api/sessions").await;
         assert_eq!(status, axum::http::StatusCode::OK);
         assert_eq!(value["total"], 4);
-        assert_eq!(
-            value.get("matching"),
-            None,
-            "an unfiltered listing reports no matching count at all"
-        );
+        assert_eq!(value["matching"], 4);
 
         // Including when the page is cut for its LIMIT rather than a filter:
         // truncation says nothing about matching either way.
         let (_, value) = get_json(&harness, "/api/sessions?limit=1").await;
         assert_eq!(value["total"], 4);
-        assert_eq!(value.get("matching"), None);
+        assert_eq!(value["matching"], 4);
         assert_eq!(value["truncated"], true);
     }
 
@@ -5386,16 +5481,12 @@ mod tests {
         assert_eq!(row_ids(&value), vec!["spaced"]);
         assert_eq!(value["matching"], 1);
 
-        // The exactly-empty value is what clears it — and a cleared filter is
-        // an unfiltered request, which makes no matching claim.
+        // The exactly-empty value clears the TEXT dimension. The implicit
+        // archive exclusion remains, so this is still a counted predicate.
         let (_, value) = get_json(&harness, "/api/sessions?title=").await;
         assert_eq!(row_ids(&value), vec!["spaced", "plain"]);
         assert_eq!(value["total"], 2);
-        assert_eq!(
-            value.get("matching"),
-            None,
-            "clearing the last filter parameter leaves an unfiltered listing"
-        );
+        assert_eq!(value["matching"], 2);
     }
 
     /// A filtered page is capped lower than an unfiltered one, and the
@@ -5424,10 +5515,60 @@ mod tests {
             "the refusal must name the filtered cap: {body:?}"
         );
 
-        // The same limit is fine without a filter, which is what makes this
-        // a filtered cap rather than a lower cap for everyone.
-        let (status, _) = get_json(&harness, &format!("/api/sessions?limit={over}")).await;
+        // Removing the default archive predicate makes the same limit an
+        // ordinary bounded scan again.
+        let (status, _) = get_json(
+            &harness,
+            &format!("/api/sessions?include_archived=true&limit={over}"),
+        )
+        .await;
         assert_eq!(status, axum::http::StatusCode::OK);
+    }
+
+    /// Archived sessions stay in the fleet total, disappear from the
+    /// ordinary result set, and reappear only through the inclusion switch.
+    #[tokio::test]
+    async fn archived_sessions_are_hidden_by_default_and_included_on_request() {
+        let mut archived = filterable(
+            "archived",
+            200,
+            "/tmp/archive",
+            "retained",
+            farhelm_proto::SessionStatus::Exited { exit_code: None },
+            None,
+        );
+        archived.archived = true;
+        let harness = rest_harness::helm_listing(vec![
+            archived,
+            filterable(
+                "active",
+                100,
+                "/tmp/active",
+                "ordinary",
+                farhelm_proto::SessionStatus::Running,
+                None,
+            ),
+        ])
+        .await;
+
+        let (_, ordinary) = get_json(&harness, "/api/sessions").await;
+        assert_eq!(row_ids(&ordinary), vec!["active"]);
+        assert_eq!(ordinary["matching"], 1);
+        assert_eq!(ordinary["total"], 2);
+
+        let (_, limited) = get_json(&harness, "/api/sessions?limit=1").await;
+        assert_eq!(
+            row_ids(&limited),
+            vec!["active"],
+            "the newest archived row must be filtered before the page is cut"
+        );
+        assert_eq!(limited["matching"], 1);
+        assert_eq!(limited["total"], 2);
+
+        let (_, all) = get_json(&harness, "/api/sessions?include_archived=true").await;
+        assert_eq!(row_ids(&all), vec!["archived", "active"]);
+        assert!(all.get("matching").is_none());
+        assert_eq!(all["total"], 2);
     }
 
     /// A filtered walk's later pages report a count that is still TRUE: the

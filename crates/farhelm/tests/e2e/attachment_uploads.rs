@@ -5,6 +5,7 @@
 use crate::harness::*;
 
 use crate::terminal_backpressure::flood_session;
+use farhelm_supervisor::service::{ArchiveGate, ArchiveStage};
 
 // ---------------------------------------------------------------------
 // Attachment uploads (PLAN_M4.md item 4)
@@ -881,6 +882,169 @@ async fn a_delete_racing_an_upload_leaves_no_file_and_no_directory() {
             dir_names(&quarantine)
         );
     }
+}
+
+/// Archive cancels and joins a stalled transfer without calling the
+/// retained session deleted or allowing a partial file to publish.
+#[tokio::test]
+async fn archive_cancels_a_stalled_upload_truthfully_and_cleans_its_stage() {
+    let h = harness().await;
+    let (session, _work) = basic_session(&h).await;
+    let mut peer = RawPeer::connect(&h.sup).await;
+    let started = peer.begin(1, &session.id, 1, "partial.txt", 10).await;
+    assert!(matches!(started, ControlMsg::UploadStarted { .. }));
+    peer.chunk(1, b"half".to_vec()).await;
+
+    h.client
+        .archive_session(&session.id)
+        .await
+        .expect("archive joins the transfer it cancels");
+    let outcome = peer.next_outcome(20).await;
+    let ControlMsg::UploadAborted { channel, reason } = outcome else {
+        panic!("archive must abort the stalled upload, got: {outcome:?}");
+    };
+    assert_eq!(channel, 1);
+    assert!(reason.contains("archived"), "truthful reason: {reason}");
+    assert!(
+        !reason.contains("deleted"),
+        "archive is not deletion: {reason}"
+    );
+
+    let session_dir = farhelm_supervisor::attachments::session_dir(h.state.path(), &session.id);
+    let staging = farhelm_supervisor::attachments::staging_dir(h.state.path(), &session.id);
+    assert!(
+        session_dir.exists(),
+        "archive retains the attachment directory"
+    );
+    assert!(
+        dir_names(&staging).is_empty(),
+        "the partial stage must be removed"
+    );
+    assert!(
+        !session_dir.join("partial.txt").exists(),
+        "a cancelled partial upload must never publish"
+    );
+}
+
+/// A read-only archive preflight failure leaves an in-flight upload alone.
+///
+/// The archive reply says nothing was archived at these boundaries. That
+/// must cover the upload too: cancelling it before a pane, tab, scope, or
+/// sweep check fails would make the refusal itself a destructive result.
+#[tokio::test]
+async fn archive_preflight_failures_do_not_discard_uploads() {
+    for stage in [
+        ArchiveStage::PaneProbe,
+        ArchiveStage::TabRediscovery,
+        ArchiveStage::ScopeEnumeration,
+        ArchiveStage::Sweep,
+    ] {
+        let gate: ArchiveGate = Arc::new(move |reached| {
+            Box::pin(async move {
+                if reached == stage {
+                    anyhow::bail!("injected archive preflight failure at {stage:?}");
+                }
+                Ok(())
+            })
+        });
+        let h = harness_with_seams(
+            SupervisorTimeouts::default(),
+            SupervisorSeams {
+                archive_gate: Some(gate),
+                ..SupervisorSeams::default()
+            },
+        )
+        .await;
+        let (session, _work) = basic_session(&h).await;
+        let mut peer = RawPeer::connect(&h.sup).await;
+        let started = peer.begin(1, &session.id, 1, "survives.txt", 5).await;
+        assert!(matches!(started, ControlMsg::UploadStarted { .. }));
+        peer.chunk(1, b"alive".to_vec()).await;
+
+        h.client
+            .archive_session(&session.id)
+            .await
+            .expect_err("the injected preflight must refuse archive");
+        peer.control(&ControlMsg::CommitUpload {
+            req_id: 2,
+            channel: 1,
+        })
+        .await;
+        let outcome = peer.next_outcome(20).await;
+        assert!(
+            matches!(outcome, ControlMsg::UploadCommitted { req_id: 2, .. }),
+            "{stage:?} must leave the upload usable, got {outcome:?}"
+        );
+        wait_for_attachments(h.state.path(), &session.id, &["survives.txt"], 10).await;
+    }
+}
+
+/// A begin admitted after archive's transfer drain cannot start once the
+/// lifecycle claim is released.
+///
+/// Archive retains the row, so existence alone is not a sufficient staging
+/// check. The transfer must re-read `archived` under the same claim archive
+/// held through publication, otherwise it recreates writable attachment
+/// state behind the completed archive.
+#[tokio::test]
+async fn an_upload_waiting_behind_archive_is_refused_after_publication() {
+    let entered = Arc::new(tokio::sync::Notify::new());
+    let release = Arc::new(tokio::sync::Notify::new());
+    let gate_entered = Arc::clone(&entered);
+    let gate_release = Arc::clone(&release);
+    let gate: ArchiveGate = Arc::new(move |stage| {
+        let entered = Arc::clone(&gate_entered);
+        let release = Arc::clone(&gate_release);
+        Box::pin(async move {
+            if stage == ArchiveStage::ArtifactRemoval {
+                entered.notify_one();
+                release.notified().await;
+            }
+            Ok(())
+        })
+    });
+    let h = harness_with_seams(
+        SupervisorTimeouts::default(),
+        SupervisorSeams {
+            archive_gate: Some(gate),
+            ..SupervisorSeams::default()
+        },
+    )
+    .await;
+    let (session, _work) = basic_session(&h).await;
+    let archiver = connect_client(&h.sup).await;
+    let archive_id = session.id.clone();
+    let archive = tokio::spawn(async move { archiver.archive_session(&archive_id).await });
+    tokio::time::timeout(Duration::from_secs(5), entered.notified())
+        .await
+        .expect("archive reached the post-drain artifact boundary");
+
+    let mut peer = RawPeer::connect(&h.sup).await;
+    peer.control(&ControlMsg::BeginUpload {
+        req_id: 1,
+        session_id: session.id.clone(),
+        channel: 1,
+        filename: "too-late.txt".to_string(),
+        size: 1,
+    })
+    .await;
+    tokio::task::yield_now().await;
+    release.notify_waiters();
+    archive
+        .await
+        .expect("archive task")
+        .expect("archive completes");
+
+    let outcome = peer.next_outcome(20).await;
+    let ControlMsg::Error { kind, message, .. } = outcome else {
+        panic!("the post-drain begin must be refused, got {outcome:?}");
+    };
+    assert_eq!(kind, ErrorKind::InvalidRequest);
+    assert!(
+        message.contains("archived") && message.contains("restart"),
+        "the refusal must name the retained lifecycle state: {message}"
+    );
+    wait_for_attachments(h.state.path(), &session.id, &[], 10).await;
 }
 
 /// Every `BeginUpload` refusal, and the property they share: nothing is

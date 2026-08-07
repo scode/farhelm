@@ -300,6 +300,12 @@ const FILTER_UNSUPPORTED_NOTE: &str =
 ///   filter that happens to match everything still says so — a banner that
 ///   silently reverted to the unfiltered sentence would leave a user unsure
 ///   whether their filter took at all.
+///
+///   The default archive exclusion is one of those filters. It therefore
+///   says "N matching of M" even when every existing row is active and the
+///   two numbers happen to agree. `M` remains the fleet total, including
+///   archived rows; changing its meaning with the toggle would make the
+///   denominator move while the fleet did not.
 /// - **A filter the helm did not answer.** `matching` is absent only where
 ///   substituting a number would be a fabrication (`api::matching_count`),
 ///   and that case gets the unfiltered sentence plus a clause saying why —
@@ -414,6 +420,7 @@ mod tests {
             status: SessionStatus::Unknown,
             annotation: None,
             restart_offer: crate::RestartOffer::FreshOnly,
+            archived: false,
             tabs: Vec::new(),
             host: None,
             host_name: None,

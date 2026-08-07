@@ -217,18 +217,20 @@ test.describe("session list filtering", () => {
       ).toEqual([`needle-${stamp}`]);
     }
 
-    // Clearing widens it again, which is the edge an over-eager "treat blank
-    // as a filter" would break: an empty search box must ask for everything
-    // rather than for sessions whose title contains the empty string. The
-    // wire says which of the two happened — `?title=` and no parameter at all
-    // narrow to opposite things.
+    // Clearing removes the explicit title search and returns to the default
+    // view. That view still excludes archived sessions, so it is still a
+    // filter and the banner keeps both numbers: matching rows and the whole
+    // fleet. The wire distinguishes a cleared title from a search for the
+    // empty string — no `title` parameter versus `?title=`.
     await page.locator(".filter-clear").click();
     await expect(row(page, other.id)).toBeVisible({ timeout: 20_000 });
-    await expect(page.locator(".banner")).toHaveText(/^\d+ sessions$/);
+    await expect(page.locator(".banner")).toHaveText(/^\d+ matching of \d+ sessions$/);
     const cleared = reads.slice(filtered.length);
     expect(cleared.length, "clearing the filter must re-read the list").toBeGreaterThan(0);
     for (const read of cleared) {
-      expect(read.url.searchParams.has("title"), `${read.url} must ask for everything`).toBe(false);
+      expect(read.url.searchParams.has("title"), `${read.url} must clear the title search`).toBe(
+        false,
+      );
     }
   });
 

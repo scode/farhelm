@@ -189,9 +189,10 @@ body,
   outline: none;
 }
 
-/* Disabled for any of three reasons (see `SessionRow`'s own doc in
+/* Disabled while navigation or a row-local operation owns the action area
+   (see `SessionRow`'s own doc in
    list.rs): the list-wide nav lock (opening this row would navigate away
-   and unmount `ListView` mid-operation), or this row's OWN delete
+   and unmount `ListView` mid-operation), or this row's OWN lifecycle
    confirmation or rename field being open (cancel is the only way back to
    normal). Either way it must visibly stop being a normal clickable row
    rather than just silently failing to activate. */
@@ -200,7 +201,7 @@ body,
   cursor: default;
 }
 
-/* MT-8: while a prompt occupies the row — the inline delete confirm, or
+/* MT-8: while a prompt occupies the row — either lifecycle confirmation, or
    the rename field, which is why ONE modifier class covers both — the
    row's own open button is hidden outright rather than left `:disabled`
    and merely dimmed. `.session-row-main` is a non-wrapping flex row, and
@@ -217,21 +218,24 @@ body,
   display: none;
 }
 
-/* Stop/delete/confirm-delete/confirm-cancel: small, secondary-looking
+/* Lifecycle actions and confirmations: small, secondary-looking
    controls that stay out of the open button's way — plain text buttons
    rather than icons, matching the rest of M2's undecorated chrome
    (PLAN_M2.md). Box-model shape itself comes from `.btn` above; this
-   group only adds what differs, shared across all four rather than
-   duplicated per pair since the shape is identical. `flex-shrink: 0`
+   group only adds what differs, shared across every lifecycle control
+   rather than duplicated per pair since the shape is identical. `flex-shrink: 0`
    is deliberate, not a default left implicit: `.confirm-title` below is
    the ONE row member allowed to shrink under space pressure (a long
    title, say) — these buttons must stay full-size and reachable
    regardless, never the ones that give. */
 .session-row-rename,
 .session-row-stop,
+.session-row-archive,
 .session-row-delete,
 .confirm-delete,
 .confirm-cancel,
+.confirm-archive,
+.archive-cancel,
 .rename-submit,
 .rename-cancel {
   align-self: center;
@@ -954,7 +958,7 @@ body,
    filter something a user has to go looking for to explain a short list.
 
    A wrapping row rather than the create form's column, because these are
-   five short, independent dimensions rather than one form to fill in top to
+   several short, independent dimensions plus the archive switch rather than one form to fill in top to
    bottom — and wrapping is what keeps them all reachable at a narrow width
    instead of pushing the apply control off the edge. */
 .session-filter {
@@ -971,6 +975,16 @@ body,
   gap: 2px;
   font-size: 12px;
   color: #8a919e;
+}
+
+.session-filter .filter-archived {
+  flex-direction: row;
+  align-items: center;
+  padding-bottom: 5px;
+}
+
+.session-filter .filter-archived input {
+  width: auto;
 }
 
 .session-filter input,
@@ -1106,6 +1120,25 @@ body,
   padding: 6px 10px;
   background: #232833;
   font-size: 12px;
+}
+
+.archive-offer {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 14px;
+}
+
+.archive-error,
+.archived-notice {
+  color: #d08770;
+  padding: 8px 14px;
+}
+
+.archived-badge {
+  color: #b48ead;
+  font-size: 11px;
+  text-transform: uppercase;
 }
 
 .restart-offer-text {

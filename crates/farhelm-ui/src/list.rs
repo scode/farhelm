@@ -1,6 +1,6 @@
 //! The session list: `ListView` (the flat listing, its filter and search
-//! surface, and its stop/delete/create/rename actions), `SessionRow`
-//! (one row, including the inline delete confirmation and the inline
+//! surface, and its stop/delete/archive/create/rename actions), `SessionRow`
+//! (one row, including the inline lifecycle confirmations and the inline
 //! rename field), and
 //! `CreateSessionForm` (the "new session" inline form). All three are
 //! `ListView`'s own concern — none of them is meaningful mounted outside
@@ -46,9 +46,10 @@ use std::collections::{HashMap, HashSet};
 use dioxus::prelude::*;
 
 use crate::api::{
-    self, CreateAgent, SessionFilter, SessionListing, create_session, delete_session, fetch_hosts,
-    fetch_sessions, mint_intent_key, rename_session, stop_session,
+    self, CreateAgent, SessionFilter, SessionListing, archive_session, create_session,
+    delete_session, fetch_hosts, fetch_sessions, mint_intent_key, rename_session, stop_session,
 };
+use crate::archive::confirmation as archive_confirmation;
 use crate::feed::{fallback_polls_now, fallback_sleep, use_feed_reader};
 use crate::hosts::{HostsPanel, HostsRead, host_incarnation, is_connected, phase_label};
 use crate::ops::{OpLock, ReadGate, use_op_lock};
@@ -96,8 +97,31 @@ struct RowState {
     error: Option<String>,
     busy: bool,
     confirming: bool,
+    confirming_archive: bool,
     renaming: bool,
     nav_disabled: bool,
+}
+
+/// Which ordinary row controls exist for the current retention state.
+///
+/// Archive removes terminal lifecycle actions, not metadata management:
+/// an archived row can still be opened, renamed, or deleted, but cannot be
+/// stopped or archived a second time.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct RowControlVisibility {
+    rename: bool,
+    stop: bool,
+    archive: bool,
+    delete: bool,
+}
+
+fn row_control_visibility(archived: bool) -> RowControlVisibility {
+    RowControlVisibility {
+        rename: true,
+        stop: !archived,
+        archive: !archived,
+        delete: true,
+    }
 }
 
 /// One entry in the create dialog's host selector: everything that decides
@@ -527,6 +551,11 @@ pub(crate) fn ListView(on_open: EventHandler<Session>) -> Element {
     // at all (deleted from elsewhere, say) — there is no row left for a
     // dangling entry to ever affect, so this is tidiness, not correctness.
     let mut confirming = use_signal(HashSet::<String>::new);
+    // Archive has a distinct prompt because its consequence and mutation
+    // differ from delete's. Keeping the sets separate also makes the row's
+    // mutual exclusion explicit instead of overloading one flag with an
+    // action kind that every handler would then have to decode.
+    let mut confirming_archive = use_signal(HashSet::<String>::new);
     // Which row, if any, has its rename field open (PLAN_M5.md item 6),
     // and the text being typed into it.
     //
@@ -764,6 +793,15 @@ pub(crate) fn ListView(on_open: EventHandler<Session>) -> Element {
             confirming
                 .write()
                 .retain(|id| live_ids.contains(id.as_str()));
+            let active_ids: HashSet<&str> = listing
+                .sessions
+                .iter()
+                .filter(|session| !session.archived)
+                .map(|session| session.id.as_str())
+                .collect();
+            confirming_archive
+                .write()
+                .retain(|id| active_ids.contains(id.as_str()));
             // An open rename field for a session that has left the
             // listing entirely goes with it, the same tidiness the
             // `confirming` retain above performs — there is no row
@@ -1032,7 +1070,10 @@ pub(crate) fn ListView(on_open: EventHandler<Session>) -> Element {
         //
         // The same argument covers an open RENAME field, which replaces
         // the same buttons for the same reason.
-        if confirming.read().contains(&id) || renaming.read().as_deref() == Some(id.as_str()) {
+        if confirming.read().contains(&id)
+            || confirming_archive.read().contains(&id)
+            || renaming.read().as_deref() == Some(id.as_str())
+        {
             return;
         }
         // Re-entry guard for the per-session in-flight set: a disabled
@@ -1208,6 +1249,7 @@ pub(crate) fn ListView(on_open: EventHandler<Session>) -> Element {
     let mut do_delete_on_confirm = do_delete.clone();
     let on_delete = move |target: DeleteTarget| {
         if pending.read().contains(&target.id)
+            || confirming_archive.read().contains(&target.id)
             || renaming.read().as_deref() == Some(target.id.as_str())
         {
             return;
@@ -1293,6 +1335,54 @@ pub(crate) fn ListView(on_open: EventHandler<Session>) -> Element {
         confirming.write().remove(&id);
     };
 
+    // Archive shares the per-row operation gate with stop, rename, and
+    // delete, but it owns a separate confirmation. A successful response is
+    // followed by a list read because the applied archive switch decides
+    // whether the retained row disappears or changes in place; the client
+    // cannot repair the fleet-wide counts by editing one row itself.
+    let archive_base = base.clone();
+    let archive_refresh = request_listing.clone();
+    let mut do_archive = move |id: String| {
+        if !pending.write().insert(id.clone()) {
+            return;
+        }
+        errors.write().remove(&id);
+        let base = archive_base.clone();
+        let refresh = archive_refresh.clone();
+        spawn(async move {
+            match archive_session(&base, &id).await {
+                Ok(_) => refresh(Trigger::Explicit),
+                Err(e) => {
+                    errors.write().insert(id.clone(), format!("archive: {e}"));
+                }
+            }
+            pending.write().remove(&id);
+        });
+    };
+    let mut do_archive_on_confirm = do_archive.clone();
+    let on_archive = move |session: Session| {
+        if session.archived
+            || pending.read().contains(&session.id)
+            || confirming.read().contains(&session.id)
+            || renaming.read().as_deref() == Some(session.id.as_str())
+        {
+            return;
+        }
+        if archive_confirmation(&session, session.tabs.len()).is_some() {
+            confirming_archive.write().insert(session.id);
+        } else {
+            do_archive_on_confirm(session.id);
+        }
+    };
+    let confirm_archive = move |id: String| {
+        if confirming_archive.write().remove(&id) {
+            do_archive(id);
+        }
+    };
+    let cancel_archive = move |id: String| {
+        confirming_archive.write().remove(&id);
+    };
+
     // The rename button's click: opens this row's field, seeds the draft
     // from the title the row is showing right now, and never calls the API
     // — exactly as `on_delete` opens the confirm prompt. Refuses a row
@@ -1305,7 +1395,10 @@ pub(crate) fn ListView(on_open: EventHandler<Session>) -> Element {
     // from the current title while an edit already in progress is never
     // overwritten by a poll (see `renaming`/`rename_draft`).
     let on_rename_start = move |(id, title): (String, String)| {
-        if pending.read().contains(&id) || confirming.read().contains(&id) {
+        if pending.read().contains(&id)
+            || confirming.read().contains(&id)
+            || confirming_archive.read().contains(&id)
+        {
             return;
         }
         rename_draft.set(title);
@@ -1405,6 +1498,9 @@ pub(crate) fn ListView(on_open: EventHandler<Session>) -> Element {
     let on_delete = use_callback(on_delete);
     let confirm_delete = use_callback(confirm_delete);
     let cancel_delete = use_callback(cancel_delete);
+    let on_archive = use_callback(on_archive);
+    let confirm_archive = use_callback(confirm_archive);
+    let cancel_archive = use_callback(cancel_archive);
     let on_rename_start = use_callback(on_rename_start);
     let on_rename_submit = use_callback(on_rename_submit);
     let on_rename_cancel = use_callback(move |_| renaming.set(None));
@@ -1422,10 +1518,12 @@ pub(crate) fn ListView(on_open: EventHandler<Session>) -> Element {
     // than an option the user cannot even select to find out.
     let host_options: Vec<HostOption> = host_options(hosts.read().hosts().unwrap_or_default());
 
-    // Read from the APPLIED filter, not the draft: text typed but not yet
-    // submitted has changed no results and gives the clear button nothing
-    // to undo.
-    let filter_changed = filter.read().is_active();
+    // Whether the applied filter differs from the public default, for the
+    // clear control and empty-result line. The default still excludes
+    // archived rows, so `false` means "the documented default view", not
+    // "no predicate is active". Read from the applied filter rather than
+    // the draft because typed-but-unsubmitted text has changed no results.
+    let filter_changed = *filter.read() != SessionFilter::default();
     // The selector's own copy: the create form takes ownership of
     // `host_options` further down, and both surfaces want the same list —
     // the same hosts, called the same things, with the same phase labels.
@@ -1613,6 +1711,17 @@ pub(crate) fn ListView(on_open: EventHandler<Session>) -> Element {
                     oninput: move |evt| filter_draft.write().title = evt.value(),
                 }
             }
+            label { class: "filter-archived",
+                input {
+                    r#type: "checkbox",
+                    class: "filter-include-archived",
+                    checked: filter_draft.read().include_archived,
+                    onchange: move |evt| {
+                        filter_draft.write().include_archived = evt.checked();
+                    },
+                }
+                "include archived"
+            }
             button { r#type: "submit", class: "btn filter-apply", "filter" }
             button {
                 r#type: "button",
@@ -1735,6 +1844,9 @@ pub(crate) fn ListView(on_open: EventHandler<Session>) -> Element {
                                     error: errors.read().get(&session.id).cloned(),
                                     busy: pending.read().contains(&session.id),
                                     confirming: confirming.read().contains(&session.id),
+                                    confirming_archive: confirming_archive
+                                        .read()
+                                        .contains(&session.id),
                                     renaming: renaming.read().as_deref()
                                         == Some(session.id.as_str()),
                                     nav_disabled: nav_locked,
@@ -1745,6 +1857,9 @@ pub(crate) fn ListView(on_open: EventHandler<Session>) -> Element {
                                 on_delete,
                                 on_confirm_delete: confirm_delete,
                                 on_cancel_delete: cancel_delete,
+                                on_archive,
+                                on_confirm_archive: confirm_archive,
+                                on_cancel_archive: cancel_archive,
                                 on_rename_start,
                                 on_rename_submit,
                                 // The draft is deliberately left alone: the
@@ -2757,6 +2872,9 @@ fn SessionRow(
     on_delete: EventHandler<DeleteTarget>,
     on_confirm_delete: EventHandler<String>,
     on_cancel_delete: EventHandler<String>,
+    on_archive: EventHandler<Session>,
+    on_confirm_archive: EventHandler<String>,
+    on_cancel_archive: EventHandler<String>,
     on_rename_start: EventHandler<(String, String)>,
     on_rename_submit: EventHandler<(String, String)>,
     on_rename_cancel: EventHandler<()>,
@@ -2765,6 +2883,7 @@ fn SessionRow(
         error,
         busy,
         confirming,
+        confirming_archive,
         renaming,
         nav_disabled,
     } = state;
@@ -2781,18 +2900,23 @@ fn SessionRow(
         id: session.id.clone(),
         status: session.status.clone(),
     };
+    let archive_target = session.clone();
     let confirm_id = session.id.clone();
     let cancel_id = session.id.clone();
+    let confirm_archive_id = session.id.clone();
+    let cancel_archive_id = session.id.clone();
     let rename_start = (session.id.clone(), session.title.clone());
     let rename_submit_id = session.id.clone();
-    // The open button is removed from layout by the prompt or rename field.
-    // What the stylesheet needs to know is only that another control owns
-    // this row's action area. The reason is the one MT-8 recorded:
-    // `.session-row-main` is a non-wrapping flex row whose children have
-    // `min-width` floors, so anything that takes space beside this button is
-    // painted over by its overflowing content rather than laid out next to
-    // it.
-    let open_class = if confirming || renaming {
+    let controls = row_control_visibility(session.archived);
+    // The open button is removed from layout by EITHER prompt — one
+    // modifier class for both, since what the stylesheet needs to know is
+    // "a prompt occupies this row", not which one. The reason is the one
+    // MT-8 recorded: `.session-row-main` is a non-wrapping flex row whose
+    // children have `min-width` floors, so anything that takes space
+    // beside this button — the confirm prompt's elements, or the rename
+    // field — is painted over by the button's own overflowing content
+    // rather than laid out next to it.
+    let open_class = if confirming || confirming_archive || renaming {
         "session-row-open prompting"
     } else {
         "session-row-open"
@@ -2812,6 +2936,7 @@ fn SessionRow(
             class: row_class,
             "data-session-id": "{session.id}",
             "data-session-stale": "{session.stale}",
+            "data-session-archived": "{session.archived}",
             // Two stacked rows, not one: the buttons need a plain flex
             // ROW (see `.session-row-main` in app.css), but a per-session
             // error line needs its own full-width row underneath rather
@@ -2836,7 +2961,7 @@ fn SessionRow(
                     // the open button inert for the whole time a prompt is
                     // showing, rather than giving it a second, competing
                     // meaning as an implicit cancel.
-                    disabled: nav_disabled || confirming || renaming,
+                    disabled: nav_disabled || confirming || confirming_archive || renaming,
                     onclick: move |_| on_open.call(open_session.clone()),
                     // The host leads the row: with more than one machine in
                     // play it is the first thing that disambiguates two
@@ -2882,6 +3007,9 @@ fn SessionRow(
                     // than replaces `exited`.
                     if session.stale {
                         span { class: "stale-badge", "stale" }
+                    }
+                    if session.archived {
+                        span { class: "archived-badge", "archived" }
                     }
                     if let Some((badge_class, badge_text)) = badge {
                         span { class: "status-badge {badge_class}", "{badge_text}" }
@@ -2932,6 +3060,26 @@ fn SessionRow(
                         onclick: move |_| on_cancel_delete.call(cancel_id.clone()),
                         "cancel"
                     }
+                } else if confirming_archive {
+                    if let Some(consequence) = archive_confirmation(&session, session.tabs.len()) {
+                        span { class: "confirm-consequence", "{consequence}:" }
+                    } else {
+                        span { class: "confirm-consequence", "archiving removes the terminal:" }
+                    }
+                    span { class: "confirm-title", "\"{session.title}\"" }
+                    button {
+                        r#type: "button",
+                        class: "btn confirm-archive",
+                        onclick: move |_| on_confirm_archive.call(confirm_archive_id.clone()),
+                        "confirm archive"
+                    }
+                    button {
+                        r#type: "button",
+                        class: "btn archive-cancel",
+                        autofocus: true,
+                        onclick: move |_| on_cancel_archive.call(cancel_archive_id.clone()),
+                        "cancel"
+                    }
                 } else if renaming {
                     // The field takes the action area over exactly as the
                     // confirm prompt does, rather than sitting beside the
@@ -2957,26 +3105,41 @@ fn SessionRow(
                         on_cancel: move |_| on_rename_cancel.call(()),
                     }
                 } else {
-                    button {
-                        r#type: "button",
-                        class: "btn session-row-rename",
-                        disabled: busy,
-                        onclick: move |_| on_rename_start.call(rename_start.clone()),
-                        "rename"
+                    if controls.rename {
+                        button {
+                            r#type: "button",
+                            class: "btn session-row-rename",
+                            disabled: busy,
+                            onclick: move |_| on_rename_start.call(rename_start.clone()),
+                            "rename"
+                        }
                     }
-                    button {
-                        r#type: "button",
-                        class: "btn session-row-stop",
-                        disabled: busy,
-                        onclick: move |_| on_stop.call(stop_id.clone()),
-                        "stop"
+                    if controls.stop {
+                        button {
+                            r#type: "button",
+                            class: "btn session-row-stop",
+                            disabled: busy,
+                            onclick: move |_| on_stop.call(stop_id.clone()),
+                            "stop"
+                        }
                     }
-                    button {
-                        r#type: "button",
-                        class: "btn session-row-delete",
-                        disabled: busy,
-                        onclick: move |_| on_delete.call(delete_target.clone()),
-                        "delete"
+                    if controls.archive {
+                        button {
+                            r#type: "button",
+                            class: "btn session-row-archive",
+                            disabled: busy,
+                            onclick: move |_| on_archive.call(archive_target.clone()),
+                            "archive"
+                        }
+                    }
+                    if controls.delete {
+                        button {
+                            r#type: "button",
+                            class: "btn session-row-delete",
+                            disabled: busy,
+                            onclick: move |_| on_delete.call(delete_target.clone()),
+                            "delete"
+                        }
                     }
                 }
             }
@@ -2997,6 +3160,22 @@ fn SessionRow(
 mod tests {
     use super::*;
 
+    /// Revealing an archived row must keep its metadata actions while
+    /// withholding lifecycle controls that no longer have a terminal to act
+    /// on.
+    #[test]
+    fn archived_rows_keep_metadata_controls_without_lifecycle_controls() {
+        assert_eq!(
+            row_control_visibility(true),
+            RowControlVisibility {
+                rename: true,
+                stop: false,
+                archive: false,
+                delete: true,
+            }
+        );
+    }
+
     /// Repeated parent refreshes must update direct callback props in place
     /// without rerendering an otherwise unchanged session row.
     ///
@@ -3014,6 +3193,9 @@ mod tests {
             let on_delete = use_callback(|_: DeleteTarget| {});
             let on_confirm_delete = use_callback(|_: String| {});
             let on_cancel_delete = use_callback(|_: String| {});
+            let on_archive = use_callback(|_: Session| {});
+            let on_confirm_archive = use_callback(|_: String| {});
+            let on_cancel_archive = use_callback(|_: String| {});
             let on_rename_start = use_callback(|_: (String, String)| {});
             let on_rename_submit = use_callback(|_: (String, String)| {});
             let on_rename_cancel = use_callback(|_: ()| {});
@@ -3025,6 +3207,7 @@ mod tests {
                 status: SessionStatus::Exited { exit_code: Some(0) },
                 annotation: None,
                 restart_offer: crate::RestartOffer::FreshOnly,
+                archived: false,
                 tabs: Vec::new(),
                 host: None,
                 host_name: None,
@@ -3038,6 +3221,7 @@ mod tests {
                         error: None,
                         busy: false,
                         confirming: false,
+                        confirming_archive: false,
                         renaming: false,
                         nav_disabled: false,
                     },
@@ -3047,6 +3231,9 @@ mod tests {
                     on_delete,
                     on_confirm_delete,
                     on_cancel_delete,
+                    on_archive,
+                    on_confirm_archive,
+                    on_cancel_archive,
                     on_rename_start,
                     on_rename_submit,
                     on_rename_cancel,
