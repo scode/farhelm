@@ -1324,6 +1324,29 @@ mod tests {
         assert_eq!(read(b"PATH=/bin\0HOME=/root\0"), EnvironMarkers::default());
     }
 
+    /// Marker parsing returns only match flags and retains no environment
+    /// bytes, including the spawn credential beside the session id.
+    ///
+    /// This is deliberately a parser-boundary claim. It does not claim to
+    /// capture every future tracing call in the surrounding process scan; it
+    /// proves that no credential bytes survive in the value that scan code
+    /// can inspect or format after parsing.
+    #[test]
+    fn environ_marker_results_retain_no_spawn_credential_bytes() {
+        let secret = "credential-that-must-not-reach-logs";
+        let environ = format!(
+            "{}=abc-123\0{}={secret}\0",
+            crate::launch::SESSION_ID_ENV_VAR,
+            crate::launch::SESSION_TOKEN_ENV_VAR,
+        );
+        let markers = environ_markers(environ.as_bytes(), "abc-123", None);
+        assert!(markers.session);
+        assert!(
+            !format!("{markers:?}").contains(secret),
+            "the parser result contains match flags, never environment bytes"
+        );
+    }
+
     /// The two "any" flags answer a different question from their exact
     /// siblings — not "is this ours" but "has something already claimed
     /// this process for a kind of terminal" — and that difference is what

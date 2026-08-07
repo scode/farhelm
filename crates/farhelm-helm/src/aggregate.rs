@@ -1101,12 +1101,12 @@ mod tests {
     fn row(id: &str, created_at: i64, host: HostId) -> SessionRow {
         SessionRow {
             info: SessionInfo {
-                creation_seq: None,
                 parent: None,
                 archived: false,
                 id: id.to_string(),
                 title: id.to_string(),
                 created_at,
+                creation_seq: None,
                 cwd: "/tmp".to_string(),
                 invocation: "agent".to_string(),
                 status: SessionStatus::Running,

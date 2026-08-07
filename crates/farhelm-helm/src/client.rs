@@ -2678,12 +2678,12 @@ mod tests {
 
     fn session(id: &str) -> SessionInfo {
         SessionInfo {
-            creation_seq: None,
             parent: None,
             archived: false,
             id: id.into(),
             title: id.into(),
             created_at: 1_700_000_000,
+            creation_seq: None,
             cwd: format!("/{id}"),
             invocation: "agent".into(),
             status: farhelm_proto::SessionStatus::Running,

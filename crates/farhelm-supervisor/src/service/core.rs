@@ -44,7 +44,6 @@ use crate::agent_kind::{
     CaptureVerdict, CaptureWindow, CaptureWindowBounds, IntegrationSnapshot, RecordStamp,
 };
 use crate::launch::{LaunchSpec, resolve_shell, window_command};
-#[cfg(test)]
 use crate::store::DedupScope;
 use crate::store::{
     Claimed, IntentClaim, LastOutcome, ProfileSnapshot, Reservation, ReservationOutcome,
@@ -955,6 +954,9 @@ pub(crate) fn create_fingerprint(
         (parent, CreateMode::ProfileName { profile_name }) => {
             serde_json::to_string(&("profile_name", parent, cwd, title, profile_name))
         }
+        (parent, CreateMode::DerivedProfile) => {
+            serde_json::to_string(&("derived_profile", parent, cwd, title))
+        }
     }
     .expect("a fingerprint of strings and options always serializes")
 }
@@ -1118,6 +1120,9 @@ enum Resolution {
     /// Nothing was ever launched under this reservation, so the caller
     /// performs the create under it — same key, same identities.
     Relaunch(Box<Reservation>),
+    /// A bounded reservation outlived its child and was pruned. The caller
+    /// proceeds exactly as if the key had never been claimed.
+    Fresh,
 }
 
 /// What is known about whether a reserved launch reached tmux; see
@@ -1161,6 +1166,8 @@ fn unrecorded_outcome(original: anyhow::Error, settle: anyhow::Error) -> anyhow:
 /// checked" — `Supervisor::launch_session` performs no validation of its
 /// own and would have no way to.
 struct LaunchRequest<'a> {
+    /// Direct organizational parentage, persisted verbatim with the child.
+    parent: Option<String>,
     /// The working directory AS THE CALLER SPELLED IT — what the session
     /// records and what every error names, symlinks and all. Deliberately
     /// not the resolved spelling: see `store::StoredSession::canonical_cwd`
@@ -1222,14 +1229,14 @@ struct LaunchRequest<'a> {
 /// The launch inputs retained after a create's wire shape is fingerprinted.
 ///
 /// A bundle rather than a parameter list because the idempotency state
-/// machine threads these through three functions unchanged. `parent` is
-/// absent deliberately: item 2 binds it into the fingerprint before this
-/// point, while PLAN_M7.md item 4 gives it serving semantics. Terminal
-/// dimensions ride along despite shaping the attachment rather than the
-/// session (and are deliberately absent from the fingerprint), since the
-/// launch does need them.
+/// machine threads these through three functions unchanged. `parent`
+/// travels with the durable session after being bound into the fingerprint.
+/// Terminal dimensions ride along despite shaping the attachment rather
+/// than the session (and are deliberately absent from the fingerprint),
+/// since the launch does need them.
 pub(crate) struct CreateInputs<'a> {
     pub(crate) cwd: &'a str,
+    pub(crate) parent: Option<String>,
     /// Which launch selector this request chose, already resolved to one.
     pub(crate) mode: CreateMode,
     pub(crate) title: Option<String>,
@@ -1243,8 +1250,8 @@ pub(crate) struct CreateInputs<'a> {
 /// A resolved value rather than a pair of `Option`s, so that everything
 /// downstream of `handlers::create_mode` is working from a request whose
 /// meaning is settled: there is deliberately no way to construct a
-/// `CreateMode` that names multiple selectors, no selector, or a profile alongside
-/// the raw-mode overrides. The overrides live INSIDE the raw variant for
+/// `CreateMode` that names multiple selectors, no selector, or a profile
+/// alongside the raw-mode overrides. The overrides live INSIDE the raw variant for
 /// that last reason — an earlier shape carried them beside the mode as
 /// their own fields, which made "a profile-backed create must not carry
 /// these" an invariant maintained by comment and `debug_assert` rather than
@@ -1271,10 +1278,13 @@ pub(crate) enum CreateMode {
     /// its submit fails the create visibly, before any launch, with no
     /// session left behind.
     Profile { profile_id: String },
-    /// The caller named a profile by its human-facing name. Resolution is
-    /// deliberately absent until PLAN_M7.md item 4 can do it atomically
-    /// with restricted-peer admission and reservation creation.
+    /// The caller named a profile by its human-facing name. Validation
+    /// resolves the exact name atomically inside create and refuses zero or
+    /// multiple matches with the candidates named.
     ProfileName { profile_name: String },
+    /// A restricted spawn omitted `--agent`; resolve the host's last-used
+    /// profile during validation without granting catalog-read authority.
+    DerivedProfile,
 }
 
 /// Everything durable a session knows about resuming itself: its
@@ -1350,6 +1360,15 @@ impl Reserved {
         match self {
             Reserved::Unkeyed(identity) | Reserved::New { identity, .. } => &identity.tmux_name,
             Reserved::Retry(reservation) => &reservation.tmux_name,
+        }
+    }
+
+    /// The reservation window this launch is running under, if keyed.
+    fn dedup_scope(&self) -> Option<DedupScope> {
+        match self {
+            Reserved::Unkeyed(_) => None,
+            Reserved::New { claim, .. } => Some(claim.dedup_scope),
+            Reserved::Retry(reservation) => Some(reservation.dedup_scope),
         }
     }
 
@@ -2764,6 +2783,20 @@ impl Supervisor {
         // own confidentiality (see `SessionStore::open`'s docs), so it
         // must not be opened before this call.
         crate::ensure_private_dir(state_dir).await?;
+        let farhelm_exe = if farhelm_exe.is_absolute() {
+            farhelm_exe
+        } else {
+            std::env::current_dir()
+                .context("reading the supervisor's working directory")?
+                .join(farhelm_exe)
+        };
+        // Store one absolute spelling after creation. Every injected
+        // socket path derives from this value, so a supervisor started
+        // with a relative `--state-dir` cannot hand a tab or agent a path
+        // that resolves against that process's unrelated working directory.
+        let state_dir = tokio::fs::canonicalize(state_dir)
+            .await
+            .context("resolving the supervisor state directory")?;
         crate::ensure_private_dir(&state_dir.join("launch")).await?;
         // Items 6/24: a durable sentinel (`crate::files` module docs) is
         // only as durable as ITS OWN DIRECTORY'S directory-entry — a
@@ -2776,7 +2809,7 @@ impl Supervisor {
         // idempotent enough to pay unconditionally on every startup
         // rather than only detecting "was `launch/` actually freshly
         // created this time."
-        tokio::fs::File::open(state_dir)
+        tokio::fs::File::open(&state_dir)
             .await?
             .sync_all()
             .await
@@ -2791,7 +2824,7 @@ impl Supervisor {
         // incumbent and a predecessor's live sessions recorded as ended —
         // and for why an unclaimed supervisor is still constructible
         // rather than fatal here.
-        let ownership = StateDirOwnership::claim(state_dir)?;
+        let ownership = StateDirOwnership::claim(&state_dir)?;
         if ownership.is_none() {
             warn!(
                 state_dir = %state_dir.display(),
@@ -2838,7 +2871,7 @@ impl Supervisor {
         // (see `SupervisorTimeouts::tmux_exchange`) actually reach the
         // driver every attach and send-keys call goes through.
         let tmux = TmuxDriver::new_with_timeouts(
-            state_dir,
+            &state_dir,
             crate::tmux::TmuxBudgets {
                 exchange: timeouts.tmux_exchange,
                 pane_list: timeouts.tmux_pane_list,
@@ -2864,10 +2897,10 @@ impl Supervisor {
         }
         let capture_window = seams.capture_window;
         let (sessions, may_record) =
-            Self::reload_sessions(state_dir, &store, &tmux, &seams, ownership.is_some()).await?;
+            Self::reload_sessions(&state_dir, &store, &tmux, &seams, ownership.is_some()).await?;
 
         let supervisor = Arc::new(Supervisor {
-            state_dir: state_dir.to_path_buf(),
+            state_dir,
             tmux,
             store,
             host_identity,
@@ -3566,12 +3599,12 @@ impl Supervisor {
                 row.id.clone(),
                 Arc::new(SessionEntry {
                     info: SessionInfo {
-                        creation_seq: None,
-                        parent: None,
+                        parent: row.parent,
                         archived: false,
                         id: row.id,
                         title: row.title,
                         created_at: row.created_at,
+                        creation_seq: Some(row.creation_seq),
                         cwd: row.cwd,
                         invocation: row.invocation,
                         // Placeholder only: `ListSessions` recomputes
@@ -3998,6 +4031,10 @@ impl Supervisor {
             Some(reservation) => match self.resolve_reservation(reservation, &claim).await {
                 Resolution::Answer(answer) => return *answer,
                 Resolution::Relaunch(reservation) => Reserved::Retry(reservation),
+                Resolution::Fresh => Reserved::New {
+                    claim: claim.clone(),
+                    identity: new_session_identity(),
+                },
             },
             None => Reserved::New {
                 claim: claim.clone(),
@@ -4036,6 +4073,7 @@ impl Supervisor {
         self.create_session(
             CreateInputs {
                 cwd,
+                parent: None,
                 mode: CreateMode::Raw {
                     invocation: invocation.to_string(),
                     agent_kind: None,
@@ -4080,24 +4118,29 @@ impl Supervisor {
     ///
     /// ## Profile resolution (PLAN_M6_75.md item 4)
     ///
-    /// A profile-backed create resolves its profile FIRST, and everything
-    /// after that point is identical to a raw create: the profile's
+    /// A profile-backed create resolves its profile FIRST, whether the caller
+    /// selected its stable id, selected its human-facing name, or omitted a
+    /// selector on an authenticated spawn and asked for the host's last-used
+    /// profile. Everything after that point is identical to a raw create: the profile's
     /// invocation, kind, and template feed the very same
     /// [`IntegrationSnapshot::resolve`] seam a raw create's overrides do,
     /// so a session created from a profile carries an ordinary immutable
     /// snapshot with no second code path behind it. What the profile adds
     /// is the source-profile identity recorded beside that snapshot.
     ///
-    /// An unknown profile is refused right here — a precondition failure in
-    /// SPEC.md's split, so no session exists and nothing was launched — and
-    /// it is a REAL race rather than a malformed request: a profile can be
-    /// deleted between the client reading its picker and submitting. It is
-    /// therefore refused rather than quietly resolved to some other
-    /// profile, which would launch an agent the user never asked for. Being
-    /// a validation refusal, it is also recorded against a keyed create's
-    /// intent key like every other precondition, so a retry replays the
-    /// same answer instead of re-deriving it from a catalog that may have
-    /// changed again.
+    /// An unknown id is `NotFound`: the profile can be deleted between a
+    /// picker read and submit, so the caller must refresh and pick again. A
+    /// name with zero or multiple exact matches is `InvalidRequest` and names
+    /// the available or matching candidates, so `--agent` can be made
+    /// unambiguous. A selectorless spawn also returns `InvalidRequest` when
+    /// there is no last-used source, or when that source profile has since
+    /// been deleted; its remedy is an explicit `--agent <profile-name>`.
+    /// None of these paths silently chooses another profile, since that would
+    /// launch an agent the user never asked for.
+    ///
+    /// Each refusal is recorded against a keyed create like every other
+    /// precondition, so a retry replays the same answer instead of resolving
+    /// against a catalog or host default that may have changed again.
     ///
     /// A method rather than an associated function since PLAN_M6_75.md item
     /// 4: resolving a profile needs the store.
@@ -4107,6 +4150,7 @@ impl Supervisor {
     ) -> anyhow::Result<LaunchRequest<'a>> {
         let CreateInputs {
             cwd,
+            parent,
             mode,
             title,
             cols,
@@ -4163,15 +4207,98 @@ impl Supervisor {
                     }),
                 )
             }
-            CreateMode::ProfileName { .. } => {
-                return Err(RequestError::new(
-                    ErrorKind::InvalidRequest,
-                    // This PR fixes and fingerprints the vocabulary only.
-                    // PLAN_M7.md item 4 replaces this seam with atomic name
-                    // resolution before reservation or launch.
-                    "profile-name session creation is not available in this build",
+            CreateMode::ProfileName { profile_name } => {
+                let profiles = self
+                    .store
+                    .profiles()
+                    .await
+                    .context("reading the profile catalog to resolve this create's name")?;
+                let candidates = profiles
+                    .iter()
+                    .map(|profile| format!("{} ({})", profile.name, profile.id))
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                let mut matches = profiles
+                    .into_iter()
+                    .filter(|profile| profile.name == profile_name)
+                    .collect::<Vec<_>>();
+                let profile =
+                    match matches.len() {
+                        1 => matches.pop().expect("one profile match was counted"),
+                        0 => {
+                            return Err(RequestError::new(
+                            ErrorKind::InvalidRequest,
+                            format!(
+                                "no profile named {} exists on this host; available profiles: {}",
+                                truncate_for_error(&profile_name),
+                                if candidates.is_empty() { "none" } else { &candidates }
+                            ),
+                        )
+                        .into());
+                        }
+                        _ => {
+                            let matches = matches
+                                .iter()
+                                .map(|profile| format!("{} ({})", profile.name, profile.id))
+                                .collect::<Vec<_>>()
+                                .join(", ");
+                            return Err(RequestError::new(
+                                ErrorKind::InvalidRequest,
+                                format!(
+                                    "profile name {} is ambiguous; matching candidates: {matches}",
+                                    truncate_for_error(&profile_name)
+                                ),
+                            )
+                            .into());
+                        }
+                    };
+                (
+                    profile.invocation,
+                    Some(profile.agent_kind),
+                    profile.resume_template,
+                    Some(ProfileSnapshot {
+                        id: profile.id,
+                        name: profile.name,
+                    }),
                 )
-                .into());
+            }
+            CreateMode::DerivedProfile => {
+                let source = self
+                    .store
+                    .latest_source_profile()
+                    .await
+                    .context("deriving this host's last-used profile")?
+                    .ok_or_else(|| {
+                        RequestError::new(
+                            ErrorKind::InvalidRequest,
+                            "no profile has been used on this host; pass --agent <profile-name>",
+                        )
+                    })?;
+                let profile = self
+                    .store
+                    .profile(&source.id)
+                    .await
+                    .context("reading this host's last-used profile")?
+                    .ok_or_else(|| {
+                        RequestError::new(
+                            ErrorKind::InvalidRequest,
+                            format!(
+                                "the last-used profile {} ({}) no longer exists; pass --agent \
+                                 <profile-name> instead of guessing an older default",
+                                truncate_for_error(&source.name),
+                                truncate_for_error(&source.id)
+                            ),
+                        )
+                    })?;
+                (
+                    profile.invocation,
+                    Some(profile.agent_kind),
+                    profile.resume_template,
+                    Some(ProfileSnapshot {
+                        id: profile.id,
+                        name: profile.name,
+                    }),
+                )
             }
         };
         let cwd_path = PathBuf::from(cwd);
@@ -4296,6 +4423,7 @@ impl Supervisor {
             }
         };
         Ok(LaunchRequest {
+            parent,
             cwd,
             // A create has no prior identity to have verified, and the
             // canonicalization above is deliberately allowed to fail
@@ -4390,6 +4518,7 @@ impl Supervisor {
                 .map_err(|message| RequestError::new(ErrorKind::InvalidRequest, message))?;
         }
         Ok(LaunchRequest {
+            parent: row.parent,
             cwd: inputs.cwd,
             // The path `ensure_cwd_identity` just VERIFIED, so the launch
             // cannot be aimed somewhere else by a symlink repointed between
@@ -4437,18 +4566,34 @@ impl Supervisor {
             )
             .into())));
         }
+        if reservation.dedup_scope == DedupScope::SessionLifetime {
+            match self
+                .store
+                .prune_orphaned_bounded_reservation(
+                    &reservation.intent_key,
+                    &reservation.session_id,
+                )
+                .await
+            {
+                Ok(true) => return Resolution::Fresh,
+                Ok(false) => {}
+                Err(error) => return Resolution::Answer(Box::new(Err(error))),
+            }
+        }
         match &reservation.outcome {
             // Settled either way: the answer is whatever was recorded, and
             // `answer_from` is the one place that decides what that means
             // so every caller of it agrees (`ReservationOutcome::Failed`'s
             // own docs on why the kind rides along with the message).
             ReservationOutcome::Created | ReservationOutcome::Failed { .. } => {
-                Resolution::Answer(Box::new(self.answer_from(&reservation).await))
+                self.replay_resolution(&reservation, self.answer_from(&reservation).await)
+                    .await
             }
             ReservationOutcome::Pending => {
                 match self.reserved_launch_evidence(&reservation).await {
                     LaunchEvidence::Present => {
-                        Resolution::Answer(Box::new(self.settle_and_replay(&reservation).await))
+                        let answer = self.settle_and_replay(&reservation).await;
+                        self.replay_resolution(&reservation, answer).await
                     }
                     LaunchEvidence::Absent => Resolution::Relaunch(Box::new(reservation)),
                     // Neither relaunch nor replay: this process cannot tell
@@ -4466,6 +4611,39 @@ impl Supervisor {
                 }
             }
         }
+    }
+
+    /// Recheck a failed bounded replay against concurrent deletion.
+    ///
+    /// The first orphan prune can linearize before deletion while the row
+    /// still exists. If replay then finds it gone, deletion either removed
+    /// the reservation too or left it eligible for this second atomic
+    /// prune. Both cases mean the key is fresh, never a permanent-style
+    /// conflict.
+    async fn replay_resolution(
+        &self,
+        reservation: &Reservation,
+        answer: anyhow::Result<SessionInfo>,
+    ) -> Resolution {
+        if answer.is_err() && reservation.dedup_scope == DedupScope::SessionLifetime {
+            let pruned = self
+                .store
+                .prune_orphaned_bounded_reservation(
+                    &reservation.intent_key,
+                    &reservation.session_id,
+                )
+                .await;
+            match pruned {
+                Ok(true) => return Resolution::Fresh,
+                Ok(false) => match self.store.reservation(&reservation.intent_key).await {
+                    Ok(None) => return Resolution::Fresh,
+                    Ok(Some(_)) => {}
+                    Err(error) => return Resolution::Answer(Box::new(Err(error))),
+                },
+                Err(error) => return Resolution::Answer(Box::new(Err(error))),
+            }
+        }
+        Resolution::Answer(Box::new(answer))
     }
 
     /// What is durably known about whether a reserved launch ever reached
@@ -4653,13 +4831,13 @@ impl Supervisor {
                     existence: ProfileExistence::Present,
                 });
                 let info = SessionInfo {
-                    creation_seq: None,
-                    parent: None,
+                    parent: row.parent,
                     archived: false,
                     restart_offer: snapshot.restart_offer(row.captured_conversation.as_deref()),
                     id: row.id,
                     title: row.title,
                     created_at: row.created_at,
+                    creation_seq: Some(row.creation_seq),
                     cwd: row.cwd,
                     invocation: row.invocation,
                     status: SessionStatus::Unknown,
@@ -4828,6 +5006,7 @@ impl Supervisor {
         reserved: &Reserved,
     ) -> anyhow::Result<SessionInfo> {
         let LaunchRequest {
+            parent,
             cwd,
             launch_cwd,
             invocation,
@@ -4844,6 +5023,8 @@ impl Supervisor {
         // crashed attempt and this retry survives in SQLite, and the reply
         // and the published entry built from here have to agree with it.
         let mut title = title;
+        let mut creation_seq = 0;
+        let mut session_token = None;
         let id = reserved.session_id().to_string();
         let tmux_name = reserved.tmux_name().to_string();
         // Decided ONCE, here, and carried into every durable write below —
@@ -4911,8 +5092,10 @@ impl Supervisor {
             // identity to the intent key.
             let row = StoredSession {
                 id: id.clone(),
+                parent: parent.clone(),
                 title: title.clone(),
                 created_at,
+                creation_seq: 0,
                 cwd: cwd.to_string(),
                 invocation: invocation.clone(),
                 tmux_name: tmux_name.clone(),
@@ -4987,10 +5170,14 @@ impl Supervisor {
                 // could already have shown.
                 RetryClaim::Acquired {
                     created_at: preserved,
+                    creation_seq: preserved_sequence,
                     title: preserved_title,
+                    session_token: preserved_token,
                 } => {
                     created_at = preserved;
+                    creation_seq = preserved_sequence;
                     title = preserved_title;
+                    session_token = Some(preserved_token);
                 }
                 RetryClaim::Resolved(settled) => return self.answer_from(&settled).await,
                 RetryClaim::Launched => return self.settle_and_replay(reservation).await,
@@ -5031,8 +5218,10 @@ impl Supervisor {
                 .insert_session(
                     StoredSession {
                         id: id.clone(),
+                        parent: parent.clone(),
                         title: title.clone(),
                         created_at,
+                        creation_seq: 0,
                         cwd: cwd.to_string(),
                         invocation: invocation.clone(),
                         tmux_name: tmux_name.clone(),
@@ -5064,17 +5253,19 @@ impl Supervisor {
                 )
                 .await
                 .context("recording new session in the database")?;
-            if let Claimed::TakenBy(winner) = claimed {
-                // Someone else holds this key. Nothing was committed, so
-                // there is nothing to roll back and nothing of ours to
-                // settle — the honest answer is the WINNER's, which is what
-                // a replay of that key would have returned had this request
-                // arrived a moment later. Only reachable past the per-key
-                // lock, i.e. from a second process, which the
-                // state-directory claim already excludes; handled rather
-                // than asserted because "cannot happen" is a poor thing to
-                // stake a duplicate agent on.
-                return self.answer_from(&winner).await;
+            match claimed {
+                Claimed::Ours {
+                    session_token: inserted_token,
+                    creation_seq: inserted_sequence,
+                } => {
+                    session_token = Some(inserted_token);
+                    creation_seq = inserted_sequence;
+                }
+                Claimed::TakenBy(winner) => {
+                    // Someone else holds this key. Nothing was committed,
+                    // so the honest answer is the winner's.
+                    return self.answer_from(&winner).await;
+                }
             }
         }
         // Deliberately BEFORE the cleanup-bearing paths below: a simulated
@@ -5082,9 +5273,14 @@ impl Supervisor {
         // as a real one would, with nothing tidied up after it.
         self.simulate_crash(CreateStage::AfterRecord)?;
 
+        let session_token = session_token.ok_or_else(|| {
+            anyhow::anyhow!("session {id} committed without returning its spawn credential")
+        })?;
+
         let spawned = self
             .spawn_agent(
                 &id,
+                &session_token,
                 0,
                 &tmux_name,
                 argv,
@@ -5207,8 +5403,7 @@ impl Supervisor {
         self.simulate_crash(CreateStage::DuringLaunch)?;
 
         let info = SessionInfo {
-            creation_seq: None,
-            parent: None,
+            parent,
             archived: false,
             id: id.clone(),
             title,
@@ -5219,6 +5414,7 @@ impl Supervisor {
             // read clock value; see `StoredSession::created_at`'s docs for
             // why a retry in particular must not re-mint.
             created_at,
+            creation_seq: Some(creation_seq),
             cwd: cwd.to_string(),
             invocation: invocation.clone(),
             // Create-time placeholder, deliberately NOT a live status:
@@ -5281,13 +5477,22 @@ impl Supervisor {
             // agent behind with no row that knows about them. Reported as
             // the same spent-key `Conflict` a replay for a deleted session
             // gets, because that is what the client is looking at.
+            let reusable = reserved.dedup_scope() == Some(DedupScope::SessionLifetime);
             let mut error = anyhow::Error::new(RequestError::new(
                 ErrorKind::Conflict,
-                format!(
-                    "session {} was deleted while it was being created, so the launch was \
-                     torn back down; it will not be recreated under the same intent key",
-                    truncate_for_error(&id)
-                ),
+                if reusable {
+                    format!(
+                        "session {} was deleted while it was being created, so the launch was \
+                         torn back down; its bounded intent key is reusable",
+                        truncate_for_error(&id)
+                    )
+                } else {
+                    format!(
+                        "session {} was deleted while it was being created, so the launch was \
+                         torn back down; it will not be recreated under the same intent key",
+                        truncate_for_error(&id)
+                    )
+                },
             ));
             // The PROCESS tree first, tmux second. Killing the tmux
             // session ends the pane's own process group and nothing else:
@@ -6069,6 +6274,24 @@ impl Supervisor {
                 }
             },
         };
+        // Read every fallible durable launch input before removing a
+        // snapshot, killing a tmux husk, or shrinking a reusable pane. A
+        // credential read failure must leave the previous terminal exactly
+        // as it was rather than strand the temporary relaunch geometry.
+        let session_token = match self.store.session_token(&id).await {
+            Ok(Some(token)) => token,
+            Ok(None) => {
+                return Err(RelaunchFailure::definitive(anyhow::anyhow!(
+                    "session {} vanished before its spawn credential could be read",
+                    truncate_for_error(&id)
+                )));
+            }
+            Err(error) => {
+                return Err(RelaunchFailure::definitive(
+                    error.context("reading this session's spawn credential for a relaunch"),
+                ));
+            }
+        };
         // A snapshot stored for the PREVIOUS run must not survive into this
         // one: `Attach`'s dead-pane replay would otherwise show the old
         // run's last screen as if it were the new run's, the moment the new
@@ -6124,6 +6347,7 @@ impl Supervisor {
         let spawned = self
             .spawn_agent(
                 &id,
+                &session_token,
                 generation,
                 &tmux_name,
                 argv,
@@ -6497,8 +6721,7 @@ impl Supervisor {
             )
         };
         let info = SessionInfo {
-            creation_seq: None,
-            parent: None,
+            parent: entry.info.parent.clone(),
             archived: false,
             id: entry.info.id.clone(),
             title: entry.info.title.clone(),
@@ -6506,6 +6729,7 @@ impl Supervisor {
             // a new session — carried forward from the entry being
             // replaced, never re-derived from "now".
             created_at: entry.info.created_at,
+            creation_seq: entry.info.creation_seq,
             cwd: entry.info.cwd.clone(),
             invocation: entry.info.invocation.clone(),
             // Deliberately not a fabricated live status: the pane exists, but
@@ -7075,6 +7299,17 @@ impl Supervisor {
         ensure_cwd_usable(&entry.info.cwd)
             .await
             .map_err(|e| RequestError::new(error_kind(&e), format!("{e:#}")))?;
+        let session_token = self
+            .store
+            .session_token(session_id)
+            .await
+            .map_err(|e| RequestError::new(ErrorKind::Internal, format!("{e:#}")))?
+            .ok_or_else(|| {
+                RequestError::new(
+                    ErrorKind::NotFound,
+                    format!("no such session: {}", truncate_for_error(session_id)),
+                )
+            })?;
 
         // Everything past here is destructive or owes cleanup, so it runs
         // on a task this supervisor owns and the lifecycle claim moves
@@ -7085,7 +7320,8 @@ impl Supervisor {
         let cwd = entry.info.cwd.clone();
         let task = tokio::spawn(async move {
             let _lifecycle = lifecycle;
-            sup.open_tab_window(&session_id, &agent, &cwd).await
+            sup.open_tab_window(&session_id, &session_token, &agent, &cwd)
+                .await
         });
         match task.await {
             Ok(result) => result,
@@ -7099,9 +7335,42 @@ impl Supervisor {
     /// [`Self::open_tab`]'s side-effecting half, split out so the whole of
     /// it runs on one supervisor-owned task; see that method for the
     /// ordering argument.
+    fn tab_environment(
+        &self,
+        session_id: &str,
+        session_token: &str,
+        tab_id: &str,
+    ) -> Vec<(String, String)> {
+        let mut env = self.seams.launch_env.clone();
+        // The id, token, and socket are one spawn authority. Keeping their
+        // construction together prevents a tab-only change from restoring
+        // the pre-upgrade state where the id existed but spawn still failed.
+        env.push((
+            crate::launch::SESSION_ID_ENV_VAR.to_string(),
+            session_id.to_string(),
+        ));
+        env.push((
+            crate::launch::TAB_ID_ENV_VAR.to_string(),
+            tab_id.to_string(),
+        ));
+        env.push((
+            crate::launch::SESSION_TOKEN_ENV_VAR.to_string(),
+            session_token.to_string(),
+        ));
+        env.push((
+            crate::launch::SUPERVISOR_SOCK_ENV_VAR.to_string(),
+            Self::socket_path(&self.state_dir)
+                .to_string_lossy()
+                .into_owned(),
+        ));
+        env
+    }
+
+    /// Open and publish a shell window after its complete environment is fixed.
     async fn open_tab_window(
         &self,
         session_id: &str,
+        session_token: &str,
         agent: &Terminal,
         cwd: &str,
     ) -> Result<TabInfo, RequestError> {
@@ -7133,17 +7402,7 @@ impl Supervisor {
             None => Vec::new(),
         };
         let shell = self.launch_shell().await;
-        let mut env = self.seams.launch_env.clone();
-        // BOTH markers, and the pair is load-bearing: the session marker
-        // keeps delete and archive reaching this shell, the tab marker
-        // selects it for close. The opposite kind's marker is scrubbed by
-        // `tab_window_command`'s own `env -u`, not here, because tmux's
-        // `-e` can only set.
-        env.push((
-            crate::launch::SESSION_ID_ENV_VAR.to_string(),
-            session_id.to_string(),
-        ));
-        env.push((crate::launch::TAB_ID_ENV_VAR.to_string(), tab_id.clone()));
+        let env = self.tab_environment(session_id, session_token, &tab_id);
         let window_cmd = crate::launch::tab_window_command(&shell, scope_prefix);
         let (window, pane) = self
             .tmux
@@ -7688,6 +7947,7 @@ impl Supervisor {
     async fn spawn_agent(
         &self,
         id: &str,
+        session_token: &str,
         generation: i64,
         tmux_name: &str,
         argv: Vec<String>,
@@ -7713,6 +7973,13 @@ impl Supervisor {
             // `kill_process_tree`) is keyed on this exact value reaching
             // the agent's process and everything it forks.
             session_id: id.to_string(),
+            session_token: session_token.to_string(),
+            supervisor_sock: Self::socket_path(&self.state_dir),
+            farhelm_bin_dir: self
+                .farhelm_exe
+                .parent()
+                .expect("an absolute farhelm executable has a parent directory")
+                .to_path_buf(),
             // Only ever set by a restart reusing a terminal whose visible
             // frame tmux cannot carry across the respawn itself; see
             // `LaunchSpec::preamble`.
@@ -9102,12 +9369,12 @@ pub(crate) mod tests {
     pub(crate) fn entry_with(terminal: Option<Terminal>, outcome: LastOutcome) -> SessionEntry {
         SessionEntry {
             info: SessionInfo {
-                creation_seq: None,
                 parent: None,
                 archived: false,
                 id: "s1".to_string(),
                 title: "t".to_string(),
                 created_at: 1_700_000_000,
+                creation_seq: None,
                 cwd: "/tmp".to_string(),
                 invocation: "agent".to_string(),
                 status: SessionStatus::default(),
@@ -9343,8 +9610,10 @@ pub(crate) mod tests {
                 .insert_session(
                     StoredSession {
                         id: id.to_string(),
+                        parent: None,
                         title: id.to_string(),
                         created_at: now_unix(),
+                        creation_seq: 0,
                         cwd: "/tmp".to_string(),
                         invocation: "agent".to_string(),
                         tmux_name: tmux_name.to_string(),
@@ -9480,8 +9749,10 @@ pub(crate) mod tests {
             .insert_session(
                 StoredSession {
                     id: scoped_id.clone(),
+                    parent: None,
                     title: "scoped".to_string(),
                     created_at: now_unix(),
+                    creation_seq: 0,
                     cwd: "/tmp".to_string(),
                     invocation: "agent".to_string(),
                     tmux_name: "fh-scoped".to_string(),
@@ -9557,8 +9828,10 @@ pub(crate) mod tests {
                 .insert_session(
                     StoredSession {
                         id: id.to_string(),
+                        parent: None,
                         title: id.to_string(),
                         created_at: now_unix(),
+                        creation_seq: 0,
                         cwd: "/tmp".to_string(),
                         invocation: "agent".to_string(),
                         tmux_name,
@@ -9658,8 +9931,10 @@ pub(crate) mod tests {
             .insert_session(
                 StoredSession {
                     id: "s1".to_string(),
+                    parent: None,
                     title: "t".to_string(),
                     created_at: now_unix(),
+                    creation_seq: 0,
                     cwd: "/tmp".to_string(),
                     invocation: "agent".to_string(),
                     tmux_name: "fh-1".to_string(),
@@ -9744,8 +10019,10 @@ pub(crate) mod tests {
             .insert_session(
                 StoredSession {
                     id: "s1".to_string(),
+                    parent: None,
                     title: "t".to_string(),
                     created_at: now_unix(),
+                    creation_seq: 0,
                     cwd: "/tmp".to_string(),
                     invocation: "agent".to_string(),
                     tmux_name: "fh-1".to_string(),
@@ -9818,8 +10095,10 @@ pub(crate) mod tests {
             .insert_session(
                 StoredSession {
                     id: "s1".to_string(),
+                    parent: None,
                     title: "t".to_string(),
                     created_at: now_unix(),
+                    creation_seq: 0,
                     cwd: "/tmp".to_string(),
                     invocation: "agent".to_string(),
                     tmux_name: "fh-does-not-exist".to_string(),
@@ -10437,8 +10716,10 @@ pub(crate) mod tests {
             .insert_session(
                 StoredSession {
                     id: "stranded".to_string(),
+                    parent: None,
                     title: "stranded".to_string(),
                     created_at: now_unix(),
+                    creation_seq: 0,
                     cwd: "/".to_string(),
                     invocation: "agent".to_string(),
                     tmux_name: "fh-stranded".to_string(),
@@ -10542,6 +10823,7 @@ pub(crate) mod tests {
             .create_session(
                 CreateInputs {
                     cwd: &cwd,
+                    parent: None,
                     mode: CreateMode::Raw {
                         invocation: "/opt/bin/claude --dangerously-skip-permissions".to_string(),
                         agent_kind: None,
@@ -10588,6 +10870,7 @@ pub(crate) mod tests {
             .create_session(
                 CreateInputs {
                     cwd: &cwd,
+                    parent: None,
                     mode: CreateMode::Raw {
                         invocation: "claude".to_string(),
                         agent_kind: None,
@@ -10607,6 +10890,227 @@ pub(crate) mod tests {
             before,
             "a refused create must not leave a row behind"
         );
+    }
+
+    /// Name resolution chooses the whole matching profile from one catalog
+    /// snapshot and returns useful candidates for both exact-match failures.
+    #[tokio::test]
+    async fn profile_name_resolution_is_exact_and_refuses_missing_or_ambiguous_names() {
+        let state = StateDir::new();
+        let work = tempfile::tempdir().expect("workdir");
+        let cwd = work.path().to_string_lossy().to_string();
+        let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
+            .await
+            .expect("supervisor");
+        let profiles = sup.store.profiles().await.expect("starter catalog");
+        assert_eq!(
+            profiles.len(),
+            2,
+            "the fresh catalog supplies two candidates"
+        );
+        let chosen = profiles
+            .iter()
+            .find(|profile| profile.id == "starter-codex")
+            .expect("Codex starter");
+        let other = profiles
+            .iter()
+            .find(|profile| profile.id != chosen.id)
+            .expect("the other candidate");
+        let inputs = |name: &str| CreateInputs {
+            cwd: &cwd,
+            parent: Some("parent-1".to_string()),
+            mode: CreateMode::ProfileName {
+                profile_name: name.to_string(),
+            },
+            title: None,
+            cols: 80,
+            rows: 24,
+        };
+
+        let resolved = sup
+            .validate_create(inputs(&chosen.name))
+            .await
+            .expect("an exact unique name resolves");
+        let source = resolved
+            .source_profile
+            .expect("profile resolution records its source");
+        assert_eq!(source.id, chosen.id);
+        assert_eq!(source.name, chosen.name);
+        assert_eq!(resolved.invocation, chosen.invocation);
+        assert_ne!(
+            source.id, other.id,
+            "the other catalog candidate was not chosen"
+        );
+
+        for (id, name) in [("exact-a", "Exact Name"), ("exact-b", "Exact Name")] {
+            sup.store
+                .insert_profile_with_id(farhelm_proto::Profile {
+                    id: id.to_string(),
+                    name: name.to_string(),
+                    invocation: "agent".to_string(),
+                    agent_kind: AgentKind::Generic,
+                    resume_template: None,
+                })
+                .await
+                .expect("insert duplicate-name fixture");
+        }
+
+        let ambiguous = match sup.validate_create(inputs("Exact Name")).await {
+            Err(error) => error,
+            Ok(_) => panic!("two exact matches are ambiguous"),
+        };
+        assert_eq!(error_kind(&ambiguous), ErrorKind::InvalidRequest);
+        let ambiguous = format!("{ambiguous:#}");
+        assert!(ambiguous.contains("exact-a") && ambiguous.contains("exact-b"));
+
+        let missing = match sup.validate_create(inputs("exact name")).await {
+            Err(error) => error,
+            Ok(_) => panic!("name matching is exact, including case"),
+        };
+        assert_eq!(error_kind(&missing), ErrorKind::InvalidRequest);
+        let missing = format!("{missing:#}");
+        assert!(
+            missing.contains("available profiles") && missing.contains("starter-claude"),
+            "a missing exact name lists candidates the caller can send: {missing}"
+        );
+    }
+
+    /// Default derivation names the newest profile-backed session and never
+    /// walks backward when that profile has since been removed.
+    #[tokio::test]
+    async fn derived_profile_refuses_a_gone_newest_profile_without_walkback() {
+        let state = StateDir::new();
+        let work = tempfile::tempdir().expect("workdir");
+        let cwd = work.path().to_string_lossy().to_string();
+        let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
+            .await
+            .expect("supervisor");
+        let starter = sup
+            .store
+            .profile("starter-claude")
+            .await
+            .unwrap()
+            .expect("starter profile");
+        let gone = match sup
+            .store
+            .create_profile(
+                "Gone Agent".to_string(),
+                "agent".to_string(),
+                AgentKind::Generic,
+                None,
+            )
+            .await
+            .expect("create profile")
+        {
+            crate::store::ProfileCreation::Created(profile) => profile,
+            other => panic!("profile creation must succeed: {other:?}"),
+        };
+        const SEEDED_CREATED_AT: i64 = 1_700_000_000;
+        let source =
+            |id: &str, title: &str, profile: crate::store::ProfileSnapshot| StoredSession {
+                id: id.to_string(),
+                parent: None,
+                title: title.to_string(),
+                created_at: SEEDED_CREATED_AT,
+                creation_seq: 0,
+                cwd: cwd.clone(),
+                invocation: "agent".to_string(),
+                tmux_name: format!("fh-{id}"),
+                pane: "%0".to_string(),
+                outcome: LastOutcome::Running,
+                agent_kind: AgentKind::Generic,
+                resume_template: None,
+                canonical_cwd: None,
+                captured_conversation: None,
+                captured_record: None,
+                capture_ambiguous: false,
+                first_input_at: None,
+                generation: 0,
+                launch_scoped: false,
+                source_profile: Some(profile),
+            };
+        sup.store
+            .insert_session(
+                source(
+                    "older",
+                    "older",
+                    crate::store::ProfileSnapshot {
+                        id: starter.id,
+                        name: starter.name,
+                    },
+                ),
+                None,
+            )
+            .await
+            .expect("seed older source");
+        sup.store
+            .insert_session(
+                source(
+                    "newest",
+                    "newest",
+                    crate::store::ProfileSnapshot {
+                        id: gone.id.clone(),
+                        name: gone.name.clone(),
+                    },
+                ),
+                None,
+            )
+            .await
+            .expect("seed same-second newer source");
+        sup.store
+            .delete_profile(&gone.id)
+            .await
+            .expect("delete profile");
+
+        let refusal = match sup
+            .validate_create(CreateInputs {
+                cwd: &cwd,
+                parent: None,
+                mode: CreateMode::DerivedProfile,
+                title: None,
+                cols: 80,
+                rows: 24,
+            })
+            .await
+        {
+            Err(error) => error,
+            Ok(_) => panic!("a gone newest profile is a precondition failure"),
+        };
+        assert_eq!(error_kind(&refusal), ErrorKind::InvalidRequest);
+        let refusal = format!("{refusal:#}");
+        assert!(
+            refusal.contains("Gone Agent") && refusal.contains("--agent"),
+            "the refusal names the lost choice and the explicit remedy: {refusal}"
+        );
+    }
+
+    /// A host with no profile-backed history cannot guess what spawn should
+    /// run, and the refusal leaves no session behind.
+    #[tokio::test]
+    async fn derived_profile_without_source_history_is_a_clean_precondition_failure() {
+        let state = StateDir::new();
+        let work = tempfile::tempdir().expect("workdir");
+        let cwd = work.path().to_string_lossy().to_string();
+        let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
+            .await
+            .expect("supervisor");
+        let refusal = match sup
+            .validate_create(CreateInputs {
+                cwd: &cwd,
+                parent: None,
+                mode: CreateMode::DerivedProfile,
+                title: None,
+                cols: 80,
+                rows: 24,
+            })
+            .await
+        {
+            Err(error) => error,
+            Ok(_) => panic!("a profile cannot be derived from no profile-backed sessions"),
+        };
+        assert_eq!(error_kind(&refusal), ErrorKind::InvalidRequest);
+        assert!(format!("{refusal:#}").contains("--agent"));
+        assert!(sup.store.load_all().await.unwrap().is_empty());
     }
 
     /// Drive `handle_control`'s create arm three times against one intent
@@ -11034,8 +11538,10 @@ pub(crate) mod tests {
             .insert_session(
                 StoredSession {
                     id: "stranded".to_string(),
+                    parent: None,
                     title: "stranded".to_string(),
                     created_at: now_unix(),
+                    creation_seq: 0,
                     cwd: "/".to_string(),
                     invocation: "agent".to_string(),
                     tmux_name: "fh-stranded".to_string(),
@@ -11114,8 +11620,10 @@ pub(crate) mod tests {
             .insert_session(
                 StoredSession {
                     id: "ended".to_string(),
+                    parent: None,
                     title: "ended".to_string(),
                     created_at: now_unix(),
+                    creation_seq: 0,
                     cwd: "/".to_string(),
                     invocation: "agent".to_string(),
                     tmux_name: "fh-ended".to_string(),
@@ -11615,8 +12123,10 @@ pub(crate) mod tests {
             .insert_session(
                 StoredSession {
                     id: "stranded".to_string(),
+                    parent: None,
                     title: "stranded".to_string(),
                     created_at: now_unix(),
+                    creation_seq: 0,
                     cwd: "/".to_string(),
                     invocation: "agent".to_string(),
                     tmux_name: "fh-stranded".to_string(),
@@ -11702,8 +12212,10 @@ pub(crate) mod tests {
             .insert_session(
                 StoredSession {
                     id: "stranded".to_string(),
+                    parent: None,
                     title: "stranded".to_string(),
                     created_at: now_unix(),
+                    creation_seq: 0,
                     cwd: "/".to_string(),
                     invocation: "agent".to_string(),
                     tmux_name: "fh-stranded".to_string(),
@@ -12012,6 +12524,7 @@ pub(crate) mod tests {
             .create_session(
                 CreateInputs {
                     cwd: "/",
+                    parent: None,
                     mode: CreateMode::Profile {
                         profile_id: "starter-claude".to_string(),
                     },
@@ -12071,8 +12584,10 @@ pub(crate) mod tests {
             .insert_session(
                 StoredSession {
                     id: "stranded".to_string(),
+                    parent: None,
                     title: "stranded".to_string(),
                     created_at: now_unix(),
+                    creation_seq: 0,
                     cwd: "/".to_string(),
                     invocation: "claude --original".to_string(),
                     tmux_name: "fh-stranded".to_string(),
@@ -12124,6 +12639,7 @@ pub(crate) mod tests {
             .create_session(
                 CreateInputs {
                     cwd: "/",
+                    parent: None,
                     mode: CreateMode::Profile {
                         profile_id: "starter-claude".to_string(),
                     },
@@ -12181,8 +12697,10 @@ pub(crate) mod tests {
             .insert_session(
                 StoredSession {
                     id: "stranded".to_string(),
+                    parent: None,
                     title: "stranded".to_string(),
                     created_at: now_unix(),
+                    creation_seq: 0,
                     cwd: "/".to_string(),
                     invocation: "codex".to_string(),
                     tmux_name: "fh-stranded".to_string(),
@@ -12225,6 +12743,7 @@ pub(crate) mod tests {
             .create_session(
                 CreateInputs {
                     cwd: "/",
+                    parent: None,
                     mode: CreateMode::Profile {
                         profile_id: "starter-codex".to_string(),
                     },
@@ -12276,6 +12795,7 @@ pub(crate) mod tests {
             .create_session(
                 CreateInputs {
                     cwd: &cwd,
+                    parent: None,
                     mode: CreateMode::Profile {
                         profile_id: "starter-claude".to_string(),
                     },
@@ -12365,6 +12885,7 @@ pub(crate) mod tests {
                 .create_session(
                     CreateInputs {
                         cwd: &cwd,
+                        parent: None,
                         mode: CreateMode::Profile {
                             profile_id: "starter-claude".to_string(),
                         },
@@ -12463,8 +12984,10 @@ pub(crate) mod tests {
             .insert_session(
                 StoredSession {
                     id: "stranded".to_string(),
+                    parent: None,
                     title: "stranded".to_string(),
                     created_at: now_unix(),
+                    creation_seq: 0,
                     cwd: cwd.clone(),
                     invocation: "agent".to_string(),
                     tmux_name: "fh-stranded".to_string(),
@@ -12582,6 +13105,7 @@ pub(crate) mod tests {
             .create_session(
                 CreateInputs {
                     cwd: "/",
+                    parent: None,
                     mode: CreateMode::Profile {
                         profile_id: "starter-claude".to_string(),
                     },
@@ -12660,6 +13184,7 @@ pub(crate) mod tests {
             .create_session(
                 CreateInputs {
                     cwd: &cwd,
+                    parent: None,
                     mode: CreateMode::Profile {
                         profile_id: "starter-claude".to_string(),
                     },
@@ -12769,8 +13294,10 @@ pub(crate) mod tests {
         let cwd = state.path().to_string_lossy().to_string();
         let stranded = StoredSession {
             id: "stranded".to_string(),
+            parent: None,
             title: "as created".to_string(),
             created_at: now_unix(),
+            creation_seq: 0,
             cwd: cwd.clone(),
             invocation: "agent".to_string(),
             tmux_name: "fh-stranded".to_string(),
@@ -12814,6 +13341,7 @@ pub(crate) mod tests {
         let reply = sup
             .launch_reserved(
                 LaunchRequest {
+                    parent: None,
                     cwd: &cwd,
                     launch_cwd: cwd.clone(),
                     invocation: "agent".to_string(),
@@ -12905,8 +13433,10 @@ pub(crate) mod tests {
             .insert_session(
                 StoredSession {
                     id: "stranded".to_string(),
+                    parent: None,
                     title: "stranded".to_string(),
                     created_at: now_unix(),
+                    creation_seq: 0,
                     cwd: cwd.clone(),
                     invocation: "''".to_string(),
                     tmux_name: "fh-stranded".to_string(),
@@ -13121,8 +13651,10 @@ pub(crate) mod tests {
             .insert_session(
                 StoredSession {
                     id: "stranded".to_string(),
+                    parent: None,
                     title: "stranded".to_string(),
                     created_at: now_unix(),
+                    creation_seq: 0,
                     cwd: cwd.clone(),
                     invocation: "agent".to_string(),
                     tmux_name: "fh-stranded".to_string(),
@@ -13180,5 +13712,35 @@ pub(crate) mod tests {
             "the agent must have started in the directory the identity check verified, not in \
              whatever the link was repointed at afterwards"
         );
+    }
+
+    /// Every shell tab receives the same spawn authority as its owning agent.
+    #[tokio::test]
+    async fn a_tab_environment_carries_the_complete_spawn_contract() {
+        let state = StateDir::new();
+        let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
+            .await
+            .expect("supervisor");
+        let env = sup
+            .tab_environment("session-7", "private-token", "tab-9")
+            .into_iter()
+            .collect::<HashMap<_, _>>();
+        assert_eq!(
+            env.get(crate::launch::SESSION_ID_ENV_VAR)
+                .map(String::as_str),
+            Some("session-7")
+        );
+        assert_eq!(
+            env.get(crate::launch::SESSION_TOKEN_ENV_VAR)
+                .map(String::as_str),
+            Some("private-token")
+        );
+        let socket = Supervisor::socket_path(&sup.state_dir);
+        assert_eq!(
+            env.get(crate::launch::SUPERVISOR_SOCK_ENV_VAR)
+                .map(String::as_str),
+            Some(socket.to_string_lossy().as_ref())
+        );
+        assert!(socket.is_absolute());
     }
 }

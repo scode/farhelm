@@ -36,6 +36,16 @@ use std::path::{Path, PathBuf};
 /// than left to the cgroup.
 pub const SESSION_ID_ENV_VAR: &str = "FARHELM_SESSION_ID";
 
+/// The bearer value proving which session requested a restricted spawn.
+pub const SESSION_TOKEN_ENV_VAR: &str = "FARHELM_SESSION_TOKEN";
+
+/// The exact local supervisor socket this launch belongs to.
+///
+/// This is an implementation detail for the bundled spawn CLI, not part of
+/// the third-party environment contract. Falling back to a default state
+/// directory would silently dial the wrong supervisor after `--state-dir`.
+pub const SUPERVISOR_SOCK_ENV_VAR: &str = "FARHELM_SUPERVISOR_SOCK";
+
 /// The environment marker every TERMINAL TAB carries on top of
 /// [`SESSION_ID_ENV_VAR`]: the tab's own id (PLAN_M4.md item 2). Set by
 /// tmux itself (`new-window -e`) rather than by a shim, because a tab has
@@ -90,7 +100,7 @@ pub const AGENT_ID_ENV_VAR: &str = "FARHELM_AGENT_ID";
 /// What the shim needs to launch the agent: written as JSON by the
 /// supervisor, read by `farhelm internal launch` inside the session. A
 /// file (not argv) so the invocation never fights shell quoting twice.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 pub struct LaunchSpec {
     /// The agent argv, already shell-words-split by the supervisor.
     pub argv: Vec<String>,
@@ -104,6 +114,20 @@ pub struct LaunchSpec {
     /// This session's id, injected into the agent's environment as
     /// [`SESSION_ID_ENV_VAR`] — see that constant's docs for why.
     pub session_id: String,
+    /// Recoverable per-session credential, unchanged across relaunches.
+    ///
+    /// This bearer value must never enter logs. `LaunchSpec` deliberately
+    /// has no derived `Debug` implementation so tracing the surrounding
+    /// launch request cannot disclose it by accident.
+    pub session_token: String,
+    /// Exact unix socket path the spawn CLI must dial.
+    pub supervisor_sock: PathBuf,
+    /// Directory containing the supervisor's own `farhelm` binary.
+    ///
+    /// The shim prepends it to the PATH produced by login-shell startup,
+    /// so an agent invoking `farhelm` by name reaches the same artifact
+    /// that launched it before considering any ambient installation.
+    pub farhelm_bin_dir: PathBuf,
     /// Bytes the shim writes to the terminal before `exec`, or empty for
     /// the ordinary launch.
     ///
@@ -761,12 +785,7 @@ pub fn exec_launch_spec_with_seam(
     // tmux server, and an inner agent still wearing it would be filed as a
     // tab process by its own session's stop sweep and never reaped. This
     // is the exec that ends that inheritance.
-    let err = std::process::Command::new(&spec.argv[0])
-        .args(&spec.argv[1..])
-        .env(SESSION_ID_ENV_VAR, &spec.session_id)
-        .env(AGENT_ID_ENV_VAR, &spec.session_id)
-        .env_remove(TAB_ID_ENV_VAR)
-        .exec();
+    let err = agent_command(&spec).exec();
     let report = format!(
         "exec_failed argv0={} errno={}",
         spec.argv[0],
@@ -774,6 +793,27 @@ pub fn exec_launch_spec_with_seam(
     );
     let report = record_launch_failure(&status_path, report, seam);
     anyhow::Error::from(err).context(report)
+}
+
+/// Build the final agent command, including Farhelm's private launch
+/// contract, without disturbing the login shell's inherited environment.
+fn agent_command(spec: &LaunchSpec) -> std::process::Command {
+    let mut command = std::process::Command::new(&spec.argv[0]);
+    let inherited_path = std::env::var_os("PATH").unwrap_or_default();
+    let mut path = spec.farhelm_bin_dir.as_os_str().to_os_string();
+    if !inherited_path.is_empty() {
+        path.push(":");
+        path.push(inherited_path);
+    }
+    command
+        .args(&spec.argv[1..])
+        .env("PATH", path)
+        .env(SESSION_ID_ENV_VAR, &spec.session_id)
+        .env(SESSION_TOKEN_ENV_VAR, &spec.session_token)
+        .env(SUPERVISOR_SOCK_ENV_VAR, &spec.supervisor_sock)
+        .env(AGENT_ID_ENV_VAR, &spec.session_id)
+        .env_remove(TAB_ID_ENV_VAR);
+    command
 }
 
 /// Write `report` as this launch's durable sentinel (`crate::files`
@@ -828,6 +868,9 @@ mod tests {
             argv: vec![missing_binary.to_string_lossy().into_owned()],
             status_file: status_path_for_spec(&spec_path),
             session_id: id.to_string(),
+            session_token: "test-token".to_string(),
+            supervisor_sock: PathBuf::from("/tmp/supervisor.sock"),
+            farhelm_bin_dir: PathBuf::from("/opt/farhelm/bin"),
             preamble: Vec::new(),
         };
         std::fs::write(&spec_path, serde_json::to_vec(&spec).unwrap()).unwrap();
@@ -933,6 +976,9 @@ mod tests {
             argv: vec![missing_binary.to_string_lossy().into_owned()],
             status_file: status_path_for_spec(&spec_path),
             session_id: "test-session".to_string(),
+            session_token: "test-token".to_string(),
+            supervisor_sock: PathBuf::from("/tmp/supervisor.sock"),
+            farhelm_bin_dir: PathBuf::from("/opt/farhelm/bin"),
             preamble: Vec::new(),
         };
         std::fs::write(&spec_path, serde_json::to_vec(&spec).unwrap()).unwrap();
@@ -981,6 +1027,9 @@ mod tests {
             argv: vec![non_executable.to_string_lossy().into_owned()],
             status_file: status_path_for_spec(&spec_path),
             session_id: "test-session".to_string(),
+            session_token: "test-token".to_string(),
+            supervisor_sock: PathBuf::from("/tmp/supervisor.sock"),
+            farhelm_bin_dir: PathBuf::from("/opt/farhelm/bin"),
             preamble: Vec::new(),
         };
         std::fs::write(&spec_path, serde_json::to_vec(&spec).unwrap()).unwrap();
@@ -1054,6 +1103,9 @@ mod tests {
             argv: vec![],
             status_file: status_path_for_spec(&spec_path),
             session_id: "test-session".to_string(),
+            session_token: "test-token".to_string(),
+            supervisor_sock: PathBuf::from("/tmp/supervisor.sock"),
+            farhelm_bin_dir: PathBuf::from("/opt/farhelm/bin"),
             preamble: Vec::new(),
         };
         std::fs::write(&spec_path, serde_json::to_vec(&spec).unwrap()).unwrap();
@@ -1091,6 +1143,9 @@ mod tests {
             argv: vec![missing_binary.to_string_lossy().into_owned()],
             status_file: status_path_for_spec(&spec_path),
             session_id: "test-session".to_string(),
+            session_token: "test-token".to_string(),
+            supervisor_sock: PathBuf::from("/tmp/supervisor.sock"),
+            farhelm_bin_dir: PathBuf::from("/opt/farhelm/bin"),
             preamble: Vec::new(),
         };
         std::fs::write(&spec_path, serde_json::to_vec(&spec).unwrap()).unwrap();
@@ -1127,6 +1182,52 @@ mod tests {
         assert_eq!(
             cmd[4],
             "exec /opt/farhelm internal launch /state/launch/abc.json"
+        );
+    }
+
+    /// The final exec receives the session credential and the exact socket
+    /// that minted it; neither may depend on a guessed state-directory path.
+    #[test]
+    fn agent_command_injects_the_spawn_contract() {
+        let spec = LaunchSpec {
+            argv: vec!["agent".to_string()],
+            status_file: PathBuf::from("/tmp/status"),
+            session_id: "session-7".to_string(),
+            session_token: "private-token".to_string(),
+            supervisor_sock: PathBuf::from("/run/user/1000/farhelm.sock"),
+            farhelm_bin_dir: PathBuf::from("/opt/farhelm/bin"),
+            preamble: Vec::new(),
+        };
+        let command = agent_command(&spec);
+        let env = command
+            .get_envs()
+            .map(|(name, value)| {
+                (
+                    name.to_string_lossy().into_owned(),
+                    value.map(|value| value.to_string_lossy().into_owned()),
+                )
+            })
+            .collect::<std::collections::HashMap<_, _>>();
+        assert_eq!(
+            env.get(SESSION_ID_ENV_VAR).and_then(Option::as_deref),
+            Some("session-7")
+        );
+        assert_eq!(
+            env.get(SESSION_TOKEN_ENV_VAR).and_then(Option::as_deref),
+            Some("private-token")
+        );
+        assert_eq!(
+            env.get(SUPERVISOR_SOCK_ENV_VAR).and_then(Option::as_deref),
+            Some("/run/user/1000/farhelm.sock")
+        );
+        assert_eq!(env.get(TAB_ID_ENV_VAR), Some(&None));
+        assert!(
+            env.get("PATH")
+                .and_then(Option::as_deref)
+                .is_some_and(
+                    |path| path == "/opt/farhelm/bin" || path.starts_with("/opt/farhelm/bin:")
+                ),
+            "the running binary's directory must win PATH resolution"
         );
     }
 

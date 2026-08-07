@@ -746,11 +746,13 @@ constraint (see the GUI section's motivation), not an afterthought:
 - **Playwright (TypeScript) drives the web build in headless Chromium** against a real helm and real supervisor on
   Linux. DOM assertions and screenshots both work because the UI is real DOM. This is the canonical GUI verification
   path for agents.
-- **A fake agent** — `farhelm internal fake-agent --script basic|altscreen|binary|mouse-modes`, a hidden subcommand of
-  the one binary rather than a separate artifact — stands in for Claude Code/Codex across this suite's integration and
-  e2e tests. Its deterministic scripts cover prompt/echo input, terminal modes, alternate-screen rendering, byte-clean
-  live output, and mouse-mode reporting, without vendor auth. Later milestones extend this fixture with fake on-disk
-  records for status heuristics, conversation capture, and resume. Real-agent smoke testing stays manual.
+- **A fake agent** — `farhelm internal fake-agent --script basic|altscreen|binary|mouse-modes|spawn`, a hidden
+  subcommand of the one binary rather than a separate artifact — stands in for Claude Code/Codex across this suite's
+  integration and e2e tests. Its deterministic scripts cover prompt/echo input, terminal modes, alternate-screen
+  rendering, byte-clean live output, and mouse-mode reporting, without vendor auth. Later milestones extend this fixture
+  with fake on-disk records for status heuristics, conversation capture, and resume. The spawn suite also has an
+  automated real-Claude leg that creates a jj workspace and spawns into it; CI leaves it gated because vendor
+  credentials and network access are absent, and a developer enables it manually with `FARHELM_REAL_AGENT=1`.
 - Rust integration tests exercise supervisor+tmux directly (CI provides tmux) and the framing protocol with golden
   cases; farhelm-proto keeps wire compatibility testable.
 - **`node --test` unit-tests the asset-JS layer's pure functions**, under `crates/farhelm-ui/js-tests/` (outside

@@ -345,12 +345,12 @@ mod tests {
                 row.id,
                 "identity-known",
                 vec![farhelm_proto::SessionInfo {
-                    creation_seq: None,
                     parent: None,
                     archived: false,
                     id: "remembered".to_string(),
                     title: "remembered".to_string(),
                     created_at: 100,
+                    creation_seq: None,
                     cwd: "/tmp".to_string(),
                     invocation: "agent".to_string(),
                     status: farhelm_proto::SessionStatus::Running,

@@ -95,6 +95,15 @@ pub enum Script {
     /// Spawns a child process and prints both pids, for process-tree-kill
     /// tests.
     Spawner,
+    /// Accepts `spawn <cwd>` on stdin and runs this binary's `spawn`
+    /// command as the current session, reporting the child id. The
+    /// `spawn-parented <cwd>` form supplies this session's id explicitly,
+    /// so browser tests can observe the public parent filter too.
+    ///
+    /// The spawned child inherits this same profile and script but remains
+    /// idle until driven, which keeps the fixture deterministic instead of
+    /// recursively creating descendants on launch.
+    Spawn,
     /// Like `Spawner`, but the child ignores SIGTERM — the acceptance
     /// subject for the SIGKILL half of `kill_process_tree`'s sequence.
     /// Its child writes `stubborn-ready` in the session's working
@@ -203,6 +212,7 @@ pub fn run(script: Script, record_home: Option<std::path::PathBuf>) -> anyhow::R
         Script::Hexecho => hexecho(),
         Script::MouseModes => mouse_modes(),
         Script::Spawner => spawn_and_echo("sleep 3600", "spawner"),
+        Script::Spawn => spawn_session(),
         Script::SpawnerStubborn => spawn_and_echo(
             "trap '' TERM; touch stubborn-ready; sleep 3600",
             "spawner-stubborn",
@@ -229,6 +239,57 @@ pub fn run(script: Script, record_home: Option<std::path::PathBuf>) -> anyhow::R
         Script::CodexRecord => record_agent(RecordShape::Codex, record_home),
         Script::EnvEcho => env_echo(),
     }
+}
+
+/// Drive the public spawn CLI from inside a supervised session.
+///
+/// Keeping this fixture on the real executable is the point: the browser
+/// acceptance leg crosses launch-time credential injection, the private
+/// supervisor admission path, profile derivation, and the public session
+/// list before it observes success. The line protocol avoids a test-only
+/// environment knob and lets one long-lived terminal choose an isolated
+/// temporary directory at runtime.
+fn spawn_session() -> anyhow::Result<()> {
+    let parent = std::env::var("FARHELM_SESSION_ID")
+        .context("the spawn fake agent must run inside a supervised session")?;
+    let stdin = std::io::stdin();
+    let mut out = std::io::stdout().lock();
+    writeln!(out, "FAKE-AGENT READY\r")?;
+    out.flush()?;
+
+    for line in stdin.lock().lines() {
+        let line = line.context("reading a spawn fixture command")?;
+        let (cwd, parented, marker) = if let Some(cwd) = line.strip_prefix("spawn-parented ") {
+            (cwd, true, "SPAWNED-PARENTED")
+        } else if let Some(cwd) = line.strip_prefix("spawn ") {
+            (cwd, false, "SPAWNED")
+        } else {
+            writeln!(out, "SPAWN-ERROR: expected spawn <cwd>\r")?;
+            out.flush()?;
+            continue;
+        };
+        // Resolve by name on purpose. The fixture proves the launch shim
+        // prepended its own binary directory after shell initialization;
+        // using `current_exe` here would bypass the contract under test.
+        let mut command = std::process::Command::new("farhelm");
+        command.arg("spawn").arg("--cwd").arg(cwd);
+        if parented {
+            command.arg("--parent").arg(&parent);
+        }
+        let result = command
+            .output()
+            .context("running farhelm spawn from the fake agent")?;
+        if result.status.success() {
+            let child = String::from_utf8(result.stdout)
+                .context("farhelm spawn wrote a non-UTF-8 session id")?;
+            writeln!(out, "{marker}:{}\r", child.trim_end())?;
+        } else {
+            let diagnostic = String::from_utf8_lossy(&result.stderr);
+            writeln!(out, "SPAWN-ERROR:{}\r", diagnostic.trim_end())?;
+        }
+        out.flush()?;
+    }
+    Ok(())
 }
 
 /// Report [`RC_MARKER_VAR`] as the launch's shell resolved it, then run

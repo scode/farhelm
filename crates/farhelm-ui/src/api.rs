@@ -86,8 +86,8 @@ struct SessionPage {
     next_cursor: Option<String>,
 }
 
-/// The session list's query surface (PLAN_M6_75.md item 7): SPEC.md's five
-/// dimensions, as the values a user typed or chose.
+/// The session list's query surface: SPEC.md's dimensions, as the values a
+/// user typed or chose.
 ///
 /// Filtering is a QUERY, not a render pass. Every field here becomes a
 /// parameter on `GET /api/sessions` and the helm answers with the matching
@@ -95,10 +95,6 @@ struct SessionPage {
 /// coherent with pagination at all. A client filtering the page it was
 /// handed would hide matches beyond the page cut while reporting a count
 /// that included them, and the count is what the banner says out loud.
-///
-/// The parent-reference dimension SPEC.md ties to spawned sessions is
-/// deliberately absent: it ships in M7 beside the feature that mints parent
-/// references, not here where no session has one (PLAN_M6_75.md's Out).
 ///
 /// Strings rather than `Option<String>` because a text field's empty value
 /// IS its absent value, and the helm agrees — an exactly-empty parameter is
@@ -108,6 +104,8 @@ struct SessionPage {
 pub(crate) struct SessionFilter {
     /// A registered host's id, from `GET /api/hosts`.
     pub(crate) host: Option<HostId>,
+    /// The exact session id whose direct children should be listed.
+    pub(crate) parent: String,
     /// Substring of the working directory, case-insensitively.
     pub(crate) directory: String,
     /// A profile, named by its id or by the name a session snapshotted at
@@ -133,6 +131,7 @@ impl SessionFilter {
     /// `list::ListView`'s commit path).
     pub(crate) fn is_active(&self) -> bool {
         self.host.is_some()
+            || !self.parent.is_empty()
             || !self.directory.is_empty()
             || !self.profile.is_empty()
             || !self.status.is_empty()
@@ -155,6 +154,7 @@ impl SessionFilter {
             parts.push(format!("host={host}"));
         }
         for (name, value) in [
+            ("parent", &self.parent),
             ("directory", &self.directory),
             ("profile", &self.profile),
             ("status", &self.status),
@@ -2551,6 +2551,7 @@ mod tests {
     fn every_filter_dimension_travels_under_its_own_encoded_parameter() {
         let filter = SessionFilter {
             host: Some(7),
+            parent: "session/root".to_string(),
             directory: "/srv/my project".to_string(),
             profile: "claude code".to_string(),
             status: "waiting".to_string(),
@@ -2559,8 +2560,8 @@ mod tests {
         assert!(filter.is_active());
         assert_eq!(
             filter.query(),
-            "host=7&directory=%2Fsrv%2Fmy%20project&profile=claude%20code&status=waiting&\
-             title=a%26b"
+            "host=7&parent=session%2Froot&directory=%2Fsrv%2Fmy%20project&\
+             profile=claude%20code&status=waiting&title=a%26b"
         );
     }
 

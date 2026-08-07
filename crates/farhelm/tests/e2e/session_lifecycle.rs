@@ -1809,7 +1809,7 @@ async fn unparseable_invocations_error_without_creating_a_session() {
 /// fires under zsh. Both directions are checked: failure writes it,
 /// success does not. The shim must also unlink the spec on every path —
 /// exec failure, malformed spec, and success alike — because it holds
-/// the agent's full command line, which users put credentials into, and
+/// the agent's full command line plus its spawn bearer credential, and
 /// nothing else removes it before the next supervisor restart's sweep.
 ///
 /// A plain `#[test]`: everything here is synchronous process spawning,
@@ -1825,6 +1825,9 @@ fn launch_shim_records_exec_failure_only_on_failure() {
             "argv": argv,
             "status_file": status_file.to_string_lossy(),
             "session_id": format!("test-{name}"),
+            "session_token": format!("credential-{name}"),
+            "supervisor_sock": dir.path().join("supervisor.sock"),
+            "farhelm_bin_dir": dir.path(),
         });
         std::fs::write(&spec_path, spec.to_string()).unwrap();
         (spec_path, status_file)

@@ -10,6 +10,7 @@ description = "The multi-call farhelm binary: helm, supervisor, internal command
 anyhow.workspace = true
 clap.workspace = true
 farhelm-helm.workspace = true
+farhelm-proto.workspace = true
 farhelm-supervisor.workspace = true
 # Only for the `hexecho` fake-agent script's raw-mode termios calls
 # (fake_agent.rs); everything else in this binary stays on tokio/std.
@@ -22,9 +23,6 @@ tokio.workspace = true
 tracing-subscriber.workspace = true
 
 [dev-dependencies]
-# Only the integration tests speak the wire protocol directly; the binary
-# reaches it through the helm and supervisor crates.
-farhelm-proto.workspace = true
 # The two-host aggregation test drives a REAL `farhelm helm run` over real
 # loopback HTTP (merged_hosts.rs), because that is the only way to exercise
 # the shipped binary's own serving path; a hand-rolled HTTP client would be

@@ -52,7 +52,7 @@
 //!   is PLAN_M6_75.md item 6's work, against the contract this module
 //!   freezes.
 //! - **Narrowing happens here, not in the browser.** The merged list takes
-//!   SPEC.md's five filter dimensions as query parameters and answers a
+//!   SPEC.md's filter dimensions as query parameters and answers a
 //!   filtered request with two counts (matching, and the fleet's own),
 //!   because a client that filtered the page it was handed would hide
 //!   matches beyond the page cut while reporting a count that included them.

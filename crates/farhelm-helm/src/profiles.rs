@@ -1625,21 +1625,19 @@ mod tests {
         );
         assert_eq!(
             harness.manager.events().revision(),
-            before + 1,
-            "exactly one invalidation, and the recorded session cannot be the one that made it \
-             (its cache write was a no-op) — so it is the remembered default reaching the other \
-             clients' create dialogs"
+            before,
+            "the preceding drain already converged this profile-backed session into the \
+             remembered default, so replaying the same create changes neither cache nor default"
         );
         peer.await.unwrap();
     }
 
-    /// REPAIRING a remembered default's identity binding invalidates, even
-    /// though the profile id did not change.
+    /// A drain repairs a remembered default's identity binding as soon as
+    /// the newly identified host reports profile provenance.
     ///
-    /// Spec: after a host learns an identity — which makes the row recorded
-    /// against no identity unreadable, so the default disappears — the next
-    /// create from that same profile restores it AND moves the fleet's
-    /// revision by one.
+    /// Spec: after a host learns an identity, the row recorded against no
+    /// identity becomes unreadable. The next completed drain repairs that
+    /// binding from its profile-backed session and publishes the change.
     ///
     /// The path is ordinary: a supervisor with no identity, upgraded or
     /// reconfigured into one that has one. What makes it worth a test is that
@@ -1654,7 +1652,7 @@ mod tests {
     /// already listed, so recording it publishes nothing and the remembered
     /// default is the only thing left that can move the revision.
     #[tokio::test]
-    async fn repairing_a_remembered_defaults_identity_binding_invalidates() {
+    async fn a_drain_repairs_a_remembered_defaults_identity_binding() {
         let existing = farhelm_proto::SessionInfo {
             cwd: "/work".to_string(),
             source_profile: Some(farhelm_proto::SourceProfile {
@@ -1729,8 +1727,8 @@ mod tests {
             .await;
         assert_eq!(
             harness.store.remembered_profile(local).await.unwrap(),
-            None,
-            "a default bound to no identity is not the identified install's preference"
+            Some("p-favorite".to_string()),
+            "the identified host's source provenance repairs the binding during its drain"
         );
 
         let before = harness.manager.events().revision();
@@ -1745,13 +1743,13 @@ mod tests {
         assert_eq!(
             harness.store.remembered_profile(local).await.unwrap(),
             Some("p-favorite".to_string()),
-            "the create rebinds the default to the identity the host now reports"
+            "the preceding drain already rebound the default to the host's current identity"
         );
         assert_eq!(
             harness.manager.events().revision(),
-            before + 1,
-            "and the default going from absent back to present is a change other clients must be \
-             told about — the profile id standing still does not make it one"
+            before,
+            "the later create returns the same session provenance, so the repaired default does \
+             not publish a duplicate change"
         );
         peer.await.unwrap();
     }

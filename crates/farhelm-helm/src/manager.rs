@@ -2672,6 +2672,45 @@ impl ConnectionManager {
             .await
     }
 
+    /// Remember a profile-backed create together with the session that
+    /// proves when that preference was established.
+    ///
+    /// The claim discipline is identical to [`Self::remember_profile_default`].
+    /// Keeping the provenance in the same identity-bound write lets later
+    /// drains converge on newer creates while refusing delayed older ones.
+    pub async fn remember_profile_default_from_session(
+        &self,
+        claim: &SessionClaim,
+        profile_id: &str,
+        session: &SessionInfo,
+    ) -> anyhow::Result<bool> {
+        let (status, cache_lock) = {
+            let map = self.actors.lock().expect("actor map mutex poisoned");
+            let Some(handle) = map.actors.get(&claim.host) else {
+                return Err(anyhow::Error::new(ManagerError::NoSuchHost(claim.host)));
+            };
+            (Arc::clone(&handle.status), Arc::clone(&handle.cache_lock))
+        };
+        let _writing = cache_lock.lock().await;
+        if !self.claim_is_current(claim, &status) {
+            anyhow::bail!(
+                "host {}'s connection changed between the create and its remembered-default \
+                 write; the preference was not recorded",
+                claim.host
+            );
+        }
+        self.store
+            .remember_profile_default_from_session(
+                claim.host,
+                claim.identity.as_deref(),
+                profile_id,
+                session.creation_seq,
+                session.created_at,
+                &session.id,
+            )
+            .await
+    }
+
     /// Hold this host's cache-write lock — the one every writer of its
     /// durable state already takes ([`Self::remember_session`],
     /// [`Self::forget_session`], [`Self::remember_profile_default`], and the
@@ -4200,8 +4239,15 @@ impl HostActor {
             .await
         {
             Ok(replacement) => {
-                let CacheReplacement { contested, changed } = replacement;
-                debug!(sessions, changed, "replaced the host's cached session list");
+                let CacheReplacement {
+                    contested,
+                    changed,
+                    default_changed,
+                } = replacement;
+                debug!(
+                    sessions,
+                    changed, default_changed, "replaced the host's cached session list"
+                );
                 if let Some(sample) = contested.first() {
                     // ONE bounded line per refresh, not one per colliding
                     // row per tick: a host reporting a thousand ids that
@@ -4231,7 +4277,7 @@ impl HostActor {
                     end_connection: None,
                     live: LiveSessions::Clear,
                     contested: Some(Arc::new(contested)),
-                    cache_changed: changed,
+                    cache_changed: changed || default_changed,
                 }
             }
             Err(error) => {
@@ -5404,12 +5450,12 @@ mod tests {
     /// and neither needs the other's field coverage.
     fn session(id: &str, created_at: i64) -> SessionInfo {
         SessionInfo {
-            creation_seq: None,
             parent: None,
             archived: false,
             id: id.to_string(),
             title: id.to_string(),
             created_at,
+            creation_seq: None,
             cwd: format!("/{id}"),
             invocation: "agent".to_string(),
             status: SessionStatus::Running,
@@ -5551,6 +5597,97 @@ mod tests {
     /// rounding tolerance here would only hide a real drift.
     fn seconds(attempts: &[Duration]) -> Vec<u64> {
         attempts.iter().map(|d| d.as_secs()).collect()
+    }
+
+    /// A refresh whose session cache is byte-identical still publishes when
+    /// disappearance repair changes only the remembered default.
+    #[tokio::test(start_paused = true)]
+    async fn default_changed_alone_bumps_the_fleet_revision() {
+        let profiled = SessionInfo {
+            creation_seq: Some(1),
+            source_profile: Some(farhelm_proto::SourceProfile {
+                id: "profile-a".to_string(),
+                name: "Profile A".to_string(),
+                existence: farhelm_proto::ProfileExistence::Present,
+            }),
+            ..session("source-a", 100)
+        };
+        let fixture = fixture(Cadence::default(), {
+            let profiled = profiled.clone();
+            |store, transport| async move {
+                let host = store
+                    .add_ssh_host("defaults.example", None, None)
+                    .await
+                    .unwrap();
+                record_contact(&store, host, "defaults-identity").await;
+                store
+                    .replace_host_sessions(host, "defaults-identity", vec![profiled.clone()])
+                    .await
+                    .unwrap();
+                transport.set_script(
+                    host,
+                    Script {
+                        identity: Some("defaults-identity".to_string()),
+                        sessions: vec![profiled],
+                        ..Script::default()
+                    },
+                );
+            }
+        })
+        .await;
+        let host = fixture.store.list_hosts().await.unwrap()[1].id;
+        fixture
+            .manager
+            .wait_for_state(host, |state| {
+                matches!(
+                    state,
+                    HostState::Connected {
+                        last_refresh: RefreshHealth::Ok { .. },
+                        ..
+                    }
+                )
+            })
+            .await
+            .expect("actor is running");
+
+        fixture
+            .store
+            .remember_profile_default_from_session(
+                host,
+                Some("defaults-identity"),
+                "profile-b",
+                Some(2),
+                100,
+                "gone-source-b",
+            )
+            .await
+            .unwrap();
+        let before = fixture.manager.events().revision();
+        for _ in 0..3 {
+            tokio::time::advance(REFRESH_INTERVAL).await;
+            tokio::task::yield_now().await;
+            if fixture
+                .store
+                .remembered_profile(host)
+                .await
+                .unwrap()
+                .as_deref()
+                == Some("profile-a")
+            {
+                break;
+            }
+        }
+
+        assert!(fixture.manager.events().revision() > before);
+        assert_eq!(
+            fixture
+                .store
+                .remembered_profile(host)
+                .await
+                .unwrap()
+                .as_deref(),
+            Some("profile-a")
+        );
     }
 
     // ---- Cadences ---------------------------------------------------

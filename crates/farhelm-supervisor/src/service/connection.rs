@@ -8,13 +8,14 @@
 //! pumping tmux output back to the client and detecting a stalled reader.
 
 use super::core::{Supervisor, note_first_input};
-use super::handlers::handle_control;
+use super::handlers::{handle_control, handle_restricted_control};
 use super::snapshots::load_alt_screen_snapshot;
 use super::terminals::{ActiveAttach, AttachmentKey, InputRoute, TerminalId};
 use super::uploads::{
     UPLOAD_PRIORITY_QUEUE, UploadCommand, UploadRoute, UploadSignal, prune_finished_uploads,
 };
 use crate::tmux::{OutputEvent, OutputStream, PaneModes};
+use anyhow::Context;
 use farhelm_proto::io::{
     FrameReader, FrameWriter, ProgressWrite, handshake_with_host_identity, parse_control,
     write_frame_before_stall,
@@ -152,27 +153,13 @@ pub(crate) struct ConnectionCtx<'a> {
     pub(crate) tasks: &'a mut tokio::task::JoinSet<()>,
 }
 
-impl ConnectionCtx<'_> {
-    /// Derive a create reservation's deduplication window from this
-    /// connection, never from request fields (PLAN_M7.md item 2).
-    ///
-    /// Every connection this PR admits is the existing interactive kind;
-    /// an auth-bearing hello is refused before a `ConnectionCtx` exists.
-    /// The answer therefore remains M3's permanent tombstone. PLAN_M7.md
-    /// item 4 admits authenticated spawn connections and changes this seam
-    /// to return `SessionLifetime` for their creates.
-    pub(crate) fn create_dedup_scope(&self) -> crate::store::DedupScope {
-        crate::store::DedupScope::Permanent
-    }
-}
-
 /// Serve one admitted protocol connection.
 ///
 /// Generic over the byte stream so tests can drive it over an in-process
 /// duplex pipe with the same code path production uses over the unix
-/// socket. Until PLAN_M7.md item 4 can validate session credentials and
-/// restrict the request slice, an auth-bearing hello is refused before the
-/// request loop starts; it is never treated as an ordinary local peer.
+/// socket. An auth-bearing hello is validated against the session row and
+/// enters a restricted create-only dispatcher; an ordinary local peer keeps
+/// the full-authority path it has always used.
 pub async fn handle_connection<S>(sup: Arc<Supervisor>, stream: S) -> anyhow::Result<()>
 where
     S: AsyncRead + AsyncWrite + Send + 'static,
@@ -192,22 +179,45 @@ where
     // cloning it here is cheap and there is nothing to race.
     let peer_hello =
         handshake_with_host_identity(&mut reader, &mut writer, sup.host_identity.clone()).await?;
-    if matches!(peer_hello, ControlMsg::Hello { auth: Some(_), .. }) {
-        // PLAN_M7.md item 4 validates the credential and installs the
-        // restricted operation slice. Until that exists, accepting this
-        // hello would silently upgrade a deliberately restricted peer to
-        // today's full-authority connection.
-        const MESSAGE: &str = "session-authenticated spawn is not available in this build; upgrade the supervisor \
-             before retrying";
-        writer
-            .write_control(&ControlMsg::Error {
-                req_id: 0,
-                message: MESSAGE.to_string(),
-                kind: ErrorKind::Unauthorized,
-            })
-            .await?;
-        anyhow::bail!(MESSAGE);
-    }
+    let restricted_auth = match peer_hello {
+        ControlMsg::Hello {
+            auth: Some(auth), ..
+        } => {
+            let authenticated = sup
+                .store
+                .authenticates_session(&auth.session_id, &auth.token)
+                .await
+                .context("validating session authentication");
+            match authenticated {
+                Ok(true) => Some(auth),
+                Ok(false) => {
+                    const MESSAGE: &str =
+                        "the session credential is invalid or its session no longer exists";
+                    writer
+                        .write_control(&ControlMsg::Error {
+                            req_id: 0,
+                            message: MESSAGE.to_string(),
+                            kind: ErrorKind::Unauthorized,
+                        })
+                        .await?;
+                    anyhow::bail!(MESSAGE);
+                }
+                Err(error) => {
+                    writer
+                        .write_control(&ControlMsg::Error {
+                            req_id: 0,
+                            message: "the supervisor could not validate the session credential"
+                                .to_string(),
+                            kind: ErrorKind::Internal,
+                        })
+                        .await?;
+                    return Err(error);
+                }
+            }
+        }
+        ControlMsg::Hello { auth: None, .. } => None,
+        _ => unreachable!("the handshake accepts only a peer hello"),
+    };
 
     // Single writer task; everything that wants to send (request
     // handlers, the output forwarder, takeover notifications) goes
@@ -482,18 +492,19 @@ where
                 }
                 farhelm_proto::FrameKind::Control => {
                     let msg = parse_control(&frame)?;
-                    handle_control(
-                        &sup,
-                        msg,
-                        ConnectionCtx {
-                            tx: &tx,
-                            priority: &priority_tx,
-                            input_routes: &mut input_routes,
-                            upload_routes: &mut upload_routes,
-                            tasks: &mut tasks,
-                        },
-                    )
-                    .await;
+                    match restricted_auth.as_ref() {
+                        Some(auth) => handle_restricted_control(&sup, msg, &tx, auth).await,
+                        None => {
+                            let ctx = ConnectionCtx {
+                                tx: &tx,
+                                priority: &priority_tx,
+                                input_routes: &mut input_routes,
+                                upload_routes: &mut upload_routes,
+                                tasks: &mut tasks,
+                            };
+                            handle_control(&sup, msg, ctx).await
+                        }
+                    }
                 }
             }
         }
@@ -1388,6 +1399,7 @@ fn apply_pause_transition(pause: &watch::Sender<Option<tokio::time::Instant>>, p
 #[cfg(test)]
 mod tests {
     use super::super::core::tests::{StateDir, dummy_exe, no_uploads};
+    use super::super::core::{CreateInputs, CreateMode};
     use super::*;
     use farhelm_proto::{RestartOffer, SessionInfo, SessionStatus};
 
@@ -1413,12 +1425,12 @@ mod tests {
         let oversized = ControlMsg::SessionList {
             req_id,
             sessions: vec![SessionInfo {
-                creation_seq: None,
                 parent: None,
                 archived: false,
                 id: "s1".to_string(),
                 title: "x".repeat(farhelm_proto::MAX_FRAME_LEN as usize),
                 created_at: 1_700_000_000,
+                creation_seq: None,
                 cwd: "/tmp".to_string(),
                 invocation: "agent".to_string(),
                 status: SessionStatus::Running,
@@ -1472,12 +1484,12 @@ mod tests {
         let msg = ControlMsg::SessionCreated {
             req_id: 7,
             session: SessionInfo {
-                creation_seq: None,
                 parent: None,
                 archived: false,
                 id: "s1".to_string(),
                 title: "demo".to_string(),
                 created_at: 1_700_000_000,
+                creation_seq: None,
                 cwd: "/tmp".to_string(),
                 invocation: "agent".to_string(),
                 // Matches real `create_session` output: `Unknown`, not
@@ -1504,12 +1516,12 @@ mod tests {
         let msg = ControlMsg::SessionRestarted {
             req_id: 9,
             session: SessionInfo {
-                creation_seq: None,
                 parent: None,
                 archived: false,
                 id: "s1".to_string(),
                 title: "demo".to_string(),
                 created_at: 1_700_000_000,
+                creation_seq: None,
                 cwd: "/tmp".to_string(),
                 invocation: "agent".to_string(),
                 status: SessionStatus::Running,
@@ -1639,15 +1651,37 @@ mod tests {
         });
     }
 
-    /// An authenticated spawn hello must fail closed until PLAN_M7.md item
-    /// 4 can validate it and install the restricted operation slice. A
-    /// silent success here would grant the peer full interactive authority.
+    /// A real session id paired with the wrong token is refused before the
+    /// peer can submit even the restricted operation slice.
+    ///
+    /// Keeping the row present distinguishes token validation from the
+    /// already-covered stale-session case: accepting any token for a known id
+    /// would otherwise pass a test that authenticates only missing rows.
     #[tokio::test]
-    async fn an_authenticated_spawn_hello_is_refused_until_admission_exists() {
+    async fn an_authenticated_spawn_hello_with_the_wrong_token_is_unauthorized() {
         let state = StateDir::new();
         let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
             .await
             .expect("supervisor construction touches only tmux, not the launch shim");
+        let cwd = state.path().to_string_lossy().into_owned();
+        let parent = sup
+            .create_session(
+                CreateInputs {
+                    cwd: &cwd,
+                    parent: None,
+                    mode: CreateMode::Raw {
+                        invocation: "agent".to_string(),
+                        agent_kind: None,
+                        resume_template: None,
+                    },
+                    title: Some("parent".to_string()),
+                    cols: 80,
+                    rows: 24,
+                },
+                None,
+            )
+            .await
+            .expect("create authenticating session");
         let (client_side, server_side) = tokio::io::duplex(64 * 1024);
         let server = tokio::spawn(async move { handle_connection(sup, server_side).await });
         let (r, w) = tokio::io::split(client_side);
@@ -1660,8 +1694,8 @@ mod tests {
                 role: "spawn".to_string(),
                 host_identity: None,
                 auth: Some(farhelm_proto::SessionAuth {
-                    session_id: "session-1".to_string(),
-                    token: "secret".to_string(),
+                    session_id: parent.id,
+                    token: "definitely-not-the-minted-token".to_string(),
                 }),
             })
             .await
@@ -1692,17 +1726,151 @@ mod tests {
         assert_eq!(req_id, 0);
         assert_eq!(kind, ErrorKind::Unauthorized);
         assert!(
-            message.contains("session-authenticated spawn")
-                && message.contains("not available in this build")
-                && message.contains("upgrade"),
-            "the refusal must name the unavailable capability and the remedy: {message}"
+            message.contains("credential") && message.contains("no longer exists"),
+            "the refusal must identify a bad or stale session credential without disclosing \
+             which half failed: {message}"
         );
 
         let error = server
             .await
             .expect("connection task must not panic")
             .expect_err("the restricted peer must not enter the request loop");
-        assert!(format!("{error:#}").contains("session-authenticated spawn"));
+        assert!(format!("{error:#}").contains("session credential is invalid"));
+    }
+
+    /// Authority follows the presence of session authentication, not the
+    /// peer's self-declared role string.
+    ///
+    /// The `spawn` role remains descriptive wire metadata. Without an auth
+    /// bearer this is the same local Unix-socket peer as every helm client and
+    /// therefore retains the full dispatcher, including `ListSessions`.
+    #[tokio::test]
+    async fn a_spawn_role_without_authentication_retains_full_authority() {
+        let state = StateDir::new();
+        let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
+            .await
+            .expect("supervisor");
+        let (client_side, server_side) = tokio::io::duplex(64 * 1024);
+        let server = tokio::spawn(async move { handle_connection(sup, server_side).await });
+        let (r, w) = tokio::io::split(client_side);
+        let mut reader = FrameReader::new(r);
+        let mut writer = FrameWriter::new(w);
+        writer
+            .write_control(&ControlMsg::Hello {
+                protocol_version: farhelm_proto::PROTOCOL_VERSION,
+                build_version: farhelm_proto::BUILD_VERSION.to_string(),
+                role: "spawn".to_string(),
+                host_identity: None,
+                auth: None,
+            })
+            .await
+            .expect("send unauthenticated spawn-role hello");
+        let hello = reader.read_frame().await.unwrap().expect("server hello");
+        assert!(matches!(
+            parse_control(&hello),
+            Ok(ControlMsg::Hello { .. })
+        ));
+
+        writer
+            .write_control(&ControlMsg::ListSessions {
+                req_id: 60,
+                cursor: None,
+                limit: None,
+            })
+            .await
+            .expect("send a full-authority request");
+        let reply = reader.read_frame().await.unwrap().expect("list reply");
+        assert!(matches!(
+            parse_control(&reply),
+            Ok(ControlMsg::SessionList { req_id: 60, .. })
+        ));
+
+        drop(writer);
+        drop(reader);
+        server.await.unwrap().expect("clean client close");
+    }
+
+    /// A valid credential enters the restricted request loop rather than
+    /// receiving the handshake-level refusal used for a forgery.
+    #[tokio::test]
+    async fn a_valid_session_credential_is_admitted_with_restricted_authority() {
+        let state = StateDir::new();
+        let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
+            .await
+            .expect("supervisor");
+        let cwd = state.path().to_string_lossy().into_owned();
+        let parent = sup
+            .create_session(
+                CreateInputs {
+                    cwd: &cwd,
+                    parent: None,
+                    mode: CreateMode::Raw {
+                        invocation: "agent".to_string(),
+                        agent_kind: None,
+                        resume_template: None,
+                    },
+                    title: Some("parent".to_string()),
+                    cols: 80,
+                    rows: 24,
+                },
+                None,
+            )
+            .await
+            .expect("create authenticating session");
+        let token = sup
+            .store
+            .session_token(&parent.id)
+            .await
+            .unwrap()
+            .expect("created session has a credential");
+        let (client_side, server_side) = tokio::io::duplex(64 * 1024);
+        let server_sup = Arc::clone(&sup);
+        let server = tokio::spawn(async move { handle_connection(server_sup, server_side).await });
+        let (r, w) = tokio::io::split(client_side);
+        let mut reader = FrameReader::new(r);
+        let mut writer = FrameWriter::new(w);
+        writer
+            .write_control(&ControlMsg::Hello {
+                protocol_version: farhelm_proto::PROTOCOL_VERSION,
+                build_version: farhelm_proto::BUILD_VERSION.to_string(),
+                role: "spawn".to_string(),
+                host_identity: None,
+                auth: Some(farhelm_proto::SessionAuth {
+                    session_id: parent.id,
+                    token,
+                }),
+            })
+            .await
+            .unwrap();
+        let hello = reader.read_frame().await.unwrap().expect("server hello");
+        assert!(matches!(
+            parse_control(&hello),
+            Ok(ControlMsg::Hello { .. })
+        ));
+        writer
+            .write_control(&ControlMsg::ListSessions {
+                req_id: 61,
+                cursor: None,
+                limit: None,
+            })
+            .await
+            .unwrap();
+        let refusal = reader
+            .read_frame()
+            .await
+            .unwrap()
+            .expect("restricted refusal");
+        assert!(matches!(
+            parse_control(&refusal).unwrap(),
+            ControlMsg::Error {
+                req_id: 61,
+                kind: ErrorKind::Unauthorized,
+                ..
+            }
+        ));
+        drop(writer);
+        drop(reader);
+        server.await.unwrap().expect("clean client close");
     }
 
     /// Drive one real `handle_connection` server task over an in-process

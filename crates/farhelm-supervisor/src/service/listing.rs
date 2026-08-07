@@ -680,12 +680,12 @@ mod tests {
     /// caught.
     fn fake_session(id: &str, title_len: usize) -> SessionInfo {
         SessionInfo {
-            creation_seq: None,
             parent: None,
             archived: false,
             id: id.to_string(),
             title: "x".repeat(title_len),
             created_at: 1_700_000_000,
+            creation_seq: None,
             cwd: "/tmp".to_string(),
             invocation: "agent".to_string(),
             status: SessionStatus::Running,

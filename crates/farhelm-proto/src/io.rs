@@ -6,7 +6,7 @@
 //! transport" true in practice. Kept separate from the codec so the codec
 //! stays IO-free and golden-testable.
 
-use crate::{ControlMsg, ErrorKind, Frame, PROTOCOL_VERSION};
+use crate::{ControlMsg, ErrorKind, Frame, PROTOCOL_VERSION, SessionAuth};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
@@ -425,6 +425,32 @@ pub async fn handshake_with_host_identity<R: AsyncRead + Unpin, W: AsyncWrite + 
             role: "supervisor".to_string(),
             host_identity,
             auth: None,
+        },
+    )
+    .await
+}
+
+/// Exchange hellos while asking the supervisor for the restricted spawn
+/// authority attributed to `auth.session_id`.
+///
+/// A successful crossing-hello exchange only proves wire compatibility.
+/// The supervisor validates the bearer immediately afterward and may send
+/// an uncorrelated `Unauthorized` error before accepting a request; callers
+/// must therefore keep reading after this function returns.
+pub async fn handshake_with_session_auth<R: AsyncRead + Unpin, W: AsyncWrite + Unpin>(
+    reader: &mut FrameReader<R>,
+    writer: &mut FrameWriter<W>,
+    auth: SessionAuth,
+) -> std::io::Result<ControlMsg> {
+    handshake_with_hello(
+        reader,
+        writer,
+        ControlMsg::Hello {
+            protocol_version: PROTOCOL_VERSION,
+            build_version: crate::BUILD_VERSION.to_string(),
+            role: "spawn".to_string(),
+            host_identity: None,
+            auth: Some(auth),
         },
     )
     .await

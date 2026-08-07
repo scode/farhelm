@@ -1061,6 +1061,7 @@ mod tests {
             .create_session(
                 CreateInputs {
                     cwd: &cwd,
+                    parent: None,
                     mode: CreateMode::Raw {
                         invocation: "/opt/bin/claude".to_string(),
                         agent_kind: None,
@@ -2022,8 +2023,10 @@ mod tests {
             .insert_session(
                 StoredSession {
                     id: id.to_string(),
+                    parent: None,
                     title: id.to_string(),
                     created_at: now_unix(),
+                    creation_seq: 0,
                     cwd: "/tmp".to_string(),
                     invocation: "agent".to_string(),
                     tmux_name: tmux_name.to_string(),

@@ -84,11 +84,13 @@
 //! than the plan records.
 
 use anyhow::Context;
+use base64::Engine as _;
 use rusqlite::{Connection, OpenFlags, OptionalExtension};
 use std::collections::HashMap;
 use std::path::Path;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
+use subtle::ConstantTimeEq;
 
 /// How long a query waits on `SQLITE_BUSY` before giving up.
 ///
@@ -107,7 +109,22 @@ const BUSY_TIMEOUT: Duration = Duration::from_secs(5);
 /// step in `apply_schema`: version 2 (PLAN_M3.md item 2 — the durable
 /// last-known outcome and the boot id) is the first real migration this
 /// database has ever had, and the template every later one follows.
-const SCHEMA_VERSION: i64 = 9;
+const SCHEMA_VERSION: i64 = 11;
+
+/// Random payload size behind one URL-safe session bearer.
+const SESSION_TOKEN_BYTES: usize = 32;
+
+/// Mint the recoverable bearer value injected into one session.
+///
+/// The token has the session row's lifetime. It is intentionally plaintext:
+/// a later launch of the same session must be able to inject the same value,
+/// so a one-way digest could not satisfy the restart contract.
+fn mint_session_token() -> anyhow::Result<String> {
+    let mut bytes = [0u8; SESSION_TOKEN_BYTES];
+    getrandom::fill(&mut bytes)
+        .map_err(|error| anyhow::anyhow!("reading operating-system randomness: {error}"))?;
+    Ok(base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(bytes))
+}
 
 /// The sole row id of [`supervisor_meta`](apply_schema) — the table is
 /// single-row by construction (a `CHECK` on this value), so every read and
@@ -633,9 +650,9 @@ type OutcomeColumns = (String, Option<i32>, Option<String>, Option<String>);
 /// an answer after the session is gone, and the honest answer is "yes, and
 /// it was deleted", never a fresh duplicate.
 ///
-/// PLAN_M7.md item 2 adds `SessionLifetime` for spawn. Those rows become
-/// prunable when their child is gone, but item 4 owns that pruning; this PR
-/// records the policy without changing deletion behavior.
+/// PLAN_M7.md adds `SessionLifetime` for spawn. Those rows are pruned in the
+/// same transaction that deletes their child, so a retry key becomes usable
+/// again exactly when the session it identified is gone.
 ///
 /// Each row holds a
 /// full copy of its request's canonical fields (`service`'s
@@ -669,9 +686,8 @@ pub struct Reservation {
     /// probes tmux for exactly this name at decision time rather than
     /// trusting a session map that may predate a late-completing create.
     pub tmux_name: String,
-    /// How long this row deduplicates its key. PLAN_M7.md item 4 makes
-    /// `SessionLifetime` rows prunable once their child is gone; this step
-    /// records the policy but keeps all current creates `Permanent`.
+    /// How long this row deduplicates its key. Restricted spawn creates use
+    /// `SessionLifetime`; full-authority interactive creates use `Permanent`.
     pub dedup_scope: DedupScope,
     pub outcome: ReservationOutcome,
 }
@@ -680,9 +696,9 @@ pub struct Reservation {
 /// item 2).
 ///
 /// This is derived from the creating connection and never appears on the
-/// wire, so a caller cannot widen its own deduplication window. Pruning the
-/// bounded scope belongs to PLAN_M7.md item 4; recording it now keeps one
-/// reservation mechanism for interactive creates and spawn.
+/// wire, so a caller cannot widen its own deduplication window. One
+/// reservation mechanism therefore serves both interactive creates and
+/// bounded spawn retries without trusting the request to select policy.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DedupScope {
     /// M3's existing tombstone behavior: the key remains spent forever.
@@ -746,7 +762,10 @@ pub struct Settlement {
 pub enum Claimed {
     /// The key was free (or the create carried none): the launching row is
     /// committed and this process owns the intent.
-    Ours,
+    Ours {
+        session_token: String,
+        creation_seq: u64,
+    },
     /// The key was already claimed. NOTHING was committed — the session row
     /// is rolled back with the refused claim — and the existing reservation
     /// is returned so the caller can answer from it rather than guessing.
@@ -793,7 +812,12 @@ pub enum RetryClaim {
     /// the next reload — the user's rename accepted, acknowledged, and then
     /// apparently reverted. Returning it here is what lets the caller adopt
     /// the committed value instead of its own stale one.
-    Acquired { created_at: i64, title: String },
+    Acquired {
+        created_at: i64,
+        creation_seq: u64,
+        title: String,
+        session_token: String,
+    },
     /// The reservation is no longer pending — something settled it first
     /// (most often a concurrent delete, which tombstones as `Created`). The
     /// caller must answer from this outcome, which for a deleted session is
@@ -1109,6 +1133,8 @@ pub type BootTxFault = Arc<dyn Fn() -> anyhow::Result<()> + Send + Sync>;
 #[derive(Debug, Clone)]
 pub struct StoredSession {
     pub id: String,
+    /// Direct parent metadata, or `None` for an ordinary root session.
+    pub parent: Option<String>,
     pub title: String,
     /// Seconds since the Unix epoch when this row was inserted (`now_unix`,
     /// called once by the caller so the exact instant matches what
@@ -1135,6 +1161,11 @@ pub struct StoredSession {
     /// `created_at`, this field is immutable either way — nothing later
     /// in this session's life re-derives or overwrites it.
     pub created_at: i64,
+    /// Strict creation order within this supervisor installation.
+    ///
+    /// Unlike `created_at`, this cannot tie. Retries preserve the original
+    /// value, so one logical create keeps one place in the sequence.
+    pub creation_seq: u64,
     pub cwd: String,
     pub invocation: String,
     pub tmux_name: String,
@@ -1393,6 +1424,12 @@ pub struct SessionStore {
 /// - 9: PLAN_M7.md item 2 — `create_reservations.dedup_scope`, defaulting
 ///   existing interactive reservations to their historical `permanent`
 ///   policy. Spawn begins writing `session_lifetime` in item 4.
+/// - 10: PLAN_M7.md item 4 — plaintext per-session spawn credentials and
+///   direct-parent metadata. Every existing row receives a credential in
+///   the migration transaction; parent is absent for pre-spawn rows.
+/// - 11: PR #118's spawn review — a supervisor-monotonic creation sequence.
+///   The counter lives in `supervisor_meta`, so deleting the newest session
+///   cannot make its value reusable the way a bare SQLite rowid could.
 ///
 /// `may_migrate` is the caller's assertion that it holds this state
 /// directory's exclusivity (see `service::StateDirOwnership`). Upgrading a
@@ -1444,12 +1481,16 @@ fn apply_schema(conn: &Connection, may_migrate: bool) -> anyhow::Result<()> {
                  generation            INTEGER NOT NULL DEFAULT 0,
                  launch_scoped         INTEGER NOT NULL DEFAULT 0,
                  source_profile_id     TEXT,
-                 source_profile_name   TEXT
+                 source_profile_name   TEXT,
+                 parent                TEXT,
+                 session_token         TEXT,
+                 creation_seq          INTEGER
              ) STRICT;
              CREATE TABLE supervisor_meta (
                  id            INTEGER PRIMARY KEY CHECK (id = 0),
                  boot_id       TEXT,
-                 host_identity TEXT
+                 host_identity TEXT,
+                 last_creation_seq INTEGER NOT NULL DEFAULT 0
              ) STRICT;
              CREATE TABLE create_reservations (
                  intent_key   TEXT PRIMARY KEY,
@@ -1466,7 +1507,7 @@ fn apply_schema(conn: &Connection, may_migrate: bool) -> anyhow::Result<()> {
                  ON create_reservations (session_id) WHERE state = 'pending';
              {PROFILES_SCHEMA}
              {STARTER_PROFILES}
-             PRAGMA user_version = 9;
+             PRAGMA user_version = 11;
              COMMIT;"
         ))
         .context("creating schema")?;
@@ -1693,6 +1734,102 @@ fn apply_schema(conn: &Connection, may_migrate: bool) -> anyhow::Result<()> {
         .context("migrating schema from version 8 to 9")?;
         version = 9;
     }
+    if version == 9 {
+        // A credential is recoverable launch state, not an authentication
+        // digest: restart has to inject the SAME value into the replacement
+        // process. The nullable add is only an intermediate shape inside
+        // this transaction. Every existing row is filled before the final
+        // table shape is claimed by user_version 10, and all later readers
+        // refuse NULL through their ordinary String decode.
+        let migration = conn
+            .unchecked_transaction()
+            .context("starting schema migration from version 9 to 10")?;
+        migration
+            .execute_batch(
+                "ALTER TABLE sessions ADD COLUMN parent TEXT;
+                 ALTER TABLE sessions ADD COLUMN session_token TEXT;",
+            )
+            .context("adding spawn columns during schema migration from version 9 to 10")?;
+        {
+            let ids = {
+                let mut stmt = migration
+                    .prepare("SELECT id FROM sessions")
+                    .context("preparing migrated-session credential scan")?;
+                stmt.query_map([], |row| row.get::<_, String>(0))
+                    .context("querying sessions that need credentials")?
+                    .collect::<Result<Vec<_>, _>>()
+                    .context("decoding sessions that need credentials")?
+            };
+            for id in ids {
+                migration
+                    .execute(
+                        "UPDATE sessions SET session_token = ?2 WHERE id = ?1",
+                        rusqlite::params![id, mint_session_token()?],
+                    )
+                    .context("minting a migrated session credential")?;
+            }
+        }
+        migration
+            .pragma_update(None, "user_version", 10)
+            .context("recording schema version 10")?;
+        migration
+            .commit()
+            .context("committing schema migration from version 9 to 10")?;
+        version = 10;
+    }
+    if version == 10 {
+        // Seconds are display data, not chronology: concurrent creates can
+        // share one timestamp. The explicit counter remains monotonic even
+        // after the newest session is deleted, unlike a sessions-table
+        // rowid whose maximum value SQLite is allowed to reuse.
+        //
+        // Existing rows receive the old stable ordering: `created_at`
+        // ascending, then id descending, so the previous newest ordering
+        // (`created_at DESC, id ASC`) maps to the greatest sequence.
+        let migration = conn
+            .unchecked_transaction()
+            .context("starting schema migration from version 10 to 11")?;
+        migration
+            .execute_batch(
+                "ALTER TABLE sessions ADD COLUMN creation_seq INTEGER;
+                 ALTER TABLE supervisor_meta
+                     ADD COLUMN last_creation_seq INTEGER NOT NULL DEFAULT 0;",
+            )
+            .context("adding creation-sequence storage")?;
+        let ids = {
+            let mut stmt = migration
+                .prepare("SELECT id FROM sessions ORDER BY created_at ASC, id DESC")
+                .context("preparing migrated-session sequence scan")?;
+            stmt.query_map([], |row| row.get::<_, String>(0))
+                .context("querying sessions that need creation sequences")?
+                .collect::<Result<Vec<_>, _>>()
+                .context("decoding sessions that need creation sequences")?
+        };
+        for (index, id) in ids.iter().enumerate() {
+            let sequence = i64::try_from(index + 1).context("too many migrated sessions")?;
+            migration
+                .execute(
+                    "UPDATE sessions SET creation_seq = ?2 WHERE id = ?1",
+                    rusqlite::params![id, sequence],
+                )
+                .context("assigning a migrated session creation sequence")?;
+        }
+        let last = i64::try_from(ids.len()).context("too many migrated sessions")?;
+        migration
+            .execute(
+                "INSERT INTO supervisor_meta (id, last_creation_seq) VALUES (0, ?1)
+                 ON CONFLICT(id) DO UPDATE SET last_creation_seq = excluded.last_creation_seq",
+                rusqlite::params![last],
+            )
+            .context("initializing the session creation counter")?;
+        migration
+            .pragma_update(None, "user_version", 11)
+            .context("recording schema version 11")?;
+        migration
+            .commit()
+            .context("committing schema migration from version 10 to 11")?;
+        version = 11;
+    }
     if version == SCHEMA_VERSION {
         return Ok(());
     }
@@ -1778,17 +1915,59 @@ fn settle_within(conn: &Connection, settlement: &Settlement) -> anyhow::Result<(
 /// create reply, so the timestamp the client sees always matches the one
 /// this row actually gets. Computing it twice (once here, once at the
 /// call site) would let the two drift by however long launch took.
-fn insert_session_row(conn: &Connection, row: &StoredSession) -> anyhow::Result<()> {
+/// Values minted with a session row and needed by its first launch.
+struct InsertedSession {
+    session_token: String,
+    creation_seq: u64,
+}
+
+/// Advance the durable supervisor-wide creation counter.
+///
+/// The caller owns a transaction. Keeping allocation inside that same
+/// transaction means a failed insert consumes no sequence and a committed
+/// row can never exist without one.
+fn next_creation_seq(conn: &Connection) -> anyhow::Result<u64> {
+    conn.execute(
+        "INSERT INTO supervisor_meta (id, last_creation_seq) VALUES (0, 0)
+         ON CONFLICT(id) DO NOTHING",
+        [],
+    )
+    .context("ensuring the session creation counter exists")?;
+    conn.execute(
+        "UPDATE supervisor_meta SET last_creation_seq = last_creation_seq + 1 WHERE id = 0",
+        [],
+    )
+    .context("advancing the session creation counter")?;
+    let value: i64 = conn
+        .query_row(
+            "SELECT last_creation_seq FROM supervisor_meta WHERE id = 0",
+            [],
+            |row| row.get(0),
+        )
+        .context("reading the advanced session creation counter")?;
+    u64::try_from(value).context("session creation counter became negative")
+}
+
+fn insert_session_row(
+    conn: &Connection,
+    row: &StoredSession,
+    preserved: Option<(&str, u64)>,
+) -> anyhow::Result<InsertedSession> {
     let (state, exit_code, annotation, error_detail) = row.outcome.columns();
+    let (session_token, creation_seq) = match preserved {
+        Some((token, sequence)) => (token.to_string(), sequence),
+        None => (mint_session_token()?, next_creation_seq(conn)?),
+    };
+    let stored_creation_seq = i64::try_from(creation_seq).context("creation sequence overflow")?;
     conn.execute(
         "INSERT INTO sessions \
-         (id, title, cwd, invocation, tmux_name, pane, created_at, \
+         (id, title, cwd, invocation, tmux_name, pane, created_at, creation_seq, \
           outcome_state, exit_code, annotation, error_detail, \
           agent_kind, resume_template, canonical_cwd, captured_conversation, \
           captured_record, capture_ambiguous, first_input_at, generation, launch_scoped, \
-          source_profile_id, source_profile_name) \
+          source_profile_id, source_profile_name, parent, session_token) \
          VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, \
-                 ?18, ?19, ?20, ?21, ?22)",
+                 ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25)",
         rusqlite::params![
             row.id,
             row.title,
@@ -1797,6 +1976,7 @@ fn insert_session_row(conn: &Connection, row: &StoredSession) -> anyhow::Result<
             row.tmux_name,
             row.pane,
             row.created_at,
+            stored_creation_seq,
             state,
             exit_code,
             annotation,
@@ -1815,10 +1995,15 @@ fn insert_session_row(conn: &Connection, row: &StoredSession) -> anyhow::Result<
             // `CHECK` constraint.
             row.source_profile.as_ref().map(|profile| &profile.id),
             row.source_profile.as_ref().map(|profile| &profile.name),
+            row.parent,
+            session_token,
         ],
     )
     .context("inserting session row")?;
-    Ok(())
+    Ok(InsertedSession {
+        session_token,
+        creation_seq,
+    })
 }
 
 /// The column list every session read shares, in the order
@@ -1839,7 +2024,7 @@ const SESSION_COLUMNS: &str = "id, title, cwd, invocation, tmux_name, pane, \
                                agent_kind, resume_template, canonical_cwd, \
                                captured_conversation, captured_record, capture_ambiguous, \
                                first_input_at, generation, launch_scoped, created_at, \
-                               source_profile_id, source_profile_name";
+                               source_profile_id, source_profile_name, parent, creation_seq";
 
 /// The raw columns of one session row, before the fallible decoding that
 /// cannot happen inside a rusqlite row mapper (whose error type is
@@ -1855,6 +2040,7 @@ type SessionColumns = (
     String,
     Option<String>,
     (Option<String>, Option<String>),
+    i64,
 );
 
 /// Read one row's columns positionally, matching [`SESSION_COLUMNS`].
@@ -1868,6 +2054,7 @@ fn read_session_columns(r: &rusqlite::Row<'_>) -> rusqlite::Result<SessionColumn
     Ok((
         StoredSession {
             id: r.get(0)?,
+            parent: r.get(22)?,
             title: r.get(1)?,
             cwd: r.get(2)?,
             invocation: r.get(3)?,
@@ -1884,12 +2071,14 @@ fn read_session_columns(r: &rusqlite::Row<'_>) -> rusqlite::Result<SessionColumn
             generation: r.get(17)?,
             launch_scoped: r.get::<_, i64>(18)? != 0,
             created_at: r.get(19)?,
+            creation_seq: 0,
             source_profile: None,
         },
         (r.get(6)?, r.get(7)?, r.get(8)?, r.get(9)?),
         r.get(10)?,
         r.get(11)?,
         (r.get(20)?, r.get(21)?),
+        r.get::<_, i64>(23)?,
     ))
 }
 
@@ -1914,8 +2103,16 @@ fn read_session_columns(r: &rusqlite::Row<'_>) -> rusqlite::Result<SessionColumn
 /// derived at all, since the id is the only key the catalog is looked up
 /// by. Neither is something to invent a value for.
 fn decode_session_row(columns: SessionColumns) -> anyhow::Result<StoredSession> {
-    let (mut row, (state, exit_code, annotation, error_detail), kind, template, source_profile) =
-        columns;
+    let (
+        mut row,
+        (state, exit_code, annotation, error_detail),
+        kind,
+        template,
+        source_profile,
+        creation_seq,
+    ) = columns;
+    row.creation_seq = u64::try_from(creation_seq)
+        .with_context(|| format!("session {} has a negative creation sequence", row.id))?;
     row.source_profile = match source_profile {
         (Some(id), Some(name)) => Some(ProfileSnapshot { id, name }),
         (None, None) => None,
@@ -2342,9 +2539,12 @@ impl SessionStore {
                     return Ok(Claimed::TakenBy(Box::new(winner)));
                 }
             }
-            insert_session_row(&tx, &row)?;
+            let inserted = insert_session_row(&tx, &row, None)?;
             tx.commit().context("committing the session insert")?;
-            Ok(Claimed::Ours)
+            Ok(Claimed::Ours {
+                session_token: inserted.session_token,
+                creation_seq: inserted.creation_seq,
+            })
         })
         .await
         .context("session insert task panicked")?
@@ -2373,6 +2573,12 @@ impl SessionStore {
         kind: farhelm_proto::ErrorKind,
         message: &str,
     ) -> anyhow::Result<()> {
+        // A bounded key has no child to bound it when validation fails.
+        // Recording that refusal would therefore turn a session-lifetime
+        // reservation into an immortal row. Its retry revalidates instead.
+        if claim.dedup_scope == DedupScope::SessionLifetime {
+            return Ok(());
+        }
         let conn = Arc::clone(&self.conn);
         let session_id = session_id.to_string();
         let tmux_name = tmux_name.to_string();
@@ -2459,11 +2665,21 @@ impl SessionStore {
             {
                 return Ok(RetryClaim::Resolved(Box::new(reservation)));
             }
-            let current: Option<(String, String, i64, String)> = tx
+            let current: Option<(String, String, i64, String, String, i64)> = tx
                 .query_row(
-                    "SELECT outcome_state, pane, created_at, title FROM sessions WHERE id = ?1",
+                    "SELECT outcome_state, pane, created_at, title, session_token, creation_seq \
+                     FROM sessions WHERE id = ?1",
                     rusqlite::params![row.id],
-                    |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
+                    |r| {
+                        Ok((
+                            r.get(0)?,
+                            r.get(1)?,
+                            r.get(2)?,
+                            r.get(3)?,
+                            r.get(4)?,
+                            r.get(5)?,
+                        ))
+                    },
                 )
                 .optional()
                 .context("reading the reserved session's current state")?;
@@ -2483,31 +2699,39 @@ impl SessionStore {
             // timestamp the reply must honor, so reading all three off one
             // committed snapshot rules out a second query ever disagreeing
             // with the first about which row it saw.
-            let (preserved_created_at, preserved_title) = match &current {
-                Some((state, pane, created_at, title)) => {
-                    if !pane.is_empty() || !matches!(state.as_str(), "launching" | "interrupted") {
-                        return Ok(RetryClaim::Launched);
+            let (preserved_created_at, preserved_title, preserved_token, preserved_sequence) =
+                match current {
+                    Some((state, pane, created_at, title, token, sequence)) => {
+                        if !pane.is_empty()
+                            || !matches!(state.as_str(), "launching" | "interrupted")
+                        {
+                            return Ok(RetryClaim::Launched);
+                        }
+                        (
+                            created_at,
+                            title,
+                            Some(token),
+                            Some(u64::try_from(sequence).context("negative creation sequence")?),
+                        )
                     }
-                    (*created_at, title.clone())
-                }
-                // Contradicts `SessionStore::insert_session`'s own
-                // invariant — a Pending reservation's row is committed in
-                // the SAME transaction as the reservation itself, so one
-                // can never durably exist without the other. Handled
-                // rather than asserted for the same reason the relaunch
-                // takeover as a whole re-checks its conditions instead of
-                // trusting the caller's evidence: "cannot happen" is a
-                // poor thing to stake a duplicate agent on, and here that
-                // would extend to a lost timestamp too. Falls back to the
-                // caller's own freshly minted `row.created_at` — the
-                // least-wrong answer when the row this takeover was
-                // supposed to preserve cannot be found at all. (The
-                // original `current.is_some_and(..)` check this replaces
-                // took the same "nothing found, proceed anyway" branch for
-                // `None`, so this preserves that behavior rather than
-                // introducing a new refusal path.)
-                None => (row.created_at, row.title.clone()),
-            };
+                    // Contradicts `SessionStore::insert_session`'s own
+                    // invariant — a Pending reservation's row is committed in
+                    // the SAME transaction as the reservation itself, so one
+                    // can never durably exist without the other. Handled
+                    // rather than asserted for the same reason the relaunch
+                    // takeover as a whole re-checks its conditions instead of
+                    // trusting the caller's evidence: "cannot happen" is a
+                    // poor thing to stake a duplicate agent on, and here that
+                    // would extend to a lost timestamp too. Falls back to the
+                    // caller's own freshly minted `row.created_at` — the
+                    // least-wrong answer when the row this takeover was
+                    // supposed to preserve cannot be found at all. (The
+                    // original `current.is_some_and(..)` check this replaces
+                    // took the same "nothing found, proceed anyway" branch for
+                    // `None`, so this preserves that behavior rather than
+                    // introducing a new refusal path.)
+                    None => (row.created_at, row.title.clone(), None, None),
+                };
             tx.execute(
                 "DELETE FROM sessions WHERE id = ?1",
                 rusqlite::params![row.id],
@@ -2524,17 +2748,25 @@ impl SessionStore {
             // the same committed snapshot the other two conditions are
             // read from is what makes that atomic rather than a second
             // read racing the first.
-            let row = StoredSession {
+            let mut row = StoredSession {
                 created_at: preserved_created_at,
-                title: preserved_title.clone(),
+                creation_seq: 0,
+                title: preserved_title,
                 ..row
             };
-            insert_session_row(&tx, &row)
-                .context("re-inserting the launching row for a relaunch")?;
+            let inserted = insert_session_row(
+                &tx,
+                &row,
+                preserved_token.as_deref().zip(preserved_sequence),
+            )
+            .context("re-inserting the launching row for a relaunch")?;
             tx.commit().context("committing the relaunch takeover")?;
+            let preserved_title = std::mem::take(&mut row.title);
             Ok(RetryClaim::Acquired {
                 created_at: preserved_created_at,
+                creation_seq: inserted.creation_seq,
                 title: preserved_title,
+                session_token: inserted.session_token,
             })
         })
         .await
@@ -2794,6 +3026,69 @@ impl SessionStore {
         .context("session read task panicked")?
     }
 
+    /// Recover the credential one session's current and future launches use.
+    ///
+    /// This is intentionally a separate projection from [`Self::session`]:
+    /// callers describing sessions never need the bearer value, so keeping
+    /// it out of `StoredSession` prevents an innocent `Debug` or log of that
+    /// metadata type from exposing it.
+    pub async fn session_token(&self, id: &str) -> anyhow::Result<Option<String>> {
+        let conn = Arc::clone(&self.conn);
+        let id = id.to_string();
+        tokio::task::spawn_blocking(move || -> anyhow::Result<Option<String>> {
+            let conn = conn.lock().expect("session db mutex poisoned");
+            conn.query_row(
+                "SELECT session_token FROM sessions WHERE id = ?1",
+                rusqlite::params![id],
+                |row| row.get(0),
+            )
+            .optional()
+            .context("reading a session credential")
+        })
+        .await
+        .context("session credential read task panicked")?
+    }
+
+    /// Validate a hello's session attribution without exposing the stored
+    /// bearer value to the connection layer.
+    pub async fn authenticates_session(&self, id: &str, token: &str) -> anyhow::Result<bool> {
+        let Some(expected) = self.session_token(id).await? else {
+            return Ok(false);
+        };
+        Ok(expected.as_bytes().ct_eq(token.as_bytes()).into())
+    }
+
+    /// The newest profile-backed session's immutable source snapshot.
+    ///
+    /// No catalog join appears here on purpose. Spawn defaults to the last
+    /// profile that was actually used, even when that profile has since
+    /// been deleted; the caller must then refuse and name `--agent`, never
+    /// walk backward to an older surviving profile. The monotonic creation
+    /// sequence is the chronology authority; unlike wall-clock seconds and
+    /// random ids, it cannot tie or reorder same-second creates.
+    pub async fn latest_source_profile(&self) -> anyhow::Result<Option<ProfileSnapshot>> {
+        let conn = Arc::clone(&self.conn);
+        tokio::task::spawn_blocking(move || -> anyhow::Result<Option<ProfileSnapshot>> {
+            let conn = conn.lock().expect("session db mutex poisoned");
+            conn.query_row(
+                "SELECT source_profile_id, source_profile_name FROM sessions \
+                 WHERE source_profile_id IS NOT NULL \
+                 ORDER BY creation_seq DESC LIMIT 1",
+                [],
+                |row| {
+                    Ok(ProfileSnapshot {
+                        id: row.get(0)?,
+                        name: row.get(1)?,
+                    })
+                },
+            )
+            .optional()
+            .context("reading the most recently used source profile")
+        })
+        .await
+        .context("last-used profile read task panicked")?
+    }
+
     /// The reservation for `intent_key`, if this state directory has ever
     /// seen it — the one lookup `service::Supervisor::create_session`'s
     /// state machine runs before deciding whether a create is a first
@@ -2901,9 +3196,13 @@ impl SessionStore {
         .context("reservation settlement task panicked")?
     }
 
-    /// [`SessionStore::delete_session`] for the DELETE path, settling this
-    /// session's still-pending reservations in the SAME transaction as the
-    /// row removal (PLAN_M3.md item 6's tombstone rule).
+    /// [`SessionStore::delete_session`] for the user-visible DELETE path.
+    ///
+    /// Permanent interactive reservations are settled as `Created` in the
+    /// same transaction as row removal: their keys remain tombstones. A
+    /// session-lifetime spawn reservation is deleted instead, because its
+    /// key is promised only while this child exists and becomes reusable at
+    /// the same commit that removes the child.
     ///
     /// The settlement direction is `Created`, and it is a statement of
     /// fact rather than a courtesy: a session cannot be deleted without
@@ -2915,8 +3214,8 @@ impl SessionStore {
     /// crashed attempt never launched" and produce exactly the duplicate
     /// this mechanism exists to exclude.
     ///
-    /// The reservation ROW is deliberately kept; see [`Reservation`]'s docs
-    /// on tombstones. This is a separate method from plain
+    /// The permanent reservation row is deliberately kept; see
+    /// [`Reservation`]'s docs on tombstones. This is a separate method from plain
     /// [`SessionStore::delete_session`] because that one is ALSO the create
     /// path's rollback (`service`'s `abandon_launching_record`), where the
     /// launch provably did not happen and settling its reservation
@@ -2930,11 +3229,18 @@ impl SessionStore {
                 .transaction()
                 .context("beginning the session delete transaction")?;
             tx.execute(
-                "UPDATE create_reservations SET state = 'created' \
-                 WHERE session_id = ?1 AND state = 'pending'",
+                "DELETE FROM create_reservations \
+                 WHERE session_id = ?1 AND dedup_scope = 'session_lifetime'",
                 rusqlite::params![id],
             )
-            .context("settling the deleted session's reservations")?;
+            .context("pruning the deleted spawn's bounded reservation")?;
+            tx.execute(
+                "UPDATE create_reservations SET state = 'created' \
+                 WHERE session_id = ?1 AND state = 'pending' \
+                 AND dedup_scope = 'permanent'",
+                rusqlite::params![id],
+            )
+            .context("settling the deleted interactive session's reservations")?;
             tx.execute("DELETE FROM sessions WHERE id = ?1", rusqlite::params![id])
                 .context("deleting session row")?;
             tx.commit().context("committing the session delete")?;
@@ -3525,19 +3831,14 @@ impl SessionStore {
     /// racing nothing, since this connection is already serialized
     /// through one mutex).
     ///
-    /// This is the CREATE-ROLLBACK delete, not the user-facing one, and
-    /// `settlement` is what makes the distinction safe to express in one
-    /// method: the rollback runs where a launch provably did NOT happen, so
-    /// its reservation is settled `Failed` (or left pending — see
-    /// `service`'s retention rules), never told a session was created the
-    /// way [`SessionStore::delete_session_settling_reservations`] does.
+    /// This is the CREATE-ROLLBACK delete, not the user-facing one. A
+    /// permanent reservation is settled `Failed`, preserving M3's replay
+    /// contract. A session-lifetime reservation is deleted instead: once
+    /// the child row is gone there is no lifetime left to bound it, and a
+    /// failed tombstone would otherwise be immortal.
     ///
-    /// The settlement rides the SAME transaction as the removal because
-    /// the two are one fact: a rollback whose settlement did not commit
-    /// would leave a reservation pointing at a row that no longer exists,
-    /// and the retry that found it would relaunch under an intent the
-    /// client was already told had failed. `None` is a rollback with no
-    /// intent key to settle.
+    /// The reservation change rides the SAME transaction as the removal.
+    /// `None` is an unkeyed rollback and touches no reservation.
     pub async fn delete_session(
         &self,
         id: &str,
@@ -3553,13 +3854,53 @@ impl SessionStore {
             tx.execute("DELETE FROM sessions WHERE id = ?1", rusqlite::params![id])
                 .context("deleting session row")?;
             if let Some(settlement) = &settlement {
-                settle_within(&tx, settlement)?;
+                let pruned = tx
+                    .execute(
+                        "DELETE FROM create_reservations
+                         WHERE intent_key = ?1 AND session_id = ?2
+                           AND dedup_scope = 'session_lifetime'",
+                        rusqlite::params![settlement.intent_key, settlement.session_id],
+                    )
+                    .context("pruning a rolled-back bounded reservation")?;
+                if pruned == 0 {
+                    settle_within(&tx, settlement)?;
+                }
             }
             tx.commit().context("committing the launch rollback")?;
             Ok(())
         })
         .await
         .context("session delete task panicked")?
+    }
+
+    /// Remove a bounded reservation after its child has disappeared.
+    ///
+    /// The absence check and deletion are one SQLite statement, closing
+    /// the replay-versus-delete race: either the child still exists and
+    /// this does nothing, or the key is free before a fresh claim begins.
+    pub async fn prune_orphaned_bounded_reservation(
+        &self,
+        intent_key: &str,
+        session_id: &str,
+    ) -> anyhow::Result<bool> {
+        let conn = Arc::clone(&self.conn);
+        let intent_key = intent_key.to_string();
+        let session_id = session_id.to_string();
+        tokio::task::spawn_blocking(move || -> anyhow::Result<bool> {
+            let conn = conn.lock().expect("session db mutex poisoned");
+            let removed = conn
+                .execute(
+                    "DELETE FROM create_reservations
+                     WHERE intent_key = ?1 AND session_id = ?2
+                       AND dedup_scope = 'session_lifetime'
+                       AND NOT EXISTS (SELECT 1 FROM sessions WHERE id = ?2)",
+                    rusqlite::params![intent_key, session_id],
+                )
+                .context("pruning an orphaned bounded reservation")?;
+            Ok(removed != 0)
+        })
+        .await
+        .context("bounded-reservation prune task panicked")?
     }
 
     /// Load every persisted session, for `Supervisor::reload_sessions`
@@ -3899,6 +4240,17 @@ impl SessionStore {
 mod tests {
     use super::*;
 
+    /// Credential strength is measured on the decoded random payload, not
+    /// the encoded string length that base64 formatting can inflate.
+    #[test]
+    fn minted_session_credentials_carry_a_32_byte_random_payload() {
+        let token = mint_session_token().expect("mint session credential");
+        let payload = base64::engine::general_purpose::URL_SAFE_NO_PAD
+            .decode(token)
+            .expect("minted credential is URL-safe base64");
+        assert_eq!(payload.len(), 32);
+    }
+
     /// The v1 schema, verbatim as this crate shipped it before M3 — the
     /// only way to produce a genuine pre-migration database to upgrade,
     /// since `apply_schema` itself no longer knows how to create one.
@@ -4055,6 +4407,41 @@ mod tests {
         conn.pragma_update(None, "user_version", 7).expect("stamp");
     }
 
+    /// Plant the last pre-spawn schema with two credential-less sessions.
+    ///
+    /// Written from the older schema fixtures and the historical DDL, not
+    /// from today's migration, so a credential-minting regression cannot
+    /// accidentally update both the implementation and its starting point.
+    fn plant_v9_database(path: &Path) {
+        let conn = Connection::open(path).expect("create raw db");
+        conn.execute_batch(V6_SCHEMA).expect("v6 schema");
+        conn.execute_batch(
+            "ALTER TABLE supervisor_meta ADD COLUMN host_identity TEXT;
+             ALTER TABLE sessions ADD COLUMN source_profile_id TEXT;
+             ALTER TABLE sessions ADD COLUMN source_profile_name TEXT;
+             ALTER TABLE create_reservations
+                 ADD COLUMN dedup_scope TEXT NOT NULL DEFAULT 'permanent';",
+        )
+        .expect("v7 through v9 columns");
+        conn.execute_batch(PROFILES_SCHEMA)
+            .expect("v8 profile catalog");
+        for (index, id) in ["old-a", "old-b"].into_iter().enumerate() {
+            conn.execute(
+                "INSERT INTO sessions (id, title, cwd, invocation, tmux_name, pane, created_at, \
+                 outcome_state, agent_kind) \
+                 VALUES (?1, ?1, '/work', 'agent', ?2, ?3, ?4, 'running', 'generic')",
+                rusqlite::params![
+                    id,
+                    format!("fh-{id}"),
+                    format!("%{index}"),
+                    1_700_000_000_i64 + index as i64,
+                ],
+            )
+            .expect("insert v9 session");
+        }
+        conn.pragma_update(None, "user_version", 9).expect("stamp");
+    }
+
     /// A store on a fresh temp database, with the temp directory returned
     /// alongside it because dropping it would delete the database out from
     /// under the store.
@@ -4083,8 +4470,10 @@ mod tests {
             .insert_session(
                 StoredSession {
                     id: id.to_string(),
+                    parent: None,
                     title: id.to_string(),
                     created_at: now_unix(),
+                    creation_seq: 0,
                     cwd: "/tmp/work".to_string(),
                     invocation: "agent".to_string(),
                     tmux_name: format!("fh-{id}"),
@@ -4546,6 +4935,55 @@ mod tests {
         assert_eq!(version, SCHEMA_VERSION);
     }
 
+    /// Upgrading a running pre-spawn installation gives every existing
+    /// session a distinct, durable credential inside the migration itself.
+    #[tokio::test]
+    async fn schema_9_migration_mints_stable_credentials_for_every_existing_session() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let db_path = dir.path().join("supervisor.db");
+        plant_v9_database(&db_path);
+
+        let store = SessionStore::open(&db_path, true).await.expect("migrate");
+        let a = store
+            .session_token("old-a")
+            .await
+            .expect("read token")
+            .expect("old-a received a token");
+        let b = store
+            .session_token("old-b")
+            .await
+            .expect("read token")
+            .expect("old-b received a token");
+        assert!(!a.is_empty() && !b.is_empty());
+        assert_ne!(
+            a, b,
+            "credentials are per session, not one migration secret"
+        );
+        assert!(store.authenticates_session("old-a", &a).await.unwrap());
+        drop(store);
+
+        let reopened = SessionStore::open(&db_path, true).await.expect("reopen");
+        let mut migrated = reopened.load_all().await.unwrap();
+        migrated.sort_by(|a, b| a.id.cmp(&b.id));
+        assert_eq!(
+            migrated
+                .iter()
+                .map(|row| row.creation_seq)
+                .collect::<Vec<_>>(),
+            vec![1, 2],
+            "migration preserves the former timestamp/id chronology"
+        );
+        assert_eq!(
+            reopened.session_token("old-a").await.unwrap().as_deref(),
+            Some(a.as_str()),
+            "a relaunch reuses the durable credential"
+        );
+        assert!(
+            migrated.iter().all(|row| row.parent.is_none()),
+            "pre-spawn rows gain no invented parent"
+        );
+    }
+
     /// Every pre-v11 reservation was interactive and therefore permanent.
     /// The 8-to-9 migration must record that fact rather than inventing a
     /// bounded lifetime for a key that was originally promised forever.
@@ -4926,8 +5364,10 @@ mod tests {
             .insert_session(
                 StoredSession {
                     id: "s1".to_string(),
+                    parent: None,
                     title: "demo".to_string(),
                     created_at: now_unix(),
+                    creation_seq: 0,
                     cwd: "/tmp/work".to_string(),
                     invocation: "agent".to_string(),
                     tmux_name: "fh-1".to_string(),
@@ -4973,7 +5413,9 @@ mod tests {
                 StoredSession {
                     id: "s1".to_string(),
                     title: "demo".to_string(),
+                    parent: None,
                     created_at: now_unix(),
+                    creation_seq: 0,
                     cwd: "/tmp/work".to_string(),
                     invocation: "agent".to_string(),
                     tmux_name: "fh-1".to_string(),
@@ -5572,8 +6014,10 @@ mod tests {
             .insert_session(
                 StoredSession {
                     id: "s1".to_string(),
+                    parent: Some("parent-7".to_string()),
                     title: "demo".to_string(),
                     created_at: now_unix(),
+                    creation_seq: 0,
                     cwd: "/tmp/work".to_string(),
                     invocation: "agent --flag".to_string(),
                     tmux_name: "fh-abc".to_string(),
@@ -5600,6 +6044,7 @@ mod tests {
         let rows = reopened.load_all().await.expect("load");
         assert_eq!(rows.len(), 1);
         assert_eq!(rows[0].id, "s1");
+        assert_eq!(rows[0].parent.as_deref(), Some("parent-7"));
         assert_eq!(rows[0].title, "demo");
         assert_eq!(rows[0].cwd, "/tmp/work");
         assert_eq!(rows[0].invocation, "agent --flag");
@@ -5896,8 +6341,10 @@ mod tests {
             .insert_session(
                 StoredSession {
                     id: "s1".to_string(),
+                    parent: None,
                     title: "s1".to_string(),
                     created_at: SENTINEL_CREATED_AT,
+                    creation_seq: 0,
                     cwd: "/tmp/work".to_string(),
                     invocation: "agent".to_string(),
                     tmux_name: "fh-s1".to_string(),
@@ -5953,8 +6400,10 @@ mod tests {
             captured_record: None,
             capture_ambiguous: false,
             id: id.to_string(),
+            parent: None,
             title: id.to_string(),
             created_at: now_unix(),
+            creation_seq: 0,
             cwd: "/tmp/work".to_string(),
             invocation: "agent".to_string(),
             tmux_name: format!("fh-{id}"),
@@ -5998,7 +6447,10 @@ mod tests {
             )
             .await
             .expect("insert with claim");
-        assert_eq!(claimed, Claimed::Ours, "the key {key} must have been free");
+        assert!(
+            matches!(claimed, Claimed::Ours { .. }),
+            "the key {key} must have been free"
+        );
     }
 
     /// One settlement for a reservation seeded by [`insert_reserved`].
@@ -6081,8 +6533,7 @@ mod tests {
         );
     }
 
-    /// Both deduplication windows survive SQLite unchanged. This step does
-    /// not prune `SessionLifetime`; PLAN_M7.md item 4 owns that behavior.
+    /// Both deduplication windows survive SQLite unchanged.
     #[tokio::test]
     async fn reservation_dedup_scopes_round_trip() {
         let (_dir, store) = fresh_store().await;
@@ -6329,6 +6780,55 @@ mod tests {
         }
     }
 
+    /// A spawned child's key and credential have exactly the child's row's
+    /// lifetime, while an interactive key remains a durable tombstone.
+    #[tokio::test]
+    async fn deleting_a_spawned_child_prunes_its_bounded_key_and_credential() {
+        let (_dir, store) = fresh_store().await;
+        insert_reserved_with_scope(
+            &store,
+            "spawn-child",
+            "spawn-key",
+            "fp",
+            DedupScope::SessionLifetime,
+        )
+        .await;
+        insert_reserved(&store, "interactive", "interactive-key", "fp").await;
+        let token = store
+            .session_token("spawn-child")
+            .await
+            .unwrap()
+            .expect("every inserted session receives a credential");
+        assert!(
+            store
+                .authenticates_session("spawn-child", &token)
+                .await
+                .unwrap()
+        );
+
+        store
+            .delete_session_settling_reservations("spawn-child")
+            .await
+            .expect("delete child");
+        assert_eq!(store.reservation("spawn-key").await.unwrap(), None);
+        assert_eq!(store.session_token("spawn-child").await.unwrap(), None);
+        assert!(
+            !store
+                .authenticates_session("spawn-child", &token)
+                .await
+                .unwrap(),
+            "a deleted session can no longer authenticate"
+        );
+        assert!(
+            store
+                .reservation("interactive-key")
+                .await
+                .unwrap()
+                .is_some(),
+            "another session's permanent key is untouched"
+        );
+    }
+
     /// The delete's two writes are one transaction: a failure leaves the
     /// session AND its reservation exactly as they were.
     ///
@@ -6379,6 +6879,8 @@ mod tests {
         let (_dir, store) = fresh_store().await;
         insert_reserved(&store, "s1", "unsettled", "fp").await;
         insert_reserved(&store, "s2", "settled", "fp").await;
+        insert_reserved_with_scope(&store, "s3", "bounded", "fp", DedupScope::SessionLifetime)
+            .await;
 
         store
             .delete_session("s1", None)
@@ -6398,6 +6900,20 @@ mod tests {
             )
             .await
             .expect("rollback delete with settlement");
+        store
+            .delete_session(
+                "s3",
+                Some(settlement(
+                    "bounded",
+                    "s3",
+                    ReservationOutcome::Failed {
+                        kind: farhelm_proto::ErrorKind::Internal,
+                        message: "launch failed".to_string(),
+                    },
+                )),
+            )
+            .await
+            .expect("rollback bounded launch");
 
         assert_eq!(
             reservation_of(&store, "unsettled").await.outcome,
@@ -6410,15 +6926,14 @@ mod tests {
                 message: "the spec never landed".to_string(),
             }
         );
+        assert_eq!(store.reservation("bounded").await.unwrap(), None);
         assert!(store.load_all().await.expect("load").is_empty());
     }
 
     /// A refused intent is recorded with no session row at all — the shape
-    /// a create rejected by validation leaves behind, so its retry replays
-    /// the refusal instead of re-deriving one from a filesystem that may
-    /// have changed. The non-default scope pins this method's independent
-    /// SQL path too: a failed spawn intent must remain prunable once its
-    /// session lifetime ends.
+    /// a create rejected by validation leaves behind. A bounded spawn has
+    /// no child lifetime to bind this reservation to, so it must leave no
+    /// claim; permanent interactive refusals retain their durable replay.
     #[tokio::test]
     async fn a_refused_intent_records_without_a_session_row() {
         let (_dir, store) = fresh_store().await;
@@ -6441,15 +6956,26 @@ mod tests {
             store.load_all().await.expect("load").is_empty(),
             "a validation refusal never had a session"
         );
-        let refused = reservation_of(&store, "key").await;
-        assert_eq!(refused.dedup_scope, DedupScope::SessionLifetime);
-        assert_eq!(
-            refused.outcome,
-            ReservationOutcome::Failed {
-                kind: farhelm_proto::ErrorKind::InvalidRequest,
-                message: "working directory does not exist: /nope".to_string(),
-            }
-        );
+        assert_eq!(store.reservation("key").await.unwrap(), None);
+
+        store
+            .record_failed_intent(
+                IntentClaim {
+                    intent_key: "permanent-failure".to_string(),
+                    fingerprint: "fp".to_string(),
+                    dedup_scope: DedupScope::Permanent,
+                },
+                "never-created",
+                "fh-never-created",
+                farhelm_proto::ErrorKind::InvalidRequest,
+                "working directory does not exist: /nope",
+            )
+            .await
+            .expect("record permanent failure");
+        assert!(matches!(
+            reservation_of(&store, "permanent-failure").await.outcome,
+            ReservationOutcome::Failed { .. }
+        ));
 
         // A key someone else claimed in the meantime is left alone: a
         // refusal must never overwrite a live claim.
@@ -6492,13 +7018,19 @@ mod tests {
         // a_retry` below is where that value earns its own scrutiny; this
         // test only needs to know a takeover happened at all.
         insert_reserved(&store, "s1", "acquire", "fp").await;
-        assert!(matches!(
-            store
-                .restart_pending_launch(launching_row("s1"), "acquire")
-                .await
-                .expect("takeover"),
-            RetryClaim::Acquired { .. }
-        ));
+        let original_token = store
+            .session_token("s1")
+            .await
+            .unwrap()
+            .expect("insert minted a token");
+        let RetryClaim::Acquired { session_token, .. } = store
+            .restart_pending_launch(launching_row("s1"), "acquire")
+            .await
+            .expect("takeover")
+        else {
+            panic!("the pending launch should be acquired");
+        };
+        assert_eq!(session_token.as_bytes(), original_token.as_bytes());
         assert_eq!(
             store.session("s1").await.expect("read").unwrap().outcome,
             LastOutcome::Launching,
@@ -6605,6 +7137,7 @@ mod tests {
             .insert_session(
                 StoredSession {
                     created_at: ORIGINAL_CREATED_AT,
+                    creation_seq: 0,
                     ..launching_row("s1")
                 },
                 Some(IntentClaim {
@@ -6620,6 +7153,7 @@ mod tests {
             .restart_pending_launch(
                 StoredSession {
                     created_at: RETRY_CREATED_AT,
+                    creation_seq: 0,
                     ..launching_row("s1")
                 },
                 "retry",
@@ -6720,8 +7254,10 @@ mod tests {
             .insert_session(
                 StoredSession {
                     id: "s1".to_string(),
+                    parent: None,
                     title: "t".to_string(),
                     created_at: now_unix(),
+                    creation_seq: 0,
                     cwd: "/tmp/work".to_string(),
                     invocation: "agent".to_string(),
                     tmux_name: "fh-s1".to_string(),
@@ -7781,8 +8317,10 @@ mod tests {
             .insert_session(
                 StoredSession {
                     id: "s1".to_string(),
+                    parent: None,
                     title: "s1".to_string(),
                     created_at: now_unix(),
+                    creation_seq: 0,
                     cwd: "/tmp/work".to_string(),
                     invocation: "claude".to_string(),
                     tmux_name: "fh-s1".to_string(),
@@ -7986,8 +8524,10 @@ mod tests {
         let (_dir, store) = fresh_store().await;
         let stranded = |title: &str| StoredSession {
             id: "s1".to_string(),
+            parent: None,
             title: title.to_string(),
             created_at: 1_700_000_000,
+            creation_seq: 0,
             cwd: "/tmp/work".to_string(),
             invocation: "agent".to_string(),
             tmux_name: "fh-s1".to_string(),

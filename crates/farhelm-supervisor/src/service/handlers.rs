@@ -47,6 +47,26 @@ use crate::store::DedupScope;
 use crate::store::{
     IntentClaim, LastOutcome, ProfileCreation, ProfileNames, Transition, validate_profile_fields,
 };
+
+/// Authority-derived create policy.
+///
+/// One value controls both selector defaulting and reservation lifetime, so
+/// a caller cannot accidentally combine interactive derivation with bounded
+/// keys or spawn derivation with permanent tombstones.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum CreateAdmission {
+    Interactive,
+    Spawn,
+}
+
+impl CreateAdmission {
+    fn dedup_scope(self) -> DedupScope {
+        match self {
+            CreateAdmission::Interactive => DedupScope::Permanent,
+            CreateAdmission::Spawn => DedupScope::SessionLifetime,
+        }
+    }
+}
 use anyhow::Context;
 use farhelm_proto::{
     AgentKind, ControlMsg, ErrorKind, Frame, MAX_PROFILES_PER_HOST, RestartMode, SessionInfo,
@@ -169,11 +189,9 @@ fn create_mode(
 /// the reply-size and idempotency-store caps, then hands off to
 /// [`Supervisor::create_session`].
 ///
-/// The refusal ORDER is shape, size/key bounds, then staged feature gates.
-/// None claims a reservation: malformed or oversized requests must remain
-/// correctable under the same key, and a profile-name request refused only
-/// because PLAN_M7.md item 4 has not landed must remain retryable once it
-/// has. That is deliberately NOT true of launch preconditions past this
+/// The refusal ORDER is shape, then size and key bounds. Neither claims a
+/// reservation: malformed or oversized requests must remain correctable
+/// under the same key. That is deliberately NOT true of launch preconditions past this
 /// point (a working directory that does not exist, a profile id that no
 /// longer does): those are durable outcomes replayed under the key, which
 /// is the contract `Supervisor::create_session` states in full.
@@ -191,7 +209,7 @@ async fn handle_create_session(
     cols: u16,
     rows: u16,
     intent_key: Option<String>,
-    dedup_scope: DedupScope,
+    admission: CreateAdmission,
     // Two consumers, and they must see the SAME values: item 6's
     // fingerprint (a retry differing only in an override is a
     // different request and is refused as a key reuse) and item
@@ -200,13 +218,23 @@ async fn handle_create_session(
     agent_kind: Option<AgentKind>,
     resume_template: Option<Vec<String>>,
 ) {
-    let mode = match create_mode(
-        invocation,
-        profile_id,
-        profile_name,
-        agent_kind,
-        resume_template,
-    ) {
+    let selectorless_spawn = admission == CreateAdmission::Spawn
+        && invocation.is_none()
+        && profile_id.is_none()
+        && profile_name.is_none()
+        && agent_kind.is_none()
+        && resume_template.is_none();
+    let mode = match if selectorless_spawn {
+        Ok(CreateMode::DerivedProfile)
+    } else {
+        create_mode(
+            invocation,
+            profile_id,
+            profile_name,
+            agent_kind,
+            resume_template,
+        )
+    } {
         Ok(mode) => mode,
         Err(message) => {
             send_reply(
@@ -241,6 +269,7 @@ async fn handle_create_session(
         ),
         CreateMode::Profile { profile_id } => (profile_id.len(), 0),
         CreateMode::ProfileName { profile_name } => (profile_name.len(), 0),
+        CreateMode::DerivedProfile => (0, 0),
     };
     let field_len = parent.as_deref().map_or(0, str::len)
         + cwd.len()
@@ -288,21 +317,6 @@ async fn handle_create_session(
         .await;
         return;
     }
-    if matches!(mode, CreateMode::ProfileName { .. }) {
-        // This selector is wire vocabulary only until PLAN_M7.md item 4.
-        // Refuse before claiming an intent key: otherwise today's staged
-        // error becomes a permanent replay after name-based spawn works.
-        send_reply(
-            tx,
-            &ControlMsg::Error {
-                req_id,
-                message: "profile-name session creation is not available in this build".to_string(),
-                kind: ErrorKind::InvalidRequest,
-            },
-        )
-        .await;
-        return;
-    }
     // The resolved mode travels onward unchanged: the fingerprint binds
     // whichever selector the request chose (so a retried key cannot flip
     // selectors or name a DIFFERENT profile), and `create_session` resolves
@@ -318,12 +332,13 @@ async fn handle_create_session(
     let idempotency = intent_key.map(|intent_key| IntentClaim {
         intent_key,
         fingerprint: create_fingerprint(parent.as_deref(), &cwd, &mode, title.as_deref()),
-        dedup_scope,
+        dedup_scope: admission.dedup_scope(),
     });
     match sup
         .create_session(
             CreateInputs {
                 cwd: &cwd,
+                parent,
                 mode,
                 title,
                 cols,
@@ -2381,7 +2396,6 @@ pub(crate) async fn handle_control(sup: &Arc<Supervisor>, msg: ControlMsg, ctx: 
             agent_kind,
             resume_template,
         } => {
-            let dedup_scope = ctx.create_dedup_scope();
             handle_create_session(
                 sup,
                 ctx.tx,
@@ -2395,7 +2409,7 @@ pub(crate) async fn handle_control(sup: &Arc<Supervisor>, msg: ControlMsg, ctx: 
                 cols,
                 rows,
                 intent_key,
-                dedup_scope,
+                CreateAdmission::Interactive,
                 agent_kind,
                 resume_template,
             )
@@ -2568,6 +2582,125 @@ pub(crate) async fn handle_control(sup: &Arc<Supervisor>, msg: ControlMsg, ctx: 
     }
 }
 
+/// Dispatch the deliberately narrow operation slice granted to a
+/// session-authenticated peer.
+///
+/// Presence of hello auth selected this path before any request was read.
+/// The peer can create a child and nothing else; keeping that split outside
+/// ordinary dispatch means a future handler cannot accidentally become
+/// available to spawn merely by being added to the full-authority match.
+pub(crate) async fn handle_restricted_control(
+    sup: &Arc<Supervisor>,
+    msg: ControlMsg,
+    tx: &mpsc::Sender<Frame>,
+    auth: &farhelm_proto::SessionAuth,
+) {
+    match msg {
+        ControlMsg::CreateSession {
+            req_id,
+            parent,
+            cwd,
+            invocation,
+            profile_id,
+            profile_name,
+            title,
+            cols,
+            rows,
+            intent_key,
+            agent_kind,
+            resume_template,
+        } => {
+            // The hello check admits the connection; this check authorizes
+            // each create. Holding the parent's lifecycle claim across the
+            // create serializes it with deletion, so an authenticated peer
+            // cannot outlive the session whose authority it is using.
+            let _parent_lifecycle = sup.lifecycle_locks.claim(&auth.session_id).await;
+            match sup
+                .store
+                .authenticates_session(&auth.session_id, &auth.token)
+                .await
+            {
+                Ok(true) => {}
+                Ok(false) => {
+                    send_reply(
+                        tx,
+                        &ControlMsg::Error {
+                            req_id,
+                            message:
+                                "the session credential is invalid or its session no longer exists"
+                                    .to_string(),
+                            kind: ErrorKind::Unauthorized,
+                        },
+                    )
+                    .await;
+                    return;
+                }
+                Err(error) => {
+                    send_reply(
+                        tx,
+                        &ControlMsg::Error {
+                            req_id,
+                            message: format!(
+                                "could not validate the session credential: {error:#}"
+                            ),
+                            kind: ErrorKind::Internal,
+                        },
+                    )
+                    .await;
+                    return;
+                }
+            }
+            if parent
+                .as_deref()
+                .is_some_and(|parent| parent != auth.session_id)
+            {
+                send_reply(
+                    tx,
+                    &ControlMsg::Error {
+                        req_id,
+                        message: format!(
+                            "a session-authenticated peer may name only itself ({}) as parent",
+                            truncate_for_error(&auth.session_id)
+                        ),
+                        kind: ErrorKind::Unauthorized,
+                    },
+                )
+                .await;
+                return;
+            }
+            handle_create_session(
+                sup,
+                tx,
+                req_id,
+                parent,
+                cwd,
+                invocation,
+                profile_id,
+                profile_name,
+                title,
+                cols,
+                rows,
+                intent_key,
+                CreateAdmission::Spawn,
+                agent_kind,
+                resume_template,
+            )
+            .await;
+        }
+        other => {
+            send_reply(
+                tx,
+                &ControlMsg::Error {
+                    req_id: other.request_req_id().unwrap_or(0),
+                    message: "a session-authenticated peer may only create sessions".to_string(),
+                    kind: ErrorKind::Unauthorized,
+                },
+            )
+            .await;
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::super::connection::CONNECTION_WRITER_QUEUE;
@@ -2578,6 +2711,62 @@ mod tests {
     use super::*;
     use crate::agent_kind::IntegrationSnapshot;
     use farhelm_proto::{PROFILE_FIELD_CAP, RestartOffer, SessionStatus};
+
+    /// Seed the durable half of a parent, which is the authority source a
+    /// restricted connection must revalidate before every create.
+    async fn authenticated_parent(
+        sup: &Supervisor,
+        cwd: &std::path::Path,
+        id: &str,
+    ) -> farhelm_proto::SessionAuth {
+        let profile = sup
+            .store
+            .profiles()
+            .await
+            .expect("read starter profiles")
+            .into_iter()
+            .next()
+            .expect("a fresh supervisor seeds starter profiles");
+        let claimed = sup
+            .store
+            .insert_session(
+                crate::store::StoredSession {
+                    id: id.to_string(),
+                    parent: None,
+                    title: id.to_string(),
+                    created_at: crate::store::now_unix(),
+                    creation_seq: 0,
+                    cwd: cwd.to_string_lossy().into_owned(),
+                    invocation: "agent".to_string(),
+                    tmux_name: format!("fh-{id}"),
+                    pane: String::new(),
+                    outcome: LastOutcome::Launching,
+                    agent_kind: AgentKind::Generic,
+                    resume_template: None,
+                    canonical_cwd: None,
+                    captured_conversation: None,
+                    captured_record: None,
+                    capture_ambiguous: false,
+                    first_input_at: None,
+                    generation: 0,
+                    launch_scoped: false,
+                    source_profile: Some(crate::store::ProfileSnapshot {
+                        id: profile.id,
+                        name: profile.name,
+                    }),
+                },
+                None,
+            )
+            .await
+            .expect("seed authenticated parent");
+        let crate::store::Claimed::Ours { session_token, .. } = claimed else {
+            panic!("an unkeyed parent insert cannot be taken");
+        };
+        farhelm_proto::SessionAuth {
+            session_id: id.to_string(),
+            token: session_token,
+        }
+    }
     use std::time::Duration;
 
     /// The pre-storage create refusals, driven through the
@@ -2592,9 +2781,8 @@ mod tests {
     /// that "helpfully" forwards a default `agent_kind` alongside a profile
     /// selection has written a request whose meaning nobody can defend,
     /// and the refusal stops an invented precedence rule at launch time.
-    /// It also covers the profile-name selector's temporary PLAN_M7.md item
-    /// 4 seam: a valid staged request must remain retryable once that item
-    /// starts serving it.
+    /// It also covers profile-name combinations, whose exact resolution is
+    /// meaningful only after this shape boundary has admitted them.
     ///
     /// Every row carries an INTENT KEY, and the keys are asserted unclaimed
     /// afterwards. That is the half a refusal test usually forgets: a
@@ -2613,7 +2801,6 @@ mod tests {
         let (tx, mut rx) = mpsc::channel(CONNECTION_WRITER_QUEUE);
         let mut input_routes = HashMap::new();
         let mut tasks = tokio::task::JoinSet::new();
-
         for (req_id, invocation, profile_id, profile_name, agent_kind, resume_template, expected) in [
             (
                 1u64,
@@ -2678,15 +2865,6 @@ mod tests {
                 None,
                 Some(vec!["claude".to_string(), "{conversation}".to_string()]),
                 "the profile supplies both",
-            ),
-            (
-                9,
-                None,
-                None,
-                Some("Claude Code".to_string()),
-                None,
-                None,
-                "not available in this build",
             ),
         ] {
             handle_control(
@@ -2861,8 +3039,8 @@ mod tests {
 
     /// `parent` is part of the permanent fingerprint and therefore part
     /// of `CREATE_FIELD_CAP`, including when its UTF-8 byte length differs
-    /// from its character count. The exact boundary reaches the next
-    /// staged check; one byte more is refused before its key is claimed.
+    /// from its character count. The exact boundary reaches catalog
+    /// resolution; one byte more is refused before its key is claimed.
     #[tokio::test]
     async fn parent_bytes_are_capped_before_the_intent_key_is_spent() {
         let state = StateDir::new();
@@ -2873,7 +3051,7 @@ mod tests {
         let mut input_routes = HashMap::new();
         let mut tasks = tokio::task::JoinSet::new();
         let cwd = state.path().to_string_lossy().to_string();
-        let profile_name = "Claude Code";
+        let profile_name = "No Such Profile";
         let parent_bytes = CREATE_FIELD_CAP - cwd.len() - profile_name.len();
         let mut parent = format!(
             "{}{}",
@@ -2885,16 +3063,17 @@ mod tests {
             CREATE_FIELD_CAP
         );
 
-        for (req_id, key, value, expected) in [
+        for (req_id, key, value, expected, claimed) in [
             (
                 1u64,
                 "parent-at-cap",
                 parent.clone(),
-                "not available in this build",
+                "no profile named",
+                true,
             ),
             {
                 parent.push('x');
-                (2, "parent-over-cap", parent, "parent, cwd")
+                (2, "parent-over-cap", parent, "parent, cwd", false)
             },
         ] {
             handle_control(
@@ -2933,22 +3112,23 @@ mod tests {
                 message.contains(expected),
                 "the boundary must fail at the expected next check: {message}"
             );
-            assert!(
+            assert_eq!(
                 sup.store
                     .reservation(key)
                     .await
                     .expect("reservation lookup")
-                    .is_none(),
-                "a boundary refusal must not spend {key}"
+                    .is_some(),
+                claimed,
+                "only a request that reached catalog resolution spends {key}"
             );
         }
         assert!(sup.store.load_all().await.expect("load").is_empty());
     }
 
     /// Profile-name selection pays the same byte budget as profile-id and
-    /// raw selection. The at-cap value reaches its staged PLAN_M7.md item 4
-    /// refusal; adding one byte is rejected by the cap, before either key
-    /// can become a reservation.
+    /// raw selection. The at-cap value reaches catalog resolution and
+    /// records that durable answer; adding one byte is rejected before its
+    /// key can be claimed.
     #[tokio::test]
     async fn profile_name_bytes_are_capped_before_the_intent_key_is_spent() {
         let state = StateDir::new();
@@ -2967,16 +3147,23 @@ mod tests {
         );
         assert_eq!(profile_name.len() + cwd.len(), CREATE_FIELD_CAP);
 
-        for (req_id, key, value, expected) in [
+        for (req_id, key, value, expected, claimed) in [
             (
                 1u64,
                 "profile-name-at-cap",
                 profile_name.clone(),
-                "not available in this build",
+                "no profile named",
+                true,
             ),
             {
                 profile_name.push('x');
-                (2, "profile-name-over-cap", profile_name, "exceeding the")
+                (
+                    2,
+                    "profile-name-over-cap",
+                    profile_name,
+                    "exceeding the",
+                    false,
+                )
             },
         ] {
             handle_control(
@@ -3015,13 +3202,14 @@ mod tests {
                 message.contains(expected),
                 "the boundary must fail at the expected check: {message}"
             );
-            assert!(
+            assert_eq!(
                 sup.store
                     .reservation(key)
                     .await
                     .expect("reservation lookup")
-                    .is_none(),
-                "a boundary refusal must not spend {key}"
+                    .is_some(),
+                claimed,
+                "only a request that reached catalog resolution spends {key}"
             );
         }
         assert!(sup.store.load_all().await.expect("load").is_empty());
@@ -4002,6 +4190,342 @@ mod tests {
         assert_eq!(source.existence, farhelm_proto::ProfileExistence::Deleted);
     }
 
+    /// A session-authenticated peer has one operation, and even that
+    /// operation cannot forge a sibling or ancestor relationship.
+    #[tokio::test]
+    async fn restricted_dispatch_refuses_non_create_authority_and_a_forged_parent() {
+        let state = StateDir::new();
+        let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
+            .await
+            .expect("supervisor");
+        let (tx, mut rx) = mpsc::channel(CONNECTION_WRITER_QUEUE);
+        let auth = authenticated_parent(&sup, state.path(), "parent-session").await;
+
+        handle_restricted_control(
+            &sup,
+            ControlMsg::ListSessions {
+                req_id: 41,
+                cursor: None,
+                limit: None,
+            },
+            &tx,
+            &auth,
+        )
+        .await;
+        let unauthorized: ControlMsg =
+            serde_json::from_slice(&rx.recv().await.expect("authority refusal").body).unwrap();
+        assert!(matches!(
+            unauthorized,
+            ControlMsg::Error {
+                req_id: 41,
+                kind: ErrorKind::Unauthorized,
+                ..
+            }
+        ));
+
+        handle_restricted_control(
+            &sup,
+            ControlMsg::CreateSession {
+                req_id: 42,
+                parent: Some("forged-parent".to_string()),
+                cwd: state.path().to_string_lossy().into_owned(),
+                invocation: None,
+                profile_id: None,
+                profile_name: Some("Claude Code".to_string()),
+                title: None,
+                cols: 80,
+                rows: 24,
+                intent_key: Some("forged-key".to_string()),
+                agent_kind: None,
+                resume_template: None,
+            },
+            &tx,
+            &auth,
+        )
+        .await;
+        let forged: ControlMsg =
+            serde_json::from_slice(&rx.recv().await.expect("parent refusal").body).unwrap();
+        let ControlMsg::Error {
+            req_id,
+            kind,
+            message,
+        } = forged
+        else {
+            panic!("a forged parent must be refused");
+        };
+        assert_eq!(req_id, 42);
+        assert_eq!(kind, ErrorKind::Unauthorized);
+        assert!(message.contains("parent-session"));
+        assert!(sup.sessions.lock().await.is_empty());
+        assert_eq!(sup.store.reservation("forged-key").await.unwrap(), None);
+    }
+
+    /// Deleting a parent revokes every already-open restricted connection.
+    ///
+    /// Hello-time authentication is only admission to the connection; the
+    /// lifecycle-serialized check here is what prevents a cached bearer from
+    /// creating descendants after its authority row is gone.
+    #[tokio::test]
+    async fn restricted_create_revalidates_after_its_parent_is_deleted() {
+        let state = StateDir::new();
+        let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
+            .await
+            .expect("supervisor");
+        let auth = authenticated_parent(&sup, state.path(), "revoked-parent").await;
+        sup.store
+            .delete_session_settling_reservations(&auth.session_id)
+            .await
+            .expect("delete authenticated parent");
+        let (tx, mut rx) = mpsc::channel(CONNECTION_WRITER_QUEUE);
+
+        handle_restricted_control(
+            &sup,
+            ControlMsg::CreateSession {
+                req_id: 43,
+                parent: None,
+                cwd: state.path().to_string_lossy().into_owned(),
+                invocation: None,
+                profile_id: None,
+                profile_name: None,
+                title: None,
+                cols: 80,
+                rows: 24,
+                intent_key: Some("revoked-key".to_string()),
+                agent_kind: None,
+                resume_template: None,
+            },
+            &tx,
+            &auth,
+        )
+        .await;
+
+        let reply: ControlMsg =
+            serde_json::from_slice(&rx.recv().await.expect("revocation reply").body).unwrap();
+        assert!(matches!(
+            reply,
+            ControlMsg::Error {
+                req_id: 43,
+                kind: ErrorKind::Unauthorized,
+                ..
+            }
+        ));
+        assert_eq!(sup.store.reservation("revoked-key").await.unwrap(), None);
+    }
+
+    /// An admitted spawn receives bounded idempotency, preserves its direct
+    /// parent, replays an identical key, conflicts if only that parent
+    /// intent changes, and may reuse the key after its child is deleted.
+    #[tokio::test]
+    async fn restricted_create_is_parented_session_lifetime_and_parent_sensitive() {
+        let state = StateDir::new();
+        let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
+            .await
+            .expect("supervisor");
+        let (tx, mut rx) = mpsc::channel(CONNECTION_WRITER_QUEUE);
+        let auth = authenticated_parent(&sup, state.path(), "parent-session").await;
+        let create = |req_id, parent: Option<&str>| ControlMsg::CreateSession {
+            req_id,
+            parent: parent.map(str::to_string),
+            cwd: state.path().to_string_lossy().into_owned(),
+            invocation: None,
+            profile_id: None,
+            profile_name: None,
+            title: Some("spawned child".to_string()),
+            cols: 80,
+            rows: 24,
+            intent_key: Some("spawn-key".to_string()),
+            agent_kind: None,
+            resume_template: None,
+        };
+        let mut send = async |msg| {
+            handle_restricted_control(&sup, msg, &tx, &auth).await;
+            serde_json::from_slice::<ControlMsg>(&rx.recv().await.expect("create reply").body)
+                .expect("decode create reply")
+        };
+
+        let first = send(create(51, Some("parent-session"))).await;
+        let ControlMsg::SessionCreated { session, .. } = first else {
+            panic!("a valid restricted create must succeed: {first:?}");
+        };
+        assert_eq!(session.parent.as_deref(), Some("parent-session"));
+        assert_eq!(
+            sup.store
+                .reservation("spawn-key")
+                .await
+                .unwrap()
+                .expect("key is durable while the child exists")
+                .dedup_scope,
+            DedupScope::SessionLifetime
+        );
+
+        let replay = send(create(52, Some("parent-session"))).await;
+        let ControlMsg::SessionCreated {
+            session: replayed, ..
+        } = replay
+        else {
+            panic!("an identical key must replay: {replay:?}");
+        };
+        assert_eq!(replayed.id, session.id);
+
+        let conflict = send(create(53, None)).await;
+        assert!(matches!(
+            conflict,
+            ControlMsg::Error {
+                req_id: 53,
+                kind: ErrorKind::Conflict,
+                ..
+            }
+        ));
+
+        // Model the completed-delete boundary: the durable transaction has
+        // removed both bounded records, and the published map follows it.
+        sup.store
+            .delete_session_settling_reservations(&session.id)
+            .await
+            .expect("delete the first child and release its key");
+        sup.sessions.lock().await.remove(&session.id);
+
+        let replacement = send(create(54, Some("parent-session"))).await;
+        let ControlMsg::SessionCreated {
+            session: replacement,
+            ..
+        } = replacement
+        else {
+            panic!("a deleted child's key must create a fresh child: {replacement:?}");
+        };
+        assert_ne!(replacement.id, session.id);
+        assert_eq!(
+            sup.store
+                .reservation("spawn-key")
+                .await
+                .unwrap()
+                .expect("the replacement owns the reused key")
+                .session_id,
+            replacement.id
+        );
+    }
+
+    /// A keyed selectorless spawn binds the profile chosen by its first
+    /// attempt, even when a later create changes the host's last-used source.
+    ///
+    /// Ambient default changes are exactly why replay resolves from the
+    /// reservation and stored child rather than validating the selectorless
+    /// request again. Re-deriving here would either launch a second child or
+    /// turn an identical retry into a conflict after the user used another
+    /// profile elsewhere.
+    #[tokio::test]
+    async fn selectorless_spawn_replays_its_child_after_the_host_default_changes() {
+        let state = StateDir::new();
+        let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
+            .await
+            .expect("supervisor");
+        let (tx, mut rx) = mpsc::channel(CONNECTION_WRITER_QUEUE);
+        let auth = authenticated_parent(&sup, state.path(), "default-source-parent").await;
+        let original_source = sup
+            .store
+            .latest_source_profile()
+            .await
+            .expect("read original default")
+            .expect("the authenticated parent is profile-backed");
+        let request = |req_id| ControlMsg::CreateSession {
+            req_id,
+            parent: None,
+            cwd: state.path().to_string_lossy().into_owned(),
+            invocation: None,
+            profile_id: None,
+            profile_name: None,
+            title: Some("selectorless child".to_string()),
+            cols: 80,
+            rows: 24,
+            intent_key: Some("selectorless-replay-key".to_string()),
+            agent_kind: None,
+            resume_template: None,
+        };
+
+        handle_restricted_control(&sup, request(71), &tx, &auth).await;
+        let first: ControlMsg =
+            serde_json::from_slice(&rx.recv().await.expect("first create reply").body).unwrap();
+        let ControlMsg::SessionCreated { session: child, .. } = first else {
+            panic!("the first selectorless create must succeed: {first:?}");
+        };
+        assert_eq!(
+            child.source_profile.as_ref().map(|source| &source.id),
+            Some(&original_source.id)
+        );
+
+        let newer_profile = match sup
+            .store
+            .create_profile(
+                "New host default".to_string(),
+                "agent".to_string(),
+                AgentKind::Generic,
+                None,
+            )
+            .await
+            .expect("create a different profile")
+        {
+            ProfileCreation::Created(profile) => profile,
+            other => panic!("the catalog has room for a test profile: {other:?}"),
+        };
+        sup.store
+            .insert_session(
+                crate::store::StoredSession {
+                    id: "new-default-source".to_string(),
+                    parent: None,
+                    title: "new default source".to_string(),
+                    created_at: crate::store::now_unix(),
+                    creation_seq: 0,
+                    cwd: state.path().to_string_lossy().into_owned(),
+                    invocation: "agent".to_string(),
+                    tmux_name: "fh-new-default-source".to_string(),
+                    pane: String::new(),
+                    outcome: LastOutcome::Launching,
+                    agent_kind: AgentKind::Generic,
+                    resume_template: None,
+                    canonical_cwd: None,
+                    captured_conversation: None,
+                    captured_record: None,
+                    capture_ambiguous: false,
+                    first_input_at: None,
+                    generation: 0,
+                    launch_scoped: false,
+                    source_profile: Some(crate::store::ProfileSnapshot {
+                        id: newer_profile.id.clone(),
+                        name: newer_profile.name,
+                    }),
+                },
+                None,
+            )
+            .await
+            .expect("record a newer profile-backed create");
+        assert_eq!(
+            sup.store
+                .latest_source_profile()
+                .await
+                .unwrap()
+                .expect("new default")
+                .id,
+            newer_profile.id,
+            "premise: the host default changed before the retry"
+        );
+
+        handle_restricted_control(&sup, request(72), &tx, &auth).await;
+        let replay: ControlMsg =
+            serde_json::from_slice(&rx.recv().await.expect("replay reply").body).unwrap();
+        let ControlMsg::SessionCreated {
+            session: replayed, ..
+        } = replay
+        else {
+            panic!("the identical selectorless key must replay: {replay:?}");
+        };
+        assert_eq!(replayed.id, child.id);
+        assert_eq!(
+            replayed.source_profile.as_ref().map(|source| &source.id),
+            Some(&original_source.id),
+            "replay returns the profile resolution captured by the original child"
+        );
+    }
+
     /// All three source-profile existence states, derived through a REAL
     /// `ListSessions` reply (PLAN_M6_75.md item 5).
     ///
@@ -4066,7 +4590,6 @@ mod tests {
                 id.clone(),
                 Arc::new(SessionEntry {
                     info: SessionInfo {
-                        creation_seq: None,
                         parent: None,
                         archived: false,
                         id: id.clone(),
@@ -4074,6 +4597,7 @@ mod tests {
                         // Descending creation order is what `list_page`
                         // walks, so a later index must sort later.
                         created_at: 1_700_000_000 - index as i64,
+                        creation_seq: None,
                         cwd: "/tmp".to_string(),
                         invocation: "bash".to_string(),
                         status: SessionStatus::default(),
@@ -4109,12 +4633,12 @@ mod tests {
             "s3".to_string(),
             Arc::new(SessionEntry {
                 info: SessionInfo {
-                    creation_seq: None,
                     parent: None,
                     archived: false,
                     id: "s3".to_string(),
                     title: "s3".to_string(),
                     created_at: 1_699_999_997,
+                    creation_seq: None,
                     cwd: "/tmp".to_string(),
                     invocation: "bash".to_string(),
                     status: SessionStatus::default(),
@@ -4276,12 +4800,12 @@ mod tests {
                 id.clone(),
                 Arc::new(SessionEntry {
                     info: SessionInfo {
-                        creation_seq: None,
                         parent: None,
                         archived: false,
                         id: id.clone(),
                         title: id.clone(),
                         created_at: 1_700_000_000 - index as i64,
+                        creation_seq: None,
                         cwd: "/tmp".to_string(),
                         invocation: "bash".to_string(),
                         status: SessionStatus::default(),
@@ -4441,12 +4965,12 @@ mod tests {
         let entry = |id: &str, source: Option<&farhelm_proto::Profile>| {
             Arc::new(SessionEntry {
                 info: SessionInfo {
-                    creation_seq: None,
                     parent: None,
                     archived: false,
                     id: id.to_string(),
                     title: id.to_string(),
                     created_at: 1_700_000_000,
+                    creation_seq: None,
                     cwd: "/tmp".to_string(),
                     invocation: "bash".to_string(),
                     status: SessionStatus::default(),
@@ -4988,12 +5512,12 @@ mod tests {
             "s1".to_string(),
             Arc::new(SessionEntry {
                 info: SessionInfo {
-                    creation_seq: None,
                     parent: None,
                     archived: false,
                     id: "s1".to_string(),
                     title: "x".repeat(farhelm_proto::MAX_FRAME_LEN as usize),
                     created_at: 1_700_000_000,
+                    creation_seq: None,
                     cwd: "/tmp".to_string(),
                     invocation: "agent".to_string(),
                     status: SessionStatus::default(),
@@ -5393,12 +5917,12 @@ mod tests {
     fn fake_entry_with_title(id: &str, created_at: i64, title: String) -> Arc<SessionEntry> {
         Arc::new(SessionEntry {
             info: SessionInfo {
-                creation_seq: None,
                 parent: None,
                 archived: false,
                 id: id.to_string(),
                 title,
                 created_at,
+                creation_seq: None,
                 cwd: "/tmp".to_string(),
                 invocation: "agent".to_string(),
                 status: SessionStatus::default(),
@@ -5890,12 +6414,12 @@ mod tests {
             "s1".to_string(),
             Arc::new(SessionEntry {
                 info: SessionInfo {
-                    creation_seq: None,
                     parent: None,
                     archived: false,
                     id: "s1".to_string(),
                     title: "t".to_string(),
                     created_at: 1_700_000_000,
+                    creation_seq: None,
                     cwd: "/tmp".to_string(),
                     invocation: "agent".to_string(),
                     status: SessionStatus::default(),

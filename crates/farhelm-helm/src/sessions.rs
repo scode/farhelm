@@ -67,8 +67,8 @@ use tracing::warn;
 /// first [`aggregate::DEFAULT_PAGE_LIMIT`] entries — exactly what every
 /// pre-M6 caller sends.
 ///
-/// The five filter parameters are SPEC.md's five session-list dimensions:
-/// host, directory, profile, status, title. Their match semantics live on
+/// The filter parameters are SPEC.md's session-list dimensions: host,
+/// parent, directory, profile, status, and title. Their match semantics live on
 /// [`store::SessionFilter`], which is also where both the persisted and the
 /// in-memory sources read them from, so there is one definition rather than
 /// one per source. A parameter present but EMPTY is treated as absent
@@ -107,6 +107,8 @@ pub(crate) struct ListQuery {
     limit: Option<usize>,
     /// Only sessions on this registered host (a `HostView::id`).
     host: Option<store::HostId>,
+    /// Only direct children of this session id.
+    parent: Option<String>,
     /// Only sessions whose working directory CONTAINS this text, ignoring
     /// case.
     directory: Option<String>,
@@ -152,6 +154,9 @@ fn list_filter(q: &ListQuery) -> anyhow::Result<store::SessionFilter> {
     let mut filter = store::SessionFilter::default();
     if let Some(host) = q.host {
         filter = filter.host(host);
+    }
+    if let Some(parent) = present(&q.parent) {
+        filter = filter.parent(&parent);
     }
     if let Some(directory) = present(&q.directory) {
         filter = filter.directory(&directory);
@@ -200,7 +205,7 @@ fn list_filter(q: &ListQuery) -> anyhow::Result<store::SessionFilter> {
 /// for all of them, including why the filter's count is a SECOND number
 /// beside `total` rather than a redefinition of it.
 ///
-/// The five filter parameters (PLAN_M6_75.md item 5) narrow the list
+/// The filter parameters narrow the list
 /// server-side, before the page cut, which is what makes "N matching of M"
 /// coherent with a paged list at all: the alternative — a client filtering
 /// the page it was handed — hides matches beyond the cut while reporting a
@@ -911,7 +916,7 @@ pub(crate) async fn create_session(
         Ok(session) => {
             record_session(&state, &claim, &session).await;
             if let CreateMode::Profile(profile_id) = &mode {
-                remember_default_profile(&state, &claim, profile_id).await;
+                remember_default_profile(&state, &claim, profile_id, &session).await;
             }
             axum::Json(session).into_response()
         }
@@ -1013,10 +1018,11 @@ async fn remember_default_profile(
     state: &AppState,
     claim: &manager::SessionClaim,
     profile_id: &str,
+    session: &farhelm_proto::SessionInfo,
 ) {
     match state
         .manager
-        .remember_profile_default(claim, profile_id)
+        .remember_profile_default_from_session(claim, profile_id, session)
         .await
     {
         Ok(true) => state.manager.events().bump(),
@@ -1448,12 +1454,12 @@ mod tests {
                 .write_frame(&Frame::control(&ControlMsg::SessionCreated {
                     req_id,
                     session: SessionInfo {
-                        creation_seq: None,
                         parent: None,
                         archived: false,
                         id: "sess-1".into(),
                         title: "some-agent".into(),
                         created_at: 1_700_000_000,
+                        creation_seq: None,
                         cwd: "/some/dir".into(),
                         invocation: "some-agent".into(),
                         // Matches real `create_session` output: `Unknown`,
@@ -1546,12 +1552,12 @@ mod tests {
                 .write_frame(&Frame::control(&ControlMsg::SessionCreated {
                     req_id,
                     session: SessionInfo {
-                        creation_seq: None,
                         parent: None,
                         archived: false,
                         id: "sess-1".into(),
                         title: "t".into(),
                         created_at: 1_700_000_000,
+                        creation_seq: None,
                         cwd: "/some/dir".into(),
                         invocation: "some-agent".into(),
                         status: farhelm_proto::SessionStatus::Unknown,
@@ -2120,12 +2126,12 @@ mod tests {
                 .write_control(&ControlMsg::SessionRestarted {
                     req_id,
                     session: farhelm_proto::SessionInfo {
-                        creation_seq: None,
                         parent: None,
                         archived: false,
                         id: "sess-1".into(),
                         title: "t".into(),
                         created_at: 1_700_000_000,
+                        creation_seq: None,
                         cwd: "/some/dir".into(),
                         invocation: "some-agent".into(),
                         status: farhelm_proto::SessionStatus::Unknown,
@@ -2262,12 +2268,12 @@ mod tests {
             // must fail the full-struct comparison below even if the
             // title alone looked right.
             let expected_session = SessionInfo {
-                creation_seq: None,
                 parent: None,
                 archived: false,
                 id: "sess-1".into(),
                 title: expected_title.clone(),
                 created_at: 1_700_000_000,
+                creation_seq: None,
                 cwd: "/distinctive/dir".into(),
                 invocation: "distinctive-agent --flag".into(),
                 status: SessionStatus::Running,
@@ -2433,12 +2439,12 @@ mod tests {
                     .write_control(&ControlMsg::SessionRenamed {
                         req_id,
                         session: farhelm_proto::SessionInfo {
-                            creation_seq: None,
                             parent: None,
                             archived: false,
                             id: "sess-1".into(),
                             title: String::new(),
                             created_at: 1_700_000_000,
+                            creation_seq: None,
                             cwd: "/some/dir".into(),
                             invocation: "some-agent".into(),
                             status: farhelm_proto::SessionStatus::Unknown,
@@ -2859,12 +2865,12 @@ mod tests {
                 .write_frame(&Frame::control(&ControlMsg::SessionCreated {
                     req_id,
                     session: SessionInfo {
-                        creation_seq: None,
                         parent: None,
                         archived: false,
                         id: "sess-new".into(),
                         title: "sess-new".into(),
                         created_at: 1_700_000_500,
+                        creation_seq: None,
                         cwd: "/work".into(),
                         invocation: "claude".into(),
                         status: farhelm_proto::SessionStatus::Unknown,
@@ -4901,14 +4907,17 @@ mod tests {
             .local(rest_harness::HostScript {
                 identity: Some("identity-local".to_string()),
                 sessions: vec![
-                    filterable(
-                        "local-running",
-                        400,
-                        "/home/me/src/farhelm",
-                        "Refactor the drain",
-                        SessionStatus::Running,
-                        Some(source("p-claude", "Claude Code", ProfileExistence::Present)),
-                    ),
+                    farhelm_proto::SessionInfo {
+                        parent: Some("root-session".to_string()),
+                        ..filterable(
+                            "local-running",
+                            400,
+                            "/home/me/src/farhelm",
+                            "Refactor the drain",
+                            SessionStatus::Running,
+                            Some(source("p-claude", "Claude Code", ProfileExistence::Present)),
+                        )
+                    },
                     filterable(
                         "local-idle",
                         300,
@@ -4934,14 +4943,17 @@ mod tests {
                             SessionStatus::Waiting,
                             Some(source("p-gone", "Codex", ProfileExistence::Deleted)),
                         ),
-                        filterable(
-                            "alpha-exited",
-                            100,
-                            "/srv/alpha/other",
-                            "Drain the queue",
-                            SessionStatus::Exited { exit_code: Some(0) },
-                            Some(source("p-claude", "Claude Code", ProfileExistence::Present)),
-                        ),
+                        farhelm_proto::SessionInfo {
+                            parent: Some("root-session".to_string()),
+                            ..filterable(
+                                "alpha-exited",
+                                100,
+                                "/srv/alpha/other",
+                                "Drain the queue",
+                                SessionStatus::Exited { exit_code: Some(0) },
+                                Some(source("p-claude", "Claude Code", ProfileExistence::Present)),
+                            )
+                        },
                     ],
                     ..rest_harness::HostScript::default()
                 },
@@ -4955,14 +4967,14 @@ mod tests {
         (harness, local, alpha)
     }
 
-    /// Every dimension SPEC.md names — host, directory, profile, status,
-    /// title — narrows the list by itself, with the semantics
+    /// Every dimension SPEC.md names — host, parent, directory, profile,
+    /// status, title — narrows the list by itself, with the semantics
     /// `store::SessionFilter` documents.
     ///
     /// One test rather than five because the fixture is the expensive part
     /// and the assertions are one line each; what matters is that each
     /// parameter selects a DIFFERENT subset, which is only visible with all
-    /// five side by side.
+    /// six side by side.
     #[tokio::test]
     async fn every_filter_dimension_narrows_the_list_on_its_own() {
         let (harness, local, alpha) = filterable_fleet().await;
@@ -4992,6 +5004,10 @@ mod tests {
 
         // Substring again, and case-insensitive again.
         let (_, value) = get_json(&harness, "/api/sessions?title=drain").await;
+        assert_eq!(row_ids(&value), vec!["local-running", "alpha-exited"]);
+
+        // Parent ids are opaque and exact; only direct children match.
+        let (_, value) = get_json(&harness, "/api/sessions?parent=root-session").await;
         assert_eq!(row_ids(&value), vec!["local-running", "alpha-exited"]);
 
         // And the local host, so the host filter is shown selecting rather
@@ -5247,6 +5263,7 @@ mod tests {
             format!("/api/sessions?limit=1&cursor={cursor}"),
             format!("/api/sessions?status=running&limit=1&cursor={cursor}"),
             format!("/api/sessions?profile=p-claude&status=exited&limit=1&cursor={cursor}"),
+            format!("/api/sessions?profile=p-claude&parent=root-session&limit=1&cursor={cursor}"),
         ] {
             let (status, body) = get_json(&harness, &changed).await;
             assert_eq!(

@@ -5,8 +5,8 @@
 //! provisioning copies exactly one binary to a host and the launch shim must
 //! exist inside every session without separate installation (SPEC_impl.md,
 //! "CLI").
-//! `farhelm spawn` is a later milestone; the grammar here is the subset of
-//! SPEC_impl.md's CLI section that exists so far.
+//! `farhelm spawn` keeps stdout machine-readable: its only successful output
+//! is the child id and every diagnostic goes to stderr.
 
 use clap::{Parser, Subcommand};
 use std::path::PathBuf;
@@ -26,6 +26,25 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Cmd {
+    /// Create a session on the supervisor that launched this one.
+    Spawn {
+        /// Child working directory. Relative paths resolve against this
+        /// process's real current directory before crossing the wire.
+        #[arg(long)]
+        cwd: PathBuf,
+        /// Optional display title; omitted derives from the directory.
+        #[arg(long)]
+        title: Option<String>,
+        /// Agent profile name; omitted derives the host's last-used profile.
+        #[arg(long)]
+        agent: Option<String>,
+        /// Organizational parent id. Never defaults to this session.
+        #[arg(long)]
+        parent: Option<String>,
+        /// Retry key, valid only for the child session's lifetime.
+        #[arg(long)]
+        idempotency_key: Option<String>,
+    },
     /// Run the helm: the single control-plane process serving the UI.
     Helm {
         #[command(subcommand)]
@@ -118,6 +137,23 @@ enum InternalCmd {
 fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
     match cli.command {
+        Cmd::Spawn {
+            cwd,
+            title,
+            agent,
+            parent,
+            idempotency_key,
+        } => {
+            let child = runtime()?.block_on(spawn_session(SpawnArgs {
+                cwd,
+                title,
+                agent,
+                parent,
+                idempotency_key,
+            }))?;
+            println!("{child}");
+            Ok(())
+        }
         Cmd::Helm {
             command: HelmCmd::Run(args),
         } => {
@@ -174,6 +210,129 @@ fn main() -> anyhow::Result<()> {
                 record_home,
             } => fake_agent::run(script, record_home),
         },
+    }
+}
+
+/// Parsed spawn inputs after clap has enforced the one required flag.
+struct SpawnArgs {
+    cwd: PathBuf,
+    title: Option<String>,
+    agent: Option<String>,
+    parent: Option<String>,
+    idempotency_key: Option<String>,
+}
+
+/// Validate the injected spawn contract before the first socket operation.
+///
+/// A session id with no token is the recognizable upgrade edge. Every
+/// missing value names the exact variable; no default supervisor is dialed.
+fn spawn_environment() -> anyhow::Result<(String, String, PathBuf)> {
+    use anyhow::Context;
+
+    let session_id = std::env::var_os(farhelm_supervisor::launch::SESSION_ID_ENV_VAR);
+    let session_token = std::env::var_os(farhelm_supervisor::launch::SESSION_TOKEN_ENV_VAR);
+    let supervisor_sock = std::env::var_os(farhelm_supervisor::launch::SUPERVISOR_SOCK_ENV_VAR);
+    if session_id.is_some() && session_token.is_none() {
+        anyhow::bail!(
+            "this session predates spawn support and must be restarted before running \
+             farhelm spawn"
+        );
+    }
+    let socket = supervisor_sock
+        .ok_or_else(|| {
+            anyhow::anyhow!(
+                "{} is required; farhelm spawn will not guess which supervisor to dial",
+                farhelm_supervisor::launch::SUPERVISOR_SOCK_ENV_VAR
+            )
+        })?
+        .into_string()
+        .map_err(|_| anyhow::anyhow!("FARHELM_SUPERVISOR_SOCK is not valid UTF-8"))?;
+    let session_id = session_id
+        .context("FARHELM_SESSION_ID is required inside a Farhelm session")?
+        .into_string()
+        .map_err(|_| anyhow::anyhow!("FARHELM_SESSION_ID is not valid UTF-8"))?;
+    let token = session_token
+        .context("FARHELM_SESSION_TOKEN is required inside a Farhelm session")?
+        .into_string()
+        .map_err(|_| anyhow::anyhow!("FARHELM_SESSION_TOKEN is not valid UTF-8"))?;
+    Ok((session_id, token, PathBuf::from(socket)))
+}
+
+/// Create one child under the environment's session authority.
+///
+/// This is the centralized scripting contract for `farhelm spawn`: validate
+/// all three injected environment values before dialing, preserve the cwd's
+/// lexical spelling (resolving only a relative input against this process's
+/// cwd), authenticate the connection, and return the child id for the sole
+/// stdout line. A `SessionCreated` reply means creation succeeded regardless
+/// of the status snapshot it carries; every refusal and protocol mismatch is
+/// an error and therefore produces no id.
+async fn spawn_session(args: SpawnArgs) -> anyhow::Result<String> {
+    use anyhow::Context;
+    use farhelm_proto::io::{FrameReader, FrameWriter, handshake_with_session_auth, parse_control};
+    use farhelm_proto::{ControlMsg, SessionAuth};
+
+    let (session_id, token, socket) = spawn_environment()?;
+    let cwd = if args.cwd.is_absolute() {
+        args.cwd
+    } else {
+        std::env::current_dir()
+            .context("reading farhelm spawn's current directory")?
+            .join(args.cwd)
+    };
+    let cwd = cwd
+        .to_str()
+        .ok_or_else(|| anyhow::anyhow!("spawn working directory is not valid UTF-8"))?
+        .to_string();
+
+    let stream = tokio::net::UnixStream::connect(&socket)
+        .await
+        .with_context(|| format!("connecting to supervisor socket {}", socket.display()))?;
+    let (read, write) = tokio::io::split(stream);
+    let mut reader = FrameReader::new(read);
+    let mut writer = FrameWriter::new(write);
+    handshake_with_session_auth(&mut reader, &mut writer, SessionAuth { session_id, token })
+        .await
+        .context("performing the authenticated supervisor handshake")?;
+
+    const REQUEST_ID: u64 = 1;
+    writer
+        .write_control(&ControlMsg::CreateSession {
+            req_id: REQUEST_ID,
+            parent: args.parent,
+            cwd,
+            invocation: None,
+            profile_id: None,
+            profile_name: args.agent,
+            title: args.title,
+            cols: 80,
+            rows: 24,
+            intent_key: args.idempotency_key,
+            agent_kind: None,
+            resume_template: None,
+        })
+        .await
+        .context("sending the spawn request")?;
+
+    let frame = reader
+        .read_frame()
+        .await
+        .context("reading the spawn reply")?
+        .ok_or_else(|| anyhow::anyhow!("the supervisor closed before answering spawn"))?;
+    let message = parse_control(&frame).context("decoding the spawn reply")?;
+    match message {
+        ControlMsg::SessionCreated {
+            req_id: REQUEST_ID,
+            session,
+        } => Ok(session.id),
+        ControlMsg::Error {
+            req_id: 0 | REQUEST_ID,
+            message,
+            ..
+        } => anyhow::bail!(message),
+        unexpected => {
+            anyhow::bail!("the supervisor sent an unexpected spawn reply: {unexpected:?}")
+        }
     }
 }
 

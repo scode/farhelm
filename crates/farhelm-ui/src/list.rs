@@ -1516,7 +1516,20 @@ pub(crate) fn ListView(on_open: EventHandler<Session>) -> Element {
                     }
                 }
             }
-            // The three free-text dimensions opt out of every form of
+            label {
+                "parent"
+                input {
+                    r#type: "text",
+                    class: "filter-parent",
+                    autocomplete: "off",
+                    autocorrect: "off",
+                    autocapitalize: "none",
+                    spellcheck: "false",
+                    value: "{filter_draft.read().parent}",
+                    oninput: move |evt| filter_draft.write().parent = evt.value(),
+                }
+            }
+            // The four free-text dimensions opt out of every form of
             // browser text mangling for the same reason the create form's
             // fields do: a directory is a literal path, a profile is a name
             // the helm matches exactly, and an autocorrected search term
