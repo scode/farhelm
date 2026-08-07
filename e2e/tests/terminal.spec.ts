@@ -11462,12 +11462,35 @@ test("latched-skew-revokes-automatic-reconnect", async ({ page, request }) => {
     // Now the helm "changes build" under the open tab. The next reply
     // latches the mismatch, which withdraws the permission this ladder was
     // armed on.
+    // The catch is load-hardening, not decoration: this handler stays
+    // installed while the page keeps polling, and the unroute below (or test
+    // teardown, on a failure elsewhere) can catch a request mid-handler —
+    // `route.fulfill` then throws "Route is already handled!" and fails the
+    // test from the background (seen twice under full-suite load, chromium
+    // and webkit). On the unroute path Playwright's fallback has already
+    // continued the request, so this handler simply no longer owns it; at
+    // teardown its outcome is moot. Either way the race is safe to
+    // suppress — but ONLY the race: any other failure here must still fail
+    // the test, which is why the catch matches the known lifecycle errors
+    // and rethrows the rest. The same fetch-then-fulfill shape elsewhere in
+    // this suite is only exposed where a matching request can be in flight
+    // at unroute or teardown time; this stamp handler matches EVERY api
+    // call, which is why it is the one that keeps getting caught.
     await page.route("**/api/**", async (route) => {
-      const response = await route.fetch();
-      await route.fulfill({
-        response,
-        headers: { ...response.headers(), "x-farhelm-build": "9999.0.0-rolled-back" },
-      });
+      try {
+        const response = await route.fetch();
+        await route.fulfill({
+          response,
+          headers: { ...response.headers(), "x-farhelm-build": "9999.0.0-rolled-back" },
+        });
+      } catch (e) {
+        const raced =
+          e instanceof Error
+          && /Route is already handled|Target page, context or browser has been closed|Test ended/.test(
+            e.message,
+          );
+        if (!raced) throw e;
+      }
     });
 
     // And the notification is what makes that reply happen: the session view
