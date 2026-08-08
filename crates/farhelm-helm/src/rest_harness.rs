@@ -769,6 +769,49 @@ impl Harness {
         .await;
     }
 
+    /// Wait until `host` has refreshed on a connection newer than
+    /// `previous_incarnation`.
+    ///
+    /// The incarnation is the barrier rather than an intermediate
+    /// disconnected state because actor status travels through a `watch`
+    /// channel. A fast reconnect can replace `Connecting` with `Connected`
+    /// before a waiter observes it, but the newer incarnation remains visible.
+    /// Fleet revisions wake this loop without polling; the manager snapshot
+    /// keeps the connection token and refresh state from straddling a change.
+    pub(crate) async fn await_refreshed_after(&self, host: HostId, previous_incarnation: u64) {
+        let mut revisions = self.manager.events().subscribe();
+        tokio::time::timeout(SETTLE_TIMEOUT, async {
+            loop {
+                if let Some(status) = self.manager.status(host)
+                    && status.incarnation > previous_incarnation
+                    && matches!(
+                        status.state,
+                        HostState::Connected {
+                            last_refresh: RefreshHealth::Ok { .. },
+                            ..
+                        }
+                    )
+                {
+                    return;
+                }
+                revisions
+                    .changed()
+                    .await
+                    .expect("the harness keeps the fleet event publisher alive");
+            }
+        })
+        .await
+        .unwrap_or_else(|_| {
+            let status = self.manager.status(host);
+            panic!(
+                "host {host} never refreshed after incarnation {previous_incarnation}; last seen \
+                 state {:?} on incarnation {:?}",
+                status.as_ref().map(|status| &status.state),
+                status.as_ref().map(|status| status.incarnation)
+            )
+        })
+    }
+
     /// Stand a NEW helm up over the same helm.db, after letting `rescript`
     /// change what the far side does.
     ///

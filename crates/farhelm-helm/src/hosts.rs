@@ -748,10 +748,7 @@ mod tests {
         );
 
         harness.fleet.kill_connection(local);
-        harness
-            .await_state(local, |state| !state.is_connected())
-            .await;
-        harness.await_refreshed(local).await;
+        harness.await_refreshed_after(local, before).await;
 
         let (_, body, _) = call(&harness, "GET", "/api/hosts", None).await;
         let after = body["hosts"][0]["incarnation"]
