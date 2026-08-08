@@ -86,6 +86,36 @@ async fn stored_sessions(state: &std::path::Path) -> Vec<StoredSession> {
     rows
 }
 
+/// Wait until the predecessor has released the state directory's kernel claim.
+///
+/// `Arc::strong_count` is useful below for diagnosing a connection task that
+/// never drains, but it is not a completion barrier for the kernel lock's
+/// final release. A sibling test can fork while the claim file is open and
+/// keep that open file description alive until its child execs, even after the
+/// last `Supervisor` drops here. Poll the actual `flock` from a blocking thread
+/// so the replacement cannot race that inherited descriptor and silently
+/// start read-only.
+async fn wait_for_state_dir_claim_release(state: &std::path::Path, deadline: tokio::time::Instant) {
+    let lock_path = state.join("supervisor.lock");
+    tokio::task::spawn_blocking(move || {
+        let lock = std::fs::OpenOptions::new()
+            .create(true)
+            .truncate(false)
+            .write(true)
+            .open(&lock_path)
+            .expect("open the supervisor claim file");
+        while let Err(error) = lock.try_lock() {
+            assert!(
+                tokio::time::Instant::now() < deadline,
+                "the old supervisor never released the state directory's claim: {error}"
+            );
+            std::thread::sleep(Duration::from_millis(20));
+        }
+    })
+    .await
+    .expect("the state-directory claim waiter must not panic");
+}
+
 /// Retire `sup` (and the client whose connection task holds its own
 /// reference) and construct its replacement, which must genuinely OWN the
 /// state directory.
@@ -111,6 +141,7 @@ pub(crate) async fn handoff_to_new_supervisor(
         tokio::time::sleep(Duration::from_millis(20)).await;
     }
     drop(sup);
+    wait_for_state_dir_claim_release(state, deadline).await;
     let replacement = Supervisor::new_with_exe(state, farhelm_bin().into())
         .await
         .expect("the restarted supervisor");
