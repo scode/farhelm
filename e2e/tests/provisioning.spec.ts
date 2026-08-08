@@ -62,6 +62,12 @@ type Progress = {
   message: string | null;
 };
 
+/** Mutable local-host facts snapshotted by each routed registry request. */
+type InjectedLocalState = {
+  down: boolean;
+  lastError?: string;
+};
+
 type StackInfo = { provisioning_backend: string };
 
 /** Read the backend path only after Playwright has started the stack. */
@@ -185,23 +191,35 @@ async function probeRemote(page: Page, destination: string): Promise<void> {
   await page.locator(".add-host-submit").click();
 }
 
-/** Replace only the local row's connection state; every other host stays real. */
+/**
+ * Replace only the local row's connection state; every other host stays real.
+ *
+ * Most callers want a revision as soon as the feed opens. A test that needs an
+ * exact notification boundary can suppress that greeting and send the first
+ * revision itself.
+ */
 async function controlLocalState(
   page: Page,
-  state: { down: boolean },
+  state: InjectedLocalState,
+  options: { greetOnConnect?: boolean } = {},
 ): Promise<FeedStub> {
   const feed = await stubFeed(page);
-  feed.notifyOnConnect(1);
+  if (options.greetOnConnect !== false) feed.notifyOnConnect(1);
   await page.route("**/api/hosts", async (route) => {
     if (route.request().method() !== "GET") return route.continue();
+    // A request belongs to the injected state generation at dispatch. Capture
+    // it before fetching so a later test transition cannot rewrite a response
+    // that was already in flight.
+    const { down, lastError } = state;
     const response = await route.fetch();
     const body = await response.json();
-    if (state.down) {
+    if (down) {
       const local = body.hosts.find((host: Host) => host.kind === "local");
       local.state = {
         phase: "unreachable-reprobing",
         cause: "local-supervisor-not-running",
         last_error:
+          lastError ??
           "no supervisor is running; start it with `farhelm supervisor run --state-dir /tmp/fh-e2e-state`",
       };
     }
@@ -645,8 +663,8 @@ test("manual-only local setup leaves the manual command primary", async ({ page 
 });
 
 test("a failed local ADD keeps its rerun action in the local setup state", async ({ page }) => {
-  const state = { down: true };
-  const feed = await controlLocalState(page, state);
+  const state: InjectedLocalState = { down: true };
+  const feed = await controlLocalState(page, state, { greetOnConnect: false });
   await page.route("**/api/hosts/*/provisioning", async (route) => {
     await route.fulfill({
       status: 200,
@@ -666,7 +684,29 @@ test("a failed local ADD keeps its rerun action in the local setup state", async
   await expect(local.locator(".provisioning-rerun")).toBeVisible();
   await local.locator(".provisioning-rerun").click();
   await expect(local.locator(".provisioning-plan")).toBeVisible();
-  await notifyFeed(feed, 2);
+
+  // A feed notification only starts reconciliation. Register its request
+  // boundary first, then publish the marker and revision without yielding;
+  // the route's state snapshot prevents an older in-flight request from
+  // acquiring it. Rendering the marker proves WebKit decoded this refresh.
+  await expect.poll(() => feed.openSockets()).toBeGreaterThan(0);
+  const refresh = page.waitForRequest(
+    (request) =>
+      new URL(request.url()).pathname === "/api/hosts" && request.method() === "GET",
+  );
+  const refreshedError = "feed-driven host refresh completed";
+  state.lastError = refreshedError;
+  feed.notify(2);
+  try {
+    await refresh;
+    await expect(local.locator(".provisioning-manual")).toContainText(refreshedError);
+    await expect(local.locator(".provisioning-plan")).toBeVisible();
+  } finally {
+    // Feed and fallback refreshes can coalesce after the visible assertion.
+    // Drain and remove their handlers here so context teardown never disposes
+    // a route-fetched response while `controlLocalState` is decoding it.
+    await page.unrouteAll({ behavior: "wait" });
+  }
 });
 
 // These UPDATE cases run while the shared fleet is reconnecting. Dispatching
