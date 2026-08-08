@@ -4,7 +4,6 @@
 
 use crate::harness::*;
 
-use crate::terminal_backpressure::flood_session;
 use farhelm_supervisor::service::{ArchiveGate, ArchiveStage};
 
 // ---------------------------------------------------------------------
@@ -1457,13 +1456,18 @@ async fn acks_are_cumulative_and_never_precede_the_write_they_claim() {
 /// so the supervisor's queue rather than the pipe dominates both the
 /// numerator and the denominator.
 ///
-/// The unread soak has its own premise: the flood must already be LIVE.
-/// Attach replay cannot establish that — even an empty pane emits replay
-/// data for modes and cursor position — so the test reads through
-/// `ReplayComplete` and waits for one later Data frame first. That readiness
-/// frame is deliberately excluded from `terminal_bytes`; the denominator and
-/// its 32 KiB floor describe only bytes left unread during the soak and then
-/// frozen by `PauseOutput`.
+/// The unread soak has its own premise: the flood must start AFTER the
+/// attachment's replay has completed. A finite unpaced flood started during
+/// session creation can be nearly finished before the raw peer attaches, so
+/// one post-`ReplayComplete` Data frame can be only its tail. `flood-gated`
+/// instead waits for one input byte. A direct tmux pane poll first proves that
+/// fixture has printed READY after entering raw mode, without creating an
+/// attachment cutover of its own. The measurement peer then attaches, waits
+/// for its own `ReplayComplete`, opens the gate, and scans the live byte stream
+/// through `FLOOD-00000000` before beginning the unread soak. The readiness
+/// observation and first-record marker are deliberately excluded from
+/// `terminal_bytes`; the denominator and its 32 KiB floor describe only bytes
+/// left unread during the soak and then frozen by `PauseOutput`.
 ///
 /// # The residual race, and its margin
 ///
@@ -1492,14 +1496,51 @@ async fn an_ack_arrives_ahead_of_a_backlog_of_terminal_output() {
     const SETTLE: Duration = Duration::from_secs(5);
 
     let h = harness().await;
-    let (session, _work) = flood_session(&h).await;
+    let work = tempfile::tempdir().expect("workdir");
+    let session = h
+        .client
+        .create_session(
+            &work.path().to_string_lossy(),
+            &agent_cmd("internal fake-agent --script flood-gated"),
+            None,
+            80,
+            24,
+        )
+        .await
+        .expect("create");
+
+    // Prove the fake agent has installed raw mode and reached its input gate
+    // before the measurement attachment exists. The rendered pane is the
+    // source from which replay is later derived, so polling it avoids an
+    // attachment's replay/live cutover rather than trying to reconstruct text
+    // that cutover may split with mode sequences.
+    let tmux_sock = h.state.path().join("tmux.sock");
+    let tmux_name = format!("fh-{}", session.id);
+    let ready_deadline = tokio::time::Instant::now() + Duration::from_secs(30);
+    loop {
+        let pane = tmux_query(
+            &tmux_sock,
+            &["capture-pane", "-p", "-S", "-", "-t", &tmux_name],
+        )
+        .await;
+        let rendered = String::from_utf8_lossy(&pane.stdout);
+        if pane.status.success() && rendered.contains("FAKE-AGENT READY") {
+            break;
+        }
+        assert!(
+            tokio::time::Instant::now() < ready_deadline,
+            "the gated flood never became ready; rendered pane:\n{rendered}\ntmux stderr:\n{}",
+            String::from_utf8_lossy(&pane.stderr)
+        );
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+
     let mut peer = RawPeer::connect_with_buffer(&h.sup, 1024).await;
 
-    // Attach the flooding terminal on channel 1 and prove that the LIVE
-    // producer is flowing before treating an unread interval as a backlog
-    // soak. Without that evidence a scheduler-starved flood can spend the
-    // whole soak producing nothing, only to report the broken premise at the
-    // final backlog-size assertion after the rest of this test has run.
+    // The gate keeps the finite flood out of the pane until this measurement
+    // attachment has crossed its own replay boundary. The fixture readiness
+    // proof above makes the later one-byte gate safe without scanning a
+    // readiness marker through the replay/live cutover.
     peer.control(&ControlMsg::Attach {
         req_id: 1,
         session_id: session.id.clone(),
@@ -1511,28 +1552,67 @@ async fn an_ack_arrives_ahead_of_a_backlog_of_terminal_output() {
         if_unowned: false,
     })
     .await;
-    let readiness_deadline = tokio::time::Instant::now() + Duration::from_secs(30);
+    let replay_deadline = tokio::time::Instant::now() + Duration::from_secs(30);
     let mut replay_complete = false;
-    loop {
-        let remaining = readiness_deadline.saturating_duration_since(tokio::time::Instant::now());
+    while !replay_complete {
+        let remaining = replay_deadline.saturating_duration_since(tokio::time::Instant::now());
         let frame = tokio::time::timeout(remaining, peer.reader.read_frame())
             .await
-            .expect("the flood never produced live output")
+            .expect("the measurement attachment never completed replay")
             .expect("read frame")
             .expect("connection stayed open");
         match frame.kind {
-            FrameKind::Data if replay_complete => break,
-            FrameKind::Control => {
-                if matches!(
-                    parse_control(&frame).expect("parse control"),
-                    ControlMsg::ReplayComplete { channel: 1 }
-                ) {
-                    replay_complete = true;
-                }
-            }
             FrameKind::Data => {}
+            FrameKind::Control => match parse_control(&frame).expect("parse control") {
+                ControlMsg::ReplayComplete { channel: 1 } => replay_complete = true,
+                ControlMsg::Error { kind, message, .. } => {
+                    panic!("measurement attach failed ({kind:?}): {message}")
+                }
+                ControlMsg::Detached { channel: 1, reason } => {
+                    panic!("measurement attachment ended before replay: {reason}")
+                }
+                _ => {}
+            },
         }
     }
+
+    // `flood-gated` reads exactly one raw-mode byte. Sending it only after
+    // its readiness proof and this peer's ReplayComplete makes the following
+    // marker proof about live output from this attachment, rather than about
+    // the tail of create-time replay.
+    peer.writer
+        .write_frame(&Frame::data(1, vec![b'g']))
+        .await
+        .expect("open the flood gate");
+    let flood_deadline = tokio::time::Instant::now() + Duration::from_secs(30);
+    let mut first_record = Vec::new();
+    while !first_record
+        .windows(b"FLOOD-00000000".len())
+        .any(|text| text == b"FLOOD-00000000")
+    {
+        let remaining = flood_deadline.saturating_duration_since(tokio::time::Instant::now());
+        let frame = tokio::time::timeout(remaining, peer.reader.read_frame())
+            .await
+            .expect("the gated flood never began")
+            .expect("read frame")
+            .expect("connection stayed open");
+        match frame.kind {
+            FrameKind::Data => first_record.extend_from_slice(&frame.body),
+            FrameKind::Control => match parse_control(&frame).expect("parse control") {
+                ControlMsg::Error { kind, message, .. } => {
+                    panic!("opening the flood gate failed ({kind:?}): {message}")
+                }
+                ControlMsg::Detached { channel: 1, reason } => {
+                    panic!("measurement attachment ended before the flood began: {reason}")
+                }
+                _ => {}
+            },
+        }
+    }
+
+    // The marker proves live output reached this peer. Leave the remaining
+    // finite burst unread long enough to fill the supervisor queue; neither
+    // the readiness exchange nor the marker contributes to its denominator.
     tokio::time::sleep(Duration::from_secs(2)).await;
 
     // Freeze what piled up. From here the terminal queue only shrinks
