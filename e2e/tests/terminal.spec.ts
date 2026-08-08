@@ -506,6 +506,10 @@ async function sendFloodGateByte(page: Page) {
   await page.evaluate(() => {
     // The value is arbitrary — `flood_gated` only counts bytes, in raw
     // mode, so nothing downstream interprets or echoes it.
+    // Start the verifier's hard cap in this same page turn, before the gate
+    // opens, so a delayed first Node-side sample cannot extend the budget.
+    const verifier = (window as any).__farhelmFloodVerify;
+    if (verifier) verifier.monitorStartedAt = performance.now();
     (window as any).__farhelmWs.send(new Uint8Array([0x67]));
   });
 }
@@ -767,6 +771,13 @@ async function installFloodStreamVerifier(page: Page) {
       nextExpected: 0,
       recordsSeen: 0,
       sawDone: false,
+      // The gate sender arms this clock immediately before releasing the
+      // producer. Recording progress where bytes are verified, rather than
+      // when Node later samples the count, preserves stalls hidden by a busy
+      // browser or delayed debugging-protocol round trip.
+      monitorStartedAt: null as number | null,
+      lastProgressAt: null as number | null,
+      maxProgressGap: 0,
       // The FIRST violation only: once something is wrong, later bytes
       // are not interesting, and holding just one message keeps this
       // genuinely constant-memory even in a pathological failure.
@@ -791,6 +802,7 @@ async function installFloodStreamVerifier(page: Page) {
       cb?: () => void,
     ) {
       if (data instanceof Uint8Array && !state.error && !state.sawDone) {
+        const recordsBefore = state.recordsSeen;
         let text = state.leftover + decoder.decode(data, { stream: false });
         if (!state.started) {
           // Discard the READY banner (and tmux's own row-padding around
@@ -840,10 +852,119 @@ verified records: ${JSON.stringify(rest.slice(0, 24))}`;
           break;
         }
         state.leftover = state.error ? "" : text.slice(i);
+        if (state.recordsSeen > recordsBefore || state.sawDone) {
+          const now = performance.now();
+          if (state.monitorStartedAt !== null) {
+            const previous = Math.max(
+              state.lastProgressAt ?? state.monitorStartedAt,
+              state.monitorStartedAt,
+            );
+            state.maxProgressGap = Math.max(state.maxProgressGap, now - previous);
+          }
+          state.lastProgressAt = now;
+        }
       }
       return real.call(this, data, cb);
     };
   });
+}
+
+/**
+ * Wait for the whole-stream verifier to reach the flood's terminal marker.
+ *
+ * Progress, rather than total throughput, is the useful liveness signal for
+ * this load test. WebKit can keep consuming the stream correctly while a
+ * loaded runner falls behind the fixed completion budget that a buffer-text
+ * poll would impose. Each newly verified record therefore renews a bounded
+ * no-progress budget, while an independent absolute cap still prevents a
+ * merely slow producer from holding the suite forever. The verifier is also
+ * the cheapest observation seam: unlike `termText`, reading its constant-size
+ * state does not reconstruct the terminal's 12,000-line retained buffer on
+ * every poll.
+ */
+async function waitForFloodStreamComplete(page: Page) {
+  const noProgressTimeout = 15_000;
+  const absoluteTimeout = 90_000;
+  const pollInterval = 250;
+  let recordsSeen = -1;
+  let progressAge = 0;
+  let elapsed = 0;
+
+  for (;;) {
+    const remainingProgress = Math.max(1, noProgressTimeout - progressAge);
+    const remainingAbsolute = Math.max(1, absoluteTimeout - elapsed);
+    const readBudget = Math.min(remainingProgress, remainingAbsolute);
+    let readTimer: ReturnType<typeof setTimeout> | undefined;
+    const verify = await Promise.race([
+      page.evaluate(() => {
+        const state = (window as any).__farhelmFloodVerify;
+        if (!state) return null;
+        const now = performance.now();
+        state.monitorStartedAt ??= now;
+        const lastProgress = Math.max(
+          state.lastProgressAt ?? state.monitorStartedAt,
+          state.monitorStartedAt,
+        );
+        return {
+          recordsSeen: state.recordsSeen as number,
+          sawDone: state.sawDone as boolean,
+          error: state.error as string | null,
+          progressAge: now - lastProgress,
+          maxProgressGap: state.maxProgressGap as number,
+          elapsed:
+            (state.sawDone && state.lastProgressAt !== null
+              ? state.lastProgressAt
+              : now) - state.monitorStartedAt,
+        };
+      }),
+      new Promise<never>((_, reject) => {
+        readTimer = setTimeout(() => {
+          const deadline =
+            remainingProgress <= remainingAbsolute
+              ? `flood verifier made no observable progress for ${noProgressTimeout}ms`
+              : `flood verifier was not observable within its ${absoluteTimeout}ms hard cap`;
+          reject(
+            new Error(
+              `${deadline}; last verified ${recordsSeen}/${FLOOD_RECORDS} records`,
+            ),
+          );
+        }, readBudget);
+      }),
+    ]).finally(() => {
+      if (readTimer !== undefined) clearTimeout(readTimer);
+    });
+    if (!verify) {
+      throw new Error("whole-stream flood verifier was not installed");
+    }
+    if (verify.error) {
+      throw new Error(`whole-stream flood verifier failed: ${verify.error}`);
+    }
+    recordsSeen = verify.recordsSeen;
+    progressAge = verify.progressAge;
+    elapsed = verify.elapsed;
+    if (elapsed >= absoluteTimeout) {
+      throw new Error(
+        `flood did not reach FLOOD-DONE within ${absoluteTimeout}ms; verified ${recordsSeen}/${FLOOD_RECORDS} records`,
+      );
+    }
+    if (
+      progressAge >= noProgressTimeout ||
+      verify.maxProgressGap >= noProgressTimeout
+    ) {
+      throw new Error(
+        `flood made no progress for ${noProgressTimeout}ms; verified ${recordsSeen}/${FLOOD_RECORDS} records`,
+      );
+    }
+    if (verify.sawDone) return;
+
+    await page.waitForTimeout(
+      Math.min(
+        pollInterval,
+        noProgressTimeout - progressAge,
+        absoluteTimeout - elapsed,
+      ),
+    );
+  }
 }
 
 // First pixels: the whole stack standing up and putting an agent's output
@@ -4032,7 +4153,7 @@ test("the whole flood stream arrives exactly once and in order, with at least on
   page,
   request,
 }) => {
-  test.setTimeout(60_000);
+  test.setTimeout(150_000);
   const title = `flood-complete-${Date.now()}`;
   let id: string | undefined;
   try {
@@ -4041,7 +4162,11 @@ test("the whole flood stream arrives exactly once and in order, with at least on
       verifyStream: true,
     });
 
-    await waitForTermText(page, "FLOOD-DONE", 45_000);
+    await waitForFloodStreamComplete(page);
+    // The verifier sees the marker immediately before handing its chunk to
+    // xterm. Keep one buffer-level wait after throughput is no longer part of
+    // the deadline so the retained-tail assertion still covers what rendered.
+    await waitForTermText(page, "FLOOD-DONE");
 
     // The write-completion callbacks that drive resume are asynchronous
     // relative to xterm.js appending to its buffer, so `FLOOD-DONE`
@@ -4077,7 +4202,9 @@ test("the whole flood stream arrives exactly once and in order, with at least on
     // `FLOOD-DONE` right behind it — this is what a real user's screen
     // would actually show, kept alongside the whole-stream check above
     // rather than instead of it.
-    const records = parseFloodRecords(await termText(page));
+    const retainedText = await termText(page);
+    expect(retainedText).toContain("FLOOD-DONE");
+    const records = parseFloodRecords(retainedText);
     expect(records.length).toBeGreaterThan(0);
     for (let i = 1; i < records.length; i++) {
       expect(records[i]).toBe(records[i - 1] + 1);

@@ -146,7 +146,12 @@ Consequences of that stance:
   folded in from the flake-fix series' staged notes (2026-08-03, recorded in its own log but never pushed here): one
   browser-suite sighting of the Playwright flood harness failing with "drain socket closed before FLOOD-DONE" — passed
   its rerun, one occurrence, the first candidate for a browser-side load class; a second occurrence earns it a
-  discriminator entry of its own.
+  discriminator entry of its own. That trigger fired during the M7 mopup run (2026-08-08): the full-suite WebKit pass
+  timed out waiting 45 seconds for the whole-stream test's `FLOOD-DONE` marker while the in-page verifier was still
+  advancing (701,657 of 800,000 records), and the focused rerun passed. This is a fixed-throughput-budget flake, not
+  evidence of loss or a recurrence of the first sighting's premature raw-socket close. The test now waits on the
+  verifier's constant-size progress state: corruption fails immediately, forward progress renews a bounded stall budget,
+  and an independent hard cap still catches a producer that is only limping rather than stuck.
 - **M6.75 — status and profiles.** Running/waiting/idle heuristics with per-agent sharpening, list filtering, profile
   CRUD and starter profiles. Also live push replacing BOTH of the UI's polls — M2's session-list poll and M4's
   session-detail/tab-list poll — status transitions are what make polling genuinely painful, and the push channel serves
