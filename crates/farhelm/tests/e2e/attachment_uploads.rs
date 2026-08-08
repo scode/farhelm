@@ -1457,6 +1457,14 @@ async fn acks_are_cumulative_and_never_precede_the_write_they_claim() {
 /// so the supervisor's queue rather than the pipe dominates both the
 /// numerator and the denominator.
 ///
+/// The unread soak has its own premise: the flood must already be LIVE.
+/// Attach replay cannot establish that — even an empty pane emits replay
+/// data for modes and cursor position — so the test reads through
+/// `ReplayComplete` and waits for one later Data frame first. That readiness
+/// frame is deliberately excluded from `terminal_bytes`; the denominator and
+/// its 32 KiB floor describe only bytes left unread during the soak and then
+/// frozen by `PauseOutput`.
+///
 /// # The residual race, and its margin
 ///
 /// Those two settles are a time bound, not an observation, and there is no
@@ -1487,8 +1495,11 @@ async fn an_ack_arrives_ahead_of_a_backlog_of_terminal_output() {
     let (session, _work) = flood_session(&h).await;
     let mut peer = RawPeer::connect_with_buffer(&h.sup, 1024).await;
 
-    // Attach the flooding terminal on channel 1 and let its output pile
-    // up in the connection's writer queue while nothing reads it.
+    // Attach the flooding terminal on channel 1 and prove that the LIVE
+    // producer is flowing before treating an unread interval as a backlog
+    // soak. Without that evidence a scheduler-starved flood can spend the
+    // whole soak producing nothing, only to report the broken premise at the
+    // final backlog-size assertion after the rest of this test has run.
     peer.control(&ControlMsg::Attach {
         req_id: 1,
         session_id: session.id.clone(),
@@ -1500,6 +1511,28 @@ async fn an_ack_arrives_ahead_of_a_backlog_of_terminal_output() {
         if_unowned: false,
     })
     .await;
+    let readiness_deadline = tokio::time::Instant::now() + Duration::from_secs(30);
+    let mut replay_complete = false;
+    loop {
+        let remaining = readiness_deadline.saturating_duration_since(tokio::time::Instant::now());
+        let frame = tokio::time::timeout(remaining, peer.reader.read_frame())
+            .await
+            .expect("the flood never produced live output")
+            .expect("read frame")
+            .expect("connection stayed open");
+        match frame.kind {
+            FrameKind::Data if replay_complete => break,
+            FrameKind::Control => {
+                if matches!(
+                    parse_control(&frame).expect("parse control"),
+                    ControlMsg::ReplayComplete { channel: 1 }
+                ) {
+                    replay_complete = true;
+                }
+            }
+            FrameKind::Data => {}
+        }
+    }
     tokio::time::sleep(Duration::from_secs(2)).await;
 
     // Freeze what piled up. From here the terminal queue only shrinks

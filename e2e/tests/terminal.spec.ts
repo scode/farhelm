@@ -12530,7 +12530,9 @@ test("heartbeat-stays-idle-under-output", async ({ page, request }) => {
   // can take a few hundred milliseconds, and a window tighter than that
   // makes the socket GENUINELY idle between keystrokes — at which point a
   // probe is correct behavior and the test would be failing the feature
-  // for working. Fifteen round trips still span several windows.
+  // for working. The evidence loop below keeps the traffic flowing for the
+  // required duration rather than guessing how many round trips will take
+  // that long on a particular engine or machine.
   await reconnectTimingsFromNextLoad(page, {
     heartbeatIdleMs: 1_500,
     heartbeatTimeoutMs: 10_000,
@@ -12544,14 +12546,22 @@ test("heartbeat-stays-idle-under-output", async ({ page, request }) => {
     // Round trips, each well inside the idle window, spanning several times
     // the window in total: an unconditional probe fires repeatedly across
     // this, a gated one not at all.
-    const started = Date.now();
-    for (let i = 0; i < 30; i++) {
-      const line = `busy-${i}`;
+    const started = performance.now();
+    const evidenceDeadline = started + 30_000;
+    let echoes = 0;
+    while (performance.now() - started <= 3_000) {
+      if (performance.now() >= evidenceDeadline) {
+        throw new Error("the terminal stalled before it could establish the busy-window evidence");
+      }
+      const line = `busy-${echoes++}`;
       await page.keyboard.type(line);
       await page.keyboard.press("Enter");
       await waitForTermText(page, `echo:${line}`);
+      if (performance.now() >= evidenceDeadline) {
+        throw new Error("the terminal stalled before it could establish the busy-window evidence");
+      }
     }
-    const busyForMs = Date.now() - started;
+    const busyForMs = performance.now() - started;
     expect(
       busyForMs,
       "the busy window has to span several idle windows for its silence to mean anything",

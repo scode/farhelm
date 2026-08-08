@@ -27,7 +27,9 @@ Before creating or updating a PR, or claiming work is done, run exactly what CI 
 - `cargo fmt --all -- --check`
 - `cargo clippy --all-targets -- -D warnings`
 - `cargo test -- --show-output` — `--show-output` is what makes a loudly-skipped test's reason visible; the cgroup tests
-  skip themselves where no systemd user manager exists, and libtest hides a passing test's output otherwise.
+  skip themselves where no systemd user manager exists, and libtest hides a passing test's output otherwise. CI adds
+  `--test-threads=4` to match its 4-vCPU runners (the tmux-spawning integration tests die under thread
+  oversubscription); a beefier local machine does not need the cap.
 - `cd crates/farhelm-ui/js-tests && node --test` — the JS unit harness for the asset-JS layer's pure functions
   (PLAN_M6_5.md item 1); node is already a CI requirement for Playwright below, so this adds no dependency. Run from
   inside the directory rather than as a glob from the repo root: node's no-argument default discovery (every `*.test.js`

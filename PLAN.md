@@ -128,6 +128,25 @@ Consequences of that stance:
   snapshot paths rather than by a test: an invocation of 120-odd characters overflows the session view's titlebar and
   pushes the rename control out of reach, which is a real UI failure on a surface every session has and not test debt at
   all.
+
+  Amendment (2026-08-08, the M7 run): three of this entry's open threads closed. The SIGSEGV watch item concluded
+  exactly as the standing rule demanded — occurrences reached seven, a core_pattern trap caught a core, and the
+  backtrace named the mechanism: a failed `CommandExt::exec` leaves libc's `environ` pointing at the Command's freed
+  envp in whatever process ran it, so the launch exec-failure tests were poisoning the whole test binary and any later
+  `getenv` (glibc tcache safe-linking values are why every fault address looked like a truncated pointer). Test-only;
+  production shims exec-or-exit. Fixed in the flake-hardening PR by moving those scenarios into child processes. The
+  server-death-under-load hypothesis is now CONFIRMED — the pane-silenced diagnostics caught "%exit server exited
+  unexpectedly" on a SERIAL stack-CI rerun — and of the two recorded CI-quieting candidates the evidence picked neither:
+  serial reruns still failing rules out cross-run overlap, so the pressure is within-run thread oversubscription, and
+  the remedy is `--test-threads=4` in the CI test job (matching the runner's vCPUs), landed at the stack bottom.
+  Ack-ahead-of-backlog and the heartbeat-idle spec each recurred and were re-fixed at the evidence layer rather than the
+  claim (prove the flood flows before soaking; extend the traffic window by elapsed time, not echo count). New parked
+  observation, systemic rather than incidental: e2e harness state tempdirs leak on abnormal test-stack exit — 423 of
+  them (~22 GB) accumulated across one long run before an ENOSPC — cleanup-on-abnormal-exit wants a design pass. Also
+  folded in from the flake-fix series' staged notes (2026-08-03, recorded in its own log but never pushed here): one
+  browser-suite sighting of the Playwright flood harness failing with "drain socket closed before FLOOD-DONE" — passed
+  its rerun, one occurrence, the first candidate for a browser-side load class; a second occurrence earns it a
+  discriminator entry of its own.
 - **M6.75 — status and profiles.** Running/waiting/idle heuristics with per-agent sharpening, list filtering, profile
   CRUD and starter profiles. Also live push replacing BOTH of the UI's polls — M2's session-list poll and M4's
   session-detail/tab-list poll — status transitions are what make polling genuinely painful, and the push channel serves

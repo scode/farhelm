@@ -838,8 +838,110 @@ fn record_launch_failure(
 
 #[cfg(test)]
 mod tests {
+    //! Exec-failure tests run the shim in a disposable child process. Rust's
+    //! `CommandExt::exec` documentation warns that a failed exec can leave the
+    //! process environment inconsistent; on Unix, the returned call can leave
+    //! libc's `environ` pointing at the command's freed environment vector.
+    //! That is a process-wide hazard for any later `getenv`, not a local error
+    //! the test can safely recover from. Production shims exit immediately;
+    //! these tests must do the same without poisoning the shared test process.
+
     use super::*;
     use std::os::unix::fs::PermissionsExt;
+
+    const EXEC_FAILURE_CHILD_SPEC: &str = "FARHELM_LAUNCH_EXEC_FAILURE_CHILD_SPEC";
+    const EXEC_FAILURE_CHILD_KIND: &str = "FARHELM_LAUNCH_EXEC_FAILURE_CHILD_KIND";
+
+    /// Store the failed exec's error for the parent, then leave immediately.
+    ///
+    /// Nothing after `exec_launch_spec` may return to libtest: its normal
+    /// bookkeeping can consult the process environment after the failed exec
+    /// left that environment unsafe. The parent owns every assertion and
+    /// treats either a failed write or an abnormal child exit as a test
+    /// failure.
+    fn finish_exec_failure_child(spec_path: &Path, error: &anyhow::Error) -> ! {
+        let wrote_error = std::fs::write(
+            exec_failure_child_result_path(spec_path),
+            format!("{error:#}"),
+        )
+        .is_ok();
+        // SAFETY: this is the disposable child process, after the result file
+        // is complete. Skipping Rust and libtest cleanup is the point: either
+        // may read the process-wide environment that failed exec invalidated.
+        unsafe { libc::_exit(if wrote_error { 0 } else { 1 }) }
+    }
+
+    /// Keep a child's error report beside its spec without colliding with the
+    /// durable `.status` sentinel the production shim writes.
+    fn exec_failure_child_result_path(spec_path: &Path) -> PathBuf {
+        spec_path.with_extension("child-error")
+    }
+
+    /// Run the ignored child helper as a single-purpose exec-failure process.
+    ///
+    /// `--exact` and `--ignored` are both load-bearing: a normal test run can
+    /// never enter the child path because an unrelated caller happened to set
+    /// one of its environment variables. The child writes the returned error
+    /// to a file and calls `_exit`; this parent remains safe to inspect that
+    /// output, the sentinel, and every original invariant.
+    fn run_exec_failure_child(spec_path: &Path, kind: &str) -> String {
+        let exe = std::env::current_exe().expect("locate the supervisor test binary");
+        let run = std::process::Command::new(&exe)
+            .args([
+                "--exact",
+                "launch::tests::exec_failure_child",
+                "--ignored",
+                "--nocapture",
+            ])
+            .env(EXEC_FAILURE_CHILD_SPEC, spec_path)
+            .env(EXEC_FAILURE_CHILD_KIND, kind)
+            .output()
+            .unwrap_or_else(|error| panic!("re-running {exe:?}: {error}"));
+        assert!(
+            run.status.success(),
+            "the exec-failure child must exit cleanly: status={:?}, stdout={}, stderr={}",
+            run.status,
+            String::from_utf8_lossy(&run.stdout),
+            String::from_utf8_lossy(&run.stderr)
+        );
+        std::fs::read_to_string(exec_failure_child_result_path(spec_path))
+            .expect("the exec-failure child must leave its error report")
+    }
+
+    /// Drive one real failed exec, record its result for the parent, and exit.
+    ///
+    /// This is the only test that enters the unsafe post-exec-failure state.
+    /// It is ignored during ordinary runs and invoked deliberately by
+    /// [`run_exec_failure_child`] under its exact test name. The two modes
+    /// cover the real filesystem and the sentinel-write fault seam without
+    /// returning either case to libtest cleanup.
+    #[test]
+    #[ignore = "the child half of the exec-failure isolation tests"]
+    fn exec_failure_child() {
+        let spec_path = std::env::var_os(EXEC_FAILURE_CHILD_SPEC)
+            .map(PathBuf::from)
+            .expect("the parent must provide the child spec path");
+        let kind = std::env::var(EXEC_FAILURE_CHILD_KIND)
+            .expect("the parent must provide the child scenario");
+        let error = match kind.as_str() {
+            "real" => exec_launch_spec(&spec_path),
+            "fail-at-write" => {
+                struct FailAtWrite;
+                impl crate::files::FaultSeam for FailAtWrite {
+                    fn write(
+                        &self,
+                        _file: &mut std::fs::File,
+                        _bytes: &[u8],
+                    ) -> std::io::Result<()> {
+                        Err(std::io::Error::other("injected sentinel-write failure"))
+                    }
+                }
+                exec_launch_spec_with_seam(&spec_path, &FailAtWrite)
+            }
+            other => panic!("unknown exec-failure child scenario: {other}"),
+        };
+        finish_exec_failure_child(&spec_path, &error);
+    }
 
     /// The ordinary case: no launch has ever failed for this session, so
     /// there is no sentinel file at all, and the reader must say so
@@ -874,7 +976,7 @@ mod tests {
             preamble: Vec::new(),
         };
         std::fs::write(&spec_path, serde_json::to_vec(&spec).unwrap()).unwrap();
-        exec_launch_spec(&spec_path);
+        run_exec_failure_child(&spec_path, "real");
 
         // Compared against the file's FULL content, not merely `contains`:
         // the reader's whole job is to hand back exactly what is on disk,
@@ -983,10 +1085,10 @@ mod tests {
         };
         std::fs::write(&spec_path, serde_json::to_vec(&spec).unwrap()).unwrap();
 
-        let err = exec_launch_spec(&spec_path);
+        let rendered = run_exec_failure_child(&spec_path, "real");
         assert!(
-            format!("{err:#}").contains("exec_failed"),
-            "error chain should surface the exec-failure report: {err:#}"
+            rendered.contains("exec_failed"),
+            "error chain should surface the exec-failure report: {rendered}"
         );
 
         let status_path = status_path_for_spec(&spec_path);
@@ -1034,8 +1136,8 @@ mod tests {
         };
         std::fs::write(&spec_path, serde_json::to_vec(&spec).unwrap()).unwrap();
 
-        let err = exec_launch_spec(&spec_path);
-        assert!(format!("{err:#}").contains("exec_failed"));
+        let rendered = run_exec_failure_child(&spec_path, "real");
+        assert!(rendered.contains("exec_failed"));
 
         let content = std::fs::read_to_string(status_path_for_spec(&spec_path)).unwrap();
         assert!(
@@ -1129,13 +1231,6 @@ mod tests {
     /// that bypassed the shim entirely.
     #[test]
     fn exec_launch_spec_with_seam_reports_both_failures_without_a_torn_sentinel() {
-        struct FailAtWrite;
-        impl crate::files::FaultSeam for FailAtWrite {
-            fn write(&self, _file: &mut std::fs::File, _bytes: &[u8]) -> std::io::Result<()> {
-                Err(std::io::Error::other("injected sentinel-write failure"))
-            }
-        }
-
         let tmp = tempfile::tempdir().unwrap();
         let spec_path = tmp.path().join("spec.json");
         let missing_binary = tmp.path().join("no-such-farhelm-test-binary");
@@ -1150,8 +1245,7 @@ mod tests {
         };
         std::fs::write(&spec_path, serde_json::to_vec(&spec).unwrap()).unwrap();
 
-        let err = exec_launch_spec_with_seam(&spec_path, &FailAtWrite);
-        let rendered = format!("{err:#}");
+        let rendered = run_exec_failure_child(&spec_path, "fail-at-write");
         assert!(
             rendered.contains("exec_failed"),
             "the exec failure remains the reported root cause: {rendered}"
