@@ -1440,10 +1440,21 @@ test.describe("agent profiles", () => {
     const profile = await createProfile(request, local, { name: `lease-${Date.now()}` });
     profiles.push({ host: local, id: profile.id });
 
+    // A fabricated API reply still has to look like it came from this helm.
+    // Omitting the stamp latches global build skew, which suppresses feed
+    // invalidations and turns this lease test into a race against that policy.
+    const probe = await request.get("/api/hosts");
+    const build = probe.headers()["x-farhelm-build"];
+    if (!build) throw new Error("the helm hosts response has no build stamp");
+
     // The save is held open until this test releases it.
     let release: (() => void) | undefined;
     const held = new Promise<void>((resolve) => {
       release = resolve;
+    });
+    let markStarted: (() => void) | undefined;
+    const started = new Promise<void>((resolve) => {
+      markStarted = resolve;
     });
     await page.route(
       (url) => /^\/api\/hosts\/\d+\/profiles\/[^/]+$/.test(url.pathname),
@@ -1452,13 +1463,19 @@ test.describe("agent profiles", () => {
           await route.continue();
           return;
         }
+        markStarted!();
         await held;
-        // Answers with a refusal, because a refusal is the loudest thing a
-        // completion could write: it would take over the form's error line.
+        // A precondition refusal becomes a section-level notice. Without the
+        // lease guard it would remain visible after the old editor closes,
+        // which makes the negative assertion below capable of catching that
+        // broken implementation.
         await route.fulfill({
           status: 409,
           contentType: "text/plain",
-          body: "a refusal about an install nobody is looking at any more",
+          headers: { "x-farhelm-build": build },
+          body:
+            "a refusal about an install nobody is looking at any more " +
+            "[farhelm:precondition/incarnation]",
         });
       },
     );
@@ -1488,45 +1505,39 @@ test.describe("agent profiles", () => {
     );
 
     const feed = await listWithStubbedFeed(page);
-    // Catalog reads are counted, so every wait below is on a READ having
-    // landed rather than on time passing — the successor's rows look exactly
-    // like the predecessor's, so nothing about the DOM can say which
-    // activation produced them.
-    const reads = await watchCatalogReads(page);
     await openProfiles(page, local);
     const editing = profileRow(page, local, profile.id);
     await expect(editing).toBeVisible({ timeout: 20_000 });
     await editing.locator(".profile-edit").click();
     await editing.locator(".profile-name-input").fill(`lease-${Date.now()}-edited`);
+    const completed = page.waitForResponse(
+      (response) =>
+        response.request().method() === "POST" &&
+        /^\/api\/hosts\/\d+\/profiles\/[^/]+$/.test(new URL(response.url()).pathname),
+    );
     await editing.locator(".profile-save").click();
+    await started;
 
-    // While it hangs, the host moves and the successor's catalog is read. The
-    // barrier is that read: the hosts refresh has to land, re-point the
-    // surface, and produce a catalog GET of its own before the save is
-    // released, or the reply would be arriving under the ORIGINAL lease and
-    // this test would be asserting nothing.
-    const beforeMove = reads.reads(local);
+    // While the save hangs, move the host and wait for the old form to be
+    // replaced. A request counter cannot provide this barrier: routes observe
+    // a catalog GET before its reply lands, and the hosts and catalog reads
+    // race each other after one feed notice.
     moved = true;
     feed.notify(2);
-    await expect
-      .poll(() => reads.reads(local), {
-        timeout: 20_000,
-        message: "the successor's catalog must have been read before the save is released",
-      })
-      .toBeGreaterThan(beforeMove);
+    await expect(editing.locator(".profile-form")).toHaveCount(0, { timeout: 20_000 });
     await expect(profileRow(page, local, profile.id)).toBeVisible({ timeout: 20_000 });
 
     release!();
+    await completed;
 
-    // Nothing the held save produces may reach the screen. Waited on through a
-    // positive signal rather than a sleep: one more read is asked for and has
-    // to land, and only then does absence mean anything.
-    const beforeSettle = reads.reads(local);
-    feed.notify(3);
-    await expect
-      .poll(() => reads.reads(local), { timeout: 20_000 })
-      .toBeGreaterThan(beforeSettle);
+    // The operation token is released only after the held reply has completed.
+    // Waiting for its control to re-enable makes every absence below an
+    // assertion about the settled completion, not about a lucky early read.
+    await expect(section(page, local).locator(".new-profile-button")).toBeEnabled({
+      timeout: 20_000,
+    });
     await expect(profileRow(page, local, profile.id)).toBeVisible({ timeout: 20_000 });
+    await expect(page.locator(".build-skew")).toHaveCount(0);
     await expect(
       section(page, local).locator(".profile-form-error"),
       "a refusal about the previous install must not appear under the successor's rows",
