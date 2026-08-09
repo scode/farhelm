@@ -266,8 +266,9 @@ fn list_session_panes_command(session: &str) -> String {
 ///
 /// Arguments rather than a whole command because at attach time the first
 /// [`MAX_CUTOVER_PANE_FILTERS`] of them MUST share an invocation with the
-/// `no-output` flip (see [`attach_cutover_command`]); the overflow and the
-/// late path each wrap them in a `refresh-client` of their own.
+/// `no-output` flip (see [`attach_cutover_command`]). Once output is live,
+/// [`silence_live_pane_commands`] adds a preceding `pause` instead of using
+/// these off-only arguments.
 ///
 /// # Why this is safe only alongside [`SessionSink`]
 ///
@@ -292,18 +293,29 @@ fn silence_pane_args(panes: &[String]) -> String {
     args
 }
 
-/// One `refresh-client` command per [`MAX_CUTOVER_PANE_FILTERS`]-sized
-/// chunk of `panes`, for filters that do NOT ride the cutover — the
-/// attach-time overflow and the late-pane path.
+/// One command that safely filters panes after output is live.
 ///
-/// Chunked for [`MAX_CUTOVER_PANE_FILTERS`]'s reason rather than any
-/// property of these call sites: the argument ceiling is tmux's, so it
-/// applies to every command carrying these arguments, not only the
-/// cutover.
-fn silence_pane_commands(panes: &[String]) -> Vec<String> {
+/// tmux 3.3 through 3.6 must see `pause` before `off` once a control client
+/// can have pane output queued. Keeping both transitions in one command
+/// prevents more output from interleaving between them. This renderer is
+/// shared by attach-time overflow and panes discovered later so those two
+/// live paths cannot drift on the compatibility-sensitive ordering.
+fn silence_live_pane_command(panes: &[String]) -> String {
+    let mut command = String::from("refresh-client");
+    for pane in panes {
+        let _ = write!(command, " -A \"{pane}:pause\" -A \"{pane}:off\"");
+    }
+    command
+}
+
+/// Chunk live pane filters below tmux's argument ceiling.
+///
+/// Each pane costs twice as many arguments as it does in the cutover, so a
+/// live command carries half as many panes to preserve the same argv budget.
+fn silence_live_pane_commands(panes: &[String]) -> Vec<String> {
     panes
-        .chunks(MAX_CUTOVER_PANE_FILTERS)
-        .map(|chunk| format!("refresh-client{}", silence_pane_args(chunk)))
+        .chunks(MAX_CUTOVER_PANE_FILTERS / 2)
+        .map(silence_live_pane_command)
         .collect()
 }
 
@@ -2874,8 +2886,8 @@ impl TmuxDriver {
             child,
             // Exclusively owned: this client carries its own one-shot
             // replay-cutover command group (below), the attach-time pane
-            // filter, and the occasional late `-A <pane>:off` — all
-            // written from the single task that owns this stream. Input
+            // filter, and the occasional live `pause`-then-`off` filter —
+            // all written from the single task that owns this stream. Input
             // travels on a wholly separate client — see
             // `open_input_client` — so there is no sharing concern here.
             stdin,
@@ -2917,7 +2929,7 @@ impl TmuxDriver {
         let (modes, prefill) = stream
             .snapshot_then_cutover(deadline, &attach_cutover_command(riding))
             .await?;
-        for command in silence_pane_commands(overflow) {
+        for command in silence_live_pane_commands(overflow) {
             stream.send_filter_command(&command).await?;
         }
         stream.silenced.extend(foreign.iter().cloned());
@@ -3274,9 +3286,10 @@ impl SessionSink {
 /// **tmux-side, and the one that matters.** Every pane of the session
 /// except this stream's own is turned off for this client with
 /// `refresh-client -A <pane>:off` — at attach for the panes that exist
-/// then ([`Self::foreign_panes`], folded into the cutover), and on first
-/// sight for any pane that appears later, such as a tab opened while this
-/// terminal was already attached ([`Self::silence_late_pane`]). This is
+/// then ([`Self::foreign_panes`], folded into the cutover), and after a
+/// protective `pause` when the filter must be installed after live output
+/// begins. That second path covers both attach-time overflow and a pane
+/// first discovered later ([`Self::silence_late_pane`]). This is
 /// what makes a session's control-mode read work O(session traffic)
 /// instead of O(attached terminals × session traffic), and — more
 /// importantly than the arithmetic — it is what stops a busy tab's bytes
@@ -3587,10 +3600,7 @@ impl OutputStream {
             self.silenced.clear();
         }
         self.silenced.insert(pane.clone());
-        let command = format!(
-            "refresh-client{}",
-            silence_pane_args(std::slice::from_ref(&pane))
-        );
+        let command = silence_live_pane_command(std::slice::from_ref(&pane));
         self.send_filter_command(&command).await
     }
 
@@ -6545,45 +6555,49 @@ mod tests {
         assert_eq!(silence_pane_args(&[]), "");
     }
 
-    /// No `refresh-client` this module builds may carry more than
-    /// [`MAX_CUTOVER_PANE_FILTERS`] panes, however many a session has.
+    /// Live pane filters stay below tmux's argument ceiling and preserve order.
     ///
     /// tmux refuses a command line of roughly a thousand arguments, and
-    /// each pane costs two — so without chunking, a session with enough
-    /// tabs would make every attach on it fail outright, at a threshold
-    /// nobody would connect to tab count. The boundary is checked exactly
-    /// at the cap and one past it, because "splits when it must" and
-    /// "does not split when it need not" are different bugs and an
-    /// off-by-one hides in the gap.
+    /// each post-cutover pane costs four: `-A <pane>:pause` followed by
+    /// `-A <pane>:off`. Without chunking, a session with enough tabs would
+    /// make every attach on it fail outright. The boundary is checked
+    /// exactly at the live cap and one past it, and every pane must retain
+    /// both transitions in the required order.
     #[test]
-    fn pane_filters_are_chunked_below_tmuxs_argument_ceiling() {
+    fn live_pane_filters_are_ordered_and_chunked_below_tmuxs_argument_ceiling() {
         let panes = |n: usize| (0..n).map(|i| format!("%{i}")).collect::<Vec<_>>();
+        let live_cap = MAX_CUTOVER_PANE_FILTERS / 2;
 
-        let at_cap = panes(MAX_CUTOVER_PANE_FILTERS);
-        let commands = silence_pane_commands(&at_cap);
+        let at_cap = panes(live_cap);
+        let commands = silence_live_pane_commands(&at_cap);
         assert_eq!(commands.len(), 1, "the cap itself must be one command");
 
-        let over_cap = panes(MAX_CUTOVER_PANE_FILTERS + 1);
-        let commands = silence_pane_commands(&over_cap);
+        let over_cap = panes(live_cap + 1);
+        let commands = silence_live_pane_commands(&over_cap);
         assert_eq!(commands.len(), 2, "one past the cap must split");
         for command in &commands {
             assert!(
+                command.starts_with("refresh-client "),
+                "a live pane filter must be a refresh-client command: {command}"
+            );
+            assert!(
                 command.matches(" -A ").count() <= MAX_CUTOVER_PANE_FILTERS,
-                "a chunk exceeded the cap: {command}"
+                "a command exceeded the established argument budget: {command}"
             );
         }
-        // Every pane must appear exactly once across the chunks: a split
-        // that dropped its remainder would leave panes unfiltered, which
-        // is silent by construction.
+        // A split that drops its remainder or reverses either transition
+        // silently restores the old crash path for that pane.
         let rendered = commands.join(" ");
         for pane in &over_cap {
             assert_eq!(
-                rendered.matches(&format!("\"{pane}:off\"")).count(),
+                rendered
+                    .matches(&format!("-A \"{pane}:pause\" -A \"{pane}:off\""))
+                    .count(),
                 1,
-                "{pane} must be filtered exactly once"
+                "{pane} must be paused and filtered exactly once, in order"
             );
         }
-        assert!(silence_pane_commands(&[]).is_empty());
+        assert!(silence_live_pane_commands(&[]).is_empty());
     }
 
     /// The per-attachment memo of already-filtered panes stays bounded
@@ -6656,6 +6670,20 @@ mod tests {
         assert_eq!(
             continue_pane_command("%7"),
             "refresh-client -A \"%7:continue\""
+        );
+    }
+
+    /// Late filtering discards queued output before turning the pane off.
+    ///
+    /// The order is the tmux 3.3–3.6 crash workaround: direct `off` can
+    /// leave a queued block pointing at bytes tmux has already freed, while
+    /// `pause` clears that queue first. Keeping both states in one command
+    /// prevents pane output from reopening the vulnerable gap.
+    #[test]
+    fn late_pane_filter_pauses_before_turning_output_off() {
+        assert_eq!(
+            silence_live_pane_command(&["%7".to_string()]),
+            "refresh-client -A \"%7:pause\" -A \"%7:off\""
         );
     }
 
@@ -7478,7 +7506,7 @@ mod tests {
 
         // A real filter command, left with its reply outstanding.
         stream
-            .send_filter_command(&format!("refresh-client -A \"{neighbour}:off\""))
+            .send_filter_command(&silence_live_pane_command(std::slice::from_ref(&neighbour)))
             .await
             .expect("writing a pane filter");
         assert_eq!(
