@@ -3038,8 +3038,40 @@ impl TmuxDriver {
             reader: BufReader::new(stdout),
             line: Vec::with_capacity(8192),
         };
-        sink.read_block(deadline, "session-sink attach").await?;
+        if let Err(attach) = sink.read_block(deadline, "session-sink attach").await {
+            if let Err(reap) = sink.shutdown().await {
+                return Err(SessionSinkOpenReapError {
+                    attach: format!("{attach:#}"),
+                    reap: format!("{reap:#}"),
+                }
+                .into());
+            }
+            return Err(attach);
+        }
         Ok(sink)
+    }
+}
+
+/// An attach failure whose spawned sink process could not be confirmed gone.
+///
+/// Ordinary attach errors are safe to retry after their child is reaped. This
+/// marker tells the supervisor about the strictly different case where a
+/// replacement must be refused because the failed client may still exist.
+#[derive(Debug, thiserror::Error)]
+#[error("session-sink attach failed ({attach}) and its client could not be reaped ({reap})")]
+pub(crate) struct SessionSinkOpenReapError {
+    attach: String,
+    reap: String,
+}
+
+#[cfg(test)]
+impl SessionSinkOpenReapError {
+    /// A marker-only fixture for supervisor retry-policy tests.
+    pub(crate) fn for_test() -> Self {
+        Self {
+            attach: "injected attach failure".to_string(),
+            reap: "injected reap failure".to_string(),
+        }
     }
 }
 
@@ -3104,11 +3136,9 @@ impl TmuxDriver {
 /// the session's traffic to rest on the documented rule instead; the pane
 /// filter it enables removes N-1 copies in exchange (see [`OutputStream`]).
 pub struct SessionSink {
-    /// Never read directly: kept alive so dropping this value kills the
-    /// client process (`kill_on_drop`), which is how the sink's lifetime
-    /// is tied to its owner's without any explicit teardown call on any
-    /// path — including a cancelled supervising task.
-    #[allow(dead_code)]
+    /// Reaped explicitly by orderly shutdown. `kill_on_drop` remains the
+    /// cancellation and unwind fallback, tying the process to this value
+    /// even when its owner cannot await teardown.
     child: Child,
     /// Never written to — the sink issues no commands at all — but held
     /// open for its whole life, because control mode ends at stdin EOF:
@@ -3197,6 +3227,28 @@ impl SessionSink {
                 }
             }
         }
+    }
+
+    /// Kill this control client and confirm that the process has exited.
+    ///
+    /// `kill_on_drop` remains the cancellation fallback, but it cannot
+    /// establish a handoff boundary: dropping requests termination without
+    /// waiting for the old tmux client to disappear. Orderly last-owner
+    /// teardown uses this path before a queued reattach may create its
+    /// replacement.
+    pub async fn shutdown(&mut self) -> anyhow::Result<()> {
+        if self
+            .child
+            .try_wait()
+            .context("checking whether the session-sink client already exited")?
+            .is_some()
+        {
+            return Ok(());
+        }
+        self.child
+            .kill()
+            .await
+            .context("killing and reaping the session-sink client")
     }
 }
 

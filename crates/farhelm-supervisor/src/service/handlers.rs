@@ -1722,8 +1722,17 @@ async fn handle_detach(
         // hazard — is waiting for it here, before the lock is
         // released. Awaiting cannot deadlock: forwarders never
         // take this lock.
-        a.forwarder.abort();
-        let _ = a.forwarder.await;
+        let ActiveAttach {
+            forwarder, sink, ..
+        } = a;
+        forwarder.abort();
+        let _ = forwarder.await;
+
+        // Dropping the final lease publishes this session's reaping barrier
+        // synchronously. The runtime-owned reaper may finish afterward, but
+        // the next attach already has a state it must wait on; a shared sink
+        // simply retains its other lease and never enters that state.
+        drop(sink);
     }
 }
 

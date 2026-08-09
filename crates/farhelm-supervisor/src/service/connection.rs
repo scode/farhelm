@@ -462,11 +462,19 @@ where
                             Some(Err(e)) => {
                                 warn!(session = %entry.info.id, error = %e, "input dropped");
                                 if let Some(old) = attachments.remove(&route.key) {
-                                    old.forwarder.abort();
-                                    let _ = old.forwarder.await;
+                                    let ActiveAttach {
+                                        channel,
+                                        notify,
+                                        forwarder,
+                                        sink,
+                                        ..
+                                    } = old;
+                                    forwarder.abort();
+                                    let _ = forwarder.await;
+                                    drop(sink);
                                     notify_detached(
-                                        &old.notify,
-                                        old.channel,
+                                        &notify,
+                                        channel,
                                         format!("terminal input failed: {e:#}"),
                                     );
                                 }
@@ -530,21 +538,27 @@ where
     // Tear down any attachments this connection owned so the next
     // attach doesn't fight a dead forwarder. Abort AND await, exactly
     // like the takeover path: abort only schedules cancellation, and the
-    // old control-mode client's process is not gone until the cancelled
-    // task has been polled to completion. Removing the entry without
-    // waiting would let a new connection's attach — which finds no
-    // incumbent to kick — open its control client while the old one is
-    // still dying, the documented frozen-replay hazard. Awaiting under
-    // the lock is safe (forwarders never take it) and is what serializes
-    // that new attach behind this teardown.
+    // old per-terminal control client's process is not gone until the
+    // cancelled task has been polled to completion. If this connection held
+    // the session's final attachment, the shared sink client must likewise
+    // be reaped. Removing the entry without waiting would let a new
+    // connection's attach — which finds no incumbent to kick — open its
+    // clients while the old ones are still dying, the documented
+    // frozen-replay hazard. Awaiting under the lock is safe (forwarders
+    // never take it) and is what serializes that new attach behind this
+    // teardown.
     let mut attachments = sup.attachments.lock().await;
     let mine: Vec<ActiveAttach> = attachments
         .extract_if(|_, attachment| attachment.notify.same_channel(&tx))
         .map(|(_, attachment)| attachment)
         .collect();
     for attachment in mine {
-        attachment.forwarder.abort();
-        let _ = attachment.forwarder.await;
+        let ActiveAttach {
+            forwarder, sink, ..
+        } = attachment;
+        forwarder.abort();
+        let _ = forwarder.await;
+        drop(sink);
     }
     drop(attachments);
     drop(tx);
@@ -1314,10 +1328,15 @@ fn detach_stalled(
             // Abort-and-await like every other teardown, even though the
             // forwarder is the very task that asked for this: it has
             // already shut its control client down and returned, so this
-            // only reaps the handle. Dropping the removed `ActiveAttach`
-            // is also what kills the input client.
-            old.forwarder.abort();
-            let _ = old.forwarder.await;
+            // only reaps the handle. Destructuring the removed
+            // `ActiveAttach` also kills its input client, then orderly
+            // reaps the sink when this was the session's last attachment.
+            let ActiveAttach {
+                forwarder, sink, ..
+            } = old;
+            forwarder.abort();
+            let _ = forwarder.await;
+            drop(sink);
         }
         drop(attachments);
         let _ = tx

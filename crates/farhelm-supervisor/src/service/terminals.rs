@@ -9,12 +9,13 @@
 //! any one attachment's lifetime.
 
 use super::core::{RequestError, SessionEntry, Supervisor, error_kind, truncate_for_error};
-use crate::tmux::{InputClient, SessionSink};
+use crate::tmux::{InputClient, SessionSink, SessionSinkOpenReapError};
+use anyhow::Context;
 use farhelm_proto::{ErrorKind, Frame, TerminalSelector};
 use std::collections::{HashMap, HashSet};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex as StdMutex, Weak};
 use std::time::Duration;
-use tokio::sync::{mpsc, watch};
+use tokio::sync::{mpsc, oneshot, watch};
 use tracing::warn;
 
 /// How long an `OpenTab` watches a new tab's pane before accepting that
@@ -545,15 +546,20 @@ fn sink_retry_delay(consecutive_failures: u32) -> Duration {
 ///
 /// # Lifetime by refcount, deliberately
 ///
-/// Every [`ActiveAttach`] holds an `Arc` of this, and [`Supervisor::sinks`]
-/// holds only a `Weak`. That is what implements "the sink starts when a
-/// session gains its first attachment and stops when the last one goes"
-/// without a single explicit teardown call: attachments are removed on a
-/// dozen paths — takeover, replace, detach, stall, connection loss,
-/// restart, tab close, delete — and a scheme that had to be invoked on
-/// each of them would eventually be forgotten on the next one added. The
-/// last `Arc` to drop aborts the supervising task, whose cancellation
-/// drops the client and kills the process through `kill_on_drop`.
+/// Every [`ActiveAttach`] holds an `Arc` of this. [`Supervisor::sinks`]
+/// normally holds the registered live sink's `Weak`; final-owner release
+/// replaces that slot with `Reaping`, while ANY unconfirmed reap — including
+/// an unregistered client that lost a concurrent first-attach race — replaces
+/// it with fail-closed `Failed`. That is what implements "the sink starts
+/// when a session gains its first attachment and stops when the last one
+/// goes": attachments are removed on a dozen paths — takeover, replace,
+/// detach, stall, connection loss, restart, tab close, delete — and the last
+/// `Arc` still defines the end of the sink's lifetime. Each path that can
+/// release the last owner passes its [`SessionSinkLease`] through its drop
+/// path. Takeover and replacement already hold the incoming attachment's
+/// reference, so the old attachment merely releases its share and the same
+/// sink stays live. Cancellation and unwinding retain the abort-on-drop
+/// fallback so cleanup cannot leak the task when no async teardown can run.
 ///
 /// # Self-healing, without an exit
 ///
@@ -565,15 +571,25 @@ fn sink_retry_delay(consecutive_failures: u32) -> Duration {
 /// screen whose isolation guarantee depends on a sink existing, and a
 /// supervisor that had quietly stopped trying would leave that terminal
 /// looking perfectly healthy while the guarantee was gone for good.
-/// Stopping is the owner's decision, expressed by dropping the last `Arc`,
-/// and it needs no cooperation from this task.
+/// Stopping is the owner's decision: orderly last-owner release asks this
+/// task to reap its client, while cancellation aborts the task and relies on
+/// `kill_on_drop`. Sink death or reopen failure alone never makes it stop.
 ///
 /// Nothing persists across a supervisor restart: sinks are a property of
 /// live attachments, and the next attach builds one.
 pub(crate) struct SessionSinkHandle {
+    /// Registry key for the client this handle supervises. Teardown needs
+    /// it after the attachment has been removed, when no `Terminal` remains
+    /// available to name the per-session handoff state.
+    pub(crate) tmux_name: String,
     /// The task that keeps a client attached, drains it, and replaces it
-    /// when it dies. Aborted by [`Drop`], which is the whole teardown.
-    pub(crate) task: tokio::task::JoinHandle<()>,
+    /// when it dies. `Option` lets [`Self::shutdown`] await it despite this
+    /// type's abort-on-drop fallback.
+    pub(crate) task: Option<tokio::task::JoinHandle<anyhow::Result<()>>>,
+    /// Requests orderly teardown when an attachment-ending path releases
+    /// the last owner. Cancellation still relies on [`Drop`], because
+    /// async work cannot be performed from an arbitrary destructor.
+    pub(crate) shutdown: Option<oneshot::Sender<()>>,
     /// The live client's process id, or `None` while there is none —
     /// which doubles as this handle's READINESS signal.
     ///
@@ -591,11 +607,314 @@ pub(crate) struct SessionSinkHandle {
 
 impl Drop for SessionSinkHandle {
     fn drop(&mut self) {
-        self.task.abort();
+        if let Some(task) = &self.task {
+            task.abort();
+        }
     }
 }
 
-/// Keep `session` sinked until this task is cancelled.
+impl SessionSinkHandle {
+    /// Stop the sink client and wait until its process has exited.
+    ///
+    /// The runtime-owned lease reaper awaits this method and publishes its
+    /// result through the per-session registry slot. Successful completion
+    /// is therefore the boundary every same-session replacement waits for;
+    /// task or process errors remain a fail-closed registry state.
+    pub(crate) async fn shutdown(mut self) -> anyhow::Result<()> {
+        drop(self.shutdown.take());
+        if let Some(task) = self.task.take() {
+            return task.await.context("joining the session-sink task")?;
+        }
+        Ok(())
+    }
+}
+
+type SinkReapOutcome = Option<Result<(), Arc<str>>>;
+type SinkReapSender = watch::Sender<SinkReapOutcome>;
+type SinkReapReceiver = watch::Receiver<SinkReapOutcome>;
+
+/// Registry state for one tmux session's sink handoff.
+pub(crate) enum SinkRegistryEntry {
+    Live(Weak<SessionSinkHandle>),
+    Reaping(SinkReapReceiver),
+    Failed(Arc<str>),
+}
+
+/// The sink registry is synchronously locked because a lease destructor
+/// must publish `Reaping` before its last strong reference disappears.
+/// Every critical section is memory-only; process work runs after release.
+#[derive(Default)]
+pub(crate) struct SinkRegistryState {
+    entries: HashMap<String, SinkRegistryEntry>,
+    /// Candidate opens and reaps that every same-session ensure must wait for.
+    pub(crate) candidates: HashMap<String, Vec<SinkReapReceiver>>,
+}
+
+impl std::ops::Deref for SinkRegistryState {
+    type Target = HashMap<String, SinkRegistryEntry>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.entries
+    }
+}
+
+impl std::ops::DerefMut for SinkRegistryState {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.entries
+    }
+}
+
+pub(crate) type SinkRegistry = Arc<StdMutex<SinkRegistryState>>;
+
+/// A published candidate operation whose abandonment is orderly.
+///
+/// The guard begins before opening and may later own an opened, unregistered
+/// client. Cancellation before the opener starts settles it through this
+/// guard's own drop path. Once opening begins, the runtime-owned task sends the
+/// guard across a oneshot channel; cancellation before or after that send still
+/// leaves value drop responsible for settling the barrier and reaping any
+/// client rather than falling through the handle's abort-only fallback.
+pub(crate) struct SessionSinkCandidate {
+    handle: Option<SessionSinkHandle>,
+    completion: Option<SinkReapSender>,
+    tmux_name: String,
+    opening_started: bool,
+    registry: SinkRegistry,
+    runtime: tokio::runtime::Handle,
+}
+
+impl SessionSinkCandidate {
+    /// Publish a barrier before a runtime-owned candidate open begins.
+    #[cfg(test)]
+    pub(crate) fn begin(tmux_name: String, registry: SinkRegistry) -> Self {
+        let registry_for_candidate = Arc::clone(&registry);
+        let mut state = registry.lock().expect("sink registry poisoned");
+        Self::begin_locked(tmux_name, registry_for_candidate, &mut state)
+    }
+
+    /// Publish a barrier while the caller's registry decision is locked.
+    pub(crate) fn begin_locked(
+        tmux_name: String,
+        registry: SinkRegistry,
+        state: &mut SinkRegistryState,
+    ) -> Self {
+        let (completion, completion_rx) = watch::channel(None);
+        state
+            .candidates
+            .entry(tmux_name.clone())
+            .or_default()
+            .push(completion_rx);
+        Self {
+            handle: None,
+            completion: Some(completion),
+            tmux_name,
+            opening_started: false,
+            registry,
+            runtime: tokio::runtime::Handle::current(),
+        }
+    }
+
+    /// Mark that cancellation can no longer prove no process was spawned.
+    pub(crate) fn mark_opening_started(&mut self) {
+        self.opening_started = true;
+    }
+
+    /// Add the client produced by the guarded open operation.
+    pub(crate) fn set_handle(&mut self, handle: SessionSinkHandle) {
+        assert!(self.handle.replace(handle).is_none(), "candidate set twice");
+    }
+
+    /// Resolve an open that returned no installable client handle.
+    ///
+    /// `outcome` distinguishes confirmed cleanup from an attach that spawned
+    /// a process whose exit could not be confirmed.
+    pub(crate) fn finish_without_handle(mut self, outcome: Result<(), Arc<str>>) {
+        self.finish(outcome);
+    }
+
+    /// Transfer an installed client and release its opening barrier.
+    pub(crate) fn install(mut self) -> SessionSinkHandle {
+        let handle = self.handle.take().expect("the candidate finished opening");
+        self.finish(Ok(()));
+        handle
+    }
+
+    /// Orderly-reap an unregistered client before releasing its barrier.
+    pub(crate) async fn shutdown(mut self) -> Result<(), Arc<str>> {
+        let outcome = match self.handle.take() {
+            Some(handle) => handle
+                .shutdown()
+                .await
+                .map_err(|error| Arc::<str>::from(format!("{error:#}"))),
+            None => Ok(()),
+        };
+        self.finish(outcome.clone());
+        outcome
+    }
+
+    /// Publish one candidate operation's terminal outcome exactly once.
+    fn finish(&mut self, outcome: Result<(), Arc<str>>) {
+        if let Some(completion) = self.completion.take() {
+            completion.send_replace(Some(outcome));
+        }
+    }
+}
+
+impl Drop for SessionSinkCandidate {
+    fn drop(&mut self) {
+        let Some(completion) = self.completion.take() else {
+            return;
+        };
+        let handle = self.handle.take();
+        let tmux_name = self.tmux_name.clone();
+        let opening_started = self.opening_started;
+        let registry = Arc::clone(&self.registry);
+        self.runtime.spawn(async move {
+            let outcome = match handle {
+                Some(handle) => handle
+                    .shutdown()
+                    .await
+                    .map_err(|error| Arc::<str>::from(format!("{error:#}"))),
+                None if opening_started => Err(Arc::<str>::from(
+                    "the runtime-owned session-sink opener stopped after process creation began",
+                )),
+                None => Ok(()),
+            };
+            if let Err(error) = &outcome {
+                registry
+                    .lock()
+                    .expect("sink registry poisoned")
+                    .insert(tmux_name, SinkRegistryEntry::Failed(Arc::clone(error)));
+            }
+            completion.send_replace(Some(outcome));
+        });
+    }
+}
+
+/// One provisional or committed attachment's ownership of a session sink.
+///
+/// Dropping the final lease of the currently registered `Live` handle
+/// atomically replaces its weak entry with a reaping barrier, then hands
+/// shutdown to a runtime-owned task. A final lease made stale by an existing
+/// `Failed` barrier reaps independently and leaves that fail-closed evidence
+/// intact. Both paths make failure, cancellation, and unwinding obey the same
+/// orderly teardown contract without requiring async destructor code.
+pub(crate) struct SessionSinkLease {
+    handle: Option<Arc<SessionSinkHandle>>,
+    registry: SinkRegistry,
+    runtime: tokio::runtime::Handle,
+}
+
+impl SessionSinkLease {
+    /// Wrap one strong handle as ownership that publishes its final reap.
+    pub(crate) fn new(handle: Arc<SessionSinkHandle>, registry: SinkRegistry) -> Self {
+        Self {
+            handle: Some(handle),
+            registry,
+            runtime: tokio::runtime::Handle::current(),
+        }
+    }
+}
+
+impl std::ops::Deref for SessionSinkLease {
+    type Target = SessionSinkHandle;
+
+    fn deref(&self) -> &Self::Target {
+        self.handle
+            .as_deref()
+            .expect("a live lease owns its handle")
+    }
+}
+
+impl Drop for SessionSinkLease {
+    fn drop(&mut self) {
+        let Some(handle) = self.handle.take() else {
+            return;
+        };
+        let tmux_name = handle.tmux_name.clone();
+        let (owned, tracked_reaper) = {
+            let mut registry = self.registry.lock().expect("sink registry poisoned");
+            let registered = registry.get(&tmux_name).is_some_and(|entry| match entry {
+                SinkRegistryEntry::Live(registered) => {
+                    Weak::ptr_eq(registered, &Arc::downgrade(&handle))
+                }
+                SinkRegistryEntry::Reaping(_) | SinkRegistryEntry::Failed(_) => false,
+            });
+            if Arc::strong_count(&handle) != 1 {
+                // Release this share while the registry is still locked.
+                // Otherwise two simultaneous final drops can both observe
+                // two owners, release the lock, and only then decrement the
+                // count, leaving nobody to publish the reaping barrier.
+                drop(handle);
+                return;
+            }
+            let tracked_reaper = if registered {
+                let (done, done_rx) = watch::channel(None);
+                let done_identity = done_rx.clone();
+                registry.insert(tmux_name.clone(), SinkRegistryEntry::Reaping(done_rx));
+                Some((done, done_identity))
+            } else {
+                None
+            };
+            (
+                Arc::try_unwrap(handle).unwrap_or_else(|_| {
+                    unreachable!("the registry lock prevents a new lease after the count check")
+                }),
+                tracked_reaper,
+            )
+        };
+        let registry = Arc::clone(&self.registry);
+        self.runtime.spawn(async move {
+            let outcome = owned
+                .shutdown()
+                .await
+                .map_err(|error| Arc::<str>::from(format!("{error:#}")));
+            match tracked_reaper {
+                Some((done, done_identity)) => {
+                    {
+                        let mut registry = registry.lock().expect("sink registry poisoned");
+                        let same_reaper =
+                            registry.get(&tmux_name).is_some_and(|entry| match entry {
+                                SinkRegistryEntry::Reaping(current) => {
+                                    current.same_channel(&done_identity)
+                                }
+                                SinkRegistryEntry::Live(_) | SinkRegistryEntry::Failed(_) => false,
+                            });
+                        if same_reaper {
+                            match &outcome {
+                                Ok(()) => {
+                                    registry.remove(&tmux_name);
+                                }
+                                Err(error) => {
+                                    registry.insert(
+                                        tmux_name.clone(),
+                                        SinkRegistryEntry::Failed(Arc::clone(error)),
+                                    );
+                                }
+                            }
+                        }
+                    }
+                    done.send_replace(Some(outcome));
+                }
+                None => {
+                    // A stale handle can become final after another sink has
+                    // replaced its registry slot. It still needs orderly
+                    // reaping; failure poisons the current slot because an
+                    // unconfirmed client makes every same-session replacement
+                    // unsafe, regardless of which incarnation owned it.
+                    if let Err(error) = outcome {
+                        registry
+                            .lock()
+                            .expect("sink registry poisoned")
+                            .insert(tmux_name, SinkRegistryEntry::Failed(error));
+                    }
+                }
+            }
+        });
+    }
+}
+
+/// Keep `session` sinked until its owner requests shutdown or cancels it.
 ///
 /// Takes an already-attached `client` rather than opening its own, because
 /// the FIRST attach must be synchronous with the attaching request: a
@@ -604,9 +923,9 @@ impl Drop for SessionSinkHandle {
 /// LATER attach is this task's own business, announced through `state` for
 /// whoever is waiting on readiness.
 ///
-/// Runs until cancelled, with no exit of its own — see
-/// [`SessionSinkHandle`] for why "give up" is not a state this is allowed
-/// to reach.
+/// Orderly shutdown is its only normal exit. Sink death and reopen failure
+/// never make it give up — see [`SessionSinkHandle`] for why retrying remains
+/// mandatory while an attachment owns the handle.
 ///
 /// `open` is how a replacement is obtained, injected rather than called
 /// through the driver directly so the RETRY POLICY is testable without a
@@ -618,8 +937,11 @@ pub(crate) async fn run_session_sink<O, F>(
     session: String,
     first: SessionSink,
     state: watch::Sender<Option<u32>>,
+    mut shutdown: oneshot::Receiver<()>,
+    #[cfg(test)] retrying: Option<watch::Sender<u64>>,
     open: O,
-) where
+) -> anyhow::Result<()>
+where
     O: Fn(String) -> F,
     F: Future<Output = anyhow::Result<SessionSink>>,
 {
@@ -632,7 +954,13 @@ pub(crate) async fn run_session_sink<O, F>(
     let mut consecutive_failures = 0u32;
     loop {
         let started = tokio::time::Instant::now();
-        client.drain().await;
+        tokio::select! {
+            _ = client.drain() => {}
+            _ = &mut shutdown => {
+                state.send_replace(None);
+                return client.shutdown().await;
+            }
+        }
         // Announce the gap BEFORE anything else: from here until a
         // replacement is attached, this session has no sink, and an attach
         // that arrives meanwhile must wait rather than install filters.
@@ -644,23 +972,83 @@ pub(crate) async fn run_session_sink<O, F>(
         // published pid simply never changed, so a killed sink looked
         // healthy forever to anything that asked.
         state.send_replace(None);
-        // Kill the corpse before sleeping. `drain` returning means the
+        // Reap the corpse before sleeping. `drain` returning means the
         // stream ended, which is very nearly always the process exiting —
         // but "very nearly" is not good enough here: a client whose stdout
         // closed while the process lived on would be an ATTACHED tmux
         // client that nothing is reading, i.e. precisely the flow-control
         // victim this whole mechanism exists to guarantee does not exist.
-        drop(client);
+        //
+        // A transient process-control error cannot safely advance to a new
+        // client and must not end supervision while attachments remain.
+        // Keep the old child handle and retry its reap until exit is proven;
+        // an owner shutdown that arrives meanwhile changes only what happens
+        // AFTER that proof, never whether the proof is required.
+        let mut reap_failures = 0u32;
+        let mut stop_after_reap = false;
+        loop {
+            match client.shutdown().await {
+                Ok(()) => break,
+                Err(error) => {
+                    reap_failures = reap_failures.saturating_add(1);
+                    warn!(session = %session, error = %format!("{error:#}"),
+                          "could not reap the dead session sink; retrying");
+                }
+            }
+            let delay = tokio::time::sleep(sink_retry_delay(reap_failures));
+            if stop_after_reap {
+                delay.await;
+            } else {
+                tokio::select! {
+                    _ = delay => {}
+                    _ = &mut shutdown => stop_after_reap = true,
+                }
+            }
+        }
+        if stop_after_reap {
+            return Ok(());
+        }
         if started.elapsed() >= SINK_HEALTHY_RUN {
             consecutive_failures = 0;
         } else {
             consecutive_failures = consecutive_failures.saturating_add(1);
         }
         client = loop {
-            tokio::time::sleep(sink_retry_delay(consecutive_failures)).await;
-            match open(session.clone()).await {
+            #[cfg(test)]
+            if let Some(retrying) = &retrying {
+                retrying.send_modify(|sequence| *sequence = sequence.wrapping_add(1));
+            }
+            tokio::select! {
+                _ = tokio::time::sleep(sink_retry_delay(consecutive_failures)) => {}
+                _ = &mut shutdown => return Ok(()),
+            }
+            // Finish a started attach exchange even if shutdown arrives.
+            // Cancelling `open_session_sink` can drop a spawned tmux child
+            // without awaiting its exit, recreating the overlap this
+            // orderly path exists to prevent. Its exchange is bounded; once
+            // it returns, reap any client it produced before stopping.
+            let opened = open(session.clone()).await;
+            match shutdown.try_recv() {
+                Ok(()) | Err(oneshot::error::TryRecvError::Closed) => {
+                    match opened {
+                        Ok(mut client) => client.shutdown().await?,
+                        Err(error)
+                            if error.downcast_ref::<SessionSinkOpenReapError>().is_some() =>
+                        {
+                            return Err(error);
+                        }
+                        Err(_) => {}
+                    }
+                    return Ok(());
+                }
+                Err(oneshot::error::TryRecvError::Empty) => {}
+            }
+            match opened {
                 Ok(next) => break next,
                 Err(e) => {
+                    if e.downcast_ref::<SessionSinkOpenReapError>().is_some() {
+                        return Err(e);
+                    }
                     consecutive_failures = consecutive_failures.saturating_add(1);
                     warn!(session = %session, error = %format!("{e:#}"),
                           "could not reattach the session sink; retrying");
@@ -730,23 +1118,31 @@ pub(crate) struct ActiveAttach {
     pub(crate) pause: watch::Sender<Option<tokio::time::Instant>>,
     /// This attachment's share of its SESSION's sink client.
     ///
-    /// Never read. Holding it IS the effect: the sink lives exactly as long
-    /// as some attachment on the session holds one of these, which is how
-    /// the "first attach starts it, last detach stops it" lifecycle needs
-    /// no code on any of the many teardown paths (see
-    /// [`SessionSinkHandle`]). Placed here rather than beside the session
-    /// entry deliberately — a session with no attachment needs no sink, and
-    /// a sink outliving its last viewer would be a control client attached
-    /// to a session nobody is watching.
-    #[allow(dead_code)]
-    pub(crate) sink: Arc<SessionSinkHandle>,
+    /// Holding it keeps the shared sink alive. Orderly teardown consumes
+    /// this share through [`SessionSinkLease`]'s drop path, which reaps the
+    /// client only when no other attachment still owns it;
+    /// takeover and replacement keep their incoming share, so the sink
+    /// spans that handoff unchanged. Placed here rather than beside the
+    /// session entry deliberately — a session with no attachment needs no
+    /// sink, and a sink outliving its last viewer would be a control client
+    /// attached to a session nobody is watching.
+    pub(crate) sink: SessionSinkLease,
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::tmux::PaneState;
-    use std::sync::atomic::{AtomicU64, Ordering};
+    use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+
+    /// Records whether a gated test future was cancelled before release.
+    struct DropFlag(Arc<AtomicBool>);
+
+    impl Drop for DropFlag {
+        fn drop(&mut self) {
+            self.0.store(true, Ordering::Relaxed);
+        }
+    }
 
     /// A pane-state map is a whole tmux SERVER's worth of panes, and this
     /// is what turns it back into ONE session's tab strip. Every filter
@@ -897,6 +1293,22 @@ mod tests {
         SessionSink::from_child_for_tests(child)
     }
 
+    /// A client whose output closes while its process stays alive.
+    ///
+    /// This is the exceptional EOF shape the supervisor must kill before
+    /// opening a replacement; ordinary fake clients exit and cannot
+    /// distinguish an awaited reap from a drop-only teardown.
+    fn output_closed_fake_sink() -> SessionSink {
+        let child = tokio::process::Command::new("sh")
+            .args(["-c", "exec 1>&-; exec sleep 30"])
+            .stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::piped())
+            .kill_on_drop(true)
+            .spawn()
+            .expect("spawning a fake sink with closed output");
+        SessionSink::from_child_for_tests(child)
+    }
+
     /// Let the supervising task make progress while the virtual clock
     /// advances, until `done` holds or a REAL deadline passes.
     ///
@@ -931,11 +1343,14 @@ mod tests {
     async fn the_sink_supervisor_keeps_retrying_indefinitely() {
         let attempts = Arc::new(AtomicU64::new(0));
         let (state, _rx) = watch::channel(Some(1));
+        let (_shutdown, shutdown_rx) = oneshot::channel();
         let counter = Arc::clone(&attempts);
         let task = tokio::spawn(run_session_sink(
             "fh-test".to_string(),
             dying_fake_sink(),
             state.clone(),
+            shutdown_rx,
+            None,
             move |_| {
                 let counter = Arc::clone(&counter);
                 async move {
@@ -981,31 +1396,455 @@ mod tests {
     #[tokio::test(start_paused = true)]
     async fn dropping_the_last_sink_handle_stops_its_supervisor() {
         let (state, _rx) = watch::channel(Some(1));
+        let (shutdown, shutdown_rx) = oneshot::channel();
         let handle = Arc::new(SessionSinkHandle {
-            task: tokio::spawn(run_session_sink(
+            tmux_name: "fh-test".to_string(),
+            task: Some(tokio::spawn(run_session_sink(
                 "fh-test".to_string(),
                 living_fake_sink(),
                 state,
+                shutdown_rx,
+                None,
                 |_| async { anyhow::bail!("never called") },
-            )),
+            ))),
+            shutdown: Some(shutdown),
             state: watch::channel(None).0,
         });
         let second = Arc::clone(&handle);
         drop(handle);
         tokio::task::yield_now().await;
         assert!(
-            !second.task.is_finished(),
+            !second
+                .task
+                .as_ref()
+                .expect("the task is still owned")
+                .is_finished(),
             "a handle still held by another owner must not stop the sink"
         );
         // The task handle is inside the Arc, so its state has to be
         // sampled through a clone taken before the last drop.
-        let task = second.task.abort_handle();
+        let task = second
+            .task
+            .as_ref()
+            .expect("the task is still owned")
+            .abort_handle();
         drop(second);
         tokio::task::yield_now().await;
         assert!(
             task.is_finished(),
             "dropping the last handle must stop the supervising task"
         );
+    }
+
+    /// Orderly last-owner shutdown does not return while the sink process
+    /// can still overlap its replacement.
+    ///
+    /// Abort-on-drop is sufficient for leak prevention but does not wait
+    /// for process death. A browser reload sends detach and attach back to
+    /// back on one connection, so this stronger boundary is what prevents
+    /// the new control client from racing the old one's tmux teardown.
+    #[tokio::test]
+    async fn orderly_sink_shutdown_reaps_the_client_before_returning() {
+        let sink = living_fake_sink();
+        let pid = sink.pid().expect("the fake sink has a process id");
+        let (state, _rx) = watch::channel(Some(pid));
+        let (shutdown, shutdown_rx) = oneshot::channel();
+        let handle = SessionSinkHandle {
+            tmux_name: "fh-test".to_string(),
+            task: Some(tokio::spawn(run_session_sink(
+                "fh-test".to_string(),
+                sink,
+                state.clone(),
+                shutdown_rx,
+                None,
+                |_| async { anyhow::bail!("never called") },
+            ))),
+            shutdown: Some(shutdown),
+            state,
+        };
+
+        handle
+            .shutdown()
+            .await
+            .expect("orderly sink shutdown succeeds");
+
+        assert!(
+            !std::path::Path::new(&format!("/proc/{pid}")).exists(),
+            "orderly shutdown returned while the sink process still existed"
+        );
+    }
+
+    /// An EOF from a still-live client is reaped before replacement begins.
+    ///
+    /// A control client whose output pipe closes without process exit would
+    /// otherwise remain attached and unread while its replacement starts,
+    /// reproducing the overlap this lifecycle is designed to exclude.
+    #[tokio::test]
+    async fn a_live_sink_after_eof_is_reaped_before_replacement_opens() {
+        let sink = output_closed_fake_sink();
+        let pid = sink.pid().expect("the fake sink has a process id");
+        let process = Arc::new(format!("/proc/{pid}"));
+        let (state, _rx) = watch::channel(Some(pid));
+        let (_shutdown, shutdown_rx) = oneshot::channel();
+        let (observed, mut observed_rx) = tokio::sync::mpsc::unbounded_channel();
+        let process_for_task = Arc::clone(&process);
+        let task = tokio::spawn(run_session_sink(
+            "fh-test".to_string(),
+            sink,
+            state,
+            shutdown_rx,
+            None,
+            move |_| {
+                let observed = observed.clone();
+                let process = Arc::clone(&process_for_task);
+                async move {
+                    let gone = !std::path::Path::new(process.as_str()).exists();
+                    let _ = observed.send(gone);
+                    anyhow::bail!("stop after observing the replacement boundary")
+                }
+            },
+        ));
+
+        let gone = observed_rx
+            .recv()
+            .await
+            .expect("the replacement opener reports the process boundary");
+        assert!(
+            gone,
+            "replacement opening began before the EOF client was reaped"
+        );
+        task.abort();
+        let _ = task.await;
+    }
+
+    /// Owner shutdown interrupts retry backoff without opening a replacement.
+    ///
+    /// Last-attachment teardown commonly lands while a dead sink is waiting
+    /// out its retry delay. Letting the delay win would keep the handoff
+    /// barrier occupied and could create a client after the session no longer
+    /// has an owner, so shutdown must end that wait immediately.
+    #[tokio::test(start_paused = true)]
+    async fn shutdown_during_retry_backoff_does_not_open_a_replacement() {
+        let attempts = Arc::new(AtomicU64::new(0));
+        let (state, _rx) = watch::channel(Some(1));
+        let (shutdown, shutdown_rx) = oneshot::channel();
+        let (retrying, mut retrying_rx) = watch::channel(0u64);
+        let counter = Arc::clone(&attempts);
+        let task = tokio::spawn(run_session_sink(
+            "fh-test".to_string(),
+            dying_fake_sink(),
+            state,
+            shutdown_rx,
+            Some(retrying),
+            move |_| {
+                let counter = Arc::clone(&counter);
+                async move {
+                    counter.fetch_add(1, Ordering::Relaxed);
+                    anyhow::bail!("the replacement must not open")
+                }
+            },
+        ));
+
+        retrying_rx
+            .changed()
+            .await
+            .expect("the sink supervisor announces its retry timer");
+        shutdown
+            .send(())
+            .expect("the sink supervisor still receives shutdown");
+        task.await
+            .expect("the sink supervisor task joins")
+            .expect("shutdown during backoff succeeds");
+
+        assert_eq!(
+            attempts.load(Ordering::Relaxed),
+            0,
+            "shutdown during backoff must not open a replacement client"
+        );
+    }
+
+    /// An open whose child could not be reaped ends supervision fail-closed.
+    ///
+    /// Retrying this marker as an ordinary attach failure would knowingly
+    /// overlap the unconfirmed client with another replacement. The error must
+    /// therefore reach the handle reaper, which retains the session barrier.
+    #[tokio::test(start_paused = true)]
+    async fn an_unconfirmed_open_reap_error_is_not_retried() {
+        let attempts = Arc::new(AtomicU64::new(0));
+        let counter = Arc::clone(&attempts);
+        let (state, _rx) = watch::channel(Some(1));
+        let (_shutdown, shutdown_rx) = oneshot::channel();
+        let task = tokio::spawn(run_session_sink(
+            "fh-test".to_string(),
+            dying_fake_sink(),
+            state,
+            shutdown_rx,
+            None,
+            move |_| {
+                let counter = Arc::clone(&counter);
+                async move {
+                    let attempt = counter.fetch_add(1, Ordering::Relaxed);
+                    assert_eq!(attempt, 0, "the unconfirmed client error was retried");
+                    Err(SessionSinkOpenReapError::for_test().into())
+                }
+            },
+        ));
+
+        let error = task
+            .await
+            .expect("the sink supervisor task joins")
+            .expect_err("an unconfirmed client must end replacement attempts");
+        assert!(error.downcast_ref::<SessionSinkOpenReapError>().is_some());
+        assert_eq!(
+            attempts.load(Ordering::Relaxed),
+            1,
+            "the unconfirmed client error must not be retried"
+        );
+    }
+
+    /// Shutdown cannot hide an unconfirmed client returned by an open.
+    ///
+    /// An owner may disappear while the bounded replacement exchange is in
+    /// flight. If that exchange reports that its spawned child was not reaped,
+    /// final-owner teardown must retain the error instead of clearing the
+    /// session barrier as a successful shutdown.
+    #[tokio::test(start_paused = true)]
+    async fn shutdown_during_open_preserves_an_unconfirmed_reap_error() {
+        let (state, _rx) = watch::channel(Some(1));
+        let (shutdown, shutdown_rx) = oneshot::channel();
+        let (retrying, mut retrying_rx) = watch::channel(0u64);
+        let entered = Arc::new(tokio::sync::Notify::new());
+        let release = Arc::new(tokio::sync::Notify::new());
+        let opener_entered = Arc::clone(&entered);
+        let opener_release = Arc::clone(&release);
+        let task = tokio::spawn(run_session_sink(
+            "fh-test".to_string(),
+            dying_fake_sink(),
+            state,
+            shutdown_rx,
+            Some(retrying),
+            move |_| {
+                let entered = Arc::clone(&opener_entered);
+                let release = Arc::clone(&opener_release);
+                async move {
+                    entered.notify_one();
+                    release.notified().await;
+                    Err(SessionSinkOpenReapError::for_test().into())
+                }
+            },
+        ));
+
+        retrying_rx
+            .changed()
+            .await
+            .expect("the sink supervisor announces its retry timer");
+        tokio::time::advance(SINK_RETRY_MAX).await;
+        entered.notified().await;
+        shutdown
+            .send(())
+            .expect("the sink supervisor still receives shutdown");
+        release.notify_one();
+        let error = task
+            .await
+            .expect("the sink supervisor task joins")
+            .expect_err("shutdown must preserve an unconfirmed client error");
+        assert!(error.downcast_ref::<SessionSinkOpenReapError>().is_some());
+    }
+
+    /// Shutdown waits out an in-flight open and reaps its returned client.
+    ///
+    /// Cancelling a tmux attach exchange can detach the future before the
+    /// spawned process has exited. The exchange is bounded, so orderly
+    /// teardown finishes it and then proves the resulting client is gone
+    /// before releasing the same-session handoff barrier.
+    #[tokio::test(start_paused = true)]
+    async fn shutdown_during_replacement_open_reaps_the_returned_client() {
+        let (state, _rx) = watch::channel(Some(1));
+        let (shutdown, shutdown_rx) = oneshot::channel();
+        let (retrying, mut retrying_rx) = watch::channel(0u64);
+        let entered = Arc::new(tokio::sync::Notify::new());
+        let release = Arc::new(tokio::sync::Notify::new());
+        let returned_pid = Arc::new(AtomicU64::new(0));
+        let opener_dropped = Arc::new(AtomicBool::new(false));
+        let opener_entered = Arc::clone(&entered);
+        let opener_release = Arc::clone(&release);
+        let opener_pid = Arc::clone(&returned_pid);
+        let opener_drop_flag = Arc::clone(&opener_dropped);
+        let future = run_session_sink(
+            "fh-test".to_string(),
+            dying_fake_sink(),
+            state,
+            shutdown_rx,
+            Some(retrying),
+            move |_| {
+                let entered = Arc::clone(&opener_entered);
+                let release = Arc::clone(&opener_release);
+                let returned_pid = Arc::clone(&opener_pid);
+                let opener_dropped = Arc::clone(&opener_drop_flag);
+                async move {
+                    let _drop_flag = DropFlag(opener_dropped);
+                    entered.notify_one();
+                    release.notified().await;
+                    let sink = living_fake_sink();
+                    returned_pid.store(u64::from(sink.pid().unwrap_or(0)), Ordering::Relaxed);
+                    Ok(sink)
+                }
+            },
+        );
+        tokio::pin!(future);
+
+        tokio::select! {
+            result = future.as_mut() => panic!("sink supervisor exited before replacement: {result:?}"),
+            changed = retrying_rx.changed() => {
+                changed.expect("the sink supervisor announces its retry timer");
+            }
+        }
+        tokio::time::advance(SINK_RETRY_MAX).await;
+        tokio::select! {
+            result = future.as_mut() => panic!("sink supervisor exited before opening: {result:?}"),
+            _ = entered.notified() => {}
+        }
+        shutdown
+            .send(())
+            .expect("the sink supervisor still receives shutdown");
+        let remained_pending = std::future::poll_fn(|cx| {
+            std::task::Poll::Ready(future.as_mut().poll(cx).is_pending())
+        })
+        .await;
+        assert!(
+            remained_pending,
+            "shutdown must not cancel an in-flight replacement open"
+        );
+        assert!(
+            !opener_dropped.load(Ordering::Relaxed),
+            "shutdown dropped the in-flight replacement opener"
+        );
+
+        release.notify_one();
+        future
+            .await
+            .expect("shutdown after the replacement opens succeeds");
+        let pid = returned_pid.load(Ordering::Relaxed);
+        assert_ne!(pid, 0, "the opener must return a real client");
+        assert!(
+            !std::path::Path::new(&format!("/proc/{pid}")).exists(),
+            "shutdown returned while the replacement process still existed"
+        );
+    }
+
+    /// The last lease publishes its handoff barrier synchronously, while
+    /// the runtime-owned reaper completes independently afterward.
+    ///
+    /// This is the cancellation-safe core of detach/reattach ordering: a
+    /// caller may disappear as soon as it drops the lease, but a same-session
+    /// attach must already see `Reaping` before it can attempt a replacement.
+    #[tokio::test]
+    async fn the_last_sink_lease_publishes_reaping_before_shutdown_finishes() {
+        let registry: SinkRegistry = Arc::new(StdMutex::new(Default::default()));
+        let (shutdown, shutdown_rx) = oneshot::channel();
+        let entered = Arc::new(tokio::sync::Notify::new());
+        let release = Arc::new(tokio::sync::Notify::new());
+        let task_entered = Arc::clone(&entered);
+        let task_release = Arc::clone(&release);
+        let handle = Arc::new(SessionSinkHandle {
+            tmux_name: "fh-test".to_string(),
+            task: Some(tokio::spawn(async move {
+                let _ = shutdown_rx.await;
+                task_entered.notify_one();
+                task_release.notified().await;
+                Ok(())
+            })),
+            shutdown: Some(shutdown),
+            state: watch::channel(Some(1)).0,
+        });
+        registry.lock().expect("sink registry").insert(
+            "fh-test".to_string(),
+            SinkRegistryEntry::Live(Arc::downgrade(&handle)),
+        );
+        let first = SessionSinkLease::new(Arc::clone(&handle), Arc::clone(&registry));
+        let last = SessionSinkLease::new(handle, Arc::clone(&registry));
+
+        drop(first);
+        assert!(matches!(
+            registry.lock().expect("sink registry").get("fh-test"),
+            Some(SinkRegistryEntry::Live(_))
+        ));
+        drop(last);
+        assert!(matches!(
+            registry.lock().expect("sink registry").get("fh-test"),
+            Some(SinkRegistryEntry::Reaping(_))
+        ));
+
+        entered.notified().await;
+        assert!(matches!(
+            registry.lock().expect("sink registry").get("fh-test"),
+            Some(SinkRegistryEntry::Reaping(_))
+        ));
+        release.notify_one();
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(30);
+        loop {
+            if registry
+                .lock()
+                .expect("sink registry")
+                .get("fh-test")
+                .is_none()
+            {
+                break;
+            }
+            assert!(
+                tokio::time::Instant::now() < deadline,
+                "a successful reaper did not clear its handoff barrier"
+            );
+            tokio::task::yield_now().await;
+        }
+    }
+
+    /// A failed reap remains visible instead of permitting another client.
+    ///
+    /// Once process exit cannot be confirmed, reopening the same session
+    /// could overlap the lost client. Retaining the failure in the registry
+    /// makes subsequent attaches fail closed until the supervisor restarts.
+    #[tokio::test]
+    async fn a_failed_sink_reap_remains_a_fail_closed_registry_entry() {
+        let registry: SinkRegistry = Arc::new(StdMutex::new(Default::default()));
+        let (shutdown, shutdown_rx) = oneshot::channel();
+        let handle = Arc::new(SessionSinkHandle {
+            tmux_name: "fh-test".to_string(),
+            task: Some(tokio::spawn(async move {
+                let _ = shutdown_rx.await;
+                anyhow::bail!("the sink process could not be reaped")
+            })),
+            shutdown: Some(shutdown),
+            state: watch::channel(Some(1)).0,
+        });
+        registry.lock().expect("sink registry").insert(
+            "fh-test".to_string(),
+            SinkRegistryEntry::Live(Arc::downgrade(&handle)),
+        );
+
+        drop(SessionSinkLease::new(handle, Arc::clone(&registry)));
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(30);
+        loop {
+            let failed = {
+                let registry = registry.lock().expect("sink registry");
+                match registry.get("fh-test") {
+                    Some(SinkRegistryEntry::Failed(error)) => Some(Arc::clone(error)),
+                    _ => None,
+                }
+            };
+            if let Some(error) = failed {
+                assert!(
+                    error.contains("the sink process could not be reaped"),
+                    "the registry must preserve the reap failure: {error}"
+                );
+                break;
+            }
+            assert!(
+                tokio::time::Instant::now() < deadline,
+                "the failed reaper did not publish its fail-closed state"
+            );
+            tokio::task::yield_now().await;
+        }
     }
 
     /// A sink that lived a healthy while resets the backoff, so the next
@@ -1029,12 +1868,16 @@ mod tests {
         // hands out, which is how the "healthy run" is ended on cue.
         let live_pid = Arc::new(AtomicU64::new(0));
         let (state, _rx) = watch::channel(Some(1));
+        let (_shutdown, shutdown_rx) = oneshot::channel();
+        let (retrying, mut retrying_rx) = watch::channel(0u64);
         let counter = Arc::clone(&attempts);
         let pid_slot = Arc::clone(&live_pid);
         let task = tokio::spawn(run_session_sink(
             "fh-test".to_string(),
             dying_fake_sink(),
             state.clone(),
+            shutdown_rx,
+            Some(retrying),
             move |_| {
                 let counter = Arc::clone(&counter);
                 let pid_slot = Arc::clone(&pid_slot);
@@ -1067,6 +1910,7 @@ mod tests {
         tokio::time::advance(SINK_HEALTHY_RUN + Duration::from_secs(1)).await;
         tokio::task::yield_now().await;
         let pid = live_pid.load(Ordering::Relaxed);
+        retrying_rx.borrow_and_update();
         // The kill is SYNCHRONOUS deliberately, and it must stay that way.
         // With an AWAITED kill the sequence under `start_paused` is: the
         // test task parks on the child's exit; the supervisor task may
@@ -1098,6 +1942,24 @@ mod tests {
             "waiting for the supervisor to notice the healthy sink died",
         )
         .await;
+        // The supervisor now reaps the dead client before scheduling its
+        // replacement. Wait on that real-process boundary without advancing
+        // virtual time; otherwise Tokio can spend the measurement window
+        // while the task is still awaiting the reap, and this test would be
+        // timing process cleanup rather than the backoff it names.
+        let process = format!("/proc/{pid}");
+        let reap_deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+        while std::path::Path::new(&process).exists() {
+            assert!(
+                std::time::Instant::now() < reap_deadline,
+                "the dead fake sink was not reaped before its replacement"
+            );
+            tokio::task::yield_now().await;
+        }
+        retrying_rx
+            .changed()
+            .await
+            .expect("the sink supervisor announces its retry timer");
         let before = attempts.load(Ordering::Relaxed);
         tokio::time::advance(SINK_RETRY_BASE + Duration::from_millis(50)).await;
         tokio::task::yield_now().await;

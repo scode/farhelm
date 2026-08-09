@@ -1450,9 +1450,11 @@ async fn a_stalled_tab_viewer_does_not_pause_the_agents_stream() {
 /// forever.
 ///
 /// Deliberately checks a session that is attached, detached, and attached
-/// AGAIN: the second attach proves the registry's dangling-`Weak` handling
-/// (the entry left behind by the dead sink must be replaced, not upgraded
-/// into a corpse).
+/// AGAIN. The second attach is the handoff boundary: final-owner release
+/// publishes a per-session reaping barrier before teardown leaves the request,
+/// and the replacement must wait until the old control client is confirmed
+/// gone. A registry that merely forgot the old handle would pass the lifetime
+/// assertions while still allowing two tmux clients to overlap.
 #[tokio::test]
 async fn the_session_sink_lives_exactly_as_long_as_the_sessions_attachments() {
     let h = harness().await;
@@ -1521,36 +1523,20 @@ async fn the_session_sink_lives_exactly_as_long_as_the_sessions_attachments() {
         "a sink must outlive a detach that leaves another terminal attached"
     );
 
-    // The last detach leaves no channel to round-trip on, so this one is
-    // polled. It is still an assertion about the sink going away, not
-    // about how fast: the deadline is generous and the failure message
-    // names the property.
+    // The browser reload shape is deliberately immediate: `Detach` has no
+    // reply, and the following attach is the only ordering barrier. Its
+    // success must therefore mean the last-owner sink teardown finished,
+    // including process death, before the replacement was opened.
     h.client.detach(chan).await;
-    let deadline = tokio::time::Instant::now() + Duration::from_secs(20);
-    while h.sup.session_sink_pid(&tmux_name).await.is_some() {
-        assert!(
-            tokio::time::Instant::now() < deadline,
-            "the last detach must take the sink down"
-        );
-        tokio::time::sleep(Duration::from_millis(50)).await;
-    }
-    // The registry forgetting is not the claim — the PROCESS being gone
-    // is. A sink whose handle was dropped but whose client survived would
-    // pass every check above while leaving an attached tmux client behind
-    // for the life of the server, which is precisely the leak the refcount
-    // lifecycle exists to prevent.
-    await_process_gone(first, "the last detach must kill the sink's client").await;
-    assert_eq!(
-        attached_control_clients(&h).await,
-        0,
-        "no control client may remain attached once the session has no terminals"
-    );
-
     let (chan, mut rx) = h
         .client
         .attach(&session.id, 80, 24)
         .await
         .expect("reattach");
+    assert!(
+        !std::path::Path::new(&format!("/proc/{first}")).exists(),
+        "a reattach reply overtook the old sink client's exit"
+    );
     let mut seen = Vec::new();
     wait_for(&mut rx, &mut seen, "FAKE-AGENT READY", 20).await;
     let second = h
@@ -1563,6 +1549,20 @@ async fn the_session_sink_lives_exactly_as_long_as_the_sessions_attachments() {
         "the second sink must be a new process, not the registry handing back a dead one"
     );
     h.client.detach(chan).await;
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(20);
+    while h.sup.session_sink_pid(&tmux_name).await.is_some() {
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "the final detach must take the replacement sink down"
+        );
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    await_process_gone(second, "the final detach must kill the sink's client").await;
+    assert_eq!(
+        attached_control_clients(&h).await,
+        0,
+        "no control client may remain attached once the session has no terminals"
+    );
 }
 
 /// Wait for `pid` to be gone, or fail saying what was expected of it.

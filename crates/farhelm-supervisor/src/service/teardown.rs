@@ -268,10 +268,12 @@ impl Supervisor {
             channel,
             notify,
             forwarder,
+            sink,
             ..
         } in doomed
         {
             let _ = forwarder.await;
+            drop(sink);
             notify_detach.push((channel, notify));
         }
 
@@ -545,10 +547,12 @@ impl Supervisor {
             channel,
             notify,
             forwarder,
+            sink,
             ..
         } in doomed
         {
             let _ = forwarder.await;
+            drop(sink);
             notify_detach.push((channel, notify));
         }
 
