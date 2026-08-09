@@ -165,6 +165,17 @@ Consequences of that stance:
   mistaken for the teardown reply. The transition atomically discards every current pane queue and prevents a newly
   created tab from opening another race. The conformance test keeps the immediate-detach shape and probes the server
   afterward; the repaired boundary passed 50 fresh-process repetitions on tmux 3.7b and 50 on tmux 3.4.
+
+  A final-tip CI run then exposed a separate browser-harness lifetime failure: WebKit's own network subprocess crashed
+  after the suite had reused one browser for the engine's full 294-case pass. The trace named `Network process crashed`
+  on both the terminal and feed WebSockets; the helm and supervisor stayed up, and the same restart-scrollback case
+  passed immediately in a fresh WebKit process. Playwright's browser fixture is worker-scoped, so `workers: 1` had made
+  the one-project-per-engine layout a one-process-per-engine layout as well. The config now creates one project per
+  (engine, spec file). It keeps the single worker and shared stack — the server-side serialization contract is unchanged
+  — but a browser process lives for one file rather than thousands of seconds. The 588-case inventory is unchanged; the
+  largest spec file is the remaining process-lifetime bound. The failed case passed 11 separate fresh-process reruns,
+  then passed again inside a 55.7-minute full run (584 passed, four intentional real-agent skips). That run replaced
+  browsers between all 13 files; its longest residual lifetime was the 21.4-minute WebKit terminal file.
 - **M6.75 — status and profiles.** Running/waiting/idle heuristics with per-agent sharpening, list filtering, profile
   CRUD and starter profiles. Also live push replacing BOTH of the UI's polls — M2's session-list poll and M4's
   session-detail/tab-list poll — status transitions are what make polling genuinely painful, and the push channel serves

@@ -12,24 +12,52 @@
 // the desktop app embeds Gecko, so it would add runtime without
 // covering a real target.
 import { defineConfig, devices } from "@playwright/test";
+import { readdirSync } from "node:fs";
+import { join } from "node:path";
 import {
   AUTH_STORAGE_STATE_PATH,
   harnessAuthorizationHeaders,
 } from "./tests/helpers/device-auth";
 
 const authorizationHeaders = harnessAuthorizationHeaders();
+const testsDir = join(__dirname, "tests");
+
+/** Preserve Playwright's recursive spec discovery while assigning one file per project. */
+function discoverSpecFiles(directory = testsDir): string[] {
+  return readdirSync(directory, { withFileTypes: true })
+    .flatMap((entry) => {
+      const path = join(directory, entry.name);
+      if (entry.isDirectory()) return discoverSpecFiles(path);
+      if (!entry.name.endsWith(".spec.ts")) return [];
+
+      return [path.slice(testsDir.length + 1)];
+    })
+    .sort();
+}
+
+const specFiles = discoverSpecFiles();
+
+const engines = [
+  { name: "chromium", use: { ...devices["Desktop Chrome"] } },
+  { name: "webkit", use: { ...devices["Desktop Safari"] } },
+];
 
 export default defineConfig({
   testDir: "./tests",
   // The stack is one shared helm with ONE session; tests interfere with
-  // each other by design (takeover semantics), so run serially. This
-  // also serializes ACROSS projects: `workers` caps the whole run, not
-  // each project, and both projects point at the one webServer instance
-  // below, so a second worker running WebKit tests concurrently with
-  // Chromium ones would race on that shared session server-side. Running
-  // two engines therefore doubles wall-clock time rather than cost —
-  // there is no safe way to claw that back without splitting the shared
-  // session per project.
+  // each other by design (takeover semantics), so run serially. `workers`
+  // caps the whole run, including across projects, and every project points
+  // at the one webServer below. A second worker would race the first on the
+  // shared session server-side.
+  //
+  // One project per (engine, spec file) is also a browser-process lifetime
+  // boundary. The old one-project-per-engine shape reused one WebKit process
+  // for all 294 cases. Its network subprocess eventually crashed in CI and
+  // took healthy terminal and feed WebSockets down with it. A fresh project
+  // keeps the suite serial and the stack shared while replacing the browser
+  // between files. Do not collapse these projects merely to save launches;
+  // that restores the multi-thousand-second process lifetime behind the
+  // crash. The largest file still sets the residual lifetime bound.
   fullyParallel: false,
   workers: 1,
   timeout: 60_000,
@@ -50,13 +78,16 @@ export default defineConfig({
   // Playwright does not guarantee alphabetical file ordering, and
   // project `dependencies` cannot express "webkit's reset runs AFTER
   // chromium's tests" without dragging the whole chromium suite into a
-  // `--project=webkit` run. A `beforeAll` runs at each project's entry
+  // `--project='webkit-*'` run. A `beforeAll` runs at each project's entry
   // into the file, in order by construction, and its failure fails the
   // file's tests rather than letting them run against half-reset state.
-  projects: [
-    { name: "chromium", use: { ...devices["Desktop Chrome"] } },
-    { name: "webkit", use: { ...devices["Desktop Safari"] } },
-  ],
+  projects: engines.flatMap((engine) =>
+    specFiles.map((spec) => ({
+      name: `${engine.name}-${spec.replace(/\.spec\.ts$/, "")}`,
+      testMatch: spec,
+      use: engine.use,
+    })),
+  ),
   webServer: {
     command: "bash ./start-stack.sh",
     // The API correctly answers 401 before global setup has exchanged the
