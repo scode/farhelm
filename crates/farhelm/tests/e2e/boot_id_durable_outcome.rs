@@ -246,10 +246,10 @@ async fn a_reboot_interrupts_live_sessions_and_preserves_ended_ones() {
     let h = harness_believing_boot("boot-a").await;
     let (live, _live_work) = basic_session(&h).await;
     let (stopped, _stopped_work) = basic_session(&h).await;
-    // A session that ends on its own AND is listed before the reboot: the
-    // list is where its exit code is witnessed, so what survives below is
-    // specifically the recording that list made — omit it and the code is
-    // gone with the pane.
+    // A session that ends on its own AND is listed before the reboot: listing
+    // is where its exit code is witnessed, so what survives below is the
+    // supervisor's durable recording rather than anything recovered from the
+    // pane after it is gone.
     let work = tempfile::tempdir().expect("workdir");
     let ended = h
         .client
@@ -262,7 +262,7 @@ async fn a_reboot_interrupts_live_sessions_and_preserves_ended_ones() {
         )
         .await
         .expect("create the self-exiting session");
-    let ended_status = wait_for_exit_code(&h.client, &ended.id, 3, 30).await.status;
+    let ended_settled = wait_for_exit_code(&h.client, &ended.id, 3, 30).await;
 
     h.client
         .stop_session(&stopped.id)
@@ -294,6 +294,27 @@ async fn a_reboot_interrupts_live_sessions_and_preserves_ended_ones() {
     // rather than read once, for the reason `wait_for_listing` documents.
     wait_for_live_status(&client_restarted, &live.id, 30).await;
 
+    // Older tmux versions can first report an exited pane without its code,
+    // then enrich that durable outcome on a later list. Accept only that
+    // monotonic refinement before using the final observation as the snapshot
+    // the reboot must preserve; a broader allowance would hide corruption by
+    // the same-boot supervisor restart above.
+    let ended_before_reboot = listed(&client_restarted, &ended.id).await.status;
+    assert!(
+        ended_before_reboot == ended_settled.status
+            || matches!(
+                (&ended_settled.status, &ended_before_reboot),
+                (
+                    SessionStatus::Exited { exit_code: None },
+                    SessionStatus::Exited { exit_code: Some(3) }
+                )
+            ),
+        "an ended session may gain its known exit code before reboot, but must not otherwise \
+         change across a same-boot supervisor restart (settled: {:?}, final: \
+         {ended_before_reboot:?})",
+        ended_settled.status
+    );
+
     // The reboot: tmux dies with the host, and the next supervisor reads a
     // different boot id.
     kill_tmux_server_and_wait(&h.state.path().join("tmux.sock")).await;
@@ -320,9 +341,9 @@ async fn a_reboot_interrupts_live_sessions_and_preserves_ended_ones() {
 
     let ended_after = listed(&client2, &ended.id).await;
     assert_eq!(
-        ended_after.status, ended_status,
-        "an exit observed by a list before the reboot keeps the code that list recorded, \
-         even though the pane that held it is gone"
+        ended_after.status, ended_before_reboot,
+        "an exit keeps the final status observed before the reboot, even though the pane that \
+         held it is gone"
     );
     assert_eq!(
         ended_after.annotation, None,
