@@ -98,8 +98,9 @@ pub use connection::handle_connection;
 pub(crate) use core::recovered_archive_flag;
 pub use core::{
     ArchiveGate, ArchiveStage, BootIdSource, CaptureStoreFault, CaptureWrite, CreateCrashSeam,
-    CreateStage, STALL_DETACH_TIMEOUT, SampleFault, SampleRead, SessionSnapshot, StateDirOwnership,
-    Supervisor, SupervisorSeams, SupervisorTimeouts, TabOpenFault, TabOpenStage,
-    UPLOAD_DISK_STAGE_TIMEOUT, UPLOAD_PROGRESS_TIMEOUT, WRITER_STALL_TIMEOUT, connect, run,
+    CreateStage, ForwarderCleanupGate, NaturalDetachGate, STALL_DETACH_TIMEOUT, SampleFault,
+    SampleRead, SessionSnapshot, StateDirOwnership, Supervisor, SupervisorSeams,
+    SupervisorTimeouts, TabOpenFault, TabOpenStage, UPLOAD_DISK_STAGE_TIMEOUT,
+    UPLOAD_PROGRESS_TIMEOUT, WRITER_STALL_TIMEOUT, connect, run,
 };
 pub use listing::LIST_SESSION_CAP;

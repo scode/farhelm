@@ -4,8 +4,10 @@
 
 use crate::harness::*;
 
+use crate::boot_id_durable_outcome::listed;
 use crate::restart_with_resume::{RC_MARKER_VAR, write_rc_files};
 use crate::terminal_backpressure::drain_for;
+use std::sync::Arc;
 
 // ---------------------------------------------------------------------------
 // Terminal tabs (PLAN_M4.md item 2)
@@ -34,6 +36,32 @@ async fn harness_with_shell(shell: &str) -> Harness {
         },
     )
     .await
+}
+
+/// Hold a forwarder's successful cleanup result behind a deterministic gate.
+///
+/// The real deferred-publication interval is only a scheduler race. Tests use
+/// this gate to prove request finalization while the output client is already
+/// safe but its per-terminal barrier still reads as pending.
+fn gated_forwarder_cleanup() -> (
+    farhelm_supervisor::service::ForwarderCleanupGate,
+    Arc<tokio::sync::Notify>,
+    Arc<tokio::sync::Notify>,
+) {
+    let entered = Arc::new(tokio::sync::Notify::new());
+    let release = Arc::new(tokio::sync::Notify::new());
+    let gate_entered = Arc::clone(&entered);
+    let gate_release = Arc::clone(&release);
+    let gate = Arc::new(move || {
+        let entered = Arc::clone(&gate_entered);
+        let release = Arc::clone(&gate_release);
+        let future: Pin<Box<dyn std::future::Future<Output = ()> + Send>> = Box::pin(async move {
+            entered.notify_one();
+            release.notified().await;
+        });
+        future
+    });
+    (gate, entered, release)
 }
 
 /// Wait for an attached SHELL terminal to be ready to accept a command.
@@ -540,6 +568,68 @@ async fn closing_a_tab_kills_its_shell_and_daemonized_child_and_nothing_else() {
     wait_for(&mut agent_rx, &mut agent_seen, "agent-untouched", 15).await;
 }
 
+/// A closed tab tells its viewer the irreversible truth even when output
+/// cleanup is still being finalized.
+///
+/// Once tmux has killed the window, retrying close can only report that the
+/// tab is missing. The first request must therefore send `Detached` before it
+/// returns the pending-cleanup error, and the removed tab must stay absent
+/// while the runtime-owned barrier completes.
+#[tokio::test]
+async fn close_notifies_and_removes_a_tab_while_output_cleanup_is_pending() {
+    let (cleanup_gate, cleanup_entered, cleanup_release) = gated_forwarder_cleanup();
+    let h = harness_with_seams(
+        SupervisorTimeouts::default(),
+        SupervisorSeams {
+            launch_shell: Some("/bin/sh".to_string()),
+            forwarder_cleanup_gate: Some(cleanup_gate),
+            ..SupervisorSeams::default()
+        },
+    )
+    .await;
+    let (session, _work) = basic_session(&h).await;
+    let _cleanup = MarkerCleanupGuard::new(session.id.clone());
+    let tab = h.client.open_tab(&session.id).await.expect("open a tab");
+    let (channel, mut rx) = h
+        .client
+        .attach_terminal(
+            &session.id,
+            80,
+            24,
+            TerminalSelector::Tab { id: tab.id.clone() },
+            "close-cleanup-owner",
+        )
+        .await
+        .expect("attach the tab");
+    let mut seen = Vec::new();
+    wait_for_shell(&h.client, channel, &mut rx, &mut seen, "CLOSE-READY").await;
+
+    let error = h
+        .client
+        .close_tab(&session.id, &tab.id)
+        .await
+        .expect_err("the close must report its still-published cleanup barrier");
+    tokio::time::timeout(Duration::from_secs(10), cleanup_entered.notified())
+        .await
+        .expect("the forwarder cleanup result reaches its publication gate");
+    let rendered = format!("{error:#}");
+    assert!(
+        rendered.contains("terminal-output client is still being cleaned up"),
+        "the close must name its pending output cleanup: {rendered}"
+    );
+    let reason = expect_detached(&mut rx, 10).await;
+    assert!(
+        reason.contains("terminal tab closed"),
+        "the viewer must hear the final tab verdict despite cleanup delay: {reason}"
+    );
+    assert!(
+        listed_tabs(&h.client, &session.id).await.is_empty(),
+        "the already-killed tab must remain absent after cleanup reports pending"
+    );
+
+    cleanup_release.notify_one();
+}
+
 /// The pid of the process tmux reports for `pane`.
 async fn pane_pid_of(h: &Harness, pane: &str) -> u32 {
     let out = tmux_query(
@@ -940,6 +1030,63 @@ async fn restarting_the_agent_leaves_a_tab_attached_running_and_unswept() {
     );
 }
 
+/// A restart whose terminal cleanup is deferred restores the stopped session.
+///
+/// The restart has already opened a durable generation and temporarily
+/// unpublished the session when it discovers the output barrier. That failure
+/// must take the normal rollback path: the viewer hears why it detached, the
+/// row returns with its stopped outcome, and it is not stranded as an unknown
+/// launch until the supervisor itself restarts.
+#[tokio::test]
+async fn restart_restores_and_notifies_while_output_cleanup_is_pending() {
+    let (cleanup_gate, cleanup_entered, cleanup_release) = gated_forwarder_cleanup();
+    let h = harness_with_seams(
+        SupervisorTimeouts::default(),
+        SupervisorSeams {
+            forwarder_cleanup_gate: Some(cleanup_gate),
+            ..SupervisorSeams::default()
+        },
+    )
+    .await;
+    let (session, _work) = basic_session(&h).await;
+    let _cleanup = MarkerCleanupGuard::new(session.id.clone());
+    let (channel, mut rx) = h.client.attach(&session.id, 80, 24).await.expect("attach");
+    let mut seen = Vec::new();
+    wait_for(&mut rx, &mut seen, "FAKE-AGENT READY", 20).await;
+
+    let error = h
+        .client
+        .restart_session(&session.id, farhelm_proto::RestartMode::Fresh, true)
+        .await
+        .expect_err("pending terminal cleanup must fail this restart definitively");
+    tokio::time::timeout(Duration::from_secs(10), cleanup_entered.notified())
+        .await
+        .expect("the forwarder cleanup result reaches its publication gate");
+    let rendered = format!("{error:#}");
+    assert!(
+        rendered.contains("terminal-output client is still being cleaned up"),
+        "the restart must preserve the cleanup cause: {rendered}"
+    );
+    let reason = expect_detached(&mut rx, 10).await;
+    assert!(
+        reason.contains("session restarted"),
+        "the removed viewer must receive the restart verdict: {reason}"
+    );
+    let restored = listed(&h.client, &session.id).await;
+    assert!(
+        matches!(restored.status, SessionStatus::Exited { .. }),
+        "the failed relaunch must restore a stopped outcome, not leave Launching: {restored:?}"
+    );
+    assert_eq!(
+        restored.annotation.as_deref(),
+        Some("stopped by user"),
+        "the failed relaunch must republish the outcome created by its completed stop"
+    );
+
+    let _ = channel;
+    cleanup_release.notify_one();
+}
+
 /// Deleting a session takes the agent, its tabs, and their daemonized
 /// descendants (PLAN_M4.md acceptance 3).
 ///
@@ -1035,6 +1182,70 @@ async fn window_geometry(h: &Harness, pane: &str) -> String {
     String::from_utf8_lossy(&out.stdout).trim().to_string()
 }
 
+/// Capture tmux's own view after a terminal attach unexpectedly fails.
+///
+/// This runs only on the failure path. Keeping the probes out of the successful
+/// path matters here: the test is chasing a timing-dependent disappearance, so
+/// routine diagnostics must not add enough scheduling work to hide it. The
+/// output distinguishes a dead server from a missing window and from a pane
+/// that exited while its window marker remained.
+async fn tmux_state_after_attach_failure(h: &Harness) -> String {
+    let socket = h.state.path().join("tmux.sock");
+    let sessions = bounded_tmux_diagnostic(
+        "list-sessions",
+        &socket,
+        &[
+            "list-sessions",
+            "-F",
+            "#{session_name}|windows=#{session_windows}|attached=#{session_attached}",
+        ],
+    )
+    .await;
+    let panes = bounded_tmux_diagnostic(
+        "list-panes",
+        &socket,
+        &[
+            "list-panes",
+            "-a",
+            "-F",
+            "#{session_name}|#{window_id}|#{pane_id}|dead=#{pane_dead}|status=#{pane_dead_status}|command=#{pane_current_command}|agent=#{@farhelm-agent}|tab=#{@farhelm-tab}",
+        ],
+    )
+    .await;
+    let clients = bounded_tmux_diagnostic(
+        "list-clients",
+        &socket,
+        &[
+            "list-clients",
+            "-F",
+            "pid=#{client_pid}|session=#{session_name}|flags=#{client_flags}",
+        ],
+    )
+    .await;
+
+    format!("{sessions}\n{panes}\n{clients}")
+}
+
+/// Run one failure-only tmux probe with a hard process-lifetime bound.
+///
+/// These diagnostics execute when the private server may already be wedged.
+/// An unbounded probe would replace the useful attach failure with a hung test
+/// and leave its child behind when the harness times out.
+async fn bounded_tmux_diagnostic(label: &str, socket: &std::path::Path, args: &[&str]) -> String {
+    let mut command = tokio::process::Command::new("tmux");
+    command.arg("-S").arg(socket).args(args).kill_on_drop(true);
+    match tokio::time::timeout(Duration::from_secs(2), command.output()).await {
+        Ok(Ok(output)) => format!(
+            "{label} status={:?}\nstdout:\n{}stderr:\n{}",
+            output.status,
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        ),
+        Ok(Err(error)) => format!("{label} could not start or finish: {error}"),
+        Err(_) => format!("{label} timed out after 2s; its child was killed"),
+    }
+}
+
 /// Every terminal-fidelity promise SPEC.md makes, asserted once for the
 /// AGENT terminal and once for a TAB of the same session — replay of
 /// scrollback across a reattach, alternate-screen selection, pane-mode
@@ -1071,11 +1282,17 @@ async fn terminal_conformance_holds_for_the_agent_and_for_a_tab() {
     ];
 
     for (label, selector) in targets {
-        let (chan, mut rx) = h
+        let attached = h
             .client
             .attach_terminal(&session.id, 80, 24, selector.clone(), "conformance")
-            .await
-            .unwrap_or_else(|e| panic!("{label}: attach failed: {e:#}"));
+            .await;
+        let (chan, mut rx) = match attached {
+            Ok(attached) => attached,
+            Err(error) => {
+                let tmux_state = tmux_state_after_attach_failure(&h).await;
+                panic!("{label}: attach failed: {error:#}\ntmux state:\n{tmux_state}");
+            }
+        };
         let mut seen = Vec::new();
         wait_for_shell(&h.client, chan, &mut rx, &mut seen, "READY").await;
 
@@ -1192,8 +1409,20 @@ async fn terminal_conformance_holds_for_the_agent_and_for_a_tab() {
         h.client
             .send_input(chan3, b"printf '\\033[?1049l'\r".to_vec())
             .await;
+        // Deliberately do not wait for the echo or mode change. A user may
+        // close a terminal while output is queued, and tmux 3.7b used to abort
+        // the whole private server when Farhelm detached the control client
+        // before tmux had discarded that queue. The next attach makes that
+        // server loss observable: the next target does it after the agent leg,
+        // and the probe below does it after the final tab leg.
         h.client.detach(chan3).await;
     }
+
+    let (_probe_channel, _probe_rx) = h
+        .client
+        .attach_terminal(&session.id, 80, 24, TerminalSelector::Agent, "conformance")
+        .await
+        .expect("the tmux server survives the tab's immediate detach");
 }
 
 /// A resize reflows ONLY the window of the terminal whose channel carried
@@ -1463,7 +1692,7 @@ async fn the_session_sink_lives_exactly_as_long_as_the_sessions_attachments() {
     let tmux_name = format!("fh-{}", session.id);
 
     assert_eq!(
-        h.sup.session_sink_pid(&tmux_name).await,
+        h.sup.session_sink_pid(&tmux_name),
         None,
         "a session nobody has attached to must have no sink"
     );
@@ -1481,7 +1710,6 @@ async fn the_session_sink_lives_exactly_as_long_as_the_sessions_attachments() {
     let first = h
         .sup
         .session_sink_pid(&tmux_name)
-        .await
         .expect("the first attachment must bring a sink up");
 
     // A second terminal of the same session SHARES the sink rather than
@@ -1502,7 +1730,7 @@ async fn the_session_sink_lives_exactly_as_long_as_the_sessions_attachments() {
     let mut tab_seen = Vec::new();
     wait_for_shell(&h.client, tab_chan, &mut tab_rx, &mut tab_seen, "READY").await;
     assert_eq!(
-        h.sup.session_sink_pid(&tmux_name).await,
+        h.sup.session_sink_pid(&tmux_name),
         Some(first),
         "a second terminal on the same session must share its sink"
     );
@@ -1518,7 +1746,7 @@ async fn the_session_sink_lives_exactly_as_long_as_the_sessions_attachments() {
         .await;
     wait_for(&mut rx, &mut seen, "after-the-tab-detached", 20).await;
     assert_eq!(
-        h.sup.session_sink_pid(&tmux_name).await,
+        h.sup.session_sink_pid(&tmux_name),
         Some(first),
         "a sink must outlive a detach that leaves another terminal attached"
     );
@@ -1542,7 +1770,6 @@ async fn the_session_sink_lives_exactly_as_long_as_the_sessions_attachments() {
     let second = h
         .sup
         .session_sink_pid(&tmux_name)
-        .await
         .expect("a later attach must bring a fresh sink up");
     assert_ne!(
         second, first,
@@ -1550,7 +1777,7 @@ async fn the_session_sink_lives_exactly_as_long_as_the_sessions_attachments() {
     );
     h.client.detach(chan).await;
     let deadline = tokio::time::Instant::now() + Duration::from_secs(20);
-    while h.sup.session_sink_pid(&tmux_name).await.is_some() {
+    while h.sup.session_sink_pid(&tmux_name).is_some() {
         assert!(
             tokio::time::Instant::now() < deadline,
             "the final detach must take the replacement sink down"
@@ -1589,6 +1816,339 @@ async fn await_process_gone(pid: u32, what: &str) {
 /// amount of registry inspection would reveal.
 async fn attached_control_clients(h: &Harness) -> usize {
     count_control_clients(&h.state.path().join("tmux.sock")).await
+}
+
+/// The process ids of every currently attached tmux client.
+///
+/// The connection-loss regression below needs process identity, not merely a
+/// count: a replacement is allowed to have the same number of clients as its
+/// predecessor, but none of those clients may be the predecessor still dying
+/// behind an already-successful attach reply.
+async fn attached_control_client_pids(h: &Harness) -> Vec<u32> {
+    let output = tmux_query(
+        &h.state.path().join("tmux.sock"),
+        &["list-clients", "-F", "#{client_pid}"],
+    )
+    .await;
+    assert!(
+        output.status.success(),
+        "listing tmux client pids failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    String::from_utf8_lossy(&output.stdout)
+        .lines()
+        .map(|line| {
+            line.parse::<u32>()
+                .expect("tmux printed a numeric client pid")
+        })
+        .collect()
+}
+
+/// Wait until tmux's own visible pane contains a producer-completion marker.
+///
+/// The attachment is deliberately paused in the callers below, so observing
+/// through its output channel would defeat the queued-output fixture. Polling
+/// the pane makes producer completion a real state transition rather than a
+/// sleep whose margin changes with host load.
+async fn wait_for_pane_text(h: &Harness, pane: &str, needle: &str, timeout_secs: u64) {
+    let socket = h.state.path().join("tmux.sock");
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(timeout_secs);
+    loop {
+        let capture = tmux_query(&socket, &["capture-pane", "-p", "-t", pane]).await;
+        assert!(
+            capture.status.success(),
+            "capturing the producer's pane failed: {}",
+            String::from_utf8_lossy(&capture.stderr)
+        );
+        if String::from_utf8_lossy(&capture.stdout).contains(needle) {
+            return;
+        }
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "the pane never contained producer marker {needle:?}"
+        );
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+}
+
+/// Input-client failure reaps queued output before a replacement attaches.
+///
+/// The input and output paths use separate tmux clients. Killing the input one
+/// and then sending a frame drives the handler branch that used to abort the
+/// output forwarder. With output paused under a busy pane, that shortcut can
+/// hit tmux 3.7b's queued-pane teardown abort; the cooperative path must report
+/// the failure, keep the server alive, and let a fresh attachment work.
+#[tokio::test]
+async fn input_client_failure_safely_reaps_queued_output_before_reattach() {
+    let h = harness_with_shell("/bin/sh").await;
+    let (session, _work) = shell_session(&h).await;
+    let _cleanup = MarkerCleanupGuard::new(session.id.clone());
+    let (channel, mut rx) = h.client.attach(&session.id, 80, 24).await.expect("attach");
+    let mut seen = Vec::new();
+    wait_for_shell(&h.client, channel, &mut rx, &mut seen, "INPUT-READY").await;
+
+    h.client
+        .send_input(
+            channel,
+            b"yes INPUT-FAIL-FLOOD | head -c 1048576; printf '\nINPUT-FLOOD-%s\n' DONE\r".to_vec(),
+        )
+        .await;
+    h.client.pause_output(channel).await;
+    // Observe completion from tmux's own pane rather than through the paused
+    // attachment. The marker proves the finite producer is no longer adding
+    // backlog before the input client is broken; replacement recovery then
+    // measures teardown alone while the old output client still holds the
+    // already-queued flood.
+    let socket = h.state.path().join("tmux.sock");
+    let tmux_name = format!("fh-{}", session.id);
+    let pane = pane_id_of(&socket, &tmux_name).await;
+    wait_for_pane_text(&h, &pane, "INPUT-FLOOD-DONE", 20).await;
+    let input_pid = h
+        .sup
+        .attachment_input_client_pid(&session.id, None)
+        .await
+        .expect("the live attachment has an input client");
+    let old_sink = h
+        .sup
+        .session_sink_pid(&tmux_name)
+        .expect("the attachment has a session sink");
+    let old_clients = attached_control_client_pids(&h).await;
+    assert!(
+        old_clients.len() >= 3
+            && old_clients.contains(&input_pid)
+            && old_clients.contains(&old_sink),
+        "the attachment must own input, output, and sink clients before failure: {old_clients:?}"
+    );
+    kill_verified_tmux_client(input_pid, &h).await;
+    // The attachment still owns the child's wait handle, so SIGKILL can leave
+    // a zombie until the failure branch removes it. A zombie has already
+    // closed its pipes and is therefore the exact precondition this send needs.
+    wait_until_pid_gone(input_pid, 20).await;
+
+    h.client
+        .send_input(channel, b"trigger-input-failure\r".to_vec())
+        .await;
+    let reason = expect_detached(&mut rx, 20).await;
+    assert!(
+        reason.contains("input") && reason.contains("failed"),
+        "the detach must describe the input-client failure: {reason}"
+    );
+    assert!(
+        tmux_query(
+            &h.state.path().join("tmux.sock"),
+            &["has-session", "-t", &format!("fh-{}", session.id)],
+        )
+        .await
+        .status
+        .success(),
+        "input failure cleanup must not abort the private tmux server"
+    );
+
+    let (replacement, mut replacement_rx) = h
+        .client
+        .attach(&session.id, 80, 24)
+        .await
+        .expect("replacement attach");
+    for pid in old_clients.into_iter().filter(|pid| *pid != old_sink) {
+        assert!(
+            !std::path::Path::new(&format!("/proc/{pid}")).exists(),
+            "replacement attach replied before old per-terminal tmux client {pid} was reaped"
+        );
+    }
+    let mut replacement_seen = Vec::new();
+    wait_for_shell(
+        &h.client,
+        replacement,
+        &mut replacement_rx,
+        &mut replacement_seen,
+        "INPUT-RECOVERED",
+    )
+    .await;
+}
+
+/// Connection loss finishes queued-output teardown before replacement attach.
+///
+/// Losing the transport bypasses the explicit `Detach` request. The connection
+/// tail must therefore retain attachment ownership while it shuts down the
+/// per-terminal clients and releases its sink lease; otherwise another helm
+/// can see an empty slot, overlap the old output client, and reproduce tmux
+/// 3.7b's queued-pane abort. The session sink may be handed directly to the
+/// replacement because it never carries output. A successful replacement
+/// reply is the observable boundary for every output-bearing client.
+#[tokio::test]
+async fn connection_loss_safely_reaps_queued_output_before_reattach() {
+    let h = harness_with_shell("/bin/sh").await;
+    let (session, _work) = shell_session(&h).await;
+    let _cleanup = MarkerCleanupGuard::new(session.id.clone());
+    let owner = h.second_client().await;
+    let (channel, mut owner_rx) = owner.attach(&session.id, 80, 24).await.expect("attach");
+    let mut owner_seen = Vec::new();
+    wait_for_shell(
+        &owner,
+        channel,
+        &mut owner_rx,
+        &mut owner_seen,
+        "CONNECTION-READY",
+    )
+    .await;
+
+    owner
+        .send_input(
+            channel,
+            b"yes CONNECTION-FAIL-FLOOD | head -c 1048576; printf '\nCONNECTION-FLOOD-%s\n' DONE\r"
+                .to_vec(),
+        )
+        .await;
+    owner.pause_output(channel).await;
+    // The marker proves the finite producer has stopped while the attachment
+    // still owns its already-queued output. Connection teardown is therefore
+    // the only moving part when the replacement races it below.
+    let socket = h.state.path().join("tmux.sock");
+    let tmux_name = format!("fh-{}", session.id);
+    let pane = pane_id_of(&socket, &tmux_name).await;
+    wait_for_pane_text(&h, &pane, "CONNECTION-FLOOD-DONE", 20).await;
+    let old_clients = attached_control_client_pids(&h).await;
+    let old_sink = h
+        .sup
+        .session_sink_pid(&format!("fh-{}", session.id))
+        .expect("the final attachment has a session sink");
+    let old_input = h
+        .sup
+        .attachment_input_client_pid(&session.id, None)
+        .await
+        .expect("the attachment has an input client");
+    assert!(
+        old_clients.len() >= 3,
+        "the final attachment must own input, output, and sink clients before connection loss: {old_clients:?}"
+    );
+    assert!(old_clients.contains(&old_sink));
+    assert!(old_clients.contains(&old_input));
+
+    drop(owner);
+    let replacement = tokio::time::timeout(
+        Duration::from_secs(20),
+        h.client.attach(&session.id, 80, 24),
+    )
+    .await;
+    let (replacement, mut replacement_rx) = match replacement {
+        Ok(result) => result.expect("replacement attach after connection loss"),
+        Err(_) => panic!(
+            "replacement attach timed out while connection cleanup held the terminal:\n{}",
+            tmux_state_after_attach_failure(&h).await
+        ),
+    };
+
+    for pid in old_clients.into_iter().filter(|pid| *pid != old_sink) {
+        assert!(
+            !std::path::Path::new(&format!("/proc/{pid}")).exists(),
+            "replacement attach replied before old per-terminal tmux client {pid} was reaped"
+        );
+    }
+    assert!(
+        tmux_query(
+            &h.state.path().join("tmux.sock"),
+            &["has-session", "-t", &format!("fh-{}", session.id)],
+        )
+        .await
+        .status
+        .success(),
+        "connection-loss cleanup must not abort the private tmux server"
+    );
+
+    let mut replacement_seen = Vec::new();
+    wait_for_shell(
+        &h.client,
+        replacement,
+        &mut replacement_rx,
+        &mut replacement_seen,
+        "CONNECTION-RECOVERED",
+    )
+    .await;
+}
+
+/// Explicit takeover wins a race with a natural output-client failure.
+///
+/// The forwarder can finish and derive a stream-failure reason just before a
+/// takeover removes its attachment. The later arbiter must identity-check the
+/// map instead of sending that stale verdict: the old client should receive
+/// only the takeover reason that actually ended its ownership.
+#[tokio::test]
+async fn takeover_reason_wins_over_a_gated_natural_detach() {
+    let natural_entered = Arc::new(tokio::sync::Notify::new());
+    let natural_release = Arc::new(tokio::sync::Notify::new());
+    let gate_entered = Arc::clone(&natural_entered);
+    let gate_release = Arc::clone(&natural_release);
+    let h = harness_with_seams(
+        SupervisorTimeouts::default(),
+        SupervisorSeams {
+            launch_shell: Some("/bin/sh".to_string()),
+            natural_detach_gate: Some(Arc::new(move || {
+                let entered = Arc::clone(&gate_entered);
+                let release = Arc::clone(&gate_release);
+                Box::pin(async move {
+                    entered.notify_one();
+                    release.notified().await;
+                })
+            })),
+            ..SupervisorSeams::default()
+        },
+    )
+    .await;
+    let (session, _work) = shell_session(&h).await;
+    let _cleanup = MarkerCleanupGuard::new(session.id.clone());
+    let (channel, mut owner_rx) = h.client.attach(&session.id, 80, 24).await.expect("attach");
+    let mut owner_seen = Vec::new();
+    wait_for_shell(
+        &h.client,
+        channel,
+        &mut owner_rx,
+        &mut owner_seen,
+        "NATURAL-RACE-READY",
+    )
+    .await;
+
+    let tmux_name = format!("fh-{}", session.id);
+    let sink = h
+        .sup
+        .session_sink_pid(&tmux_name)
+        .expect("the attachment has a sink");
+    let input = h
+        .sup
+        .attachment_input_client_pid(&session.id, None)
+        .await
+        .expect("the attachment has an input client");
+    let output = attached_control_client_pids(&h)
+        .await
+        .into_iter()
+        .find(|pid| *pid != sink && *pid != input)
+        .expect("the attachment has an output client");
+    kill_verified_tmux_client(output, &h).await;
+    tokio::time::timeout(Duration::from_secs(20), natural_entered.notified())
+        .await
+        .expect("the natural detach reached its arbitration boundary");
+
+    let replacement_client = h.second_client().await;
+    let (replacement, mut replacement_rx) = replacement_client
+        .attach(&session.id, 80, 24)
+        .await
+        .expect("takeover attach");
+    let reason = expect_detached(&mut owner_rx, 20).await;
+    assert!(
+        reason.contains("another client"),
+        "the explicit takeover reason must win, got: {reason}"
+    );
+
+    natural_release.notify_one();
+    tokio::task::yield_now().await;
+    let mut replacement_seen = Vec::new();
+    wait_for_shell(
+        &replacement_client,
+        replacement,
+        &mut replacement_rx,
+        &mut replacement_seen,
+        "NATURAL-RACE-RECOVERED",
+    )
+    .await;
 }
 
 /// A sink killed out from under a live attachment comes back, and the
@@ -1657,13 +2217,12 @@ async fn a_killed_session_sink_comes_back_while_its_terminals_stay_attached() {
     let doomed = h
         .sup
         .session_sink_pid(&tmux_name)
-        .await
         .expect("an attached session must have a sink");
     kill_verified_tmux_client(doomed, &h).await;
 
     let deadline = tokio::time::Instant::now() + Duration::from_secs(20);
     let healed = loop {
-        if let Some(pid) = h.sup.session_sink_pid(&tmux_name).await
+        if let Some(pid) = h.sup.session_sink_pid(&tmux_name)
             && pid != doomed
         {
             break pid;
@@ -1776,7 +2335,6 @@ async fn concurrent_first_attaches_share_one_sink_and_orphan_nothing() {
     let pid = h
         .sup
         .session_sink_pid(&tmux_name)
-        .await
         .expect("the session must have a sink");
     assert_eq!(
         attached_control_clients(&h).await,
@@ -1987,7 +2545,7 @@ async fn the_sink_registry_does_not_grow_with_dead_sessions() {
         wait_for(&mut rx, &mut seen, "FAKE-AGENT READY", 20).await;
         h.client.detach(chan).await;
         let deadline = tokio::time::Instant::now() + Duration::from_secs(20);
-        while h.sup.session_sink_pid(&tmux_name).await.is_some() {
+        while h.sup.session_sink_pid(&tmux_name).is_some() {
             assert!(
                 tokio::time::Instant::now() < deadline,
                 "a detached session must lose its sink"
@@ -2003,7 +2561,7 @@ async fn the_sink_registry_does_not_grow_with_dead_sessions() {
     // per session", not "is exactly zero at every instant": the last
     // session's entry may still be present until the next lookup sweeps
     // it.
-    let registered = h.sup.session_sink_registry_len().await;
+    let registered = h.sup.session_sink_registry_len();
     assert!(
         registered <= 1,
         "the sink registry kept {registered} entries after four sessions came and went"

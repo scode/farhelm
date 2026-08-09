@@ -135,23 +135,36 @@ Consequences of that stance:
   envp in whatever process ran it, so the launch exec-failure tests were poisoning the whole test binary and any later
   `getenv` (glibc tcache safe-linking values are why every fault address looked like a truncated pointer). Test-only;
   production shims exec-or-exit. Fixed in the flake-hardening PR by moving those scenarios into child processes. The
-  server-death-under-load hypothesis is now CONFIRMED — the pane-silenced diagnostics caught "%exit server exited
-  unexpectedly" on a SERIAL stack-CI rerun — and of the two recorded CI-quieting candidates the evidence picked neither:
-  serial reruns still failing rules out cross-run overlap, so the pressure is within-run thread oversubscription, and
-  the remedy is `--test-threads=4` in the CI test job (matching the runner's vCPUs), landed at the stack bottom.
-  Ack-ahead-of-backlog and the heartbeat-idle spec each recurred and were re-fixed at the evidence layer rather than the
-  claim (prove the flood flows before soaking; extend the traffic window by elapsed time, not echo count). New parked
-  observation, systemic rather than incidental: e2e harness state tempdirs leak on abnormal test-stack exit — 423 of
-  them (~22 GB) accumulated across one long run before an ENOSPC — cleanup-on-abnormal-exit wants a design pass. Also
-  folded in from the flake-fix series' staged notes (2026-08-03, recorded in its own log but never pushed here): one
-  browser-suite sighting of the Playwright flood harness failing with "drain socket closed before FLOOD-DONE" — passed
-  its rerun, one occurrence, the first candidate for a browser-side load class; a second occurrence earns it a
-  discriminator entry of its own. That trigger fired during the M7 mopup run (2026-08-08): the full-suite WebKit pass
-  timed out waiting 45 seconds for the whole-stream test's `FLOOD-DONE` marker while the in-page verifier was still
-  advancing (701,657 of 800,000 records), and the focused rerun passed. This is a fixed-throughput-budget flake, not
-  evidence of loss or a recurrence of the first sighting's premature raw-socket close. The test now waits on the
-  verifier's constant-size progress state: corruption fails immediately, forward progress renews a bounded stall budget,
-  and an independent hard cap still catches a producer that is only limping rather than stuck.
+  pane-silenced diagnostics confirmed the immediate symptom — tmux itself emitted "%exit server exited unexpectedly" on
+  a serial stack-CI rerun — but the scheduler-starvation explanation drawn from that symptom was still only a
+  hypothesis. `--test-threads=4` remains in the CI job to match the runner's vCPUs and bound the aggregate load of tests
+  that spawn real servers; it is not evidence about why one server died. Ack-ahead-of-backlog and the heartbeat-idle
+  spec each recurred and were re-fixed at the evidence layer rather than the claim (prove the flood flows before
+  soaking; extend the traffic window by elapsed time, not echo count). New parked observation, systemic rather than
+  incidental: e2e harness state tempdirs leak on abnormal test-stack exit — 423 of them (~22 GB) accumulated across one
+  long run before an ENOSPC — cleanup-on-abnormal-exit wants a design pass. Also folded in from the flake-fix series'
+  staged notes (2026-08-03, recorded in its own log but never pushed here): one browser-suite sighting of the Playwright
+  flood harness failing with "drain socket closed before FLOOD-DONE" — passed its rerun, one occurrence, the first
+  candidate for a browser-side load class; a second occurrence earns it a discriminator entry of its own. That trigger
+  fired during the M7 mopup run (2026-08-08): the full-suite WebKit pass timed out waiting 45 seconds for the
+  whole-stream test's `FLOOD-DONE` marker while the in-page verifier was still advancing (701,657 of 800,000 records),
+  and the focused rerun passed. This is a fixed-throughput-budget flake, not evidence of loss or a recurrence of the
+  first sighting's premature raw-socket close. The test now waits on the verifier's constant-size progress state:
+  corruption fails immediately, forward progress renews a bounded stall budget, and an independent hard cap still
+  catches a producer that is only limping rather than stuck.
+
+  Amendment (2026-08-09): the server-death mechanism is now root-caused. The terminal conformance test reproduced it in
+  one isolated test process with one libtest thread, first after 35 fresh runs and again after 62, so neither concurrent
+  jobs nor within-binary thread oversubscription is required. A tmux 3.7b verbose server log caught the one-line fatal
+  error `fatal: not enough data: 0 < 22`. It happened when an alternate-screen exit queued pane bytes at the same
+  instant Farhelm detached its output-bearing control client. EOF alone reproduced the abort; tmux still had a pane
+  block whose bytes the departing client had invalidated. Orderly teardown now targets the output client by its
+  tmux-assigned name from a separate `refresh-client -f no-output` process, waits for that process to acknowledge the
+  transition, then closes the output client's stdin and reaps it. Keeping the acknowledgement off the output client's
+  protocol stream matters: a cancelled replay may leave older positional replies there, and one of those must not be
+  mistaken for the teardown reply. The transition atomically discards every current pane queue and prevents a newly
+  created tab from opening another race. The conformance test keeps the immediate-detach shape and probes the server
+  afterward; the repaired boundary passed 50 fresh-process repetitions on tmux 3.7b and 50 on tmux 3.4.
 - **M6.75 — status and profiles.** Running/waiting/idle heuristics with per-agent sharpening, list filtering, profile
   CRUD and starter profiles. Also live push replacing BOTH of the UI's polls — M2's session-list poll and M4's
   session-detail/tab-list poll — status transitions are what make polling genuinely painful, and the push channel serves

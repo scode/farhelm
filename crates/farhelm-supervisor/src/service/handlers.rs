@@ -1369,7 +1369,21 @@ async fn handle_attach(
     // whose terminals are split between two clients, which SPEC.md
     // forbids). It also makes the winner the *last* attach rather
     // than whichever client's tmux calls happened to finish last.
-    let mut attachments = sup.attachments.lock().await;
+    let mut attachments = loop {
+        let attachments = sup.attachments.lock().await;
+        if !sup.has_output_reap_for_key(&key) {
+            break attachments;
+        }
+        drop(attachments);
+        if let Err(error) = sup.wait_for_output_reap(&key).await {
+            permit.send(reply_frame(&ControlMsg::Error {
+                req_id,
+                message: format!("terminal output cleanup is unconfirmed: {error}"),
+                kind: ErrorKind::Internal,
+            }));
+            return;
+        }
+    };
 
     // Revalidate the entry this attach resolved BEFORE installing
     // anything on it (fix-batch item 6). The lookup above released
@@ -1486,9 +1500,8 @@ async fn handle_attach(
         }));
         return;
     }
-    let displaced: Vec<ActiveAttach> = attachments
+    let displaced: Vec<(AttachmentKey, ActiveAttach)> = attachments
         .extract_if(|k, a| displaced_by_attach(k, &a.lease, &session_id, &lease))
-        .map(|(_, attachment)| attachment)
         .collect();
     // Same terminal, same lease: an ordinary reconnect, and the
     // one-attachment-per-terminal enforcement point. It cannot
@@ -1497,26 +1510,27 @@ async fn handle_attach(
     // just the cutover that has always happened here. Which is
     // exactly why it is told a DIFFERENT reason: see
     // `DETACH_REASON_REPLACED`.
-    let incumbent = attachments.remove(&key);
+    let incumbent = attachments
+        .remove(&key)
+        .map(|attachment| (key.clone(), attachment));
 
-    // Abort every doomed forwarder BEFORE awaiting any of them:
-    // the awaits are sequential, so aborting inside the same loop
-    // would leave the not-yet-aborted forwarders free to emit
-    // output — and their own end-of-stream `Detached` — while the
-    // earlier ones are already being torn down.
-    for old in displaced.iter().chain(incumbent.iter()) {
-        old.forwarder.abort();
+    // Stop every doomed forwarder BEFORE awaiting any of them. The joins run
+    // concurrently, so signalling in the same loop would let a quick cleanup
+    // finish and emit effects while later forwarders were still live.
+    for (old_key, old) in displaced.iter().chain(incumbent.iter()) {
+        sup.begin_forwarder_shutdown(old_key.clone(), old);
     }
     let mut notices = Vec::with_capacity(displaced.len() + usize::from(incumbent.is_some()));
-    for (old, reason) in displaced
+    let doomed = displaced
         .into_iter()
-        .map(|old| (old, DETACH_REASON_TAKEOVER))
+        .map(|(key, old)| (key, old, DETACH_REASON_TAKEOVER))
         .chain(
             incumbent
                 .into_iter()
-                .map(|old| (old, DETACH_REASON_REPLACED)),
-        )
-    {
+                .map(|(key, old)| (key, old, DETACH_REASON_REPLACED)),
+        );
+    let mut forwarders = tokio::task::JoinSet::new();
+    for (old_key, old, reason) in doomed {
         // `..` drops this attachment's input client (killing its
         // control-mode process via `kill_on_drop`) and its pause
         // sender, which is what every teardown path does.
@@ -1524,16 +1538,60 @@ async fn handle_attach(
             channel,
             notify,
             forwarder,
+            sink,
             ..
         } = old;
-        // Awaiting the abort is what actually makes the old
-        // control-mode client gone: dropping its OutputStream
-        // (and so killing the process) happens when the task is
-        // polled after cancellation, not when abort() returns.
-        // The forwarder never takes this lock, so awaiting it
-        // here cannot deadlock.
-        let _ = forwarder.await;
-        notices.push((channel, notify, reason));
+        // Await until the old forwarder either reaps its control client or
+        // transfers that client to the published per-terminal reaper. The
+        // request refuses the replacement below while that barrier remains.
+        // The forwarder never takes this lock, so awaiting it here cannot
+        // deadlock.
+        forwarders.spawn(async move {
+            let joined = forwarder.await;
+            drop(sink);
+            (old_key, joined, channel, notify, reason)
+        });
+    }
+    let mut cleanup_error = None;
+    while let Some(joined) = forwarders.join_next().await {
+        match joined {
+            Ok((old_key, result, channel, notify, reason)) => {
+                if let Err(error) = sup.record_forwarder_join(old_key, result) {
+                    cleanup_error.get_or_insert(error);
+                }
+                notices.push((channel, notify, reason));
+            }
+            Err(join) => {
+                cleanup_error.get_or_insert_with(|| {
+                    Arc::<str>::from(format!("terminal cleanup wrapper failed: {join}"))
+                });
+            }
+        }
+    }
+    if let Some(error) = cleanup_error {
+        drop(attachments);
+        for (channel, notify, reason) in notices {
+            notify_detached(&notify, channel, reason.to_string());
+        }
+        permit.send(reply_frame(&ControlMsg::Error {
+            req_id,
+            message: format!("the old terminal attachment could not be cleaned up: {error}"),
+            kind: ErrorKind::Internal,
+        }));
+        return;
+    }
+    if sup.has_output_reap_for_key(&key) {
+        drop(attachments);
+        for (channel, notify, reason) in notices {
+            notify_detached(&notify, channel, reason.to_string());
+        }
+        permit.send(reply_frame(&ControlMsg::Error {
+            req_id,
+            message: "the old terminal attachment is still being cleaned up; attach again"
+                .to_string(),
+            kind: ErrorKind::Conflict,
+        }));
+        return;
     }
     // Every notice is enqueued back to back, after the last
     // forwarder is gone, so a client that lost several terminals
@@ -1591,12 +1649,11 @@ async fn handle_attach(
     // to; it therefore hears every window's panes and filters down
     // to this one by pane id (see `tmux::OutputStream`), which is
     // what keeps a tab's output out of the agent's terminal.
-    let (modes, prefill, stream) = match sup
-        .tmux
-        .open_replay_stream(&terminal.tmux_name, &terminal.pane)
+    let stream_candidate = match sup
+        .open_replay_stream_candidate(key.clone(), &terminal.tmux_name, &terminal.pane)
         .await
     {
-        Ok(parts) => parts,
+        Ok(candidate) => candidate,
         Err(e) => {
             drop(attachments);
             permit.send(reply_frame(&ControlMsg::Error {
@@ -1621,8 +1678,8 @@ async fn handle_attach(
     {
         Ok(input) => input,
         Err(e) => {
+            drop(stream_candidate);
             drop(attachments);
-            stream.shutdown().await;
             permit.send(reply_frame(&ControlMsg::Error {
                 req_id,
                 message: format!("{e:#}"),
@@ -1631,6 +1688,7 @@ async fn handle_attach(
             return;
         }
     };
+    let (modes, prefill, stream) = stream_candidate.install();
 
     // The `Attached` reply is enqueued HERE, before the forwarder
     // exists, using the capacity reserved before this handler took
@@ -1657,6 +1715,8 @@ async fn handle_attach(
     // live output. The dead-pane stop snapshot moved with it —
     // see `Forwarder::send_dead_pane_snapshot`.
     let (pause_tx, pause_rx) = watch::channel(None);
+    let (forwarder_shutdown, shutdown_rx) = watch::channel(false);
+    let (forwarder_cleanup, cleanup_rx) = watch::channel(None);
     let forwarder = Forwarder {
         sup: Arc::clone(sup),
         session_id: session_id.clone(),
@@ -1666,8 +1726,9 @@ async fn handle_attach(
         stream,
         pause_rx,
         stall_timeout: sup.timeouts.stall_detach,
+        cleanup: forwarder_cleanup,
     };
-    let task = tokio::spawn(forwarder.run(modes, prefill));
+    let task = tokio::spawn(forwarder.run(modes, prefill, shutdown_rx));
 
     attachments.insert(
         key.clone(),
@@ -1676,6 +1737,8 @@ async fn handle_attach(
             lease,
             notify: tx.clone(),
             forwarder: task,
+            forwarder_shutdown,
+            forwarder_cleanup: cleanup_rx,
             input,
             pause: pause_tx,
             sink,
@@ -1714,7 +1777,7 @@ async fn handle_detach(
         .get(&route.key)
         .is_some_and(|a| a.channel == channel && a.notify.same_channel(tx));
     if mine && let Some(a) = attachments.remove(&route.key) {
-        // Abort AND await, mirroring the takeover path: detach
+        // Request shutdown AND await, mirroring the takeover path: detach
         // followed by an immediate reattach (a browser reload is
         // exactly this) finds no incumbent to kick, so the only
         // thing keeping the old control-mode client from
@@ -1722,11 +1785,18 @@ async fn handle_detach(
         // hazard — is waiting for it here, before the lock is
         // released. Awaiting cannot deadlock: forwarders never
         // take this lock.
+        sup.begin_forwarder_shutdown(route.key.clone(), &a);
         let ActiveAttach {
             forwarder, sink, ..
         } = a;
-        forwarder.abort();
-        let _ = forwarder.await;
+        if let Err(cleanup) = sup.record_forwarder_join(route.key.clone(), forwarder.await) {
+            warn!(
+                session = %route.key.session,
+                terminal = ?route.key.terminal,
+                error = %cleanup,
+                "detached terminal output cleanup remains unconfirmed"
+            );
+        }
 
         // Dropping the final lease publishes this session's reaping barrier
         // synchronously. The runtime-owned reaper may finish afterward, but

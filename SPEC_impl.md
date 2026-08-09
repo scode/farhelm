@@ -187,14 +187,19 @@ below). Passthrough sequences (audited): the control-mode pane-output stream car
 still wrapped, regardless of the `allow-passthrough` option — that option only gates forwarding to rendering clients,
 which Farhelm has none of — so the supervisor unwraps passthrough payloads itself before they reach xterm.js. Reconnect
 replay prefills xterm.js from `capture-pane -e` history, then continues with live bytes from the same control client —
-that is how the 10,000-line floor is met without a gap between the two. The handoff ordering is load-bearing: the
-incumbent control client is killed and awaited, the window is resized, and the replacement attaches with `no-output`.
-Pane modes, a history snapshot, a visible-screen snapshot, and a final `refresh-client -f
-!no-output,pause-after=N` are
-submitted as one semicolon-separated command group through that replacement. The matching `%end` for the final refresh
-block is the cutover: earlier pane bytes are represented by the snapshot, later ones arrive as live output, and
-`no-output` advances rather than queueing a second copy for delivery. Normal-screen replay selects the history snapshot;
-alternate-screen replay selects the visible snapshot so normal history is not mixed into a full-screen app.
+that is how the 10,000-line floor is met without a gap between the two. The handoff ordering is load-bearing: a separate
+tmux command process targets the incumbent control client by its tmux-assigned name and switches it back to `no-output`;
+only after that process succeeds is the incumbent's stdin closed and the process reaped. The acknowledgement cannot
+share the output client's protocol stream because cancellation may leave older positional command replies unread there.
+tmux applies `no-output` by discarding all pending pane blocks for that client and refusing new ones, so this is a
+client-wide boundary rather than a racy list of panes that existed when teardown began. Closing or killing tmux 3.7b's
+client while one of those blocks remains can abort the whole private server with `fatal: not enough data`; the
+acknowledged transition is therefore part of the handoff contract, not cleanup polish. Pane modes, a history snapshot, a
+visible-screen snapshot, and a final `refresh-client -f !no-output,pause-after=N` are submitted as one
+semicolon-separated command group through that replacement. The matching `%end` for the final refresh block is the
+cutover: earlier pane bytes are represented by the snapshot, later ones arrive as live output, and `no-output` advances
+rather than queueing a second copy for delivery. Normal-screen replay selects the history snapshot; alternate-screen
+replay selects the visible snapshot so normal history is not mixed into a full-screen app.
 
 Setting `pause-after` on that same cutover (M2.5) changes the dialect the client then reads, which the parser must
 handle rather than discard: pane bytes arrive as `%extended-output <pane-id> <age> ... : <data>` instead of `%output`,

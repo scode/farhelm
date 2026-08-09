@@ -67,7 +67,7 @@ use super::core::{ArchiveStage, SessionEntry, Supervisor};
 use super::launch_artifacts::{remove_fail_closed, remove_launch_artifacts_for_session};
 use super::snapshots::snapshot_path;
 use super::sweep::{SweepTarget, reap_process_tree};
-use super::terminals::ActiveAttach;
+use super::terminals::{ActiveAttach, AttachmentKey};
 use super::ticker::ActivitySample;
 use super::uploads::abort_session_uploads;
 use crate::store::LastOutcome;
@@ -256,28 +256,53 @@ impl Supervisor {
         // removed. Notices are initiated before the guard drops, matching
         // the ordering guarantee described in the module docs.
         let mut attachments = self.attachments.lock().await;
-        let doomed: Vec<ActiveAttach> = attachments
+        let doomed: Vec<(AttachmentKey, ActiveAttach)> = attachments
             .extract_if(|key, _| key.session == session_id)
-            .map(|(_, attachment)| attachment)
             .collect();
-        for old in &doomed {
-            old.forwarder.abort();
+        for (key, old) in &doomed {
+            self.begin_forwarder_shutdown(key.clone(), old);
         }
         let mut notify_detach = Vec::with_capacity(doomed.len());
-        for ActiveAttach {
-            channel,
-            notify,
-            forwarder,
-            sink,
-            ..
-        } in doomed
-        {
-            let _ = forwarder.await;
-            drop(sink);
-            notify_detach.push((channel, notify));
+        let mut forwarders = tokio::task::JoinSet::new();
+        for (key, old) in doomed {
+            let ActiveAttach {
+                channel,
+                notify,
+                forwarder,
+                sink,
+                ..
+            } = old;
+            forwarders.spawn(async move {
+                let joined = forwarder.await;
+                drop(sink);
+                (key, joined, channel, notify)
+            });
+        }
+        let mut forwarder_error = None;
+        while let Some(joined) = forwarders.join_next().await {
+            match joined {
+                Ok((key, result, channel, notify)) => {
+                    if let Err(error) = self.record_forwarder_join(key, result) {
+                        forwarder_error.get_or_insert(error.to_string());
+                    }
+                    notify_detach.push((channel, notify));
+                }
+                Err(join) => {
+                    forwarder_error
+                        .get_or_insert_with(|| format!("terminal cleanup wrapper failed: {join}"));
+                }
+            }
+        }
+        if forwarder_error.is_none() && self.has_output_reap_for_session(session_id) {
+            forwarder_error = Some(
+                "a terminal-output client is still crossing its safe shutdown boundary".to_string(),
+            );
         }
 
         let teardown: Result<(), String> = async {
+            if let Some(error) = forwarder_error {
+                return Err(error);
+            }
             self.tmux
                 .kill_session(&tmux_name)
                 .await
@@ -521,39 +546,60 @@ impl Supervisor {
         // ownership, on the teardown side). Restart is the
         // deliberate contrast — see `detach_for_restart`.
         //
-        // Abort the forwarders now, before they can race their own
+        // Stop the forwarders now, before they can race their own
         // natural "session terminal ended" Detached against whatever
         // truthful notice this function sends once the real outcome
         // below is known — but do not send that notice yet.
         //
-        // ALL of them are aborted before ANY is awaited, exactly as
-        // the attach takeover does it: the awaits are sequential, so
-        // aborting inside the same loop would leave the later
-        // forwarders streaming (and able to emit their own detach)
-        // while the earlier ones are already gone.
-        let doomed: Vec<ActiveAttach> = attachments
+        // ALL of them are signalled before ANY join is started, exactly as
+        // the attach takeover does it. Starting joins in the same loop would
+        // let a quick forwarder finish while a later one was still streaming
+        // and able to emit its own detach.
+        let doomed: Vec<(AttachmentKey, ActiveAttach)> = attachments
             .extract_if(|key, _| key.session == session_id)
-            .map(|(_, attachment)| attachment)
             .collect();
-        for old in &doomed {
-            old.forwarder.abort();
+        for (key, old) in &doomed {
+            self.begin_forwarder_shutdown(key.clone(), old);
         }
         let mut notify_detach = Vec::with_capacity(doomed.len());
         // `..` drops each attachment's input client — killing its
         // control-mode process via `kill_on_drop`, like every other
-        // teardown path — and its pause sender, which the aborted
+        // teardown path — and its pause sender, which the stopped
         // forwarder can no longer observe anyway.
-        for ActiveAttach {
-            channel,
-            notify,
-            forwarder,
-            sink,
-            ..
-        } in doomed
-        {
-            let _ = forwarder.await;
-            drop(sink);
-            notify_detach.push((channel, notify));
+        let mut forwarders = tokio::task::JoinSet::new();
+        for (key, old) in doomed {
+            let ActiveAttach {
+                channel,
+                notify,
+                forwarder,
+                sink,
+                ..
+            } = old;
+            forwarders.spawn(async move {
+                let joined = forwarder.await;
+                drop(sink);
+                (key, joined, channel, notify)
+            });
+        }
+        let mut forwarder_error = None;
+        while let Some(joined) = forwarders.join_next().await {
+            match joined {
+                Ok((key, result, channel, notify)) => {
+                    if let Err(error) = self.record_forwarder_join(key, result) {
+                        forwarder_error.get_or_insert(error.to_string());
+                    }
+                    notify_detach.push((channel, notify));
+                }
+                Err(join) => {
+                    forwarder_error
+                        .get_or_insert_with(|| format!("terminal cleanup wrapper failed: {join}"));
+                }
+            }
+        }
+        if forwarder_error.is_none() && self.has_output_reap_for_session(session_id) {
+            forwarder_error = Some(
+                "a terminal-output client is still crossing its safe shutdown boundary".to_string(),
+            );
         }
 
         // Fail-closed and sequenced deliberately: artifacts before the
@@ -574,6 +620,9 @@ impl Supervisor {
         // quarantining step's own comment).
         let mut quarantined: Option<PathBuf> = None;
         let teardown: Result<(), String> = async {
+            if let Some(error) = forwarder_error {
+                return Err(error);
+            }
             if let Some(terminal) = entry.terminal.as_ref() {
                 self.tmux
                     .kill_session(&terminal.tmux_name)

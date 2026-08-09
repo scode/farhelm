@@ -10,7 +10,7 @@
 use super::core::{Supervisor, note_first_input};
 use super::handlers::{handle_control, handle_restricted_control};
 use super::snapshots::load_alt_screen_snapshot;
-use super::terminals::{ActiveAttach, AttachmentKey, InputRoute, TerminalId};
+use super::terminals::{ActiveAttach, AttachmentKey, InputRoute, OutputReapOutcome, TerminalId};
 use super::uploads::{
     UPLOAD_PRIORITY_QUEUE, UploadCommand, UploadRoute, UploadSignal, prune_finished_uploads,
 };
@@ -462,6 +462,7 @@ where
                             Some(Err(e)) => {
                                 warn!(session = %entry.info.id, error = %e, "input dropped");
                                 if let Some(old) = attachments.remove(&route.key) {
+                                    sup.begin_forwarder_shutdown(route.key.clone(), &old);
                                     let ActiveAttach {
                                         channel,
                                         notify,
@@ -469,8 +470,17 @@ where
                                         sink,
                                         ..
                                     } = old;
-                                    forwarder.abort();
-                                    let _ = forwarder.await;
+                                    if let Err(cleanup) = sup.record_forwarder_join(
+                                        route.key.clone(),
+                                        forwarder.await,
+                                    ) {
+                                        warn!(
+                                            session = %entry.info.id,
+                                            terminal = ?route.key.terminal,
+                                            error = %cleanup,
+                                            "terminal output cleanup remains unconfirmed after input failure"
+                                        );
+                                    }
                                     drop(sink);
                                     notify_detached(
                                         &notify,
@@ -536,29 +546,49 @@ where
     }
     drop(upload_routes);
     // Tear down any attachments this connection owned so the next
-    // attach doesn't fight a dead forwarder. Abort AND await, exactly
-    // like the takeover path: abort only schedules cancellation, and the
-    // old per-terminal control client's process is not gone until the
-    // cancelled task has been polled to completion. If this connection held
-    // the session's final attachment, the shared sink client must likewise
-    // be reaped. Removing the entry without waiting would let a new
-    // connection's attach — which finds no incumbent to kick — open its
-    // clients while the old ones are still dying, the documented
-    // frozen-replay hazard. Awaiting under the lock is safe (forwarders
-    // never take it) and is what serializes that new attach behind this
-    // teardown.
+    // attach doesn't fight a dead forwarder. Signal AND await, exactly
+    // like the takeover path: a shutdown request only wakes the forwarder,
+    // and joining it proves the output client was either reaped or handed to
+    // the per-terminal barrier published above. If this connection held the
+    // session's final attachment, dropping its sink lease likewise publishes
+    // a same-session barrier before process cleanup continues. Removing the
+    // entry without those handoffs would let a new connection's attach —
+    // which finds no incumbent to kick — open clients while the old ones are
+    // still unsafe, the documented frozen-replay hazard. Awaiting under the
+    // lock is safe (forwarders never take it); a reaper that outlives the lock
+    // still blocks replacement through the registry.
     let mut attachments = sup.attachments.lock().await;
-    let mine: Vec<ActiveAttach> = attachments
+    let mine: Vec<(AttachmentKey, ActiveAttach)> = attachments
         .extract_if(|_, attachment| attachment.notify.same_channel(&tx))
-        .map(|(_, attachment)| attachment)
         .collect();
-    for attachment in mine {
+    for (key, attachment) in &mine {
+        sup.begin_forwarder_shutdown(key.clone(), attachment);
+    }
+    let mut forwarders = tokio::task::JoinSet::new();
+    for (key, attachment) in mine {
         let ActiveAttach {
             forwarder, sink, ..
         } = attachment;
-        forwarder.abort();
-        let _ = forwarder.await;
-        drop(sink);
+        forwarders.spawn(async move {
+            let joined = forwarder.await;
+            drop(sink);
+            (key, joined)
+        });
+    }
+    while let Some(joined) = forwarders.join_next().await {
+        match joined {
+            Ok((key, result)) => {
+                if let Err(cleanup) = sup.record_forwarder_join(key.clone(), result) {
+                    warn!(
+                        session = %key.session,
+                        terminal = ?key.terminal,
+                        error = %cleanup,
+                        "connection closed before terminal output cleanup was confirmed"
+                    );
+                }
+            }
+            Err(join) => warn!(error = %join, "terminal cleanup wrapper failed"),
+        }
     }
     drop(attachments);
     drop(tx);
@@ -584,9 +614,8 @@ where
              aborting"
         );
         tasks.abort_all();
-        // `abort_all` only SCHEDULES cancellation — exactly like every
-        // other abort in this module (the attachment forwarders just
-        // above, `drain_writer` below), a task is not actually gone until
+        // `abort_all` only SCHEDULES cancellation — as with the writer-task
+        // abort in `drain_writer` below, a task is not actually gone until
         // its cancellation has been delivered and polled to completion.
         // Draining `join_next` to empty here is what proves that: only
         // once every aborted task has been reaped are its resources
@@ -840,6 +869,8 @@ fn reap_finished_tasks(tasks: &mut tokio::task::JoinSet<()>) {
 
 /// Why a forwarder stopped, and therefore what the client must be told.
 enum ForwarderEnd {
+    /// The attachment owner requested an orderly detach.
+    Requested,
     /// The client's connection is gone (its writer queue closed). Nothing
     /// left to notify.
     ClientGone,
@@ -864,9 +895,9 @@ enum ForwarderEnd {
 /// methods on the thing they all belong to.
 ///
 /// It never takes `Supervisor::attachments`. That is the invariant — and
-/// only that one — which lets the takeover, detach, and delete paths abort
-/// *and await* a forwarder while holding that mutex; the one place this
-/// task needs the map (the stall teardown) hands the work to a separate
+/// only that one — which lets the takeover, detach, and delete paths request
+/// shutdown and await a forwarder while holding that mutex; the one place
+/// this task needs the map (the stall teardown) hands the work to a separate
 /// task for exactly that reason. It is NOT lock-free in general:
 /// `send_dead_pane_snapshot` briefly takes `pending_snapshots`, which is
 /// safe precisely because nothing ever holds that lock across a wait on a
@@ -887,6 +918,8 @@ pub(crate) struct Forwarder {
     pub(crate) stream: OutputStream,
     pub(crate) pause_rx: watch::Receiver<Option<tokio::time::Instant>>,
     pub(crate) stall_timeout: Duration,
+    /// Publishes process cleanup independently of the request awaiting this task.
+    pub(crate) cleanup: watch::Sender<OutputReapOutcome>,
 }
 
 impl Forwarder {
@@ -903,35 +936,86 @@ impl Forwarder {
     /// emitted once the initial replay has been enqueued in full and
     /// before `pump` can enqueue a single live byte. Nothing else in this
     /// task may be inserted between the second and third steps.
-    pub(crate) async fn run(mut self, modes: PaneModes, prefill: Vec<u8>) {
+    pub(crate) async fn run(
+        mut self,
+        modes: PaneModes,
+        prefill: Vec<u8>,
+        mut shutdown: watch::Receiver<bool>,
+    ) {
         // The attach replay never resets: the client's terminal is brand
         // new. Only the catch-up path passes `true` — see `send_replay`.
-        let end = match self.send_replay(modes, prefill, false).await {
-            Ok(()) => match self.send_replay_complete().await {
-                Ok(()) => self.pump().await,
-                Err(end) => end,
-            },
-            Err(end) => end,
+        let end = {
+            let forwarding = async {
+                match self.send_replay(modes, prefill, false).await {
+                    Ok(()) => match self.send_replay_complete().await {
+                        Ok(()) => self.pump().await,
+                        Err(end) => end,
+                    },
+                    Err(end) => end,
+                }
+            };
+            tokio::pin!(forwarding);
+            tokio::select! {
+                biased;
+                _ = shutdown.changed() => ForwarderEnd::Requested,
+                end = &mut forwarding => end,
+            }
         };
-        // Ordered: kill the control client BEFORE announcing the detach,
-        // matching every other teardown in this module. A client that
-        // reattaches the instant it sees `Detached` must not race a
-        // control client that is still dying — the documented
-        // frozen-replay hazard.
-        self.stream.shutdown().await;
+        // Ordered: establish the safe shutdown handoff before announcing any
+        // detach. A client that reattaches immediately must find either a
+        // reaped output client or the published barrier of the runtime-owned
+        // reaper that retained it. The cooperative shutdown arm above makes
+        // this path run even when teardown interrupts a blocked replay or
+        // output read.
+        let cleanup_gate = self.sup.seams.forwarder_cleanup_gate.clone();
+        let cleanup = self.cleanup.clone();
+        match self.stream.shutdown().await {
+            Ok(()) if cleanup_gate.is_none() => {
+                cleanup.send_replace(Some(Ok(())));
+            }
+            result => {
+                tokio::spawn(async move {
+                    let outcome = match result {
+                        Ok(()) => Ok(()),
+                        Err(reaper) => reaper.run().await,
+                    };
+                    if let Some(gate) = cleanup_gate {
+                        gate().await;
+                    }
+                    cleanup.send_replace(Some(outcome));
+                });
+            }
+        }
+        // Explicit teardown can win after forwarding ended naturally but
+        // before process cleanup finished. In that case its caller owns the
+        // detach reason; publishing the earlier natural reason afterward
+        // would be a stale second verdict on the same channel.
+        let end = if *shutdown.borrow_and_update() {
+            ForwarderEnd::Requested
+        } else {
+            end
+        };
         match end {
-            ForwarderEnd::ClientGone => {}
+            ForwarderEnd::Requested | ForwarderEnd::ClientGone => {}
             ForwarderEnd::TerminalEnded => {
-                notify_detached(&self.tx, self.channel, "session terminal ended".to_string());
+                detach_naturally(
+                    &self.sup,
+                    AttachmentKey::new(&self.session_id, self.terminal),
+                    self.channel,
+                    self.tx,
+                    "session terminal ended".to_string(),
+                );
             }
             ForwarderEnd::StreamFailed(reason) => {
                 // Must notify: swallowing this leaves the client with a
                 // terminal that silently stops updating while still
                 // accepting input, and no log line anywhere explaining why.
                 warn!(channel = self.channel, error = %reason, "output stream failed");
-                notify_detached(
-                    &self.tx,
+                detach_naturally(
+                    &self.sup,
+                    AttachmentKey::new(&self.session_id, self.terminal),
                     self.channel,
+                    self.tx,
                     format!("output stream failed: {reason}"),
                 );
             }
@@ -1088,9 +1172,9 @@ impl Forwarder {
                 }
                 changed = self.pause_rx.changed() => {
                     // The sender is dropped only when this attachment has
-                    // been removed from the map, at which point this task
-                    // is being aborted anyway; falling through is the
-                    // harmless answer.
+                    // been removed from the map, at which point the separate
+                    // shutdown watch is also ready; falling through lets the
+                    // outer, biased select take that orderly path.
                     if changed.is_err() {
                         return Ok(());
                     }
@@ -1279,14 +1363,14 @@ async fn stalled_past_deadline(
 ///
 /// Spawned rather than run inline because forwarders must never take
 /// `Supervisor::attachments`: the takeover, detach, and delete paths all
-/// abort AND AWAIT a forwarder while holding that mutex, so a forwarder
-/// blocking on it would deadlock the supervisor outright. A separate task
-/// can wait for the lock safely: it is not the task being awaited, so a
-/// teardown holding the mutex can always make progress and release it.
-/// (This does NOT assume the spawning forwarder has already returned — it
-/// may still be unwinding when this runs. Nothing here depends on that:
-/// the forwarder has already shut its control client down before spawning
-/// this, and the `abort`-then-`await` below reaps the handle whenever it
+/// request shutdown and await a forwarder while holding that mutex, so a
+/// forwarder blocking on it would deadlock the supervisor outright. A
+/// separate task can wait for the lock safely: it is not the task being
+/// awaited, so a teardown holding the mutex can always make progress and
+/// release it. (This does NOT assume the spawning forwarder has already
+/// returned — it may still be unwinding when this runs. Nothing here depends
+/// on that: the forwarder has already shut its control client down before
+/// spawning this, and the signal-then-await below reaps the handle whenever it
 /// finishes.)
 ///
 /// The identity check is the same two-part one every other ownership
@@ -1325,17 +1409,24 @@ fn detach_stalled(
         }
         let removed = attachments.remove(&key);
         if let Some(old) = removed {
-            // Abort-and-await like every other teardown, even though the
+            // Signal-and-await like every other teardown, even though the
             // forwarder is the very task that asked for this: it has
-            // already shut its control client down and returned, so this
-            // only reaps the handle. Destructuring the removed
+            // already handed its control client to safe shutdown and is about
+            // to return, so this only joins that completion. Destructuring the removed
             // `ActiveAttach` also kills its input client, then orderly
             // reaps the sink when this was the session's last attachment.
+            sup.begin_forwarder_shutdown(key.clone(), &old);
             let ActiveAttach {
                 forwarder, sink, ..
             } = old;
-            forwarder.abort();
-            let _ = forwarder.await;
+            if let Err(cleanup) = sup.record_forwarder_join(key.clone(), forwarder.await) {
+                warn!(
+                    session = %key.session,
+                    terminal = ?key.terminal,
+                    error = %cleanup,
+                    "stalled terminal output cleanup remains unconfirmed"
+                );
+            }
             drop(sink);
         }
         drop(attachments);
@@ -1345,6 +1436,53 @@ fn detach_stalled(
                 reason: DETACH_REASON_STALLED.to_string(),
             }))
             .await;
+    });
+}
+
+/// Claim and report a forwarder's natural terminal verdict on a separate task.
+///
+/// A forwarder cannot take `attachments`: teardown may hold that lock while it
+/// awaits this very task. The separate arbiter identity-checks and removes the
+/// still-current attachment instead. An explicit restart, takeover, close, or
+/// connection teardown that removed it first therefore owns the only notice;
+/// the stale natural verdict is discarded.
+fn detach_naturally(
+    sup: &Arc<Supervisor>,
+    key: AttachmentKey,
+    channel: u32,
+    tx: mpsc::Sender<Frame>,
+    reason: String,
+) {
+    let sup = Arc::clone(sup);
+    tokio::spawn(async move {
+        if let Some(gate) = &sup.seams.natural_detach_gate {
+            gate().await;
+        }
+        let mut attachments = sup.attachments.lock().await;
+        let mine = attachments
+            .get(&key)
+            .is_some_and(|a| a.channel == channel && a.notify.same_channel(&tx));
+        if !mine {
+            return;
+        }
+        let old = attachments
+            .remove(&key)
+            .expect("the identity-checked attachment remains under the lock");
+        sup.begin_forwarder_shutdown(key.clone(), &old);
+        let ActiveAttach {
+            forwarder, sink, ..
+        } = old;
+        if let Err(cleanup) = sup.record_forwarder_join(key.clone(), forwarder.await) {
+            warn!(
+                session = %key.session,
+                terminal = ?key.terminal,
+                error = %cleanup,
+                "naturally ended terminal output cleanup remains unconfirmed"
+            );
+        }
+        drop(sink);
+        drop(attachments);
+        notify_detached(&tx, channel, reason);
     });
 }
 

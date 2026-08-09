@@ -20,8 +20,9 @@ use std::collections::{HashMap, HashSet};
 use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
+use std::sync::Arc;
 use tokio::io::{AsyncBufReadExt, AsyncRead, AsyncReadExt, AsyncWriteExt, BufReader};
-use tokio::process::{Child, ChildStdin, Command};
+use tokio::process::{Child, ChildStdin, ChildStdout, Command};
 use tracing::warn;
 
 /// History (and therefore replay) floor. SPEC.md promises at least the
@@ -190,6 +191,36 @@ pub const AGENT_WINDOW_OPTION: &str = "@farhelm-agent";
 /// injected at construction (see [`TmuxDriver::new_with_timeouts`]) rather
 /// than read from here directly.
 pub(crate) const CONTROL_EXCHANGE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
+
+/// How long an output-bearing control client gets to exit after stdin closes.
+///
+/// Before closing stdin, normal teardown switches the client back to
+/// `no-output`. tmux applies that flag by discarding every pane block and
+/// refusing new ones, which gives the client a race-free exit boundary even
+/// if a new pane appears during teardown. Killing a client while those blocks
+/// still exist can abort tmux 3.7b itself (`fatal: not enough data`). Two
+/// seconds bounds each phase independently: a healthy local client completes
+/// both in milliseconds, while a broken one must not hold the
+/// supervisor-wide attachment lock forever.
+const CONTROL_CLIENT_SHUTDOWN_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(2);
+
+/// Backoff for a client whose acknowledged output-off boundary is not ready.
+const CONTROL_CLEANUP_RETRY_BASE: std::time::Duration = std::time::Duration::from_millis(250);
+
+/// Longest interval between retries of the safe output-off boundary.
+const CONTROL_CLEANUP_RETRY_MAX: std::time::Duration = std::time::Duration::from_secs(5);
+
+/// Grow cleanup retry delay exponentially without exceeding the process cap.
+fn control_cleanup_retry_delay(failures: u32) -> std::time::Duration {
+    let exponent = failures.saturating_sub(1).min(31);
+    let factor = 1u32.checked_shl(exponent).unwrap_or(0);
+    if factor == 0 {
+        return CONTROL_CLEANUP_RETRY_MAX;
+    }
+    CONTROL_CLEANUP_RETRY_BASE
+        .saturating_mul(factor)
+        .min(CONTROL_CLEANUP_RETRY_MAX)
+}
 
 /// The format is deliberately comma-separated. See [`PaneModes::parse`].
 ///
@@ -428,6 +459,31 @@ pub struct TmuxDriver {
     /// [`PANE_LIST_TIMEOUT`]; injectable for the same reason as
     /// `exchange_timeout`.
     pane_list_timeout: std::time::Duration,
+    /// Limits aggregate safe-shutdown probes when a server is degraded.
+    ///
+    /// Every retry spawns a short-lived tmux process. Session-wide teardown can
+    /// wake many reapers together, so clones share this admission limit rather
+    /// than amplifying one stuck server into unbounded process churn.
+    shutdown_admission: Arc<tokio::sync::Semaphore>,
+    /// A deterministic hold around the shutdown command, tests only.
+    ///
+    /// The production handoff is an external tmux command whose process exit
+    /// is its acknowledgement. Tests need to hold that exact boundary open so
+    /// they can prove the output client remains alive until it completes;
+    /// injecting a gate here does that without changing process environment or
+    /// teaching production code about a fake tmux binary.
+    #[cfg(test)]
+    disable_output_gate: Option<Arc<DisableOutputGate>>,
+}
+
+/// Test control for the external `no-output` acknowledgement boundary.
+#[cfg(test)]
+#[derive(Debug, Default)]
+struct DisableOutputGate {
+    entered: tokio::sync::Notify,
+    release: tokio::sync::Notify,
+    acknowledged: tokio::sync::Notify,
+    finish: tokio::sync::Notify,
 }
 
 /// The two control-mode budgets a [`TmuxDriver`] is constructed with.
@@ -1418,6 +1474,9 @@ impl TmuxDriver {
             config: state_dir.join("tmux.conf"),
             exchange_timeout: budgets.exchange,
             pane_list_timeout: budgets.pane_list,
+            shutdown_admission: Arc::new(tokio::sync::Semaphore::new(4)),
+            #[cfg(test)]
+            disable_output_gate: None,
         }
     }
 
@@ -1492,6 +1551,58 @@ impl TmuxDriver {
     async fn run(&self, args: &[&str]) -> anyhow::Result<String> {
         let out = self.run_bytes(args).await?;
         Ok(String::from_utf8_lossy(&out).into_owned())
+    }
+
+    /// Stop pane delivery to one live control client through a separate command.
+    ///
+    /// This deliberately does NOT use the output client's stdin or stdout.
+    /// The stream being torn down may have been cancelled halfway through a
+    /// line, a command write, or a positional reply group; reusing that stream
+    /// would make the final acknowledgement indistinguishable from an older
+    /// reply. A separate tmux process addresses the control client by the name
+    /// tmux assigns from its OS pid (`client-<pid>`). Successful process exit
+    /// proves the server applied `no-output`, which discards every queued pane
+    /// block before the client itself is closed or killed.
+    async fn disable_control_client_output(&self, target: &str) -> anyhow::Result<()> {
+        let _admission = self
+            .shutdown_admission
+            .acquire()
+            .await
+            .context("the control-client shutdown admission limit closed")?;
+        #[cfg(test)]
+        let gate = self.disable_output_gate.as_ref().map(Arc::clone);
+        #[cfg(test)]
+        if let Some(gate) = &gate {
+            gate.entered.notify_one();
+            gate.release.notified().await;
+        }
+
+        let mut command = self.command();
+        command
+            .args(["refresh-client", "-t", target, "-f", "no-output"])
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::piped())
+            // Cancelling the deadline must not leave a diagnostic tmux
+            // process behind. This process is not the output-bearing client;
+            // killing it cannot invalidate that client's pane queues.
+            .kill_on_drop(true);
+        let output = tokio::time::timeout(CONTROL_CLIENT_SHUTDOWN_TIMEOUT, command.output())
+            .await
+            .context("timed out disabling a control client's output")?
+            .context("spawning tmux to disable a control client's output")?;
+        if !output.status.success() {
+            bail!(
+                "tmux could not disable control client {target}: {}",
+                String::from_utf8_lossy(&output.stderr).trim()
+            );
+        }
+        #[cfg(test)]
+        if let Some(gate) = &gate {
+            gate.acknowledged.notify_one();
+            gate.finish.notified().await;
+        }
+        Ok(())
     }
 
     /// Like [`TmuxDriver::run`], but returning stdout as raw bytes.
@@ -2865,6 +2976,22 @@ impl TmuxDriver {
         session: &str,
         pane: &str,
     ) -> anyhow::Result<(PaneModes, Vec<u8>, OutputStream)> {
+        Ok(self
+            .open_replay_stream_candidate(session, pane)
+            .await?
+            .install())
+    }
+
+    /// Build a replay stream behind a cancellation-safe ownership guard.
+    ///
+    /// The supervisor keeps this guard until the input client is also ready.
+    /// Abandoning it at any point safely reaps the output-bearing client rather
+    /// than exercising the raw stream's emergency `kill_on_drop` fallback.
+    pub(crate) async fn open_replay_stream_candidate(
+        &self,
+        session: &str,
+        pane: &str,
+    ) -> anyhow::Result<ReplayStreamCandidate> {
         let deadline = tokio::time::Instant::now() + self.exchange_timeout;
         let mut child = self
             .command()
@@ -2882,7 +3009,15 @@ impl TmuxDriver {
             .context("spawning tmux control-mode client")?;
         let stdin = child.stdin.take().expect("piped stdin");
         let stdout = child.stdout.take().expect("piped stdout");
-        let mut stream = OutputStream {
+        let stream = OutputStream {
+            driver: self.clone(),
+            client_target: format!(
+                "client-{}",
+                child
+                    .id()
+                    .context("tmux control-mode client has no process id")?
+            ),
+            output_disabled: false,
             child,
             // Exclusively owned: this client carries its own one-shot
             // replay-cutover command group (below), the attach-time pane
@@ -2890,7 +3025,7 @@ impl TmuxDriver {
             // all written from the single task that owns this stream. Input
             // travels on a wholly separate client — see
             // `open_input_client` — so there is no sharing concern here.
-            stdin,
+            stdin: Some(stdin),
             reader: BufReader::new(stdout),
             line: Vec::with_capacity(8192),
             passthrough: PassthroughDecoder::default(),
@@ -2903,37 +3038,49 @@ impl TmuxDriver {
             pane_list_timeout: self.pane_list_timeout,
             exit_reason: None,
         };
-        read_command_block(
-            &mut stream.reader,
-            &mut stream.line,
-            deadline,
-            "control-mode attach",
-            pane,
-        )
-        .await?;
-        // The session's other panes are learned while output is still off
-        // and then silenced BY the cutover itself — see
-        // `attach_cutover_command` for why they cannot be silenced by an
-        // earlier command, and `OutputStream` for what the filter buys.
-        // Any failure here propagates: this exchange shares the client's
-        // stdout with the positionally-read replay group that follows, so
-        // an exchange that did not complete cleanly leaves a stream nobody
-        // can safely keep reading (see `foreign_panes`).
-        let foreign = stream.foreign_panes(deadline).await?;
-        // Only the first chunk can ride the cutover; the rest follow it
-        // (see `MAX_CUTOVER_PANE_FILTERS`). Splitting BEFORE the cutover
-        // rather than trimming inside it keeps the overflow addressed
-        // rather than silently unfiltered.
-        let split = foreign.len().min(MAX_CUTOVER_PANE_FILTERS);
-        let (riding, overflow) = foreign.split_at(split);
-        let (modes, prefill) = stream
-            .snapshot_then_cutover(deadline, &attach_cutover_command(riding))
+        let mut candidate = OutputStreamCandidate::new(stream);
+        let opened = async {
+            let stream = candidate.stream_mut();
+            read_command_block(
+                &mut stream.reader,
+                &mut stream.line,
+                deadline,
+                "control-mode attach",
+                pane,
+            )
             .await?;
-        for command in silence_live_pane_commands(overflow) {
-            stream.send_filter_command(&command).await?;
+            // The session's other panes are learned while output is still off
+            // and then silenced BY the cutover itself — see
+            // `attach_cutover_command` for why they cannot be silenced by an
+            // earlier command, and `OutputStream` for what the filter buys.
+            // Any failure here propagates: this exchange shares the client's
+            // stdout with the positionally-read replay group that follows, so
+            // an exchange that did not complete cleanly leaves a stream nobody
+            // can safely keep reading (see `foreign_panes`).
+            let foreign = stream.foreign_panes(deadline).await?;
+            // Only the first chunk can ride the cutover; the rest follow it
+            // (see `MAX_CUTOVER_PANE_FILTERS`). Splitting BEFORE the cutover
+            // rather than trimming inside it keeps the overflow addressed
+            // rather than silently unfiltered.
+            let split = foreign.len().min(MAX_CUTOVER_PANE_FILTERS);
+            let (riding, overflow) = foreign.split_at(split);
+            let (modes, prefill) = stream
+                .snapshot_then_cutover(deadline, &attach_cutover_command(riding))
+                .await?;
+            for command in silence_live_pane_commands(overflow) {
+                stream.send_filter_command(&command).await?;
+            }
+            stream.silenced.extend(foreign.iter().cloned());
+            Ok::<_, anyhow::Error>((modes, prefill))
         }
-        stream.silenced.extend(foreign.iter().cloned());
-        Ok((modes, prefill, stream))
+        .await;
+        match opened {
+            Ok((modes, prefill)) => Ok(ReplayStreamCandidate::new(modes, prefill, candidate)),
+            Err(error) => {
+                candidate.shutdown().await;
+                Err(error)
+            }
+        }
     }
 
     /// Open a control-mode client dedicated to carrying input into `pane`.
@@ -3044,47 +3191,98 @@ impl TmuxDriver {
             .context("spawning tmux session-sink client")?;
         let stdin = child.stdin.take().expect("piped stdin");
         let stdout = child.stdout.take().expect("piped stdout");
-        let mut sink = SessionSink {
+        let sink = SessionSink {
+            driver: Some(self.clone()),
+            client_target: child
+                .id()
+                .map(|pid| format!("client-{pid}"))
+                .context("tmux session-sink client has no process id")?,
+            output_disabled: false,
             child,
-            stdin,
+            stdin: Some(stdin),
             reader: BufReader::new(stdout),
             line: Vec::with_capacity(8192),
         };
-        if let Err(attach) = sink.read_block(deadline, "session-sink attach").await {
-            if let Err(reap) = sink.shutdown().await {
-                return Err(SessionSinkOpenReapError {
-                    attach: format!("{attach:#}"),
-                    reap: format!("{reap:#}"),
-                }
-                .into());
-            }
+        let mut candidate = SessionSinkOpenCandidate::new(sink);
+        if let Err(attach) = candidate
+            .sink_mut()
+            .read_block(deadline, "session-sink attach")
+            .await
+        {
+            candidate.shutdown().await;
             return Err(attach);
         }
-        Ok(sink)
+        Ok(candidate.install())
     }
 }
 
-/// An attach failure whose spawned sink process could not be confirmed gone.
+/// Close one output-bearing control client without invalidating tmux's queue.
 ///
-/// Ordinary attach errors are safe to retry after their child is reaped. This
-/// marker tells the supervisor about the strictly different case where a
-/// replacement must be refused because the failed client may still exist.
-#[derive(Debug, thiserror::Error)]
-#[error("session-sink attach failed ({attach}) and its client could not be reaped ({reap})")]
-pub(crate) struct SessionSinkOpenReapError {
-    attach: String,
-    reap: String,
-}
+/// The caller must first establish an acknowledged client-wide `no-output`
+/// boundary through [`TmuxDriver::disable_control_client_output`]. tmux may
+/// otherwise still own pane-output blocks for this client, and even stdin EOF
+/// can make tmux 3.7b abort when a pending callback tries to finish bytes the
+/// client teardown invalidated. After the boundary, EOF is the normal
+/// control-mode exit and draining stdout lets the client finish even when its
+/// last notifications would otherwise fill the pipe.
+///
+/// The timeout retains `kill_on_drop`'s bounded-cleanup property. Falling back
+/// to a kill is safe only because the caller already established `no-output`;
+/// it is still exceptional and logged because graceful EOF is the expected
+/// control-mode exit.
+async fn shutdown_output_control_client(
+    child: &mut Child,
+    stdin: Option<ChildStdin>,
+    reader: &mut BufReader<ChildStdout>,
+    kind: &'static str,
+) -> anyhow::Result<()> {
+    if child
+        .try_wait()
+        .with_context(|| format!("checking whether the {kind} already exited"))?
+        .is_some()
+    {
+        return Ok(());
+    }
 
-#[cfg(test)]
-impl SessionSinkOpenReapError {
-    /// A marker-only fixture for supervisor retry-policy tests.
-    pub(crate) fn for_test() -> Self {
-        Self {
-            attach: "injected attach failure".to_string(),
-            reap: "injected reap failure".to_string(),
+    drop(stdin);
+    let graceful = tokio::time::timeout(CONTROL_CLIENT_SHUTDOWN_TIMEOUT, async {
+        let mut sink = tokio::io::sink();
+        let drain = tokio::io::copy(reader, &mut sink);
+        tokio::pin!(drain);
+        tokio::select! {
+            status = child.wait() => status,
+            drained = &mut drain => {
+                drained?;
+                child.wait().await
+            }
+        }
+    })
+    .await;
+
+    match graceful {
+        Ok(Ok(_)) => return Ok(()),
+        Ok(Err(error)) => {
+            warn!(kind, error = %error, "control client could not finish gracefully; killing it");
+        }
+        Err(_) => {
+            warn!(
+                kind,
+                "control client did not finish gracefully before its reap deadline; killing it"
+            );
         }
     }
+
+    if child
+        .try_wait()
+        .with_context(|| format!("rechecking whether the {kind} exited"))?
+        .is_some()
+    {
+        return Ok(());
+    }
+    child
+        .kill()
+        .await
+        .with_context(|| format!("killing and reaping the {kind}"))
 }
 
 /// The one control client per tmux SESSION that exists purely so tmux
@@ -3121,9 +3319,10 @@ impl SessionSinkOpenReapError {
 /// flow-control victim does not carry the flag that makes clients
 /// victims. It declares no size (no `refresh-client -C`), like every other
 /// control client here, so window geometry still comes only from
-/// `resize-window`. It never writes a command at all — output is on from
-/// the attach itself (see [`TmuxDriver::open_session_sink`]) — and reads
-/// nothing but bytes it throws away.
+/// `resize-window`. During normal operation output is on from the attach
+/// itself (see [`TmuxDriver::open_session_sink`]), the sink writes no commands,
+/// and it reads nothing but bytes it throws away. Orderly teardown alone
+/// writes `no-output` so tmux can discard this client's queues safely.
 ///
 /// # The one window that remains
 ///
@@ -3148,17 +3347,21 @@ impl SessionSinkOpenReapError {
 /// the session's traffic to rest on the documented rule instead; the pane
 /// filter it enables removes N-1 copies in exchange (see [`OutputStream`]).
 pub struct SessionSink {
+    /// The independent command path used to disable this client's output.
+    /// Test-only process doubles have no tmux driver and need no transition.
+    driver: Option<TmuxDriver>,
+    /// tmux's stable name for a control client spawned as this OS process.
+    client_target: String,
+    /// Set only after the external command has acknowledged `no-output`.
+    output_disabled: bool,
     /// Reaped explicitly by orderly shutdown. `kill_on_drop` remains the
     /// cancellation and unwind fallback, tying the process to this value
     /// even when its owner cannot await teardown.
     child: Child,
-    /// Never written to — the sink issues no commands at all — but held
-    /// open for its whole life, because control mode ends at stdin EOF:
-    /// dropping this handle early would make tmux exit the very client
-    /// this type exists to keep attached. `#[allow(dead_code)]` records
-    /// that "unread" is the intended state rather than an oversight.
-    #[allow(dead_code)]
-    stdin: ChildStdin,
+    /// Held open for the sink's lifetime because stdin EOF detaches a control
+    /// client. Normal operation never writes to it. Orderly shutdown disables
+    /// output through the independent driver, then closes this pipe.
+    stdin: Option<ChildStdin>,
     reader: BufReader<tokio::process::ChildStdout>,
     line: Vec<u8>,
 }
@@ -3206,8 +3409,11 @@ impl SessionSink {
         let stdin = child.stdin.take().expect("piped stdin");
         let stdout = child.stdout.take().expect("piped stdout");
         SessionSink {
+            driver: None,
+            client_target: String::new(),
+            output_disabled: true,
             child,
-            stdin,
+            stdin: Some(stdin),
             reader: BufReader::new(stdout),
             line: Vec::new(),
         }
@@ -3241,26 +3447,124 @@ impl SessionSink {
         }
     }
 
-    /// Kill this control client and confirm that the process has exited.
-    ///
-    /// `kill_on_drop` remains the cancellation fallback, but it cannot
-    /// establish a handoff boundary: dropping requests termination without
-    /// waiting for the old tmux client to disappear. Orderly last-owner
-    /// teardown uses this path before a queued reattach may create its
-    /// replacement.
-    pub async fn shutdown(&mut self) -> anyhow::Result<()> {
-        if self
-            .child
-            .try_wait()
-            .context("checking whether the session-sink client already exited")?
-            .is_some()
+    /// Disable this sink's output before detaching its control client.
+    async fn disable_output_before_shutdown(&mut self) -> anyhow::Result<()> {
+        if self.output_disabled
+            || self
+                .child
+                .try_wait()
+                .context("checking whether the session-sink client already exited")?
+                .is_some()
         {
             return Ok(());
         }
-        self.child
-            .kill()
+        let Some(driver) = &self.driver else {
+            // Process doubles used by the supervising-loop tests are not tmux
+            // clients and have no pane queue to invalidate.
+            self.output_disabled = true;
+            return Ok(());
+        };
+        if let Err(error) = driver
+            .disable_control_client_output(&self.client_target)
             .await
-            .context("killing and reaping the session-sink client")
+        {
+            if self
+                .child
+                .try_wait()
+                .context("rechecking whether the session-sink client exited")?
+                .is_some()
+            {
+                return Ok(());
+            }
+            return Err(error).context("disabling session-sink output before shutdown");
+        }
+        self.output_disabled = true;
+        Ok(())
+    }
+
+    /// Detach this control client and confirm that the process has exited.
+    ///
+    /// `kill_on_drop` remains the cancellation fallback, but it cannot
+    /// establish a handoff boundary: dropping requests termination without
+    /// waiting for the old tmux client to disappear. More importantly, a
+    /// process kill can invalidate output tmux has already queued for this
+    /// client and crash the server; [`shutdown_output_control_client`] closes
+    /// stdin and drains the tail instead. Orderly last-owner teardown uses
+    /// this path before a queued reattach may create its replacement.
+    pub async fn shutdown(&mut self) -> anyhow::Result<()> {
+        self.disable_output_before_shutdown().await?;
+        shutdown_output_control_client(
+            &mut self.child,
+            self.stdin.take(),
+            &mut self.reader,
+            "session-sink control client",
+        )
+        .await
+    }
+}
+
+/// Own a sink client until its attach handshake commits or cleanup finishes.
+///
+/// `open_session_sink` spawns the process before its first awaited reply. This
+/// guard makes cancellation hand the client to the runtime, which retries the
+/// output-off boundary without keeping the request future alive.
+struct SessionSinkOpenCandidate {
+    sink: Option<SessionSink>,
+    runtime: tokio::runtime::Handle,
+}
+
+impl SessionSinkOpenCandidate {
+    fn new(sink: SessionSink) -> Self {
+        Self {
+            sink: Some(sink),
+            runtime: tokio::runtime::Handle::current(),
+        }
+    }
+
+    fn sink_mut(&mut self) -> &mut SessionSink {
+        self.sink.as_mut().expect("session-sink candidate is live")
+    }
+
+    fn install(mut self) -> SessionSink {
+        self.sink.take().expect("session-sink candidate is live")
+    }
+
+    async fn shutdown(mut self) {
+        if let Some(mut sink) = self.sink.take() {
+            reap_session_sink_candidate(&mut sink).await;
+        }
+    }
+}
+
+impl Drop for SessionSinkOpenCandidate {
+    fn drop(&mut self) {
+        let Some(mut sink) = self.sink.take() else {
+            return;
+        };
+        self.runtime.spawn(async move {
+            reap_session_sink_candidate(&mut sink).await;
+        });
+    }
+}
+
+/// Retry an uncommitted sink's safe boundary without flooding logs or forks.
+async fn reap_session_sink_candidate(sink: &mut SessionSink) {
+    let mut failures = 0u32;
+    loop {
+        match sink.shutdown().await {
+            Ok(()) => return,
+            Err(error) => {
+                failures = failures.saturating_add(1);
+                if failures.is_power_of_two() {
+                    warn!(
+                        error = %format!("{error:#}"),
+                        failures,
+                        "uncommitted session-sink cleanup is not yet safe; retrying"
+                    );
+                }
+            }
+        }
+        tokio::time::sleep(control_cleanup_retry_delay(failures)).await;
     }
 }
 
@@ -3270,9 +3574,10 @@ impl SessionSink {
 /// capture and the live cutover have completed. The client counts as
 /// attached in tmux's eyes but never declares a size (no
 /// `refresh-client -C`), so tmux ignores it for sizing entirely —
-/// geometry comes only from explicit `resize-window` calls. Dropping it
-/// kills the client process (`kill_on_drop`), which detaches it; the tmux
-/// server and pane are unaffected.
+/// geometry comes only from explicit `resize-window` calls. Orderly teardown
+/// closes the command pipe and drains the client before reaping it.
+/// `kill_on_drop` remains only for cancellation and unwinding, where an async
+/// shutdown cannot run.
 ///
 /// # One pane, out of a whole session's stream
 ///
@@ -3337,6 +3642,12 @@ impl SessionSink {
 /// tmux 3.4 and 3.7b reproduced a pane stall that stalled-client trials
 /// without it reproduced 4 times in 5.
 pub struct OutputStream {
+    /// Independent access to the private server for the shutdown boundary.
+    driver: TmuxDriver,
+    /// tmux names non-terminal control clients `client-<pid>`.
+    client_target: String,
+    /// Whether the server has acknowledged client-wide `no-output`.
+    output_disabled: bool,
     child: Child,
     /// Held open for the lifetime of the client. Carries the attach-time
     /// exchanges (the pane list, then the replay-cutover command group)
@@ -3345,7 +3656,7 @@ pub struct OutputStream {
     /// wholly separate [`InputClient`]. So this is a plain,
     /// exclusively-owned handle rather than a shared, lockable one: only
     /// the one task driving this stream ever writes to it.
-    stdin: ChildStdin,
+    stdin: Option<ChildStdin>,
     reader: BufReader<tokio::process::ChildStdout>,
     line: Vec<u8>,
     /// Stateful because tmux may split one passthrough wrapper across
@@ -3437,6 +3748,120 @@ pub struct OutputStream {
     exit_reason: Option<String>,
 }
 
+/// The optional supervisor barrier completed by a provisional replay stream.
+type ReplayCompletionSender = tokio::sync::watch::Sender<Option<Result<(), std::sync::Arc<str>>>>;
+
+/// A replay stream that has not yet been committed to an attachment.
+///
+/// The supervisor can hold this across input-client setup. Cancellation or an
+/// input setup failure then reaps the already-output-bearing client before the
+/// optional handoff barrier completes; installing it transfers ownership to
+/// the forwarder and completes that barrier immediately.
+pub(crate) struct ReplayStreamCandidate {
+    modes: Option<PaneModes>,
+    prefill: Option<Vec<u8>>,
+    stream: Option<OutputStreamCandidate>,
+    completion: Option<ReplayCompletionSender>,
+    runtime: tokio::runtime::Handle,
+}
+
+impl ReplayStreamCandidate {
+    fn new(modes: PaneModes, prefill: Vec<u8>, stream: OutputStreamCandidate) -> Self {
+        Self {
+            modes: Some(modes),
+            prefill: Some(prefill),
+            stream: Some(stream),
+            completion: None,
+            runtime: tokio::runtime::Handle::current(),
+        }
+    }
+
+    /// Tie abandonment to a supervisor-published terminal handoff barrier.
+    pub(crate) fn set_completion(&mut self, completion: ReplayCompletionSender) {
+        self.completion = Some(completion);
+    }
+
+    /// Commit the client to a forwarder and release its provisional barrier.
+    pub(crate) fn install(mut self) -> (PaneModes, Vec<u8>, OutputStream) {
+        if let Some(completion) = self.completion.take() {
+            completion.send_replace(Some(Ok(())));
+        }
+        (
+            self.modes.take().expect("replay candidate has modes"),
+            self.prefill.take().expect("replay candidate has prefill"),
+            self.stream
+                .take()
+                .expect("replay candidate has a stream")
+                .install(),
+        )
+    }
+}
+
+impl Drop for ReplayStreamCandidate {
+    fn drop(&mut self) {
+        let Some(stream) = self.stream.take() else {
+            return;
+        };
+        let completion = self.completion.take();
+        self.runtime.spawn(async move {
+            stream.shutdown().await;
+            if let Some(completion) = completion {
+                completion.send_replace(Some(Ok(())));
+            }
+        });
+    }
+}
+
+/// Own an output client until attach either commits it or reaps it safely.
+///
+/// The attach exchange can be cancelled after tmux has enabled live output.
+/// Dropping the raw stream there would invoke `kill_on_drop` while pane blocks
+/// may still be queued, which is the tmux 3.7b server-abort trigger. This guard
+/// transfers every abandoned client to the runtime and keeps retrying the
+/// acknowledged `no-output` boundary instead.
+struct OutputStreamCandidate {
+    stream: Option<OutputStream>,
+    runtime: tokio::runtime::Handle,
+}
+
+impl OutputStreamCandidate {
+    fn new(stream: OutputStream) -> Self {
+        Self {
+            stream: Some(stream),
+            runtime: tokio::runtime::Handle::current(),
+        }
+    }
+
+    fn stream_mut(&mut self) -> &mut OutputStream {
+        self.stream.as_mut().expect("output candidate is live")
+    }
+
+    fn install(mut self) -> OutputStream {
+        self.stream.take().expect("output candidate is live")
+    }
+
+    async fn shutdown(mut self) {
+        if let Some(stream) = self.stream.take()
+            && let Err(reaper) = stream.shutdown().await
+        {
+            let _ = reaper.run().await;
+        }
+    }
+}
+
+impl Drop for OutputStreamCandidate {
+    fn drop(&mut self) {
+        let Some(stream) = self.stream.take() else {
+            return;
+        };
+        self.runtime.spawn(async move {
+            if let Err(reaper) = stream.shutdown().await {
+                let _ = reaper.run().await;
+            }
+        });
+    }
+}
+
 impl OutputStream {
     /// The pane this stream carries.
     ///
@@ -3516,12 +3941,16 @@ impl OutputStream {
     /// stream believing a filter is installed that never was.
     async fn send_filter_command(&mut self, command: &str) -> anyhow::Result<()> {
         let line = format!("{command}\n");
+        let stdin = self
+            .stdin
+            .as_mut()
+            .context("the tmux pane-filter client is already shutting down")?;
         tokio::time::timeout(self.exchange_timeout, async {
-            self.stdin
+            stdin
                 .write_all(line.as_bytes())
                 .await
                 .context("writing a tmux pane-filter command")?;
-            self.stdin
+            stdin
                 .flush()
                 .await
                 .context("flushing a tmux pane-filter command")
@@ -3618,12 +4047,16 @@ impl OutputStream {
     ) -> anyhow::Result<Vec<u8>> {
         let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
         let pane = self.pane.clone();
+        let stdin = self
+            .stdin
+            .as_mut()
+            .context("the tmux exchange client is already shutting down")?;
         tokio::time::timeout(remaining, async {
-            self.stdin
+            stdin
                 .write_all(format!("{command}\n").as_bytes())
                 .await
                 .with_context(|| format!("writing the tmux {purpose} command"))?;
-            self.stdin
+            stdin
                 .flush()
                 .await
                 .with_context(|| format!("flushing the tmux {purpose} command"))
@@ -3723,12 +4156,16 @@ impl OutputStream {
         let pane = self.pane.clone();
         let pane = pane.as_str();
         let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
+        let stdin = self
+            .stdin
+            .as_mut()
+            .context("the tmux replay client is already shutting down")?;
         tokio::time::timeout(remaining, async {
-            self.stdin
+            stdin
                 .write_all(command.as_bytes())
                 .await
                 .context("writing tmux replay cutover commands")?;
-            self.stdin
+            stdin
                 .flush()
                 .await
                 .context("flushing tmux replay cutover commands")
@@ -3984,6 +4421,53 @@ impl OutputStream {
         self.snapshot_then_cutover(deadline, &cutover).await
     }
 
+    /// Clear this client's queued pane blocks through an independent command.
+    ///
+    /// The output stream may be between any two bytes of an in-band command or
+    /// reply when teardown wins its race. Targeting the client externally makes
+    /// that partial protocol state irrelevant: the separate tmux process exits
+    /// only after the server has applied client-wide `no-output`.
+    async fn disable_output_before_shutdown(&mut self) -> anyhow::Result<()> {
+        if self.output_disabled
+            || self
+                .child
+                .try_wait()
+                .context("checking whether the terminal-output client already exited")?
+                .is_some()
+        {
+            return Ok(());
+        }
+        if let Err(error) = self
+            .driver
+            .disable_control_client_output(&self.client_target)
+            .await
+        {
+            if self
+                .child
+                .try_wait()
+                .context("rechecking whether the terminal-output client exited")?
+                .is_some()
+            {
+                return Ok(());
+            }
+            return Err(error).context("disabling terminal output before shutdown");
+        }
+        self.output_disabled = true;
+        Ok(())
+    }
+
+    /// Attempt the complete safe-boundary transition and process reap once.
+    async fn try_shutdown(&mut self) -> anyhow::Result<()> {
+        self.disable_output_before_shutdown().await?;
+        shutdown_output_control_client(
+            &mut self.child,
+            self.stdin.take(),
+            &mut self.reader,
+            "terminal-output control client",
+        )
+        .await
+    }
+
     /// Submit a raw command line on this client's stdin, for tests only.
     ///
     /// Exists so a test can force tmux into a state that is otherwise
@@ -4003,9 +4487,13 @@ impl OutputStream {
     /// [`Self::snapshot_then_cutover`].
     #[cfg(test)]
     async fn send_raw_command(&mut self, command: &str) -> anyhow::Result<()> {
-        self.stdin.write_all(command.as_bytes()).await?;
-        self.stdin.write_all(b"\n").await?;
-        self.stdin.flush().await?;
+        let stdin = self
+            .stdin
+            .as_mut()
+            .context("the test stream is shut down")?;
+        stdin.write_all(command.as_bytes()).await?;
+        stdin.write_all(b"\n").await?;
+        stdin.flush().await?;
         Ok(())
     }
 
@@ -4046,21 +4534,67 @@ impl OutputStream {
         }
     }
 
-    /// Kill the control-mode client and wait for it to actually be gone.
+    /// Detach the control-mode client and wait for it to actually be gone.
     ///
-    /// The orderly teardown for a forwarder that ran to completion. A
-    /// forwarder cancelled mid-flight never reaches this — the task stops
-    /// at an await point and `kill_on_drop` does the killing instead,
-    /// which is why the takeover path aborts *and then awaits* the
-    /// forwarder rather than just aborting it. Either way the client must
-    /// be dead before another attaches: overlapping control clients
-    /// reproducibly froze the newcomer's stream after the replay. The
+    /// The external `no-output` acknowledgement is load-bearing. Killing or
+    /// closing a client while tmux has a pane block queued for it can abort
+    /// tmux 3.7b with `fatal: not enough data`; [`Self::try_shutdown`] first
+    /// makes tmux discard that queue, then closes stdin and reaps the client.
+    /// A bounded kill is safe only after that boundary and exists for a client
+    /// that refuses the normal EOF exit.
+    ///
+    /// The client must be dead before another attaches: overlapping control
+    /// clients reproducibly froze the newcomer's stream after replay. The
     /// mechanism was never pinned down (in isolation two attached control
-    /// clients DO both receive pane output — audited), so treat the
-    /// ordering, not any particular explanation, as the invariant; the
-    /// attach handler's open-stream comment tells the same story.
-    pub async fn shutdown(mut self) {
-        let _ = self.child.kill().await;
+    /// clients do both receive pane output), so callers depend on the ordering,
+    /// not that explanation.
+    pub async fn shutdown(mut self) -> Result<(), OutputReaper> {
+        match self.try_shutdown().await {
+            Ok(()) => Ok(()),
+            Err(error) => Err(OutputReaper {
+                stream: self,
+                last_error: format!("{error:#}"),
+            }),
+        }
+    }
+}
+
+/// A runtime-owned retry of an output client's safe shutdown boundary.
+///
+/// Returning an ordinary error would drop `OutputStream`, whose
+/// `kill_on_drop` child can invalidate a pane block before tmux has discarded
+/// it. This value retains every process handle instead. The supervisor publishes
+/// a per-terminal barrier before letting a replacement attach, while this task
+/// retries until the server acknowledges `no-output` and the client is reaped.
+pub struct OutputReaper {
+    stream: OutputStream,
+    last_error: String,
+}
+
+impl OutputReaper {
+    /// Retry forever rather than turn an unconfirmed client into a safe one by
+    /// assertion. The registry waiting on this task makes the failure visible
+    /// and keeps only the affected terminal closed to replacement.
+    pub async fn run(mut self) -> Result<(), std::sync::Arc<str>> {
+        let mut failures = 1u32;
+        loop {
+            if failures.is_power_of_two() {
+                warn!(
+                    pane = %self.stream.pane,
+                    error = %self.last_error,
+                    failures,
+                    "terminal-output client cleanup is not yet safe; retrying"
+                );
+            }
+            tokio::time::sleep(control_cleanup_retry_delay(failures)).await;
+            match self.stream.try_shutdown().await {
+                Ok(()) => return Ok(()),
+                Err(error) => {
+                    failures = failures.saturating_add(1);
+                    self.last_error = format!("{error:#}");
+                }
+            }
+        }
     }
 }
 
@@ -4164,6 +4698,11 @@ impl InputClient {
     /// comfortably inside the ~64 KiB pipe capacity that an unbounded
     /// pipeline would wedge against.
     const PIPELINE_BATCH: usize = 64;
+
+    /// The control client's process id, for lifecycle fault-injection tests.
+    pub(crate) fn pid(&self) -> Option<u32> {
+        self.child.id()
+    }
 
     /// Deliver `bytes` to the pane as keystrokes, verbatim, confirming
     /// every chunk executed before returning.
@@ -6459,8 +6998,14 @@ mod tests {
             .expect("spawning the command sink");
         let stdin = command_sink.stdin.take().expect("piped stdin");
         let stream = OutputStream {
+            // This fixture exercises parsing over process-backed pipes, not
+            // tmux teardown. Marking its synthetic client already disabled
+            // keeps shutdown-only server state out of the fixture's contract.
+            driver: TmuxDriver::new(std::path::Path::new("")),
+            client_target: String::new(),
+            output_disabled: true,
             child: feeder,
-            stdin,
+            stdin: Some(stdin),
             reader: BufReader::new(feeder_stdout),
             line: Vec::new(),
             passthrough: PassthroughDecoder::default(),
@@ -6687,6 +7232,300 @@ mod tests {
         );
     }
 
+    /// Abandoning a provisional replay client performs the safe transition.
+    ///
+    /// Attach can be cancelled after the replay cutover enabled output but
+    /// before an input client or forwarder exists. The provisional guard must
+    /// keep that client alive through the external `no-output` acknowledgement,
+    /// then reap it without taking the private tmux server down.
+    #[tokio::test]
+    async fn an_abandoned_replay_candidate_is_reaped_after_no_output() {
+        let mut server = ScratchServer::start().await;
+        let pane = server
+            .driver
+            .create_session(
+                "fh-abandoned-replay",
+                "/",
+                80,
+                24,
+                &[],
+                &ticking_pane("ABANDONED"),
+            )
+            .await
+            .expect("session");
+        let gate = Arc::new(DisableOutputGate::default());
+        server.driver.disable_output_gate = Some(Arc::clone(&gate));
+        let candidate = server
+            .driver
+            .open_replay_stream_candidate("fh-abandoned-replay", &pane)
+            .await
+            .expect("replay candidate");
+        let target = candidate
+            .stream
+            .as_ref()
+            .expect("candidate stream")
+            .stream
+            .as_ref()
+            .expect("output stream")
+            .client_target
+            .clone();
+
+        drop(candidate);
+        tokio::time::timeout(std::time::Duration::from_secs(10), gate.entered.notified())
+            .await
+            .expect("candidate cleanup reaches the external boundary");
+        assert!(
+            server
+                .driver
+                .run(&["list-clients", "-F", "#{client_name}"])
+                .await
+                .expect("listing clients before acknowledgement")
+                .lines()
+                .any(|name| name == target),
+            "the candidate client closed before no-output was acknowledged"
+        );
+
+        gate.release.notify_one();
+        tokio::time::timeout(
+            std::time::Duration::from_secs(10),
+            gate.acknowledged.notified(),
+        )
+        .await
+        .expect("candidate cleanup acknowledges no-output");
+        gate.finish.notify_one();
+        let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(10);
+        loop {
+            let clients = server
+                .driver
+                .run(&["list-clients", "-F", "#{client_name}"])
+                .await
+                .expect("listing clients after acknowledgement");
+            if !clients.lines().any(|name| name == target) {
+                break;
+            }
+            assert!(
+                tokio::time::Instant::now() < deadline,
+                "the abandoned output client was not reaped"
+            );
+            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        }
+        assert!(
+            server
+                .driver
+                .has_session("fh-abandoned-replay")
+                .await
+                .expect("checking the private server after candidate cleanup"),
+            "candidate cleanup must not abort the private tmux server"
+        );
+    }
+
+    /// Shutdown establishes `no-output` outside a dirty positional exchange.
+    ///
+    /// A forwarder can be cancelled after writing a multi-command replay group
+    /// but before reading any reply. An in-band shutdown command would then
+    /// mistake the first old `%end` for its own acknowledgement and close the
+    /// output client while tmux still owns queued pane blocks. Holding the
+    /// independent command immediately before and after its acknowledgement
+    /// proves both sides of the boundary: the output client remains alive
+    /// until `no-output` is visible, then it is reaped without taking down the
+    /// private server.
+    #[tokio::test]
+    async fn shutdown_acks_no_output_despite_unread_positional_replies() {
+        let mut server = ScratchServer::start().await;
+        let pane = server
+            .driver
+            .create_session(
+                "fh-shutdown-boundary",
+                "/",
+                80,
+                24,
+                &[],
+                &ticking_pane("BOUNDARY"),
+            )
+            .await
+            .expect("session");
+        let gate = Arc::new(DisableOutputGate::default());
+        server.driver.disable_output_gate = Some(Arc::clone(&gate));
+        let (_modes, _prefill, mut stream) = server
+            .driver
+            .open_replay_stream("fh-shutdown-boundary", &pane)
+            .await
+            .expect("replay stream");
+        let target = stream.client_target.clone();
+
+        // Queue four replies and prove the group ran without consuming any of
+        // them on this client's stdout. This is the interrupted replay shape
+        // that makes an in-band shutdown acknowledgement ambiguous.
+        let waiter_driver = server.driver.clone();
+        let waiter = tokio::spawn(async move {
+            waiter_driver
+                .run(&["wait-for", "fh-shutdown-replies-ready"])
+                .await
+        });
+        stream
+            .send_raw_command(
+                "display-message -p '#{pane_id}' ; \
+                 capture-pane -p -t : ; \
+                 display-message -p '#{session_name}' ; \
+                 wait-for -S fh-shutdown-replies-ready",
+            )
+            .await
+            .expect("queueing an unread four-block exchange");
+        waiter
+            .await
+            .expect("joining the group sentinel")
+            .expect("the group sentinel must run");
+
+        let shutdown = tokio::spawn(async move { shutdown_test_stream(stream).await });
+        tokio::time::timeout(std::time::Duration::from_secs(10), gate.entered.notified())
+            .await
+            .expect("shutdown must reach the external boundary");
+        assert!(
+            server
+                .driver
+                .run(&["list-clients", "-F", "#{client_name}"])
+                .await
+                .expect("listing clients before the boundary")
+                .lines()
+                .any(|name| name == target),
+            "the output client closed before the safe transition began"
+        );
+
+        gate.release.notify_one();
+        tokio::time::timeout(
+            std::time::Duration::from_secs(10),
+            gate.acknowledged.notified(),
+        )
+        .await
+        .expect("the external command must acknowledge no-output");
+        let clients = server
+            .driver
+            .run(&["list-clients", "-F", "#{client_name}|#{client_flags}"])
+            .await
+            .expect("inspecting the acknowledged client");
+        let target_line = clients
+            .lines()
+            .find(|line| line.starts_with(&format!("{target}|")))
+            .expect("the client must remain alive until shutdown receives the acknowledgement");
+        assert!(
+            target_line
+                .split_once('|')
+                .is_some_and(|(_, flags)| { flags.split(',').any(|flag| flag == "no-output") }),
+            "the external command returned without applying no-output: {target_line}"
+        );
+        assert!(
+            !shutdown.is_finished(),
+            "the output client was reaped before the acknowledgement returned"
+        );
+
+        gate.finish.notify_one();
+        tokio::time::timeout(std::time::Duration::from_secs(10), shutdown)
+            .await
+            .expect("shutdown must finish after acknowledgement")
+            .expect("joining output shutdown");
+        let clients = server
+            .driver
+            .run(&["list-clients", "-F", "#{client_name}"])
+            .await
+            .expect("listing clients after shutdown");
+        assert!(
+            clients.lines().all(|name| name != target),
+            "the acknowledged output client was not reaped"
+        );
+        assert!(
+            server
+                .driver
+                .run(&["has-session", "-t", "fh-shutdown-boundary"])
+                .await
+                .is_ok(),
+            "safe output-client shutdown must not abort the private server"
+        );
+    }
+
+    /// Every completed reply boundary of a four-command exchange is safe to stop at.
+    ///
+    /// Pause recovery reads its replies positionally, so cooperative teardown
+    /// can win before the first block or after any one of the four. Each case
+    /// leaves a different amount of old protocol state on the output client's
+    /// stdout. Reopening a fresh client per boundary proves shutdown never
+    /// depends on how many of those old replies the interrupted reader happened
+    /// to consume.
+    #[tokio::test]
+    async fn shutdown_survives_every_four_block_reply_boundary() {
+        let server = ScratchServer::start().await;
+        let pane = server
+            .driver
+            .create_session(
+                "fh-shutdown-boundaries",
+                "/",
+                80,
+                24,
+                &[],
+                &["sh".to_string(), "-c".to_string(), "sleep 300".to_string()],
+            )
+            .await
+            .expect("session");
+
+        for replies_read in 0..=4 {
+            let (_modes, _prefill, mut stream) = server
+                .driver
+                .open_replay_stream("fh-shutdown-boundaries", &pane)
+                .await
+                .unwrap_or_else(|error| {
+                    panic!("opening boundary-{replies_read} stream: {error:#}")
+                });
+            let sentinel = format!("fh-shutdown-boundary-{replies_read}");
+            let waiter_driver = server.driver.clone();
+            let waiter_sentinel = sentinel.clone();
+            let waiter =
+                tokio::spawn(
+                    async move { waiter_driver.run(&["wait-for", &waiter_sentinel]).await },
+                );
+            stream
+                .send_raw_command(&format!(
+                    "display-message -p '#{{pane_id}}' ; \
+                     capture-pane -p -t : ; \
+                     display-message -p '#{{session_name}}' ; \
+                     wait-for -S {sentinel}"
+                ))
+                .await
+                .unwrap_or_else(|error| {
+                    panic!("queueing boundary-{replies_read} exchange: {error:#}")
+                });
+            waiter
+                .await
+                .expect("joining the boundary sentinel")
+                .expect("the boundary exchange must run");
+
+            let deadline = tokio::time::Instant::now() + CONTROL_EXCHANGE_TIMEOUT;
+            for block in 0..replies_read {
+                read_command_block(
+                    &mut stream.reader,
+                    &mut stream.line,
+                    deadline,
+                    "shutdown-boundary test exchange",
+                    &pane,
+                )
+                .await
+                .unwrap_or_else(|error| {
+                    panic!(
+                        "reading block {block} before boundary {replies_read} shutdown: {error:#}"
+                    )
+                });
+            }
+
+            shutdown_test_stream(stream).await;
+            assert!(
+                server
+                    .driver
+                    .run(&["has-session", "-t", "fh-shutdown-boundaries"])
+                    .await
+                    .is_ok(),
+                "shutdown after {replies_read} replies aborted the private server"
+            );
+        }
+    }
+
     /// The replay group's command list and ORDER are the contract
     /// `snapshot_then_cutover` reads reply blocks against, and both the
     /// attach and catch-up paths depend on it being identical apart from
@@ -6882,6 +7721,21 @@ mod tests {
         }
     }
 
+    /// Finish an output stream's fail-closed shutdown in real-tmux tests.
+    ///
+    /// A one-shot failure deliberately returns ownership instead of dropping
+    /// the client. Production publishes that reaper through the per-terminal
+    /// registry; a direct unit test has no registry, so it must drive the same
+    /// retry object itself or risk leaking the very unsafe state under test.
+    async fn shutdown_test_stream(stream: OutputStream) {
+        if let Err(reaper) = stream.shutdown().await {
+            reaper
+                .run()
+                .await
+                .expect("the output client must eventually shut down safely");
+        }
+    }
+
     /// The catch-up path against a REAL tmux: a paused pane must surface
     /// as [`OutputEvent::Paused`], and
     /// [`OutputStream::resume_paused_with_replay`] must both hand back a
@@ -6980,7 +7834,7 @@ mod tests {
             matches!(event, OutputEvent::Bytes(bytes) if bytes.windows(10).any(|w| w == b"PAUSETEST-"))
         })
         .await;
-        stream.shutdown().await;
+        shutdown_test_stream(stream).await;
     }
 
     /// Read this stream continuously until `ticks` of its OWN pane's
@@ -7213,7 +8067,7 @@ mod tests {
             read_progress(&progress) > before,
             "the filtered neighbour stopped making progress — it was frozen, not filtered"
         );
-        stream.shutdown().await;
+        shutdown_test_stream(stream).await;
     }
 
     /// The sink is what keeps a pane every terminal has filtered off from
@@ -7290,7 +8144,7 @@ mod tests {
             !sink_task.is_finished(),
             "the sink stopped draining, so the recovery above proves nothing"
         );
-        stream.shutdown().await;
+        shutdown_test_stream(stream).await;
     }
 
     /// The counter a [`bursting_pane`] keeps outside tmux, or 0 before it
@@ -7434,7 +8288,7 @@ mod tests {
             read_progress(&progress) > before,
             "the late pane stopped making progress — it was frozen, not filtered"
         );
-        stream.shutdown().await;
+        shutdown_test_stream(stream).await;
     }
 
     /// A filter command written while output is live must not desynchronize
@@ -7544,7 +8398,7 @@ mod tests {
             "the catch-up must have settled the filter debt, not merely worked around it"
         );
         assert!(!sink_task.is_finished(), "the sink must still be draining");
-        stream.shutdown().await;
+        shutdown_test_stream(stream).await;
     }
 
     /// Parser-level robustness only: an empty string must parse as an

@@ -9,7 +9,7 @@
 //! any one attachment's lifetime.
 
 use super::core::{RequestError, SessionEntry, Supervisor, error_kind, truncate_for_error};
-use crate::tmux::{InputClient, SessionSink, SessionSinkOpenReapError};
+use crate::tmux::{InputClient, SessionSink};
 use anyhow::Context;
 use farhelm_proto::{ErrorKind, Frame, TerminalSelector};
 use std::collections::{HashMap, HashSet};
@@ -522,8 +522,8 @@ const SINK_RETRY_MAX: Duration = Duration::from_secs(5);
 /// perfectly healthy.
 pub(crate) const SINK_READY_TIMEOUT: Duration = Duration::from_secs(15);
 
-/// The delay before the `n`th consecutive replacement attempt: exponential
-/// from [`SINK_RETRY_BASE`], capped at [`SINK_RETRY_MAX`].
+/// The delay after `n` consecutive failures: exponential from
+/// [`SINK_RETRY_BASE`], capped at [`SINK_RETRY_MAX`].
 ///
 /// A free function so the policy is testable without a tmux server, and
 /// because "how long until the next try" is exactly the kind of arithmetic
@@ -534,11 +534,46 @@ pub(crate) const SINK_READY_TIMEOUT: Duration = Duration::from_secs(15);
 fn sink_retry_delay(consecutive_failures: u32) -> Duration {
     // Saturating rather than wrapping: a session that has been failing for
     // hours must land on the cap, not wrap around to no delay at all.
-    let factor = 1u32.checked_shl(consecutive_failures.min(31)).unwrap_or(0);
+    // One failure gets the base delay; the exponent grows only after another
+    // consecutive failure. Zero is also the base for the initial retry path.
+    let exponent = consecutive_failures.saturating_sub(1).min(31);
+    let factor = 1u32.checked_shl(exponent).unwrap_or(0);
     if factor == 0 {
         return SINK_RETRY_MAX;
     }
     SINK_RETRY_BASE.saturating_mul(factor).min(SINK_RETRY_MAX)
+}
+
+/// Retain a sink client until its output-off boundary and process exit are proven.
+///
+/// Owner shutdown has no safe fallback: returning an error would drop the
+/// `kill_on_drop` child, which can invalidate a pane block still queued inside
+/// tmux. This retry tail therefore outlives the request that triggered it and
+/// keeps the same client handle until orderly shutdown succeeds.
+async fn shutdown_session_sink_until_safe(
+    session: &str,
+    client: &mut SessionSink,
+    reason: &'static str,
+) {
+    let mut failures = 0u32;
+    loop {
+        match client.shutdown().await {
+            Ok(()) => return,
+            Err(error) => {
+                failures = failures.saturating_add(1);
+                if failures.is_power_of_two() {
+                    warn!(
+                        session,
+                        error = %format!("{error:#}"),
+                        failures,
+                        reason,
+                        "session-sink shutdown is not yet safe; retrying"
+                    );
+                }
+            }
+        }
+        tokio::time::sleep(sink_retry_delay(failures)).await;
+    }
 }
 
 /// A session's live sink client, owned jointly by every attachment on that
@@ -665,6 +700,24 @@ impl std::ops::DerefMut for SinkRegistryState {
 }
 
 pub(crate) type SinkRegistry = Arc<StdMutex<SinkRegistryState>>;
+
+/// A cleanup result that is absent until the runtime-owned reaper settles.
+pub(crate) type OutputReapOutcome = Option<Result<(), Arc<str>>>;
+
+/// The stable receiver published before an output client begins shutdown.
+pub(crate) type OutputReapReceiver = watch::Receiver<OutputReapOutcome>;
+
+/// The handoff state left by a terminal-output client that could not finish
+/// cleanup or whose provisional open has not resolved yet.
+pub(crate) enum OutputReapEntry {
+    /// A runtime-owned task still holds and drains the old client.
+    Reaping(OutputReapReceiver),
+    /// Cleanup lost its task or otherwise became unconfirmable.
+    Failed(Arc<str>),
+}
+
+/// Per-terminal ownership barriers for provisional opens and deferred reaps.
+pub(crate) type OutputReapRegistry = Arc<StdMutex<HashMap<AttachmentKey, OutputReapEntry>>>;
 
 /// A published candidate operation whose abandonment is orderly.
 ///
@@ -954,13 +1007,19 @@ where
     let mut consecutive_failures = 0u32;
     loop {
         let started = tokio::time::Instant::now();
-        tokio::select! {
-            _ = client.drain() => {}
+        let ended = tokio::select! {
+            _ = client.drain() => tokio::time::Instant::now(),
             _ = &mut shutdown => {
                 state.send_replace(None);
-                return client.shutdown().await;
+                shutdown_session_sink_until_safe(
+                    &session,
+                    &mut client,
+                    "the final attachment released its sink",
+                )
+                .await;
+                return Ok(());
             }
-        }
+        };
         // Announce the gap BEFORE anything else: from here until a
         // replacement is attached, this session has no sink, and an attach
         // that arrives meanwhile must wait rather than install filters.
@@ -991,8 +1050,11 @@ where
                 Ok(()) => break,
                 Err(error) => {
                     reap_failures = reap_failures.saturating_add(1);
-                    warn!(session = %session, error = %format!("{error:#}"),
-                          "could not reap the dead session sink; retrying");
+                    if reap_failures.is_power_of_two() {
+                        warn!(session = %session, error = %format!("{error:#}"),
+                              failures = reap_failures,
+                              "could not reap the dead session sink; retrying");
+                    }
                 }
             }
             let delay = tokio::time::sleep(sink_retry_delay(reap_failures));
@@ -1008,7 +1070,10 @@ where
         if stop_after_reap {
             return Ok(());
         }
-        if started.elapsed() >= SINK_HEALTHY_RUN {
+        // Cleanup can retry for arbitrarily long. Health is the time the sink
+        // actually carried output, frozen when `drain` ended, not how long it
+        // took afterward to prove the client was gone.
+        if ended.duration_since(started) >= SINK_HEALTHY_RUN {
             consecutive_failures = 0;
         } else {
             consecutive_failures = consecutive_failures.saturating_add(1);
@@ -1028,30 +1093,29 @@ where
             // orderly path exists to prevent. Its exchange is bounded; once
             // it returns, reap any client it produced before stopping.
             let opened = open(session.clone()).await;
-            match shutdown.try_recv() {
-                Ok(()) | Err(oneshot::error::TryRecvError::Closed) => {
-                    match opened {
-                        Ok(mut client) => client.shutdown().await?,
-                        Err(error)
-                            if error.downcast_ref::<SessionSinkOpenReapError>().is_some() =>
-                        {
-                            return Err(error);
-                        }
-                        Err(_) => {}
-                    }
-                    return Ok(());
+            if matches!(
+                shutdown.try_recv(),
+                Ok(()) | Err(oneshot::error::TryRecvError::Closed)
+            ) {
+                if let Ok(mut client) = opened {
+                    shutdown_session_sink_until_safe(
+                        &session,
+                        &mut client,
+                        "shutdown arrived during sink replacement",
+                    )
+                    .await;
                 }
-                Err(oneshot::error::TryRecvError::Empty) => {}
+                return Ok(());
             }
             match opened {
                 Ok(next) => break next,
                 Err(e) => {
-                    if e.downcast_ref::<SessionSinkOpenReapError>().is_some() {
-                        return Err(e);
-                    }
                     consecutive_failures = consecutive_failures.saturating_add(1);
-                    warn!(session = %session, error = %format!("{e:#}"),
-                          "could not reattach the session sink; retrying");
+                    if consecutive_failures.is_power_of_two() {
+                        warn!(session = %session, error = %format!("{e:#}"),
+                              failures = consecutive_failures,
+                              "could not reattach the session sink; retrying");
+                    }
                 }
             }
         };
@@ -1077,12 +1141,24 @@ pub(crate) struct ActiveAttach {
     /// in which a session claims an owner that holds nothing.
     pub(crate) lease: String,
     pub(crate) notify: mpsc::Sender<Frame>,
-    /// The forwarder task. A `JoinHandle` rather than an `AbortHandle`
-    /// because a takeover must be able to *wait* for the old forwarder to
-    /// finish: `abort()` only schedules cancellation, so the old
-    /// control-mode client's process would otherwise still be alive when
-    /// the new one starts.
+    /// The forwarder task. Teardown requests cooperative shutdown through
+    /// `forwarder_shutdown`, then waits until this task has either reaped the
+    /// old control client or transferred it to `forwarder_cleanup`. A
+    /// replacement remains behind that receiver's registry barrier.
     pub(crate) forwarder: tokio::task::JoinHandle<()>,
+    /// Wakes a blocked forwarder without cancelling its cleanup tail.
+    ///
+    /// Aborting the task drops and kills its output-bearing tmux client at an
+    /// arbitrary point. tmux 3.7b can abort the whole server when that races a
+    /// queued pane-output block, so every ordinary teardown signals this watch
+    /// instead and lets `Forwarder::run` close the client gracefully.
+    pub(crate) forwarder_shutdown: watch::Sender<bool>,
+    /// Completion of the output client's safe boundary and process reap.
+    ///
+    /// Teardown publishes this receiver before signalling the task. The task
+    /// may hand work to a longer-lived reaper, but the receiver stays the same,
+    /// so request cancellation cannot erase the per-terminal handoff barrier.
+    pub(crate) forwarder_cleanup: OutputReapReceiver,
     /// A second control-mode client, dedicated to this attachment's input,
     /// opened alongside the replay stream in the attach handler. `send`
     /// on it only returns once tmux has actually executed the command —
@@ -1127,6 +1203,13 @@ pub(crate) struct ActiveAttach {
     /// sink, and a sink outliving its last viewer would be a control client
     /// attached to a session nobody is watching.
     pub(crate) sink: SessionSinkLease,
+}
+
+impl ActiveAttach {
+    /// Ask the output forwarder to stop at its next cancellation-safe await.
+    pub(crate) fn request_forwarder_shutdown(&self) {
+        self.forwarder_shutdown.send_replace(true);
+    }
 }
 
 #[cfg(test)]
@@ -1245,8 +1328,8 @@ mod tests {
     #[test]
     fn the_sink_backoff_grows_to_a_cap_and_stays_there() {
         assert_eq!(sink_retry_delay(0), SINK_RETRY_BASE);
-        assert_eq!(sink_retry_delay(1), SINK_RETRY_BASE * 2);
-        assert_eq!(sink_retry_delay(2), SINK_RETRY_BASE * 4);
+        assert_eq!(sink_retry_delay(1), SINK_RETRY_BASE);
+        assert_eq!(sink_retry_delay(2), SINK_RETRY_BASE * 2);
         assert_eq!(sink_retry_delay(1000), SINK_RETRY_MAX);
         // Monotonic and never past the cap, at every step in between — a
         // shift that overflowed would show up here as a delay collapsing
@@ -1563,94 +1646,6 @@ mod tests {
         );
     }
 
-    /// An open whose child could not be reaped ends supervision fail-closed.
-    ///
-    /// Retrying this marker as an ordinary attach failure would knowingly
-    /// overlap the unconfirmed client with another replacement. The error must
-    /// therefore reach the handle reaper, which retains the session barrier.
-    #[tokio::test(start_paused = true)]
-    async fn an_unconfirmed_open_reap_error_is_not_retried() {
-        let attempts = Arc::new(AtomicU64::new(0));
-        let counter = Arc::clone(&attempts);
-        let (state, _rx) = watch::channel(Some(1));
-        let (_shutdown, shutdown_rx) = oneshot::channel();
-        let task = tokio::spawn(run_session_sink(
-            "fh-test".to_string(),
-            dying_fake_sink(),
-            state,
-            shutdown_rx,
-            None,
-            move |_| {
-                let counter = Arc::clone(&counter);
-                async move {
-                    let attempt = counter.fetch_add(1, Ordering::Relaxed);
-                    assert_eq!(attempt, 0, "the unconfirmed client error was retried");
-                    Err(SessionSinkOpenReapError::for_test().into())
-                }
-            },
-        ));
-
-        let error = task
-            .await
-            .expect("the sink supervisor task joins")
-            .expect_err("an unconfirmed client must end replacement attempts");
-        assert!(error.downcast_ref::<SessionSinkOpenReapError>().is_some());
-        assert_eq!(
-            attempts.load(Ordering::Relaxed),
-            1,
-            "the unconfirmed client error must not be retried"
-        );
-    }
-
-    /// Shutdown cannot hide an unconfirmed client returned by an open.
-    ///
-    /// An owner may disappear while the bounded replacement exchange is in
-    /// flight. If that exchange reports that its spawned child was not reaped,
-    /// final-owner teardown must retain the error instead of clearing the
-    /// session barrier as a successful shutdown.
-    #[tokio::test(start_paused = true)]
-    async fn shutdown_during_open_preserves_an_unconfirmed_reap_error() {
-        let (state, _rx) = watch::channel(Some(1));
-        let (shutdown, shutdown_rx) = oneshot::channel();
-        let (retrying, mut retrying_rx) = watch::channel(0u64);
-        let entered = Arc::new(tokio::sync::Notify::new());
-        let release = Arc::new(tokio::sync::Notify::new());
-        let opener_entered = Arc::clone(&entered);
-        let opener_release = Arc::clone(&release);
-        let task = tokio::spawn(run_session_sink(
-            "fh-test".to_string(),
-            dying_fake_sink(),
-            state,
-            shutdown_rx,
-            Some(retrying),
-            move |_| {
-                let entered = Arc::clone(&opener_entered);
-                let release = Arc::clone(&opener_release);
-                async move {
-                    entered.notify_one();
-                    release.notified().await;
-                    Err(SessionSinkOpenReapError::for_test().into())
-                }
-            },
-        ));
-
-        retrying_rx
-            .changed()
-            .await
-            .expect("the sink supervisor announces its retry timer");
-        tokio::time::advance(SINK_RETRY_MAX).await;
-        entered.notified().await;
-        shutdown
-            .send(())
-            .expect("the sink supervisor still receives shutdown");
-        release.notify_one();
-        let error = task
-            .await
-            .expect("the sink supervisor task joins")
-            .expect_err("shutdown must preserve an unconfirmed client error");
-        assert!(error.downcast_ref::<SessionSinkOpenReapError>().is_some());
-    }
-
     /// Shutdown waits out an in-flight open and reaps its returned client.
     ///
     /// Cancelling a tmux attach exchange can detach the future before the
@@ -1732,6 +1727,69 @@ mod tests {
         );
     }
 
+    /// Shutdown also ends an in-flight replacement that eventually fails.
+    ///
+    /// The error branch is separate from the returned-client branch above. It
+    /// must observe the pending owner shutdown and exit without scheduling a
+    /// second open, or a session with no owners can retain its handoff barrier
+    /// and retry forever.
+    #[tokio::test(start_paused = true)]
+    async fn shutdown_during_failed_replacement_open_does_not_retry() {
+        let (state, _rx) = watch::channel(Some(1));
+        let (shutdown, shutdown_rx) = oneshot::channel();
+        let (retrying, mut retrying_rx) = watch::channel(0u64);
+        let entered = Arc::new(tokio::sync::Notify::new());
+        let release = Arc::new(tokio::sync::Notify::new());
+        let attempts = Arc::new(AtomicU64::new(0));
+        let opener_entered = Arc::clone(&entered);
+        let opener_release = Arc::clone(&release);
+        let opener_attempts = Arc::clone(&attempts);
+        let future = run_session_sink(
+            "fh-test".to_string(),
+            dying_fake_sink(),
+            state,
+            shutdown_rx,
+            Some(retrying),
+            move |_| {
+                let entered = Arc::clone(&opener_entered);
+                let release = Arc::clone(&opener_release);
+                let attempts = Arc::clone(&opener_attempts);
+                async move {
+                    attempts.fetch_add(1, Ordering::Relaxed);
+                    entered.notify_one();
+                    release.notified().await;
+                    anyhow::bail!("injected replacement failure")
+                }
+            },
+        );
+        tokio::pin!(future);
+
+        tokio::select! {
+            result = future.as_mut() => panic!("sink supervisor exited before retrying: {result:?}"),
+            changed = retrying_rx.changed() => {
+                changed.expect("the sink supervisor announces its retry timer");
+            }
+        }
+        tokio::time::advance(SINK_RETRY_MAX).await;
+        tokio::select! {
+            result = future.as_mut() => panic!("sink supervisor exited before opening: {result:?}"),
+            _ = entered.notified() => {}
+        }
+        shutdown
+            .send(())
+            .expect("the sink supervisor still receives shutdown");
+
+        release.notify_one();
+        future
+            .await
+            .expect("a failed replacement observes shutdown as success");
+        assert_eq!(
+            attempts.load(Ordering::Relaxed),
+            1,
+            "shutdown after a failed open must not start another replacement"
+        );
+    }
+
     /// The last lease publishes its handoff barrier synchronously, while
     /// the runtime-owned reaper completes independently afterward.
     ///
@@ -1797,6 +1855,121 @@ mod tests {
             );
             tokio::task::yield_now().await;
         }
+    }
+
+    /// An old successful reaper cannot erase a newer registry barrier.
+    ///
+    /// Reaper completion is asynchronous, so its original slot may have been
+    /// replaced by stronger fail-closed evidence before it finishes. Clearing
+    /// by key alone would lose that evidence and let a new sink overlap the
+    /// client whose newer cleanup remains unconfirmed.
+    #[tokio::test]
+    async fn a_stale_successful_reaper_does_not_clear_a_newer_barrier() {
+        let registry: SinkRegistry = Arc::new(StdMutex::new(Default::default()));
+        let (shutdown, shutdown_rx) = oneshot::channel();
+        let entered = Arc::new(tokio::sync::Notify::new());
+        let release = Arc::new(tokio::sync::Notify::new());
+        let task_entered = Arc::clone(&entered);
+        let task_release = Arc::clone(&release);
+        let handle = Arc::new(SessionSinkHandle {
+            tmux_name: "fh-test".to_string(),
+            task: Some(tokio::spawn(async move {
+                let _ = shutdown_rx.await;
+                task_entered.notify_one();
+                task_release.notified().await;
+                Ok(())
+            })),
+            shutdown: Some(shutdown),
+            state: watch::channel(Some(1)).0,
+        });
+        registry.lock().expect("sink registry").insert(
+            "fh-test".to_string(),
+            SinkRegistryEntry::Live(Arc::downgrade(&handle)),
+        );
+
+        drop(SessionSinkLease::new(handle, Arc::clone(&registry)));
+        entered.notified().await;
+        let mut old_done = {
+            let state = registry.lock().expect("sink registry");
+            match state.get("fh-test") {
+                Some(SinkRegistryEntry::Reaping(done)) => done.clone(),
+                _ => panic!("the old reaper did not publish its barrier"),
+            }
+        };
+        registry.lock().expect("sink registry").insert(
+            "fh-test".to_string(),
+            SinkRegistryEntry::Failed(Arc::<str>::from("newer cleanup is unconfirmed")),
+        );
+        release.notify_one();
+        while old_done.borrow().is_none() {
+            old_done
+                .changed()
+                .await
+                .expect("the old reaper publishes its outcome");
+        }
+
+        let state = registry.lock().expect("sink registry");
+        assert!(matches!(
+            state.get("fh-test"),
+            Some(SinkRegistryEntry::Failed(error)) if error.as_ref() == "newer cleanup is unconfirmed"
+        ));
+    }
+
+    /// A stale lease failure poisons the replacement registry slot.
+    ///
+    /// The client belongs to an older incarnation, but an unconfirmed tmux
+    /// process is unsafe for every newer incarnation of the same session. A
+    /// replacement `Live` entry must therefore become `Failed` rather than
+    /// silently discarding the stale lease's shutdown error.
+    #[tokio::test]
+    async fn a_stale_lease_failure_poisons_a_newer_live_slot() {
+        let registry: SinkRegistry = Arc::new(StdMutex::new(Default::default()));
+        let (shutdown, shutdown_rx) = oneshot::channel();
+        let stale = Arc::new(SessionSinkHandle {
+            tmux_name: "fh-test".to_string(),
+            task: Some(tokio::spawn(async move {
+                let _ = shutdown_rx.await;
+                anyhow::bail!("the stale sink could not be reaped")
+            })),
+            shutdown: Some(shutdown),
+            state: watch::channel(Some(1)).0,
+        });
+        let stale = SessionSinkLease::new(stale, Arc::clone(&registry));
+        let replacement = Arc::new(SessionSinkHandle {
+            tmux_name: "fh-test".to_string(),
+            task: None,
+            shutdown: None,
+            state: watch::channel(Some(2)).0,
+        });
+        registry.lock().expect("sink registry").insert(
+            "fh-test".to_string(),
+            SinkRegistryEntry::Live(Arc::downgrade(&replacement)),
+        );
+
+        drop(stale);
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(30);
+        loop {
+            let failure = {
+                let state = registry.lock().expect("sink registry");
+                match state.get("fh-test") {
+                    Some(SinkRegistryEntry::Failed(error)) => Some(Arc::clone(error)),
+                    _ => None,
+                }
+            };
+            if let Some(error) = failure {
+                assert!(
+                    error.contains("the stale sink could not be reaped"),
+                    "the stale failure must replace the newer live slot: {error}"
+                );
+                break;
+            }
+            assert!(
+                tokio::time::Instant::now() < deadline,
+                "the stale lease failure did not poison the newer slot"
+            );
+            tokio::task::yield_now().await;
+        }
+        drop(replacement);
     }
 
     /// A failed reap remains visible instead of permitting another client.

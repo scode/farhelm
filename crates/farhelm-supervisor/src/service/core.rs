@@ -34,10 +34,10 @@ use super::sweep::{
     StopFailure, SweepTarget, TabReapAnchor, launch_scope_unit, reap_process_tree, stop_live_agent,
 };
 use super::terminals::{
-    ActiveAttach, AttachmentKey, SINK_READY_TIMEOUT, SessionSinkCandidate, SessionSinkHandle,
-    SessionSinkLease, SinkRegistry, SinkRegistryEntry, TAB_LAUNCH_SETTLE, TAB_LAUNCH_SETTLE_STEP,
-    Terminal, TerminalId, agent_pane_from_states, resolve_terminal, run_session_sink,
-    tabs_from_pane_states,
+    ActiveAttach, AttachmentKey, OutputReapEntry, OutputReapReceiver, OutputReapRegistry,
+    SINK_READY_TIMEOUT, SessionSinkCandidate, SessionSinkHandle, SessionSinkLease, SinkRegistry,
+    SinkRegistryEntry, TAB_LAUNCH_SETTLE, TAB_LAUNCH_SETTLE_STEP, Terminal, TerminalId,
+    agent_pane_from_states, resolve_terminal, run_session_sink, tabs_from_pane_states,
 };
 use super::ticker::{ActivitySample, SAMPLING_ADMISSION_PERMITS, TICKER_INTERVAL, start_ticker};
 use super::uploads::UploadHandle;
@@ -51,7 +51,7 @@ use crate::store::{
     RetryClaim, SessionStore, Settlement, StoredSession, Transition, now_unix,
 };
 use crate::tmux::{
-    AGENT_WINDOW_OPTION, PaneState, SessionSinkOpenReapError, TAB_WINDOW_OPTION, TmuxDriver,
+    AGENT_WINDOW_OPTION, PaneState, ReplayStreamCandidate, TAB_WINDOW_OPTION, TmuxDriver,
 };
 use anyhow::Context;
 use farhelm_proto::{
@@ -417,6 +417,21 @@ pub type SinkReservationGate =
 /// lookup admits only one missing-sink reservation. Production installs none.
 pub type SinkLookupGate = SinkReservationGate;
 
+/// A hook awaited before a natural forwarder verdict claims its attachment.
+///
+/// The arbitration race test holds this boundary while an explicit takeover
+/// removes the attachment. Production installs none.
+pub type NaturalDetachGate = SinkReservationGate;
+
+/// A hook awaited after a forwarder's output client is safely gone but before
+/// that result is published to teardown waiters.
+///
+/// Restart and tab-close must still notify their viewer and recover their
+/// session state when cleanup has moved behind a runtime-owned barrier. Tests
+/// hold this boundary to make that normally tiny interval deterministic.
+/// Production installs none.
+pub type ForwarderCleanupGate = SinkReservationGate;
+
 /// A named boundary in archive teardown where tests may pause or fail the
 /// operation before it publishes the archived row.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -481,6 +496,10 @@ pub struct SupervisorSeams {
     pub sink_lookup_gate: Option<SinkLookupGate>,
     /// Test signal emitted after locked lookup observes a candidate barrier.
     pub sink_candidate_wait_gate: Option<SinkLookupGate>,
+    /// See [`NaturalDetachGate`]. `None` in production.
+    pub natural_detach_gate: Option<NaturalDetachGate>,
+    /// See [`ForwarderCleanupGate`]. `None` in production.
+    pub forwarder_cleanup_gate: Option<ForwarderCleanupGate>,
     /// See [`ArchiveGate`]. `None` in production.
     pub archive_gate: Option<ArchiveGate>,
     /// See [`SampleFault`]. `None` in production.
@@ -603,6 +622,8 @@ impl Default for SupervisorSeams {
             sink_reservation_gate: None,
             sink_lookup_gate: None,
             sink_candidate_wait_gate: None,
+            natural_detach_gate: None,
+            forwarder_cleanup_gate: None,
             archive_gate: None,
             sample_fault: None,
             ticker_interval: TICKER_INTERVAL,
@@ -2439,7 +2460,7 @@ impl CaptureState {
 /// reason: an ownership check that releases the lock before acting goes
 /// stale the moment a takeover interleaves. `DeleteSession` is the second
 /// holder of this same exception, for the same underlying reason: it
-/// holds `attachments` across its own forwarder-abort and tmux calls so a
+/// holds `attachments` across its own forwarder shutdown and tmux calls so a
 /// concurrent `Attach` cannot install a fresh attachment on a session
 /// that is disappearing out from under it — but deliberately NOT across
 /// its process-tree sweep, which can take seconds and would otherwise
@@ -2507,6 +2528,14 @@ pub struct Supervisor {
     /// because a takeover cannot interleave inside any of their
     /// check-then-act pairs.
     pub(crate) attachments: Mutex<HashMap<AttachmentKey, ActiveAttach>>,
+    /// Per-terminal barriers for provisional opens and unfinished shutdowns.
+    ///
+    /// Teardown publishes a `Reaping` entry while it still holds
+    /// `attachments`, before allowing any attach to observe the old map entry
+    /// as absent. The retained receiver is therefore the per-terminal handoff
+    /// boundary: a replacement waits outside the global async mutex, while a
+    /// lost reaper leaves `Failed` behind until supervisor restart.
+    pub(crate) output_reaps: OutputReapRegistry,
     /// Each tmux session's sink lifecycle and handoff state, keyed by tmux
     /// session name (PLAN_M4.md order-of-work step 5, and
     /// [`SessionSinkHandle`] for what a live sink is).
@@ -2519,9 +2548,11 @@ pub struct Supervisor {
     /// Candidate-operation barriers sit alongside that registered state: they
     /// are published atomically when a missing sink is reserved for opening
     /// and remain until the open completes without an installable handle or
-    /// the resulting installed/competing client is resolved. The runtime-owned
-    /// opener or reaper, not the request that noticed the work, owns
-    /// completion; cancellation therefore cannot erase either barrier.
+    /// the resulting installed/competing client is resolved. A runtime task
+    /// owns the in-flight open. On success, the request receives a guard and
+    /// completes the barrier by installing it; abandoning that guard transfers
+    /// both cleanup and completion to its runtime-owned drop reaper. Request
+    /// cancellation therefore cannot erase either barrier.
     ///
     /// Keyed by TMUX session name rather than farhelm session id because
     /// the name is what a client attaches to, and because it makes the
@@ -2815,6 +2846,295 @@ struct CaptureHistory {
 }
 
 impl Supervisor {
+    /// Publish a terminal's cleanup barrier before requesting shutdown.
+    ///
+    /// Callers hold `attachments` while removing the corresponding live entry.
+    /// Installing a deferred barrier before that lock is released closes the
+    /// only gap in which a replacement could see neither the old attachment nor
+    /// its still-running cleanup. Join failure is permanent for this supervisor
+    /// process: the task lost the only proof that its output client reached the
+    /// safe boundary, so retrying an attach would be a guess.
+    pub(crate) fn begin_forwarder_shutdown(&self, key: AttachmentKey, attachment: &ActiveAttach) {
+        self.track_output_reap(key, attachment.forwarder_cleanup.clone());
+        attachment.request_forwarder_shutdown();
+    }
+
+    /// Open a provisional replay client without tying its cleanup to a request.
+    ///
+    /// The barrier is published before the runtime-owned open begins and stays
+    /// until the caller installs the returned guard or abandoning it proves the
+    /// client safely reaped. The request-facing wait is bounded; timing out does
+    /// not cancel the opener or erase the per-terminal barrier.
+    pub(crate) async fn open_replay_stream_candidate(
+        &self,
+        key: AttachmentKey,
+        tmux_name: &str,
+        pane: &str,
+    ) -> anyhow::Result<ReplayStreamCandidate> {
+        let (completion, completion_rx) = watch::channel(None);
+        self.track_output_reap(key, completion_rx);
+        let (send, receive) = tokio::sync::oneshot::channel();
+        let tmux = self.tmux.clone();
+        let tmux_name = tmux_name.to_string();
+        let pane = pane.to_string();
+        tokio::spawn(async move {
+            match tmux.open_replay_stream_candidate(&tmux_name, &pane).await {
+                Ok(mut candidate) => {
+                    candidate.set_completion(completion);
+                    let _ = send.send(Ok(candidate));
+                }
+                Err(error) => {
+                    completion.send_replace(Some(Ok(())));
+                    let _ = send.send(Err(error));
+                }
+            }
+        });
+        tokio::time::timeout(self.timeouts.sink_ready, receive)
+            .await
+            .with_context(|| {
+                format!(
+                    "the terminal-output client did not finish opening within {:?}",
+                    self.timeouts.sink_ready
+                )
+            })?
+            .context("the runtime-owned terminal-output opener stopped")?
+    }
+
+    /// Install one reap receiver and own its eventual registry transition.
+    fn track_output_reap(&self, key: AttachmentKey, done: OutputReapReceiver) {
+        self.output_reaps
+            .lock()
+            .expect("output-reap registry poisoned")
+            .insert(key.clone(), OutputReapEntry::Reaping(done.clone()));
+
+        let registry = Arc::clone(&self.output_reaps);
+        tokio::spawn(async move {
+            let identity = done.clone();
+            let mut done = done;
+            let outcome = loop {
+                if let Some(outcome) = done.borrow().clone() {
+                    break outcome;
+                }
+                if done.changed().await.is_err() {
+                    break Err(Arc::<str>::from(
+                        "terminal-output cleanup task ended without a result",
+                    ));
+                }
+            };
+            let mut registry = registry.lock().expect("output-reap registry poisoned");
+            let same = registry.get(&key).is_some_and(|entry| match entry {
+                OutputReapEntry::Reaping(current) => current.same_channel(&identity),
+                OutputReapEntry::Failed(_) => false,
+            });
+            if same {
+                match outcome {
+                    Ok(()) => {
+                        registry.remove(&key);
+                    }
+                    Err(error) => {
+                        registry.insert(key, OutputReapEntry::Failed(error));
+                    }
+                }
+            }
+        });
+    }
+
+    /// Preserve a join failure as fail-closed evidence for this terminal.
+    pub(crate) fn record_forwarder_join(
+        &self,
+        key: AttachmentKey,
+        joined: Result<(), tokio::task::JoinError>,
+    ) -> Result<(), Arc<str>> {
+        match joined {
+            Ok(()) => Ok(()),
+            Err(join) => {
+                let error = Arc::<str>::from(format!(
+                    "terminal {:?} output forwarder panicked or was cancelled: {join}",
+                    key.terminal
+                ));
+                self.output_reaps
+                    .lock()
+                    .expect("output-reap registry poisoned")
+                    .insert(key, OutputReapEntry::Failed(Arc::clone(&error)));
+                Err(error)
+            }
+        }
+    }
+
+    /// Whether any terminal in `session` still has an unresolved output client.
+    ///
+    /// The caller uses this while holding `attachments`; teardown publishes
+    /// under that same async lock, making the check atomic with new attachment
+    /// installation even though the registry itself uses a synchronous lock.
+    pub(crate) fn has_output_reap_for_session(&self, session: &str) -> bool {
+        let mut registry = self
+            .output_reaps
+            .lock()
+            .expect("output-reap registry poisoned");
+        let settled: Vec<(AttachmentKey, Result<(), Arc<str>>)> = registry
+            .iter()
+            .filter_map(|(key, entry)| match entry {
+                OutputReapEntry::Reaping(done) => {
+                    done.borrow().clone().map(|outcome| (key.clone(), outcome))
+                }
+                OutputReapEntry::Failed(_) => None,
+            })
+            .collect();
+        for (key, outcome) in settled {
+            match outcome {
+                Ok(()) => {
+                    registry.remove(&key);
+                }
+                Err(error) => {
+                    registry.insert(key, OutputReapEntry::Failed(error));
+                }
+            }
+        }
+        registry.keys().any(|key| key.session == session)
+    }
+
+    /// Whether `key` still has an unresolved output client.
+    ///
+    /// Output-client overlap is a per-terminal hazard. Restart, tab close, and
+    /// attach therefore use this narrower check; archive and delete retain the
+    /// session-wide check because they tear down every terminal together.
+    pub(crate) fn has_output_reap_for_key(&self, key: &AttachmentKey) -> bool {
+        let mut registry = self
+            .output_reaps
+            .lock()
+            .expect("output-reap registry poisoned");
+        let settled = registry.get(key).and_then(|entry| match entry {
+            OutputReapEntry::Reaping(done) => done.borrow().clone(),
+            OutputReapEntry::Failed(_) => None,
+        });
+        if let Some(outcome) = settled {
+            match outcome {
+                Ok(()) => {
+                    registry.remove(key);
+                }
+                Err(error) => {
+                    registry.insert(key.clone(), OutputReapEntry::Failed(error));
+                }
+            }
+        }
+        registry.contains_key(key)
+    }
+
+    /// Wait for one terminal's old output client, without pinning a request.
+    ///
+    /// The runtime-owned reaper keeps running after this budget expires. A
+    /// caller gets a retryable failure instead of wedging its connection's
+    /// dispatcher behind cleanup that may legitimately retry forever.
+    pub(crate) async fn wait_for_output_reap(&self, key: &AttachmentKey) -> Result<(), Arc<str>> {
+        let key = key.clone();
+        let budget = self.timeouts.sink_ready;
+        tokio::time::timeout(budget, async {
+            loop {
+                let mut done = {
+                    let registry = self
+                        .output_reaps
+                        .lock()
+                        .expect("output-reap registry poisoned");
+                    match registry.get(&key) {
+                        Some(OutputReapEntry::Reaping(done)) => done.clone(),
+                        Some(OutputReapEntry::Failed(error)) => {
+                            return Err(Arc::clone(error));
+                        }
+                        None => return Ok(()),
+                    }
+                };
+                loop {
+                    if let Some(outcome) = done.borrow().clone() {
+                        outcome?;
+                        break;
+                    }
+                    done.changed().await.map_err(|_| {
+                        Arc::<str>::from("terminal-output cleanup task ended without a result")
+                    })?;
+                }
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .map_err(|_| {
+            Arc::<str>::from(format!(
+                "terminal-output cleanup did not finish within {budget:?}"
+            ))
+        })?
+    }
+
+    /// Wait outside `attachments` for every old output client on one session.
+    ///
+    /// A test seam for the whole-session registry contract. Production archive
+    /// and delete fail fast when this state exists; they do not pin a request
+    /// while runtime-owned reapers keep retrying.
+    #[cfg(test)]
+    pub(crate) async fn wait_for_output_reaps(&self, session: &str) -> Result<(), Arc<str>> {
+        let budget = self.timeouts.sink_ready;
+        tokio::time::timeout(budget, async {
+            loop {
+                let pending: Vec<OutputReapReceiver> = {
+                    let registry = self
+                        .output_reaps
+                        .lock()
+                        .expect("output-reap registry poisoned");
+                    let mut pending = Vec::new();
+                    for (key, entry) in registry.iter().filter(|(key, _)| key.session == session) {
+                        match entry {
+                            OutputReapEntry::Reaping(done) => pending.push(done.clone()),
+                            OutputReapEntry::Failed(error) => {
+                                return Err(Arc::<str>::from(format!(
+                                    "terminal {:?} cleanup is unconfirmed: {error}",
+                                    key.terminal
+                                )));
+                            }
+                        }
+                    }
+                    pending
+                };
+                if pending.is_empty() {
+                    return Ok(());
+                }
+
+                let mut waits = tokio::task::JoinSet::new();
+                for mut done in pending {
+                    waits.spawn(async move {
+                        loop {
+                            if let Some(outcome) = done.borrow().clone() {
+                                return outcome;
+                            }
+                            if done.changed().await.is_err() {
+                                return Err(Arc::<str>::from(
+                                    "terminal-output cleanup task ended without a result",
+                                ));
+                            }
+                        }
+                    });
+                }
+                while let Some(joined) = waits.join_next().await {
+                    match joined {
+                        Ok(Ok(())) => {}
+                        Ok(Err(error)) => return Err(error),
+                        Err(join) => {
+                            return Err(Arc::<str>::from(format!(
+                                "waiting for terminal-output cleanup failed: {join}"
+                            )));
+                        }
+                    }
+                }
+                // The watcher that owns registry cleanup may be one scheduling turn
+                // behind the completion we just observed.
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .map_err(|_| {
+            Arc::<str>::from(format!(
+                "terminal-output cleanup for session {session} did not finish within {budget:?}"
+            ))
+        })?
+    }
+
     /// Production constructor: the launch shim is this very process's
     /// binary. Test harnesses must NOT use this — their `current_exe` is
     /// the libtest runner, not farhelm — and use `new_with_exe` instead.
@@ -2988,6 +3308,7 @@ impl Supervisor {
             host_identity,
             sessions: Mutex::new(sessions),
             attachments: Mutex::new(HashMap::new()),
+            output_reaps: Arc::new(std::sync::Mutex::new(HashMap::new())),
             sinks: Arc::new(std::sync::Mutex::new(Default::default())),
             uploads: Mutex::new(HashMap::new()),
             next_transfer: AtomicU64::new(1),
@@ -6168,19 +6489,24 @@ impl Supervisor {
         // about to be respawned under it (or replaced outright), so the
         // client is told to reattach rather than left watching a stream
         // whose meaning changed underneath it.
-        self.detach_for_restart(&id).await;
-        let relaunched = self
-            .relaunch_into_terminal(
-                entry,
-                claim.generation,
-                launch_scope_unit(&id, claim.generation, claim.scoped),
-                argv,
-                launch_cwd,
-                terminal_survives,
-                live_frame,
-                reset_capture,
-            )
-            .await;
+        let relaunched = match self.detach_for_restart(&id).await {
+            Ok(()) => {
+                self.relaunch_into_terminal(
+                    entry,
+                    claim.generation,
+                    launch_scope_unit(&id, claim.generation, claim.scoped),
+                    argv,
+                    launch_cwd,
+                    terminal_survives,
+                    live_frame,
+                    reset_capture,
+                )
+                .await
+            }
+            Err(error) => Err(RelaunchFailure::definitive(
+                error.context("detaching the previous run's terminal output"),
+            )),
+        };
         match relaunched {
             Ok(info) => Ok(info),
             // The relaunch got as far as publishing its new generation and
@@ -6873,27 +7199,14 @@ impl Supervisor {
         info
     }
 
-    /// Record that a sink process may still exist, blocking later clients.
-    fn fail_sink_registry(
-        sinks: &SinkRegistry,
-        tmux_name: &str,
-        error: &anyhow::Error,
-    ) -> Arc<str> {
-        let message = Arc::<str>::from(format!("{error:#}"));
-        sinks.lock().expect("sink registry poisoned").insert(
-            tmux_name.to_string(),
-            SinkRegistryEntry::Failed(Arc::clone(&message)),
-        );
-        message
-    }
-
     /// Open a candidate in a task that survives cancellation of its caller.
     ///
     /// Opening a tmux control client spawns a process before its bounded
     /// attach exchange completes. If the request awaiting that exchange is
-    /// cancelled, the runtime-owned task finishes it and orderly-reaps any
-    /// client the abandoned result contains; an unconfirmed exit poisons the
-    /// session just like every other reap failure.
+    /// cancelled, the runtime-owned task finishes it. `open_session_sink`
+    /// retains and retries cleanup for any child whose attach fails, so this
+    /// task cannot release the candidate barrier until returning an attached
+    /// client or a failure whose child is confirmed gone.
     async fn open_sink_candidate(
         &self,
         tmux_name: &str,
@@ -6901,8 +7214,8 @@ impl Supervisor {
     ) -> anyhow::Result<SessionSinkCandidate> {
         let (send, receive) = tokio::sync::oneshot::channel();
         let tmux = self.tmux.clone();
-        let sinks = Arc::clone(&self.sinks);
         let tmux_name = tmux_name.to_string();
+        let waiting_for = tmux_name.clone();
         tokio::spawn(async move {
             let mut candidate = candidate;
             candidate.mark_opening_started();
@@ -6939,18 +7252,19 @@ impl Supervisor {
                     let _ = send.send(Ok(candidate));
                 }
                 Err(error) => {
-                    if error.downcast_ref::<SessionSinkOpenReapError>().is_some() {
-                        let message = Self::fail_sink_registry(&sinks, &tmux_name, &error);
-                        candidate.finish_without_handle(Err(message));
-                    } else {
-                        candidate.finish_without_handle(Ok(()));
-                    }
+                    candidate.finish_without_handle(Ok(()));
                     let _ = send.send(Err(error));
                 }
             }
         });
-        receive
+        tokio::time::timeout(self.timeouts.sink_ready, receive)
             .await
+            .with_context(|| {
+                format!(
+                    "the session-sink opener for {waiting_for} did not finish within {:?}",
+                    self.timeouts.sink_ready
+                )
+            })?
             .context("the runtime-owned session-sink opener stopped")?
     }
 
@@ -7320,13 +7634,34 @@ impl Supervisor {
     /// the wire protocol. Reads the registry rather than a live tmux query
     /// so a test can tell "the supervisor believes it has a sink" apart
     /// from "some client happens to be attached".
-    pub async fn session_sink_pid(&self, tmux_name: &str) -> Option<u32> {
+    pub fn session_sink_pid(&self, tmux_name: &str) -> Option<u32> {
         let sinks = self.sinks.lock().expect("sink registry poisoned");
         let Some(SinkRegistryEntry::Live(handle)) = sinks.get(tmux_name) else {
             return None;
         };
         let handle = handle.upgrade()?;
         *handle.state.borrow()
+    }
+
+    /// The input control client's pid for one live attachment, for tests.
+    ///
+    /// Killing that process is the only deterministic way to exercise the
+    /// connection handler's input-failure teardown. `tab_id = None` selects the
+    /// agent terminal; `Some(id)` selects that tab. Production has no caller.
+    pub async fn attachment_input_client_pid(
+        &self,
+        session_id: &str,
+        tab_id: Option<&str>,
+    ) -> Option<u32> {
+        let terminal = match tab_id {
+            Some(id) => TerminalId::Tab(id.to_string()),
+            None => TerminalId::Agent,
+        };
+        self.attachments
+            .lock()
+            .await
+            .get(&AttachmentKey::new(session_id, terminal))
+            .and_then(|attachment| attachment.input.pid())
     }
 
     /// How many registered sink-state entries the registry is holding.
@@ -7337,7 +7672,7 @@ impl Supervisor {
     /// supervisor's memory made it obvious. Transient candidate-operation
     /// barriers are deliberately excluded; their own tests inspect their
     /// completion boundary rather than treating in-flight work as a leak.
-    pub async fn session_sink_registry_len(&self) -> usize {
+    pub fn session_sink_registry_len(&self) -> usize {
         self.sinks.lock().expect("sink registry poisoned").len()
     }
 
@@ -7359,32 +7694,42 @@ impl Supervisor {
     /// therefore their attachments — must survive it untouched
     /// (PLAN_M4.md item 2). A session-wide sweep here would detach a tab
     /// whose shell the restart never went near.
-    async fn detach_for_restart(&self, session_id: &str) {
-        let attachment = self
-            .attachments
-            .lock()
-            .await
-            .remove(&AttachmentKey::new(session_id, TerminalId::Agent));
-        // `..` drops this attachment's input client (killing its
-        // control-mode process via `kill_on_drop`) and its pause sender,
-        // which the forwarder being aborted below can no longer observe.
-        let Some(ActiveAttach {
+    async fn detach_for_restart(&self, session_id: &str) -> anyhow::Result<()> {
+        let key = AttachmentKey::new(session_id, TerminalId::Agent);
+        let mut attachments = self.attachments.lock().await;
+        let attachment = attachments.remove(&key);
+        let Some(attachment) = attachment else {
+            return Ok(());
+        };
+        // Stop before destructuring so the forwarder retains its cleanup tail;
+        // publishing while the map lock is still held prevents a replacement
+        // from observing neither the old entry nor its reap barrier. `..` then
+        // drops this attachment's input client and pause sender.
+        self.begin_forwarder_shutdown(key.clone(), &attachment);
+        drop(attachments);
+        let ActiveAttach {
             channel,
             notify,
             forwarder,
             sink,
             ..
-        }) = attachment
-        else {
-            return;
-        };
-        // Aborted before the notice, exactly as the delete handler does, so
+        } = attachment;
+        // Stopped before the notice, exactly as the delete handler does, so
         // the forwarder cannot race its own "terminal ended" detach against
         // this truthful one.
-        forwarder.abort();
-        let _ = forwarder.await;
+        let cleanup = self
+            .record_forwarder_join(key.clone(), forwarder.await)
+            .err();
+        let reaping = self.has_output_reap_for_key(&key);
         drop(sink);
         notify_detached(&notify, channel, "session restarted".to_string());
+        if let Some(cleanup) = cleanup {
+            anyhow::bail!("{cleanup}");
+        }
+        if reaping {
+            anyhow::bail!("the previous run's terminal-output client is still being cleaned up");
+        }
+        Ok(())
     }
 
     /// The shell every launch of this supervisor runs through — the seam
@@ -8052,18 +8397,11 @@ impl Supervisor {
         let survivors = self
             .reap_tab_tree(session_id, terminal, tab_id, TabReapAnchor::MarkerOnly)
             .await;
-        // Unconditional, and before the error below: see the method docs.
-        self.detach_closed_tab(session_id, tab_id).await;
-        survivors.map_err(|e| {
-            RequestError::new(
-                ErrorKind::Internal,
-                format!(
-                    "terminal tab {}'s window is gone but survivors of its shell could not be \
-                     confirmed reaped: {e:#}",
-                    truncate_for_error(tab_id)
-                ),
-            )
-        })?;
+        // Unconditional, and before reporting either error: the window is
+        // already gone, so its viewer must receive the terminal verdict even
+        // when process or output-client cleanup remains unconfirmed.
+        let detach = self.detach_closed_tab(session_id, tab_id).await;
+        tab_close_cleanup_result(tab_id, survivors, detach)?;
         info!(session = %session_id, tab = %tab_id, "terminal tab closed");
         Ok(())
     }
@@ -8076,9 +8414,11 @@ impl Supervisor {
     /// 3 — the lease groups a session's channels, and this removes one of
     /// them rather than dissolving the group).
     ///
-    /// Aborts before notifying, like every other teardown here, so the
-    /// forwarder cannot race its own end-of-stream `Detached` against this
-    /// truthful one.
+    /// Stops and awaits the forwarder before notifying, like every other
+    /// teardown here, so it cannot race its own end-of-stream `Detached`
+    /// against this truthful one. The forwarder may transfer process reaping
+    /// to the published per-terminal barrier; in that case the notice still
+    /// goes out, but replacement attach remains fail-closed behind the barrier.
     ///
     /// This is also the ONLY thing that ends a tab's attachment while its
     /// session lives, and that is worth knowing: a tab's forwarder holds a
@@ -8091,27 +8431,42 @@ impl Supervisor {
     /// its viewer sees a terminal that stops updating until it detaches or
     /// reattaches. Detecting it would mean teaching the output stream
     /// tmux's window-close notifications, which no product path needs.
-    async fn detach_closed_tab(&self, session_id: &str, tab_id: &str) {
-        let attachment = self.attachments.lock().await.remove(&AttachmentKey::new(
-            session_id,
-            TerminalId::Tab(tab_id.to_string()),
-        ));
+    async fn detach_closed_tab(&self, session_id: &str, tab_id: &str) -> Result<(), RequestError> {
+        let key = AttachmentKey::new(session_id, TerminalId::Tab(tab_id.to_string()));
+        let mut attachments = self.attachments.lock().await;
+        let attachment = attachments.remove(&key);
+        let Some(attachment) = attachment else {
+            return Ok(());
+        };
+        // Install the handoff barrier before releasing the map lock, so a
+        // concurrent attach cannot slip into the removal-to-publication gap.
+        self.begin_forwarder_shutdown(key.clone(), &attachment);
+        drop(attachments);
         // `..` drops this attachment's input client (killing its
-        // control-mode process via `kill_on_drop`) and its pause sender.
-        let Some(ActiveAttach {
+        // no-output control client) and its pause sender.
+        let ActiveAttach {
             channel,
             notify,
             forwarder,
             sink,
             ..
-        }) = attachment
-        else {
-            return;
-        };
-        forwarder.abort();
-        let _ = forwarder.await;
+        } = attachment;
+        let cleanup = self
+            .record_forwarder_join(key.clone(), forwarder.await)
+            .err();
+        let reaping = self.has_output_reap_for_key(&key);
         drop(sink);
         notify_detached(&notify, channel, "terminal tab closed".to_string());
+        if let Some(cleanup) = cleanup {
+            return Err(RequestError::new(ErrorKind::Internal, cleanup.to_string()));
+        }
+        if reaping {
+            return Err(RequestError::new(
+                ErrorKind::Internal,
+                "the closed tab's terminal-output client is still being cleaned up",
+            ));
+        }
+        Ok(())
     }
 
     /// Tear down a window an `OpenTab` decided not to keep, and turn
@@ -8653,6 +9008,39 @@ impl Supervisor {
             *entry.outcome.lock().expect("outcome mutex poisoned") = committed;
         }
         Ok(())
+    }
+}
+
+/// Preserve every cleanup failure after a tab's window is irreversibly gone.
+///
+/// A retry cannot recover the killed window, so dropping either the process
+/// sweep error or the output-client error would discard the only actionable
+/// account of what may still be alive.
+fn tab_close_cleanup_result(
+    tab_id: &str,
+    survivors: anyhow::Result<()>,
+    detach: Result<(), RequestError>,
+) -> Result<(), RequestError> {
+    match (survivors, detach) {
+        (Ok(()), Ok(())) => Ok(()),
+        (Ok(()), Err(detach)) => Err(detach),
+        (Err(survivors), Ok(())) => Err(RequestError::new(
+            ErrorKind::Internal,
+            format!(
+                "terminal tab {}'s window is gone but survivors of its shell could not be \
+                 confirmed reaped: {survivors:#}",
+                truncate_for_error(tab_id)
+            ),
+        )),
+        (Err(survivors), Err(detach)) => Err(RequestError::new(
+            ErrorKind::Internal,
+            format!(
+                "terminal tab {}'s window is gone, but process cleanup failed ({survivors:#}) \
+                 and terminal-output cleanup also failed ({})",
+                truncate_for_error(tab_id),
+                detach.message
+            ),
+        )),
     }
 }
 
@@ -9406,6 +9794,168 @@ pub(crate) mod tests {
     /// [`UploadRoute`]).
     pub(crate) fn no_uploads() -> HashMap<u32, UploadRoute> {
         HashMap::new()
+    }
+
+    /// A replacement cannot pass a published output-reap barrier early.
+    ///
+    /// The forwarder may return after handing its client to a runtime-owned
+    /// reaper. This test pins the registry half of that handoff: waiting stays
+    /// blocked while the result is absent, then the successful result removes
+    /// the barrier instead of leaving a terminal permanently unattached.
+    #[tokio::test]
+    async fn an_output_reap_barrier_blocks_until_cleanup_succeeds() {
+        let state = StateDir::new();
+        let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
+            .await
+            .expect("supervisor");
+        let key = AttachmentKey::new("session", TerminalId::Agent);
+        let (done, done_rx) = watch::channel(None);
+        sup.track_output_reap(key, done_rx);
+
+        let waiting_sup = Arc::clone(&sup);
+        let waiting =
+            tokio::spawn(async move { waiting_sup.wait_for_output_reaps("session").await });
+        tokio::task::yield_now().await;
+        assert!(
+            !waiting.is_finished(),
+            "an unresolved client cleanup must hold replacement attach behind its barrier"
+        );
+
+        done.send_replace(Some(Ok(())));
+        tokio::time::timeout(Duration::from_secs(2), waiting)
+            .await
+            .expect("the successful cleanup must release its waiter")
+            .expect("joining the output-reap waiter")
+            .expect("successful cleanup must permit replacement");
+        assert!(
+            !sup.has_output_reap_for_session("session"),
+            "a successful cleanup must remove its registry entry"
+        );
+    }
+
+    /// Lost cleanup proof remains a durable fail-closed attachment barrier.
+    ///
+    /// Treating a failed reaper like success would recreate the overlapping
+    /// control-client race on the next attach. The error must therefore reach
+    /// the waiter and remain in the registry for every later attempt.
+    #[tokio::test]
+    async fn a_failed_output_reap_remains_fail_closed() {
+        let state = StateDir::new();
+        let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
+            .await
+            .expect("supervisor");
+        let key = AttachmentKey::new("session", TerminalId::Agent);
+        let (done, done_rx) = watch::channel(None);
+        sup.track_output_reap(key, done_rx);
+        done.send_replace(Some(Err(Arc::<str>::from("injected cleanup loss"))));
+
+        let error = sup
+            .wait_for_output_reaps("session")
+            .await
+            .expect_err("unconfirmed cleanup must refuse replacement");
+        assert!(
+            error.contains("injected cleanup loss"),
+            "the refusal must preserve the cause: {error}"
+        );
+        assert!(
+            sup.has_output_reap_for_session("session"),
+            "a cleanup failure must remain visible after the first waiter returns"
+        );
+        assert!(
+            sup.wait_for_output_reaps("session").await.is_err(),
+            "later attaches must see the same fail-closed state"
+        );
+    }
+
+    /// An unresolved tab client does not block the agent terminal's attach.
+    ///
+    /// Output-client overlap is per pane, even though both clients attach to
+    /// the same tmux session. A session-wide check here would let one stuck tab
+    /// make every otherwise-independent terminal unavailable.
+    #[tokio::test]
+    async fn output_reap_barriers_are_scoped_to_one_terminal() {
+        let state = StateDir::new();
+        let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
+            .await
+            .expect("supervisor");
+        let tab = AttachmentKey::new("session", TerminalId::Tab("tab-1".to_string()));
+        let agent = AttachmentKey::new("session", TerminalId::Agent);
+        let (_done, done_rx) = watch::channel(None);
+        sup.track_output_reap(tab.clone(), done_rx);
+
+        assert!(sup.has_output_reap_for_key(&tab));
+        assert!(
+            !sup.has_output_reap_for_key(&agent),
+            "a tab cleanup barrier must not cover the agent terminal"
+        );
+        tokio::time::timeout(Duration::from_secs(1), sup.wait_for_output_reap(&agent))
+            .await
+            .expect("the unrelated terminal returns immediately")
+            .expect("the unrelated terminal has no cleanup failure");
+    }
+
+    /// A request stops waiting while its runtime-owned output reaper remains.
+    ///
+    /// Reapers intentionally retry forever when tmux cannot acknowledge the
+    /// safe boundary. The connection dispatcher must still regain control, and
+    /// the retained registry entry must keep later replacement attempts closed.
+    #[tokio::test]
+    async fn output_reap_waits_are_bounded_without_erasing_the_barrier() {
+        let state = StateDir::new();
+        let sup = Supervisor::new_with_exe_and_timeouts(
+            state.path(),
+            dummy_exe(),
+            SupervisorTimeouts {
+                sink_ready: Duration::from_millis(25),
+                ..SupervisorTimeouts::default()
+            },
+        )
+        .await
+        .expect("supervisor");
+        let key = AttachmentKey::new("session", TerminalId::Agent);
+        let (_done, done_rx) = watch::channel(None);
+        sup.track_output_reap(key.clone(), done_rx);
+
+        let error = sup
+            .wait_for_output_reap(&key)
+            .await
+            .expect_err("an unresolved reaper must exhaust the request budget");
+        assert!(
+            error.contains("did not finish within"),
+            "the timeout must describe the retained cleanup boundary: {error}"
+        );
+        assert!(
+            sup.has_output_reap_for_key(&key),
+            "timing out the request must not erase its fail-closed barrier"
+        );
+    }
+
+    /// Tab close reports both kinds of cleanup it could not confirm.
+    ///
+    /// The window is already gone when these failures are combined, so a
+    /// second close cannot recover whichever diagnostic the first response
+    /// discards. Keeping both is the only way to tell an operator about a
+    /// surviving process and an unresolved output client at the same time.
+    #[test]
+    fn tab_close_preserves_process_and_output_cleanup_failures() {
+        let error = tab_close_cleanup_result(
+            "tab-1",
+            Err(anyhow::anyhow!("injected survivor")),
+            Err(RequestError::new(
+                ErrorKind::Internal,
+                "injected output cleanup",
+            )),
+        )
+        .expect_err("both failed cleanup paths must fail the close");
+
+        assert!(
+            error.message.contains("injected survivor"),
+            "the process-sweep failure must survive aggregation: {error:?}"
+        );
+        assert!(
+            error.message.contains("injected output cleanup"),
+            "the output-client failure must survive aggregation: {error:?}"
+        );
     }
 
     /// A supervisor state directory that also kills the private tmux
