@@ -176,6 +176,16 @@ Consequences of that stance:
   largest spec file is the remaining process-lifetime bound. The failed case passed 11 separate fresh-process reruns,
   then passed again inside a 55.7-minute full run (584 passed, four intentional real-agent skips). That run replaced
   browsers between all 13 files; its longest residual lifetime was the 21.4-minute WebKit terminal file.
+
+  The next stacked CI run exposed a different browser-harness lifetime race inside that remaining terminal-file
+  boundary. An invalidation-driven `/api/hosts` refresh entered an async `page.route` handler just after the test's
+  final assertion; Playwright began page teardown, disposed the `route.fetch()` response, and the otherwise-passing test
+  failed while reading its JSON. The trace showed the second GET begin before the after-hooks and fail only after
+  context disposal started. Terminal tests now unregister every page route after each case and wait for handlers already
+  in flight, keeping their response context alive through completion while preventing another handler from entering the
+  teardown gap. The failed case passed 21 standalone fresh-process reruns, then passed again in a 55.0-minute full run
+  (584 passed, four intentional real-agent skips); both complete terminal files finished cleanly, including WebKit's
+  21.3-minute pass.
 - **M6.75 — status and profiles.** Running/waiting/idle heuristics with per-agent sharpening, list filtering, profile
   CRUD and starter profiles. Also live push replacing BOTH of the UI's polls — M2's session-list poll and M4's
   session-detail/tab-list poll — status transitions are what make polling genuinely painful, and the push channel serves

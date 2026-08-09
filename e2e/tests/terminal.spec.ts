@@ -186,6 +186,16 @@ test.beforeAll(async ({ request }) => {
   expect(created.ok(), "recreating the shared e2e-session").toBe(true);
 });
 
+test.afterEach(async ({ page }) => {
+  // A final assertion can coincide with an invalidation-driven refresh. If
+  // Playwright owns teardown immediately afterward, it disposes the
+  // `route.fetch()` response while the async handler is still reading it and
+  // turns a passing test into an unhandled teardown failure. Unregistering
+  // first closes the door to new handlers; `wait` lets every handler already
+  // inside finish while its page and request context are still alive.
+  await page.unrouteAll({ behavior: "wait" });
+});
+
 /**
  * A real, distinguishable agent invocation for the create-dialog tests
  * (PLAN_M2.md step 8): the same fake-agent binary and `basic` script
