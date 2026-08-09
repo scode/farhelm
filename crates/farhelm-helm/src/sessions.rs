@@ -4235,6 +4235,11 @@ mod tests {
             .as_str()
             .expect("more pages")
             .to_string();
+        let previous_incarnation = harness
+            .manager
+            .status(alpha)
+            .expect("alpha has an actor")
+            .incarnation;
 
         // The row the cursor NAMES is deleted, and a brand-new session
         // appears at the very front of the order — the two mutations a walk
@@ -4247,16 +4252,25 @@ mod tests {
         });
         harness.fleet.kill_connection(alpha);
         harness
-            .await_state(alpha, |state| {
-                matches!(
-                    state,
-                    crate::manager::HostState::Connected {
-                        last_refresh: crate::manager::RefreshHealth::Ok { sessions: 2 },
-                        ..
-                    }
-                )
-            })
+            .await_refreshed_after(alpha, previous_incarnation)
             .await;
+
+        // Both scripts contain two sessions, so a count-based wait can accept
+        // the old connected state before the actor notices the killed
+        // connection. Prove that the replacement cache itself has landed
+        // before asking the old cursor to resume through it.
+        let (_, refreshed) = get_json(&harness, "/api/sessions?limit=10").await;
+        assert_eq!(
+            row_ids(&refreshed),
+            vec![
+                "alpha-brand-new",
+                "beta-newest",
+                "local-mid",
+                "alpha-old",
+                "beta-oldest",
+            ],
+            "the reconnect must publish both mutations before the cursor walk resumes"
+        );
 
         let (_, second) =
             get_json(&harness, &format!("/api/sessions?limit=2&cursor={cursor}")).await;
