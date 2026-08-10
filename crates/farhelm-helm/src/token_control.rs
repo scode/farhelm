@@ -7,8 +7,9 @@
 //! bridge. It carries one command, never browser traffic, and the directory's
 //! 0700 mode gives it the same trust boundary as direct access to helm.db. A
 //! lifetime flock serializes serving ownership with offline rotation, while
-//! the CLI verifies SO_PEERCRED and bounds connect, write, and read under one
-//! deadline before trusting the reply.
+//! the CLI verifies the peer's uid (SO_PEERCRED on Linux, getpeereid on
+//! macOS) and bounds connect, write, and read under one deadline before
+//! trusting the reply.
 
 use crate::{auth, auth::AuthState, store::HelmStore};
 use anyhow::Context;
@@ -248,37 +249,22 @@ async fn rotate_through_helm(
 
 /// Refuse a socket not owned by the effective user before sending a command
 /// or trusting any reply bytes.
+///
+/// tokio's `peer_cred` is the portability seam: it reads `SO_PEERCRED` on
+/// Linux and `getpeereid` on the BSD family including macOS, both reporting
+/// the peer's effective uid as of `connect`. A hand-rolled `SO_PEERCRED`
+/// call here once made this file the only thing in the workspace that could
+/// not compile for the Mac app.
 fn verify_peer_uid(stream: &tokio::net::UnixStream) -> anyhow::Result<()> {
-    let mut credentials = std::mem::MaybeUninit::<libc::ucred>::uninit();
-    let mut length = std::mem::size_of::<libc::ucred>() as libc::socklen_t;
-    // SAFETY: the fd is live for this call, `credentials` points to enough
-    // writable storage for `length`, and SO_PEERCRED initializes that storage
-    // on success.
-    let result = unsafe {
-        libc::getsockopt(
-            stream.as_raw_fd(),
-            libc::SOL_SOCKET,
-            libc::SO_PEERCRED,
-            credentials.as_mut_ptr().cast(),
-            &mut length,
-        )
-    };
-    if result != 0 {
-        return Err(anyhow::Error::new(std::io::Error::last_os_error())
-            .context("reading token-control peer credentials"));
-    }
-    if length as usize != std::mem::size_of::<libc::ucred>() {
-        anyhow::bail!("token-control peer credentials had an unexpected size");
-    }
-    // SAFETY: successful SO_PEERCRED initialized the full `ucred`, and the
-    // length check above rejects a truncated result.
-    let credentials = unsafe { credentials.assume_init() };
+    let credentials = stream
+        .peer_cred()
+        .context("reading token-control peer credentials")?;
     // SAFETY: geteuid has no preconditions and reads process identity only.
     let expected = unsafe { libc::geteuid() };
-    if credentials.uid != expected {
+    if credentials.uid() != expected {
         anyhow::bail!(
             "refusing token-control peer owned by uid {}; expected uid {expected}",
-            credentials.uid
+            credentials.uid()
         );
     }
     Ok(())
