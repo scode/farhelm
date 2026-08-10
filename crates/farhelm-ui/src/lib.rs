@@ -767,6 +767,7 @@ const APP_CSS: Asset = asset!("/assets/app.css");
 pub fn App() -> Element {
     #[cfg(all(feature = "desktop", not(target_arch = "wasm32")))]
     {
+        desktop::use_foreground_on_launch();
         return rsx! { auth::DesktopBootstrapGate {} };
     }
 
