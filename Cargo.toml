@@ -100,3 +100,18 @@ web-sys = { version = "0.3", features = ["Window", "Location"] }
 farhelm-helm = { path = "crates/farhelm-helm" }
 farhelm-proto = { path = "crates/farhelm-proto" }
 farhelm-supervisor = { path = "crates/farhelm-supervisor" }
+
+# `wasm-release` is the cargo profile dx compiles the web UI under; this
+# stanza merges into dx's own definition of it. The strip exists because
+# rustc's precompiled wasm32 std ships DWARF debug sections (~1.4 MB in our
+# module even though release builds compile our own code without debug
+# info), and dx then feeds the module to Binaryen's wasm-opt, whose DWARF
+# parser lags rustc's DWARF version and aborts with SIGABRT ("compile unit
+# size was incorrect"). dx treats that abort as a soft failure — the build
+# logs an ERROR and ships the UNOPTIMIZED wasm — so until this strip, every
+# release quietly skipped wasm-opt. Nothing consumes that DWARF in the
+# browser; stripping it at link time keeps wasm-opt actually running.
+# Scoped to dx's profile on purpose: native binaries keep their debug info.
+[profile.wasm-release]
+inherits = "release"
+strip = "debuginfo"
