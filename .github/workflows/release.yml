@@ -62,7 +62,7 @@ jobs:
           echo "ZIG=$zig" >> "$GITHUB_ENV"
           echo "CARGO_ZIGBUILD_ZIG_PATH=$zig" >> "$GITHUB_ENV"
           cargo install --locked cargo-zigbuild --version 0.20.1
-          cargo install --locked dioxus-cli --version 0.7.9
+          cargo install --locked dioxus-cli --version 0.7.10
       - name: Restore private tmux builds
         id: tmux-cache
         uses: actions/cache@5a3ec84eff668545956fd18022155c47e93e2684 # v4.2.3
@@ -176,7 +176,7 @@ jobs:
           name: release-inputs
           path: release-inputs
       - name: Install Dioxus CLI
-        run: cargo install --locked dioxus-cli --version 0.7.9
+        run: cargo install --locked dioxus-cli --version 0.7.10
       - name: Restore Apple arm64 tmux
         id: tmux-cache
         uses: actions/cache@5a3ec84eff668545956fd18022155c47e93e2684 # v4.2.3
