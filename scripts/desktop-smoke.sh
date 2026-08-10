@@ -34,7 +34,7 @@
 #
 # Prereqs (apt): xvfb xdotool openbox imagemagick curl python3, plus the
 # webkit2gtk dev stack the desktop feature already needs, dioxus-cli
-# 0.7.9, and tmux.
+# 0.7.10, and tmux.
 # Usage: scripts/desktop-smoke.sh   (from the repo root; ~3 min)
 #
 # Known handling quirks, learned the hard way:
