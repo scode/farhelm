@@ -28,6 +28,10 @@ e2e/.auth/storage-state.json
 .ci-tmux/
 .ci-tmux-python/
 
+# Personal use-it-for-real dev-loop script; carries user-specific hostnames
+# and stays out of the repo on purpose.
+/scripts/laptop-dev.sh
+
 # RustRover
 #  JetBrains specific template is maintained in a separate JetBrains.gitignore that can
 #  be found at https://github.com/github/gitignore/blob/main/Global/JetBrains.gitignore
