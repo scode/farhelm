@@ -228,6 +228,11 @@ jobs:
   # a layer no browser run exercises — that stays with the desktop
   # smoke harness and manual passes).
   e2e:
+    # Disabled, not deleted: by far the slowest and most expensive job here,
+    # and the same suite is a required local finish-work gate (see AGENTS.md),
+    # so CI was paying for a rerun of something already run. Remove the `if`
+    # to re-enable; the job is otherwise maintained and expected to work.
+    if: false
     runs-on: ubicloud
     steps:
       - uses: actions/checkout@v4
