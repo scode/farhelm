@@ -44,12 +44,17 @@ Before creating or updating a PR, or claiming work is done, run exactly what CI 
   authentication, bundle-local tmux, hard-exit tether, and restart persistence. The optional coordinate-driven leg is
   not part of CI.
 - `dprint check`
-- `cd e2e && npx playwright test` — the browser end-to-end suite, run against both Chromium and WebKit (the latter
-  stands in for the desktop app's actual engine family). It needs `cargo build` and
-  `cd crates/farhelm-ui && dx build --platform web --release` first (it drives the built web UI against a real helm and
-  supervisor), plus a one-time `cd e2e && npm install && npx playwright install chromium webkit`.
 
 These commands mirror `.github/workflows/ci.yml`; if CI changes, update this list in the same change (and vice versa).
+
+The browser end-to-end suite is deliberately NOT in that per-change list, and its CI job is disabled (`if: false` in
+ci.yml): it is far too slow to pay on every PR. It gates MERGING instead — before landing a PR stack on main, run
+`cd e2e && npx playwright test` (Chromium and WebKit; WebKit stands in for the desktop app's actual engine family). It
+needs `cargo build` and `cd crates/farhelm-ui && dx build --platform web --release` first (it drives the built web UI
+against a real helm and supervisor), plus a one-time `cd e2e && npm install && npx playwright install chromium webkit`.
+This split lets changes accumulate across a stack and surface bugs once, before merge, without each PR paying the
+suite's cost — but it also means NOTHING else runs it: CI green does not include e2e, so skipping it at merge time means
+shipping unexercised browser paths.
 
 # lore/
 
