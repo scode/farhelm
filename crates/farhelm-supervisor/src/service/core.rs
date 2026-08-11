@@ -642,14 +642,64 @@ impl Default for SupervisorSeams {
 /// A host that does not have the file at all is reported as `Ok(None)` —
 /// unsupported, honestly — while any OTHER read failure is an `Err`: see
 /// [`BootIdSource`] for why the two must not be collapsed.
-///
-/// macOS is NOT handled here. The Mac-supervisor work owns finding the
-/// equivalent (`kern.boottime`), recorded as a deferral in PLAN_M3.md's
-/// Out section beside the /proc-less process sweep it will land with;
-/// until then a Mac build would take the honest `Ok(None)` path and never
-/// claim a reboot.
+#[cfg(not(target_os = "macos"))]
 fn read_host_boot_id() -> anyhow::Result<Option<String>> {
     read_boot_id_from(Path::new("/proc/sys/kernel/random/boot_id"))
+}
+
+/// This host's current boot id (PLAN_M3.md item 2): macOS's
+/// `kern.bootsessionuuid`, a kernel-minted per-boot UUID and the exact
+/// analogue of Linux's `/proc/sys/kernel/random/boot_id`.
+///
+/// PLAN_M3.md's deferral note named `kern.boottime` as the presumed Mac
+/// equivalent, and this deliberately is NOT that. `boottime` is derived
+/// (realtime minus uptime) and the kernel recomputes it when NTP steps the
+/// clock, so it can change MID-BOOT — and a boot id that changes mid-boot
+/// would make the next supervisor restart mass-convert every live session
+/// to `Interrupted` over a clock adjustment. `bootsessionuuid` is minted
+/// once per boot and never rewritten, which is the entire property this
+/// classifier rests on.
+///
+/// The same three-way contract as the Linux reader: a kernel that does not
+/// know the name at all (`ENOENT`) is `Ok(None)` — unsupported, honestly —
+/// while any other failure is an `Err`, because "has an id and reading it
+/// failed this time" must degrade the reload rather than silently take the
+/// same-boot path (see [`BootIdSource`]).
+#[cfg(target_os = "macos")]
+fn read_host_boot_id() -> anyhow::Result<Option<String>> {
+    use anyhow::Context as _;
+    let name = c"kern.bootsessionuuid";
+    // A UUID string is 36 bytes plus a trailing NUL; the headroom costs
+    // nothing and keeps a future longer form from turning into ENOMEM.
+    let mut buf = [0u8; 128];
+    let mut len = buf.len();
+    // SAFETY: `name` is a NUL-terminated C string; `buf` owns `len` bytes
+    // and `len` says exactly that, so sysctlbyname writes only within the
+    // buffer and reports the bytes actually written back through `len`.
+    let rc = unsafe {
+        libc::sysctlbyname(
+            name.as_ptr(),
+            buf.as_mut_ptr().cast::<std::ffi::c_void>(),
+            &mut len,
+            std::ptr::null_mut(),
+            0,
+        )
+    };
+    if rc != 0 {
+        let err = std::io::Error::last_os_error();
+        if err.raw_os_error() == Some(libc::ENOENT) {
+            return Ok(None);
+        }
+        return Err(anyhow::Error::new(err).context("reading kern.bootsessionuuid"));
+    }
+    let text =
+        std::str::from_utf8(&buf[..len]).context("kern.bootsessionuuid is not valid UTF-8")?;
+    // String sysctls report their trailing NUL in the length; an id that
+    // trims to nothing is unusable and treated as unsupported rather than
+    // stored, for `read_boot_id_from`'s reason: recording "" would make a
+    // later real id look like a reboot on no evidence.
+    let trimmed = text.trim_end_matches('\0').trim();
+    Ok((!trimmed.is_empty()).then(|| trimmed.to_string()))
 }
 
 /// [`read_host_boot_id`]'s logic, parameterized on the path it reads —
@@ -658,6 +708,7 @@ fn read_host_boot_id() -> anyhow::Result<Option<String>> {
 /// mutating the test process's own environment. Not itself exposed as a
 /// [`BootIdSource`]: production always wants the fixed `/proc` path, so
 /// only the zero-argument wrapper is wired into [`Seams::default`].
+#[cfg(any(not(target_os = "macos"), test))]
 fn read_boot_id_from(path: &Path) -> anyhow::Result<Option<String>> {
     let raw = match std::fs::read_to_string(path) {
         Ok(raw) => raw,
@@ -10317,6 +10368,27 @@ pub(crate) mod tests {
         let as_dir = tmp.path().join("boot_id");
         std::fs::create_dir(&as_dir).unwrap();
         assert!(read_boot_id_from(&as_dir).is_err());
+    }
+
+    /// The Mac boot id must be present, non-empty, and STABLE across two
+    /// reads — stability within one boot is the property that made
+    /// `kern.bootsessionuuid` the right source over PLAN_M3.md's presumed
+    /// `kern.boottime`, which the kernel rewrites when NTP steps the
+    /// clock. Two reads disagreeing here would mean reboot classification
+    /// can fire without a reboot, mass-interrupting live sessions on an
+    /// ordinary supervisor restart.
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn the_mac_boot_session_uuid_is_present_and_stable() {
+        let first = read_host_boot_id()
+            .expect("reading kern.bootsessionuuid must not error")
+            .expect("modern macOS publishes kern.bootsessionuuid");
+        let second = read_host_boot_id().unwrap().unwrap();
+        assert_eq!(first, second, "the id must be stable within one boot");
+        assert!(
+            !first.contains('\0'),
+            "the sysctl's trailing NUL must have been trimmed: {first:?}"
+        );
     }
 
     /// A dummy launch-shim path for tests that never create a session:

@@ -324,7 +324,8 @@ remains that can never be represented on any page.
   supervisor-authoritative list), agent profiles and each session's profile snapshot taken at creation (SPEC.md's
   snapshot rule shapes the session schema), spawn idempotency keys, captured conversation identities, host identity, and
   the boot id last seen. Comparing the stored boot id against the current one (`/proc/sys/kernel/random/boot_id`;
-  equivalent on macOS) is how "interrupted" is classified per SPEC.md.
+  `kern.bootsessionuuid` on macOS — a per-boot UUID, chosen over `kern.boottime` because the kernel rewrites boottime on
+  clock steps and a boot id must never change mid-boot) is how "interrupted" is classified per SPEC.md.
 - Host identity: generated once at first run, stored in the db.
 - Agent profiles live in a `profiles` table in that same db, bounded on both axes — 128 profiles per host, 8 KiB of
   caller-supplied text per profile — so the unpaginated catalog reply can never outgrow a frame. That bound is not
