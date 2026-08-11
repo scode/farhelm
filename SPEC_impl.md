@@ -405,9 +405,18 @@ remains that can never be represented on any page.
   both mechanisms (reproduced, not theorized). Containing that needs a delegation boundary — a parent slice the
   supervisor owns, with the manager refusing migrations out of it — which v1 does not build and SPEC.md does not
   promise. Agent descendants run with the user's own privileges by design, so a descendant determined to outlive its
-  session can always arrange to; the honest claim is that stop reaps what a normal program leaves behind. The macOS
-  variant of the sweep (no /proc there) arrives with the Mac supervisor work. See
-  lore/2026-07-27-m2-process-tree-stop.md for the alternatives as they looked when this was decided.
+  session can always arrange to; the honest claim is that stop reaps what a normal program leaves behind. macOS has no
+  /proc, so the three reads the sweep needs — the same-euid process table, one pid's parent/start-time/zombie state, and
+  one pid's environment — go through a platform seam that answers them with `sysctl` there (`KERN_PROC_ALL`,
+  `KERN_PROC_PID`, and `KERN_PROCARGS2`) and with /proc on Linux; every decision above it, and therefore everything stop
+  promises, is one shared implementation. The Mac marker source is deliberately narrowed to the environment region of
+  `KERN_PROCARGS2` with argv discarded, so that neither platform can claim a process for marker text that merely appears
+  on its command line. One Mac residual on top of the shared ones: macOS 26+ withholds that environment region for Apple
+  platform binaries even from a same-uid parent (observed on real hardware, pinned by a macOS-only test), so a
+  reparented descendant exec'd into `/bin/sh` or another platform binary escapes the marker scan there; the PPID closure
+  still reaps it while it remains in the pane's tree. The planned close is a session-id membership channel — tmux panes
+  are session leaders and a SID survives fork, exec, and reparenting — deferred until the gap proves to matter in
+  practice. See lore/2026-07-27-m2-process-tree-stop.md for the alternatives as they looked when this was decided.
 - Attachments land in `~/.local/state/farhelm/attachments/<session-id>/`, deleted with the session. There is no size cap
   in v1: the bytes are the user's, on the user's own machine, and every hop streams them under a credit window, so a
   large file costs time rather than memory. A disk that fills up is therefore a failed upload with nothing published and

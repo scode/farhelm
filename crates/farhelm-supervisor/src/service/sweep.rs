@@ -3,16 +3,24 @@
 //! Everything here answers one question honestly: is anything still
 //! running under a session (or one of its tabs) that a stop, restart, or
 //! delete needs to be sure is gone before it reports success? The
-//! `/proc`-walk sweep is the portable backstop that always RUNS (it can
+//! process-table sweep is the portable backstop that always RUNS (it can
 //! still miss a descendant that scrubbed its markers — see the marker
 //! docs below); the systemd scope kill (`kill_scope`/`reap_process_tree`)
 //! closes that residual gap where a user manager exists. See
 //! `reap_process_tree`'s own docs for how the two combine, and
 //! PLAN_M3.md's process-tree-ownership section for why neither alone was
 //! ever enough.
+//!
+//! "Portable" is now literal rather than aspirational. Every read of the
+//! process table goes through [`crate::procs`] — `/proc` on Linux,
+//! `sysctl` on macOS — and NOTHING in this module knows which. The PPID
+//! closure, the marker union, start-time validation, the escalation, and
+//! the confirmation are one implementation on both platforms, because
+//! what stop promises a user must not vary by host.
 
 use super::core::{SessionEntry, Supervisor};
 use super::status::dead_pane_exit_code;
+use crate::procs::{self, ProcessState};
 use crate::store::Transition;
 use std::collections::{HashMap, HashSet};
 use std::time::Duration;
@@ -44,127 +52,8 @@ const KILL_CONFIRM_TIMEOUT: Duration = Duration::from_secs(2);
 /// Poll interval within [`KILL_CONFIRM_TIMEOUT`].
 const KILL_CONFIRM_STEP: Duration = Duration::from_millis(50);
 
-/// Whether an I/O error reading some `/proc/<pid>/...` path means the
-/// process (or its row) is simply gone, as opposed to a genuine problem
-/// this sweep must report. `ENOENT` is the ordinary shape (the path
-/// itself vanished), but `ESRCH` comes through this path too: opening a
-/// still-listed `/proc/<pid>/stat` whose process dies mid-read fails
-/// with ESRCH rather than ENOENT (observed on CI — the confirmation poll
-/// raced a SIGKILL'd pid's teardown and reported a false sweep failure),
-/// so both mean the same thing here: nothing left to worry about.
-fn is_gone_errno(e: &std::io::Error) -> bool {
-    e.kind() == std::io::ErrorKind::NotFound || e.raw_os_error() == Some(libc::ESRCH)
-}
-
-/// Read one stat field by its position AFTER the `comm` field (index 0 is
-/// `state`, the third stat field overall). `rest` is everything following
-/// the LAST `)` in a `/proc/<pid>/stat` line — see [`parse_stat`] for why
-/// that boundary is found on raw bytes before this ever touches `&str`.
-fn stat_field(rest: &str, index: usize) -> Option<&str> {
-    rest.split_whitespace().nth(index)
-}
-
-/// Parse a `/proc/<pid>/stat` line's state, parent pid, and kernel
-/// start-time (state is field 3 overall, the first token after `comm`;
-/// start-time is field 22, the 20th token after `comm`) from raw bytes.
-///
-/// Bytes in, not `&str`, and the `comm` field's own bytes are never
-/// decoded at all: `comm` (the process name in parentheses) is whatever
-/// bytes the process named itself with via `PR_SET_NAME`/argv[0] and can
-/// contain arbitrary, non-UTF-8 data, spaces, or even parentheses — so
-/// this locates the LAST `)` as a raw byte search (valid regardless of
-/// what came before it) and only decodes the fixed-format, always-ASCII
-/// fields after it. A `comm` with a non-UTF-8 byte would otherwise fail
-/// the whole read, silently misreporting a live process as "gone" to
-/// [`snapshot_proc`]'s caller — exactly the kind of resource-exhaustion-
-/// disguised-as-success bug this module works hard elsewhere to avoid.
-///
-/// State is what lets [`confirm_gone`] recognize a zombie — a process
-/// that has already exited but has no ancestor left to reap it — as gone
-/// rather than as a stuck SIGKILL: nothing this module does can force a
-/// reap, and a zombie cannot run anything regardless, so treating one as
-/// still-alive would fail a sweep for a reason no amount of signaling
-/// could ever fix. Start-time is what makes a discovered pid safe to act
-/// on LATER, after other work (a signal, a sleep, another `/proc` walk)
-/// has given the kernel a chance to reuse it: [`signal_validated`]
-/// re-reads this same field immediately before signaling and refuses to
-/// act unless it still matches, which is the only way a numeric pid
-/// recorded minutes, seconds, or even microseconds ago can still be
-/// trusted.
-fn parse_stat(bytes: &[u8]) -> Result<(u32, u64, char), String> {
-    let Some(after_comm) = bytes.iter().rposition(|&b| b == b')') else {
-        return Err(format!(
-            "stat content has no ')' delimiting comm: {bytes:?}"
-        ));
-    };
-    let rest = std::str::from_utf8(&bytes[after_comm + 1..])
-        .map_err(|e| format!("stat fields after comm are not valid UTF-8: {e}"))?;
-    let state = stat_field(rest, 0)
-        .ok_or("stat content is missing the state field")?
-        .chars()
-        .next()
-        .ok_or("stat content has an empty state field")?;
-    let ppid = stat_field(rest, 1)
-        .ok_or("stat content is missing the ppid field")?
-        .parse::<u32>()
-        .map_err(|e| format!("stat ppid field is unparseable: {e}"))?;
-    let starttime = stat_field(rest, 19)
-        .ok_or("stat content is missing the starttime field")?
-        .parse::<u64>()
-        .map_err(|e| format!("stat starttime field is unparseable: {e}"))?;
-    Ok((ppid, starttime, state))
-}
-
-/// This process's own effective uid, for [`is_own_pid_dir`].
-fn euid() -> u32 {
-    // SAFETY: geteuid takes no arguments and cannot fail.
-    unsafe { libc::geteuid() }
-}
-
-/// Whether `/proc/<pid>` is owned by this process's own effective uid.
-///
-/// Exists for hosts whose `/proc` is mounted `hidepid=1` (or stricter): a
-/// legitimate, common hardening option under which OTHER users' pid
-/// directories stay visible to `readdir` — so this module's `/proc` walk
-/// still enumerates them — but their contents (`stat`, `environ`, ...)
-/// become `EACCES`. That is routine and expected, not a sweep failure,
-/// so this check runs BEFORE any fail-closed stat parsing: a foreign-uid
-/// pid is skipped outright, rather than letting an ordinary permission
-/// restriction turn into a reported error for every unrelated process on
-/// a shared or hidepid-hardened host. A pid that has already exited (or
-/// otherwise can't be stat'd at the directory level) is not this check's
-/// business to adjudicate — `read_stat`'s own `ENOENT` handling covers
-/// that — so failure to read the directory's metadata defaults to "ours",
-/// leaving the decision to the caller's normal fail-closed path.
-fn is_own_pid_dir(pid: u32) -> bool {
-    use std::os::unix::fs::MetadataExt;
-    match std::fs::metadata(format!("/proc/{pid}")) {
-        Ok(metadata) => metadata.uid() == euid(),
-        Err(_) => true,
-    }
-}
-
-/// Read and parse `/proc/<pid>/stat`.
-///
-/// `Ok(None)` means the process is simply gone (`ENOENT`) — the ordinary,
-/// expected outcome of racing a process's own exit, and never worth
-/// reporting. Anything else that goes wrong — a permission error this
-/// process should never see for a pid it is supposed to own (callers are
-/// expected to have already screened out foreign-uid pids via
-/// [`is_own_pid_dir`]), a malformed or unrecognized stat format — comes
-/// back as `Err` rather than being folded into "gone": treating a real
-/// failure as absence would let this module silently under-collect a
-/// live descendant and report a sweep as clean when it was not.
-fn read_stat(pid: u32) -> Result<Option<(u32, u64, char)>, String> {
-    match std::fs::read(format!("/proc/{pid}/stat")) {
-        Ok(bytes) => parse_stat(&bytes).map(Some),
-        Err(e) if is_gone_errno(&e) => Ok(None),
-        Err(e) => Err(format!("reading /proc/{pid}/stat: {e}")),
-    }
-}
-
 /// Every farhelm marker one process's environment carries, decided in a
-/// SINGLE pass over `/proc/<pid>/environ`.
+/// SINGLE pass over the process's environment block.
 ///
 /// One pass rather than four because this is read for every same-uid
 /// process on the host on every sweep round, and because four independent
@@ -202,7 +91,7 @@ struct EnvironMarkers {
 ///
 /// Split out from [`environ_marker_verdict`] purely so this matching logic
 /// is unit-testable against constructed byte buffers, without a real
-/// process or a real `/proc` behind it.
+/// process or a real process table behind it.
 ///
 /// Every match is against a complete NUL-delimited entry, never a
 /// substring: `environ` packs `KEY=VALUE\0KEY=VALUE\0...`, so a substring
@@ -346,14 +235,14 @@ impl SweepTarget {
 /// [`kill_process_tree`], and remains open wherever no systemd user
 /// manager exists.
 ///
-/// A process belonging to a different user makes `environ` unreadable
-/// (mode 0400, owner-only) — that failure is silently treated as "no
+/// A process belonging to a different user makes its environment
+/// unreadable on both platforms — that failure is silently treated as "no
 /// marker", which is exactly the "same-user" scoping this scan is
 /// supposed to have; no separate uid check is needed because the kernel
-/// already enforces it (callers additionally skip foreign-uid pids before
-/// ever reaching this function — see [`is_own_pid_dir`] — so this scoping
-/// is belt and braces, not the only place it happens). A SAME-uid process
-/// escapes this scan too if it has called
+/// already enforces it (the enumeration additionally restricts itself to
+/// same-euid pids before this is ever called — see [`crate::procs`] — so
+/// this scoping is belt and braces, not the only place it happens). A
+/// SAME-uid process escapes this scan too if it has called
 /// `prctl(PR_SET_DUMPABLE, 0)` (directly, or via a setuid/setgid exec,
 /// which clears dumpability as a kernel security measure): `environ`
 /// requires `PTRACE_MODE_READ`-equivalent access even from the owning
@@ -361,15 +250,33 @@ impl SweepTarget {
 /// as another user's. That is the same accepted-residual bucket as the
 /// environment-scrubbing case above — a legitimate hardening choice by
 /// the target process defeats the marker scan, and only cgroups (or
-/// running as root) close it. Unlike [`read_stat`], this has no error
-/// path at all: every failure mode here (gone, permission, non-dumpable)
-/// is routine and expected for a directory-wide scan of processes this
-/// sweep does not necessarily own.
+/// running as root) close it. Unlike [`procs::read_process`], this has no
+/// error path at all: every failure mode here (gone, permission,
+/// non-dumpable) is routine and expected for a host-wide scan of processes
+/// this sweep does not necessarily own.
+///
+/// macOS 26+ adds one more residual to that bucket, and it is the OS's
+/// choice rather than the target's: the kernel withholds the environment
+/// region of `KERN_PROCARGS2` for Apple PLATFORM binaries even from a
+/// same-uid parent, so a reparented descendant exec'd into `/bin/sh` (or
+/// any other platform binary) reads as marker-less there no matter what
+/// its environment really holds. The PPID closure still finds such a
+/// process while it remains in the pane's tree; once reparented it is
+/// unreachable by this scan on that OS. The recorded follow-up is a
+/// session-id membership channel (tmux panes are session leaders, and a
+/// SID survives fork, exec, and reparenting), deliberately deferred —
+/// see `procs::read_environ`'s docs for the observation itself.
+///
+/// What is scanned is the EXEC-TIME environment and only that, identically
+/// on both platforms ([`crate::procs::read_environ`]'s contract): a
+/// process cannot be claimed for the text on its command line, which on
+/// macOS arrives in the same kernel buffer and is deliberately dropped
+/// before it gets here.
 ///
 /// An unreadable environment yielding "not claimed" is the SAFE
 /// direction: a sweep never signals a process it could not identify.
 fn environ_marker_verdict(pid: u32, session_id: &str, target: &SweepTarget) -> bool {
-    let Ok(bytes) = std::fs::read(format!("/proc/{pid}/environ")) else {
+    let Some(bytes) = procs::read_environ(pid) else {
         return false;
     };
     target.claims(&environ_markers(&bytes, session_id, target.selects_tab()))
@@ -391,17 +298,19 @@ pub(crate) enum TabReapAnchor {
     MarkerOnly,
 }
 
-/// One `/proc` walk's findings: every readable process's (ppid,
+/// One process-table walk's findings: every readable process's (ppid,
 /// start-time), plus which of those carry `session_id`'s environment
-/// marker. Both halves are read in the same sequential pass over
-/// `/proc`'s directory entries — not, importantly, at one consistent
-/// instant in time (see [`snapshot_proc`]'s own docs on that) — which is
-/// still enough to keep the PPID closure and the marker scan agreeing on
-/// one walk's worth of data rather than two independently-timed ones.
+/// marker. The marker scan is driven BY the walk's own results — a pid
+/// the walk could not read is never asked about its environment — which
+/// is why the two halves cannot disagree about which processes exist, and
+/// costs nothing: [`enumerate_tree`] drops a marked pid with no
+/// start-time anyway, since there would be no identity to validate later.
+/// Neither half is, importantly, taken at one consistent instant in time;
+/// see [`snapshot_proc`]'s own docs on that.
 struct ProcSnapshot {
-    /// pid → (ppid, starttime). Absent means this process's `/proc` row
-    /// could not be read because it exited mid-scan — the ordinary,
-    /// tolerated case ([`read_stat`]'s `Ok(None)`). A partial map built
+    /// pid → (ppid, starttime). Absent means this process's row could not
+    /// be read because it exited mid-scan — the ordinary, tolerated case
+    /// ([`procs::snapshot`] simply omits it). A partial map built
     /// this way only ever UNDER-collects candidates for the PPID closure
     /// below; it can never invent an ancestor relationship that does not
     /// exist. That under-collection is a SEPARATE concern from pid
@@ -428,9 +337,8 @@ struct ProcSnapshot {
     /// trusting this one walk's shape indefinitely. The remainder — a
     /// closure edge briefly followed on the strength of a since-recycled
     /// pid, within one walk, before the next walk or signal re-validates
-    /// it — is accepted as the honest cost of a single-pass, `/proc`-only
-    /// implementation.
-    stats: HashMap<u32, (u32, u64)>,
+    /// it — is accepted as the honest cost of a single-pass enumeration.
+    stats: procs::ProcessTable,
     /// pids this sweep's markers CLAIMED in this same walk, per
     /// [`SweepTarget::claims`] — positive selection throughout, so a
     /// process is here because something said it belongs to this sweep,
@@ -438,68 +346,41 @@ struct ProcSnapshot {
     marked: HashSet<u32>,
 }
 
-/// Walk `/proc` once, in full, for `session_id`. Fails closed: a
-/// directory-level problem (can't open or iterate `/proc` at all)
-/// propagates rather than returning an empty, falsely-clean snapshot —
-/// silently reporting "found nothing" when the walk never actually ran is
-/// exactly the failure mode this module exists to avoid. A per-pid stat
-/// read that fails for a reason OTHER than the process being gone
-/// (`read_stat`'s `Err` case) is collected into the returned error list
-/// rather than aborting the whole walk, so one unreadable row does not
-/// blind this scan to every other process in the tree.
+/// Walk the process table once, in full, for `session_id`, and decide
+/// which of the processes found carry this sweep's markers.
 ///
-/// The walk itself is a plain sequential scan over directory entries, not
-/// an atomic system-wide snapshot: a fork happening WHILE this function is
-/// mid-scan can land a new pid in a part of `/proc` already passed, or
-/// simply not exist yet when `read_dir` enumerated the directory. Either
-/// way this one walk can under-report a tree that is still actively
-/// forking — a sequential-scan race, not (as an earlier version of this
-/// comment mis-described) some impossible ordering between a parent and a
-/// child that does not exist yet. [`kill_process_tree`] is what actually
-/// compensates for this: it re-walks `/proc` between each signal phase
-/// rather than trusting one walk to see a tree that can still be growing.
+/// Fails closed, and that propagates straight out of [`procs::snapshot`]:
+/// a problem that stops the walk from happening at all is an `Err`, never
+/// an empty and falsely-clean snapshot — silently reporting "found
+/// nothing" when the walk never actually ran is exactly the failure mode
+/// this module exists to avoid. A problem confined to ONE process is
+/// collected into the returned error list rather than aborting the whole
+/// walk, so one unreadable row does not blind this scan to every other
+/// process in the tree.
+///
+/// The walk itself is a plain sequential scan, not an atomic system-wide
+/// snapshot: a fork happening WHILE it runs may or may not be visible to
+/// it, so one walk can under-report a tree that is still actively forking
+/// — a sequential-scan race, not (as an earlier version of this comment
+/// mis-described) some impossible ordering between a parent and a child
+/// that does not exist yet. [`kill_process_tree`] is what actually
+/// compensates for this: it re-walks between each signal phase rather than
+/// trusting one walk to see a tree that can still be growing.
 fn snapshot_proc(
     session_id: &str,
     target: &SweepTarget,
 ) -> Result<(ProcSnapshot, Vec<String>), String> {
-    let mut stats = HashMap::new();
-    let mut marked = HashSet::new();
-    let mut soft_errors = Vec::new();
-    let entries = std::fs::read_dir("/proc").map_err(|e| format!("reading /proc: {e}"))?;
-    for entry in entries {
-        let entry = match entry {
-            Ok(entry) => entry,
-            Err(e) => {
-                soft_errors.push(format!("iterating /proc: {e}"));
-                continue;
-            }
-        };
-        let Some(pid) = entry
-            .file_name()
-            .to_str()
-            .and_then(|s| s.parse::<u32>().ok())
-        else {
-            continue;
-        };
-        // A foreign-uid pid under hidepid-hardened /proc: visible to
-        // readdir, but its contents are routinely EACCES — see
-        // is_own_pid_dir's docs. Skipped entirely, before either read
-        // below could turn that ordinary restriction into a reported
-        // failure.
-        if !is_own_pid_dir(pid) {
-            continue;
-        }
-        match read_stat(pid) {
-            Ok(Some((ppid, starttime, _state))) => {
-                stats.insert(pid, (ppid, starttime));
-            }
-            Ok(None) => {}
-            Err(e) => soft_errors.push(e),
-        }
-        if environ_marker_verdict(pid, session_id, target) {
-            marked.insert(pid);
-        }
-    }
+    let (stats, soft_errors) = procs::snapshot()?;
+    // Only pids the walk actually read are asked about their environment.
+    // That read is the expensive half — one syscall and a kilobyte or so
+    // per process, host-wide, on every round of every sweep — and a marked
+    // pid the walk has no start-time for is discarded by `enumerate_tree`
+    // anyway, for want of an identity to re-validate before signaling.
+    let marked = stats
+        .keys()
+        .copied()
+        .filter(|&pid| environ_marker_verdict(pid, session_id, target))
+        .collect();
     Ok((ProcSnapshot { stats, marked }, soft_errors))
 }
 
@@ -585,9 +466,9 @@ fn enumerate_tree(
     Ok((found, soft_errors))
 }
 
-/// Re-read `pid`'s `/proc` start-time and signal it only if that read
-/// still matches `expected_starttime` — the barrier that makes a pid
-/// recorded at some earlier moment (before a sleep, a signal round, or a
+/// Re-read `pid`'s start-time and signal it only if that read still
+/// matches `expected_starttime` — the barrier that makes a pid recorded
+/// at some earlier moment (before a sleep, a signal round, or a
 /// re-enumeration) safe to act on now. If the original process already
 /// exited and the kernel handed its number to something unrelated, the
 /// start-time will have moved on (or the pid will be gone outright), and
@@ -597,14 +478,15 @@ fn enumerate_tree(
 /// reporting: the pid being gone entirely, its start-time no longer
 /// matching (pid reused), and `ESRCH` from the signal call itself (a
 /// benign race against the process's own concurrent exit — a DIFFERENT
-/// check from the `ENOENT` `read_stat` handles, since `ESRCH` is `kill`'s
-/// own "no such process" errno, not a filesystem one). Any other
-/// `read_stat` failure, or a signal errno other than `ESRCH` (`EPERM`,
-/// chiefly), comes back as `Err`: both mean a process this sweep was
-/// supposed to reach could not be confirmed reachable, which the caller
-/// must learn about rather than silently treat as handled.
+/// check from the "gone" [`procs::read_process`] reports, since `ESRCH`
+/// here is `kill`'s own "no such process" errno for a pid that was still
+/// listed a moment ago). Any other read failure, or a signal errno other
+/// than `ESRCH` (`EPERM`, chiefly), comes back as `Err`: both mean a
+/// process this sweep was supposed to reach could not be confirmed
+/// reachable, which the caller must learn about rather than silently
+/// treat as handled.
 fn signal_validated(pid: u32, expected_starttime: u64, signal: i32) -> Result<(), String> {
-    match read_stat(pid) {
+    match procs::read_process(pid) {
         Ok(Some((_, starttime, _state))) if starttime == expected_starttime => {
             // SAFETY: `libc::kill` validates `pid` itself; passing a pid
             // this process does not own simply yields EPERM, handled
@@ -648,7 +530,7 @@ fn signal_all(pids: &HashMap<u32, u64>, signal: i32) -> Vec<String> {
 /// and lets `fallback` carry the root's identity forward instead, exactly
 /// like every other seed.
 ///
-/// A hard enumeration failure (an unreadable `/proc` directory, or the
+/// A hard enumeration failure (an unreadable process table, or the
 /// blocking task itself panicking) is recorded into `errors` rather than
 /// aborting the sweep, and `fallback` is returned unchanged so the caller
 /// still has SOMETHING to signal. Reusing stale starttimes here is safe:
@@ -685,7 +567,7 @@ async fn enumerate_or_reuse(
 }
 
 /// Poll every identity in `found` until each has been CONFIRMED gone — a
-/// starttime mismatch, an outright-gone `/proc` row, or a zombie still
+/// starttime mismatch, an outright-gone process row, or a zombie still
 /// awaiting an ancestor's reap (nothing this sweep does can force a reap,
 /// and a zombie cannot run anything regardless, so waiting for one to be
 /// reaped before declaring success would fail a sweep for a reason no
@@ -699,7 +581,7 @@ async fn enumerate_or_reuse(
 /// "the last signal in the sequence did not error".
 ///
 /// The error direction matters as much as the confirmation logic: only
-/// the three cases above count as confirmed-absent. A `read_stat` failure
+/// the three cases above count as confirmed-absent. A read failure
 /// that is NOT one of those (a permission problem this process should not
 /// see for a pid it is supposed to own, a malformed row) is a genuine
 /// confirmation failure and is reported as an error — never silently
@@ -718,10 +600,12 @@ async fn confirm_gone(found: &HashMap<u32, u64>, timeout: Duration) -> Vec<Strin
             let mut alive = HashMap::new();
             let mut poll_errors = Vec::new();
             for (pid, starttime) in still_alive {
-                match read_stat(pid) {
+                match procs::read_process(pid) {
                     // Identity still matches and the process has not yet
                     // become a zombie: genuinely still alive.
-                    Ok(Some((_, st, state))) if st == starttime && state != 'Z' => {
+                    Ok(Some((_, st, state)))
+                        if st == starttime && state != ProcessState::Zombie =>
+                    {
                         alive.insert(pid, starttime);
                     }
                     // Gone outright, a different process now wears this
@@ -811,8 +695,8 @@ async fn confirm_gone(found: &HashMap<u32, u64>, timeout: Duration) -> Vec<Strin
 ///
 /// Every signal is starttime-validated (`signal_validated`) — a pid
 /// carried across the grace period, the quiesce fixpoint, or simply
-/// reused between rounds is never signaled unless a fresh `/proc` read
-/// still agrees it is the same process this sweep found.
+/// reused between rounds is never signaled unless a fresh read of the
+/// process table still agrees it is the same process this sweep found.
 ///
 /// Errors accumulate rather than short-circuit: enumeration failures,
 /// non-`ESRCH` signal errors, non-convergence, and post-SIGKILL survivors
@@ -966,7 +850,7 @@ pub(crate) async fn reap_process_tree(
     // the pane's process can die and the kernel can hand its number to
     // something unrelated. A bare pid read before that window and trusted
     // after it is exactly how a sweep signals a stranger.
-    let root = root_pid.and_then(|pid| match read_stat(pid) {
+    let root = root_pid.and_then(|pid| match procs::read_process(pid) {
         Ok(Some((_, starttime, _))) => Some((pid, starttime)),
         // Already gone, or unreadable: either way there is no identity to
         // carry, and the marker scan is what finds this session's
@@ -1184,7 +1068,7 @@ async fn confirm_scope_gone(scopes: &crate::scope::ScopeManager, unit: &str) -> 
 }
 
 /// Bounds how many individual error strings [`summarize_errors`] includes
-/// verbatim, so a pathological `/proc` (a fork storm producing thousands
+/// verbatim, so a pathological process table (a fork storm producing thousands
 /// of unsignalable pids, say) cannot build an unbounded — and, chained
 /// through `ControlMsg::Error`, potentially oversized — reply out of this
 /// module's own error aggregation. The total count is always reported
@@ -1485,37 +1369,40 @@ mod tests {
     /// Spawn a process carrying `FARHELM_SESSION_ID=<id>`, returning its
     /// pid — the only thing the marker sweep can find in a unit test.
     ///
-    /// `Command::env` sets the CHILD's environment; the test process's own
-    /// is never touched (a repo-wide rule). `sleep 30` bounds the leak if
-    /// an assertion panics before the sweep under test runs.
+    /// The child is the test binary in sleeper mode rather than a `sh`
+    /// child: on macOS 26+ the kernel withholds a PLATFORM binary's
+    /// environment from `KERN_PROCARGS2`, so a shell child is invisible to
+    /// the very scan these tests exist to exercise — see
+    /// [`crate::procs::sleeper`] for the full story, and
+    /// `environ_marker_verdict`'s docs for what that means in production.
     fn spawn_marked_process(session_id: &str) -> std::process::Child {
-        std::process::Command::new("sh")
-            .arg("-c")
-            .arg("sleep 30")
-            .env(crate::launch::SESSION_ID_ENV_VAR, session_id)
-            .stdin(std::process::Stdio::null())
-            .stdout(std::process::Stdio::null())
-            .stderr(std::process::Stdio::null())
-            .spawn()
-            .expect("spawning a marked test process")
+        crate::procs::sleeper::spawn(&[(crate::launch::SESSION_ID_ENV_VAR, session_id)])
     }
 
-    /// Whether `pid` is gone in the sense a kill test means it: no `/proc`
-    /// entry, or a zombie still waiting to be reaped.
+    /// Whether `pid` is gone in the sense a kill test means it: no row in
+    /// the process table, or a zombie still waiting to be reaped.
     ///
     /// The zombie case is not pedantry here — it is the ONLY outcome these
     /// tests produce. The marked process is a direct child of the test
     /// process, which does not `wait()` on it until the assertions are
-    /// done, so a successfully SIGKILLed victim keeps its `/proc` entry
-    /// until then; a bare `Path::exists` check would call every successful
-    /// sweep a failure. An unparseable `stat` reports "still there", so an
-    /// unreadable `/proc` fails the assertion loudly rather than passing it
-    /// by accident.
+    /// done, so a successfully SIGKILLed victim keeps its row until then;
+    /// a bare "does the pid exist" check would call every successful sweep
+    /// a failure.
+    ///
+    /// Deliberately routed through [`procs::read_process`] rather than
+    /// reading `/proc` itself, which is what makes every kill test in this
+    /// module a macOS regression suite for free: these tests spawn real
+    /// processes and go through the real sweep, so the only thing that had
+    /// to become portable for them to pin the Mac path too was this
+    /// helper. A read ERROR (as opposed to "gone") reports "still there",
+    /// so an unreadable process table fails the assertion loudly rather
+    /// than passing it by accident.
     fn marked_process_gone(pid: u32) -> bool {
-        let Ok(stat) = std::fs::read(format!("/proc/{pid}/stat")) else {
-            return true;
-        };
-        parse_stat(&stat).is_ok_and(|(_, _, state)| state == 'Z')
+        match procs::read_process(pid) {
+            Ok(None) => true,
+            Ok(Some((_, _, state))) => state == ProcessState::Zombie,
+            Err(_) => false,
+        }
     }
 
     /// The ORDER of stop's two mechanisms, which nothing about the end
@@ -1763,60 +1650,11 @@ mod tests {
         .expect("a dead pane pid must not fail the sweep");
     }
 
-    /// `parse_stat`'s whole reason to exist: a `comm` field containing
-    /// spaces AND a stray closing paren must not fool the last-`)` search
-    /// into stopping early. This pins the kernel's actual escape hatch —
-    /// `comm` can contain anything, including `)`, so only the LAST `)`
-    /// in the whole line is the real delimiter, no matter how many
-    /// look-alikes precede it.
-    #[test]
-    fn parse_stat_handles_comm_with_parens_and_spaces() {
-        // comm = "1 (weird) name)" — spaces, an internal paren pair, AND
-        // a trailing stray ')' that is NOT the kernel's own delimiter.
-        // Wrapped by the kernel in its own parens, the line's tail reads
-        // "...name))" — two closing parens back to back — and only the
-        // second is real.
-        let line: &[u8] = b"123 (1 (weird) name)) S 456 1 1 0 -1 0 0 0 0 0 0 0 0 0 20 0 1 0 789";
-        let (ppid, starttime, state) = parse_stat(line).expect("well-formed synthetic stat line");
-        assert_eq!(ppid, 456, "ppid must be read from AFTER the true delimiter");
-        assert_eq!(starttime, 789, "starttime is the 20th field after comm");
-        assert_eq!(state, 'S', "state is the first field after comm");
-    }
-
-    /// `comm` is whatever bytes the process named itself with — it can be
-    /// genuinely non-UTF-8 — and `parse_stat` must not choke on that, since
-    /// only the LAST `)` is located via a raw byte search and everything
-    /// before it (the non-UTF-8 comm included) is never decoded at all.
-    /// Failing this would misreport a live, oddly-named process as
-    /// unparseable, folding it into a reported sweep error over nothing
-    /// more than a name it never chose to be `/proc`-friendly about.
-    #[test]
-    fn parse_stat_survives_non_utf8_bytes_in_comm() {
-        let mut line = b"123 (bad".to_vec();
-        line.push(0xff); // not valid UTF-8 on its own or in context here
-        line.extend_from_slice(b"name) Z 456 1 1 0 -1 0 0 0 0 0 0 0 0 0 20 0 1 0 789");
-        let (ppid, starttime, state) =
-            parse_stat(&line).expect("a non-UTF-8 comm must not fail parsing");
-        assert_eq!(ppid, 456);
-        assert_eq!(starttime, 789);
-        assert_eq!(state, 'Z');
-    }
-
-    /// A stat line with no `)` at all (never happens for a real kernel-
-    /// written row, but a corrupted read or a hostile fixture could
-    /// produce one) must be a reported parse error, not a silent "gone" —
-    /// conflating "malformed" with "absent" would let a genuinely live,
-    /// misread process vanish from a sweep without a trace.
-    #[test]
-    fn parse_stat_rejects_a_line_with_no_delimiter() {
-        assert!(parse_stat(b"garbage with no parens at all").is_err());
-    }
-
     /// `signal_validated`'s entire reason to exist: a pid whose CURRENT
-    /// `/proc` start-time does not match what was recorded earlier must
-    /// be left alone, even under a signal as unblockable as `SIGKILL`.
-    /// Uses a REAL child process (there is no way to fabricate a `/proc`
-    /// entry) and a starttime that cannot possibly be correct, then
+    /// start-time does not match what was recorded earlier must be left
+    /// alone, even under a signal as unblockable as `SIGKILL`.
+    /// Uses a REAL child process (there is no way to fabricate a process
+    /// table row) and a starttime that cannot possibly be correct, then
     /// confirms the child is still alive before cleaning it up for real.
     #[test]
     fn signal_validated_skips_a_pid_whose_starttime_does_not_match() {
@@ -1825,9 +1663,9 @@ mod tests {
             .spawn()
             .expect("spawn a real child to validate against");
         let pid = child.id();
-        let (_, real_starttime, _state) = read_stat(pid)
-            .expect("reading a just-spawned child's stat must not error")
-            .expect("a just-spawned child must have a readable stat row");
+        let (_, real_starttime, _state) = procs::read_process(pid)
+            .expect("reading a just-spawned child must not error")
+            .expect("a just-spawned child must have a readable process row");
 
         // Any starttime other than the real one proves the point; adding
         // a large offset makes collision with the real value effectively
