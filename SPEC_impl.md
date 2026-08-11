@@ -690,6 +690,15 @@ channel, so a stray line there corrupts frames. File logging under `~/.local/sta
 (tracing-appender) and a `--log-level` flag are the intended shape but are not built yet — today verbosity is
 `RUST_LOG`-style env only.
 
+One log source is not native code: `POST /api/client-log` (PLAN_desktop_web_bug_triage.md) lets the desktop webview's
+console shim forward its errors and warnings into native tracing under the `webview_console` target, because the webview
+is the one layer with neither tracing nor devtools and a dead eval bridge (MT-5) otherwise erases its own evidence. The
+route is device-session-authenticated with the desktop-webview CORS layering, and treats the page as a peer, not a
+friend: an envelope-shaped body with unknown fields refused, a route body limit, per-field byte caps with the same
+bound-and-escape treatment as every other peer string, a shared fixed-window accept budget, and at most one
+dropped-count warn per window so the endpoint's own reporting cannot amplify the failure loop it exists to observe. Only
+the desktop build ships a sender; browsers have devtools and forward nothing.
+
 Motivation: tracing is the ecosystem standard, and span context is the cheap way to make "logs are available for X" a
 property of the architecture instead of a discipline.
 
