@@ -912,10 +912,19 @@ const PEER_TEXT_CAP: usize = 1024;
 /// Truncation is marked rather than silent: "the host said this" and "the
 /// host said this and kept going" are different diagnostics.
 pub fn peer_text(text: &str) -> String {
-    let truncated = text.len() > PEER_TEXT_CAP;
+    peer_text_capped(text, PEER_TEXT_CAP)
+}
+
+/// [`peer_text`] with a caller-chosen byte cap, for peers whose diagnostics
+/// have a different natural size than a supervisor's one-sentence refusals —
+/// the webview console pipe (`client_log`) wants room for a JS stack trace
+/// on the message and much less for a source label. The escaping half is
+/// identical and non-negotiable; only the bound varies.
+pub fn peer_text_capped(text: &str, cap: usize) -> String {
+    let truncated = text.len() > cap;
     // Split on a char boundary — `text` is a Rust `String`, so a byte
     // index in the middle of a multi-byte char would panic.
-    let end = (0..=PEER_TEXT_CAP.min(text.len()))
+    let end = (0..=cap.min(text.len()))
         .rev()
         .find(|end| text.is_char_boundary(*end))
         .unwrap_or(0);

@@ -109,6 +109,11 @@ mod aggregate;
 /// revocation.
 mod auth;
 
+/// `POST /api/client-log` — the desktop webview console shim's receiving
+/// end: authenticated, capped, and forwarded into native `tracing` under
+/// the `webview_console` target (PLAN_desktop_web_bug_triage.md).
+mod client_log;
+
 /// `--ensure-hosts`: the JSON5 floor under the registry, applied once
 /// before serving starts.
 mod ensure;
@@ -287,6 +292,14 @@ struct AppState {
     profile_edit_queue: std::sync::atomic::AtomicUsize,
     /// The one in-flight provisioning authority shared by every browser.
     provisioning: Arc<provisioning::ProvisioningService>,
+    /// The shared fixed-window accept budget behind `POST /api/client-log`
+    /// (see [`client_log::RateWindow`]).
+    ///
+    /// Per-helm rather than a process-wide static, for the same reason
+    /// [`Self::counts`] is: an embedded second helm serving its own webview
+    /// must not have its budget shared with — or starved by — another
+    /// helm's.
+    client_log_rate: std::sync::Mutex<client_log::RateWindow>,
 }
 
 /// Decrements [`AppState::profile_edit_queue`] however its waiter leaves —
@@ -343,6 +356,9 @@ impl AppState {
             profile_edits: std::sync::Mutex::new(std::collections::HashMap::new()),
             profile_edit_queue: std::sync::atomic::AtomicUsize::new(0),
             provisioning,
+            client_log_rate: std::sync::Mutex::new(client_log::RateWindow::new(
+                std::time::Instant::now(),
+            )),
         }
     }
 
@@ -554,10 +570,39 @@ fn api_router(state: Arc<AppState>) -> Router {
             axum::routing::options(middleware::desktop_webview_preflight),
         )
         .layer(axum::middleware::from_fn(middleware::desktop_webview_cors));
+    // Client-log authentication is layered identically to the attachment
+    // upload above: mandatory device-session auth, wrapped in CORS so the
+    // desktop webview can read the structured 401 rather than a generic
+    // fetch failure — the one thing this route must never do is fail
+    // silently for the caller reporting silent failures.
+    let desktop_client_log = Router::new()
+        .route(
+            "/api/client-log",
+            axum::routing::post(client_log::post_client_log),
+        )
+        .route_layer(axum::middleware::from_fn_with_state(
+            Arc::clone(&state),
+            auth::require_device_session,
+        ))
+        .route(
+            "/api/client-log",
+            axum::routing::options(middleware::desktop_webview_preflight),
+        )
+        .layer(axum::middleware::from_fn(middleware::desktop_webview_cors))
+        // Tighter than axum's 2 MiB default, sized from the endpoint's own
+        // caps: the JSON is fully allocated before the handler's entry cap
+        // can drop anything, so without this a spent budget still buys a
+        // 2 MiB parse per request. The upload route makes the OPPOSITE
+        // choice (no limit at all) for SPEC.md's no-size-cap promise, which
+        // is why these two webview routes cannot share a router group.
+        .layer(axum::extract::DefaultBodyLimit::max(
+            client_log::MAX_BODY_BYTES,
+        ));
 
     protected
         .merge(desktop_device)
         .merge(desktop_attachment)
+        .merge(desktop_client_log)
         .route(
             "/api/auth/token",
             axum::routing::post(auth::exchange_token)

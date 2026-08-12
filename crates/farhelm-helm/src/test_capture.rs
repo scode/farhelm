@@ -42,6 +42,14 @@ pub(crate) struct CapturedEvent {
     /// crate's spans use distinct field names (`host`, `kind`), so
     /// flattening loses nothing and spares every caller a nested walk.
     pub(crate) span_fields: HashMap<String, String>,
+    /// The event's `tracing` target, verbatim. Recorded because some
+    /// targets are load-bearing contracts (`webview_console` is what the
+    /// triage docs tell people to grep for), so a test must be able to
+    /// pin the exact string rather than only the message.
+    pub(crate) target: String,
+    /// The event's level, as `tracing`'s canonical uppercase rendering
+    /// (`"ERROR"`, `"WARN"`, ...), for the same pin-the-contract reason.
+    pub(crate) level: String,
 }
 
 impl CapturedEvent {
@@ -128,6 +136,8 @@ where
         self.0.lock().expect("capture mutex").push(CapturedEvent {
             fields: fields.0,
             span_fields,
+            target: event.metadata().target().to_string(),
+            level: event.metadata().level().to_string(),
         });
     }
 }
