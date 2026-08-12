@@ -949,7 +949,10 @@ pub(crate) fn launch_scope_unit(id: &str, generation: i64, scoped: bool) -> Opti
 /// than stored, and a unit may long since have been garbage-collected
 /// (item 10's reload/restart interplay). An empty slice means this
 /// teardown has no cgroup to lean on at all, which is the ordinary state
-/// on a host with no user manager.
+/// on a host with no user manager. A NON-empty slice on such a host is
+/// also ordinary — delete derives tab unit names unconditionally — and is
+/// skipped wholesale rather than asked about; see the availability check
+/// below for why that skip is safe.
 pub(crate) async fn reap_process_tree(
     scopes: &crate::scope::ScopeManager,
     units: &[String],
@@ -986,6 +989,30 @@ pub(crate) async fn reap_process_tree(
              whole mechanism"
         );
     }
+    // A non-empty unit list on a host with NO user manager is ordinary,
+    // not contradictory: delete derives every open tab's unit name without
+    // asking whether that tab was ever scoped (see `teardown_session`),
+    // precisely so a unit that MIGHT exist is never skipped. Where the
+    // availability probe says no manager exists, none of those names can
+    // possibly have a unit behind them — there is nothing to ask, and
+    // asking anyway converts each name into a string of "no systemd user
+    // manager" errors plus a full `SCOPE_CONFIRM_TIMEOUT` poll, turning
+    // every macOS (and manager-less Linux) delete slow and noisy for
+    // nothing. Skipping is safe for the same reason the probe's timeout
+    // is: the sweep below runs regardless and its verdict is the whole
+    // answer. A manager that probed AVAILABLE but fails mid-teardown is
+    // deliberately NOT skipped — those failures stay visible as
+    // diagnostic context for a stop the sweep could not confirm.
+    let units: &[String] = if units.is_empty() || scopes.available().await {
+        units
+    } else {
+        debug!(
+            session = %session_id,
+            "this host has no systemd user manager, so the recorded scope names cannot \
+             have units behind them; the process-tree sweep is the whole mechanism"
+        );
+        &[]
+    };
     // Every unit is killed even when an earlier one failed, for
     // `kill_scope`'s own accumulate-never-short-circuit reason one level
     // up: a delete that stopped at the first unresponsive tab scope would
@@ -1552,6 +1579,10 @@ mod tests {
                 .map(|(op, _)| op.clone())
                 .collect::<Vec<_>>(),
             vec![
+                // The availability probe comes first: reap consults it to
+                // decide whether the recorded names can have units behind
+                // them at all before asking the manager anything.
+                crate::scope::ScopeOp::Probe,
                 crate::scope::ScopeOp::Exists(unit.clone()),
                 crate::scope::ScopeOp::Kill {
                     unit: unit.clone(),
@@ -1640,6 +1671,59 @@ mod tests {
         assert!(
             marked_process_gone(decoy),
             "the sweep must still have reaped the marked process"
+        );
+        let _ = child.wait();
+    }
+
+    /// A host with NO user manager must not be asked about derived scope
+    /// names at all: no per-unit errors, no `SCOPE_CONFIRM_TIMEOUT` polls —
+    /// and the sweep still reaps.
+    ///
+    /// This pins the scope half of a real macOS delete failure (2026-08):
+    /// delete derives every open tab's unit name unconditionally, so on a
+    /// manager-less host `reap_process_tree` received real unit names and
+    /// `kill_scope` turned each into four "no systemd user manager" errors
+    /// plus a two-second confirm poll. The sweep's own (separate) macOS
+    /// failure then promoted that noise into a user-visible delete error.
+    /// Skipping units when the availability probe already answered "no
+    /// manager" is safe precisely because the sweep below remains the whole
+    /// mechanism — which this test also re-asserts by watching the marked
+    /// process die.
+    #[tokio::test]
+    async fn an_absent_user_manager_is_never_asked_about_derived_scope_units() {
+        let session_id = uuid::Uuid::new_v4().to_string();
+        let mut child = spawn_marked_process(&session_id);
+        let decoy = child.id();
+
+        let observed: Arc<std::sync::Mutex<Vec<crate::scope::ScopeOp>>> =
+            Arc::new(std::sync::Mutex::new(Vec::new()));
+        let sink = {
+            let observed = Arc::clone(&observed);
+            Arc::new(move |op: &crate::scope::ScopeOp| {
+                observed.lock().unwrap().push(op.clone());
+            }) as crate::scope::ScopeOpSink
+        };
+        let scopes = crate::scope::ScopeManager::fake(false, sink);
+        let unit = crate::scope::unit_name(&session_id, 0).expect("a UUID id must name a unit");
+        reap_process_tree(
+            &scopes,
+            std::slice::from_ref(&unit),
+            None,
+            &session_id,
+            &SweepTarget::AgentOnly,
+        )
+        .await
+        .expect("scope names on a manager-less host must not fail a stop the sweep confirmed");
+        assert!(
+            marked_process_gone(decoy),
+            "the sweep must still have reaped the marked process"
+        );
+        let observed = observed.lock().expect("op sink mutex poisoned");
+        assert!(
+            observed
+                .iter()
+                .all(|op| matches!(op, crate::scope::ScopeOp::Probe)),
+            "an absent manager must only ever see the availability probe, got: {observed:?}"
         );
         let _ = child.wait();
     }
