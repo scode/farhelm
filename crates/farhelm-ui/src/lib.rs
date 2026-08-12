@@ -86,6 +86,10 @@
 //!   webview's IPC exchange (PLAN_M7.md items 3 and 8). Both remount the
 //!   authenticated component tree after a credential change so every reader
 //!   starts again from a clean state.
+//! - `webview_watchdog`: the desktop eval-bridge heartbeat (PLAN_desktop_
+//!   web_bug_triage.md) — a pure three-state health machine plus one
+//!   desktop-only probe loop that turns a dead bridge (MT-5 class) into a
+//!   single loud log line instead of a silent brick.
 //! - `rename`: `RenameForm`, the one control both rename surfaces share
 //!   (PLAN_M5.md item 6) — a single-line field that sends what the user
 //!   typed verbatim, with the request, the optimistic paint, and the
@@ -129,6 +133,15 @@ mod session_view;
 mod skew;
 mod status;
 mod tabs;
+// Declared for every non-wasm build, not just desktop, so the pure
+// state-machine core and its tests run under plain `cargo test` — the
+// command CI actually executes (the desktop feature only gets a `cargo
+// check` there). Only the IO half (the eval probe and the launch hook) is
+// desktop-gated, inside the module; without it the pure core is unused,
+// hence the allow.
+#[cfg(not(target_arch = "wasm32"))]
+#[cfg_attr(not(feature = "desktop"), allow(dead_code))]
+mod webview_watchdog;
 
 use list::ListView;
 use session_view::SessionView;
@@ -746,6 +759,18 @@ const TERMINAL_JS: Asset = asset!("/assets/terminal.js");
 // assigns.
 const EVENTS_JS: Asset = asset!("/assets/events.js");
 const APP_CSS: Asset = asset!("/assets/app.css");
+// The webview console shim (PLAN_desktop_web_bug_triage.md; see that file's
+// own module docs for the loaded-first and desktop-only contracts). Behind
+// the same `#[cfg]` as the `desktop` module itself and referenced only from
+// `App`'s desktop branch below, rather than from `AppBody` alongside the
+// other page scripts: unlike those, this one is rendered with
+// `DesktopBootstrapGate` itself, before `AppBody` ever mounts, so it has
+// the earliest possible chance to capture what goes wrong during
+// authentication (a chance, not a guarantee — loading is async). A browser
+// build never references this constant, so `dx build --platform web` never
+// bundles the file at all.
+#[cfg(all(feature = "desktop", not(target_arch = "wasm32")))]
+const CLIENT_LOG_SHIM_JS: Asset = asset!("/assets/client-log-shim.js");
 
 /// Root component: switches between the session list and one open
 /// terminal. No router crate (see the module docs) — just a signal.
@@ -768,7 +793,19 @@ pub fn App() -> Element {
     #[cfg(all(feature = "desktop", not(target_arch = "wasm32")))]
     {
         desktop::use_foreground_on_launch();
-        return rsx! { auth::DesktopBootstrapGate {} };
+        webview_watchdog::use_webview_watchdog();
+        return rsx! {
+            // First script in the tree, ahead of `DesktopBootstrapGate`
+            // and everything `AppBody` later adds. Placement maximizes how
+            // early the shim can start capturing (ideally during the
+            // authentication flow itself) but is NOT an execution-order
+            // guarantee — Dioxus loads assets asynchronously, which is why
+            // arming goes through the pending-config global (see
+            // client-log-shim.js's module docs) instead of trusting this
+            // ordering.
+            document::Script { src: CLIENT_LOG_SHIM_JS }
+            auth::DesktopBootstrapGate {}
+        };
     }
 
     #[cfg(not(all(feature = "desktop", not(target_arch = "wasm32"))))]

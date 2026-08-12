@@ -11,9 +11,50 @@
 //! stay one command; in that configuration this binary is inert and
 //! says so rather than failing to compile.
 
+/// Install this process's `tracing` subscriber.
+///
+/// Desktop-only, and load-bearing for PLAN_desktop_web_bug_triage.md's whole
+/// premise: without a subscriber, every `tracing::error!`/`warn!` this
+/// binary emits — including the embedded helm's forwarded webview console
+/// events (`farhelm-helm`'s `client_log.rs`) and the eval-bridge watchdog's
+/// own health line (`webview_watchdog.rs`) — reaches the default no-op
+/// dispatcher and simply vanishes. `crates/farhelm`'s CLI installs its own
+/// subscriber (`init_tracing` there) for `farhelm helm run` and
+/// `farhelm supervisor run`, but those are that OTHER binary's subcommands,
+/// running in a spawned subprocess; this desktop app embeds a helm directly
+/// in ITS OWN process (`desktop::DesktopBootstrap::start`) and never goes
+/// through that code path, so it needs the same setup independently. Mirrors
+/// that function's filter default (`RUST_LOG`, else `info`) and its choice
+/// of stderr, which `scripts/laptop-dev.sh` redirects into `desktop.log`
+/// alongside stdout either way.
+#[cfg(all(feature = "desktop", not(target_arch = "wasm32")))]
+fn init_tracing() {
+    // Build-sensitive default, matching what dioxus's own launcher would
+    // have installed had this subscriber not claimed the global slot first:
+    // debug builds (the laptop dev flow's default) keep debug-level events
+    // in desktop.log, release stays at info. `RUST_LOG` overrides both.
+    let default_filter = if cfg!(debug_assertions) {
+        "debug"
+    } else {
+        "info"
+    };
+    tracing_subscriber::fmt()
+        .with_env_filter(
+            tracing_subscriber::EnvFilter::try_from_default_env()
+                .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new(default_filter)),
+        )
+        .with_writer(std::io::stderr)
+        .init();
+}
+
 #[cfg(any(feature = "web", feature = "desktop"))]
 fn main() {
     use farhelm_ui::{ApiBase, App};
+
+    // Before anything else: bootstrap itself can log, and the embedded helm
+    // it starts begins emitting the moment it does.
+    #[cfg(all(feature = "desktop", not(target_arch = "wasm32")))]
+    init_tracing();
 
     #[cfg(all(feature = "desktop", not(target_arch = "wasm32")))]
     let desktop = farhelm_ui::desktop::DesktopBootstrap::start()

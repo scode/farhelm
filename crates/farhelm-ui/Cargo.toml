@@ -45,6 +45,15 @@ tokio.workspace = true
 # dependency so wasm keeps using `crypto.randomUUID()` instead of pulling in
 # an RNG it doesn't need.
 uuid.workspace = true
+# `tracing` macros used by the embedded helm's forwarded webview console
+# events (`farhelm-helm`'s `client_log.rs`) and by this crate's own eval-
+# bridge watchdog (`webview_watchdog.rs`) — both run IN this binary's own
+# process on desktop, not in a spawned `farhelm helm run`/`supervisor run`
+# subprocess, which is why `main.rs` installs its own subscriber below
+# rather than relying on `crates/farhelm`'s `init_tracing` (a different
+# binary's `main`, never on this process's call stack).
+tracing.workspace = true
+tracing-subscriber.workspace = true
 
 [features]
 default = []
