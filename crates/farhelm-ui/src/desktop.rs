@@ -301,6 +301,49 @@ pub(crate) async fn current_token() -> anyhow::Result<String> {
     farhelm_helm::show_token(Some(runtime.state_dir.clone())).await
 }
 
+/// Bring the window to the foreground once dioxus first makes it visible.
+///
+/// Without this, launching the desktop app from a terminal (laptop-dev.sh
+/// nohup's the bundle's inner binary; `cargo run` hits it too) puts the icon
+/// in the macOS dock but leaves the window behind the terminal until the user
+/// cmd-tabs to it. The cause is a lifecycle mismatch: tao activates the app
+/// exactly once, in `applicationDidFinishLaunching` — its launch handler calls
+/// `activateIgnoringOtherApps` plus a `window_activation_hack` that
+/// `makeKeyAndOrderFront`s every *visible* window. dioxus-desktop, however,
+/// creates its window later (at `StartCause::Init`) and deliberately keeps it
+/// hidden until the first render's edits are applied, to avoid a white flash.
+/// So at activation time there is nothing to bring forward, and when the
+/// window finally shows, nothing re-activates the app.
+///
+/// tao's `Window::set_focus` is the precise remedy — on macOS it dispatches
+/// `makeKeyAndOrderFront` + `activateIgnoringOtherApps` to the main thread —
+/// but it silently no-ops while the window is invisible, which is exactly the
+/// state a mount-time effect can observe. Hence the poll: wait for
+/// dioxus-desktop's own `set_visible(true)`, then focus. The deadline covers
+/// the window never becoming visible (it should within the first render);
+/// past it the task exits without focusing rather than lingering forever.
+///
+/// On GTK `set_focus` presents the window, which at startup is a no-op or
+/// harmless. NOTE: macOS 14+ treats `activateIgnoringOtherApps` as a
+/// cooperative activation request, so the OS can in principle still decline;
+/// this is the strongest lever tao's public API offers.
+pub(crate) fn use_foreground_on_launch() {
+    use dioxus::prelude::{spawn, use_hook};
+    use_hook(|| {
+        spawn(async {
+            let window = dioxus::desktop::window();
+            let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
+            while !window.window.is_visible() {
+                if tokio::time::Instant::now() > deadline {
+                    return;
+                }
+                tokio::time::sleep(Duration::from_millis(25)).await;
+            }
+            window.window.set_focus();
+        });
+    });
+}
+
 /// Replace the native credential after the helm explicitly returns 401.
 ///
 /// The boolean reports whether this caller performed the exchange. Concurrent
