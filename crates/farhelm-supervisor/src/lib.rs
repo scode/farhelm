@@ -33,12 +33,23 @@
 //!
 //! Unix-only, unconditionally: the doorway is a unix socket and the
 //! substrate is tmux, so unix APIs are used without cfg gates — a
-//! non-unix port would be a redesign, not a compile flag.
+//! non-unix port would be a redesign, not a compile flag. Differences
+//! BETWEEN unixes are confined to one place, the private `procs` module:
+//! Linux and macOS disagree only about how the process table is read, and
+//! the sweep that decides what to kill is shared verbatim.
 
 pub mod agent_kind;
 pub mod attachments;
 pub mod files;
 pub mod launch;
+// Private, and deliberately so: `procs` is the process-table read seam
+// (`/proc` on Linux, `sysctl` on macOS) and nothing outside
+// `service::sweep` has business reading a process table at all. Its own
+// module docs carry the contract; the visibility is the part worth
+// stating here. A doc comment rather than this plain one would re-home
+// the module's docs into lib.rs's link scope and break every intra-doc
+// link inside them.
+mod procs;
 pub mod scope;
 pub mod service;
 pub mod store;
