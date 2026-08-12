@@ -697,7 +697,13 @@ route is device-session-authenticated with the desktop-webview CORS layering, an
 friend: an envelope-shaped body with unknown fields refused, a route body limit, per-field byte caps with the same
 bound-and-escape treatment as every other peer string, a shared fixed-window accept budget, and at most one
 dropped-count warn per window so the endpoint's own reporting cannot amplify the failure loop it exists to observe. Only
-the desktop build ships a sender; browsers have devtools and forward nothing.
+the desktop build ships a sender; browsers have devtools and forward nothing. The desktop app also runs a native
+eval-bridge watchdog (`webview_watchdog` target): a 15-second one-shot-eval heartbeat that logs exactly one error line
+per continuous outage when the bridge stops answering (the MT-5 class — the shim cannot report a failure of the very
+bridge that armed it) and one recovery line if it resumes; log-only by explicit decision, never a reload or an exit.
+Both target names are grep contracts: `docs/desktop-web-triage.md` is the triage recipe built on them, and
+`scripts/desktop-smoke.sh` asserts the whole pipeline (a marker through the real capture path, for the first launch and
+the restarted process alike) plus watchdog silence on every non-skipped run.
 
 Motivation: tracing is the ecosystem standard, and span context is the cheap way to make "logs are available for X" a
 property of the architecture instead of a discipline.

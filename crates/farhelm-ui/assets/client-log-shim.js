@@ -404,11 +404,21 @@
      * successful desktop authentication — including each reauthentication
      * — from `auth.rs`. Refuses silently on a non-loopback `base`; an
      * existing armed state is left untouched by a refused call.
+     *
+     * `config.smokeMarker`, present only under
+     * `scripts/desktop-smoke.sh`, is echoed through the wrapped console
+     * immediately below — see that call's own comment.
      */
     arm: function (config) {
       if (!config || !isLoopbackBase(config.base)) return;
       armed = { base: config.base, secret: config.secret };
       scheduleFlush();
+      // The smoke leg's hook, inert unless the Rust side was launched
+      // with FARHELM_SMOKE_CLIENT_LOG_MARKER. Going through the WRAPPED
+      // console (not a direct call into capture) is what makes this a
+      // proof of the real pipeline — capture, queueing, batching, the
+      // auth header, the endpoint, and tracing — rather than a shortcut.
+      if (config.smokeMarker) console.error(config.smokeMarker);
     },
     /**
      * Stop sending (capture continues into the bounded queue). Called when

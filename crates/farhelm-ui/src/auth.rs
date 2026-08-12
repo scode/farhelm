@@ -172,7 +172,11 @@ pub(crate) fn DesktopBootstrapGate() -> Element {
             // flow is "success" for the shim's purposes too, including on a
             // REauthentication after `DESKTOP_AUTH_GENERATION` bumps and this
             // whole future restarts.
-            arm_client_log_shim(&config.base, &secret);
+            arm_client_log_shim(
+                &config.base,
+                &secret,
+                config.smoke_client_log_marker.as_deref(),
+            );
             *TOKEN_REQUIRED.write() = false;
             ready.set(true);
         }
@@ -214,9 +218,14 @@ pub(crate) fn DesktopBootstrapGate() -> Element {
 /// `Authorization` header the shim sends — never through `tracing`, never
 /// through a `console.log`, exactly like the desktop device secret
 /// exchanged just above it in this same function.
+///
+/// `marker` carries `WebviewBootstrap::smoke_client_log_marker` through
+/// unchanged: `None` in every real run, `Some` only under
+/// `scripts/desktop-smoke.sh`, which is what lets the shim prove its own
+/// pipeline by echoing the marker back through `console.error` once armed.
 #[cfg(all(feature = "desktop", not(target_arch = "wasm32")))]
-fn arm_client_log_shim(base: &str, secret: &str) {
-    document::eval(&arm_client_log_script(base, secret));
+fn arm_client_log_shim(base: &str, secret: &str, marker: Option<&str>) {
+    document::eval(&arm_client_log_script(base, secret, marker));
 }
 
 /// Build `arm_client_log_shim`'s script. Split out so the one property that
@@ -226,9 +235,15 @@ fn arm_client_log_shim(base: &str, secret: &str) {
 /// unit test with hostile punctuation, and a later edit cannot quietly
 /// regress to interpolation without that test noticing.
 #[cfg(all(feature = "desktop", not(target_arch = "wasm32")))]
-fn arm_client_log_script(base: &str, secret: &str) -> String {
-    let payload = serde_json::to_string(&serde_json::json!({ "base": base, "secret": secret }))
-        .expect("an object of two strings is always serializable");
+fn arm_client_log_script(base: &str, secret: &str, marker: Option<&str>) -> String {
+    // A `None` marker serializes as `"smokeMarker": null`, which the shim's
+    // `if (config.smokeMarker)` guard treats identically to an absent key —
+    // one construction path for all three values, no representation branch
+    // to test or drift.
+    let payload = serde_json::to_string(
+        &serde_json::json!({ "base": base, "secret": secret, "smokeMarker": marker }),
+    )
+    .expect("an object of strings is always serializable");
     format!(
         "window.__farhelmClientLogPending = {payload}; \
          if (window.__farhelmClientLog) {{ \
@@ -407,17 +422,21 @@ pub(crate) fn TokenPrompt() -> Element {
 mod arm_script_tests {
     use super::arm_client_log_script;
 
-    /// The arming script must keep hostile punctuation in BOTH fields as
-    /// JSON data, never as script syntax — the property that stops a base
-    /// or secret containing quotes, backslashes, or `</script>`-shaped text
-    /// from changing what the eval executes. Pins the serde_json path so a
-    /// later edit cannot quietly regress to string interpolation.
+    /// The arming script must keep hostile punctuation in EVERY field as
+    /// JSON data, never as script syntax — the property that stops a base,
+    /// secret, or smoke marker containing quotes, backslashes, or
+    /// `</script>`-shaped text from changing what the eval executes. Pins
+    /// the serde_json path so a later edit cannot quietly regress to string
+    /// interpolation. Covers the marker field alongside base/secret because
+    /// it is built the same way (`serde_json::Value::from`) and deserves
+    /// the identical proof, not a weaker one just because it is optional.
     #[test]
     fn hostile_punctuation_stays_json_data_in_the_arming_script() {
         let script = arm_client_log_script(
             r#"http://127.0.0.1:7433/"; window.pwned = 1; ""#,
             r#"se"cr\et
 with `newline` and ${interpolation}"#,
+            Some(r#"mark"er\with `newline`"#),
         );
         assert!(
             script.starts_with("window.__farhelmClientLogPending = {"),
@@ -434,6 +453,14 @@ with `newline` and ${interpolation}"#,
         assert!(
             !script.contains("se\"cr\\et\nwith"),
             "the raw secret text must not appear unescaped anywhere in the script"
+        );
+        assert!(
+            script.contains(r#"mark\"er\\with `newline`"#),
+            "quotes and backslashes in the smoke marker must be JSON-escaped too: {script}"
+        );
+        assert!(
+            !script.contains("mark\"er\\with `newline`"),
+            "the raw smoke marker text must not appear unescaped anywhere in the script"
         );
     }
 }
