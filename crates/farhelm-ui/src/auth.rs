@@ -54,6 +54,17 @@ pub(crate) fn DesktopBootstrapGate() -> Element {
     let mut authentication = use_future(move || {
         let config = config.clone();
         async move {
+            // Stop the console shim from SPENDING the outgoing credential
+            // before its replacement exists: this future restarting is
+            // exactly the reauthentication window in which the old device
+            // secret may already be revoked, and a flush timer firing mid-
+            // window would drain queued entries into 401s. Capture keeps
+            // running; only sending pauses, until the success path below
+            // re-arms with the fresh secret. Harmless on the first run
+            // (an unarmed shim, or one not yet loaded).
+            document::eval(
+                "if (window.__farhelmClientLog) { window.__farhelmClientLog.disarm(); }",
+            );
             let token = match crate::desktop::current_token().await {
                 Ok(token) => token,
                 Err(error) => {
@@ -123,7 +134,7 @@ pub(crate) fn DesktopBootstrapGate() -> Element {
                 ));
                 return;
             };
-            if let Err(error) = crate::desktop::persist_webview_secret(secret) {
+            if let Err(error) = crate::desktop::persist_webview_secret(secret.clone()) {
                 let _ = eval.send(serde_json::json!({ "persisted": false }));
                 failure.set(Some(format!(
                     "persisting webview device session: {error:#}"
@@ -155,6 +166,13 @@ pub(crate) fn DesktopBootstrapGate() -> Element {
                 ));
                 return;
             }
+            // Arm the console shim now that a device session genuinely
+            // exists (committed to disk, not merely exchanged) — see
+            // `arm_client_log_shim`'s docs for why this exact point in the
+            // flow is "success" for the shim's purposes too, including on a
+            // REauthentication after `DESKTOP_AUTH_GENERATION` bumps and this
+            // whole future restarts.
+            arm_client_log_shim(&config.base, &secret);
             *TOKEN_REQUIRED.write() = false;
             ready.set(true);
         }
@@ -175,6 +193,48 @@ pub(crate) fn DesktopBootstrapGate() -> Element {
     } else {
         rsx! { main { class: "auth-page", p { "Starting Farhelm…" } } }
     }
+}
+
+/// Hand the webview console shim (`assets/client-log-shim.js`) the loopback
+/// origin and device secret it needs to start flushing its buffered
+/// captures, mirroring how the exchange above hands the shim's OWN
+/// credential across the same IPC boundary.
+///
+/// A fire-and-forget one-shot eval, exactly like `feed.rs`'s subscription
+/// cleanup and `session_view.rs`'s island sync snippet: nothing here needs
+/// to observe a result. The script BOTH stores the configuration in the
+/// shim's pending global AND arms directly when the shim already installed —
+/// script REGISTRATION order is not execution order for Dioxus-injected
+/// assets, so either side may win the load race, and the pending global is
+/// what makes both orders arrive at an armed shim (the shim consumes it on
+/// install; see its module header).
+///
+/// The credential crosses in this JSON payload, lives in the shim's armed
+/// state for as long as it is current, and is transmitted only in the
+/// `Authorization` header the shim sends — never through `tracing`, never
+/// through a `console.log`, exactly like the desktop device secret
+/// exchanged just above it in this same function.
+#[cfg(all(feature = "desktop", not(target_arch = "wasm32")))]
+fn arm_client_log_shim(base: &str, secret: &str) {
+    document::eval(&arm_client_log_script(base, secret));
+}
+
+/// Build `arm_client_log_shim`'s script. Split out so the one property that
+/// makes it safe — every value crossing through `serde_json` rather than
+/// string interpolation, this crate's rule for building JavaScript that
+/// touches the one origin able to reach the helm's API — is pinned by a
+/// unit test with hostile punctuation, and a later edit cannot quietly
+/// regress to interpolation without that test noticing.
+#[cfg(all(feature = "desktop", not(target_arch = "wasm32")))]
+fn arm_client_log_script(base: &str, secret: &str) -> String {
+    let payload = serde_json::to_string(&serde_json::json!({ "base": base, "secret": secret }))
+        .expect("an object of two strings is always serializable");
+    format!(
+        "window.__farhelmClientLogPending = {payload}; \
+         if (window.__farhelmClientLog) {{ \
+           window.__farhelmClientLog.arm(window.__farhelmClientLogPending); \
+         }}"
+    )
 }
 
 /// localStorage key for the device secret returned by the helm.
@@ -340,5 +400,40 @@ pub(crate) fn TokenPrompt() -> Element {
                 }
             }
         }
+    }
+}
+
+#[cfg(all(test, feature = "desktop", not(target_arch = "wasm32")))]
+mod arm_script_tests {
+    use super::arm_client_log_script;
+
+    /// The arming script must keep hostile punctuation in BOTH fields as
+    /// JSON data, never as script syntax — the property that stops a base
+    /// or secret containing quotes, backslashes, or `</script>`-shaped text
+    /// from changing what the eval executes. Pins the serde_json path so a
+    /// later edit cannot quietly regress to string interpolation.
+    #[test]
+    fn hostile_punctuation_stays_json_data_in_the_arming_script() {
+        let script = arm_client_log_script(
+            r#"http://127.0.0.1:7433/"; window.pwned = 1; ""#,
+            r#"se"cr\et
+with `newline` and ${interpolation}"#,
+        );
+        assert!(
+            script.starts_with("window.__farhelmClientLogPending = {"),
+            "the payload must be assigned as one JSON object literal: {script}"
+        );
+        assert!(
+            script.contains(r#"\"; window.pwned = 1; \""#),
+            "quotes in the base must arrive escaped, not as live syntax: {script}"
+        );
+        assert!(
+            script.contains(r#"se\"cr\\et\nwith"#),
+            "quotes, backslashes, and newlines in the secret must be JSON-escaped: {script}"
+        );
+        assert!(
+            !script.contains("se\"cr\\et\nwith"),
+            "the raw secret text must not appear unescaped anywhere in the script"
+        );
     }
 }
