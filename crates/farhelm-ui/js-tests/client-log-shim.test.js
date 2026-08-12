@@ -519,6 +519,71 @@ test("arm() with a non-loopback base sends nothing and leaves an already-armed s
   assert.equal(box.fetchCalls[0].options.headers.Authorization, "Bearer good");
 });
 
+test("arm() with a smokeMarker echoes it through the wrapped console and flushes an entry containing it", () => {
+  // PLAN_desktop_web_bug_triage.md's CI leg (scripts/desktop-smoke.sh)
+  // proves the shim -> /api/client-log -> tracing pipeline by arming with
+  // a marker and grepping for it in the native log. This test pins the JS
+  // half of that proof: the marker must travel through the REAL wrapped
+  // console.error (so capture, queueing, and batching all run), not a
+  // shortcut that pushed straight onto the queue.
+  const box = createSandbox();
+  loadShim(box);
+
+  // Spy on the WRAPPED console.error (installed by the shim), delegating
+  // through it, so the assertion below distinguishes "the marker traveled
+  // through the real capture path" from an implementation that called the
+  // original console directly and pushed the marker onto the queue by
+  // hand — both of which would satisfy weaker observations.
+  const wrapped = box.sandbox.console.error;
+  let wrappedMarkerCalls = 0;
+  box.sandbox.console.error = function () {
+    if (String(arguments[0]).includes("farhelm-smoke-clientlog-marker")) wrappedMarkerCalls++;
+    return wrapped.apply(box.sandbox.console, arguments);
+  };
+
+  box.sandbox.window.__farhelmClientLog.arm({
+    base: "http://127.0.0.1:7433",
+    secret: "s",
+    smokeMarker: "farhelm-smoke-clientlog-marker",
+  });
+
+  assert.equal(
+    wrappedMarkerCalls,
+    1,
+    "arming with a smoke marker must route it through the wrapped console.error exactly once",
+  );
+  assert.equal(
+    box.consoleErrorCalls.some((call) => call.includes("farhelm-smoke-clientlog-marker")),
+    true,
+    "the original console must still have been reached through the wrapper",
+  );
+
+  runPendingTimers(box);
+
+  assert.equal(box.fetchCalls.length, 1);
+  const body = JSON.parse(box.fetchCalls[0].options.body);
+  assert.equal(
+    body.entries.filter((e) => e.message === "farhelm-smoke-clientlog-marker").length,
+    1,
+    "the flushed batch must contain exactly one entry for the marker — a duplicate would mean a second, out-of-band insertion path",
+  );
+});
+
+test("arm() without a smokeMarker sends nothing extra", () => {
+  // The marker hook must be strictly opt-in: every ordinary desktop
+  // authentication (config.smokeMarker absent, the real-world case) must
+  // produce no console call and no traffic beyond whatever the page
+  // itself already queued.
+  const box = createSandbox();
+  loadShim(box);
+
+  box.sandbox.window.__farhelmClientLog.arm({ base: "http://127.0.0.1:7433", secret: "s" });
+  runPendingTimers(box);
+
+  assert.equal(box.consoleErrorCalls.length, 0);
+  assert.equal(box.fetchCalls.length, 0);
+});
+
 test("guardedCapture contains a hostile toString: the original console call still ran and a later capture still works", () => {
   const box = createSandbox();
   loadShim(box);

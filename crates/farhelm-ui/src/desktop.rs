@@ -35,6 +35,15 @@ const DESKTOP_STARTUP_TIMEOUT: Duration = Duration::from_secs(30);
 pub struct WebviewBootstrap {
     pub(crate) base: String,
     pub(crate) persisted_secret: Option<String>,
+    /// A smoke-test-only hook: `None` in every real run.
+    ///
+    /// `scripts/desktop-smoke.sh` sets `FARHELM_SMOKE_CLIENT_LOG_MARKER` so
+    /// the console shim can `console.error` it once armed, proving the
+    /// shim -> `/api/client-log` -> `tracing` pipeline end to end. Only a
+    /// marker that flows through the REAL capture path is honest proof; a
+    /// shortcut that wrote the marker straight into the log would validate
+    /// nothing about the pipeline it exists to catch regressions in.
+    pub(crate) smoke_client_log_marker: Option<String>,
 }
 
 struct RuntimeAuth {
@@ -237,6 +246,7 @@ impl DesktopBootstrap {
         let webview = WebviewBootstrap {
             base: base.clone(),
             persisted_secret: persisted.webview_device_secret,
+            smoke_client_log_marker: std::env::var("FARHELM_SMOKE_CLIENT_LOG_MARKER").ok(),
         };
         Ok(Self {
             webview,

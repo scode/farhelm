@@ -56,6 +56,11 @@ This split lets changes accumulate across a stack and surface bugs once, before 
 suite's cost — but it also means NOTHING else runs it: CI green does not include e2e, so skipping it at merge time means
 shipping unexercised browser paths.
 
+# Desktop/web UI bug triage
+
+`docs/desktop-web-triage.md` is the recipe: which engine comparison localizes a UI bug, where the unified log lives, and
+what a bridge-death line looks like. Start there before investigating any "the desktop UI is broken" report.
+
 # lore/
 
 `lore/` holds historical artifacts — decision records written when the decision was made. It is not part of the codebase

@@ -75,6 +75,15 @@ PORT="${DESKTOP_SMOKE_PORT:-7493}"
 API="http://127.0.0.1:$PORT"
 DISP="" # assigned once Xvfb reports its allocated display number, below
 
+# A fixed correlation value, not a uniqueness scheme: every run greps a log
+# inside its own freshly created private directory (the mktemp/refuse-existing
+# logic above), so a prior run's marker can never be in the file searched.
+# The app reads this into WebviewBootstrap::smoke_client_log_marker and the
+# shim console.errors it once armed; the poll loops below grep for it landing
+# on a webview_console tracing line, proving shim -> /api/client-log ->
+# tracing end to end (PLAN_desktop_web_bug_triage.md).
+CLIENT_LOG_MARKER="farhelm-smoke-clientlog-pipeline-proof"
+
 # Private run dir. Default: a fresh mktemp'd directory, mode 0700 so no
 # other local account can read the logs, sockets, or screenshots this run
 # produces. If the caller points DESKTOP_SMOKE_DIR at an existing path we
@@ -184,6 +193,18 @@ mkdir -p "$APP_CONTENTS/MacOS" "$APP_CONTENTS/Resources/web"
 cp "$BUILT_APP" "$APP_CONTENTS/MacOS/farhelm-ui"
 cp "$REPO/target/debug/farhelm" "$APP_CONTENTS/MacOS/farhelm"
 cp -R "$REPO/target/dx/farhelm-ui/release/web/public/." "$APP_CONTENTS/Resources/web/"
+# `dx build --platform desktop`'s Linux output puts every page script
+# (client-log-shim.js, terminal.js, xterm.js, ...) in an `assets/` directory
+# that is a SIBLING of the executable, not inside it — wry's `dioxus://`
+# asset scheme resolves them relative to the running binary's own path.
+# Relocating only the binary above and leaving `assets/` behind breaks that
+# resolution silently: every `<script src="dioxus://...">` tag still
+# appears in `document.scripts` and the page still reports
+# `readyState: "complete"`, but NONE of their content ever loads or runs, so
+# every `window.__farhelm*` global they install stays `undefined` — this is
+# exactly the class of failure the client-log leg below exists to catch, so
+# the harness must not itself reintroduce it by omission.
+cp -R "$(dirname "$BUILT_APP")/assets" "$APP_CONTENTS/MacOS/assets" || fail "staging desktop assets"
 APP="$APP_CONTENTS/MacOS/farhelm-ui"
 HOST_TMUX=$(command -v tmux)
 printf '%s\n' \
@@ -216,6 +237,8 @@ sleep 1
 DISPLAY=$DISP \
   PATH="$APP_CONTENTS/MacOS:/usr/bin:/bin" \
   FARHELM_SMOKE_TMUX_MARKER="$X/bundled-tmux-used" \
+  FARHELM_SMOKE_CLIENT_LOG_MARKER="$CLIENT_LOG_MARKER" \
+  RUST_LOG=info \
   FARHELM_DESKTOP_PORT="$PORT" \
   FARHELM_DESKTOP_STATE_DIR="$X/state" \
   "$APP" >"$X/desktop.log" 2>&1 &
@@ -258,6 +281,35 @@ done
 
 DEVICE_ROWS=$(python3 -c 'import sqlite3,sys; print(sqlite3.connect(sys.argv[1]).execute("select count(*) from device_sessions").fetchone()[0])' "$X/state/helm.db")
 [ "$DEVICE_ROWS" = 2 ] || fail "desktop bootstrap minted $DEVICE_ROWS device rows instead of two"
+
+# Wait for the client-log marker to land in $1 (a log file), proving the
+# shim -> /api/client-log -> tracing pipeline for the process writing it.
+# The shim paces flushes against MIN_FLUSH_INTERVAL_MS (30s) measured on
+# the page's monotonic clock from load, so the FIRST flush after arming can
+# legitimately wait out most of one cycle (measured ~29s on this harness),
+# and the batch still owes a round trip through fetch, the helm's
+# auth/parse/rate-cap path, and tracing before it appears in the log. 60s
+# covers a full pacing cycle plus that margin; a HEALTHY marker arrives
+# before the bound, while a genuinely missing one is only reported after
+# the full timeout — the checked-then-sleep loop ends with one final check
+# so a marker landing during the last sleep still counts.
+wait_for_client_log_marker() {
+  local log="$1" start seen=""
+  start=$(date +%s)
+  for _ in $(seq 1 60); do
+    if grep -q "webview_console.*${CLIENT_LOG_MARKER}" "$log" 2>/dev/null; then
+      seen=1
+      break
+    fi
+    sleep 1
+  done
+  [ -n "$seen" ] || grep -q "webview_console.*${CLIENT_LOG_MARKER}" "$log" 2>/dev/null || fail \
+    "the client-log marker never reached a webview_console line in $(basename "$log") (shim -> /api/client-log -> tracing pipeline broken)"
+  echo "   client-log marker landed in $(basename "$log") after $(($(date +%s) - start))s"
+}
+
+echo "== waiting for the client-log marker: shim -> /api/client-log -> tracing"
+wait_for_client_log_marker "$X/desktop.log"
 
 echo "== creating a bundle-substrate session before the hard restart"
 CREATE_BODY=$(python3 -c 'import json,sys; print(json.dumps({"cwd": sys.argv[1], "invocation": "bash", "title": "desktop-restart-smoke"}))' "$X/work") || fail "encoding smoke session"
@@ -314,6 +366,8 @@ done
 DISPLAY=$DISP \
   PATH="$APP_CONTENTS/MacOS:/usr/bin:/bin" \
   FARHELM_SMOKE_TMUX_MARKER="$X/bundled-tmux-used" \
+  FARHELM_SMOKE_CLIENT_LOG_MARKER="$CLIENT_LOG_MARKER" \
+  RUST_LOG=info \
   FARHELM_DESKTOP_PORT="$PORT" \
   FARHELM_DESKTOP_STATE_DIR="$X/state" \
   "$APP" >"$X/desktop-restart.log" 2>&1 &
@@ -345,6 +399,14 @@ for _ in $(seq 1 30); do
   sleep 1
 done
 [ -n "$SESSION_REDISCOVERED" ] || fail "the restarted app did not rediscover the surviving session"
+
+# The RESTARTED process must prove the client-log pipeline too, before the
+# rotation below muddies the auth waters: restart arms the shim through the
+# persisted-credential path — a different flow from first launch — and a
+# regression there would leave logging silently dead after every ordinary
+# app restart while all the other restart assertions stayed green.
+echo "== waiting for the restarted app's client-log marker"
+wait_for_client_log_marker "$X/desktop-restart.log"
 
 echo "== rotating the token and refreshing both client stacks on 401"
 "$APP_CONTENTS/MacOS/farhelm" helm token rotate --state-dir "$X/state" >/dev/null || fail "rotating desktop helm token"
@@ -379,7 +441,30 @@ sleep 3
 
 curl_auth -sf --max-time 5 -X DELETE "$API/api/sessions/$SID" >/dev/null || fail "cleaning up the persisted smoke session"
 SID=""
+
+# Guards the watchdog's other failure mode: a false positive. Every phase
+# above ran with a healthy eval bridge, so its death message
+# ("webview_watchdog.rs") must never have fired across either boot this run
+# captured (the pre-restart desktop.log and the post-restart
+# desktop-restart.log). Checked once, here, ahead of every PASS this script
+# can print — the smoke script's fragility budget spends this leg as one
+# assertion helper, invoked exactly once per exit path (default or legacy
+# interaction) immediately before PASS, so a watchdog false positive during
+# the optional interaction phase cannot slip in after an early check. The
+# grep statuses are handled explicitly because this is a NEGATIVE assertion:
+# "message absent" (status 1) is the only pass; an unreadable log (status 2)
+# must fail loudly rather than impersonating silence.
+assert_watchdog_silent() {
+  grep -q "webview eval bridge is not answering" "$X/desktop.log" "$X/desktop-restart.log"
+  case $? in
+    0) fail "watchdog false positive: the eval-bridge death message fired during a healthy run" ;;
+    1) : ;;
+    *) fail "could not read the desktop logs to verify watchdog silence" ;;
+  esac
+}
+
 if [ "${DESKTOP_SMOKE_LEGACY_INTERACTION:-}" != 1 ]; then
+  assert_watchdog_silent
   DISPLAY=$DISP xdotool windowactivate "$WID" key alt+F4
   FINAL_DESKTOP_PID=$(cat "$X/desktop.pid")
   for _ in $(seq 1 20); do
@@ -481,6 +566,9 @@ DESKTOP_STAT=$(ps -o stat= -p "$FINAL_DESKTOP_PID" 2>/dev/null | tr -d ' ')
 [ -z "$DESKTOP_STAT" ] || [ "${DESKTOP_STAT#Z}" != "$DESKTOP_STAT" ] || fail "desktop app did not exit cleanly"
 wait "$FINAL_DESKTOP_PID" || fail "desktop app exited unsuccessfully"
 
+# The legacy path's ONE watchdog check, after every interaction that could
+# have provoked a false positive — see assert_watchdog_silent's comment.
+assert_watchdog_silent
 echo "== PASS: embedded helm, dual auth, local supervisor, restart reuse, and terminal round-trip work"
 PASS=1
 exit 0
