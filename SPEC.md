@@ -212,7 +212,13 @@ Opening a session shows the agent's real TUI, live. The session view supports ad
 spawned in the session's working directory, for poking at the workspace next to the agent. Tabs survive client
 disconnects and supervisor restarts exactly like the agent terminal, but they are not durable metadata: after a host
 reboot or an archive, tabs are gone and the user re-adds them; nothing recreates them automatically. A tab can be closed
-individually, which kills that shell and its processes — that is the whole per-tab operation set in v1.
+individually, which kills that shell and its processes — that is the whole per-tab operation set in v1. A tab whose
+process exits on its own is reaped automatically and silently: the tab disappears as if closed, its dead pane's
+scrollback is discarded, and no notice or exit code is shown. This is deliberately NOT the agent terminal's contract —
+an exited agent stays viewable with its scrollback — because a tab's shell exiting is the user being done with the tab.
+A shell that dies before the tab's open completes still refuses the open loudly, with the shell's last words as the
+error. A tab someone has hand-split into several panes (through the session's own tmux access) counts as exited only
+when EVERY pane in it has — one exited half must not condemn a shell still running beside it.
 
 When a session's terminal contents no longer exist on a reachable host — exited across a reboot, or archived — opening
 it shows the session's metadata and says why there is no terminal, rather than an empty pane.

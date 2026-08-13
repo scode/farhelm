@@ -72,7 +72,7 @@ Two consumers of the form assume the field starts empty and need auditing in the
 
 ## 3. Terminal tab stays open (and silent) after its process exits
 
-Status: triaged, not started.
+Status: fixed in PR #154 (`pr/tab-reap`).
 
 Symptom: open a terminal tab, hit ctrl-d. The shell exits but the tab stays in the strip looking exactly like a live tab
 — no exit indication of any kind — and the user has to close it manually via the x. The user wants the tab to go away by

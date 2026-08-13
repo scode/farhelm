@@ -7372,41 +7372,81 @@ test("a session the helm stops listing is reported as stale, not torn down", asy
   }
 });
 
-// SPEC.md's split between a tab whose SHELL exited and a tab whose WINDOW
-// is gone: the first is an ordinary dead pane and stays viewable, exactly
-// as the agent terminal does (`remain-on-exit` is the contract for both).
-// Nothing in the UI may treat "the shell ended" as "the tab ended".
-test("a tab whose shell exits stays listed with its scrollback readable", async ({
+// SPEC.md's automatic tab reap (BUGS_BURNDOWN.md issue 3): a tab whose
+// shell exits is reaped as if closed — gone from the server's tab list,
+// gone from the strip, its island torn down, and the user back on the
+// agent terminal. This test REPLACED the pre-reap contract, which kept a
+// dead tab listed with its scrollback readable; the user decided an
+// exited tab is done (2026-08-13), scrollback loss included. The agent
+// terminal's exited-stays-viewable behavior is untouched and covered
+// elsewhere. The sibling tab pins the reap's surgical scope, exactly as
+// the closed-elsewhere test does for a manual remote close.
+test("a tab whose shell exits is reaped: strip entry, island, and selection", async ({
   page,
   request,
 }) => {
-  test.setTimeout(120_000);
+  test.setTimeout(180_000);
   const title = `tab-shell-exit-${Date.now()}`;
   let id: string | undefined;
   try {
-    const session = await openSessionWithTabs(page, request, title, 1);
+    const session = await openSessionWithTabs(page, request, title, 2);
     id = session.id;
-    const [tabId] = session.tabs;
-    const marker = shellMarker("BEFORE-EXIT");
-    await runInShell(page, `terminal-${tabId}`, marker.command, marker.expected);
+    const [dying, kept] = session.tabs;
+    const marker = shellMarker("KEPT-ALIVE");
+    await runInShell(page, `terminal-${kept}`, marker.command, marker.expected);
 
-    await page.locator(`[id="terminal-${tabId}"]`).click();
+    await selectTerminal(page, dying);
+    // Armed BEFORE the exit: the reap must be SILENT (SPEC.md — no notice,
+    // no exit code), and the banner surface unmounts with the island, so
+    // only an observer running through the whole removal can prove nothing
+    // was ever painted on it. A transient "Detached:" flash passes every
+    // after-the-fact query and is exactly the regression this catches.
+    await page.evaluate((bannerId) => {
+      (window as any).__reapBannerSeen = "";
+      const banner = document.getElementById(bannerId);
+      if (!banner) return;
+      const observer = new MutationObserver(() => {
+        const text = banner.textContent ?? "";
+        if (text) (window as any).__reapBannerSeen = text;
+      });
+      observer.observe(banner, { childList: true, characterData: true, subtree: true });
+    }, `term-banner-${dying}`);
+    await page.locator(`[id="terminal-${dying}"]`).click();
     await page.keyboard.type("exit");
     await page.keyboard.press("Enter");
 
-    // The tab is still a tab: listed by the server, listed in the strip,
-    // and its history still on screen.
+    // The server stops listing it (immediately at the listing layer; the
+    // ticker's kill follows within a couple of seconds).
     await expect
       .poll(
         async () => {
           const detail = await (await request.get(`/api/sessions/${id}`)).json();
           return (detail.tabs ?? []).map((t: any) => t.id);
         },
-        { timeout: 20_000, message: "a dead shell is still a tab" },
+        { timeout: 20_000, message: "an exited tab must stop being listed" },
       )
-      .toEqual([tabId]);
-    await expect(page.locator(".tab-slot")).toHaveCount(1);
-    expect(await islandText(page, `terminal-${tabId}`)).toContain(marker.expected);
+      .toEqual([kept]);
+
+    // The UI follows: strip entry gone, island torn down, selection back
+    // on the agent tab — the exact teardown a remote close gets.
+    await expect(page.locator(`.tab-slot[data-tab-id="${dying}"]`)).toHaveCount(0, {
+      timeout: 20_000,
+    });
+    await expect(page.locator(`[id="terminal-${dying}"]`)).toHaveCount(0);
+    await expect(page.locator(".tab-agent")).toHaveClass(/selected/);
+
+    // Silent means SILENT: nothing was ever painted on the dying tab's
+    // banner (the observer above watched the whole removal), and no tab
+    // error surface appeared anywhere in the view.
+    expect(
+      await page.evaluate(() => (window as any).__reapBannerSeen),
+      "the reaped tab must never show a banner",
+    ).toBe("");
+    await expect(page.locator(".tab-error")).toHaveCount(0);
+
+    // Surgical: the sibling tab's island and scrollback are untouched.
+    await expect(page.locator(`.tab-slot[data-tab-id="${kept}"]`)).toHaveCount(1);
+    expect(await islandText(page, `terminal-${kept}`)).toContain(marker.expected);
   } finally {
     if (id) await cleanupSession(request, id);
   }

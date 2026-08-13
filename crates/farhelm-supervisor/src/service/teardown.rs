@@ -201,7 +201,7 @@ impl Supervisor {
                     .map_err(ArchiveError::TabRediscovery)?;
             }
             let tabs = self
-                .session_tabs(terminal)
+                .session_tabs_including_dead(terminal)
                 .await
                 .map_err(ArchiveError::TabRediscovery)?;
             units.extend(
@@ -494,7 +494,7 @@ impl Supervisor {
             // are no tabs", and a delete that assumed the
             // latter would skip live tab scopes.
             let tabs = self
-                .session_tabs(terminal)
+                .session_tabs_including_dead(terminal)
                 .await
                 .map_err(TeardownError::TabRediscovery)?;
             units.extend(

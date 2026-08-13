@@ -1,5 +1,9 @@
 //! The supervisor's own heartbeat: one periodic task, started by `serve`,
-//! that advances the work nobody should have to ask for.
+//! that advances the work nobody should have to ask for — activity
+//! sampling, conversation capture, and the dead-tab reap (SPEC.md's
+//! "a tab whose process exits is reaped automatically", which has no
+//! event to ride: tmux pushes no pane-death notification, and listing
+//! paths are reads that must not carry the side effect).
 //!
 //! Until PLAN_M6_75.md item 1 this supervisor had no internal cadence at
 //! all. Everything periodic rode a request — conversation capture advanced
@@ -132,11 +136,11 @@
 //! log line — see `serve`.
 
 use super::core::{CaptureReason, SampleRead, SessionEntry, Supervisor};
-use super::terminals::Terminal;
+use super::terminals::{Terminal, tabs_from_pane_states};
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::oneshot;
-use tracing::{debug, error, warn};
+use tracing::{debug, error, info, warn};
 
 /// How often the supervisor's periodic task fires in production.
 ///
@@ -616,18 +620,22 @@ fn stop_requested(stop: &mut oneshot::Receiver<()>) -> bool {
     !matches!(stop.try_recv(), Err(oneshot::error::TryRecvError::Empty))
 }
 
-/// One period's work: sample a slice of the live panes, then advance
-/// conversation capture.
+/// One period's work: reap dead tabs, sample a slice of the live panes,
+/// then advance conversation capture.
 ///
-/// Both halves are periodic and neither is on an interactive path, so the
-/// only thing the order decides is which of the two is delayed by the
-/// other WITHIN a tick — they are sequential, so each pushes the next by
-/// up to its own duration. Sampling goes first because its result is what
-/// a drain arriving mid-tick will read, while a capture arriving a beat
-/// later costs nothing anybody can observe. (The claim to be careful with
-/// is not "this delays nothing" — it plainly delays the other half — but
-/// that neither half can delay a REQUEST, which is what the separate
-/// limiter below is for.)
+/// All three phases are periodic and sequential, so each pushes the next
+/// by up to its own duration; sampling precedes capture because its
+/// result is what a drain arriving mid-tick will read, while a capture
+/// arriving a beat later costs nothing anybody can observe. The REAP
+/// phase (inside `sample_pass`, riding its pane snapshot) is the one that
+/// weakens the old "neither half can delay a request" claim, and only
+/// narrowly: a close takes the target session's LIFECYCLE claim, so an
+/// interactive operation on that same session can wait behind one reap —
+/// bounded by [`REAP_BUDGET_PER_TICK`] and by the stop check between
+/// closes. Requests on other sessions are unaffected, and the request
+/// semaphore stays separate (see [`Supervisor::sampling_admission`]'s
+/// docs for why sharing it was a SPEC violation rather than a tuning
+/// question).
 ///
 /// The permit comes from [`Supervisor::sampling_admission`], never from
 /// the request semaphore: see that field's docs for why sharing it was a
@@ -706,20 +714,24 @@ async fn tick(
 ///
 /// # Cancellation
 ///
-/// `stop` is re-checked between individual captures, so a shutdown waits
-/// out at most one `capture-pane` (itself bounded by that command's own
-/// deadline) rather than a whole pass. The cursor is still advanced past
-/// what was actually sampled, so a resumed ticker would not redo work —
-/// though in practice nothing resumes a stopped ticker.
+/// `stop` is re-checked between individual captures — and, in the reap
+/// phase this pass now opens with, between individual closes — so a
+/// shutdown waits out at most one in-flight operation: one `capture-pane`
+/// (bounded by that command's own deadline) or one tab close (bounded by
+/// [`REAP_BUDGET_PER_TICK`] from ever being a batch). The cursor is still
+/// advanced past what was actually sampled, so a resumed ticker would not
+/// redo work — though in practice nothing resumes a stopped ticker.
 ///
-/// Failures are logged at DEBUG and the pass moves on. A ticker that
-/// WARNED here would turn a tmux server that is down (or a pane that
+/// SAMPLING failures are logged at DEBUG and the pass moves on. A ticker
+/// that WARNED here would turn a tmux server that is down (or a pane that
 /// vanished between the two calls, which is ordinary) into a log entry
 /// every interval forever; the paths where a user is actually waiting on
 /// the answer — the list path — still warn, which is where the signal
-/// belongs.
+/// belongs. The REAP phase is the deliberate exception: a real close
+/// failure warns (see `reap_dead_tabs`), because it can mean leftover
+/// processes with no user-visible handle left to retry through.
 async fn sample_pass(
-    sup: &Supervisor,
+    sup: &Arc<Supervisor>,
     cursor: &mut SampleCursor,
     budget: usize,
     stop: &mut oneshot::Receiver<()>,
@@ -768,6 +780,11 @@ async fn sample_pass(
             return;
         }
     };
+    // Dead-tab reaping rides this pass's pane-state fetch, BEFORE the
+    // agent-liveness filtering below: a session whose agent exited can
+    // still hold tabs, and the early return on an all-dead fleet would
+    // otherwise leave their corpses unreaped forever.
+    reap_dead_tabs(sup, &states, &entries, stop).await;
     let mut live: Vec<(Arc<SessionEntry>, Terminal)> = entries
         .into_iter()
         .filter_map(|entry| {
@@ -847,6 +864,122 @@ async fn sample_pass(
             .lock()
             .expect("activity mutex poisoned")
             .observe(tail);
+    }
+}
+
+/// Upper bound on tab reaps attempted in one tick.
+///
+/// The bound is a liveness guard for everything queued behind this
+/// function on the ticker's task — activity sampling, conversation
+/// capture, and cooperative shutdown — because each close can wait on a
+/// session's lifecycle claim and several teardown subprocesses. Whatever
+/// the budget leaves behind stays hidden from listings and is retried
+/// next tick, so the cap trades only reap LATENCY for a mass exit, never
+/// correctness. Sized to comfortably cover the ordinary case (one shell
+/// exiting at a time) with room for a burst.
+const REAP_BUDGET_PER_TICK: usize = 4;
+
+/// Close every tab whose window's panes are ALL dead — the enforcement
+/// half of SPEC.md's "a tab whose process exits is reaped automatically"
+/// (the listing paths hide dead tabs; this is what actually removes them).
+///
+/// Lives on the ticker rather than the listing paths deliberately:
+/// listings are reads and stay side-effect-free, and tmux pushes no
+/// pane-death event to react to, so the poll is the only trigger.
+/// DISCOVERY rides this pass's already-fetched `pane_states` snapshot,
+/// grouped by session in one O(panes) pass; each CLOSE then pays its own
+/// resolution probe inside [`Supervisor::close_tab`], which is the
+/// ordinary close — the same lifecycle claim, process sweep, window kill,
+/// and attached-client notice a user-initiated close performs — so a
+/// reaped tab is indistinguishable from a closed one. (The client treats
+/// that notice's tab-closed reason as silent removal, per SPEC.)
+///
+/// Reaps are awaited serially on the ticker's own task, bounded by
+/// [`REAP_BUDGET_PER_TICK`] and re-checked against `stop` between closes,
+/// so neither a mass exit nor a slow teardown can wedge sampling, capture,
+/// or shutdown behind it; the next tick retries whatever remains. The
+/// expected failure is a race with a manual close of the same tab
+/// (`NotFound`, logged at DEBUG — the dead-at-open refusal path can also
+/// destroy a marked window the same instant this sees it); any OTHER
+/// failure warns, because it may mean a close that killed the window and
+/// then failed its process sweep — a tab that no longer exists to retry
+/// through, with only its scope/marker sweeps left to catch stragglers.
+///
+/// One residual this inherits rather than creates: pane-state marker
+/// collection is skipped entirely when NO session on the private tmux
+/// server has two or more windows, so a server reduced by hand to
+/// single-window sessions (an agent window killed directly against the
+/// private socket, leaving one tab window) has undiscoverable — and
+/// therefore unreapable — tabs. That state is unreachable through the
+/// product (the agent window is never killed while the session lives;
+/// `remain-on-exit` keeps even a dead agent pane's window), and it is the
+/// same residual `detach_closed_tab` documents for by-hand window kills.
+async fn reap_dead_tabs(
+    sup: &Arc<Supervisor>,
+    states: &std::collections::HashMap<String, crate::tmux::PaneState>,
+    entries: &[Arc<SessionEntry>],
+    stop: &mut oneshot::Receiver<()>,
+) {
+    // One pass over the server-wide snapshot, partitioned by session —
+    // handing the full map to every session's rediscovery would rescan
+    // all panes per session, a quadratic cost paid every two seconds on
+    // hosts with many sessions, dead tabs or none. Borrowed, not cloned:
+    // this runs every tick whether anything is dead or not.
+    let mut by_session: std::collections::HashMap<&str, Vec<&crate::tmux::PaneState>> =
+        std::collections::HashMap::new();
+    for state in states.values() {
+        by_session
+            .entry(state.session_name.as_str())
+            .or_default()
+            .push(state);
+    }
+    let mut budget = REAP_BUDGET_PER_TICK;
+    for entry in entries {
+        let Some(terminal) = entry.terminal.as_ref() else {
+            continue;
+        };
+        let Some(session_states) = by_session.get(terminal.tmux_name.as_str()) else {
+            continue;
+        };
+        for tab in tabs_from_pane_states(session_states.iter().copied(), &terminal.tmux_name) {
+            if !tab.dead {
+                continue;
+            }
+            if stop_requested(stop) {
+                return;
+            }
+            if budget == 0 {
+                debug!(
+                    "the tick's tab-reap budget is spent; remaining dead tabs stay hidden \
+                     and the next tick continues"
+                );
+                return;
+            }
+            budget -= 1;
+            match sup.close_tab(&entry.info.id, &tab.id).await {
+                Ok(()) => {
+                    info!(
+                        session = %entry.info.id, tab = %tab.id,
+                        "reaped a terminal tab whose shell exited"
+                    );
+                }
+                Err(e) if e.kind == farhelm_proto::ErrorKind::NotFound => {
+                    debug!(
+                        session = %entry.info.id, tab = %tab.id, error = %e.message,
+                        "an exited tab vanished before this tick's reap — a manual close or \
+                         the open path's own cleanup won the race"
+                    );
+                }
+                Err(e) => {
+                    warn!(
+                        session = %entry.info.id, tab = %tab.id, error = %e.message,
+                        "reaping an exited tab failed; if its window survives the next tick \
+                         retries, otherwise only the close's scope and marker sweeps remain \
+                         to catch leftover processes"
+                    );
+                }
+            }
+        }
     }
 }
 
@@ -1018,6 +1151,314 @@ mod tests {
             assert!(tokio::time::Instant::now() < deadline, "timed out: {what}");
             tokio::time::sleep(Duration::from_millis(20)).await;
         }
+    }
+
+    /// A shared fixture for the reap tests: a tmux window on `tmux_name`,
+    /// marked as a tab, whose command has already exited into a dead pane.
+    ///
+    /// Driven through tmux directly (window + marker) rather than
+    /// `open_tab` so the shell's immediate exit is the test's choice and
+    /// no launch machinery is in the frame. Returns the pane id — the
+    /// handle the assertions watch for disappearing.
+    async fn dead_tab_in(sup: &Arc<Supervisor>, tmux_name: &str) -> String {
+        dead_tab_running(sup, tmux_name, "true").await.0
+    }
+
+    /// [`dead_tab_in`] with the tab's command chosen by the test, and the
+    /// spawn-authority env vars a REAL `open_tab` would set — which is
+    /// what lets a command daemonize a child the close's marker sweep can
+    /// find. Returns `(pane, tab_id)`.
+    async fn dead_tab_running(
+        sup: &Arc<Supervisor>,
+        tmux_name: &str,
+        command: &str,
+    ) -> (String, String) {
+        let tab_id = uuid::Uuid::new_v4().to_string();
+        let session_id = tmux_name.strip_prefix("fh-").expect("fh- prefixed name");
+        let env = vec![
+            (
+                crate::launch::SESSION_ID_ENV_VAR.to_string(),
+                session_id.to_string(),
+            ),
+            (crate::launch::TAB_ID_ENV_VAR.to_string(), tab_id.clone()),
+        ];
+        let (_window, pane) = sup
+            .tmux
+            .new_window(
+                tmux_name,
+                "/tmp",
+                &env,
+                &["sh".to_string(), "-c".to_string(), command.to_string()],
+            )
+            .await
+            .expect("create the tab window");
+        sup.tmux
+            .mark_window(tmux_name, &pane, crate::tmux::TAB_WINDOW_OPTION, &tab_id)
+            .await
+            .expect("mark the tab window");
+        let deadline = tokio::time::Instant::now() + TEST_DEADLINE;
+        loop {
+            let states = sup.tmux.pane_states().await.expect("pane states");
+            if states.get(&pane).is_some_and(|state| state.dead) {
+                break;
+            }
+            assert!(
+                tokio::time::Instant::now() < deadline,
+                "the tab's shell never exited into a dead pane"
+            );
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+        (pane, tab_id)
+    }
+
+    /// Tabs whose shells exited are REAPED by the tick — every dead tab in
+    /// the pass, not just the first match — while a live sibling tab
+    /// survives untouched. This is the enforcement half of SPEC.md's "a
+    /// tab whose process exits is reaped automatically" (BUGS_BURNDOWN.md
+    /// issue 3; the listing paths only HIDE dead tabs).
+    ///
+    /// Pinned at the ticker because nothing else may do it: listings are
+    /// side-effect-free reads, and tmux's control protocol pushes no
+    /// pane-death event to react to, so the poll is the only trigger. Two
+    /// dead tabs in one session because a first-match-only reap would pass
+    /// a single-corpse test while leaving simultaneous exits behind.
+    #[tokio::test]
+    async fn dead_tab_panes_are_reaped_by_the_tick_and_live_tabs_survive() {
+        let state = StateDir::new();
+        let sup = supervisor_with(&state, SupervisorSeams::default()).await;
+        install_live_session(&sup, "reap-tab", "sleep 600").await;
+        let tmux_name = "fh-reap-tab";
+
+        // dead_a daemonizes a child before exiting — the reap goes through
+        // the ordinary close, whose marker sweep must take the child with
+        // the window; a bare kill-window would leave it running.
+        let daemon_pid_file = state.path().join("reap-daemon.pid");
+        // The daemon writes its OWN pid (`$$` after setsid+exec), the same
+        // identity-safe shape `write_daemon_script` uses in the e2e suite:
+        // recording `$!` of a backgrounded `setsid` is wrong whenever
+        // setsid forks (it does when it starts as a group leader), and a
+        // dead recorded pid makes every later liveness assertion vacuous.
+        // The trailing wait-for-the-pid-file is the fixture's other
+        // survival condition: a pane whose shell exits before the child
+        // has called setsid takes the child down with its process group,
+        // so the pane holds until the daemon has provably detached.
+        let (dead_a, _tab_a) = dead_tab_running(
+            &sup,
+            tmux_name,
+            &format!(
+                "( setsid /bin/sh -c 'echo $$ > {pid}; exec sleep 300' \
+                 </dev/null >/dev/null 2>&1 & ); \
+                 while [ ! -s {pid} ]; do sleep 0.05; done",
+                pid = daemon_pid_file.display()
+            ),
+        )
+        .await;
+        let dead_b = dead_tab_in(&sup, tmux_name).await;
+        let live_id = uuid::Uuid::new_v4().to_string();
+        let (_window, live_pane) = sup
+            .tmux
+            .new_window(
+                tmux_name,
+                "/tmp",
+                &[],
+                &["sleep".to_string(), "600".to_string()],
+            )
+            .await
+            .expect("create the live tab window");
+        sup.tmux
+            .mark_window(
+                tmux_name,
+                &live_pane,
+                crate::tmux::TAB_WINDOW_OPTION,
+                &live_id,
+            )
+            .await
+            .expect("mark the live tab window");
+
+        // Before the reap: the two reply-facing listings split exactly on
+        // deadness. `session_tabs` (single-session replies) hides the
+        // corpses; `session_tabs_including_dead` (teardown's scope
+        // enumeration) still names them — a hidden corpse still owns a
+        // cgroup scope that archive and delete must stop.
+        let terminal = sup
+            .sessions
+            .lock()
+            .await
+            .get("reap-tab")
+            .expect("the session is installed")
+            .terminal
+            .clone()
+            .expect("the session has a terminal");
+        let listed = sup.session_tabs(&terminal).await.expect("session_tabs");
+        assert_eq!(
+            listed.iter().map(|tab| tab.id.as_str()).collect::<Vec<_>>(),
+            vec![live_id.as_str()],
+            "reply-facing tab listing must hide dead tabs even before the reap"
+        );
+        let with_dead = sup
+            .session_tabs_including_dead(&terminal)
+            .await
+            .expect("session_tabs_including_dead");
+        assert_eq!(
+            with_dead.len(),
+            3,
+            "the teardown-facing listing must still name every dead tab's scope-bearing id"
+        );
+
+        // The fixture's premise, proven BEFORE the reap: the daemon is a
+        // real, running process. Without this, a fixture whose spawn
+        // silently failed would let the swept-daemon assertion below pass
+        // vacuously. The pid file is written by the daemon itself, so it
+        // can trail the pane's death by a scheduler beat — hence the poll.
+        let daemon_pid: u32 = {
+            let deadline = tokio::time::Instant::now() + TEST_DEADLINE;
+            loop {
+                if let Ok(pid) = std::fs::read_to_string(&daemon_pid_file)
+                    .map_err(|_| ())
+                    .and_then(|contents| contents.trim().parse().map_err(|_| ()))
+                {
+                    break pid;
+                }
+                assert!(
+                    tokio::time::Instant::now() < deadline,
+                    "the dead tab's command never wrote its daemon's pid"
+                );
+                tokio::time::sleep(Duration::from_millis(20)).await;
+            }
+        };
+        assert!(
+            std::path::Path::new(&format!("/proc/{daemon_pid}")).exists(),
+            "the daemonized child must be alive before the reap for its death to mean anything"
+        );
+
+        let mut cursor = None;
+        let (_stop_tx, mut stop) = oneshot::channel();
+        sample_pass(&sup, &mut cursor, SAMPLE_TAIL_BUDGET, &mut stop).await;
+
+        let states = sup.tmux.pane_states().await.expect("pane states");
+        assert!(
+            !states.contains_key(&dead_a) && !states.contains_key(&dead_b),
+            "every dead tab's window must be gone after one tick, not just the first"
+        );
+        let survivors = tabs_from_pane_states(states.values(), tmux_name);
+        assert_eq!(
+            survivors
+                .iter()
+                .map(|tab| tab.id.as_str())
+                .collect::<Vec<_>>(),
+            vec![live_id.as_str()],
+            "the live sibling tab must survive the reap untouched"
+        );
+
+        // The daemonized child went with its tab: the reap ran the real
+        // close (marker sweep included), not a bare window kill.
+        let deadline = tokio::time::Instant::now() + TEST_DEADLINE;
+        while std::path::Path::new(&format!("/proc/{daemon_pid}")).exists() {
+            assert!(
+                tokio::time::Instant::now() < deadline,
+                "the reaped tab's daemonized child (pid {daemon_pid}) must be swept"
+            );
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+    }
+
+    /// The per-tick reap budget defers, never drops: a burst of dead tabs
+    /// larger than [`REAP_BUDGET_PER_TICK`] is finished by the NEXT pass,
+    /// with the budget boundary observable in between.
+    ///
+    /// The boundary matters because the budget is a liveness guard for
+    /// everything queued behind the reap on the ticker's task — a budget
+    /// that silently dropped the remainder would strand corpses forever,
+    /// and one that ignored its own cap would reintroduce the monopoly it
+    /// exists to prevent.
+    #[tokio::test]
+    async fn the_reap_budget_defers_the_overflow_to_the_next_tick() {
+        let state = StateDir::new();
+        let sup = supervisor_with(&state, SupervisorSeams::default()).await;
+        install_live_session(&sup, "reap-burst", "sleep 600").await;
+        let tmux_name = "fh-reap-burst";
+        let mut corpses = Vec::new();
+        for _ in 0..(REAP_BUDGET_PER_TICK + 1) {
+            corpses.push(dead_tab_in(&sup, tmux_name).await);
+        }
+
+        let mut cursor = None;
+        let (_stop_tx, mut stop) = oneshot::channel();
+        sample_pass(&sup, &mut cursor, SAMPLE_TAIL_BUDGET, &mut stop).await;
+        let states = sup.tmux.pane_states().await.expect("pane states");
+        let remaining = corpses
+            .iter()
+            .filter(|pane| states.contains_key(*pane))
+            .count();
+        assert_eq!(
+            remaining, 1,
+            "one pass reaps exactly its budget and defers the overflow"
+        );
+
+        sample_pass(&sup, &mut cursor, SAMPLE_TAIL_BUDGET, &mut stop).await;
+        let states = sup.tmux.pane_states().await.expect("pane states");
+        assert!(
+            corpses.iter().all(|pane| !states.contains_key(pane)),
+            "the next pass finishes what the budget deferred"
+        );
+    }
+
+    /// The reap still runs when NO agent pane on the whole server is live
+    /// — the sampler's `live.is_empty()` early return must not be reached
+    /// before it (an easy regression: reaping placed after that return
+    /// would strand tabs on exactly the sessions whose agents exited).
+    ///
+    /// A dedicated supervisor whose ONLY session has a dead agent pane, so
+    /// the emptiness is real rather than incidental: an earlier version of
+    /// this scenario shared a supervisor with a live-agent test and proved
+    /// nothing. Deliberately a dead agent PANE, not a killed window — a
+    /// by-hand window kill is the residual state the product cannot reach,
+    /// and it also drops the session toward the single-window regime where
+    /// the marker query is skipped server-wide.
+    #[tokio::test]
+    async fn a_dead_tab_is_reaped_when_no_agent_pane_is_live() {
+        let state = StateDir::new();
+        let sup = supervisor_with(&state, SupervisorSeams::default()).await;
+        install_live_session(&sup, "reap-dead-agent", "true").await;
+        let tmux_name = "fh-reap-dead-agent";
+        let tab_pane = dead_tab_in(&sup, tmux_name).await;
+
+        // The premise the test exists for: no live agent pane anywhere.
+        let deadline = tokio::time::Instant::now() + TEST_DEADLINE;
+        loop {
+            let states = sup.tmux.pane_states().await.expect("pane states");
+            let entries: Vec<Arc<SessionEntry>> =
+                sup.sessions.lock().await.values().cloned().collect();
+            let any_live_agent = entries.iter().any(|entry| {
+                entry.terminal.as_ref().is_some_and(|terminal| {
+                    states.get(&terminal.pane).is_some_and(|state| {
+                        state.session_name == terminal.tmux_name && !state.dead
+                    })
+                })
+            });
+            if !any_live_agent {
+                break;
+            }
+            assert!(
+                tokio::time::Instant::now() < deadline,
+                "the agent pane never went dead"
+            );
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+
+        let mut cursor = None;
+        let (_stop_tx, mut stop) = oneshot::channel();
+        sample_pass(&sup, &mut cursor, SAMPLE_TAIL_BUDGET, &mut stop).await;
+
+        let states = sup.tmux.pane_states().await.expect("pane states");
+        assert!(
+            !states.contains_key(&tab_pane),
+            "a dead tab must be reaped even with no live agent pane anywhere"
+        );
+        assert!(
+            tabs_from_pane_states(states.values(), tmux_name).is_empty(),
+            "no tab may remain discoverable on the dead-agent session after the reap"
+        );
     }
 
     /// The whole point of PLAN_M6_75.md item 1: conversation capture

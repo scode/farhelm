@@ -152,6 +152,14 @@ pub(crate) struct DiscoveredTab {
     /// lexically, which would reorder a session's tab strip the moment a
     /// user opened a tenth window.
     pub(crate) window_ordinal: u64,
+    /// Whether EVERY pane of this tab's window is dead — the condition
+    /// under which the tab is finished as far as the product is concerned
+    /// (SPEC.md: a tab whose process exits is reaped automatically).
+    /// All-panes rather than any-pane because a split someone made by
+    /// hand is still one tab, and one exited half must not condemn the
+    /// half that is still running. Consumers split on this: listing paths
+    /// hide dead tabs, and the ticker reaps them.
+    pub(crate) dead: bool,
 }
 
 /// Rediscover one session's tabs from a pane-state map, in creation order.
@@ -183,50 +191,89 @@ pub(crate) struct DiscoveredTab {
 ///   redirect close and attach onto a window of the forger's choosing.
 ///
 /// A single window holding several panes (someone split one of ours) is
-/// still ONE tab, keyed on its lowest pane NUMERICALLY — `%9` before
-/// `%10`, which a string comparison gets backwards — so repeated
-/// rediscovery answers the same way rather than depending on hash-map
-/// iteration order.
-pub(crate) fn tabs_from_pane_states(
-    states: &HashMap<String, crate::tmux::PaneState>,
+/// still ONE tab, keyed on its lowest LIVE pane — the handle attach and
+/// input flow through must not be an exited half of a split while a live
+/// shell sits beside it — falling back to the lowest pane overall only
+/// when the whole window is dead (the reap still needs a handle). See the
+/// selection comment in the body for the full argument.
+///
+/// Dead tabs are REPORTED, not filtered: `DiscoveredTab::dead` carries
+/// the verdict and the caller decides. Filtering here would blind the
+/// consumers that must see corpses — the ticker's reaper (which turns a
+/// dead tab into a closed one), the close-capable resolver, and
+/// teardown's scope enumeration (`session_tabs_including_dead`) — while
+/// the reply-facing listings apply their own hide.
+pub(crate) fn tabs_from_pane_states<'a>(
+    states: impl IntoIterator<Item = &'a crate::tmux::PaneState>,
     tmux_name: &str,
 ) -> Vec<DiscoveredTab> {
-    let mut found: HashMap<String, DiscoveredTab> = HashMap::new();
+    /// One tab id's accumulated evidence: the window claiming it and every
+    /// pane seen in that window, deferred so the HANDLE pane can be chosen
+    /// once all panes are in (see below) rather than by fold order.
+    struct Claim {
+        window_ordinal: u64,
+        /// `(pane_ordinal, dead)` for every pane of the claiming window.
+        panes: Vec<(u64, bool)>,
+    }
+    let mut found: HashMap<String, Claim> = HashMap::new();
     let mut ambiguous: HashSet<String> = HashSet::new();
-    for state in states.values() {
+    for state in states {
         if state.session_name != tmux_name || state.agent.is_some() {
             continue;
         }
         let Some(tab_id) = state.tab.as_deref() else {
             continue;
         };
-        let candidate = DiscoveredTab {
-            id: tab_id.to_string(),
-            pane: format!("%{}", state.pane_ordinal),
-            pane_ordinal: state.pane_ordinal,
-            window_ordinal: state.window_ordinal,
-        };
         match found.entry(tab_id.to_string()) {
             std::collections::hash_map::Entry::Occupied(mut existing) => {
-                if existing.get().window_ordinal == candidate.window_ordinal {
+                if existing.get().window_ordinal == state.window_ordinal {
                     // The same window, seen through a second pane: a
                     // split, not a second claimant.
-                    if candidate.pane_ordinal < existing.get().pane_ordinal {
-                        existing.insert(candidate);
-                    }
+                    existing
+                        .get_mut()
+                        .panes
+                        .push((state.pane_ordinal, state.dead));
                 } else {
                     ambiguous.insert(tab_id.to_string());
                 }
             }
             std::collections::hash_map::Entry::Vacant(slot) => {
-                slot.insert(candidate);
+                slot.insert(Claim {
+                    window_ordinal: state.window_ordinal,
+                    panes: vec![(state.pane_ordinal, state.dead)],
+                });
             }
         }
     }
     let mut tabs: Vec<DiscoveredTab> = found
         .into_iter()
         .filter(|(id, _)| !ambiguous.contains(id))
-        .map(|(_, tab)| tab)
+        .map(|(id, claim)| {
+            // The handle pane is the lowest LIVE pane when one exists —
+            // attach, input, replay, and resize all flow through it, and
+            // aiming them at an exited half of a hand-split window while a
+            // live shell sits beside it would make the tab look wedged.
+            // Only a fully dead window falls back to the lowest pane
+            // overall (the reap path needs SOME handle to address the
+            // window through). Lowest NUMERICALLY in both cases — `%9`
+            // before `%10`, which a string comparison gets backwards — so
+            // repeated rediscovery answers the same way.
+            let dead = claim.panes.iter().all(|(_, dead)| *dead);
+            let pane_ordinal = claim
+                .panes
+                .iter()
+                .filter(|(_, pane_dead)| dead || !pane_dead)
+                .map(|(ordinal, _)| *ordinal)
+                .min()
+                .expect("a claim always holds at least one pane");
+            DiscoveredTab {
+                id,
+                pane: format!("%{pane_ordinal}"),
+                pane_ordinal,
+                window_ordinal: claim.window_ordinal,
+                dead,
+            }
+        })
         .collect();
     tabs.sort_by_key(|tab| tab.window_ordinal);
     tabs
@@ -285,9 +332,11 @@ pub(crate) fn agent_pane_from_states(
 /// Find the tmux handles behind one of a session's terminals, or say why
 /// there are none.
 ///
-/// The ONE place a resolved [`TerminalId`] becomes something attachable,
-/// which is why the attach, resize, input, and close paths all funnel
-/// through it rather than each learning what a tab is.
+/// The ONE resolution funnel for [`TerminalId`], so no path has to learn
+/// what a tab is on its own — attach, resize, and input use this LIVE-ONLY
+/// spelling, while close goes through [`resolve_terminal_for_close`],
+/// whose whole difference is that a fully dead tab still resolves (it has
+/// to be findable to be destroyed).
 ///
 /// Async and OWNING, unlike the pre-tab version which borrowed from the
 /// entry. Both changes follow from the same fact: a `SessionEntry` is
@@ -309,6 +358,36 @@ pub(crate) async fn resolve_terminal(
     sup: &Supervisor,
     entry: &SessionEntry,
     terminal: &TerminalId,
+) -> Result<Terminal, RequestError> {
+    resolve_terminal_inner(sup, entry, terminal, TabResolution::LiveOnly).await
+}
+
+/// [`resolve_terminal`] for the CLOSE path, which must be able to find a
+/// tab whose panes are all dead: an exited tab is exactly what the
+/// ticker's reap (and a user's close racing it) has to locate and
+/// destroy, while every interactive resolver treats it as already gone
+/// (SPEC.md reaps it; offering its "discarded" scrollback through attach
+/// would contradict the listing that no longer shows it).
+pub(crate) async fn resolve_terminal_for_close(
+    sup: &Supervisor,
+    entry: &SessionEntry,
+    terminal: &TerminalId,
+) -> Result<Terminal, RequestError> {
+    resolve_terminal_inner(sup, entry, terminal, TabResolution::DeadIncluded).await
+}
+
+/// Whether a tab whose window is entirely dead resolves or reads as gone.
+/// Two variants rather than a bool so call sites say what they mean.
+enum TabResolution {
+    LiveOnly,
+    DeadIncluded,
+}
+
+async fn resolve_terminal_inner(
+    sup: &Supervisor,
+    entry: &SessionEntry,
+    terminal: &TerminalId,
+    resolution: TabResolution,
 ) -> Result<Terminal, RequestError> {
     // The restart-gap case (PLAN_M2.md): this entry was reloaded from
     // SQLite at startup and its tmux session was gone by then. Reporting
@@ -337,9 +416,21 @@ pub(crate) async fn resolve_terminal(
                     format!("could not ask tmux which terminal tabs this session has: {e:#}"),
                 )
             })?;
-            tabs_from_pane_states(&states, &agent.tmux_name)
+            tabs_from_pane_states(states.values(), &agent.tmux_name)
                 .into_iter()
                 .find(|tab| tab.id == *id)
+                // An exited-but-unreaped tab answers exactly like a reaped
+                // one on interactive paths: the listing already dropped it,
+                // and the reap is normally a tick away (its budget can
+                // defer a mass exit a few ticks longer), so a client holding
+                // its id must not be able to attach into the corpse and
+                // read scrollback the product has declared discarded. The
+                // close path keeps seeing it (`TabResolution::DeadIncluded`)
+                // because destroying it is how it stops existing at all.
+                .filter(|tab| match resolution {
+                    TabResolution::LiveOnly => !tab.dead,
+                    TabResolution::DeadIncluded => true,
+                })
                 .map(|tab| Terminal {
                     tmux_name: agent.tmux_name.clone(),
                     pane: tab.pane,
@@ -1274,7 +1365,7 @@ mod tests {
             ),
         ]);
 
-        let tabs = tabs_from_pane_states(&states, "fh-mine");
+        let tabs = tabs_from_pane_states(states.values(), "fh-mine");
         assert_eq!(
             tabs.iter().map(|t| t.id.clone()).collect::<Vec<_>>(),
             vec![tab(9), tab(10)],
@@ -1283,7 +1374,7 @@ mod tests {
         assert_eq!(tabs[0].pane, "%1");
         assert_eq!(tabs[1].pane, "%2");
         assert!(
-            tabs_from_pane_states(&states, "fh-nobody").is_empty(),
+            tabs_from_pane_states(states.values(), "fh-nobody").is_empty(),
             "a session with no windows on this server has no tabs"
         );
     }
@@ -1309,7 +1400,7 @@ mod tests {
         // would pick `%10`, and the pane the tab resolves to must not
         // depend on how many panes happen to have been created first.
         let states = HashMap::from([state("%9"), state("%10"), state("%11")]);
-        let tabs = tabs_from_pane_states(&states, "fh-mine");
+        let tabs = tabs_from_pane_states(states.values(), "fh-mine");
         assert_eq!(tabs.len(), 1, "one window is one tab: {tabs:?}");
         assert_eq!(
             tabs[0].pane, "%9",

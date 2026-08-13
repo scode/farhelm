@@ -146,11 +146,13 @@
 // actually are (PLAN_M6.md item 7), and getting the split wrong in either
 // direction is a real failure:
 //
-// - DECISIONS — a takeover, a stall — end recovery. A displaced client
-//   that bounced back would fight the new owner, visibly, as the two
-//   clients' takeovers alternated; a stalled client reconnecting into the
-//   same wedge helps nobody. Both keep the surface they were given
-//   (`decisionDetach`).
+// - DECISIONS — a takeover, a stall, a closed tab — end recovery. A
+//   displaced client that bounced back would fight the new owner, visibly,
+//   as the two clients' takeovers alternated; a stalled client
+//   reconnecting into the same wedge helps nobody; a closed (or reaped)
+//   tab has nothing left to reconnect to. The first two keep the surface
+//   they were given (`decisionDetach`); the closed tab paints NOTHING, per
+//   SPEC.md's silent reap (see TAB_CLOSED_DETACH_REASON).
 // - INFRASTRUCTURE — the helm losing its supervisor, a host that went
 //   away, an attach refused because the host is unreachable — is transport
 //   loss one layer up, and RECOVERS. This is SPEC.md's "comes back
@@ -446,6 +448,18 @@
   // through the real stack and fails if the client starts recovering from
   // it.
   const STALL_DETACH_REASON = "terminal stopped consuming output (stalled)";
+
+  // The reason a tab's viewer is detached when the tab itself is removed —
+  // a manual close from another client, or the supervisor reaping a tab
+  // whose shell exited (the same close flow either way). Handled SILENTLY:
+  // SPEC.md's tab reap promises the tab disappears with no notice, and the
+  // strip refresh unmounts this island moments later, so a "Detached:"
+  // banner here would be a flash of alarm about a removal the user either
+  // asked for or caused by exiting the shell. Cross-language coupling like
+  // the two strings above (the supervisor's `detach_closed_tab` emits it);
+  // pinned by the browser suite's reaped-tab test, which fails if the
+  // removal stops being silent.
+  const TAB_CLOSED_DETACH_REASON = "terminal tab closed";
 
   // Non-null once a takeover-reason `Detached` has arrived on any of this
   // view's terminals: the reason string, used both as the latch flag and as
@@ -2457,11 +2471,15 @@
         // reopen the session.
         //
         // `decisionDetach` is the structural half of both carve-outs, and
-        // it is set for exactly TWO reasons out of the open-ended set the
-        // wire allows — because only two of them are decisions:
+        // it is set for exactly THREE reasons out of the open-ended set the
+        // wire allows — because only three of them are decisions:
         //
         // - A takeover: someone else asked for this session.
         // - A stall: the server disciplined this client for not reading.
+        // - A closed tab: the terminal itself is being removed (a manual
+        //   close from any client, or the reap of an exited shell), so
+        //   there is nothing to reconnect to — and per SPEC.md the removal
+        //   is silent (see TAB_CLOSED_DETACH_REASON).
         //
         // Every other detach notice a browser can receive is INFRASTRUCTURE
         // failing, and vetoing on those was a real bug in the first version
@@ -2486,6 +2504,13 @@
         // first rung — the exact opposite of the behavior above.
         let openedOnce = false;
         let decisionDetach = false;
+        // A detach whose whole point is that the terminal is GOING AWAY
+        // silently (a closed or reaped tab — see TAB_CLOSED_DETACH_REASON).
+        // `socketEnded` consults it because the server closes the socket
+        // right after such a notice, and the generic "Connection closed"
+        // banner leaking through would undo the silence the skipped
+        // detach banner just bought.
+        let silentDetach = false;
         // Whether this socket's ending has been committed — the first one
         // wins (see `socketEnded`). Declared with the rest of the
         // per-socket state rather than beside its own function, because
@@ -3008,7 +3033,9 @@
               // client was away, it cannot take the session back by
               // accident.
               const lost = msg.reason === TAKEOVER_DETACH_REASON;
-              decisionDetach = lost || msg.reason === STALL_DETACH_REASON;
+              const tabClosed = msg.reason === TAB_CLOSED_DETACH_REASON;
+              if (tabClosed) silentDetach = true;
+              decisionDetach = lost || tabClosed || msg.reason === STALL_DETACH_REASON;
               // Only a decision ends an in-flight recovery. Anything else
               // — a host that went away, the helm losing its supervisor —
               // is one more failed attempt, and cancelling here would stop
@@ -3027,7 +3054,11 @@
               // every other reason is a detach this view caused or
               // recovers from on its own.
               if (lost) farhelmTerm.latchTakeover(msg.reason);
-              showBanner(`Detached: ${msg.reason}`, lost);
+              // A closed tab is DISAPPEARING — the strip refresh unmounts
+              // this island moments after the notice — and SPEC.md's tab
+              // reap promises silence, so it is the one detach that paints
+              // nothing (see TAB_CLOSED_DETACH_REASON).
+              if (!tabClosed) showBanner(`Detached: ${msg.reason}`, lost);
             }
             return;
           }
@@ -3092,11 +3123,11 @@
          * island is already being replaced by whoever asked for the
          * teardown; the page unloading and taking its sockets with it; this
          * view having LOST the session, where reconnecting would fight the
-         * client that now owns it; and a DECISION detach — a takeover or a
-         * stall, and only those two. Every other explanation the server
-         * gives is infrastructure failing, which is transport loss one
-         * layer up and recovers exactly like the rest (see
-         * `decisionDetach`).
+         * client that now owns it; and a DECISION detach — a takeover, a
+         * stall, or a closed tab, and only those three. Every other
+         * explanation the server gives is infrastructure failing, which is
+         * transport loss one layer up and recovers exactly like the rest
+         * (see `decisionDetach`).
          *
          * What remains is the positive test, and it is two cases rather
          * than one. A socket that reached OPEN and then died is transport
@@ -3137,6 +3168,11 @@
             noteTransportLoss(spec, baseUrl, attach);
             return;
           }
+          // A silent detach's socket close is the EXPECTED tail of a tab
+          // removal, not news: the island is about to unmount, and any
+          // banner here would be the flash of alarm the silence exists to
+          // prevent.
+          if (silentDetach) return;
           showBanner(reason === "error" ? "Connection error" : "Connection closed");
         }
 

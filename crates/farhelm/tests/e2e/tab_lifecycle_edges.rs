@@ -78,17 +78,22 @@ async fn opening_a_tab_on_a_restart_gap_session_is_a_restart_first_conflict() {
     drop(slot);
 }
 
-/// A tab whose shell EXITED on its own is not a closed tab: it stays
-/// listed, stays attachable with its scrollback, and still closes
-/// cleanly.
+/// A tab whose shell EXITED disappears from listings at once and still
+/// closes cleanly — SPEC.md's automatic-reap contract as the listing
+/// paths see it (the ticker's reap, the half that actually kills the
+/// window, is pinned in `ticker`'s own tests; this harness runs no
+/// ticker).
 ///
-/// SPEC.md gives an established tab the same `remain-on-exit` contract the
-/// agent terminal has — a dead pane is viewable, not gone — and the
-/// dead-at-OPEN refusal is deliberately a different thing. This is the
-/// test that keeps the two from being conflated into "a dead shell means
-/// no tab".
+/// This test REPLACED the pre-reap contract, deliberately: a dead tab
+/// used to stay listed and attachable with its scrollback, per PLAN_M4's
+/// "established tabs have no error-vs-exited story to tell". The user
+/// decided otherwise (BUGS_BURNDOWN.md issue 3, 2026-08-13): an exited
+/// tab is DONE — removed silently, scrollback discarded — while the
+/// agent terminal keeps its exited-with-scrollback behavior. The close
+/// half matters because the manual close and the ticker's reap are the
+/// same flow, and both must tolerate a pane that is already dead.
 #[tokio::test]
-async fn a_tab_whose_shell_exited_stays_listed_replayable_and_closable() {
+async fn a_tab_whose_shell_exited_vanishes_from_listings_and_still_closes() {
     let h = harness().await;
     let (session, _work) = basic_session(&h).await;
     let _cleanup = MarkerCleanupGuard::new(session.id.clone());
@@ -107,19 +112,15 @@ async fn a_tab_whose_shell_exited_stays_listed_replayable_and_closable() {
         .expect("attach the tab");
     let mut seen = Vec::new();
     wait_for_shell(&h.client, chan, &mut rx, &mut seen, "READY").await;
-    run_in_shell(
-        &h.client,
-        chan,
-        &mut rx,
-        &mut seen,
-        "printf 'BEFORE%sEXIT\\n' -",
-        "BEFORE-EXIT",
-        20,
-    )
-    .await;
+    assert_eq!(
+        listed_tabs(&h.client, &session.id).await,
+        vec![tab.id.clone()],
+        "a live tab lists normally"
+    );
     h.client.send_input(chan, b"exit\r".to_vec()).await;
 
-    // The pane goes dead; the tab does not.
+    // The pane goes dead — and the tab is gone from listings the moment
+    // any list looks, without waiting on the ticker's kill.
     let pane = tab_pane(&h, &session.id, &tab.id).await;
     let deadline = tokio::time::Instant::now() + Duration::from_secs(15);
     loop {
@@ -137,32 +138,73 @@ async fn a_tab_whose_shell_exited_stays_listed_replayable_and_closable() {
         );
         tokio::time::sleep(Duration::from_millis(100)).await;
     }
-
-    assert_eq!(
-        listed_tabs(&h.client, &session.id).await,
-        vec![tab.id.clone()],
-        "a tab whose shell exited is still a tab"
+    assert!(
+        listed_tabs(&h.client, &session.id).await.is_empty(),
+        "a tab whose shell exited must not be listed"
     );
-    h.client.detach(chan).await;
-    let (_chan2, mut rx2) = h
+
+    // Gone from listings means gone from ATTACH too: a client that kept
+    // the id must not be able to reach into the corpse and read scrollback
+    // the product has declared discarded (the reap normally follows within
+    // a tick; this window must not behave differently from after it).
+    let err = h
         .client
         .attach_terminal(
             &session.id,
             80,
             24,
             TerminalSelector::Tab { id: tab.id.clone() },
-            "tab-lease",
+            "corpse-lease",
         )
         .await
-        .expect("a dead tab pane must still be attachable");
-    let mut replay = Vec::new();
-    wait_for(&mut rx2, &mut replay, "BEFORE-EXIT", 20).await;
+        .expect_err("attaching a dead-but-unreaped tab must be refused");
+    assert_eq!(
+        err.downcast_ref::<SupervisorError>()
+            .expect("a refused attach must carry a SupervisorError")
+            .kind,
+        ErrorKind::NotFound,
+        "a dead tab answers exactly like a reaped one"
+    );
 
+    // The window itself is still there until a reap — asserted at the
+    // tmux level, because the LISTING was already empty before this close
+    // (the dead-tab filter above) and a listing check alone would pass a
+    // no-op close.
+    let before = tmux_query(
+        &h.state.path().join("tmux.sock"),
+        &["display-message", "-p", "-t", &pane, "#{pane_dead}"],
+    )
+    .await;
+    assert!(
+        before.status.success(),
+        "the dead pane must still exist before the close"
+    );
+    // The manual close — the same flow the ticker's reap runs — must
+    // finish the job for a pane that is already dead.
     h.client
         .close_tab(&session.id, &tab.id)
         .await
         .expect("a tab whose shell already exited must still close");
     assert!(listed_tabs(&h.client, &session.id).await.is_empty());
+    // Enumerated rather than probed: `display-message -t %N` for a
+    // vanished pane silently falls back to a current pane instead of
+    // failing, so only the full pane list can prove absence.
+    let after = tmux_query(
+        &h.state.path().join("tmux.sock"),
+        &["list-panes", "-a", "-F", "#{pane_id}"],
+    )
+    .await;
+    assert!(
+        after.status.success(),
+        "the pane enumeration itself must succeed, or its emptiness proves nothing: {}",
+        String::from_utf8_lossy(&after.stderr)
+    );
+    assert!(
+        !String::from_utf8_lossy(&after.stdout)
+            .lines()
+            .any(|line| line.trim() == pane),
+        "the close must actually destroy the window, not merely agree with the empty listing"
+    );
 }
 
 /// Closing a tab id that is well-formed but unknown is `NotFound`, and

@@ -193,7 +193,8 @@ Ubuntu 24.04 ships 3.4.
   instant and a background tab keeps up with its own output. Tabs survive a reload and a supervisor restart with their
   scrollback, and a tab opened or closed from another client shows up here on its own; a host reboot or an archive takes
   them all, and nothing recreates them. Closing a tab confirms first, then kills that shell and everything it started —
-  the agent and the other tabs are untouched.
+  the agent and the other tabs are untouched. A tab whose shell exits on its own — ctrl-d, `exit` — disappears the same
+  way, silently and scrollback included; only the agent terminal keeps its exited screen around to read.
 - Opening a tab needs somewhere to open it: if the working directory has vanished, the open fails in place with the
   directory named, and on a session whose terminals a reboot or an archive already erased it fails telling you to
   restart the session first — a session with no terminal does not grow a tab-only one. Both messages are the

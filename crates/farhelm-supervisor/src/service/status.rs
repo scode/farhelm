@@ -452,13 +452,16 @@ pub(crate) fn entry_info(
     // Tabs are not stored anywhere at all (`SessionInfo::tabs`), so this
     // rediscovery IS the tab list. A terminal-less entry has no tmux
     // session and therefore no tabs, which the empty default states
-    // honestly.
+    // honestly. Dead tabs are omitted: SPEC.md reaps a tab whose process
+    // exited, and the ticker's reap may lag this reply by a tick — hiding
+    // the corpse here is what keeps the listing honest in that window.
     info.tabs = entry
         .terminal
         .as_ref()
         .map(|terminal| {
-            tabs_from_pane_states(pane_states, &terminal.tmux_name)
+            tabs_from_pane_states(pane_states.values(), &terminal.tmux_name)
                 .into_iter()
+                .filter(|tab| !tab.dead)
                 .map(|tab| TabInfo { id: tab.id })
                 .collect()
         })

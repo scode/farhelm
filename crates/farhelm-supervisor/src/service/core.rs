@@ -37,7 +37,7 @@ use super::terminals::{
     ActiveAttach, AttachmentKey, OutputReapEntry, OutputReapReceiver, OutputReapRegistry,
     SINK_READY_TIMEOUT, SessionSinkCandidate, SessionSinkHandle, SessionSinkLease, SinkRegistry,
     SinkRegistryEntry, TAB_LAUNCH_SETTLE, TAB_LAUNCH_SETTLE_STEP, Terminal, TerminalId,
-    agent_pane_from_states, resolve_terminal, run_session_sink, tabs_from_pane_states,
+    agent_pane_from_states, resolve_terminal_for_close, run_session_sink, tabs_from_pane_states,
 };
 use super::ticker::{ActivitySample, SAMPLING_ADMISSION_PERMITS, TICKER_INTERVAL, start_ticker};
 use super::uploads::UploadHandle;
@@ -7957,9 +7957,35 @@ impl Supervisor {
     /// Its own tmux round trip, unlike the `ListSessions` path (which
     /// reuses the pane-state map it already fetched for liveness), because
     /// a single-session reply has no such map to share.
+    ///
+    /// Dead tabs are omitted, exactly as the `ListSessions` path omits
+    /// them (`status::entry_info`): a reaped-any-tick-now corpse is not a
+    /// tab a REPLY should offer. Teardown must not use this — it
+    /// enumerates per-tab scopes and a hidden corpse still owns one; see
+    /// [`Self::session_tabs_including_dead`].
     pub(crate) async fn session_tabs(&self, terminal: &Terminal) -> anyhow::Result<Vec<TabInfo>> {
         let states = self.tmux.pane_states().await?;
-        Ok(tabs_from_pane_states(&states, &terminal.tmux_name)
+        Ok(tabs_from_pane_states(states.values(), &terminal.tmux_name)
+            .into_iter()
+            .filter(|tab| !tab.dead)
+            .map(|tab| TabInfo { id: tab.id })
+            .collect())
+    }
+
+    /// [`Self::session_tabs`] with dead tabs INCLUDED — the teardown
+    /// spelling. Archive and delete enumerate per-tab cgroup scopes from
+    /// this list, and a tab whose shell exited a moment ago still owns a
+    /// scope (its daemonized children live there until something stops
+    /// it); the reply-facing filter would skip exactly that scope in the
+    /// death-to-reap window. The unit GLOB swept afterwards usually
+    /// catches strays anyway, but the explicit list must not depend on it
+    /// — the glob is the belt for units tmux can no longer name at all.
+    pub(crate) async fn session_tabs_including_dead(
+        &self,
+        terminal: &Terminal,
+    ) -> anyhow::Result<Vec<TabInfo>> {
+        let states = self.tmux.pane_states().await?;
+        Ok(tabs_from_pane_states(states.values(), &terminal.tmux_name)
             .into_iter()
             .map(|tab| TabInfo { id: tab.id })
             .collect())
@@ -8186,7 +8212,8 @@ impl Supervisor {
     ///    rule: a shell already dead by reply time is a refused open
     ///    carrying the pane's last words, not a successful open holding a
     ///    corpse. A shell that starts and later exits is a different thing
-    ///    entirely and stays viewable, like any dead pane.
+    ///    entirely: an established tab, which the listing paths hide and
+    ///    the ticker reaps (SPEC.md's automatic tab reap).
     ///
     /// Nothing here WRITES to supervisor.db or the sessions map. That is
     /// the point: rediscovery from window markers is the honest
@@ -8534,7 +8561,12 @@ impl Supervisor {
                 format!("no such session: {}", truncate_for_error(session_id)),
             ));
         };
-        let terminal = resolve_terminal(self, &entry, &TerminalId::Tab(tab_id.to_string())).await?;
+        // The close-capable resolver: an exited-but-unreaped tab is exactly
+        // what this path (the user's close, and the ticker's reap through
+        // it) must still be able to find and destroy, while attach and
+        // resize already treat it as gone.
+        let terminal =
+            resolve_terminal_for_close(self, &entry, &TerminalId::Tab(tab_id.to_string())).await?;
 
         // Supervisor-owned, like the open: a client disconnecting between
         // the first sweep and the window kill must not leave a half-reaped
