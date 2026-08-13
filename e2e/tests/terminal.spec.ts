@@ -1025,6 +1025,21 @@ test("list renders the session row with title, cwd, invocation, and a running ba
   });
 });
 
+// The create form's working-directory field defaults to "~"
+// (BUGS_BURNDOWN.md issue 2): the common create needs no typing, and the
+// literal "~" is what gets sent — the supervisor expands it against the
+// TARGET host's home, which is why a host-independent default is possible
+// at all. Pinned as the field's actual initial value (not a placeholder)
+// because the decision was specifically "what you see is what is sent";
+// a regression to an empty-but-hinted field would pass a weaker check.
+test("the create form prefills the working directory with ~", async ({ page }) => {
+  await page.goto("/");
+  await page.locator(".new-session-button").click();
+  const form = page.locator(".create-session-form");
+  await expect(form).toBeVisible();
+  await expect(form.locator('input[type="text"]').nth(0)).toHaveValue("~");
+});
+
 // Keyboard activation (PLAN_M2.md step 7: rows must be
 // keyboard-activatable). The open action (`.session-row-open`, PLAN_M2.md
 // step 8) is a native <button> rather than a div with a hand-rolled

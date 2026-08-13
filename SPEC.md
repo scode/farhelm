@@ -144,7 +144,9 @@ Session creation is one action, not a wizard. Only the working directory is fund
   concretely, the supervisor's own `HOME` environment, resolved once at supervisor start; a supervisor with no usable
   `HOME` refuses `~` with an error naming that, rather than guessing at an account database. The expansion happens once,
   at creation, and the session stores the expanded absolute path, so the anti-drift property above is preserved; `~user`
-  forms are refused. A directory picker/completer against the target host's filesystem is provided.
+  forms are refused. The create form prefills the field with `~`, so the common home-directory create needs no typing;
+  because expansion is host-side, the same default is correct for every target host. A directory picker/completer
+  against the target host's filesystem is provided.
 - Title: optional; auto-generated when omitted. Renameable later. A title is a single-line label, so a title you supply
   is refused if it contains control characters (escape sequences, newlines, tabs); an auto-generated one has any such
   character replaced with U+FFFD rather than being refused, since the directory it comes from is legitimate and you did

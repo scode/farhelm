@@ -2031,7 +2031,14 @@ fn CreateSessionForm(
     on_created: EventHandler<Session>,
 ) -> Element {
     let base = use_context::<ApiBase>().0;
-    let mut cwd = use_signal(String::new);
+    // Prefilled rather than empty-with-a-placeholder, deliberately: what
+    // gets sent is always exactly what the field shows, and the common
+    // "just give me a session in my home directory" create needs no typing
+    // at all. `~` resolves against the TARGET host's home — the supervisor
+    // expands it at create time (SPEC.md's working-directory rule), which
+    // is what makes a host-independent default possible here at all: this
+    // form cannot know a remote host's home path.
+    let mut cwd = use_signal(|| "~".to_string());
     let mut invocation = use_signal(String::new);
     let mut title = use_signal(String::new);
     let mut error = use_signal(|| None::<String>);

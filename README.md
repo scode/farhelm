@@ -146,22 +146,23 @@ Ubuntu 24.04 ships 3.4.
   widens the matching set without changing the fleet total. The parent field takes an exact session id. The profile
   field is free text rather than a menu on purpose: it matches a profile's id or the name a session snapshotted at
   creation, which is what keeps a deleted profile's sessions findable.
-- "new session" opens an inline form: host, agent, working directory (required), title (optional, auto-generated when
-  omitted). Submitting launches the agent and takes you straight into its terminal. The host selector lists every
-  registered host and defaults to the machine running the helm (SPEC.md's rule names the host of the currently open
-  session first, but this UI shows the list and a session as alternatives rather than side by side, so there is never
-  one open while this dialog exists); a host that is not connected is offered too, labelled with its state, and the
-  create against it fails in place with the helm's own explanation rather than being hidden from the list. The agent
-  selector offers that host's profiles and preselects the one you last created a session from there; when that profile
-  has since been deleted it preselects nothing and says so rather than quietly picking another. Pick "custom command"
-  instead and the command field below is what runs — the two are exclusive, and choosing a profile greys the field out
-  because the profile already says what to launch. Paths cross the form literally, and the one expansion happens on the
-  supervisor: a working directory of `~` or `~/path` expands there, once, against the target host's home (`~user` forms
-  are refused, and no variable ever expands); any other directory must be written out in full as it exists on the host
-  it names. A bad working directory fails the create in place, with the supervisor's own error shown next to the form
-  and nothing created. A bad EXECUTABLE (a typo'd command, a path that does not exist) is different: creation still
-  succeeds — the working directory and terminal both exist — and the session then reports error once its agent's own
-  exec fails, with the reason shown right in the list.
+- "new session" opens an inline form: host, agent, working directory (required, prefilled with `~`), title (optional,
+  auto-generated when omitted). Submitting launches the agent and takes you straight into its terminal. The host
+  selector lists every registered host and defaults to the machine running the helm (SPEC.md's rule names the host of
+  the currently open session first, but this UI shows the list and a session as alternatives rather than side by side,
+  so there is never one open while this dialog exists); a host that is not connected is offered too, labelled with its
+  state, and the create against it fails in place with the helm's own explanation rather than being hidden from the
+  list. The agent selector offers that host's profiles and preselects the one you last created a session from there;
+  when that profile has since been deleted it preselects nothing and says so rather than quietly picking another. Pick
+  "custom command" instead and the command field below is what runs — the two are exclusive, and choosing a profile
+  greys the field out because the profile already says what to launch. The working directory starts at `~`, which the
+  supervisor expands once against the target host's home at creation — so the no-typing default is correct for every
+  host. That is the only expansion anywhere between the form and the host: `~user` forms are refused, no variable
+  expands, and any other directory must be written out in full as it exists on the host it names. A bad working
+  directory fails the create in place, with the supervisor's own error shown next to the form and nothing created. A bad
+  EXECUTABLE (a typo'd command, a path that does not exist) is different: creation still succeeds — the working
+  directory and terminal both exist — and the session then reports error once its agent's own exec fails, with the
+  reason shown right in the list.
 - Submitting the same form twice yields one session, not two. Every create from the form carries an idempotency key, so
   a submit retried after an ambiguous failure — the request landed but its reply did not, the supervisor restarted
   mid-create — returns the session the first attempt already made instead of launching a second agent, and a failed

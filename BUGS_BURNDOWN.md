@@ -51,7 +51,7 @@ rejected. The CLI `farhelm spawn --cwd` path (SPEC.md:382) flows through the sam
 
 ## 2. Default the new-session working directory to `~`
 
-Status: triaged, not started. Depends on issue 1 (`~` expansion) landing first.
+Status: fixed in PR #153 (`pr/tilde-default`), stacked on issue 1's expansion.
 
 What the user wants: `~` as the default working directory for a new session, so the field only needs touching when a
 different directory matters.

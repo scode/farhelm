@@ -507,7 +507,10 @@ for _ in $(seq 1 15); do
   fi
 done
 [ -n "$FORM_OPEN" ] || fail "create form never opened (webview unresponsive to clicks?)"
-DISPLAY=$DISP xdotool mousemove 400 425 click 1 sleep 0.3 type --delay 120 "$X/work"
+# ctrl+a first: the working-directory field is prefilled with "~" (the
+# create form's default), and xdotool types at the caret rather than
+# replacing — without the select-all this would submit "~$X/work".
+DISPLAY=$DISP xdotool mousemove 400 425 click 1 sleep 0.3 key ctrl+a type --delay 120 "$X/work"
 DISPLAY=$DISP xdotool mousemove 400 475 click 1 sleep 0.3 type --delay 120 "bash"
 DISPLAY=$DISP xdotool mousemove 400 525 click 1 sleep 0.3 type --delay 120 "smoke"
 
