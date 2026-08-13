@@ -564,10 +564,14 @@ test.describe("the invalidation feed", () => {
         "running it alongside",
     ).toHaveLength(2);
 
-    // The same cycle for the OTHER page. The session view's fallback reads
-    // its own detail endpoint and nothing else (the host read behind a stale
-    // notice only fires for a stale session, which this one is not), so the
-    // handshake there owes exactly one read.
+    // The same cycle with a SESSION SELECTED. Under the sidebar layout
+    // (BUGS_BURNDOWN.md issue 5) selecting a session mounts the session
+    // view BESIDE the list rather than instead of it, so a notification
+    // now fans out to both readers: the view's own detail read, plus the
+    // list's listing walk and host read — the accepted cost of keeping
+    // both panes live. (The host read behind a stale notice only fires
+    // for a stale session, which this one is not, so the detail side
+    // still owes exactly one.)
     await openSession(page, session.id, session.title);
     await page.waitForTimeout(1_500);
     const detailQuiet = reads.count("detail");
@@ -583,18 +587,48 @@ test.describe("the invalidation feed", () => {
 
     await afterFallbackTick();
     await waitForLiveSocket();
-    const detailHandover = { any: reads.count(), detail: reads.count("detail") };
+    const detailHandover = {
+      detail: reads.count("detail"),
+      listing: reads.count("listing"),
+      hosts: reads.count("hosts"),
+    };
     handshake(feed, 3);
 
+    // Two independently phased fallback loops are live here (the list's
+    // and the detail's), and either can have a tick already in flight at
+    // the instant the greeting lands — so exact-count assertions taken
+    // across the handshake race that straggler. Split the claim instead:
+    // first every surface observes the recovery (the handshake's owed
+    // re-reads arrive)...
+    await expect
+      .poll(() => reads.count("detail") - detailHandover.detail, {
+        timeout: 10_000,
+        message: "the handshake owes the session view a detail re-read",
+      })
+      .toBeGreaterThanOrEqual(1);
+    await expect
+      .poll(() => reads.count("listing") - detailHandover.listing, {
+        timeout: 10_000,
+        message: "and the still-mounted sidebar its listing walk",
+      })
+      .toBeGreaterThanOrEqual(1);
+    await expect
+      .poll(() => reads.count("hosts") - detailHandover.hosts, {
+        timeout: 10_000,
+        message: "and its host read",
+      })
+      .toBeGreaterThanOrEqual(1);
+    // ...then, with recovery observed everywhere and any straggler tick
+    // given time to land, the loops must fall SILENT: a healthy feed
+    // switches every fallback off rather than running beside it. This
+    // quiet window is the assertion the exact counts were standing in for.
+    await page.waitForTimeout(2_000);
+    const settled = reads.count();
     await page.waitForTimeout(9_000);
     expect(
-      reads.count("detail") - detailHandover.detail,
-      "the handshake owes one detail re-read",
-    ).toBe(1);
-    expect(
-      reads.urls().slice(detailHandover.any),
-      "and the session view's fallback must be off, not running beside the feed",
-    ).toHaveLength(1);
+      reads.urls().slice(settled),
+      "no fallback may keep polling once the feed is healthy again",
+    ).toHaveLength(0);
   });
 
   /**

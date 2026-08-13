@@ -52,7 +52,7 @@ use crate::api::{
 use crate::archive::confirmation as archive_confirmation;
 use crate::feed::{fallback_polls_now, fallback_sleep, use_feed_reader};
 use crate::hosts::{HostsPanel, HostsRead, host_incarnation, is_connected, phase_label};
-use crate::ops::{OpLock, ReadGate, use_op_lock};
+use crate::ops::{OpLock, ReadGate};
 use crate::peer::{DetailPart, PeerLine, display_peer};
 use crate::profiles::{
     AgentChoice, CatalogLookup, CatalogSurface, HostTarget, UNRESOLVED_VALUE, existence_word,
@@ -293,21 +293,15 @@ const FILTERABLE_STATUSES: [&str; 6] = [
 /// ## Why SPEC.md's first clause is not implemented here
 ///
 /// SPEC.md's default is "the host of the currently open session, else the
-/// helm's own host". In this UI those are mutually exclusive views — `App`
-/// renders EITHER the list or a session, never both — so while this dialog
-/// exists there is no currently open session, and the first clause selects
-/// nothing every single time. It was plumbed through anyway for a while:
-/// `App` derived the open session's host, passed it down, and this function
-/// compared it against the option list. Every step of that was unreachable
-/// code with a live-looking test around it, which is worse than an absent
-/// feature — it reads as coverage for a rule nothing exercises.
-///
-/// The clause becomes reachable the moment a create surface can coexist with
-/// an open session (a split view, a modal over the terminal, a command
-/// palette — some later milestone's UI shape). At that point the parameter
-/// comes back, and the rule to restore is the one SPEC.md states: the host
-/// of the session open RIGHT NOW, never a remembered last-viewed one,
-/// because a session the user backed out of is not open.
+/// helm's own host". Both clauses are live: the sidebar layout
+/// (BUGS_BURNDOWN.md issue 5) put the create form beside an open session,
+/// which is exactly the coexistence an earlier version of this function
+/// documented as the condition for restoring the first clause. `open_host`
+/// is the SELECTED session's host — the one open right now, never a
+/// remembered last-viewed one, because a session the user deselected is
+/// not open — and it only wins while that host is still in the registry
+/// (an open session whose host was removed must not aim a create at a
+/// selector entry that no longer exists).
 ///
 /// ## Two things the fallback deliberately does not do
 ///
@@ -322,8 +316,10 @@ const FILTERABLE_STATUSES: [&str; 6] = [
 ///   chosen, which the form refuses to submit — is the honest answer, and it
 ///   only arises before the first hosts read lands, since a live helm always
 ///   has its local row.
-fn default_create_host(hosts: &[HostOption]) -> Option<HostId> {
-    hosts.iter().find(|host| host.local).map(|host| host.id)
+fn default_create_host(hosts: &[HostOption], open_host: Option<HostId>) -> Option<HostId> {
+    open_host
+        .filter(|open| hosts.iter().any(|host| host.id == *open))
+        .or_else(|| hosts.iter().find(|host| host.local).map(|host| host.id))
 }
 
 /// The host a create would ACTUALLY go to: the user's choice while it still
@@ -336,10 +332,14 @@ fn default_create_host(hosts: &[HostOption]) -> Option<HostId> {
 /// disagreement between those two would put one host's profiles under another
 /// host's create — the exact failure `profiles::CatalogRead` refuses to make
 /// possible from its side.
-fn effective_create_host(hosts: &[HostOption], chosen: Option<HostId>) -> Option<HostId> {
+fn effective_create_host(
+    hosts: &[HostOption],
+    chosen: Option<HostId>,
+    open_host: Option<HostId>,
+) -> Option<HostId> {
     chosen
         .filter(|chosen| hosts.iter().any(|host| host.id == *chosen))
-        .or_else(|| default_create_host(hosts))
+        .or_else(|| default_create_host(hosts, open_host))
 }
 
 /// Every registered host as the create dialog and the filter surface offer
@@ -442,11 +442,13 @@ std::thread_local! {
 /// answering accumulates one walk per notification and per fallback tick for
 /// as long as the page is open.
 ///
-/// Everything is scoped to this component, so it is all cancelled for free
-/// when `App` switches to `SessionView` and this component unmounts —
-/// "polling stops while a terminal is open" (PLAN_M2.md) still falls out of
-/// Dioxus's own task lifecycle, and now so does "only the mounted page
-/// re-reads".
+/// Everything is scoped to this component. Under the sidebar layout
+/// (BUGS_BURNDOWN.md issue 5) that no longer means much unmounting: the
+/// list is permanently on screen beside the selected session, so its
+/// readers stay live while a terminal is open — the coalescing above is
+/// what keeps that affordable, and PLAN_M2.md's "polling stops while a
+/// terminal is open" is deliberately retired along with the page swap
+/// that implied it.
 ///
 /// ## Two more reads, on demand (PLAN_M6_75.md item 8)
 ///
@@ -493,17 +495,45 @@ std::thread_local! {
 /// values captured at the last render, so two clicks inside one frame both
 /// see an idle page.
 ///
-/// The session-OPEN click is gated by the same token even though it starts
-/// nothing, because it ENDS everything: opening a session unmounts this
-/// component and every task it owns, so a mid-flight mutation's result is
-/// simply lost. Per-session stop/rename/delete stay outside the token, on
-/// their own per-row set — they cannot invalidate one another's premises,
-/// and two rows acting at once is behavior the browser suite pins.
+/// The session-OPEN click is gated by the same token even though the
+/// sidebar layout no longer unmounts this component on open. What the
+/// gate still buys is coherence, not survival: selecting a session swaps
+/// the MAIN pane (remounting `SessionView` and its attachments), and
+/// doing that mid-mutation would let the mutation's completion race a
+/// right-pane world that changed under it — the same
+/// two-actions-one-frame class the token exists for. Per-session
+/// stop/rename/delete stay outside the token, on their own per-row set —
+/// they cannot invalidate one another's premises, and two rows acting at
+/// once is behavior the browser suite pins.
 #[component]
-pub(crate) fn ListView(on_open: EventHandler<Session>) -> Element {
+pub(crate) fn ListView(
+    on_open: EventHandler<Session>,
+    /// The currently selected session's host — SPEC.md's first create-
+    /// default clause, supplied by `App` because only it knows the
+    /// selection. `None` when nothing is selected (or the selected
+    /// session predates per-host metadata), which falls back to the
+    /// helm's own host.
+    open_host: Option<HostId>,
+    /// The SHARED live-operation token (see `ops`'s module docs): owned by
+    /// `AppBody` rather than created here, because the selected session's
+    /// view claims the same token for its own rename/restart/archive —
+    /// a private token per pane would let the two panes mutate the fleet
+    /// under each other.
+    ops: OpLock,
+    /// Live count of this list's per-row operations, maintained here and
+    /// read by the session view's `PaneGate`: row operations never hold
+    /// the token (rows must stay concurrent with each other), so this
+    /// count is the only way the other pane can refuse to start a write
+    /// while one is in flight.
+    row_ops: Signal<u32>,
+    /// A session this list REMOVED — a successful delete, or an archive
+    /// (which the default filter drops). `AppBody` reconciles the
+    /// selection: without this, deleting the selected row would leave the
+    /// right pane showing a session this client knows is gone.
+    on_removed: EventHandler<String>,
+) -> Element {
     let base = use_context::<ApiBase>().0;
-    // The page's single live-operation token (see this component's docs).
-    let ops = use_op_lock();
+    let mut row_ops = row_ops;
     let mut listing = use_signal(|| None::<Result<SessionListing, String>>);
     // The same generation discipline the hosts read has, for the same
     // reason and against a slower race: a listing walk is several round
@@ -542,6 +572,30 @@ pub(crate) fn ListView(on_open: EventHandler<Session>) -> Element {
     // update disabling it is not synchronous with the click handler
     // itself.
     let mut pending = use_signal(HashSet::<String>::new);
+    // `pending`'s entry and exit, with the cross-pane bookkeeping attached:
+    // every row operation must (a) refuse to start while the SHARED token
+    // is held — the session view or a page operation is mid-write, and a
+    // row op landing under it is exactly the cross-pane race the shared
+    // gate exists to close — and (b) keep `row_ops` equal to `pending`'s
+    // size, because that count is what the session view's `PaneGate`
+    // consults to refuse ITS claims while a row op runs. Paired helpers
+    // rather than open-coded at each site so no exit path can forget the
+    // decrement (a stuck count would leave the session view inert).
+    let mut begin_row_op = move |id: &String| -> bool {
+        if ops.busy_now() {
+            return false;
+        }
+        if !pending.write().insert(id.clone()) {
+            return false;
+        }
+        row_ops += 1;
+        true
+    };
+    let mut end_row_op = move |id: &String| {
+        if pending.write().remove(id) {
+            row_ops -= 1;
+        }
+    };
     // Which sessions are showing the inline "confirm delete?" prompt in
     // place of their normal stop/delete buttons — see `on_delete` below.
     // Deliberately a plain client-side set with no timeout and no
@@ -681,12 +735,17 @@ pub(crate) fn ListView(on_open: EventHandler<Session>) -> Element {
     // the registry re-points this too — and it is `None` whenever the dialog
     // is closed, which is what stops it reading.
     let mut create_target = use_signal(|| None::<HostTarget>);
-    use_effect(move || {
+    // `use_reactive` because `open_host` is a plain prop, not a signal:
+    // without it the effect would capture the value it saw on first run
+    // and an open form would keep offering the OLD session's host and
+    // catalog after the user selected a session on another machine —
+    // rerenders alone never rerun a `use_effect`.
+    use_effect(use_reactive((&open_host,), move |(open_host,)| {
         let wanted = show_create()
             .then(|| {
                 let read = hosts.read();
                 let options = host_options(read.hosts().unwrap_or_default());
-                let effective = effective_create_host(&options, chosen_host());
+                let effective = effective_create_host(&options, chosen_host(), open_host);
                 options
                     .into_iter()
                     .find(|host| Some(host.id) == effective)
@@ -704,7 +763,7 @@ pub(crate) fn ListView(on_open: EventHandler<Session>) -> Element {
         if *create_target.peek() != wanted {
             create_target.set(wanted);
         }
-    });
+    }));
     let create_catalog = use_catalog_surface(create_target);
 
     // Everything that happens to a listing reply once it is BACK, in one
@@ -1081,9 +1140,10 @@ pub(crate) fn ListView(on_open: EventHandler<Session>) -> Element {
         // Re-entry guard for the per-session in-flight set: a disabled
         // button should already stop this, but the click and the
         // re-render that disables it are not synchronous, so the handler
-        // checks for itself too. `insert` returning `false` means an op
-        // for this id was already running.
-        if !pending.write().insert(id.clone()) {
+        // checks for itself too. Refused both when an op for this id is
+        // already running and while the shared token is held (see
+        // `begin_row_op`).
+        if !begin_row_op(&id) {
             return;
         }
         let base = stop_base.clone();
@@ -1099,7 +1159,7 @@ pub(crate) fn ListView(on_open: EventHandler<Session>) -> Element {
             match outcome.err() {
                 Some(e) => {
                     errors.write().insert(id.clone(), format!("stop: {e}"));
-                    pending.write().remove(&id);
+                    end_row_op(&id);
                 }
                 None => {
                     errors.write().remove(&id);
@@ -1161,7 +1221,7 @@ pub(crate) fn ListView(on_open: EventHandler<Session>) -> Element {
                     if failed {
                         stop_recovery(Trigger::Explicit);
                     }
-                    pending.write().remove(&id);
+                    end_row_op(&id);
                 }
             }
         });
@@ -1178,7 +1238,7 @@ pub(crate) fn ListView(on_open: EventHandler<Session>) -> Element {
     // in place of `on_stop`'s "stop:" one.
     let delete_refresh = request_listing.clone();
     let mut do_delete = move |id: String| {
-        if !pending.write().insert(id.clone()) {
+        if !begin_row_op(&id) {
             return;
         }
         let base = delete_base.clone();
@@ -1188,7 +1248,7 @@ pub(crate) fn ListView(on_open: EventHandler<Session>) -> Element {
             match outcome.err() {
                 Some(e) => {
                     errors.write().insert(id.clone(), format!("delete: {e}"));
-                    pending.write().remove(&id);
+                    end_row_op(&id);
                 }
                 None => {
                     errors.write().remove(&id);
@@ -1206,7 +1266,12 @@ pub(crate) fn ListView(on_open: EventHandler<Session>) -> Element {
                     if let Some(Ok(current)) = listing.write().as_mut() {
                         current.sessions.retain(|s| s.id != id);
                     }
-                    pending.write().remove(&id);
+                    end_row_op(&id);
+                    // AFTER the local bookkeeping, so a selection change
+                    // this triggers repaints against the already-updated
+                    // listing: the owner clears the right pane if the
+                    // session it shows is the one that just went away.
+                    on_removed.call(id.clone());
                     // The optimistic removal takes the ROW and nothing else:
                     // the fleet total, the matching count and the truncation
                     // flag all still describe a list that included it, and
@@ -1345,7 +1410,7 @@ pub(crate) fn ListView(on_open: EventHandler<Session>) -> Element {
     let archive_base = base.clone();
     let archive_refresh = request_listing.clone();
     let mut do_archive = move |id: String| {
-        if !pending.write().insert(id.clone()) {
+        if !begin_row_op(&id) {
             return;
         }
         errors.write().remove(&id);
@@ -1353,12 +1418,23 @@ pub(crate) fn ListView(on_open: EventHandler<Session>) -> Element {
         let refresh = archive_refresh.clone();
         spawn(async move {
             match archive_session(&base, &id).await {
-                Ok(_) => refresh(Trigger::Explicit),
+                Ok(_) => {
+                    refresh(Trigger::Explicit);
+                    // An archived session leaves the DEFAULT filter, so for
+                    // the selection's owner it has been removed just as a
+                    // delete removes: without this, the right pane keeps
+                    // showing a session whose row the refresh is about to
+                    // drop. Under an include-archived filter the row stays
+                    // listed, so the selection legitimately stays too.
+                    if !filter.peek().include_archived {
+                        on_removed.call(id.clone());
+                    }
+                }
                 Err(e) => {
                     errors.write().insert(id.clone(), format!("archive: {e}"));
                 }
             }
-            pending.write().remove(&id);
+            end_row_op(&id);
         });
     };
     let mut do_archive_on_confirm = do_archive.clone();
@@ -1423,7 +1499,7 @@ pub(crate) fn ListView(on_open: EventHandler<Session>) -> Element {
     let rename_base = base.clone();
     let rename_refresh = request_listing.clone();
     let on_rename_submit = move |(id, title): (String, String)| {
-        if !pending.write().insert(id.clone()) {
+        if !begin_row_op(&id) {
             return;
         }
         // This row's own previous failure, cleared by the retry that
@@ -1472,18 +1548,20 @@ pub(crate) fn ListView(on_open: EventHandler<Session>) -> Element {
                     errors.write().insert(id.clone(), format!("rename: {e}"));
                 }
             }
-            pending.write().remove(&id);
+            end_row_op(&id);
         });
     };
 
-    // Opening a row navigates `App` away from `ListView` entirely, which
-    // unmounts this component and every task it owns: a create or a host
-    // mutation still in flight has its eventual result silently discarded
-    // instead of ever being acted on. So the open click consults the page
-    // token AND this view's own per-session set, and it does so INSIDE the
-    // handler — the `nav_locked` value below is what the button renders
-    // with, and a render-time value is exactly what a click landing in the
-    // same frame as the operation it should have seen would read as idle.
+    // Opening a row swaps which session the keyed `SessionView` beside this
+    // list shows. The sidebar itself stays mounted now, but the selection
+    // change still tears down the previous keyed view — and an operation
+    // this list has in flight is about to repaint rows whose identity a
+    // same-frame selection change would pull out from under it. So the open
+    // click consults the page token AND this view's own per-session set,
+    // and it does so INSIDE the handler — the `nav_locked` value below is
+    // what the button renders with, and a render-time value is exactly what
+    // a click landing in the same frame as the operation it should have
+    // seen would read as idle.
     let guarded_open = move |session: Session| {
         if ops.busy_now() || !pending.peek().is_empty() {
             return;
@@ -1774,16 +1852,16 @@ pub(crate) fn ListView(on_open: EventHandler<Session>) -> Element {
         if show_create() {
             CreateSessionForm {
                 hosts: host_options,
+                open_host,
                 hosts_loaded: hosts.read().hosts().is_some(),
                 chosen_host,
                 catalog: create_catalog,
                 ops,
                 on_created: move |session| {
                     show_create.set(false);
-                    // The other close path, and it clears the same state for
-                    // the same reason — this component is about to be
-                    // unmounted by the navigation below, but a future shape
-                    // that kept the list mounted would otherwise reopen on the
+                    // The other close path. This component STAYS mounted
+                    // under the sidebar layout, so without this clear the
+                    // next open of the dialog would silently reopen on the
                     // last create's host.
                     chosen_host.set(None);
                     on_open.call(session);
@@ -1845,7 +1923,14 @@ pub(crate) fn ListView(on_open: EventHandler<Session>) -> Element {
                                 key: "{session.id}",
                                 state: RowState {
                                     error: errors.read().get(&session.id).cloned(),
-                                    busy: pending.read().contains(&session.id),
+                                    // The shared token counts as busy for
+                                    // every row's action buttons, not just
+                                    // this row's own in-flight op: while
+                                    // the other pane (or a page operation)
+                                    // holds it, `begin_row_op` refuses row
+                                    // ops anyway, and the disabled state is
+                                    // that refusal made visible.
+                                    busy: busy || pending.read().contains(&session.id),
                                     confirming: confirming.read().contains(&session.id),
                                     confirming_archive: confirming_archive
                                         .read()
@@ -1891,18 +1976,19 @@ pub(crate) fn ListView(on_open: EventHandler<Session>) -> Element {
 /// simpler than trying to keep a detached task meaningful after the fact.
 ///
 /// `on_created` fires only on a successful POST, with the newly created
-/// `Session` from the response body; `ListView` uses that to both close
-/// the form and navigate straight into the new session's terminal
-/// (SPEC.md: "creation launches the agent; you type your first prompt
-/// into its terminal"). On failure the form stays mounted with its values
+/// `Session` from the response body; `ListView` uses that to close the
+/// form and select the new session in the adjacent pane, whose terminal
+/// mounts immediately (SPEC.md: "creation launches the agent; you type
+/// your first prompt into its terminal") — the sidebar itself stays
+/// mounted throughout. On failure the form stays mounted with its values
 /// untouched and the error text rendered next to it — the fields are
 /// plain `use_signal<String>`s rather than being reset or lifted into
 /// `ListView`, so "form contents preserved" falls out of simply not
 /// clearing them rather than needing a restore step. On success the
-/// fields are left as-is too: `on_created` drives `ListView` to unmount
-/// this whole component immediately (closing the form and navigating
-/// away), so there is no one left to observe a reset — only the failure
-/// path needs to leave the control usable again.
+/// fields are left as-is too: `on_created` closes this form (unmounting
+/// it and its field signals) in the same frame, so there is no one left
+/// to observe a reset — only the failure path needs to leave the control
+/// usable again.
 ///
 /// ## The intent key (PLAN_M3.md item 6), and what it is bound to
 ///
@@ -2006,6 +2092,9 @@ pub(crate) fn ListView(on_open: EventHandler<Session>) -> Element {
 #[component]
 fn CreateSessionForm(
     hosts: Vec<HostOption>,
+    /// See `ListView`'s parameter of the same name: the selected session's
+    /// host, SPEC.md's first create-default clause.
+    open_host: Option<HostId>,
     /// Whether the hosts read has EVER succeeded. Distinguishes "there are
     /// no hosts" (impossible for a live helm, which always has its local
     /// row) from "nothing has come back yet", which is what a submit has to
@@ -2052,7 +2141,7 @@ fn CreateSessionForm(
     // (a re-added destination) silently reinstates the user's choice.
     let choice_vanished =
         chosen_host().is_some_and(|chosen| !hosts.iter().any(|host| host.id == chosen));
-    let selected = effective_create_host(&hosts, chosen_host());
+    let selected = effective_create_host(&hosts, chosen_host(), open_host);
     // This form's current intended create, if one has been submitted yet
     // (PLAN_M3.md item 6), together with the BINDING it was minted for.
     // Minted at first submit, reused by every later submit of the same
@@ -2243,7 +2332,7 @@ fn CreateSessionForm(
                 // captured host would send the create to the PREVIOUS machine
                 // while the selector on screen names another.
                 let target_now = catalog.target();
-                let selected_now = effective_create_host(&hosts, chosen_host.peek().to_owned());
+                let selected_now = effective_create_host(&hosts, chosen_host.peek().to_owned(), open_host);
                 // And the catalog the agent was just resolved against has to
                 // be the catalog OF that host. When they disagree the target
                 // effect has not caught up with the selector yet — a window of
@@ -2754,7 +2843,10 @@ fn CreateSessionForm(
 ///
 /// ## Host and staleness (PLAN_M6.md item 6)
 ///
-/// The row leads with the host it lives on, and a row the helm marked stale
+/// The row stacks its fields: the title line leads (with the stale/
+/// archived/status badges beside it), then the host, directory, and
+/// invocation lines, each ellipsizing alone in the fixed-width sidebar.
+/// A row the helm marked stale
 /// — its host is in some non-connected state — is dimmed and badged rather
 /// than hidden, per SPEC.md's "stay in the list … clearly marked". Its
 /// stop/rename/delete controls stay ENABLED, which looks like an oversight
@@ -2782,11 +2874,11 @@ fn CreateSessionForm(
 /// `nav_disabled`, unlike `error`/`busy`, is NOT this row's own state — it
 /// is `ListView`'s single global "something is in flight somewhere" flag
 /// (see `nav_locked` in `ListView`), applied identically to every row's
-/// open button. Opening ANY row unmounts `ListView` (navigation replaces
-/// it with `SessionView`), which would silently cancel whatever this row
-/// OR any other row's in-flight create/stop/delete was doing — the whole
-/// point of disabling it is to keep that unmount from happening at all
-/// while anything still needs `ListView` to stay alive to finish.
+/// open button. Opening ANY row swaps which session the keyed
+/// `SessionView` shows, tearing the previous one down mid-operation, and
+/// repaints this list under whatever operation is still in flight — the
+/// point of disabling it is to keep the selection still until every
+/// in-flight create/stop/delete has delivered its result.
 ///
 /// ## Inline delete confirmation
 ///
@@ -2973,56 +3065,90 @@ fn SessionRow(
                     // meaning as an implicit cancel.
                     disabled: nav_disabled || confirming || confirming_archive || renaming,
                     onclick: move |_| on_open.call(open_session.clone()),
-                    // The host leads the row: with more than one machine in
-                    // play it is the first thing that disambiguates two
-                    // otherwise identical sessions. The name is the helm's
-                    // own rendering (`host_name`), denormalized onto the row
-                    // so the list needs no second request — a row from a
-                    // helm that sends none simply shows nothing here rather
-                    // than inventing a label.
-                    // Escaped and direction-isolated like every other
-                    // rendering of a destination: this one names the machine
-                    // a row's stop and delete will reach, so a name able to
-                    // reorder the row around it could make one host's
-                    // session read as another's.
+                    // STACKED lines rather than one squeezed flex row: the
+                    // sidebar column (BUGS_BURNDOWN.md issue 5, interviewed
+                    // row contents) is far too narrow for the old
+                    // everything-on-one-line layout, whose min-width floors
+                    // produced the MT-8 overflow class the moment space ran
+                    // short. The title line leads with identity and its
+                    // qualifiers; host, cwd, and invocation each get a line
+                    // they can ellipsize alone.
+                    // `span` wrappers, not `div`: this all sits inside the
+                    // native `.session-row-open` <button>, whose content
+                    // model only permits phrasing content — a flow-content
+                    // div inside a button is invalid HTML that engines and
+                    // accessibility tooling may interpret inconsistently.
+                    // The stacked-line layout comes from the class's CSS,
+                    // not the element kind.
+                    span { class: "session-row-line",
+                        span { class: "session-title", "{session.title}" }
+                        // Beside the status badge rather than replacing it:
+                        // the last-known status is still what the helm
+                        // knows, and this says how old that knowledge is —
+                        // two facts, not one, exactly as the stop annotation
+                        // qualifies rather than replaces `exited`.
+                        if session.stale {
+                            span { class: "stale-badge", "stale" }
+                        }
+                        if session.archived {
+                            span { class: "archived-badge", "archived" }
+                        }
+                        if let Some((badge_class, badge_text)) = badge {
+                            span { class: "status-badge {badge_class}", "{badge_text}" }
+                        }
+                    }
+                    // The host gets the second line: with more than one
+                    // machine in play it is what disambiguates two otherwise
+                    // identical sessions. The name is the helm's own
+                    // rendering (`host_name`), denormalized onto the row so
+                    // the list needs no second request — a row from a helm
+                    // that sends none simply shows nothing here rather than
+                    // inventing a label. Escaped and direction-isolated like
+                    // every other rendering of a destination: this one names
+                    // the machine a row's stop and delete will reach, so a
+                    // name able to reorder the line around it could make one
+                    // host's session read as another's.
                     if let Some(host_name) = &session.host_name {
-                        span { class: "session-host peer-value", dir: "ltr",
-                            "{display_peer(host_name)}"
+                        span { class: "session-row-line",
+                            span { class: "session-host peer-value", dir: "ltr",
+                                "{display_peer(host_name)}"
+                            }
                         }
                     }
-                    span { class: "session-title", "{session.title}" }
-                    span { class: "session-cwd", "{session.cwd}" }
-                    span { class: "session-invocation", "{session.invocation}" }
-                    // The profile this session was CREATED from, as it
-                    // snapshotted the name — absent entirely for a
-                    // raw-created one, which is most of them. This is where
-                    // SPEC.md's snapshot rule becomes visible: the name never
-                    // moves under an existing session, and the qualifier
-                    // (`profiles::source_profile_label`) is what keeps that
-                    // from reading as a claim about today's catalog.
-                    // `data-profile-existence` is the browser suite's handle
-                    // on the half that does change.
-                    if let Some(source) = &session.source_profile {
-                        span {
-                            class: "session-profile peer-value",
-                            dir: "ltr",
-                            "data-profile-existence": "{existence_word(source.existence)}",
-                            "{source_profile_label(source)}"
+                    span { class: "session-row-line",
+                        // Two spans, not one: `.session-cwd` is the rtl
+                        // clipping container that puts the ellipsis on the
+                        // LEFT, and the inner `dir="ltr"` child is the bidi
+                        // isolate that keeps the path's characters in
+                        // logical order under it — rtl applied directly to
+                        // the text would move a leading "/" to the visual
+                        // right (see `.session-cwd` in app.css).
+                        span { class: "session-cwd",
+                            span { class: "session-cwd-text", dir: "ltr", "{session.cwd}" }
                         }
                     }
-                    // Beside the status badge rather than replacing it: the
-                    // last-known status is still what the helm knows, and
-                    // this says how old that knowledge is — two facts, not
-                    // one, exactly as the stop annotation qualifies rather
-                    // than replaces `exited`.
-                    if session.stale {
-                        span { class: "stale-badge", "stale" }
-                    }
-                    if session.archived {
-                        span { class: "archived-badge", "archived" }
-                    }
-                    if let Some((badge_class, badge_text)) = badge {
-                        span { class: "status-badge {badge_class}", "{badge_text}" }
+                    span { class: "session-row-line",
+                        span { class: "session-invocation", "{session.invocation}" }
+                        // The profile this session was CREATED from, as it
+                        // snapshotted the name — absent entirely for a
+                        // raw-created one, which is most of them. This is
+                        // where SPEC.md's snapshot rule becomes visible: the
+                        // name never moves under an existing session, and
+                        // the qualifier (`profiles::source_profile_label`)
+                        // keeps that from reading as a claim about today's
+                        // catalog. `data-profile-existence` is the browser
+                        // suite's handle on the half that does change.
+                        // NOTE: the interviewed row design drops this chip;
+                        // it survives PR-A because its removal travels with
+                        // the popup-menu PR that migrates its tests.
+                        if let Some(source) = &session.source_profile {
+                            span {
+                                class: "session-profile peer-value",
+                                dir: "ltr",
+                                "data-profile-existence": "{existence_word(source.existence)}",
+                                "{source_profile_label(source)}"
+                            }
+                        }
                     }
                 }
                 if confirming {
@@ -3352,16 +3478,34 @@ mod tests {
         }
     }
 
-    /// The default is the LOCAL row, and SPEC.md's open-session clause is
-    /// deliberately not implemented — see `default_create_host` for why
-    /// plumbing an unreachable branch is worse than an absent one.
+    /// With nothing selected, the default is the LOCAL row — SPEC.md's
+    /// second clause, the one that fires whenever the first cannot.
     #[test]
     fn the_create_default_is_the_local_row() {
         let hosts = vec![
             option(1, "this machine", true),
             option(2, "user@box", false),
         ];
-        assert_eq!(default_create_host(&hosts), Some(1));
+        assert_eq!(default_create_host(&hosts, None), Some(1));
+    }
+
+    /// The SELECTED session's host wins over the local row while it is in
+    /// the registry, and falls back the moment it is not — SPEC.md's first
+    /// create-default clause, live again now that the sidebar layout lets
+    /// the create form and an open session coexist (BUGS_BURNDOWN.md
+    /// issue 5).
+    #[test]
+    fn the_open_sessions_host_wins_while_it_exists() {
+        let hosts = vec![
+            option(1, "this machine", true),
+            option(2, "user@box", false),
+        ];
+        assert_eq!(default_create_host(&hosts, Some(2)), Some(2));
+        assert_eq!(
+            default_create_host(&hosts, Some(99)),
+            Some(1),
+            "a selected session whose host left the registry falls back to the helm's own host"
+        );
     }
 
     /// The local row is the fallback WHATEVER phase it is in — SPEC.md names
@@ -3380,7 +3524,7 @@ mod tests {
             option(2, "user@box", false),
         ];
         assert_eq!(
-            default_create_host(&hosts),
+            default_create_host(&hosts, None),
             Some(1),
             "a down local host is still the helm's own host"
         );
@@ -3397,11 +3541,11 @@ mod tests {
     /// first hosts read lands, since a live helm always has its local row.
     #[test]
     fn a_fleet_with_no_local_row_defaults_to_nothing_rather_than_guessing() {
-        assert_eq!(default_create_host(&[]), None);
+        assert_eq!(default_create_host(&[], None), None);
 
         let remote_only = vec![option(2, "user@box", false), option(3, "user@other", false)];
         assert_eq!(
-            default_create_host(&remote_only),
+            default_create_host(&remote_only, None),
             None,
             "picking whichever host sorted first would be a create on a machine nobody chose"
         );
@@ -3523,19 +3667,55 @@ mod tests {
             option(1, "this machine", true),
             option(2, "user@box", false),
         ];
-        assert_eq!(effective_create_host(&hosts, Some(2)), Some(2));
+        assert_eq!(effective_create_host(&hosts, Some(2), None), Some(2));
         assert_eq!(
-            effective_create_host(&hosts, None),
+            effective_create_host(&hosts, None, None),
             Some(1),
             "with no choice made, the target is SPEC.md's default"
         );
         assert_eq!(
-            effective_create_host(&hosts, Some(99)),
+            effective_create_host(&hosts, Some(99), None),
             Some(1),
             "a choice the registry no longer holds falls back to the default rather than staying \
              on a host nothing can reach"
         );
-        assert_eq!(effective_create_host(&[], Some(2)), None);
+        assert_eq!(effective_create_host(&[], Some(2), None), None);
+    }
+
+    /// Full three-candidate precedence: explicit choice over the open
+    /// session's host over the local row — and a VANISHED choice falls back
+    /// to the open session's host, not past it to local.
+    ///
+    /// The earlier tests each exercise one clause with the others absent,
+    /// which a reversed precedence or a fallback that skips the middle
+    /// clause would pass; this is the arrangement where every wrong order
+    /// gives a different answer. The middle assertion is the subtle one:
+    /// SPEC.md's first clause is "the host of the currently open session",
+    /// so a dead explicit choice lands there, and skipping to the local
+    /// row would silently move the create off the machine whose session
+    /// the user is looking at.
+    #[test]
+    fn precedence_holds_with_all_three_candidates_present() {
+        let hosts = vec![
+            option(1, "this machine", true),
+            option(2, "user@box", false),
+            option(3, "user@other", false),
+        ];
+        assert_eq!(
+            effective_create_host(&hosts, Some(3), Some(2)),
+            Some(3),
+            "a valid explicit choice beats the open session's host"
+        );
+        assert_eq!(
+            effective_create_host(&hosts, Some(99), Some(2)),
+            Some(2),
+            "a vanished choice falls back to the open session's host, not to local"
+        );
+        assert_eq!(
+            effective_create_host(&hosts, Some(99), Some(98)),
+            Some(1),
+            "and only when BOTH are gone does the local row answer"
+        );
     }
 
     /// A non-connected option must SAY so in its label, and a connected one

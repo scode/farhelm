@@ -481,9 +481,31 @@ if [ "${DESKTOP_SMOKE_LEGACY_INTERACTION:-}" != 1 ]; then
 fi
 
 echo "== creating a session through the real create form"
-# Layout constants for the styled 1200x900 window: the new-session button,
-# then the form's three inputs and the create button. If the layout shifts,
-# take a screenshot (import -window root) and update these.
+# The clicks below are ROOT coordinates, so the window they target must sit
+# at a known origin first. The window being clicked is the RESTARTED app's —
+# a different window from the one sized before the kill — and openbox places
+# a fresh window wherever its policy likes (observed at (199,84) on this
+# screen), which silently invalidates every constant here. Re-find, re-size,
+# and pin it to 0,0 before the first click.
+LEG_WID=""
+for _ in $(seq 1 20); do
+  LEG_WID=$(DISPLAY=$DISP xdotool search --name farhelm 2>/dev/null | tail -1)
+  [ -n "$LEG_WID" ] && break
+  sleep 1
+done
+[ -n "$LEG_WID" ] || fail "restarted app window never appeared for the interaction leg"
+DISPLAY=$DISP xdotool windowsize "$LEG_WID" 1200 900
+DISPLAY=$DISP xdotool windowmove "$LEG_WID" 0 0
+sleep 2
+
+# Layout constants for the styled 1200x900 window (frame pinned at 0,0;
+# openbox's titlebar puts the client area roughly 18px down) under the
+# two-pane shell (BUGS_BURNDOWN.md issue 5): the session list, filter, and
+# create form all live in the 340px left sidebar now — with the persistent
+# hosts panel and filter bar stacked ABOVE the new-session button, which is
+# why its y sits far below the old exclusive-list layout's — and the
+# terminal occupies the pane to the right. If the layout shifts, take a
+# screenshot (import -window root) and update these.
 #
 # The webview accepts clicks some unpredictable time after it first
 # paints, so opening the form needs an oracle: the form panel lightens
@@ -493,12 +515,12 @@ echo "== creating a session through the real create form"
 # the header, not a pass/fail assertion.
 form_region_mean() {
   DISPLAY=$DISP import -window root png:- 2>/dev/null |
-    convert - -crop 700x280+30+300 -format "%[fx:mean]" info: 2>/dev/null
+    convert - -crop 300x280+20+485 -format "%[fx:mean]" info: 2>/dev/null
 }
 BASE=$(form_region_mean)
 FORM_OPEN=""
 for _ in $(seq 1 15); do
-  DISPLAY=$DISP xdotool mousemove 65 290 click 1
+  DISPLAY=$DISP xdotool mousemove 65 474 click 1
   sleep 1.5
   NOW=$(form_region_mean)
   if python3 -c "import sys; sys.exit(0 if abs(float('$NOW')-float('$BASE'))>0.01 else 1)" 2>/dev/null; then
@@ -507,12 +529,24 @@ for _ in $(seq 1 15); do
   fi
 done
 [ -n "$FORM_OPEN" ] || fail "create form never opened (webview unresponsive to clicks?)"
+# The agent selector preselects a PROFILE, under which the typed command
+# below would be inert ("the selected profile supplies it") and the create
+# would launch that profile's agent instead of bash. "custom command" is
+# the selector's FIRST option by construction (see the create form's rsx),
+# so Home+Return in the opened popup reaches it without depending on how
+# many starter profiles exist.
+DISPLAY=$DISP xdotool mousemove 170 608 click 1 sleep 0.5 key Home sleep 0.3 key Return
+sleep 1
 # ctrl+a first: the working-directory field is prefilled with "~" (the
 # create form's default), and xdotool types at the caret rather than
 # replacing — without the select-all this would submit "~$X/work".
-DISPLAY=$DISP xdotool mousemove 400 425 click 1 sleep 0.3 key ctrl+a type --delay 120 "$X/work"
-DISPLAY=$DISP xdotool mousemove 400 475 click 1 sleep 0.3 type --delay 120 "bash"
-DISPLAY=$DISP xdotool mousemove 400 525 click 1 sleep 0.3 type --delay 120 "smoke"
+#
+# The command/title/create ys are midpoints tolerant of the ~14px upward
+# shift the selector change causes (its explanatory label collapses from
+# two lines to one): each lands inside the target field in both layouts.
+DISPLAY=$DISP xdotool mousemove 170 662 click 1 sleep 0.3 key ctrl+a type --delay 120 "$X/work"
+DISPLAY=$DISP xdotool mousemove 170 718 click 1 sleep 0.3 type --delay 120 "bash"
+DISPLAY=$DISP xdotool mousemove 170 767 click 1 sleep 0.3 type --delay 120 "smoke"
 
 # Identify the created session by set difference, not by title: matching
 # "any title starting with smo" would happily grab an unrelated pre-
@@ -525,7 +559,7 @@ BEFORE_IDS=$(curl_auth -s --max-time 5 "$API/api/sessions" | python3 -c "
 import json, sys
 d = json.load(sys.stdin)
 print(' '.join(sorted(s['id'] for s in d['sessions'])))" 2>/dev/null)
-DISPLAY=$DISP xdotool mousemove 60 565 click 1
+DISPLAY=$DISP xdotool mousemove 60 800 click 1
 SID=""
 for _ in $(seq 1 15); do
   SID=$(curl_auth -s --max-time 5 "$API/api/sessions" | BEFORE_IDS="$BEFORE_IDS" python3 -c "
@@ -544,7 +578,7 @@ echo "   created $SID"
 echo "== typing into the terminal and asserting through tmux"
 # The create lands in the session view with the terminal mounted.
 sleep 3
-DISPLAY=$DISP xdotool mousemove 400 400 click 1 sleep 0.5 type --delay 120 "echo smoke-ok"
+DISPLAY=$DISP xdotool mousemove 700 400 click 1 sleep 0.5 type --delay 120 "echo smoke-ok"
 DISPLAY=$DISP xdotool key Return
 OK=""
 for _ in $(seq 1 10); do

@@ -21,7 +21,7 @@ use crate::archive::confirmation as archive_confirmation;
 use crate::attachments::{attachment_policy, attachment_status_element_id};
 use crate::feed::{fallback_polls_now, fallback_sleep, use_feed_reader};
 use crate::hosts::{HostLookup, HostsRead, is_connected, stale_session_notice};
-use crate::ops::{ReadGate, use_op_lock};
+use crate::ops::ReadGate;
 use crate::peer::PeerLine;
 use crate::reader::{SurfaceReader, Trigger, request_read};
 use crate::reconnect::reconnect_policy;
@@ -165,11 +165,12 @@ use crate::{ApiBase, RestartOffer, Session, SessionStatus};
 ///
 /// M1 never unmounted this component (it was the only view), so
 /// `terminal.js` only ever needed a mount-time guard against a
-/// re-render calling `mount()` twice. Now that `App` can navigate away
-/// and back, this component must clean up on drop — otherwise that
-/// guard (terminal.js's `islands` map, now the ONLY mount guard — see its
-/// own docs) would permanently wedge shut, and reopening ANY session
-/// after the first would silently no-op `mount()` instead of attaching.
+/// re-render calling `mount()` twice. Under the sidebar layout this
+/// component remounts on every SELECTION change (`App` keys it by
+/// session id), so it must clean up on drop — otherwise that guard
+/// (terminal.js's `islands` map, now the ONLY mount guard — see its own
+/// docs) would permanently wedge shut, and selecting ANY session after
+/// the first would silently no-op `mount()` instead of attaching.
 /// `use_drop` fires `farhelmTerm.unmountAll()` for exactly that reason: it
 /// is the regression this lifecycle work exists to prevent, not a
 /// hypothetical.
@@ -251,7 +252,16 @@ fn admit_detail(
 }
 
 #[component]
-pub(crate) fn SessionView(session: Session, on_back: EventHandler<()>) -> Element {
+pub(crate) fn SessionView(
+    session: Session,
+    on_back: EventHandler<()>,
+    /// The cross-pane write gate (see `ops::PaneGate`): the shared token
+    /// this view's rename/restart/archive claim, refused while the sidebar
+    /// has a per-row operation in flight. Owned by `AppBody`, because a
+    /// view-private token would let the two panes mutate this session
+    /// under each other.
+    gate: crate::ops::PaneGate,
+) -> Element {
     let base = use_context::<ApiBase>().0;
     // The session as this view currently understands it. Seeded from the
     // prop and then owned here, because a restart changes it: the reply
@@ -286,8 +296,11 @@ pub(crate) fn SessionView(session: Session, on_back: EventHandler<()>) -> Elemen
     // Restart, archive, and rename all change the assumptions the other two
     // present to the user. One synchronously claimed token covers their
     // prompts as well as their requests, so two clicks in one render frame
-    // cannot authorize operations from two different snapshots.
-    let mut lifecycle = use_op_lock();
+    // cannot authorize operations from two different snapshots. The token
+    // is the SHARED one (`gate` — see the prop doc), so the same claim
+    // also excludes the sidebar's create/host mutations, and is refused
+    // while a sidebar row operation runs.
+    let mut lifecycle = gate;
     // The rename affordance (PLAN_M5.md item 6): whether the field is
     // open, whether its request is in flight, the supervisor's own words
     // if it refused, and this view's optimistic correction over `current`.
@@ -440,8 +453,10 @@ pub(crate) fn SessionView(session: Session, on_back: EventHandler<()>) -> Elemen
     // status refresh comes along with it for free.
     //
     // Every trigger is scoped to this component, so all of them stop when
-    // the view unmounts — the same lifecycle the poll relied on, now
-    // carrying the stronger property that only the MOUNTED page re-reads.
+    // the view unmounts — the same lifecycle the poll relied on. This
+    // keyed view's reads are its own; the persistent sidebar's list reader
+    // stays live beside it and re-reads its surfaces independently (see
+    // feed.rs's fan-out contract).
     // Each of the two surfaces (this session's detail, and the host registry
     // behind a stale notice) runs its reads through one `reader`, so a burst
     // of notifications coalesces into one follow-up read and a read that
@@ -1290,9 +1305,10 @@ pub(crate) fn SessionView(session: Session, on_back: EventHandler<()>) -> Elemen
         // race it; `unmountAll()` itself is what cancels each island's own
         // pending `mountWhenReady` wait, once the outer one has already
         // handed off to it. Fire-and-forget: this runs on the way out
-        // (navigating back to the list, or the whole app tearing down), so
-        // there is no reactive state left to update with a result, and the
-        // JS side is already written to be a no-op if nothing is mounted.
+        // (the user selecting a different session, clearing the selection,
+        // or the whole app tearing down), so there is no reactive state
+        // left to update with a result, and the JS side is already written
+        // to be a no-op if nothing is mounted.
         document::eval(
             "window.__farhelmSyncGeneration = (window.__farhelmSyncGeneration || 0) + 1; \
              if (window.farhelmTerm) { farhelmTerm.unmountAll(); }",

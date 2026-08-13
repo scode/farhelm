@@ -232,7 +232,11 @@ Recorded here so the claim does not get re-derived and turned into a fix PR for 
 
 ## 5. Layout redesign: persistent session sidebar, terminal fills the rest
 
-Status: triaged (not a bug — a redesign), not started. Sizable; expect this to be its own PR stack.
+Status: in progress across several PRs. PR #156 (`pr/sidebar-shell`) landed the shell: two-pane layout, keyed
+SessionView remounts, stacked sidebar rows, left-truncated cwd, the revived open-session create-host default, and the
+two-pane feed fan-out contract. Still owed: the popup action menu with in-menu confirms (and the profile chip's
+removal), the hosts/filter toggles with the SPEC amendments, auto-select + rename consolidation + back-button removal,
+and the remaining Playwright/desktop-smoke migrations.
 
 What the user wants: a left sidebar that always shows the session/agent list, with the entire right-hand side being the
 terminal area for the selected session. The tab strip ("agent | Terminal 1 | + terminal") moves to the top of the right
@@ -240,13 +244,14 @@ pane. Each sidebar row shows title + status; the per-session actions (rename/sto
 menu opened by a small button to the right of the session name, instead of the current row of buttons. The sidebar gets
 a reasonable max width — enough for title + status — and the terminal gets everything else.
 
-### Current shape (verified)
+### Shape BEFORE this issue's PRs (historical baseline — the shell PR replaces it)
 
-There is no router. `AppBody` (`crates/farhelm-ui/src/lib.rs:817`) owns a single `current: Signal<Option<Session>>`
-(:819) and matches on it (:849-859): `None` renders `ListView` (`src/list.rs:503`), `Some` renders `SessionView`
-(`src/session_view.rs:254`) with an `on_back` that sets it to `None`. The two views are deliberately mutually exclusive
-— module docs at `lib.rs:15-24` and `lib.rs:775-790` argue from that exclusivity, and several behaviors lean on it
-(below).
+There was no router. `AppBody` (`crates/farhelm-ui/src/lib.rs:817`) owned a single `current: Signal<Option<Session>>`
+(:819) and matched on it (:849-859): `None` rendered `ListView` (`src/list.rs:503`), `Some` rendered `SessionView`
+(`src/session_view.rs:254`) with an `on_back` that set it to `None`. The two views were deliberately mutually exclusive
+— module docs at `lib.rs:15-24` and `lib.rs:775-790` argued from that exclusivity, and several behaviors leaned on it
+(below). The sidebar-shell PR turns `current` into a SELECTION beside a permanently mounted list; line numbers below
+describe the baseline, not the current tree.
 
 Key structures:
 
@@ -329,11 +334,12 @@ These were put to the user directly; treat them as settled:
 
 ### Docs and tests that pin the current layout
 
-- Docs to amend: lib.rs:15-24, :41-43, :775-790; list.rs:445-450, :495-502; session_view.rs:164-176, :1287-1295;
-  feed.rs:11-19; SPEC.md:203-211/215-225 ("opening a session" language vs. persistent selection). SPEC.md's Errors and
-  diagnostics section ALSO requires per-host connection state and retry phase to stay visible — amend it together with
-  the Session list section (a compact indicator must still carry connection state and retry phase, with the full panel a
-  toggle away), or the spec ends up internally contradictory. PLAN_M2.md references are historical; leave them.
+- Docs to amend: DONE in the shell PR for lib.rs, list.rs, session_view.rs and feed.rs (rewritten around the two-pane
+  shape rather than the old exclusivity). STILL PENDING: SPEC.md:203-211/215-225 ("opening a session" language vs.
+  persistent selection). SPEC.md's Errors and diagnostics section ALSO requires per-host connection state and retry
+  phase to stay visible — amend it together with the Session list section (a compact indicator must still carry
+  connection state and retry phase, with the full panel a toggle away), or the spec ends up internally contradictory.
+  PLAN_M2.md references are historical; leave them.
 - Playwright: heavy breakage, budget for it. ~18 uses of `.session-row-open` + 70 of `.session-row` in terminal.spec.ts
   alone (helpers `rowByTitle` :310, `sharedSessionRow` :363); ~20 uses of `.back-button` which the redesign deletes (its
   disabled-while-busy assertion at archive.spec.ts:289 needs a new home or removal); back-to-list assertions
@@ -341,6 +347,9 @@ These were put to the user directly; treat them as settled:
   re-expressed as "switching sessions unmounts the previous session's islands"); mouse-modes.spec.ts:395-455
   back-then-reopen cycles become select-other-then-reselect; titlebar.spec.ts:141 is entirely titlebar flex arithmetic
   and needs re-tuning for the narrower right pane.
-- `scripts/desktop-smoke.sh` drives the UI by absolute pixel coordinates in a 1200x900 window and says so (:484-487):
-  new-session button (65,290), form fields (400,425/475/525), submit (60,565), terminal click (400,400). Every constant
-  moves; the terminal click especially since the terminal no longer starts at x≈0.
+- `scripts/desktop-smoke.sh` drives the UI by absolute pixel coordinates in a 1200x900 window and says so. The shell PR
+  moved the x coordinates into the sidebar (fields x=170, terminal click x=700), recaptured every y for the two-pane
+  layout (the persistent hosts/filter chrome sits ABOVE the new-session button now, pushing it to y≈474), re-cropped the
+  form-oracle gate, and pinned the restarted app's window to origin 0,0 before the first click — the leg previously
+  clicked wherever openbox happened to place the fresh window. If the sidebar chrome changes height in a later PR (the
+  toggles work), the y set must be recaptured again.

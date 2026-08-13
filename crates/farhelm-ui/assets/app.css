@@ -9,6 +9,53 @@ body,
   font-family: system-ui, sans-serif;
 }
 
+/* The two-pane shell (BUGS_BURNDOWN.md issue 5): a fixed-width sidebar
+ * holding the session list, and a main pane holding the selected session.
+ * The sidebar width is FIXED by decision (no drag handle, no persistence);
+ * wider than the bare minimum because rows carry title, status, host, cwd,
+ * and invocation. Every ancestor of .terminal-panes must keep a definite
+ * height, which is why the chain here is all height:100%/flex — a
+ * height:auto link would collapse the terminal to zero rows. */
+.app-shell {
+  display: flex;
+  height: 100%;
+  /* When the window is narrower than sidebar + minimum main pane, scroll
+   * rather than crush: `.app-main`'s `min-width` below keeps the terminal
+   * usable, and the shell overflowing is the honest rendering of a window
+   * that is genuinely too small for both panes. */
+  overflow-x: auto;
+}
+
+.app-sidebar {
+  width: 340px;
+  flex-shrink: 0;
+  /* x is clipped, y scrolls (shorthand order: x then y). Session rows
+   * stack and ellipsize per line, but the host rows and the filter bar
+   * still lay out on single non-wrapping lines wider than this column;
+   * the clip keeps their overflow from widening the page until the
+   * hosts/filters redesign restacks them for the sidebar. */
+  overflow: hidden auto;
+  border-right: 1px solid #262a31;
+}
+
+.app-main {
+  flex: 1;
+  /* A floor, not zero: with a shrinkable main pane a legal narrow window
+   * would silently squeeze the selected terminal to nothing while the
+   * unshrinkable sidebar kept its full width. Below 340+320px the shell
+   * scrolls (see `.app-shell`) instead. */
+  min-width: 320px;
+  height: 100%;
+}
+
+.main-empty {
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #5b6270;
+}
+
 .layout {
   display: flex;
   flex-direction: column;
@@ -158,29 +205,53 @@ body,
   /* No explicit `width: 100%`: a flex COLUMN parent's default
      `align-items: stretch` already fills this child to the parent's
      full cross-axis (width) size, so setting it again here would be a
-     no-op that just invites a future reader to wonder what it overrides. */
+     no-op that just invites a future reader to wonder what it overrides.
+     WRAPPING, since the sidebar redesign: the open button claims the
+     whole first line (`flex-basis: 100%` below) and the per-row action
+     buttons or an open prompt flow onto their own line beneath it —
+     inside a 340px column the old single-line arrangement left the open
+     button squeezed to nothing behind four action buttons. */
   display: flex;
+  flex-wrap: wrap;
   align-items: baseline;
   gap: 6px;
+  padding-bottom: 6px;
 }
 
 .session-row-open {
   /* Resets: this is a native <button> (real Enter/Space activation,
      focus, and screen-reader semantics for free — see the SessionRow
      doc in lib.rs), so it starts from the browser's button box-model
-     and typography and has to be told to look like a plain row instead. */
+     and typography and has to be told to look like a plain row instead.
+     A COLUMN of lines, not a row of spans: inside the fixed-width
+     sidebar (BUGS_BURNDOWN.md issue 5) the old single-line layout's
+     min-width floors re-entered the MT-8 overflow regime the moment
+     space ran short; stacked lines each ellipsize alone instead. */
   display: flex;
-  flex: 1;
+  flex-direction: column;
+  /* Only the basis matters here: 100% forces the button onto its own
+     wrapped line inside `.session-row-main`, ahead of the action
+     controls beneath it. */
+  flex-basis: 100%;
   min-width: 0;
-  align-items: baseline;
-  gap: 12px;
-  padding: 10px 14px;
+  gap: 2px;
+  padding: 8px 12px 4px;
   border: none;
   background: none;
   color: inherit;
   font: inherit;
   text-align: left;
   cursor: pointer;
+}
+
+/* One line of a stacked sidebar row. `min-width: 0` is what lets each
+   line's spans actually ellipsize inside the fixed column instead of
+   forcing the row wide. */
+.session-row-line {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
 }
 
 .session-row-open:hover:not(:disabled),
@@ -190,12 +261,13 @@ body,
 }
 
 /* Disabled while navigation or a row-local operation owns the action area
-   (see `SessionRow`'s own doc in
-   list.rs): the list-wide nav lock (opening this row would navigate away
-   and unmount `ListView` mid-operation), or this row's OWN lifecycle
-   confirmation or rename field being open (cancel is the only way back to
-   normal). Either way it must visibly stop being a normal clickable row
-   rather than just silently failing to activate. */
+   (see `SessionRow`'s own doc in list.rs): the list-wide nav lock —
+   selecting a row swaps which session the keyed `SessionView` shows, and
+   doing that mid-operation would unmount the view (or task) holding the
+   operation's reply — or this row's OWN lifecycle confirmation or rename
+   field being open (cancel is the only way back to normal). Either way it
+   must visibly stop being a normal clickable row rather than just
+   silently failing to activate. */
 .session-row-open:disabled {
   opacity: 0.5;
   cursor: default;
@@ -372,39 +444,42 @@ body,
 
 /* Titles, cwds, and invocations are all attacker- or user-controlled
    strings with no length limit the UI enforces (a title can legally run
-   tens of KB) — every one of the three needs its own overflow/ellipsis
-   handling, not just the two metadata fields that happened to get it
-   originally. Each also gets an explicit `flex-basis: 0` and a
-   `min-width` floor, splitting the row's space by `flex-grow` weight
-   instead of by content length: without a shared basis, a very long cwd
-   (whose default basis IS its content width) would claim most of the
-   row's space during layout and starve invocation — which had no floor
-   of its own — down toward zero width. */
+   tens of KB) — every one needs its own overflow/ellipsis handling. The
+   stacked sidebar rows (BUGS_BURNDOWN.md issue 5) retired the old
+   basis-and-floor space-splitting: each field owns (most of) a line of
+   its own now, so `min-width: 0` and ellipsis are the whole story, and
+   the floors that once re-entered the MT-8 overflow regime are gone. */
 .session-title {
   font-weight: 600;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  flex: 1 1 0;
-  min-width: 8em;
+  flex: 1 1 auto;
+  min-width: 0;
 }
 
 .session-cwd,
-.session-invocation {
+.session-invocation,
+.session-host {
   color: #8a919e;
   font-size: 12px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  flex: 1 1 0;
-  min-width: 6em;
+  flex: 1 1 auto;
+  min-width: 0;
 }
 
-.session-invocation {
-  /* Weighted higher than cwd: the invocation is usually the more useful
-     field to read in full when space is tight. */
-  flex: 2 1 0;
-  min-width: 8em;
+.session-cwd {
+  /* Left-truncated by decision: the path's TAIL is what identifies a
+     directory, so the ellipsis eats the front. The rtl direction on this
+     OUTER span only flips which end overflows; the path itself lives in
+     an inner `dir="ltr"` child (`.session-cwd-text` in list.rs), whose
+     bidi isolation is what keeps the characters in logical order — rtl
+     applied directly to the text node would render a leading "/" at the
+     visual right and reorder mixed-direction names. */
+  direction: rtl;
+  text-align: left;
 }
 
 /* The profile a session was created FROM, as it snapshotted the name
@@ -513,22 +588,6 @@ body,
    "it ran and finished" or `interrupted`'s "the host took it away". */
 .status-badge.error {
   color: #e0685f;
-}
-
-/* Multi-host list rows (PLAN_M6.md item 6). The host leads the row, sized
-   like the other metadata fields and shrinking on the same terms: a
-   destination is user data with no length limit this UI enforces, so it
-   needs the same basis/floor/ellipsis treatment `.session-cwd` documents —
-   without it a long `user@very.long.name` would claim the row's space and
-   starve the fields beside it. */
-.session-host {
-  color: #8a919e;
-  font-size: 12px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  flex: 1 1 0;
-  min-width: 6em;
 }
 
 /* A stale row (SPEC.md: sessions on an unreachable host "stay in the list

@@ -12,16 +12,18 @@
 //! Data fetching uses reqwest, which works on both native (desktop) and
 //! wasm (browser fetch) — one code path, no per-target HTTP client.
 //!
-//! ## Navigation (M2, PLAN_M2.md step 7)
+//! ## Selection (M2's navigation, reshaped by BUGS_BURNDOWN.md issue 5)
 //!
 //! `App` holds `Signal<Option<Session>>` rather than pulling in a router
-//! crate: `None` renders [`ListView`], `Some(session)` renders
-//! [`SessionView`] plus a back control that clears the signal.
-//! PLAN_M2.md named a premature router as a risk to avoid — two states
-//! and one signal cover everything needed so far, and a router can still
-//! be introduced when something actually demands one. Terminal tabs did
-//! not: a tab selection is view-local state, not a location, and nothing
-//! links to a specific tab.
+//! crate — but since the sidebar redesign it is a SELECTION, not a page
+//! switch: [`ListView`] renders permanently in a left sidebar, and the
+//! signal decides what the main pane beside it shows (`None` an empty
+//! placeholder, `Some` the [`SessionView`], remounted per session by
+//! key). PLAN_M2.md named a premature router as a risk to avoid — one
+//! signal still covers everything needed, and a router can be introduced
+//! when something actually demands one. Terminal tabs did not: a tab
+//! selection is view-local state, not a location, and nothing links to a
+//! specific tab.
 //!
 //! ## Module layout
 //!
@@ -39,8 +41,8 @@
 //!   subscription that replaced all four periodic loops, the revision
 //!   counter the mounted page re-reads on, and the rule deciding when the
 //!   documented poll fallback runs instead. Mounted here, beside the skew
-//!   notice, because the channel has to survive navigation between the two
-//!   mutually exclusive pages below.
+//!   notice, so the channel outlives selection changes; both panes read
+//!   from the same subscription.
 //! - `list`: [`ListView`], `SessionRow`, and `CreateSessionForm` — the
 //!   session list and its lifecycle actions.
 //! - `hosts`: the hosts panel (PLAN_M6.md item 6) — the per-host state
@@ -772,22 +774,22 @@ const APP_CSS: Asset = asset!("/assets/app.css");
 #[cfg(all(feature = "desktop", not(target_arch = "wasm32")))]
 const CLIENT_LOG_SHIM_JS: Asset = asset!("/assets/client-log-shim.js");
 
-/// Root component: switches between the session list and one open
-/// terminal. No router crate (see the module docs) — just a signal.
+/// Root component: the sidebar's session list beside the selected
+/// session's terminal pane. No router crate (see the module docs) — just
+/// a signal.
 ///
-/// ## No create default travels through here
+/// ## The create default's first clause is live again
 ///
 /// SPEC.md's creation default is "the host of the currently open session,
-/// else the helm's own host", and for a while this component derived the
-/// first clause and passed it to `ListView`. It could never fire: the list
-/// and a session are mutually exclusive views here, so whenever the create
-/// dialog exists, nothing is open. The plumbing was unreachable code with a
-/// live-looking test around it, which is worse than an absent feature.
-///
-/// `list::default_create_host` now answers with the local row and records
-/// what to restore — and, importantly, what NOT to: a remembered
-/// last-viewed host is a different rule wearing this one's clothes, since a
-/// session the user backed out of is not open.
+/// else the helm's own host". Under the old either/or layout the first
+/// clause could never fire (whenever the create dialog existed, nothing
+/// was open) and its plumbing was deliberately removed as unreachable.
+/// The sidebar layout makes it REACHABLE — the create form and an open
+/// session now coexist — so the selected session's host is passed to
+/// `ListView` and wins over the local-row fallback. It is the SELECTED
+/// session's host, never a remembered last-viewed one: a session the user
+/// deselected is not open, and a remembered host would be a different
+/// rule wearing this one's clothes.
 #[component]
 pub fn App() -> Element {
     #[cfg(all(feature = "desktop", not(target_arch = "wasm32")))]
@@ -817,6 +819,15 @@ pub fn App() -> Element {
 #[component]
 fn AppBody() -> Element {
     let mut current = use_signal(|| None::<Session>);
+    // The cross-pane write gate lives HERE because both panes claim or
+    // consult it (see ops.rs's module doc): the shared token covers the
+    // list's create/host mutations and the view's rename/restart/archive,
+    // and `row_ops` is the list's live per-row-operation count the view's
+    // `PaneGate` refuses claims against. Owning them above both panes is
+    // what makes "neither pane writes under the other" a structural
+    // property instead of a per-pane convention.
+    let page_ops = ops::use_op_lock();
+    let row_ops = use_signal(|| 0_u32);
     let build_skew = skew::build_skew_detected();
     let token_required = *auth::TOKEN_REQUIRED.read();
 
@@ -846,16 +857,57 @@ fn AppBody() -> Element {
             // item 6); what it produces is the revision counter each page
             // re-reads on.
             feed::FleetFeed {}
-            match &*current.read() {
-                None => rsx! {
-                    ListView { on_open: move |session: Session| current.set(Some(session)) }
-                },
-                Some(session) => rsx! {
-                    SessionView {
-                        session: session.clone(),
-                        on_back: move |_| current.set(None),
+            // The two-pane shell (BUGS_BURNDOWN.md issue 5): the session
+            // list is a permanent SIDEBAR and the right pane holds the
+            // selected session — both mounted at once, which is the whole
+            // point (the agent list stays visible while a terminal is on
+            // screen). `current` is now a SELECTION rather than a page
+            // switch, but it remains the single owner of what the right
+            // pane shows.
+            //
+            // The `key` on `SessionView` is load-bearing, not decorative:
+            // the view seeds per-session state from its prop via
+            // `use_signal` and reads the id in memos, so switching
+            // sessions MUST remount it — under the old either/or match
+            // that remount was implicit in the arm swap, and without the
+            // key a selection change would leave the view talking to the
+            // previous session.
+            div { class: "app-shell",
+                div { class: "app-sidebar",
+                    ListView {
+                        on_open: move |session: Session| current.set(Some(session)),
+                        open_host: current.read().as_ref().and_then(|session| session.host),
+                        ops: page_ops,
+                        row_ops,
+                        // Selection reconciliation: a session the LIST
+                        // removed (successful delete, or an archive under
+                        // the default filter) must not stay selected — the
+                        // right pane would keep a terminal/detail surface
+                        // for an object this client knows is gone.
+                        on_removed: move |id: String| {
+                            if current.peek().as_ref().is_some_and(|session| session.id == id) {
+                                current.set(None);
+                            }
+                        },
                     }
-                },
+                }
+                div { class: "app-main",
+                    match &*current.read() {
+                        None => rsx! {
+                            div { class: "main-empty",
+                                "select a session, or create one"
+                            }
+                        },
+                        Some(session) => rsx! {
+                            SessionView {
+                                key: "{session.id}",
+                                session: session.clone(),
+                                on_back: move |_| current.set(None),
+                                gate: ops::PaneGate::new(page_ops, row_ops),
+                            }
+                        },
+                    }
+                }
             }
         }
     }

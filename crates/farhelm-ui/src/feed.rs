@@ -10,13 +10,16 @@
 //!
 //! ## Why this lives at App level
 //!
-//! The channel must survive navigation between the two mutually exclusive
-//! pages, which is exactly why neither page can own it. [`FleetFeed`] is
-//! mounted beside the build-skew notice, above the match that swaps list for
-//! session view, and it holds the subscription for the whole life of the
-//! page. The pages subscribe to its counter through [`use_feed_reader`] and
-//! unsubscribe by unmounting, so at any moment exactly the MOUNTED page
-//! re-reads.
+//! The channel must outlive selection changes, which is why neither pane
+//! can own it. [`FleetFeed`] is mounted beside the build-skew notice,
+//! above the two-pane shell, and it holds the subscription for the whole
+//! life of the page. Consumers subscribe to its counter through
+//! [`use_feed_reader`] and unsubscribe by unmounting; under the sidebar
+//! layout the list and a session view are commonly BOTH mounted, so one
+//! notification fans out to both readers — supported by design. The cost
+//! is one extra feed CONSUMER, not one request: the list consumer's
+//! refresh issues both a listing and a hosts read, so a notification with
+//! a session selected typically costs three requests in total.
 //!
 //! ## The socket is JavaScript's; the policy is Rust's
 //!
@@ -267,9 +270,12 @@ pub(crate) async fn fallback_sleep() {
 ///
 /// A task spawned from inside `reread` belongs to the CALLING component's
 /// scope, not to the feed's: Dioxus runs an effect's callback with its
-/// owning scope on the stack, so the reads a page starts here are torn down
-/// with that page. That is what makes "only the mounted page re-reads" a
-/// property of the lifecycle rather than something anyone has to remember.
+/// owning scope on the stack, so the reads a consumer starts here are torn
+/// down with that consumer. That is what scopes re-reads to mounted
+/// consumers as a property of the lifecycle rather than something anyone
+/// has to remember — and under the two-pane shell there are commonly TWO
+/// such consumers alive at once (the persistent list and the selected
+/// session's view), each rereading its own surfaces per notification.
 ///
 /// What this hook does NOT promise is that the re-read succeeds. A
 /// notification is spent once `reread` has been called, and this module

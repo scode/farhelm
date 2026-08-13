@@ -134,11 +134,12 @@ Ubuntu 24.04 ships 3.4.
   status can be up to about that old before anyone is told. A session nothing has classified yet shows no status at all
   rather than guessing. Sessions on a host that is not connected stay listed, dimmed and badged "stale"; their controls
   still work and the helm refuses them by naming the host's state rather than failing silently, and opening one shows
-  its metadata behind a notice naming that state instead of a terminal. Click a row to open its terminal; a back control
-  returns to the list. Close the tab, reopen it later: same session, scrollback intact, the agent never noticed.
-  Reopening shows a brief "connecting — catching up" line instead of the history flying past: the terminal appears once,
-  already at the end of what you missed. A replay that outgrows the client's buffer, or that goes quiet part-way,
-  degrades to showing the rest as it arrives — visible catch-up rather than a hidden terminal, and never dropped output.
+  its metadata behind a notice naming that state instead of a terminal. Click a row and its terminal fills the right
+  pane while the list stays put in the sidebar; a back control just clears that selection. Close the tab, reopen it
+  later: same session, scrollback intact, the agent never noticed. Reopening shows a brief "connecting — catching up"
+  line instead of the history flying past: the terminal appears once, already at the end of what you missed. A replay
+  that outgrows the client's buffer, or that goes quiet part-way, degrades to showing the rest as it arrives — visible
+  catch-up rather than a hidden terminal, and never dropped output.
 - Above the list, filtering and search: host, parent session, working directory, agent profile, status, archived
   sessions, and a title search, applied when you submit rather than on every keystroke. The helm answers the query — the
   whole fleet is filtered before it is paginated, so the count above the rows ("N matching of M sessions") is about the
@@ -148,21 +149,20 @@ Ubuntu 24.04 ships 3.4.
   creation, which is what keeps a deleted profile's sessions findable.
 - "new session" opens an inline form: host, agent, working directory (required, prefilled with `~`), title (optional,
   auto-generated when omitted). Submitting launches the agent and takes you straight into its terminal. The host
-  selector lists every registered host and defaults to the machine running the helm (SPEC.md's rule names the host of
-  the currently open session first, but this UI shows the list and a session as alternatives rather than side by side,
-  so there is never one open while this dialog exists); a host that is not connected is offered too, labelled with its
-  state, and the create against it fails in place with the helm's own explanation rather than being hidden from the
-  list. The agent selector offers that host's profiles and preselects the one you last created a session from there;
-  when that profile has since been deleted it preselects nothing and says so rather than quietly picking another. Pick
-  "custom command" instead and the command field below is what runs — the two are exclusive, and choosing a profile
-  greys the field out because the profile already says what to launch. The working directory starts at `~`, which the
-  supervisor expands once against the target host's home at creation — so the no-typing default is correct for every
-  host. That is the only expansion anywhere between the form and the host: `~user` forms are refused, no variable
-  expands, and any other directory must be written out in full as it exists on the host it names. A bad working
-  directory fails the create in place, with the supervisor's own error shown next to the form and nothing created. A bad
-  EXECUTABLE (a typo'd command, a path that does not exist) is different: creation still succeeds — the working
-  directory and terminal both exist — and the session then reports error once its agent's own exec fails, with the
-  reason shown right in the list.
+  selector lists every registered host and defaults to the host of the session currently open in the right pane, or to
+  the machine running the helm when nothing is selected — creating "alongside" what you are looking at is the common
+  case the default serves; a host that is not connected is offered too, labelled with its state, and the create against
+  it fails in place with the helm's own explanation rather than being hidden from the list. The agent selector offers
+  that host's profiles and preselects the one you last created a session from there; when that profile has since been
+  deleted it preselects nothing and says so rather than quietly picking another. Pick "custom command" instead and the
+  command field below is what runs — the two are exclusive, and choosing a profile greys the field out because the
+  profile already says what to launch. The working directory starts at `~`, which the supervisor expands once against
+  the target host's home at creation — so the no-typing default is correct for every host. That is the only expansion
+  anywhere between the form and the host: `~user` forms are refused, no variable expands, and any other directory must
+  be written out in full as it exists on the host it names. A bad working directory fails the create in place, with the
+  supervisor's own error shown next to the form and nothing created. A bad EXECUTABLE (a typo'd command, a path that
+  does not exist) is different: creation still succeeds — the working directory and terminal both exist — and the
+  session then reports error once its agent's own exec fails, with the reason shown right in the list.
 - Submitting the same form twice yields one session, not two. Every create from the form carries an idempotency key, so
   a submit retried after an ambiguous failure — the request landed but its reply did not, the supervisor restarted
   mid-create — returns the session the first attempt already made instead of launching a second agent, and a failed

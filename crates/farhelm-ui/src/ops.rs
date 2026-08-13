@@ -1,5 +1,6 @@
-//! The list page's two concurrency disciplines: the single live-operation
-//! token ([`OpLock`]) and the read generation gate ([`ReadGate`]).
+//! The two panes' shared concurrency disciplines: the single live-operation
+//! token ([`OpLock`], shared across the shell via [`PaneGate`]) and the
+//! read generation gate ([`ReadGate`]).
 //!
 //! They solve mirrored halves of one problem. The token decides which
 //! WRITES may run; the gate decides which READS may be believed. Both exist
@@ -37,10 +38,17 @@
 //! exists; an adopt landing there purges the cache the create is about to be
 //! recorded in.
 //!
-//! It also gates the session-OPEN click, which starts nothing but ENDS
-//! everything: opening a session unmounts `ListView` and with it every task
-//! it owns, so a mid-flight mutation's result is simply lost. That one reads
-//! the token rather than claiming it.
+//! It also gates the session-OPEN click, which starts nothing but swaps
+//! everything: selecting a row replaces the keyed `SessionView` (tearing
+//! down the previous one's tasks) and repaints the list an in-flight
+//! mutation is about to reconcile. That one reads the token rather than
+//! claiming it.
+//!
+//! Since the two-pane shell, the token is OWNED BY `AppBody` and shared
+//! with the selected session's view (see [`PaneGate`]): the view's
+//! rename/restart/archive claim the same token the list's create and host
+//! mutations do, so neither pane can start a write under the other's, and
+//! the open click's read covers view-side work too.
 //!
 //! Per-session stop/rename/delete are deliberately NOT under it. They are
 //! scoped to their own row, cannot invalidate anything another row is doing,
@@ -134,6 +142,63 @@ impl OpLock {
     /// changes. Everything this feeds is cosmetic — see the module docs.
     pub(crate) fn busy(&self) -> bool {
         *self.held.read()
+    }
+}
+
+/// The session view's face of the SHARED cross-pane write gate.
+///
+/// Under the two-pane shell both `ListView` and the selected `SessionView`
+/// can mutate the same fleet at once, from surfaces that used to be
+/// mutually exclusive pages with a private token each. `AppBody` therefore
+/// owns ONE `OpLock` and hands it to both panes; this wrapper is what the
+/// session view holds, and it adds the one rule the bare token cannot
+/// express: the sidebar's per-row stop/delete/rename/archive deliberately
+/// do NOT claim the token (two rows' operations must stay concurrent — a
+/// pinned property), so the view's claim must ALSO refuse while any of
+/// those row operations is in flight. `row_ops` is the live count the list
+/// maintains for exactly that question.
+///
+/// The asymmetry is deliberate: row operations check the token but never
+/// hold it, so they stay concurrent with each other while still being
+/// refused during a view-side operation — and the view is refused during
+/// theirs. Same-frame races resolve through the token's synchronous
+/// test-and-set plus a `peek` of the count, both consulted inside the
+/// handler, never through render-time booleans.
+#[derive(Clone, Copy, PartialEq)]
+pub(crate) struct PaneGate {
+    lock: OpLock,
+    row_ops: Signal<u32>,
+}
+
+impl PaneGate {
+    pub(crate) fn new(lock: OpLock, row_ops: Signal<u32>) -> Self {
+        Self { lock, row_ops }
+    }
+
+    /// Claim the shared token, refusing while any sidebar row operation is
+    /// in flight. Same contract as [`OpLock::claim`] otherwise.
+    pub(crate) fn claim(&mut self) -> bool {
+        if *self.row_ops.peek() > 0 {
+            return false;
+        }
+        self.lock.claim()
+    }
+
+    /// Release the shared token — see [`OpLock::release`].
+    pub(crate) fn release(&mut self) {
+        self.lock.release();
+    }
+
+    /// Handler-time busyness: the token OR a row operation. `peek`s, like
+    /// [`OpLock::busy_now`], and for the same reason.
+    pub(crate) fn busy_now(&self) -> bool {
+        self.lock.busy_now() || *self.row_ops.peek() > 0
+    }
+
+    /// Render-time busyness for the view's disabled attributes — cosmetic,
+    /// like [`OpLock::busy`]; the claim is what enforces.
+    pub(crate) fn busy(&self) -> bool {
+        self.lock.busy() || *self.row_ops.read() > 0
     }
 }
 
