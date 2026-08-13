@@ -13,30 +13,31 @@ and an "include archived" switch widens that same query. Every client updates it
 delete, status change or host going down shows up in every open browser without a refresh, and while that channel is
 healthy the browser polls for none of it (it falls back to refetching every few seconds while the channel is down).
 Agents are launched from named profiles — per host, editable, with starter definitions for Claude Code and Codex on
-every fresh supervisor — or from a command typed into the create dialog. The hosts panel shows every host's connection
-state at all times and is where hosts are added, retargeted, removed, retried, where an identity change is decided, and
-where each host's profiles are defined; opening a stale session shows its metadata behind a notice naming its host's
-actual state instead of a terminal, and the create dialog picks which host a session is launched on. Reopening a session
-lands at the tail of its history instead of replaying it as a scroll animation — for any replay within the client's
-buffering bounds, which is every ordinary one; an unusually large replay, or one that stalls part-way, falls back to
-showing the catch-up as it arrives instead of hiding it. A session can be renamed from either the list or its own view.
-Sessions survive a supervisor restart (persisted metadata, and a still-viewable terminal whenever the private tmux
-server survived too), a host reboot classifies previously-running sessions as interrupted rather than guessing, and a
-user-stopped session keeps its "stopped by user" qualifier durably. A terminal that loses its connection — a closed
-laptop, a network that went away — gets itself back without you closing and reopening the session. Restart is live too:
-an interrupted (or exited, or errored) session relaunches its agent — resuming its own Claude Code or Codex conversation
-where that conversation was captured, and saying plainly that it is launching fresh where it was not. On Linux hosts
-with a systemd user manager, stopping a session also kills its launch's own cgroup before the portable process sweep,
-which catches descendants that daemonized away from both (see SPEC_impl.md for what that does and does not promise).
-Usable for real work, minimal in everything else. On first run the helm creates a recoverable web token. A browser
-enters the value printed by `farhelm helm token show` once, receives an origin-and-port-scoped device secret, and sends
-that secret explicitly on later REST and WebSocket requests; the helm stores only its SHA-256 digest.
-`farhelm helm
-token rotate` replaces the bootstrap token, invalidates every device secret, and closes authenticated live
-sockets. The state directory remains private to the helm account, and a script running in the authenticated UI origin
-has that device's API authority. One further caveat worth knowing before real work: every agent invocation entered
-through the GUI, whether typed into the create dialog or stored in a profile, is ordinary argv, visible to every local
-user via `ps`, so credentials do not belong in it.
+every fresh supervisor — or from a command typed into the create dialog. A compact strip above the session list names
+every host with its connection state at all times; the full hosts panel opens on demand from the sidebar's "hosts"
+toggle and is where hosts are added, retargeted, removed, retried, where an identity change is decided, and where each
+host's profiles are defined; opening a stale session shows its metadata behind a notice naming its host's actual state
+instead of a terminal, and the create dialog picks which host a session is launched on. Reopening a session lands at the
+tail of its history instead of replaying it as a scroll animation — for any replay within the client's buffering bounds,
+which is every ordinary one; an unusually large replay, or one that stalls part-way, falls back to showing the catch-up
+as it arrives instead of hiding it. A session can be renamed from either the list or its own view. Sessions survive a
+supervisor restart (persisted metadata, and a still-viewable terminal whenever the private tmux server survived too), a
+host reboot classifies previously-running sessions as interrupted rather than guessing, and a user-stopped session keeps
+its "stopped by user" qualifier durably. A terminal that loses its connection — a closed laptop, a network that went
+away — gets itself back without you closing and reopening the session. Restart is live too: an interrupted (or exited,
+or errored) session relaunches its agent — resuming its own Claude Code or Codex conversation where that conversation
+was captured, and saying plainly that it is launching fresh where it was not. On Linux hosts with a systemd user
+manager, stopping a session also kills its launch's own cgroup before the portable process sweep, which catches
+descendants that daemonized away from both (see SPEC_impl.md for what that does and does not promise). Usable for real
+work, minimal in everything else. On first run the helm creates a recoverable web token. A browser enters the value
+printed by `farhelm helm token show` once, receives an origin-and-port-scoped device secret, and sends that secret
+explicitly on later REST and WebSocket requests; the helm stores only its SHA-256 digest. `farhelm helm
+token rotate`
+replaces the bootstrap token, invalidates every device secret, and closes authenticated live sockets. The state
+directory remains private to the helm account, and a script running in the authenticated UI origin has that device's API
+authority. One further caveat worth knowing before real work: every agent invocation entered through the GUI, whether
+typed into the create dialog or stored in a profile, is ordinary argv, visible to every local user via `ps`, so
+credentials do not belong in it.
 
 ## Trying it (M7)
 
@@ -98,18 +99,19 @@ Ubuntu 24.04 ships 3.4.
   creation sends paths literally. In both forms a `~` or `~/path` cwd reaches the supervisor as written and expands
   there, once, against the supervisor user's own home, with the expanded absolute path stored; `~user` forms are
   refused, and no shell variable ever expands.
-- The authenticated page is a hosts panel above a session list. Every registered host is listed with its connection
-  state in the helm's own words — connecting, unreachable-reprobing, connected, version-skew, identity-mismatch,
-  identity-unverified, duplicate, retired — plus the evidence behind it (both versions on a skew, both identities on a
-  mismatch) and, where there is one, what to do about it. "add host" first discovers the destination. An answering
-  supervisor is registered as-is; positive absence shows the exact setup plan and does nothing until you confirm it;
-  unsupported hosts keep the concrete manual fallback. A confirmed run registers its row before execution and retains
-  step-by-step progress and failures there, so a reload or another browser can follow or rerun it. Each registered row
-  also has an explicit update action with the same plan-then-confirm handshake. Optional remote Farhelm and
-  state-directory fields still describe installs that are not on the remote's `PATH` or use a non-default state
-  directory. Each ssh row can be retargeted in place or removed, every row can be retried, and a host reporting an
-  identity that does not match the one on record offers to adopt it. Removing forgets the host and the helm's cached
-  view of its sessions — the supervisor and its agents keep running, and re-adding the destination finds them again.
+- The authenticated page leads with a compact strip above the session list: every registered host's name and its
+  connection state in the helm's own words — connecting, unreachable-reprobing, connected, version-skew,
+  identity-mismatch, identity-unverified, duplicate, retired — always visible. Opening the sidebar's "hosts" toggle
+  reveals the full panel: the evidence behind each state (both versions on a skew, both identities on a mismatch) and,
+  where there is one, what to do about it. "add host" first discovers the destination. An answering supervisor is
+  registered as-is; positive absence shows the exact setup plan and does nothing until you confirm it; unsupported hosts
+  keep the concrete manual fallback. A confirmed run registers its row before execution and retains step-by-step
+  progress and failures there, so a reload or another browser can follow or rerun it. Each registered row also has an
+  explicit update action with the same plan-then-confirm handshake. Optional remote Farhelm and state-directory fields
+  still describe installs that are not on the remote's `PATH` or use a non-default state directory. Each ssh row can be
+  retargeted in place or removed, every row can be retried, and a host reporting an identity that does not match the one
+  on record offers to adopt it. Removing forgets the host and the helm's cached view of its sessions — the supervisor
+  and its agents keep running, and re-adding the destination finds them again.
 - Each host row also opens its "profiles": the named agent definitions sessions on that host are launched from. A
   profile is a name, an invocation, an agent kind (Claude Code, Codex, or generic — the kind is what selects a
   supervisor's status heuristics and conversation capture, and is not user-authored beyond picking one), and an optional

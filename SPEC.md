@@ -226,16 +226,19 @@ it shows the session's metadata and says why there is no terminal, rather than a
 ### Session list
 
 One flat list across all registered hosts, with filtering and search by host, directory, agent profile, status, and
-title. No mandatory hierarchy. Agent-spawned sessions (see below) carry a parent reference usable as a filter, but
+title. The filter controls open on demand rather than standing permanently above the list; while an applied filter's
+controls are closed, the list says visibly that a filter is in force, so a narrowed list can never masquerade as a small
+fleet. No mandatory hierarchy. Agent-spawned sessions (see below) carry a parent reference usable as a filter, but
 parentage does not nest the list and implies nothing about VCS state.
 
-Per-host connection state is always visible. Sessions on an unreachable host stay in the list from the helm's last-known
-knowledge (which survives helm restarts), clearly marked stale, rather than vanishing. Lifecycle operations against an
-unreachable host are refused with a clear error; nothing queues for later delivery in v1. Opening such a session shows
-its metadata — title, directory, last-known status — behind a clear host-unreachable notice; there is no terminal to
-show and no pretense of one. Changes made from any client — creates, renames, stops, deletes, status transitions —
-appear in all other connected clients automatically; the agent-spawn behavior below is one instance of this general
-rule, not a special case.
+Per-host connection state is always visible, as a compact per-host indicator naming each host with its current phase;
+the full hosts panel — retry, retargeting, removal, profiles — opens on demand rather than occupying the session list
+permanently. Sessions on an unreachable host stay in the list from the helm's last-known knowledge (which survives helm
+restarts), clearly marked stale, rather than vanishing. Lifecycle operations against an unreachable host are refused
+with a clear error; nothing queues for later delivery in v1. Opening such a session shows its metadata — title,
+directory, last-known status — behind a clear host-unreachable notice; there is no terminal to show and no pretense of
+one. Changes made from any client — creates, renames, stops, deletes, status transitions — appear in all other connected
+clients automatically; the agent-spawn behavior below is one instance of this general rule, not a special case.
 
 ### Status
 
@@ -421,8 +424,9 @@ worktree, workspace, or branch as part of spawning — if the agent wants a `jj 
 
 - Every failed operation surfaces a concrete, actionable error in the client. A dialog must never close as though an
   operation succeeded when it failed.
-- Connection state per host is always visible; reconnection uses bounded retries followed by periodic low-frequency
-  re-probing, so a host that comes back overnight resurfaces by itself. The UI shows which phase it is in either way.
+- Connection state per host is always visible — at minimum as the session list's compact per-host indicator, with the
+  full hosts panel a toggle away; reconnection uses bounded retries followed by periodic low-frequency re-probing, so a
+  host that comes back overnight resurfaces by itself. The UI shows which phase it is in either way.
 - Logs are available for: the helm, each supervisor, session creation, process/PTY lifecycle, attachment transfer,
   reconnection, and resume attempts.
 - Long-lived input/output/paste paths have health checks, so "typing goes nowhere" is detected and reported rather than

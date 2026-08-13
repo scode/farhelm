@@ -22,6 +22,7 @@ import {
   listProfiles,
   listSessions,
   localHostId,
+  openFilterBar,
   type ProfileRow,
   type SessionRow,
 } from "./helpers/fleet";
@@ -121,6 +122,7 @@ test("a fake agent spawns children that appear without refreshing the observer",
     driver = await context.newPage();
 
     await page.goto("/");
+    await openFilterBar(page);
     await expect(row(page, parent.id)).toBeVisible({ timeout: 20_000 });
     const observerUrl = page.url();
     await openReadyTerminal(driver, parent.id, {

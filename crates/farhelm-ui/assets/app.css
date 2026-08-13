@@ -30,10 +30,10 @@ body,
   width: 340px;
   flex-shrink: 0;
   /* x is clipped, y scrolls (shorthand order: x then y). Session rows
-   * stack and ellipsize per line, but the host rows and the filter bar
-   * still lay out on single non-wrapping lines wider than this column;
-   * the clip keeps their overflow from widening the page until the
-   * hosts/filters redesign restacks them for the sidebar. */
+   * stack and ellipsize per line, but the on-demand full hosts panel and
+   * filter bar still lay out wide non-wrapping lines that can exceed
+   * this column while open; the clip is what keeps their overflow from
+   * widening the page. Still required, not redesign debt. */
   overflow: hidden auto;
   border-right: 1px solid #262a31;
 }
@@ -54,6 +54,64 @@ body,
   align-items: center;
   justify-content: center;
   color: #5b6270;
+}
+
+/* The sidebar's resting chrome (BUGS_BURNDOWN.md issue 5): two on-demand
+   toggles for the hosts panel and the filter bar, so the column's
+   permanent contents stay rows-plus-create. The "filtered" note beside
+   them is load-bearing, not decoration — an applied filter keeps
+   narrowing the list while its bar is closed, and without the note a
+   hidden filter reads as a shrunken fleet. */
+.sidebar-controls {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 8px 12px 4px;
+}
+
+.sidebar-controls .btn {
+  font-size: 12px;
+  padding: 2px 8px;
+}
+
+.filter-active-note {
+  color: #d8b45f;
+  font-size: 12px;
+}
+
+/* The hosts panel's permanent mount, collapsed rather than unmounted when
+   toggled shut: removal would tear down in-flight discovery/plan/mutation
+   tasks (silently discarding their replies) and forget provisioning-busy
+   state — see the holder's comment in list.rs. */
+.hosts-panel-holder.collapsed {
+  display: none;
+}
+
+/* The compact per-host strip that keeps SPEC.md's connection-state
+   visibility while the full panel is closed: name plus the SAME
+   phase-worded, phase-colored chip the panel uses. One host per line —
+   names are user data with no length bound, so each ellipsizes alone
+   rather than fighting its neighbors for one line. */
+.hosts-compact {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 0 12px 6px;
+  font-size: 12px;
+}
+
+.hosts-compact-entry {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+}
+
+.hosts-compact-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
 }
 
 .layout {
@@ -665,9 +723,12 @@ body,
   color: #d8b45f;
 }
 
-/* The hosts panel (PLAN_M6.md item 6), above the session list because
-   SPEC.md requires per-host connection state to be ALWAYS visible — not
-   behind a toggle, and not only when something is wrong. */
+/* The hosts panel (PLAN_M6.md item 6): the on-demand evidence and
+   management surface behind the sidebar's "hosts" toggle. SPEC.md's
+   always-visible connection state now lives in the compact strip (see
+   .hosts-compact); this panel adds the evidence behind each phase and
+   the actions (add/retry/retarget/remove/adopt/profiles). Mounted
+   permanently but collapsed while closed — see .hosts-panel-holder. */
 .hosts-panel {
   border-bottom: 1px solid #1d2026;
   padding: 8px 14px;
@@ -1169,10 +1230,11 @@ body,
   background: #1d2026;
 }
 
-/* Filter and search (PLAN_M6_75.md item 7). Always mounted, unlike the
-   create dialog below it: the controls ARE the statement of what the list
-   is currently showing, so hiding them behind a toggle would make an active
-   filter something a user has to go looking for to explain a short list.
+/* Filter and search (PLAN_M6_75.md item 7). Mounted on demand behind the
+   sidebar's "filter" toggle: the permanent "filtered" note beside the
+   toggles (see .filter-active-note) is what keeps an applied query from
+   becoming something a user has to go looking for to explain a short
+   list while the controls themselves are closed.
 
    A wrapping row rather than the create form's column, because these are
    several short, independent dimensions plus the archive switch rather than one form to fill in top to

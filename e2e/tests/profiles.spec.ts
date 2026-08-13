@@ -50,6 +50,7 @@ import {
   listProfiles,
   listSessions,
   localHostId,
+  openHostsPanel,
   openRowMenu,
   ProfileRow,
   stubFeed,
@@ -90,12 +91,17 @@ async function listWithStubbedFeed(page: Page): Promise<FeedStub> {
   await page.goto("/");
   await feed.waitForConnection(1);
   feed.notify(1);
-  await expect(page.locator(".hosts-panel")).toBeVisible({ timeout: 20_000 });
+  // Arrival check: the hosts panel is behind a toggle now, so the always-
+  // visible compact strip is what proves the first hosts read landed.
+  await expect(page.locator(".hosts-compact-entry").first()).toBeVisible({ timeout: 20_000 });
   return feed;
 }
 
-/** Expand one host's profiles section from its row in the hosts panel. */
+/** Expand one host's profiles section from its row in the hosts panel —
+ * opening the panel itself first, since the sidebar keeps it behind a
+ * toggle. */
 async function openProfiles(page: Page, host: number) {
+  await openHostsPanel(page);
   await page.locator(`[data-host-id="${host}"] .host-profiles-toggle`).click();
   await expect(section(page, host)).toBeVisible({ timeout: 20_000 });
 }

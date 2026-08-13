@@ -51,7 +51,9 @@ use crate::api::{
 };
 use crate::archive::confirmation as archive_confirmation;
 use crate::feed::{fallback_polls_now, fallback_sleep, use_feed_reader};
-use crate::hosts::{HostsPanel, HostsRead, host_incarnation, is_connected, phase_label};
+use crate::hosts::{
+    HostsPanel, HostsRead, host_incarnation, is_connected, phase_class, phase_label,
+};
 use crate::ops::{OpLock, ReadGate};
 use crate::peer::{DetailPart, PeerLine, display_peer};
 use crate::profiles::{
@@ -602,6 +604,13 @@ pub(crate) fn ListView(
     // update disabling it is not synchronous with the click handler
     // itself.
     let mut pending = use_signal(HashSet::<String>::new);
+    // The two on-demand sidebar sections (BUGS_BURNDOWN.md issue 5): the
+    // hosts panel and the filter bar render only while toggled open, so
+    // the sidebar's resting state is rows plus the create button. Both
+    // default closed on every load, deliberately unpersisted — the compact
+    // host strip and the "filtered" note carry the always-visible facts.
+    let mut hosts_open = use_signal(|| false);
+    let mut filter_open = use_signal(|| false);
     // `pending`'s entry and exit, with the cross-pane bookkeeping attached:
     // every row operation must (a) refuse to start while the SHARED token
     // is held — the session view or a page operation is mid-write, and a
@@ -1698,14 +1707,119 @@ pub(crate) fn ListView(
     let mut clear_filter = apply_filter;
 
     rsx! {
-        HostsPanel {
-            hosts,
-            ops,
-            mutation_busy_hosts,
-            provisioning_busy_hosts,
-            profiles_open,
-            profiles: host_profiles,
-            on_changed: refresh_hosts,
+        // The sidebar leads with two on-demand toggles (BUGS_BURNDOWN.md
+        // issue 5, interviewed): the sidebar's permanent contents are the
+        // session rows and the create button ONLY, with host management
+        // and filtering opened when needed instead of permanently stacked
+        // above the list. The compact host strip below the toggles is what
+        // keeps SPEC.md's per-host visibility promise while the full panel
+        // is closed.
+        div { class: "sidebar-controls",
+            // Closing NEVER unmounts the panel (it collapses via CSS, see
+            // the holder below), so the toggle needs no busy guard: every
+            // in-flight discovery, plan, or host mutation keeps its
+            // component — and therefore its reply handling — alive behind
+            // the collapsed surface, and provisioning-busy state survives
+            // a close/reopen instead of flashing controls re-enabled.
+            button {
+                r#type: "button",
+                class: "btn hosts-toggle",
+                aria_expanded: hosts_open(),
+                onclick: move |_| {
+                    let opening = !hosts_open();
+                    hosts_open.set(opening);
+                    // A closed panel takes its profiles section with it:
+                    // leaving `profiles_open` set would keep that host's
+                    // catalog surface reading behind an invisible panel.
+                    if !opening {
+                        profiles_open.set(None);
+                    }
+                },
+                "hosts"
+            }
+            button {
+                r#type: "button",
+                class: "btn filter-toggle",
+                aria_expanded: filter_open(),
+                onclick: move |_| filter_open.set(!filter_open()),
+                "filter"
+            }
+            // An applied non-default filter narrows the list even while
+            // the bar is closed; saying so beside the toggle is what keeps
+            // a hidden filter from reading as a shrunken fleet.
+            if filter_changed {
+                span { class: "filter-active-note", "filtered" }
+            }
+        }
+        // The always-visible compact form of the hosts panel: SPEC.md
+        // requires per-host connection state (and the retry phase behind
+        // it) to stay visible, and the interviewed redesign relaxed that
+        // from the full management panel to this strip — one entry per
+        // host, named, with the SAME phase word and color category the
+        // full panel's chip uses (`hosts::phase_label`/`phase_class`), so
+        // the two surfaces can never call one state two things.
+        // Management (retry, edit, remove, profiles) stays in the full
+        // panel behind the toggle.
+        div { class: "hosts-compact",
+            // The strip mirrors `HostsRead`'s four states, not just its
+            // happy path: this is the surface SPEC.md's always-visible
+            // promise now rests on, and a strip that renders only
+            // `hosts()` would show a failed first read as an empty fleet
+            // and a failed REFRESH as confidently current chips. The
+            // wording mirrors the full panel's own loading/error lines.
+            if hosts.read().is_loading() {
+                span { class: "hosts-compact-note", "loading hosts…" }
+            }
+            for host in hosts.read().hosts().unwrap_or_default() {
+                span {
+                    key: "{host.id}",
+                    class: "hosts-compact-entry",
+                    span { class: "hosts-compact-name peer-value", dir: "ltr",
+                        "{display_peer(&host.name)}"
+                    }
+                    span {
+                        class: "host-chip {phase_class(&host.state)}",
+                        "{phase_label(&host.state)}"
+                    }
+                }
+            }
+            // A failed refresh demotes everything above to last-known —
+            // said HERE, where the chips are, not only inside the closed
+            // panel. The helm's own words ride along like every other
+            // peer string.
+            if let Some(err) = hosts.read().refresh_error().map(str::to_string) {
+                PeerLine {
+                    class: "hosts-compact-error".to_string(),
+                    parts: vec![
+                        DetailPart::Text(
+                            if hosts.read().hosts().is_some() {
+                                "shown as of last successful read; refresh failed: ".to_string()
+                            } else {
+                                "hosts could not be read: ".to_string()
+                            },
+                        ),
+                        DetailPart::Peer(err),
+                    ],
+                }
+            }
+        }
+        // Mounted permanently, collapsed via CSS: an unmounted panel
+        // would take every in-flight add-host discovery, provisioning
+        // plan, and host mutation task down with it (their replies
+        // silently discarded, a claimed token stranded), and would
+        // forget `provisioning_busy_hosts` so a reopen briefly offered
+        // mutations on a host mid-provisioning.
+        div {
+            class: if hosts_open() { "hosts-panel-holder" } else { "hosts-panel-holder collapsed" },
+            HostsPanel {
+                hosts,
+                ops,
+                mutation_busy_hosts,
+                provisioning_busy_hosts,
+                profiles_open,
+                profiles: host_profiles,
+                on_changed: refresh_hosts,
+            }
         }
         // Filtering and search (PLAN_M6_75.md item 7): this builds the
         // QUERY, the helm answers it, and `rows::count_banner` says how many
@@ -1716,6 +1830,7 @@ pub(crate) fn ListView(
         // A `form` rather than loose inputs, and that is what makes Enter
         // work from any field: applying a filter is a submit, so the keyboard
         // path and the button are the same path rather than two.
+        if filter_open() {
         form {
             class: "session-filter",
             onsubmit: move |evt| {
@@ -1890,6 +2005,7 @@ pub(crate) fn ListView(
                 onclick: move |_| clear_filter(SessionFilter::default()),
                 "clear"
             }
+        }
         }
         div { class: "list-toolbar",
             button {

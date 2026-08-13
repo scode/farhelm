@@ -13,7 +13,7 @@ import { expect, Page, APIRequestContext, test, TestInfo } from "@playwright/tes
 import { readFile, rename, writeFile } from "node:fs/promises";
 import path from "node:path";
 
-import { stubFeed, type FeedStub } from "./helpers/fleet";
+import { openHostsPanel, stubFeed, type FeedStub } from "./helpers/fleet";
 
 const BUILD = "0.0.3";
 
@@ -184,8 +184,11 @@ async function waitForProgress(
   return await progress(request, host);
 }
 
-/** Open the real add form and submit one destination. */
+/** Open the real add form and submit one destination — opening the
+ * hosts panel itself first (idempotent), so callers need no per-call
+ * prerequisite. */
 async function probeRemote(page: Page, destination: string): Promise<void> {
+  await openHostsPanel(page);
   await page.getByRole("button", { name: "add host" }).click();
   await page.locator(".add-host-ssh").fill(destination);
   await page.locator(".add-host-submit").click();
@@ -257,6 +260,7 @@ test("real discovery offers one peer-safe concrete plan and mutates nothing befo
   const hostileHome = "/home/plan\u202Espoof\u200B";
   await configureBackend({ targets: { [target(remote)]: { home: hostileHome } } });
   await page.goto("/");
+  await openHostsPanel(page);
   await probeRemote(page, remote);
 
   const plan = page.locator(".add-host-form .provisioning-plan");
@@ -281,6 +285,7 @@ test("manual discovery preserves the concrete peer-safe reason and never provisi
     },
   });
   await page.goto("/");
+  await openHostsPanel(page);
   await probeRemote(page, remote);
 
   await expect(page.locator(".add-host-error")).toHaveText(
@@ -300,6 +305,7 @@ test("probe failure is concrete, peer-safe, and cannot become a setup offer", as
     },
   });
   await page.goto("/");
+  await openHostsPanel(page);
   await probeRemote(page, remote);
 
   await expect(page.locator(".add-host-error")).toContainText(
@@ -333,6 +339,7 @@ test("an unreadable successful probe refreshes a registration without inventing 
     await route.fulfill({ response, body: "{not-json" });
   });
   await page.goto("/");
+  await openHostsPanel(page);
   await probeRemote(page, remote);
 
   await expect(page.locator(".add-host-error")).toContainText(
@@ -356,6 +363,7 @@ test("discovery registers an answering supervisor through the real handler", asy
     },
   });
   await page.goto("/");
+  await openHostsPanel(page);
   await probeRemote(page, remote);
 
   await expect(page.locator(`.host-row:has-text("${remote}")`)).toBeVisible();
@@ -374,6 +382,7 @@ test("blank optional fields and same-task double submit produce one real probe",
     }
   });
   await page.goto("/");
+  await openHostsPanel(page);
   await page.getByRole("button", { name: "add host" }).click();
   await page.locator(".add-host-ssh").fill(remote);
   await page.evaluate(() => {
@@ -401,6 +410,7 @@ test("accepted ADD registers before execution and releases the page lock while r
     if (request.resourceType() === "document") documents += 1;
   });
   await page.goto("/");
+  await openHostsPanel(page);
   await probeRemote(page, remote);
   await page.getByRole("button", { name: "confirm setup" }).click();
 
@@ -437,6 +447,7 @@ test("a refused ADD attempt consumes the displayed offer and refreshes committed
   const remote = destination(testInfo, "add-refusal");
   await configureBackend({ targets: { [target(remote)]: { hold_actions: true } } });
   await page.goto("/");
+  await openHostsPanel(page);
   const probeResponse = page.waitForResponse((response) =>
     new URL(response.url()).pathname === "/api/hosts/probe" && response.request().method() === "POST",
   );
@@ -464,6 +475,7 @@ test("a malformed accepted ADD closes the form and warns without retrying", asyn
     });
   });
   await page.goto("/");
+  await openHostsPanel(page);
   await probeRemote(page, remote);
   await page.getByRole("button", { name: "confirm setup" }).click();
 
@@ -477,6 +489,7 @@ test("local setup waits for idle progress and reacts down, connected, then down 
   const state = { down: false };
   const feed = await controlLocalState(page, state);
   await page.goto("/");
+  await openHostsPanel(page);
   await expect(page.locator('[data-host-kind="local"] .provisioning-plan')).toHaveCount(0);
 
   state.down = true;
@@ -534,6 +547,7 @@ test("accepted local setup keeps its manual command secondary before progress ar
     });
   });
   await page.goto("/");
+  await openHostsPanel(page);
   const local = page.locator('[data-host-kind="local"]');
   await expect(local.locator(".provisioning-plan")).toBeVisible();
 
@@ -569,6 +583,7 @@ test("an unknown future progress-step status renders verbatim", async ({ page })
     });
   });
   await page.goto("/");
+  await openHostsPanel(page);
 
   const step = page.locator('[data-host-id="1"] [data-step="restart-supervisor"]');
   await expect(step).toHaveAttribute("data-status", "awaiting-reboot");
@@ -581,6 +596,7 @@ test("canceling local setup leaves the automatic offer available", async ({ page
   const state = { down: true };
   await controlLocalState(page, state);
   await page.goto("/");
+  await openHostsPanel(page);
   const local = page.locator('[data-host-kind="local"]');
   await expect(local.locator(".provisioning-plan")).toBeVisible();
 
@@ -606,6 +622,7 @@ test("a transient local probe error can return to the automatic offer", async ({
     },
   });
   await page.goto("/");
+  await openHostsPanel(page);
   const local = page.locator('[data-host-kind="local"]');
   await expect(local.locator(".provisioning-error")).toContainText("temporary local probe failure");
   await expect(local.locator(".provisioning-auto-setup")).toBeVisible();
@@ -629,6 +646,7 @@ test("local automatic discovery does not start before the authoritative idle vie
     await route.continue();
   });
   await page.goto("/");
+  await openHostsPanel(page);
   await expect(page.locator('[data-host-kind="local"]')).toBeVisible();
   expect((await backendEvents()).some((event) => event.target === "local")).toBe(false);
 
@@ -649,6 +667,7 @@ test("manual-only local setup leaves the manual command primary", async ({ page 
     },
   });
   await page.goto("/");
+  await openHostsPanel(page);
   const local = page.locator('[data-host-kind="local"]');
   await expect(local.locator(".provisioning-manual:not(.secondary)")).toContainText(
     "farhelm supervisor run",
@@ -680,6 +699,7 @@ test("a failed local ADD keeps its rerun action in the local setup state", async
     });
   });
   await page.goto("/");
+  await openHostsPanel(page);
   const local = page.locator('[data-host-kind="local"]');
   await expect(local.locator(".provisioning-rerun")).toBeVisible();
   await local.locator(".provisioning-rerun").click();
@@ -722,6 +742,7 @@ test("UPDATE plans once, binds to the row, and releases OpLock at acceptance", a
   await waitForProgress(request, accepted.host_id, "completed");
   await configureBackend({ targets: { [target(remote)]: { hold_actions: true } } });
   await page.goto("/");
+  await openHostsPanel(page);
   const row = page.locator(`[data-host-id="${accepted.host_id}"]`);
   await expect(row.locator(".provisioning-update")).toBeVisible();
   await page.evaluate((id) => {
@@ -746,6 +767,7 @@ test("a row change and an observed foreign run each discard a pending plan", asy
   const accepted = await startAdd(request, remote);
   await waitForProgress(request, accepted.host_id, "completed");
   await page.goto("/");
+  await openHostsPanel(page);
   const row = page.locator(`[data-host-id="${accepted.host_id}"]`);
   await row.locator(".provisioning-update").dispatchEvent("click");
   await expect(row.locator(".provisioning-plan")).toBeVisible();
@@ -783,6 +805,7 @@ test("UPDATE planning refusal shows the concrete reason without minting a confir
     },
   });
   await page.goto("/");
+  await openHostsPanel(page);
   const row = page.locator(`[data-host-id="${accepted.host_id}"]`);
   const refusal = page.waitForResponse((response) =>
     new URL(response.url()).pathname === `/api/hosts/${accepted.host_id}/update`
@@ -826,6 +849,7 @@ test("a refused UPDATE consumes its plan and leaves unrelated controls usable", 
     });
   });
   await page.goto("/");
+  await openHostsPanel(page);
   const row = page.locator(`[data-host-id="${accepted.host_id}"]`);
   const planResponse = page.waitForResponse((response) =>
     new URL(response.url()).pathname === `/api/hosts/${accepted.host_id}/update`,
@@ -871,6 +895,7 @@ test("mismatched accepted identity routes progress to the returned host", async 
     });
   });
   await page.goto("/");
+  await openHostsPanel(page);
   const row = page.locator(`[data-host-id="${from.host_id}"]`);
   const planResponse = page.waitForResponse(
     (response) => new URL(response.url()).pathname === `/api/hosts/${from.host_id}/update`,
@@ -898,6 +923,7 @@ test("a malformed accepted UPDATE consumes the plan, warns, and releases page co
     });
   });
   await page.goto("/");
+  await openHostsPanel(page);
   const row = page.locator(`[data-host-id="${accepted.host_id}"]`);
   await row.locator(".provisioning-update").dispatchEvent("click");
   await row.locator(".provisioning-confirm").dispatchEvent("click");
@@ -929,6 +955,7 @@ test("a progress read failure recovers on the next feed-driven real read", async
     }
   });
   await page.goto("/");
+  await openHostsPanel(page);
   const row = page.locator(`[data-host-id="${accepted.host_id}"]`);
   await expect(row.locator(".provisioning-read-error")).toContainText(
     "injected progress read failure",
@@ -957,6 +984,7 @@ test("two provisioning-busy rows reconcile independently", async ({
   const one = await startAdd(request, first);
   const two = await startAdd(request, second);
   await page.goto("/");
+  await openHostsPanel(page);
   const rowOne = page.locator(`[data-host-id="${one.host_id}"]`);
   const rowTwo = page.locator(`[data-host-id="${two.host_id}"]`);
   await expect(rowOne.locator(".host-edit")).toBeDisabled();
@@ -994,6 +1022,7 @@ test("failed ADD rerun probes the registered destination and discovery resolves 
     },
   });
   await page.goto("/");
+  await openHostsPanel(page);
   const row = page.locator(`[data-host-id="${accepted.host_id}"]`);
   await expect(row.locator(".provisioning-run-message")).toContainText(
     "supervisor started but attachment failed",
@@ -1052,6 +1081,7 @@ test("failed UPDATE rerun plans and confirms through the host update route", asy
     }
   });
   await page.goto("/");
+  await openHostsPanel(page);
   const row = page.locator(`[data-host-id="${added.host_id}"]`);
   const rerunPlanResponse = page.waitForResponse((response) =>
     new URL(response.url()).pathname === `/api/hosts/${added.host_id}/update`

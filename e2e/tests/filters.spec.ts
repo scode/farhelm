@@ -28,6 +28,7 @@ import {
   listHosts,
   listSessions,
   localHostId,
+  openFilterBar,
   SessionPage,
   stopSession,
   stubFeed,
@@ -57,7 +58,11 @@ async function listWithStubbedFeed(page: Page): Promise<void> {
   await page.goto("/");
   await feed.waitForConnection(1);
   feed.notify(1);
-  await expect(page.locator(".session-filter")).toBeVisible({ timeout: 20_000 });
+  // The filter bar sits behind the sidebar's on-demand toggle now; every
+  // test in this suite drives it, so opening it is part of arriving. The
+  // helper's own visibility wait doubles as the page-arrived assertion
+  // this line used to be.
+  await openFilterBar(page);
 }
 
 /**
@@ -487,6 +492,7 @@ test.describe("session list filtering", () => {
     const feed = await stubFeed(page);
     const reads = countReads(page);
     await page.goto("/");
+    await openFilterBar(page);
     await feed.waitForConnection(1);
     feed.notify(1);
     await expect(page.locator(".session-filter")).toBeVisible({ timeout: 20_000 });

@@ -48,7 +48,12 @@
 // feed is healthy" means, and a second definition of that would drift from
 // the one the feed's own spec asserts against.
 import { test, expect, Page, APIRequestContext } from "@playwright/test";
-import { stubFeed, openRowMenu } from "./helpers/fleet";
+import {
+  openFilterBar,
+  openHostsPanel,
+  openRowMenu,
+  stubFeed,
+} from "./helpers/fleet";
 import {
   DEVICE_SECRET_KEY,
   requireProductPageAuth,
@@ -12730,6 +12735,7 @@ test("client-helm-skew-prompts-reload", async ({ page, request }) => {
   });
 
   await page.goto("/");
+  await openFilterBar(page);
   const notice = page.locator(".build-skew");
   await expect(notice).toBeVisible({ timeout: 15_000 });
   await expect(notice).toContainText("9999.0.0-from-a-newer-helm");
@@ -13426,10 +13432,12 @@ test.describe("multi-host", () => {
     }
   });
 
-  // Both hosts, both chips, both identities — the panel's baseline, and the
-  // one assertion that proves the fleet is a fleet rather than one host
-  // drawn twice. SPEC.md: "per-host connection state is always visible",
-  // which means visible without opening anything.
+  // Both hosts, both chips, both identities — the OPENED panel's detailed
+  // two-host baseline, and the one assertion that proves the fleet is a
+  // fleet rather than one host drawn twice. (SPEC.md's without-opening-
+  // anything visibility is the compact strip's contract, pinned in
+  // sidebar.spec.ts; the identities and evidence here are what the panel
+  // adds behind the toggle.)
   test("hosts-panel-states: both harness hosts render connected chips with identities", async ({
     page,
     request,
@@ -13437,6 +13445,7 @@ test.describe("multi-host", () => {
     requireFleet();
 
     await page.goto("/");
+    await openHostsPanel(page);
     const rows = page.locator(".host-row");
     await expect(rows).toHaveCount(2);
 
@@ -13516,6 +13525,7 @@ test.describe("multi-host", () => {
     });
 
     await page.goto("/");
+    await openHostsPanel(page);
     const local = hostRowByName(page, "this machine");
     await expect(local).toHaveAttribute(
       "data-host-phase",
@@ -13581,6 +13591,7 @@ test.describe("multi-host", () => {
     });
 
     await page.goto("/");
+    await openHostsPanel(page);
     const row = hostRowByName(page, "user@reinstalled");
     await expect(row).toHaveAttribute("data-host-phase", "identity-mismatch");
     await expect(row.locator(".host-chip")).toHaveText("identity-mismatch");
@@ -13625,6 +13636,7 @@ test.describe("multi-host", () => {
     });
 
     await page.goto("/");
+    await openHostsPanel(page);
     const row = hostRowByName(page, "user@silent");
     await expect(row).toHaveAttribute("data-host-phase", "identity-unverified");
     await expect(row.locator(".host-adopt")).toHaveCount(0);
@@ -13679,6 +13691,7 @@ test.describe("multi-host", () => {
     });
 
     await page.goto("/");
+    await openHostsPanel(page);
     const row = hostRowByName(page, "user@racing");
     await row.locator(".host-adopt").click();
 
@@ -13722,6 +13735,7 @@ test.describe("multi-host", () => {
       expect(removed.ok(), `removing the ssh host: ${await removed.text()}`).toBe(true);
 
       await page.goto("/");
+      await openHostsPanel(page);
       await expect(hostRowByName(page, info.remote_ssh)).toHaveCount(0);
 
       await page.locator(".add-host-button").click();
@@ -13767,6 +13781,7 @@ test.describe("multi-host", () => {
     let id: string | undefined;
     try {
       await page.goto("/");
+      await openHostsPanel(page);
       await expect(hostRowByName(page, info.remote_ssh)).toHaveAttribute(
         "data-host-phase",
         "connected",
@@ -13905,6 +13920,7 @@ test.describe("multi-host", () => {
       const info = stackInfo();
 
       await page.goto("/");
+      await openHostsPanel(page);
       // Staleness arrives FIRST and does not wait for the retry ladder: a
       // host stops being connected the moment its connection drops, and
       // every one of its rows is last-known knowledge from that instant.
@@ -14041,6 +14057,7 @@ test.describe("multi-host", () => {
       id = (await created.json()).id;
 
       await page.goto("/");
+      await openHostsPanel(page);
       // Explicitly bounded rather than left on the 5s default: the row
       // appears only after the client's next listing poll (a three-second
       // cadence, and a walk is several round trips), so the default is
@@ -14224,6 +14241,7 @@ test.describe("multi-host", () => {
     });
 
     await page.goto("/");
+    await openHostsPanel(page);
     await expect(page.locator(".host-row")).toHaveCount(phases.length);
     for (const entry of phases) {
       const row = page.locator(`[data-host-id="${entry.id}"]`);
@@ -14260,6 +14278,7 @@ test.describe("multi-host", () => {
     });
 
     await page.goto("/");
+    await openHostsPanel(page);
     const row = page.locator(`[data-host-id="${local.id}"]`);
     await expect(row.locator(".host-retry")).toBeVisible();
     await row.locator(".host-retry").click();
@@ -14284,6 +14303,7 @@ test.describe("multi-host", () => {
     const before = await apiRemoteHost(request);
 
     await page.goto("/");
+    await openHostsPanel(page);
     const row = hostRowByName(page, info.remote_ssh);
     await row.locator(".host-remove").click();
     await expect(row.locator(".host-confirm-remove")).toBeVisible();
@@ -14473,6 +14493,7 @@ test.describe("multi-host", () => {
 
     try {
       await page.goto("/");
+      await openHostsPanel(page);
       // Its phase is whatever the dial has reached — connecting first, then
       // unreachable-reprobing — and either refuses a create. The label is
       // what proves a non-connected host is still SELECTABLE, which is the
@@ -14529,6 +14550,7 @@ test.describe("multi-host", () => {
     let added: number | undefined;
     try {
       await page.goto("/");
+      await openHostsPanel(page);
       await page.locator(".add-host-button").click();
       const form = page.locator(".add-host-form");
       await form.locator(".add-host-ssh").fill(destination);
@@ -14745,6 +14767,7 @@ test.describe("multi-host", () => {
 
     try {
       await page.goto("/");
+      await openHostsPanel(page);
       await feed.waitForConnection(1);
       feed.notify(1);
       // A directory that does not exist, so both attempts fail and the

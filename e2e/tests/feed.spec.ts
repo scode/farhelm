@@ -41,8 +41,11 @@ import {
   FeedStub,
   forceBuildSkew,
   listSessions,
+  openFilterBar,
+  openRowMenu,
   renameSession,
-  stubFeed, openRowMenu } from "./helpers/fleet";
+  stubFeed,
+} from "./helpers/fleet";
 
 /** The row for one session id, as the list renders it. */
 function row(page: Page, id: string) {
@@ -835,6 +838,7 @@ test.describe("the invalidation feed", () => {
     const reads = countReads(page);
     await forceBuildSkew(page, "9.9.9-not-this-bundle");
     await page.goto("/");
+    await openFilterBar(page);
     await expect(page.locator(".build-skew")).toBeVisible({ timeout: 20_000 });
     // The mount read is explicit too (a person navigated here), so the rows
     // are on screen even under skew — which is what gives the filter below

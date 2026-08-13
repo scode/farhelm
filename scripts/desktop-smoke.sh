@@ -500,12 +500,12 @@ sleep 2
 
 # Layout constants for the styled 1200x900 window (frame pinned at 0,0;
 # openbox's titlebar puts the client area roughly 18px down) under the
-# two-pane shell (BUGS_BURNDOWN.md issue 5): the session list, filter, and
-# create form all live in the 340px left sidebar now — with the persistent
-# hosts panel and filter bar stacked ABOVE the new-session button, which is
-# why its y sits far below the old exclusive-list layout's — and the
-# terminal occupies the pane to the right. If the layout shifts, take a
-# screenshot (import -window root) and update these.
+# two-pane shell (BUGS_BURNDOWN.md issue 5): the create form lives in the
+# 340px left sidebar, and with the hosts panel and filter bar collapsed
+# behind toggles only the toggle row and the compact host strip sit above
+# the new-session button, so its y is near the top. The terminal occupies
+# the pane to the right. If the layout shifts, take a screenshot
+# (import -window root) and update these.
 #
 # The webview accepts clicks some unpredictable time after it first
 # paints, so opening the form needs an oracle: the form panel lightens
@@ -515,12 +515,12 @@ sleep 2
 # the header, not a pass/fail assertion.
 form_region_mean() {
   DISPLAY=$DISP import -window root png:- 2>/dev/null |
-    convert - -crop 300x280+20+485 -format "%[fx:mean]" info: 2>/dev/null
+    convert - -crop 300x280+20+133 -format "%[fx:mean]" info: 2>/dev/null
 }
 BASE=$(form_region_mean)
 FORM_OPEN=""
 for _ in $(seq 1 15); do
-  DISPLAY=$DISP xdotool mousemove 65 474 click 1
+  DISPLAY=$DISP xdotool mousemove 65 123 click 1
   sleep 1.5
   NOW=$(form_region_mean)
   if python3 -c "import sys; sys.exit(0 if abs(float('$NOW')-float('$BASE'))>0.01 else 1)" 2>/dev/null; then
@@ -535,7 +535,7 @@ done
 # the selector's FIRST option by construction (see the create form's rsx),
 # so Home+Return in the opened popup reaches it without depending on how
 # many starter profiles exist.
-DISPLAY=$DISP xdotool mousemove 170 608 click 1 sleep 0.5 key Home sleep 0.3 key Return
+DISPLAY=$DISP xdotool mousemove 170 248 click 1 sleep 0.5 key Home sleep 0.3 key Return
 sleep 1
 # ctrl+a first: the working-directory field is prefilled with "~" (the
 # create form's default), and xdotool types at the caret rather than
@@ -544,9 +544,9 @@ sleep 1
 # The command/title/create ys are midpoints tolerant of the ~14px upward
 # shift the selector change causes (its explanatory label collapses from
 # two lines to one): each lands inside the target field in both layouts.
-DISPLAY=$DISP xdotool mousemove 170 662 click 1 sleep 0.3 key ctrl+a type --delay 120 "$X/work"
-DISPLAY=$DISP xdotool mousemove 170 718 click 1 sleep 0.3 type --delay 120 "bash"
-DISPLAY=$DISP xdotool mousemove 170 767 click 1 sleep 0.3 type --delay 120 "smoke"
+DISPLAY=$DISP xdotool mousemove 170 302 click 1 sleep 0.3 key ctrl+a type --delay 120 "$X/work"
+DISPLAY=$DISP xdotool mousemove 170 358 click 1 sleep 0.3 type --delay 120 "bash"
+DISPLAY=$DISP xdotool mousemove 170 407 click 1 sleep 0.3 type --delay 120 "smoke"
 
 # Identify the created session by set difference, not by title: matching
 # "any title starting with smo" would happily grab an unrelated pre-
@@ -559,7 +559,7 @@ BEFORE_IDS=$(curl_auth -s --max-time 5 "$API/api/sessions" | python3 -c "
 import json, sys
 d = json.load(sys.stdin)
 print(' '.join(sorted(s['id'] for s in d['sessions'])))" 2>/dev/null)
-DISPLAY=$DISP xdotool mousemove 60 800 click 1
+DISPLAY=$DISP xdotool mousemove 60 440 click 1
 SID=""
 for _ in $(seq 1 15); do
   SID=$(curl_auth -s --max-time 5 "$API/api/sessions" | BEFORE_IDS="$BEFORE_IDS" python3 -c "

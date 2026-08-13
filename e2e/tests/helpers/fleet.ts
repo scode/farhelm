@@ -702,6 +702,37 @@ export async function forceBuildSkew(page: Page, stamp: string): Promise<void> {
 }
 
 /**
+ * Open the sidebar's hosts panel if it is not already open.
+ *
+ * The sidebar redesign (BUGS_BURNDOWN.md issue 5) collapsed the hosts
+ * panel behind a toggle — only the compact per-host strip is permanent —
+ * so any test that manages hosts (add, retry, retarget, remove, profiles)
+ * opens the panel first through this helper. Idempotent like
+ * `openRowMenu`, and it awaits the panel itself so callers can go
+ * straight for its controls.
+ */
+export async function openHostsPanel(page: Page): Promise<void> {
+  const toggle = page.locator(".hosts-toggle");
+  if ((await toggle.getAttribute("aria-expanded")) !== "true") {
+    await toggle.click();
+  }
+  await expect(page.locator(".hosts-panel")).toBeVisible();
+}
+
+/**
+ * Open the sidebar's filter bar if it is not already open — the same
+ * on-demand-toggle story as [`openHostsPanel`], for every test that
+ * applies, clears, or inspects the session filter.
+ */
+export async function openFilterBar(page: Page): Promise<void> {
+  const toggle = page.locator(".filter-toggle");
+  if ((await toggle.getAttribute("aria-expanded")) !== "true") {
+    await toggle.click();
+  }
+  await expect(page.locator(".session-filter")).toBeVisible();
+}
+
+/**
  * Open a session row's actions menu when it is not already open.
  *
  * The sidebar redesign (BUGS_BURNDOWN.md issue 5) moved every per-row

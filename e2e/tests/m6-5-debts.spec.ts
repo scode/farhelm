@@ -26,7 +26,7 @@ import {
   listSessions,
   renameSession,
   stopSession,
-  stubFeed, openRowMenu } from "./helpers/fleet";
+  stubFeed, openHostsPanel, openRowMenu } from "./helpers/fleet";
 
 /** The row for one session id, as the list renders it. */
 function row(page: Page, id: string) {
@@ -531,6 +531,9 @@ test.describe("the M6.5 test debts", () => {
       },
     );
     await page.goto("/");
+    // The host detail line lives in the hosts panel, which sits behind
+    // the sidebar's toggle now.
+    await openHostsPanel(page);
 
     const detail = page.locator(".host-detail");
     await expect(detail).toBeVisible({ timeout: 20_000 });

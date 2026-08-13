@@ -3,7 +3,12 @@
 // view, and restart as the route back.
 
 import { expect, Page, test } from "@playwright/test";
-import { cleanupSession, createSession, openRowMenu } from "./helpers/fleet";
+import {
+  cleanupSession,
+  createSession,
+  openFilterBar,
+  openRowMenu,
+} from "./helpers/fleet";
 
 /** Find one session by its opaque server id, independent of title changes. */
 function row(page: Page, id: string) {
@@ -40,6 +45,7 @@ test("the row confirmation names every live thing and the toggle reveals the arc
     expect(tab.ok(), await tab.text()).toBeTruthy();
 
     await page.goto("/");
+    await openFilterBar(page);
     const target = row(page, session.id);
     await expect(target).toBeVisible({ timeout: 20_000 });
     await openRowMenu(target);
@@ -120,6 +126,7 @@ test("an included row stays visible while its archive state changes", async ({ p
   const session = await createSession(request, { title: `archive-retained-${Date.now()}` });
   try {
     await page.goto("/");
+    await openFilterBar(page);
     const include = page.locator(".filter-include-archived");
     await include.check();
     await page.locator(".filter-apply").click();

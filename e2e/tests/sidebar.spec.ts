@@ -10,9 +10,21 @@
  * from terminal.spec.ts's behavioral suite: every test here would pass in
  * a world where the shell CSS silently collapsed a pane or the `key` was
  * dropped, so each is written to fail against precisely that mutation.
+ *
+ * The suite grew with the redesign's later PRs and now also covers the
+ * row actions menu's own contracts (containment, float, selection
+ * isolation, rename-in-panel, consequence wrap, stale-menu
+ * reconciliation) and the sidebar's on-demand chrome (hosts/filter
+ * toggles, the compact host strip, the applied-filter note).
  */
 import { expect, test, type Page } from "@playwright/test";
-import { cleanupSession, createSession, openRowMenu } from "./helpers/fleet";
+import {
+  cleanupSession,
+  createSession,
+  openFilterBar,
+  openHostsPanel,
+  openRowMenu,
+} from "./helpers/fleet";
 
 function row(page: Page, id: string) {
   return page.locator(`[data-session-id="${id}"]`);
@@ -90,12 +102,13 @@ test("switching sessions directly tears the old view down and mounts the new one
     cwd: "/tmp",
     invocation: "sleep 300",
   });
-  const b = await createSession(request, {
-    title: `switch-b-${Date.now()}`,
-    cwd: "/tmp",
-    invocation: "sleep 300",
-  });
+  let b: { id: string } | undefined;
   try {
+    b = await createSession(request, {
+      title: `switch-b-${Date.now()}`,
+      cwd: "/tmp",
+      invocation: "sleep 300",
+    });
     await page.goto("/");
     await expect(row(page, a.id)).toBeVisible({ timeout: 20_000 });
     await expect(row(page, b.id)).toBeVisible({ timeout: 20_000 });
@@ -116,7 +129,7 @@ test("switching sessions directly tears the old view down and mounts the new one
     ).toBe(false);
   } finally {
     await cleanupSession(request, a.id);
-    await cleanupSession(request, b.id);
+    if (b) await cleanupSession(request, b.id);
   }
 });
 
@@ -288,7 +301,7 @@ test("an unanswered view operation disables row selection until it completes", a
     releaseRestart();
     await page.unroute(`**/api/sessions/${a.id}/restart`);
     await cleanupSession(request, a.id);
-    await cleanupSession(request, b.id);
+    if (b) await cleanupSession(request, b.id);
   }
 });
 
@@ -372,12 +385,13 @@ test("opening a menu does not move the rows below it", async ({ page, request })
     cwd: "/tmp",
     invocation: "sleep 300",
   });
-  const b = await createSession(request, {
-    title: `float-b-${Date.now()}`,
-    cwd: "/tmp",
-    invocation: "sleep 300",
-  });
+  let b: { id: string } | undefined;
   try {
+    b = await createSession(request, {
+      title: `float-b-${Date.now()}`,
+      cwd: "/tmp",
+      invocation: "sleep 300",
+    });
     await page.goto("/");
     await expect(row(page, a.id)).toBeVisible({ timeout: 20_000 });
     await expect(row(page, b.id)).toBeVisible({ timeout: 20_000 });
@@ -397,7 +411,7 @@ test("opening a menu does not move the rows below it", async ({ page, request })
     expect(after.x).toBe(before.x);
   } finally {
     await cleanupSession(request, a.id);
-    await cleanupSession(request, b.id);
+    if (b) await cleanupSession(request, b.id);
   }
 });
 
@@ -416,12 +430,13 @@ test("opening another row's menu does not change the selection", async ({ page, 
     cwd: "/tmp",
     invocation: "sleep 300",
   });
-  const b = await createSession(request, {
-    title: `keep-sel-b-${Date.now()}`,
-    cwd: "/tmp",
-    invocation: "sleep 300",
-  });
+  let b: { id: string } | undefined;
   try {
+    b = await createSession(request, {
+      title: `keep-sel-b-${Date.now()}`,
+      cwd: "/tmp",
+      invocation: "sleep 300",
+    });
     await page.goto("/");
     await expect(row(page, a.id)).toBeVisible({ timeout: 20_000 });
     await row(page, a.id).locator(".session-row-open").click();
@@ -434,7 +449,7 @@ test("opening another row's menu does not change the selection", async ({ page, 
     await expect(page.locator(".titlebar .title")).toContainText(a.title);
   } finally {
     await cleanupSession(request, a.id);
-    await cleanupSession(request, b.id);
+    if (b) await cleanupSession(request, b.id);
   }
 });
 
@@ -525,4 +540,246 @@ test("the archive consequence wraps fully visible inside the panel", async ({
   } finally {
     await cleanupSession(request, session.id);
   }
+});
+
+/**
+ * The sidebar's resting chrome is rows-plus-create: the hosts panel and
+ * the filter bar are closed until toggled, while the compact host strip
+ * keeps SPEC.md's per-host connection state (name and phase word) on
+ * screen the whole time.
+ *
+ * This is the interviewed contents decision (BUGS_BURNDOWN.md issue 5)
+ * plus the SPEC amendment's compact-indicator half stated as one test: a
+ * regression that either re-inlines a panel permanently or drops the
+ * strip (losing the always-visible phase) fails here.
+ */
+test("hosts and filter live behind toggles while the compact strip keeps phases visible", async ({
+  page,
+}) => {
+  await page.goto("/");
+  // Resting state: neither surface mounted, both toggles present.
+  await expect(page.locator(".hosts-toggle")).toBeVisible();
+  await expect(page.locator(".filter-toggle")).toBeVisible();
+  // The toggles SAY they are closed — the state assistive technology
+  // reads, and the state openHostsPanel/openFilterBar key off.
+  await expect(page.locator(".hosts-toggle")).toHaveAttribute("aria-expanded", "false");
+  await expect(page.locator(".filter-toggle")).toHaveAttribute("aria-expanded", "false");
+  // The hosts panel stays MOUNTED while collapsed (unmounting would
+  // discard in-flight host work — see list.rs), so closed means hidden,
+  // not absent; the filter bar owns no tasks and really unmounts.
+  await expect(page.locator(".hosts-panel")).toBeHidden();
+  await expect(page.locator(".session-filter")).toHaveCount(0);
+  // The compact strip carries every host's name and phase chip — the
+  // stack's local supervisor is connected, and the phase word is the
+  // SAME vocabulary the full panel uses.
+  const entry = page.locator(".hosts-compact-entry").first();
+  await expect(entry).toBeVisible({ timeout: 20_000 });
+  await expect(entry.locator(".host-chip")).toHaveText("connected", { timeout: 20_000 });
+
+  // Each toggle opens its surface; toggling again closes it, back to the
+  // resting state rather than accumulating panels.
+  await openHostsPanel(page);
+  await expect(page.locator(".hosts-toggle")).toHaveAttribute("aria-expanded", "true");
+  await page.locator(".hosts-toggle").click();
+  await expect(page.locator(".hosts-panel")).toBeHidden();
+
+  await openFilterBar(page);
+  await page.locator(".filter-toggle").click();
+  await expect(page.locator(".session-filter")).toHaveCount(0);
+});
+
+/**
+ * An applied filter announces itself beside the toggles while its bar is
+ * closed.
+ *
+ * The note is what keeps the on-demand bar honest: without it, a filter
+ * applied, then closed, silently narrows the list and the missing rows
+ * read as a shrunken fleet rather than as a query in force.
+ */
+test("a closed filter bar still announces an applied filter", async ({ page }) => {
+  // A query no title matches: the note must reflect the APPLIED query,
+  // and the banner proving zero matches is what ties the two together —
+  // a note that appeared without the query narrowing anything (or vice
+  // versa) fails one of the pair. No fixture session is needed; the
+  // shared stack's fleet, whatever it holds, matches nothing here.
+  const needle = `no-such-title-${Date.now()}`;
+  await page.goto("/");
+  await expect(page.locator(".filter-active-note")).toHaveCount(0);
+  await openFilterBar(page);
+  await page.locator(".filter-title").fill(needle);
+  await page.locator(".filter-apply").click();
+  await expect(page.locator(".filter-active-note")).toHaveText("filtered", {
+    timeout: 20_000,
+  });
+  await expect(page.locator(".banner")).toContainText("0 matching", {
+    timeout: 20_000,
+  });
+  // Closing the bar keeps the note: the filter is still in force.
+  await page.locator(".filter-toggle").click();
+  await expect(page.locator(".session-filter")).toHaveCount(0);
+  await expect(page.locator(".filter-active-note")).toBeVisible();
+  // Reopening and clearing retires the note with the query.
+  await openFilterBar(page);
+  await page.locator(".filter-clear").click();
+  await expect(page.locator(".filter-active-note")).toHaveCount(0, { timeout: 20_000 });
+});
+
+/**
+ * A menu whose row leaves the listing does not come back already open
+ * when the row returns.
+ *
+ * `menu_open` is reconciled on every COMMITTED listing (see list.rs) —
+ * deliberately unlike the confirmation and rename state, which only
+ * fleet-absence clears: a filtered reply is not evidence a session left
+ * the fleet, but it absolutely removes the row this transient popup was
+ * anchored to. Without that, filtering a row out and clearing the filter
+ * restored its floating panel with no new click — a popup nobody
+ * re-requested, exposing controls for a session whose state may have
+ * changed while the row was gone.
+ */
+test("a filtered-out row's open menu stays closed when the row returns", async ({
+  page,
+  request,
+}) => {
+  const marker = `stale-menu-${Date.now()}`;
+  const target = await createSession(request, {
+    title: marker,
+    cwd: "/tmp",
+    invocation: "sleep 300",
+  });
+  let decoy: { id: string } | undefined;
+  try {
+    decoy = await createSession(request, {
+      title: `decoy-${Date.now()}`,
+      cwd: "/tmp",
+      invocation: "sleep 300",
+    });
+    await page.goto("/");
+    await expect(row(page, target.id)).toBeVisible({ timeout: 20_000 });
+    await openRowMenu(row(page, target.id));
+
+    // Filter the open-menu row OUT (the decoy keeps the list non-empty,
+    // so an empty-fleet placeholder cannot mask a wrong result)...
+    await openFilterBar(page);
+    await page.locator(".filter-title").fill(`decoy-`);
+    await page.locator(".filter-apply").click();
+    await expect(row(page, target.id)).toHaveCount(0, { timeout: 20_000 });
+    await expect(row(page, decoy.id)).toBeVisible();
+
+    // ...and bring it back: present again, menu CLOSED.
+    await page.locator(".filter-clear").click();
+    await expect(row(page, target.id)).toBeVisible({ timeout: 20_000 });
+    await expect(row(page, target.id).locator(".session-row-menu-panel")).toHaveCount(0);
+    await expect(row(page, target.id).locator(".session-row-menu")).toHaveAttribute(
+      "aria-expanded",
+      "false",
+    );
+  } finally {
+    await cleanupSession(request, target.id);
+    if (decoy) await cleanupSession(request, decoy.id);
+  }
+});
+
+/**
+ * The compact strip is PER-HOST: several hosts render several entries,
+ * each named with its own phase word and color class, and a long
+ * unbroken host name ellipsizes instead of widening the strip.
+ *
+ * The single-host stack only ever shows one connected chip, which a
+ * strip that collapsed the fleet to one entry (or hard-coded
+ * "connected") would also pass; a stubbed two-host registry in mixed
+ * phases is what makes the per-host claim falsifiable, and the 200-char
+ * name is what exercises the ellipsis where the strip actually lives.
+ */
+test("the compact strip names every host with its own phase and clips long names", async ({
+  page,
+  request,
+}) => {
+  const longName = `user@${"h".repeat(200)}`;
+  // Fabricated replies must carry the helm's own build stamp, or the
+  // client latches skew and stands down from reading anything at all.
+  const stamp = (await request.get("/api/sessions")).headers()["x-farhelm-build"] ?? "";
+  expect(stamp, "the helm must stamp its replies").toBeTruthy();
+  await page.route(
+    (url) => url.pathname === "/api/hosts",
+    async (route) => {
+      if (route.request().method() !== "GET") {
+        await route.continue();
+        return;
+      }
+      await route.fulfill({
+        headers: { "x-farhelm-build": stamp, "content-type": "application/json" },
+        json: {
+          hosts: [
+            {
+              id: 1,
+              kind: "local",
+              destination: null,
+              name: "this machine",
+              identity: "id-local",
+              remote_farhelm: null,
+              remote_state_dir: null,
+              state: {
+                phase: "connected",
+                identity: "id-local",
+                build_version: "0.0.3-test",
+                refresh: { status: "ok", sessions: 0 },
+              },
+            },
+            {
+              id: 2,
+              kind: "ssh",
+              destination: longName,
+              name: longName,
+              identity: null,
+              remote_farhelm: null,
+              remote_state_dir: null,
+              state: {
+                phase: "unreachable-reprobing",
+                cause: "connect-failed",
+                last_error: "connection refused",
+              },
+            },
+          ],
+        },
+      });
+    },
+  );
+  await page.goto("/");
+
+  const entries = page.locator(".hosts-compact-entry");
+  await expect(entries).toHaveCount(2, { timeout: 20_000 });
+  await expect(entries.nth(0).locator(".hosts-compact-name")).toHaveText("this machine");
+  await expect(entries.nth(0).locator(".host-chip")).toHaveText("connected");
+  await expect(entries.nth(1).locator(".host-chip")).toHaveText("unreachable-reprobing");
+  // The long name is clipped by the strip, not allowed to widen it: the
+  // element paints less than it holds, and its box stays inside the
+  // sidebar.
+  const name = entries.nth(1).locator(".hosts-compact-name");
+  expect(await name.evaluate((el) => el.scrollWidth > el.clientWidth)).toBe(true);
+  const sidebarBox = (await page.locator(".app-sidebar").boundingBox())!;
+  const nameBox = (await name.boundingBox())!;
+  expect(nameBox.x + nameBox.width).toBeLessThanOrEqual(sidebarBox.x + sidebarBox.width + 1);
+});
+
+/**
+ * Closing the hosts panel takes its open profiles section with it: on
+ * reopen the section starts closed rather than silently reading a
+ * catalog behind a collapsed surface.
+ *
+ * The panel itself stays MOUNTED while collapsed (in-flight host work
+ * must survive a close — see list.rs), so this reset is the one piece of
+ * panel state the close deliberately clears, and nothing else pins it.
+ */
+test("closing the hosts panel closes its profiles section", async ({ page }) => {
+  await page.goto("/");
+  await openHostsPanel(page);
+  const toggleProfiles = page.locator(".host-profiles-toggle").first();
+  await toggleProfiles.click();
+  await expect(page.locator(".profiles-section")).toBeVisible({ timeout: 20_000 });
+
+  await page.locator(".hosts-toggle").click();
+  await expect(page.locator(".hosts-panel")).toBeHidden();
+  await openHostsPanel(page);
+  await expect(page.locator(".profiles-section")).toHaveCount(0);
 });
