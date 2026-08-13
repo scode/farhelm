@@ -61,12 +61,20 @@ use tracing::{error, info};
 /// than waiting for the first `resize` message is what gets live output
 /// to the right width immediately instead of reflowing a moment later.
 ///
-/// It does not fix the replay itself: the supervisor captures before it
-/// resizes (deliberately — the capture must not disturb an incumbent
-/// attachment that the attach may still fail to displace), so a reattach
-/// at a different size replays content laid out at the previous
-/// geometry. Full-screen apps repaint on the SIGWINCH that follows;
-/// normal-screen sessions wear the reflow until the next output.
+/// It does not shape the replay directly: the supervisor resizes the
+/// window after takeover and just before its replacement client captures
+/// (in that order deliberately — resizing during prep would leave an
+/// incumbent's terminal reflowed by an attach that may still fail; see
+/// the attach handler), so the replay is content tmux reflowed to the
+/// NEW geometry, possibly while the application is still repainting for
+/// it. Full-screen apps finish repainting on the SIGWINCH they already
+/// received; normal-screen sessions wear tmux's reflow until the next
+/// output. For a freshly opened tab that resize is NORMALLY a no-op —
+/// the open path pre-sizes the tab window to the agent window's geometry,
+/// best-effort — which is what keeps a new tab's first replay from racing
+/// its shell's resize repaint in the common case (a failed pre-size, or a
+/// client that resized between open and attach, degrades to the ordinary
+/// resize-at-attach).
 ///
 /// `tab` and `lease` are PLAN_M4.md item 5's terminal-selector plumbing,
 /// and BOTH are additive by construction, not just by `Option`: a request

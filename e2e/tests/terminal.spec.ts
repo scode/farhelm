@@ -7452,6 +7452,65 @@ test("a tab whose shell exits is reaped: strip entry, island, and selection", as
   }
 });
 
+// The repro behind BUGS_BURNDOWN.md issue 4: close a tab, open a fresh
+// one, and the new island renders a single clean frame — no residue row
+// parked BELOW the cursor. The residue came from a torn replay snapshot
+// (content and cursor sampled from different frames while the
+// just-opened shell repainted for an attach-time resize), so the
+// assertion is shape-independent on purpose: whatever the host shell's
+// prompt looks like, its cursor ends on the last painted line, and
+// anything below that line is exactly the torn-snapshot artifact. The
+// fix behind it is the open path pre-sizing the tab window to the
+// agent's geometry, which makes the attach-time resize a no-op — a
+// snapshot-side consistency retry was tried and rejected because it
+// broke the cutover's losslessness (see tmux.rs's command-group comment).
+test("a tab opened after closing another starts with a clean island", async ({
+  page,
+  request,
+}) => {
+  test.setTimeout(180_000);
+  const title = `tab-clean-reopen-${Date.now()}`;
+  let id: string | undefined;
+  try {
+    const session = await openSessionWithTabs(page, request, title, 1);
+    id = session.id;
+    const [first] = session.tabs;
+    // Server-side close, like a remote client's x: the strip's own
+    // confirm flow is covered elsewhere, and the supervisor-side close is
+    // identical either way.
+    const closed = await request.delete(`/api/sessions/${id}/tabs/${first}`);
+    expect(closed.ok(), await closed.text()).toBe(true);
+    await expect(page.locator(`.tab-slot[data-tab-id="${first}"]`)).toHaveCount(0, {
+      timeout: 20_000,
+    });
+
+    const fresh = await addTab(page, 0);
+    await waitForIslandMounted(page, `terminal-${fresh}`);
+    await selectTerminal(page, fresh);
+    // Wait for the shell to have painted anything at all, then assert the
+    // cursor is the bottom of the painted content.
+    await expect
+      .poll(async () => (await islandText(page, `terminal-${fresh}`)).trim().length, {
+        timeout: 20_000,
+        message: "the fresh tab's shell never painted a prompt",
+      })
+      .toBeGreaterThan(0);
+    const below = await page.evaluate((el) => {
+      const island = (window as any).__farhelmIslands[el];
+      const buf = island.term.buffer.active;
+      const junk: string[] = [];
+      for (let row = buf.baseY + buf.cursorY + 1; row < buf.length; row++) {
+        const line = buf.getLine(row)?.translateToString(true).trimEnd();
+        if (line) junk.push(`${row}: ${line}`);
+      }
+      return junk;
+    }, `terminal-${fresh}`);
+    expect(below, "no content may sit below the cursor in a fresh tab").toEqual([]);
+  } finally {
+    if (id) await cleanupSession(request, id);
+  }
+});
+
 // The other half of that split: a tab whose WINDOW is gone renders the
 // session view's existing no-terminal explanation rather than a blank
 // pane. Reaching that state honestly is not possible from outside the

@@ -415,9 +415,9 @@ fn continue_pane_command(pane: &str) -> String {
     format!("refresh-client -A \"{pane}:continue\"")
 }
 
-/// The replay command group both the attach and the catch-up paths
-/// submit through their control client, differing only in `cutover` —
-/// the final command whose `%end` is the replay/live boundary.
+/// The one command group a replay cutover sends: pane modes, history
+/// snapshot, visible snapshot, then `cutover` as the final command whose
+/// `%end` is the replay/live boundary.
 ///
 /// Shared rather than duplicated because the four commands and their
 /// ORDER are the contract [`OutputStream::snapshot_then_cutover`] reads
@@ -431,6 +431,19 @@ fn replay_command_group(session: &str, pane: &str, cutover: &str) -> String {
     // here would let a pane id that went stale across a tmux-server
     // restart capture — and replay — a completely different session's
     // terminal into this one.
+    //
+    // The captures and the cutover travel as ONE command group on
+    // purpose, and the adjacency is a correctness property, not styling:
+    // output the pane emits between the visible capture and the cutover
+    // is delivered to nobody, so any command inserted between them — or
+    // any retry scheme that re-runs the captures before a separately
+    // written cutover — widens that loss window from effectively nothing
+    // into something the cutover tests catch losing real records through.
+    // (An issue-4 attempt at bracketing the captures with a second mode
+    // sample and retrying on mismatch failed exactly that way; the fresh-
+    // tab tear it chased is prevented at its source instead, by pre-sizing
+    // the tab window at open so the attach-time resize stops provoking a
+    // mid-capture repaint.)
     let target = format!("\"{}\"", pane_in_session(session, pane));
     format!(
         "display-message -p -t {target} '{PANE_MODE_FORMAT}' ; \
@@ -2193,6 +2206,37 @@ impl TmuxDriver {
     #[cfg(test)]
     pub(crate) async fn kill_pane_for_test(&self, pane: &str) -> anyhow::Result<()> {
         self.run(&["kill-pane", "-t", pane]).await.map(|_| ())
+    }
+
+    /// The current size of the window containing `pane`, or `None` when
+    /// tmux's answer cannot be parsed.
+    ///
+    /// Exists for the tab-open path: a `new-window` inherits the SESSION
+    /// default size, not the agent window's size, so a freshly opened tab
+    /// would be laid out at a geometry no client asked for and then take
+    /// a real resize (and a mid-capture shell repaint) at first attach.
+    /// Reading the agent window's size and applying it to the new tab
+    /// window before the open reply publishes it is what makes that
+    /// attach-time resize a no-op (BUGS_BURNDOWN.md issue 4).
+    pub async fn window_size(
+        &self,
+        session: &str,
+        pane: &str,
+    ) -> anyhow::Result<Option<(u16, u16)>> {
+        let out = self
+            .run(&[
+                "display-message",
+                "-p",
+                "-t",
+                &pane_in_session(session, pane),
+                "#{window_width} #{window_height}",
+            ])
+            .await?;
+        let mut fields = out.split_whitespace();
+        Ok(fields
+            .next()
+            .and_then(|w| w.parse::<u16>().ok())
+            .zip(fields.next().and_then(|h| h.parse::<u16>().ok())))
     }
 
     /// Resize the window containing `pane`. `cols`/`rows` are clamped to
@@ -7531,7 +7575,10 @@ mod tests {
     /// attach and catch-up paths depend on it being identical apart from
     /// the final cutover. Pinned against the complete string so a
     /// reordering — which would silently pair the modes reply with the
-    /// history capture — cannot pass.
+    /// history capture — cannot pass, and so nothing can be inserted
+    /// between the visible capture and the cutover: their adjacency is
+    /// what makes the cutover lossless (see the function's own comment
+    /// for the issue-4 attempt this refuses to readmit).
     #[test]
     fn replay_command_group_differs_only_in_its_cutover() {
         let attach = replay_command_group("fh-s", "%1", &attach_cutover_command(&[]));

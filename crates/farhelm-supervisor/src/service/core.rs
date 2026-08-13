@@ -8399,6 +8399,43 @@ impl Supervisor {
             pane,
         };
 
+        // Size the new window like the AGENT's before anything can attach
+        // to it (BUGS_BURNDOWN.md issue 4). `new-window` inherits the
+        // session default size — not the agent window's, since resize is
+        // per-window (PLAN_M4.md item 3) — so without this, a tab's first
+        // attach almost always carries a REAL resize, and the shell's
+        // SIGWINCH repaint can race the attach's snapshot capture: the
+        // captured content and the separately sampled cursor can disagree,
+        // and the leading explanation for issue 4's reported symptom (a
+        // stale duplicate of the prompt beside the live one; never
+        // reproduced under instrumentation, so the mechanism is inferred)
+        // is exactly that torn frame. The agent window's size is the best
+        // available stand-in for the island about to attach (same client,
+        // same pane area). Best effort on the size read and the resize
+        // alike: a failure of either only restores the old
+        // resize-at-attach behavior, so it is not worth failing the open.
+        match self.tmux.window_size(&agent.tmux_name, &agent.pane).await {
+            Ok(Some((cols, rows))) => {
+                if let Err(e) = self
+                    .tmux
+                    .resize_window(&terminal.tmux_name, &terminal.pane, cols, rows)
+                    .await
+                {
+                    debug!(
+                        session = %session_id, tab = %tab_id, error = %format!("{e:#}"),
+                        "could not pre-size the new tab window; the first attach will resize it"
+                    );
+                }
+            }
+            Ok(None) => {}
+            Err(e) => {
+                debug!(
+                    session = %session_id, tab = %tab_id, error = %format!("{e:#}"),
+                    "could not read the agent window's size; the first attach will resize the tab"
+                );
+            }
+        }
+
         // The seam stands in for the marking itself when installed: what
         // it exists to reach is the state AFTER this call fails — a live,
         // unmarked, unfindable window — which no other input can produce.

@@ -148,8 +148,11 @@ Test helpers for spawning/killing shells in tabs already exist in `crates/farhel
 
 ## 4. New tab shows leftover content from a previously closed tab
 
-Status: triaged, not started. Root cause not yet proven — leading hypothesis below plus a cheap disambiguation plan; run
-that first, then fix.
+Status: fixed in PR #155 (`pr/tab-presize`) — the at-source fix (tab window pre-sized to the agent window at open, so
+the attach-time resize stops provoking a mid-capture repaint), per the goal decision to fix without a confirmed repro.
+The snapshot-consistency fix direction below was ATTEMPTED AND REJECTED: bracketing the cursor samples and retrying
+required separating the captures from the cutover, and the cutover-losslessness tests caught it dropping real output —
+capture-to-cutover adjacency is a hard contract (see the command-group comment in tmux.rs).
 
 Symptom: after closing a tab (whose shell had exited) via x + confirm, opening a fresh tab with "+ terminal" renders TWO
 prompt lines. The cursor sits on the FIRST line; the second "→ /tmp" line below it is residue that should not exist.

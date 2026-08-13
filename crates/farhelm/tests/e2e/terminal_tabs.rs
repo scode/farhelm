@@ -2681,3 +2681,67 @@ async fn an_rc_file_change_between_two_tab_opens_reaches_the_second_tab() {
          at each launch, not resolved once per supervisor"
     );
 }
+
+/// A freshly opened tab's window is already the AGENT window's size when
+/// the open reply publishes it (BUGS_BURNDOWN.md issue 4).
+///
+/// `new-window` inherits the tmux SESSION default size, not the agent
+/// window's (resize is per-window), so without the open path's explicit
+/// pre-sizing a tab's first attach almost always carried a real resize —
+/// and the shell's SIGWINCH repaint raced the attach's snapshot capture,
+/// which is the residue-beside-the-prompt bug. The geometry divergence is
+/// manufactured the way real clients produce it: the session is CREATED
+/// at one size (which becomes the session default) and the agent is then
+/// ATTACHED at another (a per-window resize the session default never
+/// follows). Creating the session at the odd size instead would prove
+/// nothing — the tab would inherit it through the session default with no
+/// pre-sizing at all, which is exactly the vacuous first version of this
+/// test.
+#[tokio::test]
+async fn a_new_tab_window_is_presized_to_the_agent_windows_geometry() {
+    let h = harness().await;
+    let work = tempfile::tempdir().unwrap();
+    let session = h
+        .client
+        .create_session(
+            &work.path().to_string_lossy(),
+            &agent_cmd("internal fake-agent --script basic"),
+            None,
+            80,
+            24,
+        )
+        .await
+        .expect("create");
+    let _cleanup = MarkerCleanupGuard::new(session.id.clone());
+
+    // The client's attach is what moves the agent WINDOW off the session
+    // default; 123x37 is the tell — nothing defaults to it.
+    let (chan, mut rx) = h
+        .client
+        .attach_terminal(&session.id, 123, 37, TerminalSelector::Agent, "presize")
+        .await
+        .expect("attach the agent at the odd geometry");
+    let mut seen = Vec::new();
+    wait_for(&mut rx, &mut seen, "FAKE-AGENT READY", 20).await;
+
+    let tab = h.client.open_tab(&session.id).await.expect("open a tab");
+    let pane = tab_pane(&h, &session.id, &tab.id).await;
+    let out = tmux_query(
+        &h.state.path().join("tmux.sock"),
+        &[
+            "display-message",
+            "-p",
+            "-t",
+            &pane,
+            "#{window_width} #{window_height}",
+        ],
+    )
+    .await;
+    assert_eq!(
+        String::from_utf8_lossy(&out.stdout).trim(),
+        "123 37",
+        "the tab window must be published at the ATTACHED agent window's geometry, \
+         not the session default"
+    );
+    h.client.detach(chan).await;
+}
