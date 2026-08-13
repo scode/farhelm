@@ -3,7 +3,7 @@
 // three ways it can be wrong.
 //
 // A dedicated per-area file, per this milestone's own testing convention
-// (see titlebar.spec.ts's header for why new coverage starts its own spec
+// (see sidebar.spec.ts's header for why new coverage starts its own spec
 // rather than growing terminal.spec.ts). The helpers it shares with
 // filters.spec.ts and m6-5-debts.spec.ts live in helpers/fleet.ts — see that
 // file for why these three share a module while the older specs duplicate
@@ -549,23 +549,36 @@ test.describe("the invalidation feed", () => {
     await afterFallbackTick();
     await waitForLiveSocket();
     const handover = {
-      any: reads.count(),
       listing: reads.count("listing"),
       hosts: reads.count("hosts"),
     };
     handshake(feed, 2);
 
+    // Auto-select (BUGS_BURNDOWN.md issue 5) means a session view is
+    // mounted from page load, so even this "first" phase has TWO fallback
+    // loops with independent phases — the same straggler race the
+    // selected phase below always had. The claim splits the same way:
+    // recovery observed per surface, then a quiet window proving every
+    // fallback stood down.
+    await expect
+      .poll(() => reads.count("listing") - handover.listing, {
+        timeout: 10_000,
+        message: "the handshake owes one listing walk",
+      })
+      .toBeGreaterThanOrEqual(1);
+    await expect
+      .poll(() => reads.count("hosts") - handover.hosts, {
+        timeout: 10_000,
+        message: "and one host read",
+      })
+      .toBeGreaterThanOrEqual(1);
+    await page.waitForTimeout(2_000);
+    const settledFirst = reads.count();
     await page.waitForTimeout(9_000);
     expect(
-      reads.count("listing") - handover.listing,
-      "the handshake owes one listing walk; a second one is a fallback tick beside it",
-    ).toBe(1);
-    expect(reads.count("hosts") - handover.hosts, "and one host read").toBe(1);
-    expect(
-      reads.urls().slice(handover.any),
-      "and nothing else at all: a re-handshaked feed switches the fallback off rather than " +
-        "running it alongside",
-    ).toHaveLength(2);
+      reads.urls().slice(settledFirst),
+      "no fallback may keep polling once the feed is healthy again",
+    ).toHaveLength(0);
 
     // The same cycle with a SESSION SELECTED. Under the sidebar layout
     // (BUGS_BURNDOWN.md issue 5) selecting a session mounts the session
@@ -875,7 +888,7 @@ test.describe("the invalidation feed", () => {
     ).toBe(true);
     // The banner is the helm's own count, so it is the half the page could
     // not have produced by narrowing rows it already held.
-    await expect(page.locator(".banner")).toHaveText(/^1 matching of \d+ sessions$/);
+    await expect(page.locator(".session-count")).toHaveText(/^1 matching of \d+ sessions$/);
     // Still skewed, and still saying so: the read the user asked for is not a
     // reason to forget the mismatch.
     await expect(page.locator(".build-skew")).toBeVisible();
@@ -934,6 +947,15 @@ test.describe("the invalidation feed", () => {
     // sitting in the gate.
     await expect(page.locator(".build-skew")).toBeVisible({ timeout: 20_000 });
     expect(feed.connections(), "the asset is held, so nothing can have subscribed yet").toBe(0);
+    // Auto-select mounts a session at load, and its mount read is
+    // ATTENDED — permitted under skew exactly like the list's own — so it
+    // must finish landing before the counted quiet window opens (on a
+    // slow engine it otherwise trails into it and reads as unattended).
+    await expect(page.locator(".titlebar .title")).toBeVisible({ timeout: 20_000 });
+    await expect
+      .poll(() => reads.count("detail"), { timeout: 20_000 })
+      .toBeGreaterThanOrEqual(1);
+    await page.waitForTimeout(1_500);
     const before = reads.count();
 
     release();

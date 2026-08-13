@@ -20,7 +20,7 @@ host's profiles are defined; opening a stale session shows its metadata behind a
 instead of a terminal, and the create dialog picks which host a session is launched on. Reopening a session lands at the
 tail of its history instead of replaying it as a scroll animation — for any replay within the client's buffering bounds,
 which is every ordinary one; an unusually large replay, or one that stalls part-way, falls back to showing the catch-up
-as it arrives instead of hiding it. A session can be renamed from either the list or its own view. Sessions survive a
+as it arrives instead of hiding it. A session is renamed from its sidebar row's actions menu. Sessions survive a
 supervisor restart (persisted metadata, and a still-viewable terminal whenever the private tmux server survived too), a
 host reboot classifies previously-running sessions as interrupted rather than guessing, and a user-stopped session keeps
 its "stopped by user" qualifier durably. A terminal that loses its connection — a closed laptop, a network that went
@@ -138,7 +138,8 @@ Ubuntu 24.04 ships 3.4.
   rather than guessing. Sessions on a host that is not connected stay listed, dimmed and badged "stale"; their controls
   still work and the helm refuses them by naming the host's state rather than failing silently, and opening one shows
   its metadata behind a notice naming that state instead of a terminal. Click a row and its terminal fills the right
-  pane while the list stays put in the sidebar; a back control just clears that selection. Close the tab, reopen it
+  pane while the list stays put in the sidebar; there is no back control — you leave a session by selecting another, and
+  a freshly loaded client selects one by itself (the one you last had open, or the newest). Close the tab, reopen it
   later: same session, scrollback intact, the agent never noticed. Reopening shows a brief "connecting — catching up"
   line instead of the history flying past: the terminal appears once, already at the end of what you missed. A replay
   that outgrows the client's buffer, or that goes quiet part-way, degrades to showing the rest as it arrives — visible
@@ -177,14 +178,14 @@ Ubuntu 24.04 ships 3.4.
   it. The create API additionally accepts explicit agent-kind and resume-template overrides for invocations that
   basename recognition cannot classify (a wrapper script, `env claude`), which the form does not expose.
 - Each row also has rename, stop, archive and delete, all behind the small "⋯" actions menu beside the session's title —
-  the confirmations included, so the whole exchange stays in that one popup. Rename opens a field in the menu — the same
-  control the session view's header has — and what you type is sent exactly as typed; a title the supervisor refuses
-  (control characters in it) comes back with the supervisor's own words while the old name stays. Stop kills the agent
-  and its whole process tree; the session stays listed, its terminal still viewable. Archive is available in both the
-  row's menu and the session view; it confirms whenever the agent, a prior process tree, or terminal tabs may still be
-  destroyed, then removes the agent, tabs and terminal while retaining the session's metadata and attachments. Archived
-  rows are hidden by default and restart is the only unarchive path. Delete removes the session and its stored state —
-  with a confirmation in the menu first whenever the agent might still be alive.
+  the confirmations included, so the whole exchange stays in that one popup. Rename opens a field in the menu — the ONLY
+  rename surface — and what you type is sent exactly as typed; a title the supervisor refuses (control characters in it)
+  comes back with the supervisor's own words while the old name stays. Stop kills the agent and its whole process tree;
+  the session stays listed, its terminal still viewable. Archive is available in both the row's menu and the session
+  view; it confirms whenever the agent, a prior process tree, or terminal tabs may still be destroyed, then removes the
+  agent, tabs and terminal while retaining the session's metadata and attachments. Archived rows are hidden by default
+  and restart is the only unarchive path. Delete removes the session and its stored state — with a confirmation in the
+  menu first whenever the agent might still be alive.
 - Opening a session leads with what restarting it would do to the conversation, and the control says which: "resume
   conversation" when this session's own agent conversation was captured, "restart (fresh launch)" when it was not. A
   restart reuses the session's terminal when it still exists — the previous run stays above the new one in scrollback —
@@ -204,8 +205,9 @@ Ubuntu 24.04 ships 3.4.
   restart the session first — a session with no terminal does not grow a tab-only one. Both messages are the
   supervisor's own, shown under the strip.
 - Opening a second view of the same session takes over ALL of the first view's terminals at once, each saying so where
-  it was. The displaced view then stops attaching anything — including tabs the new owner opens while it watches — until
-  you press "take control" in its banner, which takes the session back the same visible way.
+  it was — and merely LAUNCHING another client can be that second view, since a fresh client attaches its remembered
+  session on its own. The displaced view then stops attaching anything — including tabs the new owner opens while it
+  watches — until you press "take control" in its banner, which takes the session back the same visible way.
 - Drop a file onto any of a session's terminals, or paste a screenshot into one, and it is transferred to the session's
   host and the resulting path typed in at the cursor — so the agent can read it without you copying anything by hand.
   Files keep their own names; a pasted screenshot gets a generated one (`pasted-1.png`). Several files at once insert

@@ -4,7 +4,7 @@
 // invalidation socket and the build stamp.
 //
 // A helper MODULE rather than another copy pasted per spec, unlike
-// titlebar.spec.ts's and mouse-modes.spec.ts's duplicated terminal helpers.
+// sidebar.spec.ts's and mouse-modes.spec.ts's duplicated terminal helpers.
 // The difference is what is being shared: those files each needed one
 // small, stable snippet, while the three feed/filter specs share a
 // non-obvious CONTRACT — what a stubbed feed does, what counts as a
@@ -25,7 +25,7 @@ import path from "node:path";
 /**
  * The fake agent's `basic` script, as the create form's `invocation` string
  * — an absolute path, quoted, exactly as terminal.spec.ts and
- * titlebar.spec.ts build theirs. The supervisor shell-splits it into argv
+ * sidebar.spec.ts build theirs. The supervisor shell-splits it into argv
  * when the session launches.
  *
  * `basic` is deliberate: it prints, echoes, and then goes quiet, which is
@@ -699,6 +699,35 @@ export async function forceBuildSkew(page: Page, stamp: string): Promise<void> {
     const headers = { ...response.headers(), "x-farhelm-build": stamp };
     await route.fulfill({ response, headers });
   });
+}
+
+/**
+ * Pin which session the page will auto-select on every load this page
+ * performs from here on (the init script re-runs per navigation).
+ *
+ * Auto-select (BUGS_BURNDOWN.md issue 5) opens the remembered session —
+ * localStorage `farhelm.last-selected`, a `{helm, id}` record keyed by the
+ * helm's local-host identity — falling back to the newest-created
+ * non-archived one. Tests that stage route holds or stubs around a
+ * SPECIFIC session's first reads must pin the selection AWAY from that
+ * session (usually to the shared e2e-session) before `goto`, or the
+ * auto-open races the staging exactly like a user clicking too early.
+ * The identity is fetched here so the record matches what the UI will
+ * verify; a mismatched or bare id would be ignored and the pin would
+ * silently not pin.
+ */
+export async function pinAutoSelect(page: Page, id: string): Promise<void> {
+  const hosts = (await (await page.request.get("/api/hosts")).json()) as {
+    hosts: { kind: string; identity?: string | null }[];
+  };
+  const helm = hosts.hosts.find((h) => h.kind === "local")?.identity;
+  if (!helm) throw new Error("pinAutoSelect: the local host row has no identity");
+  await page.addInitScript(
+    (record) => {
+      window.localStorage.setItem("farhelm.last-selected", record);
+    },
+    JSON.stringify({ helm, id }),
+  );
 }
 
 /**

@@ -47,7 +47,8 @@ use dioxus::prelude::*;
 
 use crate::api::{
     self, CreateAgent, SessionFilter, SessionListing, archive_session, create_session,
-    delete_session, fetch_hosts, fetch_sessions, mint_intent_key, rename_session, stop_session,
+    delete_session, fetch_hosts, fetch_session, fetch_sessions, mint_intent_key, rename_session,
+    stop_session,
 };
 use crate::archive::confirmation as archive_confirmation;
 use crate::feed::{fallback_polls_now, fallback_sleep, use_feed_reader};
@@ -127,6 +128,85 @@ fn row_control_visibility(archived: bool) -> RowControlVisibility {
         stop: !archived,
         archive: !archived,
         delete: true,
+    }
+}
+
+/// The client's remembered selection, for auto-select on load.
+///
+/// The interviewed decision (BUGS_BURNDOWN.md issue 5): an empty right
+/// pane auto-selects the client's own last-selected session, falling back
+/// to the newest-created non-archived one; a placeholder appears only for
+/// an empty fleet. Browser builds persist the pair in localStorage —
+/// origin-scoped, and additionally keyed by HELM IDENTITY (the local host
+/// row's install identity), per the recorded decision: two helms behind
+/// one origin (a state-dir swap, a restored backup) must not inherit each
+/// other's selection, where an id collision would silently auto-attach an
+/// unrelated session.
+///
+/// Only USER-initiated selections are remembered (row clicks, creation).
+/// The auto-select fallback deliberately never writes: a remembered row
+/// that happens to sit beyond a TRUNCATED listing's bound must survive
+/// that listing, not be overwritten by whichever row the fallback picked.
+///
+/// Desktop builds remember within the process only: the webview's
+/// localStorage is not synchronously reachable from native Rust, and an
+/// eval round trip for a best-effort nicety is not worth its failure
+/// modes. A fresh desktop launch therefore lands on the newest-created
+/// session — the decision's own fallback (SPEC.md says so in as many
+/// words; revisit if real desktop use wants more).
+#[derive(Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+struct RememberedSelection {
+    helm: String,
+    id: String,
+}
+
+#[cfg(target_arch = "wasm32")]
+fn stored_selection(helm: &str) -> Option<String> {
+    let raw = web_sys::window()?
+        .local_storage()
+        .ok()
+        .flatten()?
+        .get_item("farhelm.last-selected")
+        .ok()
+        .flatten()?;
+    let stored: RememberedSelection = serde_json::from_str(&raw).ok()?;
+    (stored.helm == helm).then_some(stored.id)
+}
+
+#[cfg(target_arch = "wasm32")]
+fn remember_selection(helm: &str, id: &str) {
+    if let Some(storage) = web_sys::window().and_then(|w| w.local_storage().ok().flatten()) {
+        let record = RememberedSelection {
+            helm: helm.to_string(),
+            id: id.to_string(),
+        };
+        if let Ok(raw) = serde_json::to_string(&record) {
+            // Best-effort: a full or disabled storage must never break
+            // selection itself.
+            let _ = storage.set_item("farhelm.last-selected", &raw);
+        }
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+static LAST_SELECTED: std::sync::OnceLock<std::sync::RwLock<Option<RememberedSelection>>> =
+    std::sync::OnceLock::new();
+
+#[cfg(not(target_arch = "wasm32"))]
+fn stored_selection(helm: &str) -> Option<String> {
+    let slot = LAST_SELECTED.get_or_init(Default::default).read().ok()?;
+    slot.as_ref()
+        .filter(|record| record.helm == helm)
+        .map(|record| record.id.clone())
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn remember_selection(helm: &str, id: &str) {
+    if let Ok(mut slot) = LAST_SELECTED.get_or_init(Default::default).write() {
+        *slot = Some(RememberedSelection {
+            helm: helm.to_string(),
+            id: id.to_string(),
+        });
     }
 }
 
@@ -548,9 +628,9 @@ pub(crate) fn ListView(
     open_host: Option<HostId>,
     /// The SHARED live-operation token (see `ops`'s module docs): owned by
     /// `AppBody` rather than created here, because the selected session's
-    /// view claims the same token for its own rename/restart/archive —
-    /// a private token per pane would let the two panes mutate the fleet
-    /// under each other.
+    /// view claims the same token for its own restart/archive — a private
+    /// token per pane would let the two panes mutate the fleet under each
+    /// other.
     ops: OpLock,
     /// Live count of this list's per-row operations, maintained here and
     /// read by the session view's `PaneGate`: row operations never hold
@@ -563,6 +643,28 @@ pub(crate) fn ListView(
     /// selection: without this, deleting the selected row would leave the
     /// right pane showing a session this client knows is gone.
     on_removed: EventHandler<String>,
+    /// A session this list successfully RENAMED, with the title the
+    /// supervisor confirmed. `AppBody` patches the selected session's
+    /// title in place (no remount): the view otherwise learns of renames
+    /// through the feed-driven detail re-read, and under a LATCHED build
+    /// mismatch that channel is withdrawn — leaving the sidebar showing
+    /// the new name and the titlebar the old one for the rest of the
+    /// page's life.
+    on_renamed: EventHandler<(String, String)>,
+    /// The currently selected session's id, or `None` when the right pane
+    /// is empty — which is the state auto-select exists to end (see
+    /// `stored_selection`): whenever a committed listing has rows and
+    /// nothing is selected, this list opens one. A signal rather than a
+    /// plain prop because `commit_listing` consults it at REPLY time (a
+    /// captured prop value would be as old as the render that made the
+    /// closure) and the auto-select effect tracks it.
+    selected: ReadSignal<Option<String>>,
+    /// The fleet's emptiness as the last committed listing proved it —
+    /// `None` until a listing lands. `AppBody` renders the right pane's
+    /// placeholder from this: "no active sessions" may only be claimed on
+    /// a committed empty result, never during loading or failure (the
+    /// sidebar's own status lines carry those).
+    fleet_empty: Signal<Option<bool>>,
 ) -> Element {
     let base = use_context::<ApiBase>().0;
     let mut row_ops = row_ops;
@@ -899,6 +1001,20 @@ pub(crate) fn ListView(
             if menu_vanished {
                 menu_open.set(None);
             }
+            // The right pane's placeholder may only claim "no active
+            // sessions" on a committed result that actually proves one:
+            // the DEFAULT view's own reply, complete and coherent, with no
+            // rows. Not `rows::is_empty_fleet` — that helper answers a
+            // different question (is the WHOLE fleet empty), and since the
+            // ordinary exclude-archived view is itself an active
+            // server-side predicate it would never say yes here. An
+            // archived-only fleet lists nothing in the default view, and
+            // "no ACTIVE sessions" is exactly right for it. A user filter
+            // proves nothing about the pane and leaves the verdict as it
+            // was.
+            if requested == SessionFilter::default() && !listing.truncated && !listing.incoherent {
+                fleet_empty.set(Some(listing.sessions.is_empty()));
+            }
         }
         // Everything below reads ABSENCE, so it needs a read with standing
         // AND a reply that covers the fleet — and a successful one, since an
@@ -939,6 +1055,22 @@ pub(crate) fn ListView(
                 .is_some_and(|id| !live_ids.contains(id.as_str()));
             if renaming_vanished {
                 renaming.set(None);
+            }
+            // The SELECTED session reconciles on the same evidence: a
+            // session deleted from another client must not keep a detail
+            // view (and an attachment) mounted for an object this client
+            // now knows is gone. Deliberately ONLY here — a filtered
+            // listing hides rows without unselecting them (a filter
+            // narrows the list, not the open session), and a truncated
+            // walk proves nothing about what it did not reach; the
+            // absence gate above is precisely "this reply speaks for the
+            // fleet".
+            let selected_vanished = selected
+                .peek()
+                .as_ref()
+                .is_some_and(|id| !live_ids.contains(id.as_str()));
+            if selected_vanished && let Some(id) = selected.peek().clone() {
+                on_removed.call(id);
             }
             retire_vanished_renames(&mut renamed.write(), &listing.sessions, index);
         }
@@ -1494,13 +1626,23 @@ pub(crate) fn ListView(
         spawn(async move {
             match archive_session(&base, &id).await {
                 Ok(_) => {
+                    // The row leaves the LOCAL listing before the selection
+                    // owner hears about the removal: the auto-select that
+                    // runs the moment the selection clears reads this very
+                    // listing, and the archived row still sitting in it —
+                    // as the remembered id, no less — would be immediately
+                    // re-selected, defeating the reconciliation.
+                    if !filter.peek().include_archived
+                        && let Some(Ok(current)) = listing.write().as_mut()
+                    {
+                        current.sessions.retain(|s| s.id != id);
+                    }
                     refresh(Trigger::Explicit);
                     // An archived session leaves the DEFAULT filter, so for
                     // the selection's owner it has been removed just as a
-                    // delete removes: without this, the right pane keeps
-                    // showing a session whose row the refresh is about to
-                    // drop. Under an include-archived filter the row stays
-                    // listed, so the selection legitimately stays too.
+                    // delete removes. Under an include-archived filter the
+                    // row stays listed, so the selection legitimately
+                    // stays too.
                     if !filter.peek().include_archived {
                         on_removed.call(id.clone());
                     }
@@ -1553,7 +1695,13 @@ pub(crate) fn ListView(
     // from the current title while an edit already in progress is never
     // overwritten by a poll (see `renaming`/`rename_draft`).
     let on_rename_start = move |(id, title): (String, String)| {
-        if pending.read().contains(&id)
+        // The shared token counts too: the disabled attribute on the menu's
+        // rename control is cosmetic (a dispatched synthetic click still
+        // reaches this handler), and opening the field while the other
+        // pane's operation owns the gate would present an editor whose
+        // submit is guaranteed to be refused.
+        if ops.busy_now()
+            || pending.read().contains(&id)
             || confirming.read().contains(&id)
             || confirming_archive.read().contains(&id)
         {
@@ -1590,6 +1738,7 @@ pub(crate) fn ListView(
         spawn(async move {
             match rename_session(&base, &id, &title).await {
                 Ok(session) => {
+                    on_renamed.call((id.clone(), session.title.clone()));
                     // The sequence number is read AFTER the reply, never
                     // before the request: it names the first poll
                     // GUARANTEED to have started after this response
@@ -1646,6 +1795,20 @@ pub(crate) fn ListView(
         if ops.busy_now() || !pending.peek().is_empty() {
             return;
         }
+        // A USER-initiated selection is what gets remembered — the
+        // auto-select fallback deliberately never writes (see
+        // `stored_selection`). Best-effort: no identity yet (hosts read
+        // still out) just means this click is not recorded.
+        if let Some(helm) = hosts
+            .peek()
+            .hosts()
+            .unwrap_or_default()
+            .iter()
+            .find(|host| host.kind == HostKind::Local)
+            .and_then(|host| host.identity.clone())
+        {
+            remember_selection(&helm, &session.id);
+        }
         on_open.call(session);
     };
 
@@ -1654,6 +1817,85 @@ pub(crate) fn ListView(
     // no hook depends on fleet size and unchanged rows remain memoized when
     // their parent refreshes.
     let guarded_open = use_callback(guarded_open);
+    // Auto-select (BUGS_BURNDOWN.md issue 5, interviewed): an empty right
+    // pane is a state to END, not to show — the remembered selection if
+    // its row is still listed, else the newest-created non-archived row
+    // (the merged listing is created_at DESCENDING, so that is the first
+    // match). Everything consulted is a TRACKED read, deliberately: the
+    // effect must rerun when the listing commits, when the selection
+    // clears, when the hosts read lands (the remembered id is keyed by
+    // helm identity, which comes from the local host row), and when the
+    // write gates drain — an auto-select refused during a busy operation
+    // would otherwise be lost until unrelated fleet activity.
+    //
+    // A remembered id ABSENT from a TRUNCATED listing is not evidence it
+    // is gone (the walk stopped early); it is resolved directly instead,
+    // and only a definite not-found retires it in favor of the fallback.
+    // The fallback itself deliberately does not re-persist: overwriting
+    // the user's real choice with whichever row a bounded walk happened
+    // to return first would erase it permanently (see `stored_selection`).
+    let resolve_base = base.clone();
+    let mut resolving_remembered = use_signal(|| false);
+    let mut remembered_dead = use_signal(|| None::<String>);
+    use_effect(move || {
+        if selected.read().is_some() {
+            return;
+        }
+        let page_busy = ops.busy();
+        let rows_busy = *row_ops.read() > 0;
+        let hosts_read = hosts.read();
+        let listing_read = listing.read();
+        let Some(Ok(listing_ok)) = listing_read.as_ref() else {
+            return;
+        };
+        let Some(helm) = hosts_read
+            .hosts()
+            .unwrap_or_default()
+            .iter()
+            .find(|host| host.kind == HostKind::Local)
+            .and_then(|host| host.identity.clone())
+        else {
+            return;
+        };
+        if page_busy || rows_busy {
+            return;
+        }
+        // A TRACKED read: retiring the remembered id (the 404 arm below)
+        // must rerun this effect so the fallback can proceed.
+        let remembered =
+            stored_selection(&helm).filter(|id| remembered_dead.read().as_ref() != Some(id));
+        let in_page = listing_ok
+            .sessions
+            .iter()
+            .find(|s| remembered.as_deref() == Some(s.id.as_str()));
+        if in_page.is_none()
+            && let Some(id) = remembered.clone()
+            && listing_ok.truncated
+        {
+            if !*resolving_remembered.peek() {
+                resolving_remembered.set(true);
+                let base = resolve_base.clone();
+                spawn(async move {
+                    match fetch_session(&base, &id).await {
+                        Ok(Some(session)) => on_open.call(session),
+                        // Definitely gone (or unreadable): the fallback may
+                        // proceed on the next effect run.
+                        _ => remembered_dead.set(Some(id)),
+                    }
+                    resolving_remembered.set(false);
+                });
+            }
+            return;
+        }
+        let candidate = in_page.or_else(|| listing_ok.sessions.iter().find(|s| !s.archived));
+        if let Some(session) = candidate {
+            // The same synchronous handler-time guard a click gets.
+            if ops.busy_now() || !pending.peek().is_empty() {
+                return;
+            }
+            on_open.call(session.clone());
+        }
+    });
     let toggle_menu = use_callback(move |id: String| {
         let currently = menu_open.peek().as_deref() == Some(id.as_str());
         menu_open.set(if currently { None } else { Some(id) });
@@ -2048,7 +2290,18 @@ pub(crate) fn ListView(
                 chosen_host,
                 catalog: create_catalog,
                 ops,
-                on_created: move |session| {
+                on_created: move |session: Session| {
+                    // Creation is a user-initiated selection too.
+                    if let Some(helm) = hosts
+                        .peek()
+                        .hosts()
+                        .unwrap_or_default()
+                        .iter()
+                        .find(|host| host.kind == HostKind::Local)
+                        .and_then(|host| host.identity.clone())
+                    {
+                        remember_selection(&helm, &session.id);
+                    }
                     show_create.set(false);
                     // The other close path. This component STAYS mounted
                     // under the sidebar layout, so without this clear the
@@ -3318,10 +3571,10 @@ fn SessionRow(
                 // archive swaps the panel's contents for the consequence
                 // line and confirm/cancel pair, keeping the whole exchange
                 // on one small surface instead of bouncing the user
-                // somewhere else. Rename lives here too — the ROW's only
-                // rename surface (the titlebar keeps its own for now; its
-                // consolidation into this menu is the redesign's still-
-                // pending step, per BUGS_BURNDOWN.md).
+                // somewhere else. Rename lives here too — the ONLY
+                // rename surface, by decision, which is what retires the
+                // old dual-optimistic-overlay disagreement with the
+                // titlebar (whose affordance the redesign removed).
                 // Deliberately NOT disabled under the nav lock: opening a
                 // panel mutates nothing — every action inside it carries
                 // its own disabled state — and locking the toggle would

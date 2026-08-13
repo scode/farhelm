@@ -3,7 +3,7 @@
 // never answered.
 //
 // A per-area file of its own, per this milestone's convention (see
-// titlebar.spec.ts's header). The area is the pair of mechanisms M6.75 grew
+// sidebar.spec.ts's header). The area is the pair of mechanisms M6.75 grew
 // underneath every surface once the periodic loops were removed —
 // `farhelm-ui/src/ops.rs`'s generation gates and staleness epochs, which
 // decide which of several completed reads counts, and
@@ -29,6 +29,7 @@ import {
   holdMutation,
   holdReads,
   listSessions,
+  pinAutoSelect,
   stubFeed, openRowMenu } from "./helpers/fleet";
 
 /** The row for one session id, as the list renders it. */
@@ -99,6 +100,10 @@ test.describe("read ordering and recovery", () => {
 
     const feed = await stubFeed(page);
     const reads = countReads(page);
+    // Auto-select must not open THIS session before the registry hold
+    // below is armed — pin it to the shared session instead.
+    const shared = await listSessions(request, "title=e2e-session");
+    await pinAutoSelect(page, shared.sessions[0].id);
     await page.goto("/");
     await feed.waitForConnection(1);
     feed.notify(1);

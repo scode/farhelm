@@ -92,10 +92,10 @@
 //!   web_bug_triage.md) — a pure three-state health machine plus one
 //!   desktop-only probe loop that turns a dead bridge (MT-5 class) into a
 //!   single loud log line instead of a silent brick.
-//! - `rename`: `RenameForm`, the one control both rename surfaces share
-//!   (PLAN_M5.md item 6) — a single-line field that sends what the user
-//!   typed verbatim, with the request, the optimistic paint, and the
-//!   refusal text left to whichever surface mounted it.
+//! - `rename`: `RenameForm`, the row menu's rename field (PLAN_M5.md item
+//!   6; the ONE rename surface since the sidebar redesign) — a single-line
+//!   field that sends what the user typed verbatim, with the request and
+//!   the refusal text left to the list, which mounts it.
 //! - `attachments`: the attachment domain of paste/drop interception
 //!   (PLAN_M4.md item 7) — the classification rule, the naming rule, the
 //!   upload endpoint, and the wording of every message a transfer can put
@@ -821,13 +821,20 @@ fn AppBody() -> Element {
     let mut current = use_signal(|| None::<Session>);
     // The cross-pane write gate lives HERE because both panes claim or
     // consult it (see ops.rs's module doc): the shared token covers the
-    // list's create/host mutations and the view's rename/restart/archive,
+    // list's create/host mutations and the view's restart/archive,
     // and `row_ops` is the list's live per-row-operation count the view's
     // `PaneGate` refuses claims against. Owning them above both panes is
     // what makes "neither pane writes under the other" a structural
     // property instead of a per-pane convention.
     let page_ops = ops::use_op_lock();
     let row_ops = use_signal(|| 0_u32);
+    // The selected id as a memo so `ListView` can consult it at reply
+    // time and track it in effects (a plain prop would be a stale copy).
+    let selected_id = use_memo(move || current.read().as_ref().map(|session| session.id.clone()));
+    // Whether the last committed listing proved an empty fleet — the ONLY
+    // state in which the right pane may claim there is nothing to select
+    // (see the placeholder below). Written by `ListView`'s commit path.
+    let fleet_empty = use_signal(|| None::<bool>);
     let build_skew = skew::build_skew_detected();
     let token_required = *auth::TOKEN_REQUIRED.read();
 
@@ -850,10 +857,10 @@ fn AppBody() -> Element {
         } else {
             // Beside it, and outside the match for a related reason: the
             // invalidation feed is the whole page's channel, and a subscription
-            // owned by either view below would be torn down and re-handshaked
-            // every time the user opened or closed a session — turning
-            // navigation into a window with no live updates and a fallback poll
-            // spinning back up to cover it. It renders nothing (PLAN_M6_75.md
+            // owned by the keyed view below would be torn down and
+            // re-handshaked on every selection switch — a window with no
+            // live updates and a fallback poll spinning back up to cover
+            // it, several times a working hour. It renders nothing (PLAN_M6_75.md
             // item 6); what it produces is the revision counter each page
             // re-reads on.
             feed::FleetFeed {}
@@ -875,8 +882,30 @@ fn AppBody() -> Element {
             div { class: "app-shell",
                 div { class: "app-sidebar",
                     ListView {
+                        // Selection memory lives in `ListView` (it knows
+                        // the helm identity the stored id is keyed by and
+                        // which selections were user-initiated); this
+                        // handler only owns the signal.
                         on_open: move |session: Session| current.set(Some(session)),
                         open_host: current.read().as_ref().and_then(|session| session.host),
+                        selected: selected_id,
+                        fleet_empty,
+                        // A confirmed rename patches the selected session's
+                        // TITLE in place — same id, same key, no remount —
+                        // so the titlebar can never sit on the old name
+                        // while the sidebar shows the new one (the feed
+                        // normally reconciles this, but a latched build
+                        // mismatch withdraws it).
+                        on_renamed: move |(id, title): (String, String)| {
+                            let mut current = current;
+                            let selected_matches =
+                                current.peek().as_ref().is_some_and(|session| session.id == id);
+                            if selected_matches
+                                && let Some(session) = current.write().as_mut()
+                            {
+                                session.title = title;
+                            }
+                        },
                         ops: page_ops,
                         row_ops,
                         // Selection reconciliation: a session the LIST
@@ -894,15 +923,28 @@ fn AppBody() -> Element {
                 div { class: "app-main",
                     match &*current.read() {
                         None => rsx! {
+                            // Three honest states, not one claim: an empty
+                            // fleet may only be ANNOUNCED once a committed
+                            // listing proved it (`fleet_empty`); before
+                            // that the pane says it is loading, and a
+                            // non-empty fleet with nothing selected shows
+                            // nothing at all — auto-select is about to end
+                            // that state (see `ListView`). "Active"
+                            // matters in the wording: an archived-only
+                            // fleet has sessions, but none the default
+                            // view lists or auto-select may take.
                             div { class: "main-empty",
-                                "select a session, or create one"
+                                match *fleet_empty.read() {
+                                    Some(true) => "no active sessions — create one",
+                                    Some(false) => "",
+                                    None => "loading sessions…",
+                                }
                             }
                         },
                         Some(session) => rsx! {
                             SessionView {
                                 key: "{session.id}",
                                 session: session.clone(),
-                                on_back: move |_| current.set(None),
                                 gate: ops::PaneGate::new(page_ops, row_ops),
                             }
                         },

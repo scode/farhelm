@@ -271,10 +271,14 @@ whatever the agent renders is what you see. There is no composer, no message abs
   a day later, and the buffer is still there. There is no separate history store — when a host reboots or a session is
   archived, terminal contents are gone, and recovering the conversation is the agent's job (resume). A stopped or exited
   session's terminal stays viewable while its host is up, since the terminal outlives the process.
-- Opening a session attaches to it. The attached client owns input and terminal dimensions: the PTY resizes to that
-  client, and the last size sticks when nothing is attached. Reconnecting replays the terminal so the session looks as
-  it would have had the client stayed attached, modulo redraws caused by dimension changes. The floor: the host-side
-  terminal retains, and replay covers, at least the current screen plus 10,000 lines of scrollback.
+- Opening a session attaches to it — and opening a CLIENT counts as opening a session: with a non-empty fleet, a freshly
+  loaded client selects and attaches the session the user most recently had selected there (falling back to the
+  newest-created non-archived one), so launching the app is itself the deliberate act the attach semantics below key
+  off. Opening a second client therefore takes the terminal over exactly as clicking the same session there would. The
+  attached client owns input and terminal dimensions: the PTY resizes to that client, and the last size sticks when
+  nothing is attached. Reconnecting replays the terminal so the session looks as it would have had the client stayed
+  attached, modulo redraws caused by dimension changes. The floor: the host-side terminal retains, and replay covers, at
+  least the current screen plus 10,000 lines of scrollback.
 - One attached client per session, enforced by the supervisor: attaching from a second client visibly detaches the
   first, which keeps a non-live snapshot and an explicit take-control action. No shared-input mirroring in v1.
 - A viewer that is slow is served slowly, for as long as it takes. Honoring that can briefly slow the agent's OUTPUT — a

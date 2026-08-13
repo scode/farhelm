@@ -161,7 +161,6 @@ test("the detail action leaves metadata without a terminal and restart restores 
     await expect(page.locator(".archive-offer .confirm-consequence")).toContainText("agent");
     await expect(page.locator(".restart-primary")).toBeDisabled();
     await expect(page.locator(".tab-add")).toBeDisabled();
-    await expect(page.locator(".session-rename")).toBeDisabled();
     await page.locator(".archive-confirm").click();
 
     const notice = page.locator(".archived-notice");
@@ -304,14 +303,33 @@ test("a pending detail archive blocks navigation and competing mutations", async
     await page.locator(".archive-confirm").click();
     await archiveRequest;
 
-    await expect(page.locator(".back-button")).toBeDisabled();
-    await expect(page.locator(".session-rename")).toBeDisabled();
+    // Navigation is the sidebar now (back button and titlebar rename are
+    // gone with the redesign): while the archive is pending, every row's
+    // open control is nav-locked, and a dispatched click on a DIFFERENT
+    // row — the shared session's, which is provably not the one this
+    // archive selected — must not swap the view away from the session
+    // whose archive owns the gate. (A click on the selected row's own
+    // button would be a no-op even with the guard deleted.)
+    const sharedOpen = page
+      .locator(".session-row")
+      .filter({ has: page.locator(".session-title", { hasText: /^e2e-session$/ }) })
+      .locator(".session-row-open");
+    await expect(sharedOpen).toBeDisabled();
     await expect(page.locator(".restart-primary")).toBeDisabled();
-    await page.locator(".back-button").dispatchEvent("click");
-    await page.locator(".session-rename").dispatchEvent("click");
+    await sharedOpen.dispatchEvent("click");
     await page.locator(".restart-primary").dispatchEvent("click");
+    // The competing RENAME is attempted for real, not merely asserted
+    // absent: the row menu opens (the toggle is deliberately not
+    // nav-locked) but its rename control is disabled and a dispatched
+    // click on it must produce neither a form nor a request while the
+    // archive holds the shared gate.
+    const ownRow = page.locator(`[data-session-id="${session.id}"]`);
+    await openRowMenu(ownRow);
+    await expect(ownRow.locator(".session-row-rename")).toBeDisabled();
+    await ownRow.locator(".session-row-rename").dispatchEvent("click");
     expect(competing).toEqual([]);
     await expect(page.locator(".rename-form")).toHaveCount(0);
+    await expect(page.locator(".titlebar .title")).toHaveText(session.title);
     await expect(page.locator("#terminal")).toBeVisible();
 
     releaseArchive();

@@ -49,7 +49,9 @@
 // the one the feed's own spec asserts against.
 import { test, expect, Page, APIRequestContext } from "@playwright/test";
 import {
+  createSession,
   openFilterBar,
+  pinAutoSelect,
   openHostsPanel,
   openRowMenu,
   stubFeed,
@@ -1057,12 +1059,28 @@ test("the create form prefills the working directory with ~", async ({ page }) =
 // in lib.rs — so the row wrapper no longer accepts focus at all.
 test("keyboard activation opens the session, matching a real click", async ({
   page,
+  request,
 }) => {
-  await page.goto("/");
-  await sharedSessionRow(page).locator(".session-row-open").focus();
-  await page.keyboard.press("Enter");
-  await page.waitForFunction(() => (window as any).__farhelmTermReady === true);
-  await expect(page.locator(".titlebar .title")).toHaveText("e2e-session");
+  // Pinned to a bounce session so the shared session is provably NOT the
+  // auto-selected one: without this, the page can auto-open e2e-session
+  // before the keypress and the assertions hold with keyboard activation
+  // broken entirely.
+  const bounce = await createSession(request, {
+    title: `kbd-bounce-${Date.now()}`,
+    cwd: "/tmp",
+    invocation: "sleep 300",
+  });
+  try {
+    await pinAutoSelect(page, bounce.id);
+    await page.goto("/");
+    await expect(page.locator(".titlebar .title")).toContainText("kbd-bounce-");
+    await sharedSessionRow(page).locator(".session-row-open").focus();
+    await page.keyboard.press("Enter");
+    await expect(page.locator(".titlebar .title")).toHaveText("e2e-session");
+    await page.waitForFunction(() => (window as any).__farhelmTermReady === true);
+  } finally {
+    await cleanupSession(request, bounce.id);
+  }
 });
 
 // Navigation lifecycle (PLAN_M2.md step 7): SessionView used to assume it
@@ -1076,11 +1094,17 @@ test("keyboard activation opens the session, matching a real click", async ({
 // socket would look identical to a correct fresh reattach. Stamping the
 // live xterm instance before leaving, and asserting a DIFFERENT instance
 // exists after reopening, is what closes that gap.
-test("back tears down the mounted terminal; reopening the same session mounts a fresh one", async ({
+test("switching sessions tears down the mounted terminal; reselecting mounts a fresh one", async ({
   page,
+  request,
 }) => {
+  const bounce = await createSession(request, {
+    title: `bounce-${Date.now()}`,
+    cwd: "/tmp",
+    invocation: "sleep 300",
+  });
+  try {
   await openTerminal(page);
-  await expect(page.locator(".back-button")).toBeVisible();
 
   await page.locator("#terminal").click();
   await page.keyboard.type("marker-before-back");
@@ -1098,24 +1122,25 @@ test("back tears down the mounted terminal; reopening the same session mounts a 
     (window as any).__testHookBeforeBack = (window as any).__farhelmTest;
   });
 
-  await page.locator(".back-button").click();
-
-  // The teardown itself must be observable, not just its later effects:
-  // every global terminal.js publishes on mount must be gone, __farhelmTest
-  // included (PLAN_M2_5.md step 4's per-mount hook — unmount() only
-  // deletes it if it still references THIS mount's own object, terminal.js's
-  // own docs, so seeing it gone here is also indirect coverage that guard
-  // took the branch it was supposed to)...
+  // There is no back: leaving means selecting another session, whose
+  // own mount immediately REPLACES the globals — so the teardown is
+  // observed through replacement (a different xterm instance owns the
+  // globals) plus the stashed socket's closure below, rather than
+  // through a gone-entirely window that no longer exists.
+  await page.locator(`[data-session-id="${bounce.id}"]`).click();
+  await expect(page.locator(".titlebar .title")).toContainText("bounce-");
   await expect
     .poll(() =>
-      page.evaluate(() => ({
-        ready: (window as any).__farhelmTermReady,
-        term: (window as any).__farhelmTerm,
-        ws: (window as any).__farhelmWs,
-        test: (window as any).__farhelmTest,
-      })),
+      page.evaluate(
+        // A DEFINED replacement, not merely the old instance gone:
+        // teardown deletes the global, and `undefined !== marker` would
+        // declare victory over a blank pane.
+        () =>
+          Boolean((window as any).__farhelmTerm) &&
+          (window as any).__farhelmTerm.__testMarker !== "before-back",
+      ),
     )
-    .toEqual({ ready: undefined, term: undefined, ws: undefined, test: undefined });
+    .toBe(true);
   // ...and the socket it owned must be genuinely closed (readyState 3 —
   // CLOSED; there is no browser `WebSocket` global in this Node-side
   // test context to reference `WebSocket.CLOSED` by name), not merely
@@ -1147,10 +1172,10 @@ test("back tears down the mounted terminal; reopening the same session mounts a 
   ).toEqual({ onopen: null, onmessage: null, onerror: null, onclose: null });
 
   await expect(page.locator(".session-list")).toBeVisible();
-  await expect(page.locator("#terminal")).toHaveCount(0);
 
   await sharedSessionRow(page).click();
   await page.waitForFunction(() => (window as any).__farhelmTermReady === true);
+  await waitForTermText(page, "FAKE-AGENT READY");
 
   const isFreshInstance = await page.evaluate(
     () => (window as any).__farhelmTerm.__testMarker !== "before-back",
@@ -1185,7 +1210,7 @@ test("back tears down the mounted terminal; reopening the same session mounts a 
 
   // Replay must bring back output produced before THIS attachment
   // existed, exactly like the reload test below — the only difference
-  // is that here the round trip goes through the list/back UI instead
+  // is that here the round trip goes through a session switch instead
   // of a full page reload.
   await waitForTermText(page, "echo:marker-before-back");
 
@@ -1195,6 +1220,9 @@ test("back tears down the mounted terminal; reopening the same session mounts a 
   await page.keyboard.type("marker-after-reopen");
   await page.keyboard.press("Enter");
   await waitForTermText(page, "echo:marker-after-reopen");
+  } finally {
+    await cleanupSession(request, bounce.id);
+  }
 });
 
 // Regression test for the "stale mount retry" bug: terminal.js's wait for
@@ -1240,7 +1268,7 @@ test("back tears down the mounted terminal; reopening the same session mounts a 
 // defense-in-depth; this test is only equipped to fail if ALL of a
 // regression's remaining protections vanish together, not to identify
 // which single one a future change removed.
-test("backing out before a terminal is ready, then opening a different session, mounts the right one", async ({
+test("switching sessions before the first terminal is ready mounts the second session's socket", async ({
   page,
   request,
 }) => {
@@ -1269,7 +1297,11 @@ test("backing out before a terminal is ready, then opening a different session, 
     // — exactly what `mountWhenReady`'s retry loop uses — come under our
     // control.
     await page.clock.install();
-    await page.clock.pauseAt(new Date());
+    // Paused at a strictly FUTURE instant: the fake clock keeps ticking
+    // in real time between install() and pauseAt(), so pausing at "now"
+    // races that tick and throws "Cannot fast-forward to the past" on a
+    // loaded box.
+    await page.clock.pauseAt(new Date(Date.now() + 5_000));
 
     // Withhold a global `mountWhenReady` genuinely cannot proceed
     // without, so opening session A puts a REAL pending retry into
@@ -1281,7 +1313,7 @@ test("backing out before a terminal is ready, then opening a different session, 
     });
 
     await sharedSessionRow(page).click();
-    await page.locator(".back-button").click();
+    // Direct switch — the keyed remount tears the shared view down.
     await page.locator(`[data-session-id="${idB}"]`).click();
 
     // Restore the withheld global, THEN advance the frozen clock: both
@@ -1311,9 +1343,21 @@ test("backing out before a terminal is ready, then opening a different session, 
 // naming is part of mount readiness, not an optional paste enhancement: an
 // island mounted before this helper exists would silently use no captured
 // policy at all for its first paste.
-test("terminal mounting waits for the clipboard naming helper", async ({ page }) => {
+test("terminal mounting waits for the clipboard naming helper", async ({ page, request }) => {
+  // Auto-select mounts a terminal at load, before this test can withhold
+  // the helper — so park the auto-selection on a bounce session, and make
+  // the withheld-helper mount a FRESH one (selecting the shared row tears
+  // the bounce island down, and the shared mount then has to wait).
+  const bounce = await createSession(request, {
+    title: `clipboard-bounce-${Date.now()}`,
+    cwd: "/tmp",
+    invocation: "sleep 300",
+  });
+  try {
+  await pinAutoSelect(page, bounce.id);
   await page.goto("/");
   await expect(sharedSessionRow(page)).toBeVisible();
+  await page.waitForFunction(() => Boolean((window as any).__farhelmIslands?.terminal));
   await page.evaluate(() => {
     (window as any).__testClipboardNames = (window as any).farhelmClipboardNames;
     delete (window as any).farhelmClipboardNames;
@@ -1331,6 +1375,9 @@ test("terminal mounting waits for the clipboard naming helper", async ({ page })
     delete (window as any).__testClipboardNames;
   });
   await page.waitForFunction(() => Boolean((window as any).__farhelmIslands?.terminal));
+  } finally {
+    await cleanupSession(request, bounce.id);
+  }
 });
 
 // Playwright-level coverage for the PARTIAL-MOUNT ROLLBACK finding:
@@ -1349,9 +1396,24 @@ test("terminal mounting waits for the clipboard naming helper", async ({ page })
 // a user facing.
 test("a failed mount rolls back cleanly; the same session can be mounted again", async ({
   page,
+  request,
 }) => {
+  // A parking spot: with auto-select there is no unselected state, so
+  // "reopen the same session" bounces through this row instead of a back
+  // control. Created before goto so the WebSocket sabotage below cannot
+  // race its own mount in any way that matters — a failed bounce mount
+  // still moves the selection, which is all the bounce is for.
+  const bounce = await createSession(request, {
+    title: `rollback-bounce-${Date.now()}`,
+    cwd: "/tmp",
+    invocation: "sleep 300",
+  });
+  try {
   await page.goto("/");
   await expect(sharedSessionRow(page)).toBeVisible();
+  // Park on the bounce row so the LATER click on the shared row is a real
+  // selection change (auto-select may have already picked either row).
+  await page.locator(`[data-session-id="${bounce.id}"]`).click();
 
   await page.evaluate(() => {
     (window as any).__testRealWebSocket = window.WebSocket;
@@ -1379,14 +1441,27 @@ test("a failed mount rolls back cleanly; the same session can be mounted again",
     delete (window as any).__testRealWebSocket;
   });
 
-  // Reopening the SAME session (back to the list, then the same row)
+  // Reopening the SAME session (bounce to another row, then back to it)
   // must succeed now that the guard was rolled back — a regression that
   // left `active` (or the old `__farhelmMounted` flag) stuck would make
   // this mount silently no-op instead.
-  await page.locator(".back-button").click();
+  await page.locator(`[data-session-id="${bounce.id}"]`).click();
   await sharedSessionRow(page).click();
   await page.waitForFunction(() => (window as any).__farhelmTermReady === true);
   await waitForTermText(page, "FAKE-AGENT READY");
+  } finally {
+    // The sabotage must not outlive the test even on failure — a broken
+    // global WebSocket would cascade into every later mount.
+    await page
+      .evaluate(() => {
+        if ((window as any).__testRealWebSocket) {
+          (window as any).WebSocket = (window as any).__testRealWebSocket;
+          delete (window as any).__testRealWebSocket;
+        }
+      })
+      .catch(() => {});
+    await cleanupSession(request, bounce.id);
+  }
 });
 
 // Real keystrokes through the whole chain: xterm's onData, the WebSocket,
@@ -2039,12 +2114,11 @@ test("multi-session flow: create two, open and type in one, stop and delete the 
     await expect(page.locator(".titlebar .title")).toHaveText(titleA);
 
     // Type into session A while it is open, per the flow's "open one,
-    // type" step, then go back to the list to create session B.
+    // type" step, then use the permanent sidebar to create session B.
     await page.locator("#terminal").click();
     await page.keyboard.type("marker-multi-a");
     await page.keyboard.press("Enter");
     await waitForTermText(page, "echo:marker-multi-a");
-    await page.locator(".back-button").click();
 
     const formB = await fillCreateForm(page, {
       cwd: "/tmp",
@@ -2055,9 +2129,8 @@ test("multi-session flow: create two, open and type in one, stop and delete the 
     await page.waitForFunction(() => (window as any).__farhelmTermReady === true);
     await waitForTermText(page, "FAKE-AGENT READY");
     await expect(page.locator(".titlebar .title")).toHaveText(titleB);
-    await page.locator(".back-button").click();
 
-    // Both rows are back in the list, alive.
+    // Both rows are visible in the permanent sidebar, alive.
     await expect(rowByTitle(page, titleA).locator(".status-badge")).toHaveText(
       "running",
       { timeout: 10_000 },
@@ -2342,7 +2415,6 @@ test("alive delete opens an inline confirming state with the is-still-running wo
     });
     await form.locator('button[type="submit"]').click();
     await page.waitForFunction(() => (window as any).__farhelmTermReady === true);
-    await page.locator(".back-button").click();
 
     const row = rowByTitle(page, title);
     await expect(row.locator(".status-badge")).toHaveText(LIVE_BADGE, {
@@ -2423,7 +2495,6 @@ test("confirming an inline delete prompt deletes the session with exactly one DE
     });
     await form.locator('button[type="submit"]').click();
     await page.waitForFunction(() => (window as any).__farhelmTermReady === true);
-    await page.locator(".back-button").click();
 
     const row = rowByTitle(page, title);
     await expect(row.locator(".status-badge")).toHaveText(LIVE_BADGE, {
@@ -3268,9 +3339,11 @@ test("submitting the create form twice while one create is in flight produces ex
         ?.requestSubmit();
     });
 
-    await page.waitForFunction(() => (window as any).__farhelmTermReady === true, {
-      timeout: 15_000,
-    });
+    // Auto-select means __farhelmTermReady is ALREADY true (the page
+    // attached a session at load), so it cannot gate on the create any
+    // more; the created session's own title taking the pane is what
+    // proves the POST completed and creation selected it.
+    await expect(page.locator(".titlebar .title")).toHaveText(title, { timeout: 15_000 });
     expect(postCount).toBe(1);
 
     const listing = await (await request.get("/api/sessions")).json();
@@ -3808,7 +3881,9 @@ test("a blank title creates a session titled after the working directory's basen
       title: "",
     });
     await form.locator('button[type="submit"]').click();
-    await page.waitForFunction(() => (window as any).__farhelmTermReady === true);
+    // The created session's derived title taking the pane is the create's
+    // completion signal (termReady is already true under auto-select).
+    await expect(page.locator(".titlebar .title")).toHaveText("tmp", { timeout: 15_000 });
 
     // `== null` deliberately covers BOTH an omitted key (`undefined`
     // after JSON parsing) and an explicit `null` value — `create_session`
@@ -4486,12 +4561,15 @@ test("a client that stops draining is detached with the stall reason after the f
 
     // Reattach the same way the navigation-lifecycle test above
     // ("back tears down the mounted terminal; reopening the same session
-    // mounts a fresh one") does: back to the list, then the same row. The
+    // mounts a fresh one") does: bounce to another session, then back. The
     // session survived the detach (SPEC.md: no viewer can affect a
     // session it stalls out of), so replay brings back its own tail —
     // already complete in tmux history well before the stall elapsed, so
     // no second gate byte is needed.
-    await page.locator(".back-button").click();
+    // A real unmount/remount: bounce through the shared session (there
+    // is no back), then reselect.
+    await sharedSessionRow(page).click();
+    await expect(page.locator(".titlebar .title")).toHaveText("e2e-session");
     await row.click();
     await page.waitForFunction(() => (window as any).__farhelmTermReady === true);
     await waitForTermText(page, "FLOOD-DONE", 15_000);
@@ -4610,19 +4688,17 @@ test("reconnecting within the same page resets flow-control state; the new attac
       return { cols: term.cols as number, rows: term.rows as number };
     });
 
-    await page.locator(".back-button").click();
-    // The old attachment's hook must be gone entirely — the same
-    // assertion the navigation-lifecycle test above pins for
-    // `__farhelmTerm`/`__farhelmWs`, extended here to `__farhelmTest`:
-    // `unmount()` only deletes the global if it still references THIS
-    // mount's own object (terminal.js's own docs), so seeing it gone is
-    // also indirect coverage that the delete actually took that branch.
-    await expect
-      .poll(() => page.evaluate(() => (window as any).__farhelmTest))
-      .toBeUndefined();
+    // Leaving means selecting another session now: bounce to the shared
+    // row, which detaches the flood session (the delete-own-object
+    // teardown property itself is pinned by the switching-sessions
+    // lifecycle test above; here only the DETACH matters).
+    await sharedSessionRow(page).click();
+    await expect(page.locator(".titlebar .title")).toHaveText("e2e-session");
+    await page.waitForFunction(() => (window as any).__farhelmTermReady === true);
 
-    // Nothing is attached at this point, so the flood can finish without
-    // any of it landing on the attachment this test is about to measure.
+    // The flood session has no attachment now — the page holds the shared
+    // session's — so the flood can finish without any of it landing on
+    // the attachment this test is about to measure.
     await drainFloodOffScreen(page, id, geometry);
 
     await row.click();
@@ -5263,8 +5339,11 @@ test("an interrupted session's view leads with the resume offer, and declining c
   await expect(page.locator(".restart-confirm")).toHaveCount(0);
   expect(restartRequests).toBe(0);
 
-  // Declining: leave. Nothing was sent, and the row is still interrupted.
-  await page.locator(".back-button").click();
+  // Declining means LEAVING — selecting another session — and the leave
+  // itself must not send anything: a regression that fired the restart on
+  // navigate-away would pass a stay-put assertion.
+  await sharedSessionRow(page).click();
+  await expect(page.locator(".titlebar .title")).toHaveText("e2e-session");
   const row = rowByTitle(page, title);
   await expect(row.locator(".status-badge")).toHaveText("interrupted");
   expect(restartRequests).toBe(0);
@@ -5607,14 +5686,15 @@ test("a restarted session's banner clears once the new attachment is live", asyn
 }) => {
   const title = `restart-banner-clears-${Date.now()}`;
   try {
+    // Armed ON DEMAND rather than at DOMContentLoaded: auto-select mounts
+    // a different session's view (and #term-banner) at load, and an
+    // observer armed on THAT element would record the wrong terminal's
+    // banner while the created session's went unobserved.
     await page.addInitScript(() => {
       (window as any).__bannerLog = [];
-      const arm = () => {
+      (window as any).__armBannerLog = () => {
         const el = document.getElementById("term-banner");
-        if (!el) {
-          setTimeout(arm, 50);
-          return;
-        }
+        if (!el) throw new Error("no term-banner to observe");
         new MutationObserver(() => {
           (window as any).__bannerLog.push({
             shown: el.style.display === "block",
@@ -5628,7 +5708,6 @@ test("a restarted session's banner clears once the new attachment is live", asyn
           subtree: true,
         });
       };
-      document.addEventListener("DOMContentLoaded", arm);
     });
     await page.goto("/");
     const form = await fillCreateForm(page, {
@@ -5637,8 +5716,10 @@ test("a restarted session's banner clears once the new attachment is live", asyn
       title,
     });
     await form.locator('button[type="submit"]').click();
+    await expect(page.locator(".titlebar .title")).toHaveText(title, { timeout: 15_000 });
     await page.waitForFunction(() => (window as any).__farhelmTermReady === true);
     await waitForTermText(page, "FAKE-AGENT READY");
+    await page.evaluate(() => (window as any).__armBannerLog());
 
     const restartButton = page.locator(".restart-primary");
     await expect(restartButton).toHaveAttribute("data-confirms", "true", {
@@ -6666,10 +6747,17 @@ test("leaving a session with tabs tears down every island and reopening builds n
       ["terminal", `terminal-${session.tabs[0]}`, `terminal-${session.tabs[1]}`].sort(),
     );
 
-    await page.locator(".back-button").click();
-    await expect(page.locator(".session-list")).toBeVisible();
+    // Leaving = selecting another session; the shared view mounts its own
+    // single agent island, so "every island of THIS session is gone" is
+    // the tab islands' absence plus all three stashed sockets closing —
+    // the stash is what keeps the assertion about the departed session
+    // rather than about whatever mounted next.
+    await sharedSessionRow(page).click();
+    await expect(page.locator(".titlebar .title")).toHaveText("e2e-session");
 
-    expect(await mountedIslands(page)).toEqual([]);
+    const after = await mountedIslands(page);
+    expect(after).not.toContain(`terminal-${session.tabs[0]}`);
+    expect(after).not.toContain(`terminal-${session.tabs[1]}`);
     await expect
       .poll(() =>
         page.evaluate(() => (window as any).__sockets.map((ws: WebSocket) => ws.readyState))
@@ -8489,6 +8577,10 @@ test("pasted text that looks like a path arrives as text, with nothing uploaded"
     await dispatchPayload(page, "terminal", "paste", { text: "/etc/hosts" });
 
     await waitForIslandMatch(page, "terminal", /\/etc\/hosts/);
+    // Focus the terminal before Enter: the auto-selected load leaves the
+    // caret wherever the last click landed, and a synthetic paste dispatch
+    // does not move it.
+    await page.locator("#terminal").click();
     await page.keyboard.press("Enter");
     await waitForIslandLogicalText(page, "terminal", "echo:/etc/hosts");
     expect(uploads.count(), "text is not an attachment").toBe(0);
@@ -9390,8 +9482,8 @@ test("leaving mid-upload and reopening leaves exactly one set of hooks", async (
     });
     await expect(page.locator('[data-terminal="agent"] .attach-busy')).toBeVisible();
 
-    await page.locator(".back-button").click();
-    await expect(page.locator(".session-row").first()).toBeVisible();
+    await sharedSessionRow(page).click();
+    await expect(page.locator(".titlebar .title")).toHaveText("e2e-session");
     await page.locator(`[data-session-id="${id}"]`).click();
     await page.waitForFunction(() => (window as any).__farhelmTermReady === true);
     await waitForTermText(page, "FAKE-AGENT READY");
@@ -9486,8 +9578,10 @@ test("a completed upload keeps focus where it was and inserts through bracketed 
     // `latchBracketedPaste`), and the markers below would be missing for a
     // reason that has nothing to do with the insertion path.
     await latchBracketedPaste(page, "terminal");
-    // Focus deliberately parked outside the terminal before the drop.
-    await page.locator(".back-button").focus();
+    // Focus deliberately parked outside the terminal before the drop —
+    // the sidebar's hosts toggle, the stable non-terminal control now
+    // that the back button is gone.
+    await page.locator(".hosts-toggle").focus();
     await dispatchPayload(page, "terminal", "drop", {
       entries: [{ name: `focus-${stamp}.txt`, mime: "text/plain", content: "x" }],
     });
@@ -9500,7 +9594,7 @@ test("a completed upload keeps focus where it was and inserts through bracketed 
     expect(
       await page.evaluate(() => document.activeElement?.className ?? ""),
       "an upload completing must not move the caret",
-    ).toContain("back-button");
+    ).toContain("hosts-toggle");
     // `^[[200~` is the pty echoing the bracketed-paste start marker back
     // in caret notation; it is only there if the insertion went through
     // the paste path rather than being written straight at the socket.
@@ -10527,64 +10621,6 @@ test("rename-from-list: the row takes the new title and keeps it across re-reads
   }
 });
 
-// The second surface SPEC.md names. The session view's header is both
-// where the title is shown and where it is edited, and the rename reply is
-// the session's freshly recomputed state — so the view has to keep working
-// (tab strip, restart offer, live terminal) around a header that just
-// changed under it.
-//
-// The re-reads are this test's to trigger, through a stubbed feed, for the
-// reason its list-side sibling above gives.
-test("rename-from-session-view: the header takes the new title and keeps it across re-reads", async ({
-  page,
-  request,
-}) => {
-  test.setTimeout(120_000);
-  const title = `rename-view-${Date.now()}`;
-  const renamed = `${title}-renamed`;
-  let id: string | undefined;
-  const feed = await stubFeed(page);
-  let revision = 1;
-  try {
-    const session = await createTabSession(request, title);
-    id = session.id;
-
-    await page.goto("/");
-    await feed.waitForConnection(1);
-    feed.notify(revision);
-    await page.locator(`[data-session-id="${id}"]`).click();
-    await page.waitForFunction(() => (window as any).__farhelmTermReady === true);
-    await waitForTermText(page, "FAKE-AGENT READY");
-
-    await page.locator(".session-rename").click();
-    await expect(page.locator(".titlebar .rename-input")).toHaveValue(title);
-    await page.locator(".titlebar .rename-input").fill(renamed);
-    // Enter submits, which is the whole reason the single-line field
-    // handles that key itself (a textarea does not submit its form).
-    await page.keyboard.press("Enter");
-
-    await expect(page.locator(".titlebar .title")).toHaveText(renamed);
-    await expect(page.locator(".rename-error")).toHaveCount(0);
-    await expect(page.locator(".rename-form")).toHaveCount(0);
-
-    const fetched = await (await request.get(`/api/sessions/${id}`)).json();
-    expect(fetched.title).toBe(renamed);
-
-    // A detail re-read is what would revert an unprotected optimistic
-    // paint; two of them must leave the header alone.
-    await afterTwoReads(page, new RegExp(`/api/sessions/${id}$`), () => feed.notify(++revision));
-    await expect(page.locator(".titlebar .title")).toHaveText(renamed);
-
-    // The terminal underneath is untouched by the rename — nothing about
-    // an attachment changes when a label does.
-    await page.locator("#terminal").click();
-    await page.keyboard.type("still-live");
-    await page.keyboard.press("Enter");
-    await waitForTermText(page, "echo:still-live");
-  } finally {
-    if (id) await cleanupSession(request, id);
-  }
-});
 
 // SPEC.md names control characters as THE refusal for a supplied title,
 // and PLAN_M5.md item 6 makes the supervisor's own message the contract:
@@ -10679,8 +10715,9 @@ test("rename-refused-pasted-newline: a multi-line title reaches the supervisor i
     await page.waitForFunction(() => (window as any).__farhelmTermReady === true);
     await waitForTermText(page, "FAKE-AGENT READY");
 
-    await page.locator(".session-rename").click();
-    const field = page.locator(".titlebar .rename-input");
+    await openRowMenu(page.locator(`[data-session-id="${id}"]`));
+    await page.locator(".session-row-rename").click();
+    const field = page.locator(".session-row-menu-panel .rename-input");
     await field.click();
     await page.keyboard.press("Control+A");
     await page.keyboard.insertText(pasted);
@@ -10690,10 +10727,11 @@ test("rename-refused-pasted-newline: a multi-line title reaches the supervisor i
 
     await page.locator(".rename-submit").click();
 
-    // The supervisor's own refusal, for the newline it actually received.
-    await expect(page.locator(".rename-error")).toContainText("control characters", {
-      timeout: 15_000,
-    });
+    // The supervisor's own refusal, for the newline it actually received —
+    // rendered in the row's action-error line, which the open panel hosts.
+    await expect(
+      page.locator(`[data-session-id="${id}"] .action-error`),
+    ).toContainText("control characters", { timeout: 15_000 });
     // The header still shows the real title while the refusal stands.
     await expect(page.locator(".titlebar .title")).toHaveText(title);
     await expect(field).toHaveValue(pasted);
@@ -10916,10 +10954,10 @@ test("replay-stale-mount: a torn-down island's deferred ending cannot touch its 
       (window as any).__staleIsland = (window as any).__farhelmIslands["terminal"].test;
     });
 
-    // Back to the list and in again: a full unmount, then a fresh mount
+    // Bounce to the shared session and back: a full unmount, then a fresh mount
     // into the same element, whose own catch-up is held too.
-    await page.locator(".back-button").click();
-    await expect(page.locator("#terminal")).toHaveCount(0);
+    await sharedSessionRow(page).click();
+    await expect(page.locator(".titlebar .title")).toHaveText("e2e-session");
     await row.click();
     await page.waitForFunction(() => (window as any).__farhelmTermReady === true);
     await waitForHeldCatchUp(page, "terminal");
@@ -11027,98 +11065,6 @@ test("rename-draft-survives-a-failed-read: the field keeps what was typed", asyn
   }
 });
 
-// A rename reply is a SNAPSHOT from when the supervisor handled it, and a
-// slow one can land after a fresher poll. Committing the whole reply would
-// then roll the session's dynamic fields backwards — a status change or a
-// tab that appeared in between would disappear again until the next tick,
-// with a rename as the visible cause.
-//
-// So the reply's title is taken and nothing else. Staged by holding the
-// rename RESPONSE (fetched immediately, delivered late) while a detail
-// poll lands a status and a tab list the reply cannot know about; both
-// must still be on screen after the rename applies.
-test("rename-stale-response: a late rename reply updates the title without reverting anything else", async ({
-  page,
-  request,
-}) => {
-  test.setTimeout(120_000);
-  const title = `rename-stale-${Date.now()}`;
-  const renamed = `${title}-renamed`;
-  const phantomTab = "stale-probe-tab";
-  let id: string | undefined;
-  let releaseRename: (() => void) | undefined;
-  const renameHeld = new Promise<void>((resolve) => {
-    releaseRename = resolve;
-  });
-
-  try {
-    const session = await createTabSession(request, title);
-    id = session.id;
-
-    // The detail poll answers with the REAL session (so its title stays
-    // authoritative — this test is not about the title's own correction)
-    // carrying two things the rename reply cannot: an ended status and a
-    // tab. Both are what a reverted snapshot would take away.
-    await page.route(`**/api/sessions/${id}`, async (route) => {
-      if (route.request().method() !== "GET") {
-        await route.continue();
-        return;
-      }
-      const response = await route.fetch();
-      const body = await response.json();
-      body.status = { state: "exited", exit_code: 0 };
-      body.tabs = [{ id: phantomTab }];
-      await fulfillAsHelm(route, { json: body });
-    });
-    // The rename request goes out at once; its response is held until this
-    // test lets it through, which is what makes it stale rather than
-    // merely slow.
-    await page.route(`**/api/sessions/${id}/rename`, async (route) => {
-      const response = await route.fetch();
-      await renameHeld;
-      await route.fulfill({ response });
-    });
-
-    await page.goto("/");
-    await page.locator(`[data-session-id="${id}"]`).click();
-    await page.waitForFunction(() => (window as any).__farhelmTermReady === true);
-    await waitForTermText(page, "FAKE-AGENT READY");
-
-    await page.locator(".session-rename").click();
-    await page.locator(".titlebar .rename-input").fill(renamed);
-    await page.locator(".rename-submit").click();
-
-    // The fresher view of the session, from the poll the rename reply is
-    // now older than.
-    await expect(page.locator(".tab-slot")).toHaveCount(1, { timeout: 15_000 });
-    await expect(page.locator(".tab-slot")).toHaveAttribute("data-tab-id", phantomTab);
-    await expect(page.locator(".restart-primary")).toHaveAttribute(
-      "data-confirms",
-      "false",
-    );
-
-    releaseRename!();
-
-    // The rename lands: its title applies...
-    await expect(page.locator(".titlebar .title")).toHaveText(renamed, {
-      timeout: 15_000,
-    });
-    // ...and nothing else does. A committed snapshot would have dropped
-    // the tab (the reply carries none) and put the session back to alive.
-    await expect(page.locator(".tab-slot")).toHaveCount(1);
-    await expect(page.locator(".restart-primary")).toHaveAttribute(
-      "data-confirms",
-      "false",
-    );
-  } finally {
-    releaseRename?.();
-    if (id) {
-      await page.unroute(`**/api/sessions/${id}/rename`);
-      await page.unroute(`**/api/sessions/${id}`);
-      await cleanupSession(request, id);
-    }
-  }
-});
 
 // The reveal happens when the replay lands, which is a moment the user did
 // not choose — and by then they may be typing somewhere else. The rename
@@ -11148,10 +11094,12 @@ test("reveal-does-not-steal-focus: a rename field being typed into keeps focus a
     await page.waitForFunction(() => (window as any).__farhelmTermReady === true);
     await waitForHeldCatchUp(page, "terminal");
 
-    // The user turns to the header while the terminal is still catching
-    // up, and types a new title into the field.
-    await page.locator(".session-rename").click();
-    const field = page.locator(".titlebar .rename-input");
+    // The user turns to the row menu's rename field (the one rename
+    // surface) while the terminal is still catching up, and types a new
+    // title — the reveal must not steal the caret out from under them.
+    await openRowMenu(page.locator(`[data-session-id="${id}"]`));
+    await page.locator(".session-row-rename").click();
+    const field = page.locator(".session-row-menu-panel .rename-input");
     await expect(field).toBeFocused();
     await field.fill("");
     await page.keyboard.type(typed);
@@ -11810,18 +11758,27 @@ test("leaving-a-session-cancels-a-pending-reconnect", async ({ page, request }) 
     await page.evaluate(() => (window as any).__farhelmIslands["terminal"].ws.close());
     await expect(page.locator(".terminal-reconnect-now")).toBeVisible();
 
-    await page.locator(".back-button").click();
-      await expect(page.locator(`[data-session-id="${ownId}"]`)).toBeVisible();
+    // Leaving = selecting the shared session; its own island now owns the
+    // singleton slot, so the zombie this pins would show up as the
+    // `terminal` island's socket pointing back at the DEPARTED session —
+    // a stale timer remounting under a lease nothing on screen is using.
+    await sharedSessionRow(page).click();
+    await expect(page.locator(".titlebar .title")).toHaveText("e2e-session");
+    await page.waitForFunction(() => (window as any).__farhelmTermReady === true);
     // Past the pending rung, with room to spare.
     await page.waitForTimeout(2_500);
+    const islands = await page.evaluate(() => {
+      const map = (window as any).__farhelmIslands ?? {};
+      return Object.keys(map).map((key) => ({ key, url: map[key].ws?.url ?? "" }));
+    });
     expect(
-      await page.evaluate(() => Object.keys((window as any).__farhelmIslands ?? {})),
-      "a recovery whose view went away must leave nothing mounted and nothing attached",
-    ).toEqual([]);
+      islands.map((island) => island.key),
+      "only the shared session's own island may be mounted",
+    ).toEqual(["terminal"]);
     expect(
-      await page.evaluate(() => (window as any).__farhelmTermReady ?? false),
-      "and no island republished the singleton globals from a timer",
-    ).toBe(false);
+      islands[0].url,
+      "a recovery whose view went away must not have reattached the departed session",
+    ).not.toContain(ownId);
   } finally {
     if (ownId) await cleanupSession(request, ownId);
   }
@@ -12513,8 +12470,8 @@ try {
   // old screen behind — a kept screen that outlived its element would
   // stack a dead terminal under the live one, and leak an xterm
   // instance per detach.
-  await page.locator(".back-button").click();
-  await expect(page.locator(`[data-session-id="${id}"]`)).toBeVisible();
+  await sharedSessionRow(page).click();
+  await expect(page.locator(".titlebar .title")).toHaveText("e2e-session");
   await page.locator(`[data-session-id="${id}"]`).click();
   await page.waitForFunction(() => (window as any).__farhelmTermReady === true);
   await waitForTermText(page, "FAKE-AGENT READY", 20_000);
@@ -13805,8 +13762,6 @@ test.describe("multi-host", () => {
       await expect(page.locator(".titlebar .title")).toHaveText(title, {
         timeout: 30_000,
       });
-      await page.locator(".back-button").click();
-
       const row = rowByTitle(page, title);
       await expect(row.locator(".session-host")).toHaveText(info.remote_ssh, {
         timeout: 30_000,
@@ -14319,51 +14274,6 @@ test.describe("multi-host", () => {
     expect((await apiRemoteHost(request)).id).toBe(before.id);
   });
 
-  // SPEC.md's creation default names the host of the CURRENTLY OPEN
-  // session. A session the user backed out of is not open — so returning to
-  // the list must put the default back on the helm's own host rather than
-  // leaving it on the machine they were just visiting.
-  //
-  // The failure this pins is a remembered last-viewed host, which reads as
-  // a convenience and is a different rule: it would keep creating on a
-  // remote long after the user left it, and would survive that host being
-  // removed from the registry entirely.
-  test("create-dialog-cross-view-default: leaving a session restores the local default", async ({
-    page,
-    request,
-  }) => {
-    requireFleet();
-    const info = stackInfo();
-    const hosts = await apiHosts(request);
-    const local = hosts.find((host: any) => host.kind === "local");
-    const remote = hosts.find((host: any) => host.kind === "ssh");
-    const title = `cross-view-${Date.now()}`;
-    let id: string | undefined;
-
-    try {
-      const created = await request.post("/api/sessions", {
-        data: { cwd: "/tmp", invocation: "sleep 600", title, host: remote.id },
-      });
-      expect(created.ok(), `creating on the remote: ${await created.text()}`).toBe(true);
-      id = (await created.json()).id;
-
-      await page.goto("/");
-      await rowByTitle(page, title).locator(".session-row-open").click();
-      await expect(page.locator(".titlebar .title")).toHaveText(title);
-      await page.locator(".back-button").click();
-
-      await page.locator(".new-session-button").click();
-      const selector = page.locator(".create-session-host");
-      await expect(selector).toBeVisible();
-      await expect(
-        selector,
-        "a session that has been closed is not open, so its host is not the default",
-      ).toHaveValue(String(local.id));
-    } finally {
-      if (!id) id = await findSessionIdByTitle(request, title);
-      if (id) await cleanupSession(request, id);
-    }
-  });
 
   // A chosen host leaving the registry must be reconciled VISIBLY. The
   // failure this rules out is the quiet one: a selector still displaying

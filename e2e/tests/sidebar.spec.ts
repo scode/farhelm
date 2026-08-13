@@ -16,6 +16,11 @@
  * isolation, rename-in-panel, consequence wrap, stale-menu
  * reconciliation) and the sidebar's on-demand chrome (hosts/filter
  * toggles, the compact host strip, the applied-filter note).
+ *
+ * Like every per-area file since M6.5, new coverage starts its own spec
+ * rather than growing terminal.spec.ts: that file's size already makes it
+ * the suite's slowest project, and an area file keeps one subject's tests
+ * findable and runnable together.
  */
 import { expect, test, type Page } from "@playwright/test";
 import {
@@ -24,6 +29,8 @@ import {
   openFilterBar,
   openHostsPanel,
   openRowMenu,
+  pinAutoSelect,
+  stubFeed,
 } from "./helpers/fleet";
 
 function row(page: Page, id: string) {
@@ -611,7 +618,7 @@ test("a closed filter bar still announces an applied filter", async ({ page }) =
   await expect(page.locator(".filter-active-note")).toHaveText("filtered", {
     timeout: 20_000,
   });
-  await expect(page.locator(".banner")).toContainText("0 matching", {
+  await expect(page.locator(".session-count")).toContainText("0 matching", {
     timeout: 20_000,
   });
   // Closing the bar keeps the note: the filter is still in force.
@@ -782,4 +789,205 @@ test("closing the hosts panel closes its profiles section", async ({ page }) => 
   await expect(page.locator(".hosts-panel")).toBeHidden();
   await openHostsPanel(page);
   await expect(page.locator(".profiles-section")).toHaveCount(0);
+});
+
+/**
+ * The selection policy itself: a clicked session is remembered across a
+ * reload, a stale remembered id falls back to the newest-created
+ * non-archived session, and the automatic selection ATTACHES — all
+ * without any click after load.
+ *
+ * This is the PR's primary behavior stated directly; every other test
+ * either pins the selection away for staging or clicks rows manually, so
+ * none of them fails if remembering, fallback ordering, or the automatic
+ * attach silently regress.
+ */
+test("auto-select remembers the last click, falls back to newest, and attaches", async ({
+  page,
+  request,
+}) => {
+  const older = await createSession(request, {
+    title: `policy-older-${Date.now()}`,
+    cwd: "/tmp",
+    invocation: "sleep 300",
+  });
+  let newer: { id: string } | undefined;
+  try {
+    // created_at has one-second granularity and the merged order
+    // tiebreaks by id within a second — a real gap is what makes
+    // "newest" deterministic.
+    await new Promise((resolve) => setTimeout(resolve, 1_100));
+    newer = await createSession(request, {
+      title: `policy-newer-${Date.now()}`,
+      cwd: "/tmp",
+      invocation: "sleep 300",
+    });
+
+    // Click the OLDER session — the one the fallback would never pick —
+    // then reload: the remembered choice must win over newest-created.
+    await page.goto("/");
+    await expect(row(page, older.id)).toBeVisible({ timeout: 20_000 });
+    await row(page, older.id).locator(".session-row-open").click();
+    await expect(page.locator(".titlebar .title")).toContainText("policy-older-");
+    await page.reload();
+    await expect(page.locator(".titlebar .title")).toContainText("policy-older-", {
+      timeout: 20_000,
+    });
+    // The auto-selection is a real attachment, not just a mounted view.
+    await page.waitForFunction(() => (window as any).__farhelmTermReady === true);
+
+    // A stale remembered id — a session that no longer exists — falls
+    // back to the newest-created non-archived session.
+    await page.evaluate(() => {
+      const raw = window.localStorage.getItem("farhelm.last-selected")!;
+      const record = JSON.parse(raw);
+      record.id = "00000000-0000-0000-0000-000000000000";
+      window.localStorage.setItem("farhelm.last-selected", JSON.stringify(record));
+    });
+    await page.reload();
+    await expect(page.locator(".titlebar .title")).toContainText("policy-newer-", {
+      timeout: 20_000,
+    });
+  } finally {
+    await cleanupSession(request, older.id);
+    if (newer) await cleanupSession(request, newer.id);
+  }
+});
+
+/**
+ * Launching a second client displaces the first WITHOUT any click: the
+ * takeover the amended SPEC names ("opening a client counts as opening a
+ * session") — a manual row click in the second client would mask an
+ * auto-attach that never happened.
+ */
+test("a second client's launch alone takes the terminal over", async ({
+  browser,
+  page,
+  request,
+}) => {
+  const session = await createSession(request, {
+    title: `launch-takeover-${Date.now()}`,
+    cwd: "/tmp",
+    invocation: "sleep 300",
+  });
+  let second: import("@playwright/test").BrowserContext | undefined;
+  try {
+    await page.goto("/");
+    await expect(row(page, session.id)).toBeVisible({ timeout: 20_000 });
+    await row(page, session.id).locator(".session-row-open").click();
+    await page.waitForFunction(() => (window as any).__farhelmTermReady === true);
+
+    // The second client remembers the same session and merely LOADS.
+    second = await browser.newContext({
+      storageState: await page.context().storageState(),
+    });
+    const page2 = await second.newPage();
+    await pinAutoSelect(page2, session.id);
+    await page2.goto("/");
+    await page2.waitForFunction(() => (window as any).__farhelmTermReady === true, undefined, {
+      timeout: 20_000,
+    });
+
+    // Client one shows its displaced banner; client two owns the live
+    // terminal — with no click anywhere in client two.
+    await expect(page.locator("#term-banner")).toContainText(/detached|took over|displaced/i, {
+      timeout: 20_000,
+    });
+  } finally {
+    await second?.close();
+    await cleanupSession(request, session.id);
+  }
+});
+
+/**
+ * The retired surfaces stay retired: an open session view renders neither
+ * a back button nor a titlebar rename, while the row menu's rename — the
+ * one surviving surface — remains present.
+ *
+ * Reintroducing Back restores an unselected pane the shell no longer
+ * models; reintroducing the titlebar rename restores the dual optimistic
+ * title overlays the redesign removed.
+ */
+test("the back button and titlebar rename do not come back", async ({ page, request }) => {
+  const session = await createSession(request, {
+    title: `retired-${Date.now()}`,
+    cwd: "/tmp",
+    invocation: "sleep 300",
+  });
+  try {
+    await page.goto("/");
+    await expect(row(page, session.id)).toBeVisible({ timeout: 20_000 });
+    await row(page, session.id).locator(".session-row-open").click();
+    await expect(page.locator(".titlebar .title")).toContainText("retired-");
+
+    await expect(page.locator(".back-button")).toHaveCount(0);
+    await expect(page.locator(".session-rename")).toHaveCount(0);
+    await expect(page.locator(".titlebar .rename-form")).toHaveCount(0);
+
+    await openRowMenu(row(page, session.id));
+    await expect(row(page, session.id).locator(".session-row-rename")).toBeVisible();
+  } finally {
+    await cleanupSession(request, session.id);
+  }
+});
+
+/**
+ * The placeholder's three states are honest: "no active sessions" appears
+ * only once a committed listing PROVED an empty fleet, and the moment a
+ * session exists the pane switches to the auto-selected view.
+ *
+ * Route-controlled because the shared stack always has sessions: this is
+ * the only way to watch the empty→non-empty transition, and the only test
+ * that fails if the placeholder claims emptiness during loading or keeps
+ * claiming it beside available sessions.
+ */
+test("the empty-fleet placeholder appears only when proven and yields to auto-select", async ({
+  page,
+  request,
+}) => {
+  const stamp = (await request.get("/api/sessions")).headers()["x-farhelm-build"] ?? "";
+  expect(stamp, "the helm must stamp its replies").toBeTruthy();
+  let fleet: unknown[] = [];
+  await page.route(
+    (url) => url.pathname === "/api/sessions",
+    async (route) => {
+      if (route.request().method() !== "GET") {
+        await route.continue();
+        return;
+      }
+      await route.fulfill({
+        headers: { "x-farhelm-build": stamp, "content-type": "application/json" },
+        json: {
+          sessions: fleet,
+          total: fleet.length,
+          matching: fleet.length,
+          truncated: false,
+        },
+      });
+    },
+  );
+  const feed = await stubFeed(page);
+  await page.goto("/");
+  await feed.waitForConnection(1);
+  feed.notify(1);
+
+  await expect(page.locator(".main-empty")).toHaveText("no active sessions — create one", {
+    timeout: 20_000,
+  });
+
+  fleet = [
+    {
+      id: "placeholder-cycle-session",
+      title: "placeholder-cycle",
+      cwd: "/tmp",
+      invocation: "sleep 300",
+    },
+  ];
+  feed.notify(2);
+  // The pane replaces the placeholder with the auto-selected session's
+  // view (the attach itself will fail against this fabricated session,
+  // which is fine — the placeholder yielding is the contract here).
+  await expect(page.locator(".titlebar .title")).toHaveText("placeholder-cycle", {
+    timeout: 20_000,
+  });
 });

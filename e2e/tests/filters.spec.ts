@@ -3,7 +3,7 @@
 // honest about filter-versus-truncation.
 //
 // A per-area spec of its own, per this milestone's convention (see
-// titlebar.spec.ts's header). Its helpers are shared with feed.spec.ts and
+// sidebar.spec.ts's header). Its helpers are shared with feed.spec.ts and
 // m6-5-debts.spec.ts — see helpers/fleet.ts for why these three share a
 // module rather than duplicating one.
 //
@@ -207,7 +207,7 @@ test.describe("session list filtering", () => {
 
     await expect(page.locator(".session-row")).toHaveCount(1, { timeout: 20_000 });
     await expect(row(page, wanted.id)).toBeVisible();
-    await expect(page.locator(".banner")).toHaveText(/^1 matching of \d+ sessions$/);
+    await expect(page.locator(".session-count")).toHaveText(/^1 matching of \d+ sessions$/);
 
     const filtered = [...reads];
     expect(filtered.length, "applying a filter must re-read the list").toBeGreaterThan(0);
@@ -229,7 +229,7 @@ test.describe("session list filtering", () => {
     // empty string — no `title` parameter versus `?title=`.
     await page.locator(".filter-clear").click();
     await expect(row(page, other.id)).toBeVisible({ timeout: 20_000 });
-    await expect(page.locator(".banner")).toHaveText(/^\d+ matching of \d+ sessions$/);
+    await expect(page.locator(".session-count")).toHaveText(/^\d+ matching of \d+ sessions$/);
     const cleared = reads.slice(filtered.length);
     expect(cleared.length, "clearing the filter must re-read the list").toBeGreaterThan(0);
     for (const read of cleared) {
@@ -294,7 +294,7 @@ test.describe("session list filtering", () => {
     await expect(page.locator(".session-row")).toHaveCount(3, { timeout: 20_000 });
     for (const match of matches) await expect(row(page, match.id)).toBeVisible();
     await expect(row(page, other.id)).toHaveCount(0);
-    await expect(page.locator(".banner")).toHaveText(/^3 matching of \d+ sessions$/);
+    await expect(page.locator(".session-count")).toHaveText(/^3 matching of \d+ sessions$/);
 
     expect(
       reads.length,
@@ -430,7 +430,7 @@ test.describe("session list filtering", () => {
     await applyFilter(page, { host: remote!.id });
     await expect(page.locator(".session-row")).toHaveCount(0, { timeout: 20_000 });
     await expect(page.locator(".filter-empty")).toBeVisible();
-    await expect(page.locator(".banner")).toHaveText(/^0 matching of \d+ sessions$/);
+    await expect(page.locator(".session-count")).toHaveText(/^0 matching of \d+ sessions$/);
   });
 
   /**
@@ -585,6 +585,6 @@ test.describe("session list filtering", () => {
     await applyFilter(page, { profile: profileName });
     await expect(page.locator(".session-row")).toHaveCount(1, { timeout: 20_000 });
     await expect(row(page, fromProfile.id)).toBeVisible();
-    await expect(page.locator(".banner")).toHaveText(/^1 matching of \d+ sessions$/);
+    await expect(page.locator(".session-count")).toHaveText(/^1 matching of \d+ sessions$/);
   });
 });

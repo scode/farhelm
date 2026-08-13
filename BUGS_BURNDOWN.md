@@ -232,13 +232,15 @@ Recorded here so the claim does not get re-derived and turned into a fix PR for 
 
 ## 5. Layout redesign: persistent session sidebar, terminal fills the rest
 
-Status: in progress across several PRs. PR #156 (`pr/sidebar-shell`) landed the shell: two-pane layout, keyed
-SessionView remounts, stacked sidebar rows, left-truncated cwd, the revived open-session create-host default, the
-two-pane feed fan-out contract, the cross-pane write gate (`ops::PaneGate` — neither pane starts a write under the
-other's), and selection reconciliation when the selected row is deleted or archived away. The popup-menu PR
-(`pr/row-actions-menu`, stacked on it) moves every per-row action and confirm into a floating panel behind a "⋯" toggle
-and drops the profile chip from the row line into that panel. Still owed: the hosts/filter toggles with the SPEC
-amendments, auto-select + rename consolidation + back-button removal, and their Playwright migrations.
+Status: fixed across four stacked PRs. #156 (`pr/sidebar-shell`) landed the shell: two-pane layout, keyed SessionView
+remounts, stacked sidebar rows, left-truncated cwd, the revived open-session create-host default, the two-pane feed
+fan-out contract, the cross-pane write gate (`ops::PaneGate`), and selection reconciliation on delete/archive. #157
+(`pr/row-actions-menu`) moved every per-row action and confirm into the floating "⋯" panel (profile chip included). #158
+(`pr/sidebar-toggles`) collapsed the hosts panel and filter bar behind on-demand toggles with the always-visible compact
+host strip and the SPEC amendments. The final PR (`pr/session-autoselect`) added auto-select (remembered last-selected
+via localStorage, newest-created fallback, attach-on-select, empty-fleet-only placeholder), removed the titlebar rename
+(the row menu is the one rename surface) and the back button, amended SPEC.md's takeover language, and migrated the
+remaining Playwright/desktop-smoke coverage.
 
 What the user wants: a left sidebar that always shows the session/agent list, with the entire right-hand side being the
 terminal area for the selected session. The tab strip ("agent | Terminal 1 | + terminal") moves to the top of the right
@@ -336,12 +338,10 @@ These were put to the user directly; treat them as settled:
 
 ### Docs and tests that pin the current layout
 
-- Docs to amend: DONE in the shell PR for lib.rs, list.rs, session_view.rs and feed.rs (rewritten around the two-pane
-  shape rather than the old exclusivity). STILL PENDING: SPEC.md:203-211/215-225 ("opening a session" language vs.
-  persistent selection). SPEC.md's Errors and diagnostics section ALSO requires per-host connection state and retry
-  phase to stay visible — amend it together with the Session list section (a compact indicator must still carry
-  connection state and retry phase, with the full panel a toggle away), or the spec ends up internally contradictory.
-  PLAN_M2.md references are historical; leave them.
+- Docs to amend: ALL DONE across the stack — lib.rs/list.rs/session_view.rs/feed.rs rewritten in the shell PR; SPEC.md's
+  per-host-visibility language amended in BOTH places (Session list and Errors and diagnostics) in the toggles PR; the
+  "opening a session"/takeover language and the on-demand filter lifecycle amended in the auto-select PR. PLAN_M2.md
+  references are historical; leave them.
 - Playwright: heavy breakage, budget for it. ~18 uses of `.session-row-open` + 70 of `.session-row` in terminal.spec.ts
   alone (helpers `rowByTitle` :310, `sharedSessionRow` :363); ~20 uses of `.back-button` which the redesign deletes (its
   disabled-while-busy assertion at archive.spec.ts:289 needs a new home or removal); back-to-list assertions

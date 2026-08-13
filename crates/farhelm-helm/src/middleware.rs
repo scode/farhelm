@@ -133,7 +133,24 @@ fn origin_is_allowed(headers: &axum::http::HeaderMap, port: u16) -> bool {
             .is_ok_and(|o| is_loopback_authority(o) || is_desktop_webview_origin(o))
     });
 
-    host_ok && origin_ok
+    // The Origin check has one browser-shaped hole: a TOP-LEVEL cross-site
+    // navigation (a hostile page assigning window.location to this helm's
+    // predictable loopback URL) is a GET that carries no Origin at all, so
+    // it sails through the arm above — and with the UI auto-selecting and
+    // attaching a session on load, merely rendering the page displaces
+    // whichever client held that terminal. `Sec-Fetch-Site` is the
+    // browser-set (unforgeable from content) fetch-metadata header that
+    // names the relationship: reject `cross-site` when no allowed Origin
+    // vouched for the request. Everything legitimate stays open — address
+    // bar and bookmark launches say `none`, reloads and the app's own
+    // requests say `same-origin`, non-browser clients send nothing, and
+    // the desktop webview's fetches (cross-site by construction, custom
+    // scheme → loopback) carry their allowed custom-scheme Origin and are
+    // gated by that arm instead of this one.
+    let fetch_site_ok = headers.get(axum::http::header::ORIGIN).is_some()
+        || headers.get("sec-fetch-site").and_then(|v| v.to_str().ok()) != Some("cross-site");
+
+    host_ok && origin_ok && fetch_site_ok
 }
 
 /// Whether an `Origin` is one of the desktop build's own webview schemes.
@@ -398,6 +415,47 @@ mod tests {
             &headers(
                 Some("127.0.0.1:7433"),
                 Some("http://evil.example/127.0.0.1:7433")
+            ),
+            PORT
+        ));
+    }
+
+    fn with_fetch_site(mut h: HeaderMap, value: &str) -> HeaderMap {
+        h.insert(
+            axum::http::HeaderName::from_static("sec-fetch-site"),
+            value.parse().unwrap(),
+        );
+        h
+    }
+
+    /// The fetch-metadata arm: a top-level CROSS-SITE navigation carries no
+    /// Origin (which the origin arm must keep permitting for curl and for
+    /// direct launches) but does carry `Sec-Fetch-Site: cross-site` — and
+    /// with the UI auto-attaching a session on load, rendering the page for
+    /// a hostile navigator is a terminal takeover. Every legitimate shape
+    /// stays permitted: `none` (address bar), `same-origin` (reloads, the
+    /// app's own requests), an absent header (non-browser clients), and the
+    /// desktop webview's custom-scheme Origin, whose fetches are cross-site
+    /// by construction and are vouched for by the origin arm instead.
+    #[test]
+    fn cross_site_navigations_are_refused_without_a_vouching_origin() {
+        let base = || headers(Some("127.0.0.1:7433"), None);
+        assert!(!origin_is_allowed(
+            &with_fetch_site(base(), "cross-site"),
+            PORT
+        ));
+        assert!(origin_is_allowed(&with_fetch_site(base(), "none"), PORT));
+        assert!(origin_is_allowed(
+            &with_fetch_site(base(), "same-origin"),
+            PORT
+        ));
+        assert!(origin_is_allowed(&base(), PORT));
+        // The desktop webview: cross-site fetch metadata, but an allowed
+        // custom-scheme Origin vouches for it.
+        assert!(origin_is_allowed(
+            &with_fetch_site(
+                headers(Some("127.0.0.1:7433"), Some("dioxus://index.html")),
+                "cross-site"
             ),
             PORT
         ));

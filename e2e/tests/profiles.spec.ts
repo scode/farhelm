@@ -3,7 +3,7 @@
 // fallback, and SPEC.md's snapshot rule as the session list shows it.
 //
 // A per-area spec of its own, per this milestone's convention (see
-// feed.spec.ts's and titlebar.spec.ts's headers). Its helpers are the shared
+// feed.spec.ts's and sidebar.spec.ts's headers). Its helpers are the shared
 // ones in helpers/fleet.ts, extended there with the profile CRUD calls these
 // fixtures need.
 //

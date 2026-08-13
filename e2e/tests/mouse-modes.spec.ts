@@ -399,9 +399,10 @@ test("mouse-modes-restored-on-reattach", async ({ page, request }) => {
     // fake-agent PROCESS itself is untouched throughout — only the
     // client's attachment cycles — exactly matching what a real user's
     // tab-close-and-reopen does. ---
-    await page.locator(".back-button").click();
-    await expect(page.locator(".session-list")).toBeVisible();
-    await rowByTitle(page, title).click();
+    // Detach = select another session (the shared row), then reselect.
+    await rowByTitle(page, "e2e-session").locator(".session-row-open").click();
+    await expect(page.locator(".titlebar .title")).toHaveText("e2e-session");
+    await rowByTitle(page, title).locator(".session-row-open").click();
     await page.waitForFunction(() => (window as any).__farhelmTermReady === true);
     await waitForReplayReveal(page);
 
@@ -444,9 +445,10 @@ test("mouse-modes-restored-on-reattach", async ({ page, request }) => {
     // from `PaneModes`' replay (while leaving `mouse_standard` intact)
     // would pass every assertion above. Repeating the cycle for the SGR
     // leg is what actually pins that branch. ---
-    await page.locator(".back-button").click();
-    await expect(page.locator(".session-list")).toBeVisible();
-    await rowByTitle(page, title).click();
+    // Detach = select another session (the shared row), then reselect.
+    await rowByTitle(page, "e2e-session").locator(".session-row-open").click();
+    await expect(page.locator(".titlebar .title")).toHaveText("e2e-session");
+    await rowByTitle(page, title).locator(".session-row-open").click();
     await page.waitForFunction(() => (window as any).__farhelmTermReady === true);
     await waitForReplayReveal(page);
 

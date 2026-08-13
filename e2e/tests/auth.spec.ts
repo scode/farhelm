@@ -293,9 +293,10 @@ test("rotation logs out an open client and drops its feed and terminal sockets",
     .toEqual(expect.arrayContaining([expect.stringMatching(/\/api\/sessions\/.*\/term$/)]));
   await expect(page.locator(".auth-page")).toBeVisible({ timeout: 20_000 });
 
-  // Authentication removes the prompt but does not throw away navigation.
-  // Recovery therefore owes this open session a fresh detail read and a new
-  // terminal attachment, not an unsolicited trip back to the list.
+  // Authentication removes the prompt but does not throw away the
+  // selection. Recovery therefore owes this open session a fresh detail
+  // read and a new terminal attachment — not a silent switch to whatever
+  // auto-select would have picked on a cold load.
   const detailRead = page.waitForResponse((response) => {
     const url = new URL(response.url());
     return url.pathname === `/api/sessions/${sessionId}` && response.status() === 200;
@@ -323,10 +324,21 @@ test("rotation logs out an open client and drops its feed and terminal sockets",
   await authenticate(page, replacement);
   await page.unroute("**/api/auth/token", advanceContextHeader);
   await detailRead;
-  await expect(page.locator(".back-button")).toBeVisible();
+  // The EXACT session, not whichever one auto-select would pick: the
+  // titlebar shows its title and the live terminal socket carries its id.
+  const expectedTitle = await page
+    .locator(`[data-session-id="${sessionId}"] .session-title`)
+    .textContent();
+  await expect(page.locator(".titlebar .title")).toHaveText(expectedTitle ?? "", {
+    timeout: 20_000,
+  });
   await expect
     .poll(() => page.evaluate(() => (window as any).__farhelmWs?.readyState))
     .toBe(1);
+  expect(
+    await page.evaluate(() => (window as any).__farhelmWs?.url ?? ""),
+    "recovery must reattach the session that was open, not a fallback",
+  ).toContain(sessionId);
   const storedSecret = await page.evaluate(
     (key) => localStorage.getItem(key),
     DEVICE_SECRET_KEY,
