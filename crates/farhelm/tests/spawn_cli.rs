@@ -443,3 +443,58 @@ fn an_unexpected_reply_fails_instead_of_hanging() {
             .contains("unexpected spawn reply")
     );
 }
+
+/// `~`-prefixed cwds cross the wire VERBATIM — never absolutized into
+/// `<cwd>/~...` — because expansion is the supervisor's contract
+/// (SPEC.md: `~` resolves against the supervisor user's home; `~user` is
+/// its refusal to give). The ordinary relative path in the same test pins
+/// that the tilde exception did not swallow the join-against-cwd rule.
+///
+/// Guarded by a test because the regression is silent and plausible: a
+/// future "simplification" back to unconditional absolutizing would make
+/// `~/x` a nonexistent local path at best, and at worst a real directory
+/// literally named `~user` that dodges the supervisor's refusal.
+#[test]
+fn tilde_cwds_cross_the_wire_verbatim() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let socket = temp.path().join("supervisor.sock");
+    for (sent, expected) in [
+        ("~", "~".to_string()),
+        ("~/child", "~/child".to_string()),
+        ("~other/x", "~other/x".to_string()),
+        (
+            "plain/child",
+            temp.path()
+                .join("plain/child")
+                .to_string_lossy()
+                .into_owned(),
+        ),
+    ] {
+        let expected_wire = expected.clone();
+        let (done, server) = mock_supervisor(&socket, move |request| {
+            let ControlMsg::CreateSession { req_id, cwd, .. } = request else {
+                panic!("spawn must send CreateSession: {request:?}");
+            };
+            assert_eq!(cwd, expected_wire, "cwd for input {sent:?}");
+            ControlMsg::SessionCreated {
+                req_id,
+                session: child_session(cwd),
+            }
+        });
+        let output = spawn_command()
+            .current_dir(temp.path())
+            .args(["--cwd", sent])
+            .env("FARHELM_SESSION_ID", "parent-123")
+            .env("FARHELM_SESSION_TOKEN", "secret")
+            .env("FARHELM_SUPERVISOR_SOCK", &socket)
+            .output()
+            .expect("run spawn");
+        finish_server(done, server);
+        assert!(
+            output.status.success(),
+            "spawn with cwd {sent:?} failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        std::fs::remove_file(&socket).ok();
+    }
+}

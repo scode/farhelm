@@ -95,8 +95,9 @@ Ubuntu 24.04 ships 3.4.
 - Sessions are normally created in the UI. A process already inside a Farhelm session can also run
   `farhelm spawn --cwd PATH`; the launch injects the session credential and supervisor socket that authorize it. Spawn
   joins a relative path to that process's current directory and otherwise preserves the path's lexical spelling; UI
-  creation sends paths literally and requires an absolute path on the selected host. Neither form expands `~` or shell
-  variables.
+  creation sends paths literally. In both forms a `~` or `~/path` cwd reaches the supervisor as written and expands
+  there, once, against the supervisor user's own home, with the expanded absolute path stored; `~user` forms are
+  refused, and no shell variable ever expands.
 - The authenticated page is a hosts panel above a session list. Every registered host is listed with its connection
   state in the helm's own words — connecting, unreachable-reprobing, connected, version-skew, identity-mismatch,
   identity-unverified, duplicate, retired — plus the evidence behind it (both versions on a skew, both identities on a
@@ -154,12 +155,13 @@ Ubuntu 24.04 ships 3.4.
   selector offers that host's profiles and preselects the one you last created a session from there; when that profile
   has since been deleted it preselects nothing and says so rather than quietly picking another. Pick "custom command"
   instead and the command field below is what runs — the two are exclusive, and choosing a profile greys the field out
-  because the profile already says what to launch. Paths are sent literally — nothing expands `~` or any variable at any
-  point between the form and the host — so a working directory must be written out in full as it exists on the host it
-  names. A bad working directory fails the create in place, with the supervisor's own error shown next to the form and
-  nothing created. A bad EXECUTABLE (a typo'd command, a path that does not exist) is different: creation still succeeds
-  — the working directory and terminal both exist — and the session then reports error once its agent's own exec fails,
-  with the reason shown right in the list.
+  because the profile already says what to launch. Paths cross the form literally, and the one expansion happens on the
+  supervisor: a working directory of `~` or `~/path` expands there, once, against the target host's home (`~user` forms
+  are refused, and no variable ever expands); any other directory must be written out in full as it exists on the host
+  it names. A bad working directory fails the create in place, with the supervisor's own error shown next to the form
+  and nothing created. A bad EXECUTABLE (a typo'd command, a path that does not exist) is different: creation still
+  succeeds — the working directory and terminal both exist — and the session then reports error once its agent's own
+  exec fails, with the reason shown right in the list.
 - Submitting the same form twice yields one session, not two. Every create from the form carries an idempotency key, so
   a submit retried after an ambiguous failure — the request landed but its reply did not, the supervisor restarted
   mid-create — returns the session the first attempt already made instead of launching a second agent, and a failed

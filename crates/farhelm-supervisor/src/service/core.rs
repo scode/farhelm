@@ -480,6 +480,18 @@ pub struct SupervisorSeams {
     /// override) simply performs no capture; see
     /// [`Supervisor::agent_home`].
     pub agent_home: Option<PathBuf>,
+    /// The home directory a create's `~`-prefixed working directory expands
+    /// against (see [`expand_tilde_cwd`]).
+    ///
+    /// `None` means "resolve `$HOME` at construction", as `agent_home`
+    /// does, and it is a SEPARATE seam from `agent_home` on purpose: that
+    /// one names where agent record trees hang for conversation capture,
+    /// and tests point it at private fixture trees that would be nonsense
+    /// as a user's home. Injected for the same environment-hygiene reason —
+    /// this repo's tests never mutate the test process's environment. A
+    /// supervisor that resolves to nothing refuses `~` creates with a
+    /// clear error rather than guessing.
+    pub user_home: Option<PathBuf>,
     /// How wide a session's capture window is around its first-input time
     /// (see [`CaptureWindowBounds`], and `crate::agent_kind`'s constants
     /// for the trade the production values make). Shortened by tests so
@@ -616,6 +628,7 @@ impl Default for SupervisorSeams {
             boot_id: Arc::new(read_host_boot_id),
             create_crash: None,
             agent_home: None,
+            user_home: None,
             capture_window: CaptureWindowBounds::default(),
             capture_store_fault: None,
             capture_gate: None,
@@ -1310,14 +1323,18 @@ fn unrecorded_outcome(original: anyhow::Error, settle: anyhow::Error) -> anyhow:
 /// different branches, and because the type is what says "these have been
 /// checked" — `Supervisor::launch_session` performs no validation of its
 /// own and would have no way to.
-struct LaunchRequest<'a> {
+struct LaunchRequest {
     /// Direct organizational parentage, persisted verbatim with the child.
     parent: Option<String>,
-    /// The working directory AS THE CALLER SPELLED IT — what the session
-    /// records and what every error names, symlinks and all. Deliberately
-    /// not the resolved spelling: see `store::StoredSession::canonical_cwd`
-    /// for why the user-facing path must stay the user's.
-    cwd: &'a str,
+    /// The working directory as the caller spelled it — after `~`
+    /// expansion, which is the one rewrite the caller's spelling gets
+    /// ([`expand_tilde_cwd`]): what the session records and what every
+    /// error names, symlinks and all. Deliberately not the resolved
+    /// spelling beyond that: see `store::StoredSession::canonical_cwd`
+    /// for why the user-facing path must stay the user's. Owned because a
+    /// retry rebuilds it from the stored row rather than borrowing the
+    /// request's literal string.
+    cwd: String,
     /// The directory this launch actually hands to tmux, which is NOT the
     /// same question as what it records.
     ///
@@ -1977,6 +1994,88 @@ enum SpawnFailure {
     },
 }
 
+/// Expand a `~`-prefixed working directory against the SUPERVISOR's home
+/// (SPEC.md: `~` names the home of the user running the supervisor on the
+/// target host). Anything not starting with `~` passes through untouched.
+///
+/// This runs at create time, before validation and before anything is
+/// stored, so the durable record only ever holds the expanded absolute
+/// path. That placement is what keeps `ensure_cwd_usable`'s anti-drift
+/// argument intact: expansion happens exactly once, against a home
+/// resolved once at supervisor construction, so the stored path can never
+/// re-resolve differently after a daemon restart. Restart and tab-open
+/// re-check the STORED cwd and therefore never see a `~`.
+///
+/// Expansion is deliberately supervisor-side rather than in the helm or
+/// UI: the helm runs on the user's machine, and expanding there would
+/// substitute the wrong home for a remote host.
+///
+/// `~user` forms are refused rather than expanded — resolving other
+/// users' homes is a separate feature nobody asked for — and `~` with no
+/// home to expand against (no seam, no usable `$HOME`) is refused with a
+/// message naming the real problem instead of falling through to a
+/// baffling "not absolute" error.
+fn expand_tilde_cwd<'a>(
+    cwd: &'a str,
+    home: Option<&Path>,
+) -> anyhow::Result<std::borrow::Cow<'a, str>> {
+    use std::borrow::Cow;
+    let rest = match cwd {
+        "~" => "",
+        _ => match cwd.strip_prefix("~/") {
+            Some(rest) => rest,
+            None if cwd.starts_with('~') => {
+                return Err(RequestError::new(
+                    ErrorKind::InvalidRequest,
+                    format!(
+                        "working directory {cwd} looks like a ~user path, which is not \
+                         supported; use ~ or ~/path (expanded against the supervisor's own \
+                         home) or an absolute path"
+                    ),
+                )
+                .into());
+            }
+            None => return Ok(Cow::Borrowed(cwd)),
+        },
+    };
+    let home = home
+        .ok_or_else(|| {
+            RequestError::new(
+                ErrorKind::InvalidRequest,
+                format!(
+                    "working directory {cwd} needs ~ expansion, but this supervisor has no \
+                     home directory (no HOME in its environment); use an absolute path"
+                ),
+            )
+        })?
+        .to_str()
+        .ok_or_else(|| {
+            RequestError::new(
+                ErrorKind::Internal,
+                "the supervisor's home directory is not valid UTF-8, so ~ cannot be expanded \
+                 into a session working directory; use an absolute path",
+            )
+        })?;
+    // A relative home would expand `~/x` into another relative path, and
+    // `ensure_cwd_usable` would then blame the CALLER for a host
+    // misconfiguration ("working directory is not absolute: home/x").
+    // Refusing here keeps the diagnosis pointed at the real problem.
+    if !Path::new(home).is_absolute() {
+        return Err(RequestError::new(
+            ErrorKind::Internal,
+            format!(
+                "the supervisor's home directory ({home}) is not an absolute path, so ~ cannot \
+                 be expanded into a session working directory; use an absolute path"
+            ),
+        )
+        .into());
+    }
+    if rest.is_empty() {
+        return Ok(Cow::Owned(home.to_string()));
+    }
+    Ok(Cow::Owned(format!("{}/{rest}", home.trim_end_matches('/'))))
+}
+
 /// Whether `cwd` is usable as a session's working directory, as the one
 /// precondition both a create and a restart check (SPEC.md: "Operations
 /// that need the working directory — restart, opening a terminal tab —
@@ -2005,7 +2104,9 @@ enum SpawnFailure {
 /// agent in the wrong directory once the daemon was restarted from
 /// elsewhere. Rejecting relative paths up front — for both create and
 /// restart, since this check is shared — also catches cwds that were
-/// stored before this check existed.
+/// stored before this check existed. A `~`-prefixed cwd never reaches
+/// this check on the create path: [`expand_tilde_cwd`] has already turned
+/// it into an absolute path (or refused it) by the time validation runs.
 async fn ensure_cwd_usable(cwd: &str) -> anyhow::Result<()> {
     if !std::path::Path::new(cwd).is_absolute() {
         return Err(RequestError::new(
@@ -2803,6 +2904,12 @@ pub struct Supervisor {
     /// mid-life, which would let one session's identity be claimed from a
     /// directory a later pass no longer looks at.
     agent_home: Option<PathBuf>,
+    /// The home directory `~`-prefixed create cwds expand against,
+    /// resolved once at construction from [`SupervisorSeams::user_home`]
+    /// or `$HOME` (see [`expand_tilde_cwd`] for the contract). Resolved
+    /// once for the same reason `agent_home` is: what a `~` means must not
+    /// shift mid-life with the daemon's environment.
+    user_home: Option<PathBuf>,
     /// See [`SupervisorSeams::capture_window`].
     capture_window: CaptureWindowBounds,
     /// Serializes and schedules conversation-capture passes (PLAN_M3.md
@@ -3341,6 +3448,14 @@ impl Supervisor {
             .clone()
             .or_else(|| std::env::var_os("HOME").map(PathBuf::from))
             .filter(|home| !home.as_os_str().is_empty());
+        // Same resolution shape as `agent_home`, but no warning on absence:
+        // a missing home only matters if a `~` create ever arrives, and
+        // that request gets its own clear refusal.
+        let user_home = seams
+            .user_home
+            .clone()
+            .or_else(|| std::env::var_os("HOME").map(PathBuf::from))
+            .filter(|home| !home.as_os_str().is_empty());
         if agent_home.is_none() {
             warn!(
                 "no HOME for this supervisor, so no agent record directory can be located; \
@@ -3374,6 +3489,7 @@ impl Supervisor {
             intent_locks: Arc::new(KeyedLocks::default()),
             lifecycle_locks: Arc::new(KeyedLocks::default()),
             agent_home,
+            user_home,
             capture_window,
             capture: CaptureCoordination {
                 lock: Mutex::new(()),
@@ -4474,6 +4590,17 @@ impl Supervisor {
         inputs: CreateInputs<'_>,
         claim: Option<IntentClaim>,
     ) -> anyhow::Result<SessionInfo> {
+        // `~` expansion lives at the head of `validate_create`, and its
+        // reach is exactly validation's reach: a replay answers from the
+        // reservation without expanding anything (expansion reads
+        // supervisor state — the resolved home — which a settled intent
+        // must not re-consult), a retry with its row intact relaunches
+        // from the row's already-expanded cwd (`validate_retry`), and a
+        // refused expansion is a validation refusal recorded against the
+        // intent key like any other. The intent-key FINGERPRINT is
+        // computed by the handler from the client's literal string: a
+        // client retrying "~" produces the same fingerprint both times,
+        // which is all idempotency needs.
         let Some(claim) = claim else {
             let request = self.validate_create(inputs).await?;
             return self
@@ -4606,10 +4733,7 @@ impl Supervisor {
     ///
     /// A method rather than an associated function since PLAN_M6_75.md item
     /// 4: resolving a profile needs the store.
-    async fn validate_create<'a>(
-        &self,
-        inputs: CreateInputs<'a>,
-    ) -> anyhow::Result<LaunchRequest<'a>> {
+    async fn validate_create(&self, inputs: CreateInputs<'_>) -> anyhow::Result<LaunchRequest> {
         let CreateInputs {
             cwd,
             parent,
@@ -4763,6 +4887,17 @@ impl Supervisor {
                 )
             }
         };
+        // `~` expansion happens here, as the first half of the cwd check,
+        // in the one function every NEW create flows through — unkeyed,
+        // keyed-new, and a retry whose row vanished. A retry with its row
+        // intact never comes here and never re-expands: its first
+        // attempt's stored cwd is the resolution (see `validate_retry`),
+        // so a `HOME` change between the crash and the retry cannot re-aim
+        // or reject an already-accepted create. Everything below — the
+        // usability check, the derived title, the durable row, the
+        // canonical identity — sees only the expanded absolute path.
+        let cwd = expand_tilde_cwd(cwd, self.user_home.as_deref())?;
+        let cwd = cwd.as_ref();
         let cwd_path = PathBuf::from(cwd);
         ensure_cwd_usable(cwd).await?;
         // The invocation itself stays out of the error: it may carry
@@ -4886,7 +5021,7 @@ impl Supervisor {
         };
         Ok(LaunchRequest {
             parent,
-            cwd,
+            cwd: cwd.to_string(),
             // A create has no prior identity to have verified, and the
             // canonicalization above is deliberately allowed to fail
             // without failing the create — so the caller's own spelling is
@@ -4947,11 +5082,11 @@ impl Supervisor {
     /// no recorded resolution left to preserve, the reservation's identities
     /// are still free to reuse, and the alternative — refusing — would
     /// permanently strand an intent key whose session someone deleted.
-    async fn validate_retry<'a>(
+    async fn validate_retry(
         &self,
-        inputs: CreateInputs<'a>,
+        inputs: CreateInputs<'_>,
         reservation: &Reservation,
-    ) -> anyhow::Result<LaunchRequest<'a>> {
+    ) -> anyhow::Result<LaunchRequest> {
         let row = self
             .store
             .session(&reservation.session_id)
@@ -4960,8 +5095,16 @@ impl Supervisor {
         let Some(row) = row else {
             return self.validate_create(inputs).await;
         };
-        ensure_cwd_usable(inputs.cwd).await?;
-        let verified = ensure_cwd_identity(inputs.cwd, row.canonical_cwd.as_deref()).await?;
+        // The row's stored cwd IS the first attempt's resolution — already
+        // expanded if the request said `~` — so the checks run against it,
+        // never against the request's literal string. Re-expanding the
+        // request here would let a `HOME` change between the crash and the
+        // retry reject (or worse, re-aim) an already-accepted create; the
+        // fingerprint has already proven the request is the same literal
+        // string the first attempt resolved, which is all the request's
+        // own cwd is good for.
+        ensure_cwd_usable(&row.cwd).await?;
+        let verified = ensure_cwd_identity(&row.cwd, row.canonical_cwd.as_deref()).await?;
         let argv = shell_words::split(&row.invocation).context(RequestError::new(
             ErrorKind::InvalidRequest,
             "parsing the interrupted attempt's recorded agent invocation",
@@ -4981,12 +5124,11 @@ impl Supervisor {
         }
         Ok(LaunchRequest {
             parent: row.parent,
-            cwd: inputs.cwd,
             // The path `ensure_cwd_identity` just VERIFIED, so the launch
             // cannot be aimed somewhere else by a symlink repointed between
             // that check and the tmux call. `None` only for a row with no
             // recorded identity, where there was nothing to verify.
-            launch_cwd: verified.unwrap_or_else(|| inputs.cwd.to_string()),
+            launch_cwd: verified.unwrap_or_else(|| row.cwd.clone()),
             invocation: row.invocation,
             argv,
             title: row.title,
@@ -4997,9 +5139,10 @@ impl Supervisor {
                 resume_template: row.resume_template,
             },
             // `None` only for a row written before the column existed, which
-            // is necessarily a non-integrated session; the literal cwd is the
+            // is necessarily a non-integrated session; the stored cwd is the
             // same honest fallback `validate_create` uses.
-            canonical_cwd: row.canonical_cwd.unwrap_or_else(|| inputs.cwd.to_string()),
+            canonical_cwd: row.canonical_cwd.unwrap_or_else(|| row.cwd.clone()),
+            cwd: row.cwd,
             source_profile: row.source_profile,
         })
     }
@@ -5419,7 +5562,7 @@ impl Supervisor {
     /// decided, so nothing about it should be recorded.
     async fn launch_session(
         &self,
-        request: LaunchRequest<'_>,
+        request: LaunchRequest,
         reserved: Reserved,
     ) -> anyhow::Result<SessionInfo> {
         let result = self.launch_reserved(request, &reserved).await;
@@ -5464,7 +5607,7 @@ impl Supervisor {
     /// this to settle the reservation on the paths that may settle it.
     async fn launch_reserved(
         &self,
-        request: LaunchRequest<'_>,
+        request: LaunchRequest,
         reserved: &Reserved,
     ) -> anyhow::Result<SessionInfo> {
         let LaunchRequest {
@@ -9845,6 +9988,96 @@ pub(crate) mod tests {
     /// [`UploadRoute`]).
     pub(crate) fn no_uploads() -> HashMap<u32, UploadRoute> {
         HashMap::new()
+    }
+
+    /// The `~` expansion contract, form by form (BUGS_BURNDOWN.md issue 1,
+    /// SPEC.md's `~`-resolves-on-the-target-host rule).
+    ///
+    /// Pinned as a unit test because the whole point of the function is
+    /// the edge inventory: bare `~` is home itself (not `home/`), `~/` is
+    /// also home rather than a trailing-slash artifact, `~user` is a
+    /// refusal and not a mangled expansion, and everything not starting
+    /// with `~` — including a relative path that `ensure_cwd_usable` will
+    /// refuse later — passes through untouched. The degenerate homes each
+    /// pin an error CLASSIFICATION, not just an error, because the kind
+    /// decides who goes hunting: a MISSING home is `InvalidRequest` (the
+    /// caller can answer it by sending an absolute path), a relative or
+    /// non-UTF-8 home is `Internal` (host misconfiguration no different
+    /// request can route around), and `~user` is `InvalidRequest` caller
+    /// misuse. All of them name the actual problem in the message.
+    #[test]
+    fn tilde_expansion_covers_every_form() {
+        let kind_of = |err: &anyhow::Error| {
+            err.downcast_ref::<RequestError>()
+                .expect("expansion refusals carry a RequestError")
+                .kind
+        };
+        let home = Path::new("/home/someone");
+        let expand = |cwd: &str| expand_tilde_cwd(cwd, Some(home)).map(|c| c.into_owned());
+        assert_eq!(expand("~").unwrap(), "/home/someone");
+        assert_eq!(expand("~/").unwrap(), "/home/someone");
+        assert_eq!(expand("~/ws/repo").unwrap(), "/home/someone/ws/repo");
+        assert_eq!(expand("/abs/path").unwrap(), "/abs/path");
+        assert_eq!(expand("relative/path").unwrap(), "relative/path");
+
+        // A home with a trailing slash must not produce a double slash.
+        assert_eq!(
+            expand_tilde_cwd("~/x", Some(Path::new("/home/someone/")))
+                .unwrap()
+                .into_owned(),
+            "/home/someone/x"
+        );
+
+        let user_form = expand("~other").unwrap_err();
+        assert_eq!(kind_of(&user_form), ErrorKind::InvalidRequest);
+        let user_form = user_form.to_string();
+        assert!(
+            user_form.contains("~other") && user_form.contains("not"),
+            "a ~user refusal must name the path and say it is unsupported: {user_form}"
+        );
+        // `~other/sub` is the same refusal, not a partial expansion.
+        assert!(expand("~other/sub").is_err());
+
+        let no_home = expand_tilde_cwd("~", None).unwrap_err();
+        assert_eq!(
+            kind_of(&no_home),
+            ErrorKind::InvalidRequest,
+            "no home is answerable by the caller (send an absolute path), not a server fault"
+        );
+        let no_home = no_home.to_string();
+        assert!(
+            no_home.contains("home"),
+            "a no-home refusal must name the missing home, not claim the path is relative: \
+             {no_home}"
+        );
+
+        let relative_home = expand_tilde_cwd("~/x", Some(Path::new("home"))).unwrap_err();
+        assert_eq!(
+            kind_of(&relative_home),
+            ErrorKind::Internal,
+            "a relative home is host misconfiguration, not a caller mistake"
+        );
+        assert!(
+            relative_home.to_string().contains("home"),
+            "a relative-home refusal must name the home: {relative_home:#}"
+        );
+
+        // A non-UTF-8 home cannot become part of a `String`-typed cwd; the
+        // refusal is the host's problem and the DIAGNOSTIC is part of the
+        // contract — a generic internal error would strip the operator's
+        // only pointer at what to fix.
+        #[cfg(unix)]
+        {
+            use std::os::unix::ffi::OsStrExt;
+            let raw = std::ffi::OsStr::from_bytes(b"/home/\xff");
+            let non_utf8 = expand_tilde_cwd("~", Some(Path::new(raw))).unwrap_err();
+            assert_eq!(kind_of(&non_utf8), ErrorKind::Internal);
+            let message = non_utf8.to_string();
+            assert!(
+                message.contains("home") && message.contains("not valid UTF-8"),
+                "the refusal must name the home and the encoding problem: {message}"
+            );
+        }
     }
 
     /// A replacement cannot pass a published output-reap barrier early.
@@ -14396,7 +14629,7 @@ pub(crate) mod tests {
             .launch_reserved(
                 LaunchRequest {
                     parent: None,
-                    cwd: &cwd,
+                    cwd: cwd.clone(),
                     launch_cwd: cwd.clone(),
                     invocation: "agent".to_string(),
                     argv: vec!["agent".to_string()],

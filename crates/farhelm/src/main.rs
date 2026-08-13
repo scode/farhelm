@@ -29,7 +29,9 @@ enum Cmd {
     /// Create a session on the supervisor that launched this one.
     Spawn {
         /// Child working directory. Relative paths resolve against this
-        /// process's real current directory before crossing the wire.
+        /// process's real current directory before crossing the wire;
+        /// `~` and `~/path` are forwarded as written and expand on the
+        /// supervisor (`~user` forms are refused there).
         #[arg(long)]
         cwd: PathBuf,
         /// Optional display title; omitted derives from the directory.
@@ -307,18 +309,29 @@ fn spawn_environment() -> anyhow::Result<(String, String, PathBuf)> {
 ///
 /// This is the centralized scripting contract for `farhelm spawn`: validate
 /// all three injected environment values before dialing, preserve the cwd's
-/// lexical spelling (resolving only a relative input against this process's
-/// cwd), authenticate the connection, and return the child id for the sole
-/// stdout line. A `SessionCreated` reply means creation succeeded regardless
-/// of the status snapshot it carries; every refusal and protocol mismatch is
-/// an error and therefore produces no id.
+/// lexical spelling (an ordinary relative input resolves against this
+/// process's cwd; a `~`-prefixed input is forwarded verbatim for the
+/// supervisor's own expansion — see the branch below for why absolutizing
+/// it would be wrong), authenticate the connection, and return the child id
+/// for the sole stdout line. A `SessionCreated` reply means creation
+/// succeeded regardless of the status snapshot it carries; every refusal
+/// and protocol mismatch is an error and therefore produces no id.
 async fn spawn_session(args: SpawnArgs) -> anyhow::Result<String> {
     use anyhow::Context;
     use farhelm_proto::io::{FrameReader, FrameWriter, handshake_with_session_auth, parse_control};
     use farhelm_proto::{ControlMsg, SessionAuth};
 
     let (session_id, token, socket) = spawn_environment()?;
-    let cwd = if args.cwd.is_absolute() {
+    // `~`-prefixed paths are forwarded verbatim: the SUPERVISOR owns that
+    // contract (SPEC.md — `~` expands against its own home, `~user` is its
+    // refusal to give), and a spawn always targets the same host it runs
+    // on, so nothing is gained by resolving locally. Absolutizing them
+    // here would instead manufacture `<cwd>/~...` — a path that at best
+    // fails as nonexistent and at worst names a real directory literally
+    // called `~user`, silently dodging the supervisor's refusal. Ordinary
+    // relative paths keep resolving against this process's cwd, which is
+    // the spelling a shell user means.
+    let cwd = if args.cwd.is_absolute() || args.cwd.to_str().is_some_and(|c| c.starts_with('~')) {
         args.cwd
     } else {
         std::env::current_dir()

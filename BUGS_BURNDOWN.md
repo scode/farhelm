@@ -12,7 +12,7 @@ the triage suggests any of them is platform-specific.
 
 ## 1. Working directory field rejects `~`
 
-Status: triaged, not started.
+Status: fixed in PR #152 (`pr/tilde-cwd`).
 
 Symptom: creating a session with working directory `~` fails with "working directory is not absolute: ~ (a relative path
 would resolve against the supervisor process, not the client)". `~` should be accepted, resolving to the home of the

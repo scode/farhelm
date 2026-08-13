@@ -131,6 +131,19 @@ pub(crate) async fn handoff_to_new_supervisor(
     sup: Arc<Supervisor>,
     client: Arc<SupervisorClient>,
 ) -> Arc<Supervisor> {
+    handoff_to_new_supervisor_with_seams(state, sup, client, SupervisorSeams::default()).await
+}
+
+/// [`handoff_to_new_supervisor`] with the replacement's seams chosen by
+/// the test — for the cases where the point is that the ENVIRONMENT
+/// changed across the restart (a home that stopped being usable, say)
+/// while the durable record did not.
+pub(crate) async fn handoff_to_new_supervisor_with_seams(
+    state: &std::path::Path,
+    sup: Arc<Supervisor>,
+    client: Arc<SupervisorClient>,
+    seams: SupervisorSeams,
+) -> Arc<Supervisor> {
     drop(client);
     let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
     while Arc::strong_count(&sup) > 1 {
@@ -142,9 +155,14 @@ pub(crate) async fn handoff_to_new_supervisor(
     }
     drop(sup);
     wait_for_state_dir_claim_release(state, deadline).await;
-    let replacement = Supervisor::new_with_exe(state, farhelm_bin().into())
-        .await
-        .expect("the restarted supervisor");
+    let replacement = Supervisor::new_with_seams(
+        state,
+        farhelm_bin().into(),
+        SupervisorTimeouts::default(),
+        seams,
+    )
+    .await
+    .expect("the restarted supervisor");
     assert!(
         replacement.owns_state_dir(),
         "the replacement must hold the state directory's claim, or it reconciles nothing \
@@ -694,6 +712,281 @@ async fn a_reboot_does_not_turn_a_never_launched_intent_into_a_created_one() {
         stored_sessions(state.path()).await.len(),
         1,
         "still one session for one intent"
+    );
+    drop(slot);
+}
+
+/// A settled `~` create replays across a restart into a supervisor with
+/// no usable home — the expand-once rule meeting acceptance 7.
+///
+/// `~` expansion is part of validation, and a replay answers from the
+/// reservation BEFORE validation runs, so an environment change that
+/// would refuse a new `~` create must not un-settle an intent that
+/// already resolved. The unusable home is a RELATIVE path injected
+/// through the seam (this repo's tests never mutate process env), which
+/// expansion refuses outright — so the fresh-create refusal beside the
+/// successful replay is what proves the replay path never consulted the
+/// new home at all.
+#[tokio::test]
+async fn a_settled_tilde_create_replays_after_home_becomes_unusable() {
+    let slot = SLOTS.acquire().await.expect("semaphore is never closed");
+    let state = tempfile::tempdir().expect("tempdir");
+    let _tmux = TmuxServerGuard(state.path().join("tmux.sock"));
+    let home = tempfile::tempdir().expect("home");
+    std::fs::create_dir(home.path().join("ws")).expect("workdir");
+    let sup1 = Supervisor::new_with_seams(
+        state.path(),
+        farhelm_bin().into(),
+        SupervisorTimeouts::default(),
+        SupervisorSeams {
+            user_home: Some(home.path().to_path_buf()),
+            ..SupervisorSeams::default()
+        },
+    )
+    .await
+    .expect("supervisor");
+    let client1 = connect_client(&sup1).await;
+    let first = client1
+        .create_session_with_key(
+            "~/ws",
+            &agent_cmd("internal fake-agent --script basic"),
+            Some("tilde".to_string()),
+            80,
+            24,
+            Some("tilde-settled".to_string()),
+        )
+        .await
+        .expect("a ~ create with a usable home");
+    assert_eq!(first.cwd, home.path().join("ws").to_string_lossy());
+
+    let sup2 = handoff_to_new_supervisor_with_seams(
+        state.path(),
+        sup1,
+        client1,
+        SupervisorSeams {
+            user_home: Some(std::path::PathBuf::from("relative-home")),
+            ..SupervisorSeams::default()
+        },
+    )
+    .await;
+    let client2 = connect_client(&sup2).await;
+    client2
+        .create_session_with_key(
+            "~/ws",
+            &agent_cmd("internal fake-agent --script basic"),
+            Some("tilde".to_string()),
+            80,
+            24,
+            Some("tilde-fresh".to_string()),
+        )
+        .await
+        .expect_err("a NEW ~ create must refuse under an unusable home");
+    let replay = client2
+        .create_session_with_key(
+            "~/ws",
+            &agent_cmd("internal fake-agent --script basic"),
+            Some("tilde".to_string()),
+            80,
+            24,
+            Some("tilde-settled".to_string()),
+        )
+        .await
+        .expect("the settled intent must replay without re-expanding");
+    assert_eq!(
+        replay.id, first.id,
+        "the replay must return the session the first attempt created"
+    );
+    drop(slot);
+}
+
+/// A keyed create refused by `~` expansion is a recorded outcome: the
+/// retry replays the refusal even after the environment gains a perfectly
+/// usable home (acceptance 7 has no precondition exception), and the same
+/// key with a different cwd stays the usual fingerprint `Conflict`.
+///
+/// This is the branch `record_refused_create` grows with expansion: a
+/// refusal that were NOT recorded would let the same key succeed later,
+/// silently turning one intent into different outcomes across retries.
+#[tokio::test]
+async fn a_keyed_tilde_refusal_replays_after_the_home_appears() {
+    let slot = SLOTS.acquire().await.expect("semaphore is never closed");
+    let state = tempfile::tempdir().expect("tempdir");
+    let _tmux = TmuxServerGuard(state.path().join("tmux.sock"));
+    let sup1 = Supervisor::new_with_seams(
+        state.path(),
+        farhelm_bin().into(),
+        SupervisorTimeouts::default(),
+        SupervisorSeams {
+            user_home: Some(std::path::PathBuf::from("relative-home")),
+            ..SupervisorSeams::default()
+        },
+    )
+    .await
+    .expect("supervisor");
+    let client1 = connect_client(&sup1).await;
+    let refused = client1
+        .create_session_with_key(
+            "~/ws",
+            &agent_cmd("internal fake-agent --script basic"),
+            Some("tilde".to_string()),
+            80,
+            24,
+            Some("tilde-doomed".to_string()),
+        )
+        .await
+        .expect_err("~ must refuse when the supervisor's home is unusable");
+    assert!(
+        refused.to_string().contains("home"),
+        "the refusal must name the home problem: {refused:#}"
+    );
+    let refused_kind = refused
+        .downcast_ref::<SupervisorError>()
+        .expect("the refusal carries a SupervisorError")
+        .kind;
+
+    let home = tempfile::tempdir().expect("home");
+    std::fs::create_dir(home.path().join("ws")).expect("workdir");
+    let sup2 = handoff_to_new_supervisor_with_seams(
+        state.path(),
+        sup1,
+        client1,
+        SupervisorSeams {
+            user_home: Some(home.path().to_path_buf()),
+            ..SupervisorSeams::default()
+        },
+    )
+    .await;
+    let client2 = connect_client(&sup2).await;
+    let replayed = client2
+        .create_session_with_key(
+            "~/ws",
+            &agent_cmd("internal fake-agent --script basic"),
+            Some("tilde".to_string()),
+            80,
+            24,
+            Some("tilde-doomed".to_string()),
+        )
+        .await
+        .expect_err("the recorded refusal must replay, not re-validate against the new home");
+    // The replay is the ORIGINAL outcome, kind and message both — a
+    // freshly generated home error would happen to contain "home" too,
+    // and idempotency does not promise "some failure", it promises THAT
+    // failure.
+    assert_eq!(
+        replayed.to_string(),
+        refused.to_string(),
+        "the replay must be byte-for-byte the original refusal"
+    );
+    assert_eq!(
+        replayed
+            .downcast_ref::<SupervisorError>()
+            .expect("the replay carries a SupervisorError")
+            .kind,
+        refused_kind,
+        "the replay must carry the original error kind"
+    );
+    let conflict = client2
+        .create_session_with_key(
+            &home.path().join("ws").to_string_lossy(),
+            &agent_cmd("internal fake-agent --script basic"),
+            Some("tilde".to_string()),
+            80,
+            24,
+            Some("tilde-doomed".to_string()),
+        )
+        .await
+        .expect_err("the same key with a different cwd is a key reuse");
+    assert_eq!(
+        conflict
+            .downcast_ref::<SupervisorError>()
+            .expect("a key-reuse refusal must carry a SupervisorError")
+            .kind,
+        ErrorKind::Conflict,
+    );
+    drop(slot);
+}
+
+/// A PENDING `~` create — crashed after its row was recorded — relaunches
+/// on retry from the STORED expanded cwd, not from a re-expansion of the
+/// request (BUGS_BURNDOWN.md issue 1's crash-recovery hazard).
+///
+/// This is the branch the settled-replay test above cannot reach: a
+/// settled reservation replays before validation, while a pending one
+/// goes through `validate_retry`, and it is `validate_retry`'s use of the
+/// row's cwd that this pins. The replacement supervisor's home is
+/// UNUSABLE on purpose — a retry that re-expanded the request's literal
+/// `~/ws` would refuse (and, per `record_refused_create`'s retry branch,
+/// permanently delete the pending session), so the retry SUCCEEDING in
+/// home A's directory is the whole proof.
+#[tokio::test]
+async fn a_pending_tilde_create_retries_from_the_stored_expansion() {
+    let slot = SLOTS.acquire().await.expect("semaphore is never closed");
+    let state = tempfile::tempdir().expect("tempdir");
+    let _tmux = TmuxServerGuard(state.path().join("tmux.sock"));
+    let home = tempfile::tempdir().expect("home");
+    let workdir = home.path().join("ws");
+    std::fs::create_dir(&workdir).expect("workdir");
+    let sup1 = Supervisor::new_with_seams(
+        state.path(),
+        farhelm_bin().into(),
+        SupervisorTimeouts::default(),
+        SupervisorSeams {
+            user_home: Some(home.path().to_path_buf()),
+            create_crash: Some(crash_at(CreateStage::AfterRecord)),
+            ..SupervisorSeams::default()
+        },
+    )
+    .await
+    .expect("supervisor");
+    let client1 = connect_client(&sup1).await;
+    client1
+        .create_session_with_key(
+            "~/ws",
+            &agent_cmd("internal fake-agent --script basic"),
+            Some("tilde".to_string()),
+            80,
+            24,
+            Some("tilde-pending".to_string()),
+        )
+        .await
+        .expect_err("the injected crash must fail the create");
+    let row = stored_sessions(state.path())
+        .await
+        .into_iter()
+        .next()
+        .expect("the crash left the recorded row behind");
+    assert_eq!(
+        row.cwd,
+        workdir.to_string_lossy(),
+        "the recorded row must hold the EXPANDED cwd"
+    );
+
+    let sup2 = handoff_to_new_supervisor_with_seams(
+        state.path(),
+        sup1,
+        client1,
+        SupervisorSeams {
+            user_home: Some(std::path::PathBuf::from("relative-home")),
+            ..SupervisorSeams::default()
+        },
+    )
+    .await;
+    let client2 = connect_client(&sup2).await;
+    let relaunched = client2
+        .create_session_with_key(
+            "~/ws",
+            &agent_cmd("internal fake-agent --script basic"),
+            Some("tilde".to_string()),
+            80,
+            24,
+            Some("tilde-pending".to_string()),
+        )
+        .await
+        .expect("the pending retry must relaunch from the stored row, never re-expanding");
+    assert_eq!(
+        relaunched.cwd,
+        workdir.to_string_lossy(),
+        "the relaunch runs in home A's expanded directory"
     );
     drop(slot);
 }

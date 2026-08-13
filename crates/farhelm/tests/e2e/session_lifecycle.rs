@@ -1146,6 +1146,135 @@ async fn create_with_relative_cwd_is_rejected() {
     }
 }
 
+/// A `~`-prefixed cwd expands against the SUPERVISOR's home, the session
+/// DURABLY stores the expanded absolute path, and everything derived from
+/// the cwd derives from the expanded form (BUGS_BURNDOWN.md issue 1).
+///
+/// The durable form matters as much as the acceptance: `~` is only safe
+/// because expansion happens once, at create, against a home resolved at
+/// supervisor construction — a stored literal `~` would re-resolve on
+/// every restart and reintroduce exactly the drift the absolute-path rule
+/// exists to prevent. The reply's `cwd` alone cannot prove that (reply
+/// and row are built from the same in-memory value), so a SECOND
+/// supervisor is constructed over the same state dir and asked — a row
+/// holding `~` would surface here. The default titles pin the derivation
+/// point: a title of `ws` (not `~`) means the basename came off the
+/// expanded path. The home comes from the `user_home` seam because this
+/// repo's tests never mutate the test process's environment.
+#[tokio::test]
+async fn create_with_tilde_cwd_expands_against_the_supervisors_home() {
+    let home = tempfile::tempdir().unwrap();
+    let workdir = home.path().join("ws");
+    std::fs::create_dir(&workdir).unwrap();
+    let h = harness_with_seams(
+        SupervisorTimeouts::default(),
+        SupervisorSeams {
+            user_home: Some(home.path().to_path_buf()),
+            ..SupervisorSeams::default()
+        },
+    )
+    .await;
+
+    // The invocation writes its own $PWD: metadata alone cannot prove the
+    // LAUNCH happened in the expanded directory (the row could be right
+    // while tmux was handed something else), but a marker file appearing
+    // inside the expanded path can.
+    let subdir = h
+        .client
+        .create_session("~/ws", "sh -c 'pwd > where-i-ran.txt'", None, 80, 24)
+        .await
+        .expect("a ~/path cwd should be accepted and expanded");
+    assert_eq!(
+        subdir.cwd,
+        workdir.to_string_lossy(),
+        "the stored cwd must be the expanded absolute path, not the literal ~ form"
+    );
+    assert_eq!(
+        subdir.title, "ws",
+        "the default title derives from the EXPANDED path's basename"
+    );
+    let marker = workdir.join("where-i-ran.txt");
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(20);
+    loop {
+        if let Ok(contents) = std::fs::read_to_string(&marker) {
+            assert_eq!(
+                contents.trim(),
+                workdir.to_string_lossy(),
+                "the agent's own $PWD must be the expanded directory"
+            );
+            break;
+        }
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "the launch never ran in the expanded directory (no marker at {marker:?})"
+        );
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+
+    let bare = h
+        .client
+        .create_session("~", "true", None, 80, 24)
+        .await
+        .expect("a bare ~ cwd should be accepted and expanded");
+    assert_eq!(
+        bare.cwd,
+        home.path().to_string_lossy(),
+        "a bare ~ is the home directory itself"
+    );
+    assert_eq!(
+        bare.title,
+        home.path()
+            .file_name()
+            .expect("a tempdir has a basename")
+            .to_string_lossy(),
+        "a bare ~ create's default title is the home directory's basename, not ~"
+    );
+
+    let sup2 = Supervisor::new_with_exe(h.state.path(), farhelm_bin().into())
+        .await
+        .expect("second supervisor construction reading the same state dir");
+    let client2 = connect_client(&sup2).await;
+    let listed = client2.list_sessions().await.unwrap().sessions;
+    let stored = listed
+        .iter()
+        .find(|s| s.id == subdir.id)
+        .expect("the ~/ws session is durably present");
+    assert_eq!(
+        stored.cwd,
+        workdir.to_string_lossy(),
+        "a fresh supervisor must see the expanded path — the durable row, not the reply"
+    );
+}
+
+/// A `~user` cwd is refused with a message naming the supported forms —
+/// not mangled into a bogus expansion, and not the generic "not absolute"
+/// refusal that would send the user hunting for a typo.
+#[tokio::test]
+async fn create_with_tilde_user_cwd_is_rejected() {
+    let h = harness().await;
+    let err = h
+        .client
+        .create_session("~other/ws", "true", None, 80, 24)
+        .await
+        .expect_err("a ~user cwd must be refused");
+    let message = err.to_string();
+    assert!(
+        message.contains("~other") && message.contains("~/path"),
+        "the refusal must name the offending path and the supported forms: {message}"
+    );
+    assert_eq!(
+        err.downcast_ref::<SupervisorError>()
+            .expect("a ~user refusal must carry a SupervisorError")
+            .kind,
+        ErrorKind::InvalidRequest,
+        "a ~user cwd is the caller's mistake, not a server fault"
+    );
+    assert!(
+        h.client.list_sessions().await.unwrap().sessions.is_empty(),
+        "a rejected create must not have created a session"
+    );
+}
+
 /// An existing file is a different caller error from a missing path.
 /// Keeping that distinction visible prevents a correct path from being
 /// misdiagnosed as a typo.
