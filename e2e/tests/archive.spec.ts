@@ -3,7 +3,7 @@
 // view, and restart as the route back.
 
 import { expect, Page, test } from "@playwright/test";
-import { cleanupSession, createSession } from "./helpers/fleet";
+import { cleanupSession, createSession, openRowMenu } from "./helpers/fleet";
 
 /** Find one session by its opaque server id, independent of title changes. */
 function row(page: Page, id: string) {
@@ -42,6 +42,7 @@ test("the row confirmation names every live thing and the toggle reveals the arc
     await page.goto("/");
     const target = row(page, session.id);
     await expect(target).toBeVisible({ timeout: 20_000 });
+    await openRowMenu(target);
     await target.locator(".session-row-archive").click();
     await expect(target.locator(".confirm-consequence")).toContainText("agent");
     await expect(target.locator(".confirm-consequence")).toContainText("whole process tree");
@@ -56,9 +57,13 @@ test("the row confirmation names every live thing and the toggle reveals the arc
     await expect(row(page, session.id)).toBeVisible({ timeout: 20_000 });
     await expect(row(page, session.id)).toHaveAttribute("data-session-archived", "true");
     await expect(row(page, session.id).locator(".archived-badge")).toHaveText("archived");
+    await expect(row(page, session.id).locator(".session-row-open")).toBeEnabled();
+    // The lifecycle controls live in the actions menu now; opening it is
+    // what makes "stop and archive are gone, rename and delete remain"
+    // observable rather than vacuously true of a closed panel.
+    await openRowMenu(row(page, session.id));
     await expect(row(page, session.id).locator(".session-row-stop")).toHaveCount(0);
     await expect(row(page, session.id).locator(".session-row-archive")).toHaveCount(0);
-    await expect(row(page, session.id).locator(".session-row-open")).toBeEnabled();
     await expect(row(page, session.id).locator(".session-row-rename")).toBeEnabled();
     await expect(row(page, session.id).locator(".session-row-delete")).toBeEnabled();
   } finally {
@@ -84,11 +89,15 @@ test("cancelling a row archive restores every competing control without a reques
     await page.goto("/");
     const target = row(page, session.id);
     await expect(target).toBeVisible({ timeout: 20_000 });
+    await openRowMenu(target);
     await target.locator(".session-row-archive").click();
 
     await expect(target.locator(".confirm-archive")).toBeVisible();
+    // The confirm replaces the menu's items inside the panel; the open
+    // button stays visible (the panel floats over the list instead of
+    // competing for the row's space) but is inert until the prompt is
+    // answered — cancel is the only way back to normal.
     await expect(target.locator(".session-row-open")).toBeDisabled();
-    await expect(target.locator(".session-row-open")).toBeHidden();
     await expect(target.locator(".session-row-stop")).toHaveCount(0);
     await expect(target.locator(".session-row-archive")).toHaveCount(0);
     await expect(target.locator(".session-row-rename")).toHaveCount(0);
@@ -117,6 +126,7 @@ test("an included row stays visible while its archive state changes", async ({ p
 
     const target = row(page, session.id);
     await expect(target).toBeVisible({ timeout: 20_000 });
+    await openRowMenu(target);
     await target.locator(".session-row-archive").click();
     await target.locator(".confirm-archive").click();
 
@@ -176,6 +186,7 @@ test("a refused row archive keeps the row and restores its controls", async ({ p
     await page.goto("/");
     const target = row(page, session.id);
     await expect(target).toBeVisible({ timeout: 20_000 });
+    await openRowMenu(target);
     await target.locator(".session-row-archive").click();
     await target.locator(".confirm-archive").click();
     await expect(target.locator(".action-error")).toContainText("archive-row-refusal-sentinel");

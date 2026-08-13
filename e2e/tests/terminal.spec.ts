@@ -48,7 +48,7 @@
 // feed is healthy" means, and a second definition of that would drift from
 // the one the feed's own spec asserts against.
 import { test, expect, Page, APIRequestContext } from "@playwright/test";
-import { stubFeed } from "./helpers/fleet";
+import { stubFeed, openRowMenu } from "./helpers/fleet";
 import {
   DEVICE_SECRET_KEY,
   requireProductPageAuth,
@@ -2075,6 +2075,7 @@ test("multi-session flow: create two, open and type in one, stop and delete the 
     // JSON, and lands in the DOM. Asserted on `.status-badge.exited` so
     // the CSS class rides with it: a stopped session must still LOOK like
     // an ended one.
+    await openRowMenu(rowByTitle(page, titleB));
     await rowByTitle(page, titleB)
       .locator(".session-row-stop")
       .click();
@@ -2102,6 +2103,7 @@ test("multi-session flow: create two, open and type in one, stop and delete the 
       await deleteBHeld;
       await route.continue();
     });
+    await openRowMenu(rowByTitle(page, titleB));
     await rowByTitle(page, titleB)
       .locator(".session-row-delete")
       .click();
@@ -2115,6 +2117,7 @@ test("multi-session flow: create two, open and type in one, stop and delete the 
     // Delete session A (still alive): confirmation expected, wording
     // must say the agent is still running (SPEC.md: "confirmation that
     // says so when anything is still alive").
+    await openRowMenu(rowByTitle(page, titleA));
     await rowByTitle(page, titleA)
       .locator(".session-row-delete")
       .click();
@@ -2340,6 +2343,7 @@ test("alive delete opens an inline confirming state with the is-still-running wo
     await expect(row.locator(".status-badge")).toHaveText(LIVE_BADGE, {
       timeout: 10_000,
     });
+    await openRowMenu(row);
     await row.locator(".session-row-delete").click();
 
     // The prompt carries the exact consequence wording (the untruncatable
@@ -2354,19 +2358,14 @@ test("alive delete opens an inline confirming state with the is-still-running wo
     // the prompt — `SessionRow` swaps them out entirely.
     await expect(row.locator(".session-row-stop")).toHaveCount(0);
     await expect(row.locator(".session-row-delete")).toHaveCount(0);
-    // The open button stays present (cancel is the only way back to
-    // normal, not an implicit click on open — see `SessionRow`'s doc) but
-    // both disabled AND hidden. MT-8 regression: it used to stay visible
-    // and merely disabled, and its title/cwd/invocation content — each
-    // with its own non-shrinking `min-width` floor — overflowed the
-    // narrower box the confirm prompt's own elements left it and painted
-    // over that prompt instead of being replaced by it. `toBeHidden`
-    // pins the fix deterministically without needing pixel inspection:
-    // app.css's `.session-row-open.prompting` rule is what makes this true
-    // (one modifier for both prompts a row can hold — the delete
-    // confirmation here, and the rename field of PLAN_M5.md item 6).
+    // The open button stays present and visible but disabled (cancel is
+    // the only way back to normal, not an implicit click on open — see
+    // `SessionRow`'s doc). The confirm prompt lives in the floating
+    // actions panel now, so it no longer competes with the open button
+    // for the row's space — the MT-8 overflow that once forced the
+    // button to be hidden outright cannot recur by construction.
     await expect(row.locator(".session-row-open")).toBeDisabled();
-    await expect(row.locator(".session-row-open")).toBeHidden();
+    await expect(row.locator(".session-row-open")).toBeVisible();
     expect(deleteRequests).toBe(0);
 
     // Cancel: the row returns to normal, with no DELETE ever sent and the
@@ -2425,6 +2424,7 @@ test("confirming an inline delete prompt deletes the session with exactly one DE
     await expect(row.locator(".status-badge")).toHaveText(LIVE_BADGE, {
       timeout: 10_000,
     });
+    await openRowMenu(row);
     await row.locator(".session-row-delete").click();
     await expect(row.locator(".confirm-consequence")).toBeVisible();
     await row.locator(".confirm-delete").click();
@@ -2481,6 +2481,7 @@ test("exited session deletes immediately with no confirming state", async ({
       timeout: 10_000,
     });
 
+    await openRowMenu(row);
     await row.locator(".session-row-delete").click();
     // The DELETE is stalled, so the row is still here — and, while it
     // is, the confirm prompt has never appeared at all, a synchronous
@@ -2537,6 +2538,7 @@ test("delete confirmation safely displays a title containing executable HTML wit
     await expect(row.locator(".status-badge")).toHaveText(LIVE_BADGE, {
       timeout: 10_000,
     });
+    await openRowMenu(row);
     await row.locator(".session-row-delete").click();
 
     await expect(row.locator(".confirm-consequence")).toHaveText(
@@ -2598,6 +2600,7 @@ test("a legal multi-KB, unbroken title keeps the consequence text intact and cli
     await expect(row.locator(".status-badge")).toHaveText(LIVE_BADGE, {
       timeout: 10_000,
     });
+    await openRowMenu(row);
     await row.locator(".session-row-delete").click();
 
     // The safety-critical consequence half renders in full, exact text —
@@ -2619,33 +2622,47 @@ test("a legal multi-KB, unbroken title keeps the consequence text intact and cli
     // Both buttons stay on screen, reachable...
     await expect(row.locator(".confirm-delete")).toBeInViewport();
     await expect(row.locator(".confirm-cancel")).toBeInViewport();
-    // ...and not overlapping the (massively wide, if unclipped) title —
-    // a real geometry check, not just individual visibility.
-    const [titleBox, confirmBox, cancelBox] = await Promise.all([
+    // ...and undisturbed by the (massively wide, if unclipped) title — a
+    // real geometry check, not just individual visibility. The confirm
+    // lives in the floating actions panel, a COLUMN: the title gets a
+    // line of its own ABOVE the buttons and must ellipsize inside the
+    // panel's width rather than forcing the panel (and the buttons' line)
+    // wide or painting over them.
+    const [panelBox, titleBox, confirmBox, cancelBox] = await Promise.all([
+      row.locator(".session-row-menu-panel").boundingBox(),
       row.locator(".confirm-title").boundingBox(),
       row.locator(".confirm-delete").boundingBox(),
       row.locator(".confirm-cancel").boundingBox(),
     ]);
+    expect(panelBox).not.toBeNull();
     expect(titleBox).not.toBeNull();
     expect(confirmBox).not.toBeNull();
     expect(cancelBox).not.toBeNull();
-    expect(titleBox!.x + titleBox!.width).toBeLessThanOrEqual(confirmBox!.x + 1);
-    expect(confirmBox!.x + confirmBox!.width).toBeLessThanOrEqual(cancelBox!.x + 1);
-
-    // The direct CSS contract: both buttons keep their natural
-    // (un-shrunk) box — `flex-shrink: 0` is what a reviewer removing
-    // either declaration would see fail here immediately, rather than
-    // this test depending on emergent flex-overflow arithmetic to notice.
-    const [confirmShrink, cancelShrink] = await Promise.all([
-      row
-        .locator(".confirm-delete")
-        .evaluate((el) => getComputedStyle(el).flexShrink),
-      row
-        .locator(".confirm-cancel")
-        .evaluate((el) => getComputedStyle(el).flexShrink),
-    ]);
-    expect(confirmShrink).toBe("0");
-    expect(cancelShrink).toBe("0");
+    /** All four edges inside the container — one-edge checks let a box
+     * overlap a sibling or escape on an unchecked side and still pass. */
+    const inside = (name: string, box: NonNullable<typeof panelBox>) => {
+      expect(box.x, `${name} left edge`).toBeGreaterThanOrEqual(panelBox!.x - 1);
+      expect(box.x + box.width, `${name} right edge`).toBeLessThanOrEqual(
+        panelBox!.x + panelBox!.width + 1,
+      );
+      expect(box.y, `${name} top edge`).toBeGreaterThanOrEqual(panelBox!.y - 1);
+      expect(box.y + box.height, `${name} bottom edge`).toBeLessThanOrEqual(
+        panelBox!.y + panelBox!.height + 1,
+      );
+    };
+    // The clipped title stays fully inside the panel WITH a real height:
+    // the shared `.confirm-title` rule's zero flex basis once collapsed
+    // it to an invisible zero-height box in this column container (the
+    // panel-scoped `flex: none` in app.css is the fix this pins).
+    inside("title", titleBox!);
+    expect(titleBox!.height).toBeGreaterThan(5);
+    // On its own line above both buttons, never overlapping them...
+    expect(titleBox!.y + titleBox!.height).toBeLessThanOrEqual(confirmBox!.y + 1);
+    // ...the buttons stacked in order (confirm above cancel), each fully
+    // inside the panel and not overlapping each other.
+    inside("confirm", confirmBox!);
+    inside("cancel", cancelBox!);
+    expect(confirmBox!.y + confirmBox!.height).toBeLessThanOrEqual(cancelBox!.y + 1);
   } finally {
     await request.post(`/api/sessions/${id}/stop`).catch(() => {});
     await request.delete(`/api/sessions/${id}`).catch(() => {});
@@ -2727,6 +2744,7 @@ test("an inline confirming state survives a listing refresh; cancel still works 
     await expect(row.locator(".status-badge")).toHaveText(LIVE_BADGE, {
       timeout: 10_000,
     });
+    await openRowMenu(row);
     await row.locator(".session-row-delete").click();
     await expect(row.locator(".confirm-title")).toHaveText(`"${title}"`);
 
@@ -2790,17 +2808,37 @@ test("one row's confirming state does not affect another row's controls", async 
       timeout: 10_000,
     });
 
+    await openRowMenu(rowA);
     await rowA.locator(".session-row-delete").click();
     await expect(rowA.locator(".confirm-consequence")).toBeVisible();
 
-    // B is completely untouched: still its normal stop/delete pair, both
-    // enabled, and no confirm prompt of its own.
+    // B is completely untouched: opening ITS menu (which, menus being a
+    // one-at-a-time slot, closes A's panel) shows the normal stop/delete
+    // pair, both enabled, and no confirm prompt of its own. The slot
+    // itself is asserted, not just implied: A's panel must be GONE and
+    // its toggle must say so — two independently open menus would pass
+    // every other check here.
+    await openRowMenu(rowB);
+    await expect(rowA.locator(".session-row-menu-panel")).toHaveCount(0);
+    await expect(rowA.locator(".session-row-menu")).toHaveAttribute("aria-expanded", "false");
     await expect(rowB.locator(".confirm-consequence")).toHaveCount(0);
     await expect(rowB.locator(".session-row-stop")).toBeEnabled();
     await expect(rowB.locator(".session-row-delete")).toBeEnabled();
     await expect(rowB.locator(".session-row-open")).toBeEnabled();
 
+    // A's confirming state is per-row and independent of which panel is
+    // open: reopening A's menu must land back on the pending prompt, not
+    // reset to the action items — and take the one-open slot back from B.
+    await openRowMenu(rowA);
+    await expect(rowB.locator(".session-row-menu-panel")).toHaveCount(0);
+    await expect(rowA.locator(".confirm-consequence")).toBeVisible();
     await rowA.locator(".confirm-cancel").click();
+
+    // The toggle's own close branch, exercised directly: clicking an
+    // already-open menu's toggle closes it rather than reopening.
+    await rowA.locator(".session-row-menu").click();
+    await expect(rowA.locator(".session-row-menu-panel")).toHaveCount(0);
+    await expect(rowA.locator(".session-row-menu")).toHaveAttribute("aria-expanded", "false");
   } finally {
     for (const id of [idA, idB]) {
       await request.post(`/api/sessions/${id}/stop`).catch(() => {});
@@ -2839,6 +2877,7 @@ test("an alive-to-exited status change under an open confirm prompt keeps confir
     await expect(row.locator(".status-badge")).toHaveText(LIVE_BADGE, {
       timeout: 10_000,
     });
+    await openRowMenu(row);
     await row.locator(".session-row-delete").click();
     await expect(row.locator(".confirm-consequence")).toContainText("running");
     await expect(row.locator(".confirm-title")).toHaveText(`"${title}"`);
@@ -2927,6 +2966,7 @@ test("a failed listing read while confirming does not clear the confirming state
     await expect(row.locator(".status-badge")).toHaveText(LIVE_BADGE, {
       timeout: 10_000,
     });
+    await openRowMenu(row);
     await row.locator(".session-row-delete").click();
     await expect(row.locator(".confirm-title")).toHaveText(`"${title}"`);
 
@@ -3164,6 +3204,7 @@ test("deleting a session with unknown status confirms first, with wording that a
   // badge rather than a missing row.
   await expect(row.locator(".session-title")).toHaveText(sessionId);
   await expect(row.locator(".status-badge")).toHaveCount(0);
+  await openRowMenu(row);
   await row.locator(".session-row-delete").click();
 
   // Confirms before any DELETE: since there is no async eval in the way
@@ -3272,6 +3313,7 @@ test("stop and delete failures surface in the row's own error line, without dist
         body: "stop-failure-sentinel",
       }),
     );
+    await openRowMenu(row);
     await row.locator(".session-row-stop").click();
     await expect(row.locator(".action-error")).toContainText(
       "stop-failure-sentinel",
@@ -3295,6 +3337,7 @@ test("stop and delete failures surface in the row's own error line, without dist
     });
     // Still alive, so delete opens the inline confirm prompt first —
     // click through it the same way a real user would.
+    await openRowMenu(row);
     await row.locator(".session-row-delete").click();
     await row.locator(".confirm-delete").click();
     await expect(row.locator(".action-error")).toContainText(
@@ -3351,9 +3394,11 @@ test("a failed action's error is keyed to its own session, not shared across row
         body: "error-a-sentinel",
       }),
     );
+    await openRowMenu(rowA);
     await rowA.locator(".session-row-stop").click();
     await expect(rowA.locator(".action-error")).toContainText("error-a-sentinel");
 
+    await openRowMenu(rowB);
     await rowB.locator(".session-row-stop").click();
     // "exited — stopped by user": the durable stop annotation qualifies
     // the exited badge (PLAN_M3.md item 4, SPEC.md's "'stopped' is not a
@@ -3371,6 +3416,7 @@ test("a failed action's error is keyed to its own session, not shared across row
     // Retrying A (now unintercepted) must succeed and clear ONLY A's
     // error — B's (already-empty) state is untouched by this too.
     await page.unroute(`**/api/sessions/${idA}/stop`);
+    await openRowMenu(rowA);
     await rowA.locator(".session-row-stop").click();
     await expect(rowA.locator(".status-badge")).toHaveText(
       /^exited — stopped by user/,
@@ -3410,15 +3456,23 @@ test("stop's in-flight guard disables this row's stop, delete, and open, while a
   const { id: idA } = await createdA.json();
   const { id: idB } = await createdB.json();
 
-  // Delayed, then let through with `route.continue()` — NOT fulfilled
-  // here: this route needs the REAL stop to actually reach the
-  // supervisor and kill session A's real `sleep 300`, or its badge would
-  // never flip to exited below and the test could never distinguish "the
-  // guard is working" from "the request never even landed".
+  // Held until this test releases it, then let through with
+  // `route.continue()` — NOT fulfilled here: this route needs the REAL
+  // stop to actually reach the supervisor and kill session A's real
+  // `sleep 300`, or its badge would never flip to exited below and the
+  // test could never distinguish "the guard is working" from "the
+  // request never even landed". An explicit release rather than a fixed
+  // delay because the in-flight window now has to cover opening B's
+  // actions panel between assertions, which takes render round-trips a
+  // timer can only outguess.
   let stopRequests = 0;
+  let releaseStop: () => void = () => {};
+  const stopHeld = new Promise<void>((resolve) => {
+    releaseStop = resolve;
+  });
   await page.route(`**/api/sessions/${idA}/stop`, async (route) => {
     stopRequests++;
-    await new Promise((resolve) => setTimeout(resolve, 800));
+    await stopHeld;
     await route.continue();
   });
 
@@ -3432,6 +3486,10 @@ test("stop's in-flight guard disables this row's stop, delete, and open, while a
     await expect(rowB.locator(".status-badge")).toHaveText(LIVE_BADGE, {
       timeout: 10_000,
     });
+
+    // The stop button only exists in the DOM while A's actions panel is
+    // open — the bare DOM clicks below cannot open it for us.
+    await openRowMenu(rowA);
 
     // Two native clicks dispatched synchronously in the same JS tick:
     // Playwright's own `.click()` waits for an element to be enabled
@@ -3448,18 +3506,26 @@ test("stop's in-flight guard disables this row's stop, delete, and open, while a
       btn?.click();
       btn?.click();
     }, idA);
+    // The double click must have produced exactly one request BEFORE the
+    // lock assertions run: a silently-missed click (a not-yet-mounted
+    // panel button, say) would leave every row idle and let the disabled
+    // checks below fail confusingly far from the cause.
+    await expect.poll(() => stopRequests).toBe(1);
 
     // While the delayed stop is in flight: A's own controls are locked...
     await expect(rowA.locator(".session-row-stop")).toBeDisabled();
     await expect(rowA.locator(".session-row-delete")).toBeDisabled();
     await expect(rowA.locator(".session-row-open")).toBeDisabled();
-    // ...B's stop/delete (per-session) are unaffected...
+    // ...B's stop/delete (per-session) are unaffected — switching the
+    // one-at-a-time menu slot to B's panel is what makes them visible...
+    await openRowMenu(rowB);
     await expect(rowB.locator(".session-row-stop")).toBeEnabled();
     await expect(rowB.locator(".session-row-delete")).toBeEnabled();
     // ...but B's open is ALSO disabled — the nav lock is global, not
     // scoped to whichever session happens to be busy.
     await expect(rowB.locator(".session-row-open")).toBeDisabled();
 
+    releaseStop();
     await expect
       .poll(() => rowA.locator(".status-badge").textContent(), {
         timeout: 10_000,
@@ -3468,13 +3534,18 @@ test("stop's in-flight guard disables this row's stop, delete, and open, while a
 
     // Everything is usable again once the operation completes, and only
     // ONE request ever reached the route — the second click was rejected
-    // by the guard, not merely delayed behind the first.
+    // by the guard, not merely delayed behind the first. A's panel was
+    // displaced by B's above, so bring it back before inspecting it.
+    await openRowMenu(rowA);
     await expect(rowA.locator(".session-row-stop")).toBeEnabled();
     await expect(rowA.locator(".session-row-delete")).toBeEnabled();
     await expect(rowA.locator(".session-row-open")).toBeEnabled();
     await expect(rowB.locator(".session-row-open")).toBeEnabled();
     expect(stopRequests).toBe(1);
   } finally {
+    // Unconditional: a failed assertion above must not leave the page's
+    // stop request parked on the held route.
+    releaseStop();
     for (const id of [idA, idB]) {
       await request.post(`/api/sessions/${id}/stop`).catch(() => {});
       await request.delete(`/api/sessions/${id}`).catch(() => {});
@@ -3546,6 +3617,9 @@ test("rapid stop/delete clicks on the same row never let a confirmed delete sile
     });
 
     // Ordering 1 (session A): delete, then stop, dispatched together.
+    // The buttons only exist inside an open actions panel, so the panel
+    // must be open before the bare DOM clicks can find them.
+    await openRowMenu(rowA);
     await page.evaluate((id) => {
       const row = document.querySelector(`[data-session-id="${id}"]`)!;
       row.querySelector<HTMLButtonElement>(".session-row-delete")?.click();
@@ -3566,6 +3640,7 @@ test("rapid stop/delete clicks on the same row never let a confirmed delete sile
     expect(stopRequestsA).toBe(0);
 
     // Ordering 2 (session B): stop, then delete, dispatched together.
+    await openRowMenu(rowB);
     await page.evaluate((id) => {
       const row = document.querySelector(`[data-session-id="${id}"]`)!;
       row.querySelector<HTMLButtonElement>(".session-row-stop")?.click();
@@ -3625,6 +3700,7 @@ test("dispatching cancel and confirm in the same tick never deletes the session"
     await expect(row.locator(".status-badge")).toHaveText(LIVE_BADGE, {
       timeout: 10_000,
     });
+    await openRowMenu(row);
     await row.locator(".session-row-delete").click();
     await expect(row.locator(".confirm-consequence")).toBeVisible();
 
@@ -3680,6 +3756,7 @@ test("the confirm prompt focuses cancel on open; Enter closes it without deletin
     await expect(row.locator(".status-badge")).toHaveText(LIVE_BADGE, {
       timeout: 10_000,
     });
+    await openRowMenu(row);
     await row.locator(".session-row-delete").click();
     await expect(row.locator(".confirm-consequence")).toBeVisible();
 
@@ -3889,6 +3966,7 @@ test("an interrupted session shows its badge and deletes without confirming", as
     { timeout: 10_000 },
   );
 
+  await openRowMenu(row);
   await row.locator(".session-row-delete").click();
   // The DELETE is stalled, so the row is still on screen — and while it
   // is, no confirmation controls exist at all.
@@ -3962,6 +4040,7 @@ test("an error session shows its badge with detail and deletes without confirmin
     { timeout: 10_000 },
   );
 
+  await openRowMenu(row);
   await row.locator(".session-row-delete").click();
   // The DELETE is stalled, so the row is still on screen — and while it
   // is, no confirmation controls exist at all: the agent's own exec never
@@ -4012,6 +4091,7 @@ test("a long error detail clips the badge without pushing the delete button out 
   const clips = await badge.evaluate((el) => el.scrollWidth > el.clientWidth);
   expect(clips).toBe(true);
 
+  await openRowMenu(row);
   const deleteButton = row.locator(".session-row-delete");
   await expect(deleteButton).toBeVisible();
   const box = await deleteButton.boundingBox();
@@ -10414,6 +10494,7 @@ test("rename-from-list: the row takes the new title and keeps it across re-reads
     feed.notify(revision);
     const row = page.locator(`[data-session-id="${id}"]`);
     await expect(row).toBeVisible({ timeout: 15_000 });
+    await openRowMenu(row);
     await row.locator(".session-row-rename").click();
     // The field opens seeded with the current title, which is what makes
     // renaming an edit rather than a retype.
@@ -10533,6 +10614,7 @@ test("rename-refused: a control-character title shows the supervisor's words and
     await page.goto("/");
     const row = page.locator(`[data-session-id="${id}"]`);
     await expect(row).toBeVisible({ timeout: 15_000 });
+    await openRowMenu(row);
     await row.locator(".session-row-rename").click();
     await row.locator(".rename-input").fill(refused);
     await row.locator(".rename-submit").click();
@@ -10910,6 +10992,7 @@ test("rename-draft-survives-a-failed-read: the field keeps what was typed", asyn
     feed.notify(1);
     const row = page.locator(`[data-session-id="${id}"]`);
     await expect(row).toBeVisible({ timeout: 15_000 });
+    await openRowMenu(row);
     await row.locator(".session-row-rename").click();
     await row.locator(".rename-input").fill(draft);
 
@@ -13907,6 +13990,7 @@ test.describe("multi-host", () => {
       // The controls are deliberately still live on a stale row: the
       // helm's refusal is a better answer than a disabled button that
       // explains nothing.
+      await openRowMenu(row);
       await row.locator(".session-row-stop").click();
 
       const error = row.locator(".action-error");

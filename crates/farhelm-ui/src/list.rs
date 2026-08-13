@@ -100,6 +100,10 @@ struct RowState {
     confirming_archive: bool,
     renaming: bool,
     nav_disabled: bool,
+    /// Whether this row's actions menu is the (at most one) open one —
+    /// the hosts panel's `profiles_open` shape, derived from `ListView`'s
+    /// `menu_open` signal.
+    menu_open: bool,
 }
 
 /// Which ordinary row controls exist for the current retention state.
@@ -121,6 +125,32 @@ fn row_control_visibility(archived: bool) -> RowControlVisibility {
         stop: !archived,
         archive: !archived,
         delete: true,
+    }
+}
+
+/// The row menu toggle's accessible name: the session's identity, clamped.
+///
+/// Every row renders an identical "⋯" toggle, so the NAME is the only
+/// thing assistive technology can distinguish the buttons by — an
+/// unnamed toggle invites renaming or deleting the wrong session. The
+/// clamp exists because a title has no length bound (tens of KB is
+/// legal) and an accessible name is read aloud in full; 64 characters
+/// is plenty to tell sessions apart, and the ellipsis says something
+/// was cut. Char-based, not byte-based, so a multi-byte title can never
+/// split a codepoint.
+fn menu_label(title: &str) -> String {
+    const MAX_CHARS: usize = 64;
+    let mut clamped: String = title.chars().take(MAX_CHARS + 1).collect();
+    if clamped.chars().count() > MAX_CHARS {
+        clamped.truncate(
+            clamped
+                .char_indices()
+                .nth(MAX_CHARS)
+                .map_or(clamped.len(), |(i, _)| i),
+        );
+        format!("session actions for {clamped}…")
+    } else {
+        format!("session actions for {clamped}")
     }
 }
 
@@ -612,6 +642,14 @@ pub(crate) fn ListView(
     // mutual exclusion explicit instead of overloading one flag with an
     // action kind that every handler would then have to decode.
     let mut confirming_archive = use_signal(HashSet::<String>::new);
+    // At most one row's actions menu is open, and this parent owns which —
+    // the hosts panel's `profiles_open` shape (see that component), copied
+    // for the same reason: a per-row boolean would let two menus fight,
+    // and the parent is the only place "opening yours closes mine" can
+    // live. Defined up here with the other row-scoped UI state because
+    // `commit_listing` reconciles it (a menu whose row left the listing
+    // must not reappear, already open, when the row comes back).
+    let mut menu_open = use_signal(|| None::<String>);
     // Which row, if any, has its rename field open (PLAN_M5.md item 6),
     // and the text being typed into it.
     //
@@ -833,6 +871,25 @@ pub(crate) fn ListView(
             // carries none at all, so it can neither confirm nor contradict
             // an optimistic rename.
             settle_optimistic_renames(&mut renamed.write(), &listing.sessions, index);
+            // An open actions menu closes the moment its row leaves the
+            // RENDERED list — any committed reply counts, filtered or
+            // not, unlike the fleet-absence retains below (a title filter
+            // is not evidence a session left the fleet, but it absolutely
+            // removes the row this transient popup was anchored to).
+            // Left set, the panel would reappear already open if the row
+            // later returned — a popup nobody re-requested, exposing
+            // controls for a session whose state changed while it was
+            // gone. Confirmation and rename state deliberately DO
+            // survive this (they are answers-in-progress, and the suite
+            // pins that a refresh cannot revert them); the menu is just
+            // a lens.
+            let menu_vanished = menu_open
+                .read()
+                .as_ref()
+                .is_some_and(|id| !listing.sessions.iter().any(|s| s.id == *id));
+            if menu_vanished {
+                menu_open.set(None);
+            }
         }
         // Everything below reads ABSENCE, so it needs a read with standing
         // AND a reply that covers the fleet — and a successful one, since an
@@ -1389,6 +1446,15 @@ pub(crate) fn ListView(
     // `do_delete` regardless, which for the cancel-then-confirm race
     // would delete a session the user just told the UI to leave alone.
     let confirm_delete = move |id: String| {
+        // Refused OUTRIGHT while the shared token is held, BEFORE the
+        // confirming flag is touched: `do_delete`'s own `begin_row_op`
+        // would refuse anyway, but by then the flag is gone and the
+        // prompt has silently dismissed itself with nothing deleted —
+        // the confirmation must survive a refusal so the user can answer
+        // it again once the other pane's operation finishes.
+        if ops.busy_now() {
+            return;
+        }
         if !confirming.write().remove(&id) {
             return;
         }
@@ -1453,6 +1519,11 @@ pub(crate) fn ListView(
         }
     };
     let confirm_archive = move |id: String| {
+        // Same shared-token refusal as `confirm_delete`, for the same
+        // keep-the-prompt reason.
+        if ops.busy_now() {
+            return;
+        }
         if confirming_archive.write().remove(&id) {
             do_archive(id);
         }
@@ -1574,6 +1645,10 @@ pub(crate) fn ListView(
     // no hook depends on fleet size and unchanged rows remain memoized when
     // their parent refreshes.
     let guarded_open = use_callback(guarded_open);
+    let toggle_menu = use_callback(move |id: String| {
+        let currently = menu_open.peek().as_deref() == Some(id.as_str());
+        menu_open.set(if currently { None } else { Some(id) });
+    });
     let on_stop = use_callback(on_stop);
     let on_delete = use_callback(on_delete);
     let confirm_delete = use_callback(confirm_delete);
@@ -1938,6 +2013,8 @@ pub(crate) fn ListView(
                                     renaming: renaming.read().as_deref()
                                         == Some(session.id.as_str()),
                                     nav_disabled: nav_locked,
+                                    menu_open: menu_open.read().as_deref()
+                                        == Some(session.id.as_str()),
                                 },
                                 rename_draft,
                                 on_open: guarded_open,
@@ -1949,6 +2026,7 @@ pub(crate) fn ListView(
                                 on_confirm_archive: confirm_archive,
                                 on_cancel_archive: cancel_archive,
                                 on_rename_start,
+                                on_menu_toggle: toggle_menu,
                                 on_rename_submit,
                                 // The draft is deliberately left alone: the
                                 // next open reseeds it from the current row.
@@ -2821,25 +2899,27 @@ fn CreateSessionForm(
     }
 }
 
-/// One row: a plain `<div>` wrapper around three real `<button>`s (open,
-/// stop, delete) rather than a `div` with `role`/`tabindex`/a hand-rolled
-/// `onkeydown` — every action gets Enter- and Space-activation, focus
-/// styling, and screen-reader semantics for free from being a real
-/// button, and none of it needs reimplementing here (a hand-rolled div
-/// also had a latent bug: Space on a focused element scrolls the page
-/// unless the handler prevents default, which native button activation
-/// never triggers in the first place).
+/// One row, in two layers. The row itself is a plain `<div>` wrapper
+/// around two real `<button>`s — the open button (the session's stacked
+/// title/host/cwd/invocation lines) and the small "⋯" actions-menu
+/// toggle beside it. Everything else — rename, stop, archive, delete,
+/// and their confirm prompts — mounts inside the floating panel the
+/// toggle anchors, and only while that panel is open. Real buttons
+/// rather than a `div` with `role`/`tabindex`/a hand-rolled `onkeydown`:
+/// every action gets Enter- and Space-activation, focus styling, and
+/// screen-reader semantics for free (a hand-rolled div also had a latent
+/// bug: Space on a focused element scrolls the page unless the handler
+/// prevents default, which native button activation never triggers).
 ///
-/// The wrapper is a `div`, not a `button`, because M1's whole-row button
-/// cannot host the stop/delete actions PLAN_M2.md step 8 adds: HTML
-/// forbids interactive content nested inside a `<button>`, so a `<button
-/// class="session-row">` containing further `<button>`s would be invalid
-/// markup with undefined browser behavior. Splitting the open action into
-/// its own sibling button (`.session-row-open`) keeps every action a real,
-/// individually focusable button while satisfying that constraint — tab
-/// order simply walks open → stop → delete across the row in the NORMAL
-/// (not-confirming) state; see "Inline delete confirmation" below for how
-/// that changes while a delete prompt is open.
+/// The wrapper is a `div`, not a `button`, because HTML forbids
+/// interactive content nested inside a `<button>` — a whole-row button
+/// could not legally host the toggle. Tab order follows the layers:
+/// closed, it walks open → toggle and on to the next row; open, the
+/// panel's controls follow the toggle (rename → stop → archive →
+/// delete, as visible per `RowControlVisibility`); confirming, the
+/// panel holds consequence text plus confirm → cancel (with initial
+/// FOCUS on cancel — see "Focus-on-open" below); renaming, the panel
+/// holds the current title plus the field's input → save → cancel.
 ///
 /// ## Host and staleness (PLAN_M6.md item 6)
 ///
@@ -2893,23 +2973,15 @@ fn CreateSessionForm(
 /// order walks confirm delete → cancel; initial FOCUS lands directly on
 /// cancel regardless of tab order (see below).
 ///
-/// The `.session-row-open` button (title/cwd/invocation/badge) is given
-/// the extra `confirming` class and hidden outright (`display: none` in
-/// app.css) rather than merely staying `disabled`, which is what it did
-/// before this fix (MT-8): `.session-row-main` lays out its children in
-/// one non-wrapping flex row, and that button's own children each carry a
-/// `min-width` floor (see `.session-title`/`.session-cwd`/
-/// `.session-invocation`) that does not shrink to nothing just because
-/// the OUTER flex algorithm hands the button a narrower slot to make room
-/// for the confirm prompt's own elements. Past that floor the button's
-/// content overflows its shrunk box — CSS flexbox does not clip
-/// overflow by default — and renders on top of the confirm prompt sitting
-/// immediately after it in the row, rather than being replaced by it.
-/// Removing the button from layout entirely while confirming is open
-/// sidesteps that interaction completely instead of trying to out-shrink
-/// it: the confirm prompt already repeats the title (`.confirm-title`
-/// below), so nothing the hidden button showed is lost information while
-/// it is gone.
+/// The `.session-row-open` button (title/cwd/invocation/badge) stays
+/// VISIBLE while a prompt is pending, merely `disabled`: the prompt lives
+/// in the floating actions panel now, which overlays the rows below
+/// instead of competing with the button for the row's own space, so the
+/// MT-8 overflow that once forced the button out of layout entirely
+/// (`display: none` behind a `prompting` class) cannot recur by
+/// construction. Disabling it is still required — cancel must be the only
+/// way back to normal, never an implicit click on open (see `confirming`
+/// in `ListView`).
 ///
 /// The prompt itself is TWO separate elements, not one combined sentence:
 /// `.confirm-consequence` (from `confirm_consequence`, fixed wording with
@@ -2932,18 +3004,18 @@ fn CreateSessionForm(
 ///
 /// ## Inline rename (PLAN_M5.md item 6)
 ///
-/// `renaming` swaps the rename/stop/delete trio for the session's own
-/// title plus `rename::RenameForm`, and hides the open button for the same
-/// layout reason the confirm prompt does (see `open_class`). The two
+/// `renaming` swaps the actions panel's rename/stop/archive/delete set
+/// for the session's own title plus `rename::RenameForm`, disabling (not
+/// hiding) the open button exactly as the confirm prompt does. The two
 /// states are mutually exclusive by construction — `ListView` refuses to
 /// open either while the other is showing — so the branches below can be a
 /// plain if/else chain rather than a composition of overlays.
 ///
-/// Repeating the title is load-bearing, not decoration: the element that
-/// normally shows it is out of layout while the field is open, so a
-/// REFUSED rename would otherwise leave the rejected draft as the only
-/// name on screen, when SPEC.md requires the old title to stay while the
-/// supervisor's refusal is shown.
+/// Repeating the title inside the panel is load-bearing, not decoration:
+/// a REFUSED rename must show the rejected draft NEXT TO the name that
+/// still stands (SPEC.md requires the old title to stay while the
+/// supervisor's refusal is shown), and the row's own title line may be
+/// ellipsized past recognition in the narrow sidebar.
 ///
 /// The draft itself is `ListView`'s (`rename_draft`), seeded when the
 /// field opens; everything the submitted string then goes through is
@@ -2959,10 +3031,14 @@ fn CreateSessionForm(
 /// `Result` would let the safety behavior vanish with nothing to show for
 /// it. `autofocus` cannot fail the same way: it is applied by the browser
 /// itself at parse/insert time as a plain attribute, with no fallible
-/// async call in the UI's own control to get wrong or ignore. It reliably
-/// fires exactly once per entry into `confirming` for the same reason
-/// `onmounted` would have: the button is only ever created fresh inside
-/// the `if confirming` branch below.
+/// async call in the UI's own control to get wrong or ignore. It fires
+/// whenever the cancel button is freshly created inside the `if
+/// confirming` branch — which, since the prompt lives in the on-demand
+/// panel, can be MORE than once per confirmation: the confirming flag
+/// survives the panel closing (see `confirming` in `ListView`), so
+/// closing and reopening the panel remounts the prompt and lands focus
+/// on cancel again. That repeat is the safe direction — every fresh
+/// appearance of the prompt starts with the escape hatch focused.
 #[component]
 #[allow(clippy::too_many_arguments)]
 fn SessionRow(
@@ -2980,6 +3056,7 @@ fn SessionRow(
     on_rename_start: EventHandler<(String, String)>,
     on_rename_submit: EventHandler<(String, String)>,
     on_rename_cancel: EventHandler<()>,
+    on_menu_toggle: EventHandler<String>,
 ) -> Element {
     let RowState {
         error,
@@ -2988,6 +3065,7 @@ fn SessionRow(
         confirming_archive,
         renaming,
         nav_disabled,
+        menu_open,
     } = state;
     #[cfg(test)]
     SESSION_ROW_RENDERS.with(|renders| renders.set(renders.get() + 1));
@@ -3010,19 +3088,7 @@ fn SessionRow(
     let rename_start = (session.id.clone(), session.title.clone());
     let rename_submit_id = session.id.clone();
     let controls = row_control_visibility(session.archived);
-    // The open button is removed from layout by EITHER prompt — one
-    // modifier class for both, since what the stylesheet needs to know is
-    // "a prompt occupies this row", not which one. The reason is the one
-    // MT-8 recorded: `.session-row-main` is a non-wrapping flex row whose
-    // children have `min-width` floors, so anything that takes space
-    // beside this button — the confirm prompt's elements, or the rename
-    // field — is painted over by the button's own overflowing content
-    // rather than laid out next to it.
-    let open_class = if confirming || confirming_archive || renaming {
-        "session-row-open prompting"
-    } else {
-        "session-row-open"
-    };
+    let menu_id = session.id.clone();
     // A stale row is DIMMED and badged, never hidden or disabled: SPEC.md
     // requires such sessions to stay listed and be clearly marked, and their
     // lifecycle controls stay live because the helm's refusal (which names
@@ -3048,13 +3114,7 @@ fn SessionRow(
             div { class: "session-row-main",
                 button {
                     r#type: "button",
-                    // The modifier is what app.css hides (MT-8, see the
-                    // "Inline delete confirmation" section of this
-                    // component's doc above and `open_class` itself) —
-                    // without it, this button's own title/cwd/invocation
-                    // content overflows its flex-shrunk box and paints
-                    // over whichever prompt is rendered right after it.
-                    class: open_class,
+                    class: "session-row-open",
                     // Disabled by ANY of the three locks: the global nav
                     // lock (any in-flight op anywhere), or this row's own
                     // confirmation or rename field being open — the
@@ -3127,154 +3187,189 @@ fn SessionRow(
                             span { class: "session-cwd-text", dir: "ltr", "{session.cwd}" }
                         }
                     }
+                    // No profile chip on the line (the interviewed row
+                    // contents): the source-profile surface lives in the
+                    // actions menu panel below.
                     span { class: "session-row-line",
                         span { class: "session-invocation", "{session.invocation}" }
-                        // The profile this session was CREATED from, as it
-                        // snapshotted the name — absent entirely for a
-                        // raw-created one, which is most of them. This is
-                        // where SPEC.md's snapshot rule becomes visible: the
-                        // name never moves under an existing session, and
-                        // the qualifier (`profiles::source_profile_label`)
-                        // keeps that from reading as a claim about today's
-                        // catalog. `data-profile-existence` is the browser
-                        // suite's handle on the half that does change.
-                        // NOTE: the interviewed row design drops this chip;
-                        // it survives PR-A because its removal travels with
-                        // the popup-menu PR that migrates its tests.
-                        if let Some(source) = &session.source_profile {
+                    }
+                }
+                // The actions menu: one small toggle beside the open
+                // button, everything else in a floating panel it anchors
+                // (BUGS_BURNDOWN.md issue 5's interviewed design — the row
+                // itself carries no action buttons). The panel is also
+                // where a destructive action CONFIRMS: clicking delete or
+                // archive swaps the panel's contents for the consequence
+                // line and confirm/cancel pair, keeping the whole exchange
+                // on one small surface instead of bouncing the user
+                // somewhere else. Rename lives here too — the ROW's only
+                // rename surface (the titlebar keeps its own for now; its
+                // consolidation into this menu is the redesign's still-
+                // pending step, per BUGS_BURNDOWN.md).
+                // Deliberately NOT disabled under the nav lock: opening a
+                // panel mutates nothing — every action inside it carries
+                // its own disabled state — and locking the toggle would
+                // hide the very buttons whose disabled state tells the
+                // user WHY the page is briefly inert.
+                button {
+                    r#type: "button",
+                    class: "btn session-row-menu",
+                    // The session's identity is part of the accessible
+                    // name: a list renders one of these per row, and
+                    // "session actions" alone leaves a screen-reader user
+                    // no way to tell which session a toggle controls
+                    // before activating it. Clamped, because a title can
+                    // legally run to tens of KB and an accessible name is
+                    // read aloud in full.
+                    aria_label: menu_label(&session.title),
+                    aria_expanded: menu_open,
+                    onclick: move |_| on_menu_toggle.call(menu_id.clone()),
+                    "⋯"
+                }
+                if menu_open {
+                    div { class: "session-row-menu-panel",
+                        if confirming {
+                            // Two elements, consequence first: an
+                            // untruncatable consequence and a separately
+                            // truncatable title, in THIS order, so a long
+                            // title can never clip the safety-critical
+                            // half (see the component doc above).
                             span {
-                                class: "session-profile peer-value",
-                                dir: "ltr",
-                                "data-profile-existence": "{existence_word(source.existence)}",
-                                "{source_profile_label(source)}"
+                                class: "confirm-consequence",
+                                "{confirm_consequence(&session.status)}"
+                            }
+                            span { class: "confirm-title", "\"{session.title}\"" }
+                            button {
+                                r#type: "button",
+                                class: "btn confirm-delete",
+                                // Disabled while the shared token is held:
+                                // the handler refuses then anyway (keeping
+                                // the prompt), and the attribute is that
+                                // refusal made visible. Cancel stays
+                                // enabled — backing out is always safe.
+                                disabled: busy,
+                                onclick: move |_| on_confirm_delete.call(confirm_id.clone()),
+                                "confirm delete"
+                            }
+                            button {
+                                r#type: "button",
+                                class: "btn confirm-cancel",
+                                // Safe default: land keyboard focus on
+                                // cancel, not confirm, the instant this
+                                // prompt appears — a stray Enter/Space
+                                // right after the menu's delete click backs
+                                // OUT of the destructive action instead of
+                                // into it (see the component doc for why
+                                // declarative `autofocus` over the async
+                                // focus API).
+                                autofocus: true,
+                                onclick: move |_| on_cancel_delete.call(cancel_id.clone()),
+                                "cancel"
+                            }
+                        } else if confirming_archive {
+                            if let Some(consequence) = archive_confirmation(&session, session.tabs.len()) {
+                                span { class: "confirm-consequence", "{consequence}:" }
+                            } else {
+                                span { class: "confirm-consequence", "archiving removes the terminal:" }
+                            }
+                            span { class: "confirm-title", "\"{session.title}\"" }
+                            button {
+                                r#type: "button",
+                                class: "btn confirm-archive",
+                                // See confirm-delete: refusal made visible.
+                                disabled: busy,
+                                onclick: move |_| on_confirm_archive.call(confirm_archive_id.clone()),
+                                "confirm archive"
+                            }
+                            button {
+                                r#type: "button",
+                                class: "btn archive-cancel",
+                                autofocus: true,
+                                onclick: move |_| on_cancel_archive.call(cancel_archive_id.clone()),
+                                "cancel"
+                            }
+                        } else if renaming {
+                            // The AUTHORITATIVE title stays beside the
+                            // field: a refused rename must never leave the
+                            // rejected DRAFT as the only name on this
+                            // surface (SPEC.md's "the old title stays"
+                            // while the refusal is shown).
+                            span { class: "rename-current-title", "{session.title}" }
+                            RenameForm {
+                                draft: rename_draft,
+                                busy,
+                                on_submit: move |title| {
+                                    on_rename_submit.call((rename_submit_id.clone(), title))
+                                },
+                                on_cancel: move |_| on_rename_cancel.call(()),
+                            }
+                        } else {
+                            if controls.rename {
+                                button {
+                                    r#type: "button",
+                                    class: "btn session-row-rename",
+                                    disabled: busy,
+                                    onclick: move |_| on_rename_start.call(rename_start.clone()),
+                                    "rename"
+                                }
+                            }
+                            if controls.stop {
+                                button {
+                                    r#type: "button",
+                                    class: "btn session-row-stop",
+                                    disabled: busy,
+                                    onclick: move |_| on_stop.call(stop_id.clone()),
+                                    "stop"
+                                }
+                            }
+                            if controls.archive {
+                                button {
+                                    r#type: "button",
+                                    class: "btn session-row-archive",
+                                    disabled: busy,
+                                    onclick: move |_| on_archive.call(archive_target.clone()),
+                                    "archive"
+                                }
+                            }
+                            if controls.delete {
+                                button {
+                                    r#type: "button",
+                                    class: "btn session-row-delete",
+                                    disabled: busy,
+                                    onclick: move |_| on_delete.call(delete_target.clone()),
+                                    "delete"
+                                }
+                            }
+                            // The profile this session was CREATED from, as
+                            // it snapshotted the name — moved here from the
+                            // row proper (the interviewed row contents drop
+                            // the chip) so SPEC.md's snapshot rule keeps a
+                            // visible surface: the name never moves under
+                            // an existing session, and the qualifier
+                            // (`profiles::source_profile_label`) keeps that
+                            // from reading as a claim about today's
+                            // catalog. `data-profile-existence` remains the
+                            // browser suite's handle on the half that does
+                            // change.
+                            if let Some(source) = &session.source_profile {
+                                span {
+                                    class: "session-profile peer-value",
+                                    dir: "ltr",
+                                    "data-profile-existence": "{existence_word(source.existence)}",
+                                    "{source_profile_label(source)}"
+                                }
                             }
                         }
                     }
-                }
-                if confirming {
-                    // Called inline, not hoisted into a `let` above this
-                    // `if`: this is the ONLY place either half of the
-                    // prompt is ever shown, so computing them
-                    // unconditionally on every render regardless of
-                    // `confirming` would be wasted work on the common
-                    // (not-confirming) case, and — since `confirm_consequence`
-                    // is documented as never being CALLED outside this
-                    // state (see its own doc) — computing it only here is
-                    // what actually keeps that contract true rather than
-                    // just asserted.
-                    //
-                    // Two elements, consequence first: see the component
-                    // doc above for why an untruncatable consequence and
-                    // a separately truncatable title, in THIS order, is
-                    // what keeps a long title from ever clipping the
-                    // safety-critical half.
-                    span {
-                        class: "confirm-consequence",
-                        "{confirm_consequence(&session.status)}"
-                    }
-                    span { class: "confirm-title", "\"{session.title}\"" }
-                    button {
-                        r#type: "button",
-                        class: "btn confirm-delete",
-                        onclick: move |_| on_confirm_delete.call(confirm_id.clone()),
-                        "confirm delete"
-                    }
-                    button {
-                        r#type: "button",
-                        class: "btn confirm-cancel",
-                        // Safe default: land keyboard focus on cancel, not
-                        // confirm, the instant this prompt appears — a
-                        // stray Enter/Space right after the row's delete
-                        // click (residual focus, a fast typist) then backs
-                        // OUT of the destructive action instead of into
-                        // it. Declarative `autofocus`, not `onmounted` +
-                        // `set_focus`: see the component doc above for why
-                        // the fallible, discardable-`Result` async API was
-                        // rejected in favor of a plain HTML attribute that
-                        // cannot silently fail to apply.
-                        autofocus: true,
-                        onclick: move |_| on_cancel_delete.call(cancel_id.clone()),
-                        "cancel"
-                    }
-                } else if confirming_archive {
-                    if let Some(consequence) = archive_confirmation(&session, session.tabs.len()) {
-                        span { class: "confirm-consequence", "{consequence}:" }
-                    } else {
-                        span { class: "confirm-consequence", "archiving removes the terminal:" }
-                    }
-                    span { class: "confirm-title", "\"{session.title}\"" }
-                    button {
-                        r#type: "button",
-                        class: "btn confirm-archive",
-                        onclick: move |_| on_confirm_archive.call(confirm_archive_id.clone()),
-                        "confirm archive"
-                    }
-                    button {
-                        r#type: "button",
-                        class: "btn archive-cancel",
-                        autofocus: true,
-                        onclick: move |_| on_cancel_archive.call(cancel_archive_id.clone()),
-                        "cancel"
-                    }
-                } else if renaming {
-                    // The field takes the action area over exactly as the
-                    // confirm prompt does, rather than sitting beside the
-                    // buttons: a text field needs real width, and the row
-                    // has none to spare (see `open_class`).
-                    //
-                    // The AUTHORITATIVE title is repeated alongside it,
-                    // and that is a requirement rather than a nicety: the
-                    // open button that normally shows it is out of layout
-                    // here, so without this element a refused rename would
-                    // leave the rejected DRAFT as the only name on screen
-                    // — the opposite of SPEC.md's "the old title stays"
-                    // while the supervisor's refusal is shown. It shrinks
-                    // and ellipsizes (app.css) so a legal multi-KB title
-                    // cannot push the field or its buttons off the row.
-                    span { class: "rename-current-title", "{session.title}" }
-                    RenameForm {
-                        draft: rename_draft,
-                        busy,
-                        on_submit: move |title| {
-                            on_rename_submit.call((rename_submit_id.clone(), title))
-                        },
-                        on_cancel: move |_| on_rename_cancel.call(()),
-                    }
-                } else {
-                    if controls.rename {
-                        button {
-                            r#type: "button",
-                            class: "btn session-row-rename",
-                            disabled: busy,
-                            onclick: move |_| on_rename_start.call(rename_start.clone()),
-                            "rename"
-                        }
-                    }
-                    if controls.stop {
-                        button {
-                            r#type: "button",
-                            class: "btn session-row-stop",
-                            disabled: busy,
-                            onclick: move |_| on_stop.call(stop_id.clone()),
-                            "stop"
-                        }
-                    }
-                    if controls.archive {
-                        button {
-                            r#type: "button",
-                            class: "btn session-row-archive",
-                            disabled: busy,
-                            onclick: move |_| on_archive.call(archive_target.clone()),
-                            "archive"
-                        }
-                    }
-                    if controls.delete {
-                        button {
-                            r#type: "button",
-                            class: "btn session-row-delete",
-                            disabled: busy,
-                            onclick: move |_| on_delete.call(delete_target.clone()),
-                            "delete"
+                    // The refusal a panel action produced renders INSIDE
+                    // the open panel, under its controls: the panel floats
+                    // over the row's own error line, so an error rendered
+                    // only down there could sit hidden behind the very
+                    // surface whose click caused it.
+                    if let Some(err) = error.clone() {
+                        PeerLine {
+                            class: "action-error".to_string(),
+                            parts: vec![DetailPart::Peer(err)],
                         }
                     }
                 }
@@ -3282,10 +3377,15 @@ fn SessionRow(
             // The helm's own refusal, and on a stale row it names the host's
             // state and can quote peer-supplied text — so it renders through
             // the same escaping and isolation as every other peer string.
+            // Only while the panel is CLOSED: the open panel carries the
+            // error itself (above), and rendering both would say one
+            // refusal twice.
             if let Some(err) = error {
-                PeerLine {
-                    class: "action-error".to_string(),
-                    parts: vec![DetailPart::Peer(err)],
+                if !menu_open {
+                    PeerLine {
+                        class: "action-error".to_string(),
+                        parts: vec![DetailPart::Peer(err)],
+                    }
                 }
             }
         }
@@ -3335,6 +3435,7 @@ mod tests {
             let on_rename_start = use_callback(|_: (String, String)| {});
             let on_rename_submit = use_callback(|_: (String, String)| {});
             let on_rename_cancel = use_callback(|_: ()| {});
+            let on_menu_toggle = use_callback(|_: String| {});
             let session = Session {
                 id: "session-1".to_string(),
                 title: "stable".to_string(),
@@ -3360,6 +3461,7 @@ mod tests {
                         confirming_archive: false,
                         renaming: false,
                         nav_disabled: false,
+                        menu_open: false,
                     },
                     rename_draft,
                     on_open,
@@ -3373,6 +3475,7 @@ mod tests {
                     on_rename_start,
                     on_rename_submit,
                     on_rename_cancel,
+                    on_menu_toggle,
                 }
             }
         }

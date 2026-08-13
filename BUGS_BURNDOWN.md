@@ -233,10 +233,12 @@ Recorded here so the claim does not get re-derived and turned into a fix PR for 
 ## 5. Layout redesign: persistent session sidebar, terminal fills the rest
 
 Status: in progress across several PRs. PR #156 (`pr/sidebar-shell`) landed the shell: two-pane layout, keyed
-SessionView remounts, stacked sidebar rows, left-truncated cwd, the revived open-session create-host default, and the
-two-pane feed fan-out contract. Still owed: the popup action menu with in-menu confirms (and the profile chip's
-removal), the hosts/filter toggles with the SPEC amendments, auto-select + rename consolidation + back-button removal,
-and the remaining Playwright/desktop-smoke migrations.
+SessionView remounts, stacked sidebar rows, left-truncated cwd, the revived open-session create-host default, the
+two-pane feed fan-out contract, the cross-pane write gate (`ops::PaneGate` — neither pane starts a write under the
+other's), and selection reconciliation when the selected row is deleted or archived away. The popup-menu PR
+(`pr/row-actions-menu`, stacked on it) moves every per-row action and confirm into a floating panel behind a "⋯" toggle
+and drops the profile chip from the row line into that panel. Still owed: the hosts/filter toggles with the SPEC
+amendments, auto-select + rename consolidation + back-button removal, and their Playwright migrations.
 
 What the user wants: a left sidebar that always shows the session/agent list, with the entire right-hand side being the
 terminal area for the selected session. The tab strip ("agent | Terminal 1 | + terminal") moves to the top of the right

@@ -50,6 +50,7 @@ import {
   listProfiles,
   listSessions,
   localHostId,
+  openRowMenu,
   ProfileRow,
   stubFeed,
   updateProfile,
@@ -884,6 +885,11 @@ test.describe("agent profiles", () => {
     created.push(session.id);
 
     const feed = await listWithStubbedFeed(page);
+    // The profile chip moved into the row's actions panel with the rest
+    // of the per-session controls; it only exists in the DOM while the
+    // panel is open.
+    await expect(row(page, session.id)).toBeVisible({ timeout: 20_000 });
+    await openRowMenu(row(page, session.id));
     const label = row(page, session.id).locator(".session-profile");
     await expect(label).toBeVisible({ timeout: 20_000 });
     await expect(label).toContainText(before);
@@ -919,6 +925,42 @@ test.describe("agent profiles", () => {
    * launched. The session is neither removed nor renamed — only the qualifier
    * beside the name changes.
    */
+  /**
+   * A near-limit unbroken profile name stays constrained inside the
+   * actions panel instead of widening it out of the sidebar.
+   *
+   * The chip moved from the row line into the 300px-max panel, whose
+   * column layout is a new overflow context for it; every other profile
+   * test uses short names, so this is the only place the ellipsis rule
+   * is actually exercised where the chip now lives.
+   */
+  test("a long profile name ellipsizes inside the actions panel", async ({ page, request }) => {
+    const local = await localHostId(request);
+    const name = `long-${"p".repeat(180)}`;
+    const title = `long-profile-session-${Date.now()}`;
+    const profile = await createProfile(request, local, { name });
+    profiles.push({ host: local, id: profile.id });
+    const session = await createSession(request, { title, profile_id: profile.id, host: local });
+    created.push(session.id);
+
+    await page.goto("/");
+    const target = row(page, session.id);
+    await expect(target).toBeVisible({ timeout: 20_000 });
+    await openRowMenu(target);
+
+    const chip = target.locator(".session-profile");
+    await expect(chip).toBeVisible();
+    const sidebarBox = (await page.locator(".app-sidebar").boundingBox())!;
+    const panelBox = (await target.locator(".session-row-menu-panel").boundingBox())!;
+    const chipBox = (await chip.boundingBox())!;
+    // The panel keeps to the sidebar, the chip keeps to the panel...
+    expect(panelBox.x + panelBox.width).toBeLessThanOrEqual(sidebarBox.x + sidebarBox.width + 1);
+    expect(chipBox.x + chipBox.width).toBeLessThanOrEqual(panelBox.x + panelBox.width + 1);
+    // ...and the name really is being clipped, proving the ellipsis rule
+    // did the constraining rather than a conveniently short fixture.
+    expect(await chip.evaluate((el) => el.scrollWidth > el.clientWidth)).toBe(true);
+  });
+
   test("a deleted profile's sessions keep their snapshot and say it is gone", async ({
     page,
     request,
@@ -932,6 +974,9 @@ test.describe("agent profiles", () => {
     created.push(session.id);
 
     const feed = await listWithStubbedFeed(page);
+    // As above: the chip lives in the actions panel now.
+    await expect(row(page, session.id)).toBeVisible({ timeout: 20_000 });
+    await openRowMenu(row(page, session.id));
     const label = row(page, session.id).locator(".session-profile");
     await expect(label).toHaveAttribute("data-profile-existence", "present", { timeout: 20_000 });
 

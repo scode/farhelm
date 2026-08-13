@@ -19,7 +19,7 @@
 // instead. That one is a contract rather than a snippet — what "the feed is
 // healthy" means — and two definitions of it would drift apart while the
 // specs that depend on the difference kept passing.
-import { APIRequestContext, expect, Page, Route, WebSocketRoute } from "@playwright/test";
+import { APIRequestContext, expect, Locator, Page, Route, WebSocketRoute } from "@playwright/test";
 import path from "node:path";
 
 /**
@@ -699,4 +699,27 @@ export async function forceBuildSkew(page: Page, stamp: string): Promise<void> {
     const headers = { ...response.headers(), "x-farhelm-build": stamp };
     await route.fulfill({ response, headers });
   });
+}
+
+/**
+ * Open a session row's actions menu when it is not already open.
+ *
+ * The sidebar redesign (BUGS_BURNDOWN.md issue 5) moved every per-row
+ * action — rename, stop, archive, delete, and their confirms — off the row
+ * and into a floating panel behind the row's `⋯` toggle, so any test that
+ * clicks or asserts on those controls opens the menu first through this
+ * helper. Idempotent on purpose: `aria-expanded` is the toggle's own
+ * truth, so calling this on an already-open menu does not close it.
+ */
+export async function openRowMenu(row: Locator): Promise<void> {
+  const menu = row.locator(".session-row-menu");
+  if ((await menu.getAttribute("aria-expanded")) !== "true") {
+    await menu.click();
+  }
+  // Await the panel itself, not just the click: the toggle's signal write
+  // and the panel's mount land on a LATER render, and several callers go
+  // straight into bare-DOM `querySelector(...).click()` calls (the
+  // actionability-bypass tests), where a not-yet-mounted button turns
+  // into a silent no-op via `?.click()` rather than a visible failure.
+  await expect(row.locator(".session-row-menu-panel")).toBeVisible();
 }

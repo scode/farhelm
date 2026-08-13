@@ -42,8 +42,7 @@ import {
   forceBuildSkew,
   listSessions,
   renameSession,
-  stubFeed,
-} from "./helpers/fleet";
+  stubFeed, openRowMenu } from "./helpers/fleet";
 
 /** The row for one session id, as the list renders it. */
 function row(page: Page, id: string) {
@@ -310,6 +309,7 @@ test.describe("the invalidation feed", () => {
       );
 
       const renamed = `${session.title}-renamed`;
+      await openRowMenu(row(author, session.id));
       await row(author, session.id).locator(".session-row-rename").click();
       await row(author, session.id).locator(".rename-input").fill(renamed);
       await row(author, session.id).locator(".rename-submit").click();

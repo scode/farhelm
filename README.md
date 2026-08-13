@@ -116,8 +116,9 @@ Ubuntu 24.04 ships 3.4.
   resume command. They belong to the supervisor, not to the helm, so each host has its own set and a fresh supervisor
   already ships with editable starters for Claude Code and Codex. Editing or deleting one changes what future sessions
   launch and nothing else: a session already created keeps the invocation and resume command it snapshotted, keeps
-  running, and keeps naming the profile it came from — marked in the list once that profile has been renamed or deleted.
-  A profile edited from another browser shows up here without a refresh, like everything else.
+  running, and keeps naming the profile it came from — shown, marked once that profile has been renamed or deleted,
+  inside the row's "⋯" actions menu. A profile edited from another browser shows up here without a refresh, like
+  everything else.
 - Under the panel, the session list: which host each session lives on, its title, working directory, invocation, and a
   status. A live session reads running (the agent is working), waiting (it has asked you something and nothing has
   answered) or idle (it is at rest). The supervisor tells them apart by watching each session's terminal periodically: a
@@ -173,14 +174,15 @@ Ubuntu 24.04 ships 3.4.
   moves it for you. A key whose session you have since deleted is spent: the form says so rather than quietly recreating
   it. The create API additionally accepts explicit agent-kind and resume-template overrides for invocations that
   basename recognition cannot classify (a wrapper script, `env claude`), which the form does not expose.
-- Each row also has rename, stop, archive and delete. Rename opens a field in place — the same control the session
-  view's header has — and what you type is sent exactly as typed; a title the supervisor refuses (control characters in
-  it) comes back with the supervisor's own words while the old name stays. Stop kills the agent and its whole process
-  tree; the session stays listed, its terminal still viewable. Archive is available on both the row and session view; it
-  confirms whenever the agent, a prior process tree, or terminal tabs may still be destroyed, then removes the agent,
-  tabs and terminal while retaining the session's metadata and attachments. Archived rows are hidden by default and
-  restart is the only unarchive path. Delete removes the session and its stored state — with an inline confirmation
-  first whenever the agent might still be alive.
+- Each row also has rename, stop, archive and delete, all behind the small "⋯" actions menu beside the session's title —
+  the confirmations included, so the whole exchange stays in that one popup. Rename opens a field in the menu — the same
+  control the session view's header has — and what you type is sent exactly as typed; a title the supervisor refuses
+  (control characters in it) comes back with the supervisor's own words while the old name stays. Stop kills the agent
+  and its whole process tree; the session stays listed, its terminal still viewable. Archive is available in both the
+  row's menu and the session view; it confirms whenever the agent, a prior process tree, or terminal tabs may still be
+  destroyed, then removes the agent, tabs and terminal while retaining the session's metadata and attachments. Archived
+  rows are hidden by default and restart is the only unarchive path. Delete removes the session and its stored state —
+  with a confirmation in the menu first whenever the agent might still be alive.
 - Opening a session leads with what restarting it would do to the conversation, and the control says which: "resume
   conversation" when this session's own agent conversation was captured, "restart (fresh launch)" when it was not. A
   restart reuses the session's terminal when it still exists — the previous run stays above the new one in scrollback —

@@ -29,8 +29,7 @@ import {
   holdMutation,
   holdReads,
   listSessions,
-  stubFeed,
-} from "./helpers/fleet";
+  stubFeed, openRowMenu } from "./helpers/fleet";
 
 /** The row for one session id, as the list renders it. */
 function row(page: Page, id: string) {
@@ -197,6 +196,7 @@ test.describe("read ordering and recovery", () => {
       (url) => url.pathname === `/api/sessions/${session.id}/stop`,
     );
 
+    await openRowMenu(row(page, session.id));
     await row(page, session.id).locator(".session-row-stop").click();
     await expect
       .poll(async () => {

@@ -26,8 +26,7 @@ import {
   listSessions,
   renameSession,
   stopSession,
-  stubFeed,
-} from "./helpers/fleet";
+  stubFeed, openRowMenu } from "./helpers/fleet";
 
 /** The row for one session id, as the list renders it. */
 function row(page: Page, id: string) {
@@ -142,6 +141,7 @@ test.describe("the M6.5 test debts", () => {
     // The stop. Its reply is held until the helm agrees the session has
     // ended, so the refetch it triggers on arrival is a read that can see
     // the new status.
+    await openRowMenu(row(page, session.id));
     await row(page, session.id).locator(".session-row-stop").click();
     await expect
       .poll(async () => {

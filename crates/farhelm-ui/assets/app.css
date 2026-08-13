@@ -183,18 +183,21 @@ body,
   overflow-y: auto;
 }
 
-/* The row is a column: `.session-row-main` (the flex ROW of open/stop/
-   delete buttons) stacked over an optional per-session error line —
-   see the SessionRow doc in lib.rs for why an error needs its own line
-   rather than squeezing in as a fourth flex item next to the buttons.
-   `.session-row` itself is a plain flex container (a <div>, not a
-   <button>: a <button> cannot legally nest the stop/delete <button>s
-   the M2-step-8 actions add). */
+/* The row is a column: `.session-row-main` (the open button's stacked
+   lines beside the small actions-menu toggle) over an optional
+   per-session error line — see the SessionRow doc in lib.rs for why an
+   error needs its own line. The lifecycle buttons themselves live in
+   the conditionally mounted floating panel (`.session-row-menu-panel`),
+   not on the row. `.session-row` itself is a plain flex container (a
+   <div>, not a <button>: a <button> could not legally nest the toggle
+   <button> beside the open one). */
 .session-row {
   display: flex;
   flex-direction: column;
   width: 100%;
   border-bottom: 1px solid #1d2026;
+  /* Anchor for the floating actions-menu panel. */
+  position: relative;
 }
 
 .session-row:focus-within {
@@ -206,14 +209,14 @@ body,
      `align-items: stretch` already fills this child to the parent's
      full cross-axis (width) size, so setting it again here would be a
      no-op that just invites a future reader to wonder what it overrides.
-     WRAPPING, since the sidebar redesign: the open button claims the
-     whole first line (`flex-basis: 100%` below) and the per-row action
-     buttons or an open prompt flow onto their own line beneath it —
-     inside a 340px column the old single-line arrangement left the open
-     button squeezed to nothing behind four action buttons. */
+     ONE non-wrapping row of exactly two items — the open button's
+     stacked lines, and the small menu toggle pinned at the row's
+     top-right beside the title (the interviewed placement). Wrapping
+     here once let the toggle fall onto its own line below the row,
+     detached from the session it controls, because the open button
+     claimed a full-width basis. */
   display: flex;
-  flex-wrap: wrap;
-  align-items: baseline;
+  align-items: flex-start;
   gap: 6px;
   padding-bottom: 6px;
 }
@@ -226,13 +229,13 @@ body,
      A COLUMN of lines, not a row of spans: inside the fixed-width
      sidebar (BUGS_BURNDOWN.md issue 5) the old single-line layout's
      min-width floors re-entered the MT-8 overflow regime the moment
-     space ran short; stacked lines each ellipsize alone instead. */
+     space ran short; stacked lines each ellipsize alone instead.
+     `flex: 1` + `min-width: 0` share the row with the toggle: the
+     button takes everything the fixed-size toggle leaves, and shrinks
+     (ellipsizing its lines) rather than pushing the toggle out. */
   display: flex;
   flex-direction: column;
-  /* Only the basis matters here: 100% forces the button onto its own
-     wrapped line inside `.session-row-main`, ahead of the action
-     controls beneath it. */
-  flex-basis: 100%;
+  flex: 1;
   min-width: 0;
   gap: 2px;
   padding: 8px 12px 4px;
@@ -254,6 +257,61 @@ body,
   min-width: 0;
 }
 
+/* The row's actions-menu toggle: deliberately small — the row IS the open
+   affordance, and this is the one square that is not. */
+.session-row-menu {
+  flex: 0 0 auto;
+  align-self: flex-start;
+  margin: 8px 8px 0 0;
+  padding: 0 8px;
+  font-size: 14px;
+  line-height: 1.4;
+}
+
+/* The floating panel the toggle anchors: rename/stop/archive/delete, and
+   the in-menu confirm that replaces them for a destructive action. Floats
+   over the rows below rather than pushing them down — a menu that
+   reflowed the list would move the very row the user is acting on. */
+.session-row-menu-panel {
+  position: absolute;
+  top: 2.4em;
+  /* Left of the toggle COLUMN, not flush with the sidebar edge: the
+     toggles all live at the rows' top-right, so a panel anchored at
+     `right: 8px` floated exactly over the next rows' toggles and made
+     them unclickable while any menu was open — switching menus took a
+     dismiss-then-open. Keeping the ~36px toggle column clear means one
+     click on any other row's "⋯" swaps the open panel directly. The
+     max-width shrinks in step so the panel's left edge stays inside the
+     340px sidebar. */
+  right: 44px;
+  z-index: 20;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px;
+  background: #1d2026;
+  border: 1px solid #3a3f47;
+  border-radius: 4px;
+  max-width: 288px;
+}
+
+/* The ONE panel-specific override the title needs: the shared
+   `.confirm-title` rule's `flex: 1 1 0` was written for the old
+   horizontal action row, and in this COLUMN container a zero flex
+   basis is a zero HEIGHT — combined with the shared rule's
+   `overflow: hidden`, the session name vanished from the delete and
+   archive prompts entirely (the same axis-flip class that collapsed
+   the profile chip). Everything else — ellipsis, nowrap, color — comes
+   from the shared rule. */
+.session-row-menu-panel .confirm-title {
+  flex: none;
+}
+
+/* See `.rename-form`'s own comment: same axis flip, same opt-out. */
+.session-row-menu-panel .rename-form {
+  flex: none;
+}
+
 .session-row-open:hover:not(:disabled),
 .session-row-open:focus {
   background: #1d2026;
@@ -271,23 +329,6 @@ body,
 .session-row-open:disabled {
   opacity: 0.5;
   cursor: default;
-}
-
-/* MT-8: while a prompt occupies the row — either lifecycle confirmation, or
-   the rename field, which is why ONE modifier class covers both — the
-   row's own open button is hidden outright rather than left `:disabled`
-   and merely dimmed. `.session-row-main` is a non-wrapping flex row, and
-   this button's children (`.session-title`/`.session-cwd`/
-   `.session-invocation`) each carry a `min-width` floor that survives
-   the outer flex algorithm shrinking the button to make room for the
-   prompt's own elements — past that floor the button's content
-   overflows its shrunk box (flexbox does not clip by default) and paints
-   over the prompt sitting right after it in source order.
-   Removing the button from layout sidesteps the interaction instead of
-   trying to out-shrink it; see the `confirming` doc on `SessionRow` in
-   lib.rs for the full account. */
-.session-row-open.prompting {
-  display: none;
 }
 
 /* Lifecycle actions and confirmations: small, secondary-looking
@@ -370,12 +411,17 @@ body,
   margin-right: 6px;
 }
 
-/* The inline rename field (PLAN_M5.md item 6), used in a list row's
-   action area and in the session view's titlebar. Both hosts are flex
-   rows, so the form is one too and its input is the member that gives:
-   `min-width: 0` overrides a flex item's content floor, which is what
-   keeps a narrow row from pushing save/cancel off the edge. The buttons
-   share the row-button shape above rather than inventing a third.
+/* The inline rename field (PLAN_M5.md item 6), used in a row's actions
+   panel and in the session view's titlebar — two hosts on two AXES. The
+   titlebar is a flex row, where `flex: 1 1 0` means width and the input
+   is the member that gives (`min-width: 0` overrides its content floor
+   so save/cancel are never pushed off the edge). The actions panel is a
+   flex COLUMN, where the same shorthand would govern HEIGHT — the
+   panel-scoped `flex: none` below opts the form out of that axis flip
+   outright rather than leaning on flexbox's automatic-minimum subtleties
+   (the class of collapse that hid `.confirm-title` — see its own
+   panel-scoped override). The buttons share the row-button shape above
+   rather than inventing a third.
 
    The field is styled after the create form's inputs, not after the
    surrounding chrome: it is the same kind of thing (a text field the user
@@ -483,18 +529,19 @@ body,
 }
 
 /* The profile a session was created FROM, as it snapshotted the name
-   (PLAN_M6_75.md item 8). Present only on profile-created rows, which is why
-   it can afford the weakest shrink weight in the row: when it is squeezed
-   out, the row still carries the title, the directory and the invocation the
-   session actually launched. */
+   (PLAN_M6_75.md item 8). Lives in the row's actions panel (a column flex
+   container) since the sidebar redesign dropped it from the row proper, so
+   it must NOT be a flexible item: `flex: 1 1 0` in a column context is a
+   zero flex-basis HEIGHT, which collapsed the chip to an invisible
+   zero-height span. It ellipsizes against the panel's max-width instead. */
 .session-profile {
   color: #8a919e;
   font-size: 12px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  flex: 1 1 0;
-  min-width: 6em;
+  flex: none;
+  min-width: 0;
 }
 
 /* A profile that is NOT KNOWN to be present under this name: renamed since,

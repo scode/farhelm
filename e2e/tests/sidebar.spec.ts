@@ -12,7 +12,7 @@
  * dropped, so each is written to fail against precisely that mutation.
  */
 import { expect, test, type Page } from "@playwright/test";
-import { cleanupSession, createSession } from "./helpers/fleet";
+import { cleanupSession, createSession, openRowMenu } from "./helpers/fleet";
 
 function row(page: Page, id: string) {
   return page.locator(`[data-session-id="${id}"]`);
@@ -289,5 +289,240 @@ test("an unanswered view operation disables row selection until it completes", a
     await page.unroute(`**/api/sessions/${a.id}/restart`);
     await cleanupSession(request, a.id);
     await cleanupSession(request, b.id);
+  }
+});
+
+/**
+ * The actions menu's containment contract: every per-row action, and the
+ * confirm exchange that replaces them, lives INSIDE the floating panel —
+ * absent from the DOM while the menu is closed, mounted only as panel
+ * descendants while it is open.
+ *
+ * This is the popup PR's central behavior stated directly. Every migrated
+ * test locates controls relative to the whole row, so an implementation
+ * that left the buttons inline beside an empty popup would keep the rest
+ * of the suite green; only descendant-scoped locators catch it.
+ */
+test("row actions exist only inside the open actions panel", async ({ page, request }) => {
+  const session = await createSession(request, {
+    title: `containment-${Date.now()}`,
+    cwd: "/tmp",
+    invocation: "sleep 300",
+  });
+  try {
+    await page.goto("/");
+    const target = row(page, session.id);
+    await expect(target).toBeVisible({ timeout: 20_000 });
+
+    // Closed: no actions anywhere in the row, only open + toggle.
+    for (const control of [
+      ".session-row-rename",
+      ".session-row-stop",
+      ".session-row-archive",
+      ".session-row-delete",
+    ]) {
+      await expect(target.locator(control)).toHaveCount(0);
+    }
+
+    await openRowMenu(target);
+    // Open: each control exists exactly once in the row, and that one
+    // instance is a descendant of the panel — the two counts together
+    // prove "inside the panel" rather than "somewhere in the row".
+    for (const control of [
+      ".session-row-rename",
+      ".session-row-stop",
+      ".session-row-archive",
+      ".session-row-delete",
+    ]) {
+      await expect(target.locator(control)).toHaveCount(1);
+      await expect(target.locator(`.session-row-menu-panel ${control}`)).toHaveCount(1);
+    }
+
+    // A destructive click swaps the SAME panel's contents for the
+    // confirm exchange — the action items leave, the prompt arrives, all
+    // without a second surface.
+    await target.locator(".session-row-delete").click();
+    await expect(target.locator(".session-row-menu-panel .confirm-consequence")).toBeVisible();
+    await expect(target.locator(".session-row-stop")).toHaveCount(0);
+    await expect(target.locator(".session-row-menu-panel .confirm-cancel")).toBeVisible();
+    await target.locator(".confirm-cancel").click();
+    await expect(target.locator(".session-row-menu-panel .session-row-stop")).toBeVisible();
+
+    // Closing the toggle empties the row of actions again.
+    await target.locator(".session-row-menu").click();
+    await expect(target.locator(".session-row-menu-panel")).toHaveCount(0);
+    await expect(target.locator(".session-row-stop")).toHaveCount(0);
+  } finally {
+    await cleanupSession(request, session.id);
+  }
+});
+
+/**
+ * The panel FLOATS: opening one row's menu must not move the rows below
+ * it.
+ *
+ * The whole reason the panel is absolutely positioned is that a menu that
+ * reflowed the list would move the very row the user is acting on;
+ * geometry inside the panel cannot catch a regression to normal-flow
+ * positioning, only the next row's box can.
+ */
+test("opening a menu does not move the rows below it", async ({ page, request }) => {
+  const a = await createSession(request, {
+    title: `float-a-${Date.now()}`,
+    cwd: "/tmp",
+    invocation: "sleep 300",
+  });
+  const b = await createSession(request, {
+    title: `float-b-${Date.now()}`,
+    cwd: "/tmp",
+    invocation: "sleep 300",
+  });
+  try {
+    await page.goto("/");
+    await expect(row(page, a.id)).toBeVisible({ timeout: 20_000 });
+    await expect(row(page, b.id)).toBeVisible({ timeout: 20_000 });
+
+    // Rows sort newest-first or by some stable order; whichever of the
+    // two is FIRST gets its menu opened, and the OTHER is the one that
+    // must not move.
+    const firstIsA = (await row(page, a.id).boundingBox())!.y < (await row(page, b.id).boundingBox())!.y;
+    const first = firstIsA ? row(page, a.id) : row(page, b.id);
+    const second = firstIsA ? row(page, b.id) : row(page, a.id);
+
+    const before = (await second.boundingBox())!;
+    await openRowMenu(first);
+    await expect(first.locator(".session-row-menu-panel")).toBeVisible();
+    const after = (await second.boundingBox())!;
+    expect(after.y).toBe(before.y);
+    expect(after.x).toBe(before.x);
+  } finally {
+    await cleanupSession(request, a.id);
+    await cleanupSession(request, b.id);
+  }
+});
+
+/**
+ * Opening another row's menu leaves the selected session alone: the
+ * toggle is an inspection control, never an implicit row-open.
+ *
+ * Guards against event bubbling or a future row-level click handler
+ * making the ellipsis behave like the open button — which would replace
+ * the terminal the user is working in just for peeking at another
+ * session's actions.
+ */
+test("opening another row's menu does not change the selection", async ({ page, request }) => {
+  const a = await createSession(request, {
+    title: `keep-sel-a-${Date.now()}`,
+    cwd: "/tmp",
+    invocation: "sleep 300",
+  });
+  const b = await createSession(request, {
+    title: `keep-sel-b-${Date.now()}`,
+    cwd: "/tmp",
+    invocation: "sleep 300",
+  });
+  try {
+    await page.goto("/");
+    await expect(row(page, a.id)).toBeVisible({ timeout: 20_000 });
+    await row(page, a.id).locator(".session-row-open").click();
+    await expect(page.locator(".titlebar .title")).toContainText(a.title);
+
+    await openRowMenu(row(page, b.id));
+    await expect(row(page, b.id).locator(".session-row-menu-panel")).toBeVisible();
+    // Still A's session view, still mounted — the menu open was not a
+    // navigation.
+    await expect(page.locator(".titlebar .title")).toContainText(a.title);
+  } finally {
+    await cleanupSession(request, a.id);
+    await cleanupSession(request, b.id);
+  }
+});
+
+/**
+ * Rename happens inside the panel, with the row's open button visible
+ * but disabled for the duration — cancel restores the action items and
+ * re-enables navigation.
+ *
+ * Pins the rename form's new home (a panel descendant, not an inline
+ * row swap) and the navigation lock around an open editor: an enabled
+ * open button would let one stray click abandon the edit implicitly.
+ */
+test("rename lives in the panel and locks the row's open button while editing", async ({
+  page,
+  request,
+}) => {
+  const session = await createSession(request, {
+    title: `rename-panel-${Date.now()}`,
+    cwd: "/tmp",
+    invocation: "sleep 300",
+  });
+  try {
+    await page.goto("/");
+    const target = row(page, session.id);
+    await expect(target).toBeVisible({ timeout: 20_000 });
+    await openRowMenu(target);
+    await target.locator(".session-row-rename").click();
+
+    await expect(target.locator(".session-row-menu-panel .rename-form")).toBeVisible();
+    await expect(target.locator(".session-row-open")).toBeVisible();
+    await expect(target.locator(".session-row-open")).toBeDisabled();
+
+    await target.locator(".rename-cancel").click();
+    await expect(target.locator(".rename-form")).toHaveCount(0);
+    await expect(target.locator(".session-row-menu-panel .session-row-rename")).toBeVisible();
+    await expect(target.locator(".session-row-open")).toBeEnabled();
+  } finally {
+    await cleanupSession(request, session.id);
+  }
+});
+
+/**
+ * The archive consequence — the longest safety sentence a panel shows —
+ * wraps inside the panel with its full text readable.
+ *
+ * The panel relies on the consequence wrapping (`.confirm-consequence`
+ * inherits normal white-space there); a stray `nowrap` would clip or
+ * push the "what will be destroyed" half out of the 300px panel right
+ * before the user confirms, and string assertions cannot see that.
+ */
+test("the archive consequence wraps fully visible inside the panel", async ({
+  page,
+  request,
+}) => {
+  const session = await createSession(request, {
+    title: `wrap-${Date.now()}`,
+    cwd: "/tmp",
+    invocation: "sleep 300",
+  });
+  try {
+    await page.goto("/");
+    const target = row(page, session.id);
+    await expect(target).toBeVisible({ timeout: 20_000 });
+    // A LIVE session's archive confirms with the longest wording (the
+    // agent will be killed); wait for the live badge so the click takes
+    // the confirming branch rather than archiving outright.
+    await expect(target.locator(".status-badge")).toHaveText(/running|idle|waiting/, {
+      timeout: 30_000,
+    });
+    await openRowMenu(target);
+    await target.locator(".session-row-archive").click();
+
+    const consequence = target.locator(".session-row-menu-panel .confirm-consequence");
+    await expect(consequence).toBeVisible();
+    const panelBox = (await target.locator(".session-row-menu-panel").boundingBox())!;
+    const box = (await consequence.boundingBox())!;
+    expect(box.x).toBeGreaterThanOrEqual(panelBox.x - 1);
+    expect(box.x + box.width).toBeLessThanOrEqual(panelBox.x + panelBox.width + 1);
+    expect(box.y + box.height).toBeLessThanOrEqual(panelBox.y + panelBox.height + 1);
+    // Wrapped, not horizontally clipped: everything the element holds is
+    // painted within its own box.
+    expect(
+      await consequence.evaluate((el) => el.scrollWidth <= el.clientWidth + 1),
+      "the consequence must wrap rather than clip horizontally",
+    ).toBe(true);
+
+    await target.locator(".archive-cancel").click();
+  } finally {
+    await cleanupSession(request, session.id);
   }
 });
