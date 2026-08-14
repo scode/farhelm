@@ -1,8 +1,9 @@
 # Farhelm agent instructions
 
-Intent and preferences only — for what the system is and how it works, read SPEC.md (product behavior), SPEC_impl.md
-(implementation choices and their motivations), and PLAN.md / PLAN_M*.md (build order). Those documents are
-authoritative; do not restate them here and do not change behavior they specify without surfacing the conflict.
+Intent and preferences only — for what the system is and how it works, read SPEC.md (product behavior) and SPEC_impl.md
+(implementation choices and their motivations). Those documents are authoritative; do not restate them here and do not
+change behavior they specify without surfacing the conflict. The historical build-order docs (PLAN.md / PLAN_M*.md,
+cited by name throughout code comments) are archived under lore/ and are not maintained.
 
 # Conventional Commits
 

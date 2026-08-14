@@ -168,3 +168,53 @@ immediately before merging.
 16. **Build-cache disk growth on the dev box.** `target/debug/incremental` regrows ~30 GB per heavy day and, combined
     with sccache, double-caches; it caused one disk-full incident. Recorded suggestion: `CARGO_INCREMENTAL=0` where
     sccache is the wrapper, or a periodic sweep.
+
+## From the 2026-08 bugs-burndown stack (#151–#159; sidebar redesign + tab fixes)
+
+Added 2026-08-15 at the close of the burndown run (its out-of-repo working log does not follow the repository; these are
+the items with a future). All five burndown issues shipped; BUGS_BURNDOWN.md carries the per-issue record.
+
+17. **Desktop cross-restart selection memory.** Browser clients remember the last-selected session across reloads
+    (localStorage, a `{helm, id}` record keyed by the local host row's install identity); the v1 desktop app remembers
+    only within a process, so a relaunch auto-attaches the newest-created session instead of the one last used. SPEC.md
+    says exactly this, so nothing is wrong — but it was deferred purely because the webview's localStorage is not
+    synchronously reachable from native Rust, not because the behavior is right. If desktop use makes the fallback
+    annoying, persist the record native-side (the desktop bootstrap already owns a state dir) and restore it before the
+    fallback runs in `list.rs`'s auto-select effect.
+
+18. **Create-default can follow a reused HostId across a retarget window.** The create dialog defaults to the selected
+    session's host by row id; a retarget/adopt keeps the row id while changing the machine, and within one listing
+    refresh a create prepared against the stale selection lands on the successor install (the request's incarnation
+    check passes because the request was built against the successor). Mitigated: selection reconciliation clears a
+    vanished session quickly, so the window is one refresh interval. Closing it fully needs the helm listing to
+    denormalize install identity per session so the client can bind its create default to the install, not the row.
+    Raised as a definite security finding in #156's review; accepted as residual there.
+
+19. **Archive-from-detail keeps the archived view — revisit only on complaint.** #159's review asked for detail-pane
+    archive to clear the selection like the row path does. Rejected deliberately: the archived detail view
+    (archived-notice + restart) is the ONLY unarchive path while archived rows are hidden by default, so clearing would
+    strand the user. If include-archived browsing ever grows a proper unarchive affordance, this decision can flip.
+
+## E2E fixture contracts (write tests against these, or lose an afternoon)
+
+Learned during the burndown's test migrations; the helpers' docstrings in `e2e/tests/helpers/fleet.ts` carry the
+details, this is the map:
+
+- **Fabricated helm replies need three things** or the client rejects/misreads them: the `x-farhelm-build` header (probe
+  the real helm for its stamp — a missing stamp latches skew and the page stops reading), COMPLETE serde enum variants
+  (`HostPhase` is `tag="phase"` with required per-variant fields; a bare `{phase: "connected"}` fails decode and renders
+  the compact strip's error line instead of chips), and a `matching` count (a missing `matching` reads as an old helm
+  and takes the count banner's incoherence wording).
+- **Auto-select changes every test's page load**: a session attaches at `goto` before any click. Tests that stage route
+  holds or stubs around a specific session's first reads must `pinAutoSelect(page, otherId)` BEFORE `goto` (the helper
+  fetches the helm identity and writes the keyed record — a bare id is silently ignored). `__farhelmTermReady` is true
+  from load, so it no longer gates "the session I just acted on is up" — use title-based completion signals.
+- **On-demand surfaces need their open helpers first**: `openRowMenu` / `openHostsPanel` / `openFilterBar` each await
+  their surface's mount; bare-DOM `querySelector().click()` on a not-yet-mounted control is a silent no-op.
+- **"Leaving" a session means selecting another** (no back button): bounce through the shared `e2e-session` row, and
+  prove teardown via stashed handles (socket readyState, instance identity) rather than gone-entirely windows — the
+  replacement mount owns the globals immediately.
+- **`created_at` is second-granular with an id tiebreak**: two sessions created in the same second have arbitrary merged
+  order, so "newest" assertions need a >1s gap between creates.
+- **Playwright's fake clock ticks between `install()` and `pauseAt()`**: pause at a strictly future instant or a loaded
+  box throws "Cannot fast-forward to the past".
