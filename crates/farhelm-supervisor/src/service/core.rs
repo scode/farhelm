@@ -12252,17 +12252,13 @@ pub(crate) mod tests {
         let profiles = sup.store.profiles().await.expect("starter catalog");
         assert_eq!(
             profiles.len(),
-            2,
-            "the fresh catalog supplies two candidates"
+            4,
+            "the fresh catalog supplies four candidates"
         );
         let chosen = profiles
             .iter()
             .find(|profile| profile.id == "starter-codex")
             .expect("Codex starter");
-        let other = profiles
-            .iter()
-            .find(|profile| profile.id != chosen.id)
-            .expect("the other candidate");
         let inputs = |name: &str| CreateInputs {
             cwd: &cwd,
             parent: Some("parent-1".to_string()),
@@ -12284,10 +12280,6 @@ pub(crate) mod tests {
         assert_eq!(source.id, chosen.id);
         assert_eq!(source.name, chosen.name);
         assert_eq!(resolved.invocation, chosen.invocation);
-        assert_ne!(
-            source.id, other.id,
-            "the other catalog candidate was not chosen"
-        );
 
         for (id, name) in [("exact-a", "Exact Name"), ("exact-b", "Exact Name")] {
             sup.store
@@ -13892,7 +13884,7 @@ pub(crate) mod tests {
             .source_profile
             .expect("a profile-backed create records what it came from");
         assert_eq!(
-            source.name, "Claude Code",
+            source.name, "claude",
             "the SNAPSHOT is what the user picked, and no later edit rewrites it"
         );
         assert_eq!(
@@ -13961,7 +13953,7 @@ pub(crate) mod tests {
                     launch_scoped: false,
                     source_profile: Some(ProfileSnapshot {
                         id: "starter-claude".to_string(),
-                        name: "Claude Code".to_string(),
+                        name: "claude".to_string(),
                     }),
                 },
                 Some(IntentClaim {
@@ -14014,10 +14006,7 @@ pub(crate) mod tests {
             "the retry runs what the first attempt resolved, not what the catalog says now"
         );
         let source = session.source_profile.expect("the snapshot rides the row");
-        assert_eq!(
-            source.name, "Claude Code",
-            "and so does the name it recorded"
-        );
+        assert_eq!(source.name, "claude", "and so does the name it recorded");
         assert_eq!(
             source.existence,
             ProfileExistence::Renamed,
@@ -14075,7 +14064,7 @@ pub(crate) mod tests {
                     launch_scoped: false,
                     source_profile: Some(ProfileSnapshot {
                         id: "starter-codex".to_string(),
-                        name: "Codex".to_string(),
+                        name: "codex".to_string(),
                     }),
                 },
                 Some(IntentClaim {
@@ -14116,7 +14105,7 @@ pub(crate) mod tests {
         assert_eq!(session.id, "stranded");
         assert_eq!(session.invocation, "codex");
         let source = session.source_profile.expect("the snapshot rides the row");
-        assert_eq!(source.name, "Codex");
+        assert_eq!(source.name, "codex");
         assert_eq!(
             source.existence,
             ProfileExistence::Deleted,
@@ -14183,7 +14172,7 @@ pub(crate) mod tests {
             .expect("a restart never changes what a session was created from");
         assert_eq!(source.id, "starter-claude");
         assert_eq!(
-            source.name, "Claude Code",
+            source.name, "claude",
             "the snapshot is what the session recorded at creation"
         );
         assert_eq!(
@@ -14274,7 +14263,7 @@ pub(crate) mod tests {
             .as_ref()
             .expect("the stored snapshot survives the process that wrote it");
         assert_eq!(snapshot.id, "starter-claude");
-        assert_eq!(snapshot.name, "Claude Code");
+        assert_eq!(snapshot.name, "claude");
 
         // Through a real reply, so the derivation is exercised rather than
         // the raw column: the profile is gone, and the reply must say so.

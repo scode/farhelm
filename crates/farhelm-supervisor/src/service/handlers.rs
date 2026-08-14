@@ -3984,7 +3984,7 @@ mod tests {
         assert_eq!(req_id, 1, "the reply must correlate");
         assert_eq!(
             profiles.iter().map(|p| p.name.as_str()).collect::<Vec<_>>(),
-            vec!["Claude Code", "Codex"],
+            vec!["claude", "claude-yolo", "codex", "codex-yolo"],
             "a fresh supervisor is not empty (SPEC.md)"
         );
 
@@ -4252,7 +4252,7 @@ mod tests {
         }
         assert_eq!(
             sup.store.profiles().await.expect("catalog").len(),
-            2,
+            4,
             "not one refused write may have landed beside the starters"
         );
 
@@ -4738,7 +4738,7 @@ mod tests {
             .expect("create the profile")
         {
             crate::store::ProfileCreation::Created(profile) => profile,
-            other => panic!("a catalog of two starters is not full: {other:?}"),
+            other => panic!("a catalog of four starters is not full: {other:?}"),
         };
         let create = |req_id| ControlMsg::CreateSession {
             req_id,
@@ -4865,6 +4865,99 @@ mod tests {
             .expect("a deleted profile does not erase what the session came from");
         assert_eq!(source.name, "Local Claude");
         assert_eq!(source.existence, farhelm_proto::ProfileExistence::Deleted);
+    }
+
+    /// An EXPLICIT resume template on a profile must reach the session
+    /// verbatim, never re-derived from the invocation's argv0.
+    ///
+    /// The neighboring test above proves the NULL-template half of the
+    /// contract: an absent template on an integrated profile lets the kind
+    /// derive one from argv0. This test proves the other half, and it is
+    /// the half `STARTER_PROFILES` actually depends on for its two yolo
+    /// rows — derivation from argv0 alone would rebuild
+    /// `codex resume {conversation}` from `starter-codex-yolo`'s
+    /// invocation and silently drop `--yolo`, turning a resumed unattended
+    /// session back into a permission-gated one with no error anywhere.
+    /// Every other test in this module creates from a NULL-template
+    /// profile, so this shape would slip past all of them if the create
+    /// path ever started re-deriving instead of honoring what the profile
+    /// says.
+    ///
+    /// Driven against `starter-codex-yolo` itself rather than a
+    /// hand-built fixture, which doubles as an end-to-end check that the
+    /// seeded yolo starter is actually usable through the ordinary create
+    /// path.
+    #[tokio::test]
+    async fn a_profile_backed_create_honors_an_explicit_resume_template_verbatim() {
+        let state = StateDir::new();
+        let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
+            .await
+            .expect("supervisor construction touches only tmux, not the launch shim");
+        let (tx, mut rx) = mpsc::channel(CONNECTION_WRITER_QUEUE);
+        let mut input_routes = HashMap::new();
+        let mut tasks = tokio::task::JoinSet::new();
+
+        handle_control(
+            &sup,
+            ControlMsg::CreateSession {
+                req_id: 1,
+                parent: None,
+                profile_name: None,
+                cwd: state.path().to_string_lossy().to_string(),
+                invocation: None,
+                profile_id: Some("starter-codex-yolo".to_string()),
+                title: Some("from the yolo starter".to_string()),
+                cols: 80,
+                rows: 24,
+                intent_key: Some("intent-yolo".to_string()),
+                agent_kind: None,
+                resume_template: None,
+            },
+            ConnectionCtx {
+                tx: &tx,
+                priority: &tx,
+                input_routes: &mut input_routes,
+                upload_routes: &mut no_uploads(),
+                tasks: &mut tasks,
+            },
+        )
+        .await;
+        let frame = rx.try_recv().expect("a reply must have been sent");
+        let session = match serde_json::from_slice(&frame.body).expect("decode") {
+            ControlMsg::SessionCreated { session, .. } => session,
+            other => panic!("a create naming the seeded yolo starter must succeed: {other:?}"),
+        };
+
+        assert_eq!(
+            session.invocation, "codex --yolo",
+            "the profile is what says WHAT to run, flag included"
+        );
+        assert_eq!(
+            session.source_profile,
+            Some(farhelm_proto::SourceProfile {
+                id: "starter-codex-yolo".to_string(),
+                name: "codex-yolo".to_string(),
+                existence: farhelm_proto::ProfileExistence::Present,
+            })
+        );
+
+        let snapshot = sup
+            .session_snapshot(&session.id)
+            .await
+            .expect("reading the snapshot")
+            .expect("the session exists");
+        assert_eq!(snapshot.kind, AgentKind::Codex);
+        assert_eq!(
+            snapshot.resume_template.as_deref().unwrap(),
+            [
+                "codex",
+                "--yolo",
+                "resume",
+                crate::agent_kind::CONVERSATION_PLACEHOLDER
+            ],
+            "an explicit template is stored AS WRITTEN, not re-derived from argv0 — \
+             re-deriving here would silently drop --yolo and resume this session gated again"
+        );
     }
 
     /// A session-authenticated peer has one operation, and even that
