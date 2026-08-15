@@ -835,6 +835,22 @@ fn AppBody() -> Element {
     // state in which the right pane may claim there is nothing to select
     // (see the placeholder below). Written by `ListView`'s commit path.
     let fleet_empty = use_signal(|| None::<bool>);
+    // Bumped by every EXTERNAL event that can move a session row out from
+    // under an open actions panel's already-measured `position: fixed`
+    // coordinates: an `onscroll` on either scrolling ancestor of the
+    // session list below — `.app-sidebar` (the real vertical scroller)
+    // and `.app-shell` (which scrolls horizontally in a narrow window) —
+    // plus (see the `onresize` below) a resize of the sidebar itself.
+    // Read by `ListView`'s own effect to close any open row actions panel
+    // — see that prop's own doc for the full rationale, including the
+    // internal (non-`AppBody`-owned) causes it ALSO watches. Owned HERE,
+    // not inside `ListView`, because none of `onscroll`/`onresize` bubble:
+    // only an element that is ITSELF the observed one ever sees its own
+    // scroll/resize events, and `.app-shell`/`.app-sidebar` are this
+    // component's own elements, not `ListView`'s. The counter is
+    // deliberately never READ here, only bumped — "layout", not "scroll",
+    // because it now covers more than scrolling.
+    let mut layout_epoch = use_signal(|| 0_u64);
     let build_skew = skew::build_skew_detected();
     let token_required = *auth::TOKEN_REQUIRED.read();
 
@@ -879,8 +895,38 @@ fn AppBody() -> Element {
             // that remount was implicit in the arm swap, and without the
             // key a selection change would leave the view talking to the
             // previous session.
-            div { class: "app-shell",
-                div { class: "app-sidebar",
+            div {
+                class: "app-shell",
+                // See `layout_epoch`'s own doc above: this element's
+                // OWN horizontal scrolling (a legal narrow window, per
+                // this class's app.css comment) moves everything inside
+                // it, including whatever row an open actions panel was
+                // measured against.
+                onscroll: move |_| layout_epoch += 1,
+                div {
+                    class: "app-sidebar",
+                    // As above, for THIS element's own vertical
+                    // scrolling — the sidebar's usual case.
+                    onscroll: move |_| layout_epoch += 1,
+                    // A window resize does not scroll anything, but it can
+                    // still move every row: the sidebar's width is fixed
+                    // (see this class's own app.css comment), so a resize
+                    // narrow enough to trigger `.app-shell`'s horizontal
+                    // scroll changes what is under the fold without any
+                    // `onscroll` firing on its own. `ResizeObserver`-backed
+                    // (Dioxus 0.7's `onresize`) rather than a window-level
+                    // `resize` listener: observing THIS element directly is
+                    // exactly what the fixed-panel coordinates actually
+                    // depend on, and Dioxus's own JS interpreter wires
+                    // `onresize` through the SAME `ResizeObserver` machinery
+                    // on both the `web` (wasm-bindgen) and `desktop`
+                    // (wry/webview IPC) renderer targets — confirmed by
+                    // reading `dioxus-interpreter-js`'s shared
+                    // `BaseInterpreter.createListener`/`createResizeObserver`,
+                    // which both targets load unmodified — so this is not a
+                    // web-only affordance despite `ResizeObserver` sounding
+                    // browser-specific.
+                    onresize: move |_| layout_epoch += 1,
                     ListView {
                         // Selection memory lives in `ListView` (it knows
                         // the helm identity the stored id is keyed by and
@@ -918,6 +964,7 @@ fn AppBody() -> Element {
                                 current.set(None);
                             }
                         },
+                        layout_epoch,
                     }
                 }
                 div { class: "app-main",

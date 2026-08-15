@@ -42,7 +42,9 @@
 //! pages here would scramble them into an order no cursor agrees with.
 
 use std::collections::{HashMap, HashSet};
+use std::rc::Rc;
 
+use dioxus::html::geometry::PixelsRect;
 use dioxus::prelude::*;
 
 use crate::api::{
@@ -64,8 +66,8 @@ use crate::profiles::{
 use crate::reader::{SurfaceReader, Trigger, request_read};
 use crate::rename::RenameForm;
 use crate::rows::{
-    self, absence_is_evidence, apply_optimistic_renames, count_banner, retire_vanished_renames,
-    settle_optimistic_renames,
+    self, absence_is_evidence, apply_optimistic_renames, count_banner, menu_row_reordered,
+    retire_vanished_renames, settle_optimistic_renames,
 };
 use crate::status::{confirm_consequence, status_badge};
 use crate::{ApiBase, Host, HostId, HostKind, Session, SessionStatus};
@@ -665,6 +667,30 @@ pub(crate) fn ListView(
     /// a committed empty result, never during loading or failure (the
     /// sidebar's own status lines carry those).
     fleet_empty: Signal<Option<bool>>,
+    /// A counter `AppBody` bumps on every EXTERNAL layout event that can
+    /// move a session row out from under an open actions panel's already-
+    /// measured `position: fixed` coordinates: an `onscroll` from EITHER
+    /// of the sidebar's two real scrolling ancestors — `.app-sidebar`
+    /// itself (`overflow: hidden auto`, the vertical scroller) and
+    /// `.app-shell` (which scrolls horizontally when the window is
+    /// narrower than the sidebar plus the main pane's floor) — plus an
+    /// `onresize` on `.app-sidebar` where the renderer supports it (a
+    /// window resize narrow enough to trigger `.app-shell`'s scroll moves
+    /// rows without ever firing `onscroll` on its own). None of those
+    /// listeners live here: this component only renders `.session-list`,
+    /// which is not itself a scroll container (see the comment beside
+    /// it) and would never see any of those events — none of them
+    /// bubble. A counter rather than a plain signal-of-unit because
+    /// `use_effect` reruns on ANY write, so what this component actually
+    /// needs is just something to subscribe to that changes once per
+    /// event; the count itself is never read, only watched.
+    ///
+    /// This is deliberately not the WHOLE story — see the `use_effect`
+    /// that reads it (near `show_create`'s declaration, once every signal
+    /// it also watches is in scope) for the INTERNAL layout causes (this
+    /// component's own on-demand panels) it also watches, which never
+    /// touch this counter at all.
+    layout_epoch: ReadSignal<u64>,
 ) -> Element {
     let base = use_context::<ApiBase>().0;
     let mut row_ops = row_ops;
@@ -806,6 +832,65 @@ pub(crate) fn ListView(
     // would leave two vocabularies for one number.
     let mut poll_sequence = use_signal(|| 0_u64);
     let mut show_create = use_signal(|| false);
+    // A shape signature for `.hosts-compact` (below) — how many host chips
+    // it renders, plus whether its loading note or refresh-error line show
+    // — the exact three things that can change how tall that ALWAYS-
+    // mounted strip is. A `use_memo`, not a plain read of `hosts` inside
+    // the effect below: `hosts` rewrites on every fleet poll even when the
+    // strip's rendered SHAPE has not moved (a phase word flipping color at
+    // the same length, say), and closing the menu on every poll — several
+    // times a working minute on a live fleet — would make it unusable.
+    // `use_memo` only notifies when the computed tuple actually changes.
+    let hosts_strip_shape = use_memo(move || {
+        let read = hosts.read();
+        (
+            read.hosts().map(<[_]>::len).unwrap_or(0),
+            read.is_loading(),
+            read.refresh_error().is_some(),
+        )
+    });
+    // Closes any open actions-menu panel the instant something above
+    // `.session-list` could have moved the row it was measured against —
+    // a `position: fixed` panel's coordinates are a one-time snapshot
+    // (see `menu_panel_style`), so anything that shifts the sidebar's
+    // layout above the rows leaves it visibly detached from its toggle
+    // unless something notices and closes it. Two different KINDS of
+    // cause feed this one effect:
+    //
+    // - EXTERNAL layout shifts — a scroll on `.app-sidebar`/`.app-shell`,
+    //   or (where the renderer supports it) a window resize — arrive as
+    //   `layout_epoch`, a counter `AppBody` owns and bumps from listeners
+    //   this component cannot host itself (see that prop's own doc for
+    //   why).
+    // - INTERNAL layout shifts this component causes directly: opening or
+    //   closing the hosts panel or the filter bar mounts or collapses a
+    //   whole section above the rows, the create form does the same, and
+    //   the always-visible compact host strip can change its own shape
+    //   the instant an async host read lands (`hosts_strip_shape`, just
+    //   above). None of these go through `layout_epoch` — they are this
+    //   component's own renders, not an ancestor's scroll or resize — so
+    //   each is read directly here instead.
+    //
+    // Reruns on every write any of these six reads subscribes to,
+    // including the initial mount: that first run is a no-op (`menu_open`
+    // starts `None`), so there is no special-casing needed to skip it.
+    //
+    // NOT exhaustive — a same-INDEX height change on a row already above
+    // the open one (a per-row error line appearing, say) moves the open
+    // row without tripping ANY of these six signals or the index-based
+    // reflow check in `commit_listing`. See that check's own doc for the
+    // residual this leaves and why it is accepted rather than chased
+    // further here.
+    use_effect(move || {
+        layout_epoch();
+        hosts_open();
+        filter_open();
+        show_create();
+        hosts_strip_shape();
+        if menu_open.peek().is_some() {
+            menu_open.set(None);
+        }
+    });
     // The create dialog's explicit host choice, and which host row has its
     // profiles section expanded (PLAN_M6_75.md item 8).
     //
@@ -977,6 +1062,15 @@ pub(crate) fn ListView(
         if !accepted {
             return;
         }
+        // A second handle on the SAME `listing` signal, under a name that
+        // survives the shadowing two lines down (`if let Ok(listing) =
+        // &fetched` rebinds `listing` to the reply's own rows for the rest
+        // of this block) — needed below to read the OUTGOING listing
+        // (still the signal's current value at that point) as the
+        // baseline `rows::menu_row_reordered` diffs against. `Signal` is
+        // `Copy`, so this is not a second signal, just a second name for
+        // the one `ListView` owns.
+        let listing_signal = listing;
         if let Ok(listing) = &fetched {
             // Only a successful fetch is evidence about titles: an error
             // carries none at all, so it can neither confirm nor contradict
@@ -1000,6 +1094,38 @@ pub(crate) fn ListView(
                 .is_some_and(|id| !listing.sessions.iter().any(|s| s.id == *id));
             if menu_vanished {
                 menu_open.set(None);
+            }
+            // The row STAYING listed does not mean it stayed PUT: an
+            // insert or removal above it shifts its index without ever
+            // making `menu_vanished` true (`rows::menu_row_reordered`'s
+            // own doc has the full contract, including why a first load
+            // or a recovery from a failed read is deliberately never
+            // read as a reorder here). Only evaluated once the row is
+            // confirmed still present — a row `menu_vanished` already
+            // closed above has nothing left here to reconcile.
+            //
+            // `still_open_id` is bound to an OWNED value, not left as a
+            // live `peek()` borrow: the mutation below needs `menu_open`
+            // free to write again, and a borrow held through the `if let`
+            // chain (Rust extends its temporary past the whole condition)
+            // would still be outstanding at that point. The PREVIOUS
+            // listing's `Ref` guard is scoped even tighter, to this one
+            // block: it must drop well before this closure's own
+            // `listing.set(...)` at the end, or that write would panic
+            // against a borrow still outstanding on the same signal.
+            let still_open_id = menu_open.peek().clone();
+            if !menu_vanished && let Some(open_id) = still_open_id {
+                let reordered = {
+                    let previous = listing_signal.peek();
+                    let previous_sessions = match previous.as_ref() {
+                        Some(Ok(prev)) => Some(prev.sessions.as_slice()),
+                        _ => None,
+                    };
+                    menu_row_reordered(previous_sessions, &listing.sessions, &open_id)
+                };
+                if reordered {
+                    menu_open.set(None);
+                }
             }
             // The right pane's placeholder may only claim "no active
             // sessions" on a committed result that actually proves one:
@@ -2362,6 +2488,15 @@ pub(crate) fn ListView(
                         // delete prompt that quotes it, the rename field
                         // if it is reopened, and the `Session` that
                         // `on_open` carries into the session view.
+                        //
+                        // NOTE: this div does not itself scroll (it has no
+                        // height constraint of its own — `.app-sidebar` is
+                        // the real vertical scroller, see `app.css`), so an
+                        // `onscroll` handler here would never fire; closing
+                        // an open menu on scroll (or resize, or an internal
+                        // layout change) is `layout_epoch`'s job instead —
+                        // see the `use_effect` near `show_create`'s
+                        // declaration.
                         for session in apply_optimistic_renames(&listing.sessions, &renamed.read()) {
                             SessionRow {
                                 key: "{session.id}",
@@ -3268,6 +3403,240 @@ fn CreateSessionForm(
     }
 }
 
+/// Vertical gap between the toggle's bottom edge and the floating panel's
+/// top edge, in pixels — the fixed-position replacement for the old
+/// `top: 2.4em` (see `.session-row-menu-panel` in app.css for the switch
+/// from an absolutely-positioned, row-anchored panel to one positioned
+/// against the viewport).
+const MENU_PANEL_GAP_PX: f64 = 2.0;
+
+/// Horizontal gap between the panel's RIGHT edge and the toggle's LEFT
+/// edge, in pixels. Keeping the toggle COLUMN clear (rather than centering
+/// the panel under the toggle, or flushing it to the sidebar's edge) is
+/// what lets one click on any OTHER row's "⋯" swap the open panel
+/// directly, without first dismissing the one already open — see
+/// `.session-row-menu-panel` in app.css for the full rationale.
+const MENU_PANEL_RIGHT_GAP_PX: f64 = 8.0;
+
+/// A conservative reserve, in pixels, subtracted from the viewport height
+/// when clamping the panel's `top`. This is a CEILING on the clamp, not a
+/// claim about the panel's real height — the panel's mode (menu / confirm
+/// / rename) changes that height at runtime, and it is
+/// `.session-row-menu-panel`'s own `max-height` + `overflow-y: auto` in
+/// app.css that actually guarantees the panel stays on screen regardless
+/// of how far off this estimate runs. This constant only keeps the clamp
+/// from placing the panel's TOP so close to the viewport's bottom that
+/// even its shortest mode would still be pushed off.
+const MENU_PANEL_MIN_RESERVE_PX: f64 = 160.0;
+
+/// The panel's own floor on how narrow `menu_panel_style`'s horizontal
+/// clamp (below) may shrink it to. Below this, the panel could no longer
+/// show its own button labels without wrapping every word — a worse
+/// failure than the few pixels of edge overflow this floor accepts
+/// instead in the single extreme case that forces it (see that clamp's
+/// own doc).
+const MENU_PANEL_MIN_WIDTH_PX: f64 = 96.0;
+
+/// Computes the fixed-position panel's `top`/`right`/`max-width` inline
+/// style from the toggle button's own viewport rect
+/// (`MountedData::get_client_rect`, measured on open — see `SessionRow`'s
+/// toggle `onclick`). Callers reach this only through
+/// `menu_panel_placement_style`, which adds the `opacity`/`pointer-events`
+/// every state must restate — see that function's own doc for why this
+/// one deliberately does not.
+///
+/// `position: fixed` resolves these axes against the VIEWPORT, which is
+/// exactly what lets the panel escape `.session-list`'s and
+/// `.app-sidebar`'s `overflow` clipping that an absolutely-positioned,
+/// row-anchored panel could never escape (opening the menu on a row near
+/// the bottom of a full list used to cut the panel off at the scroll
+/// container's edge — see `.session-row-menu-panel` in app.css). Each
+/// axis is clamped for a DIFFERENT reason:
+///
+/// - `top` is clamped on BOTH ends: `min()` keeps a toggle near the
+///   bottom of a short viewport from pushing the panel's START past a
+///   point from which even its shortest mode would run off screen — see
+///   `MENU_PANEL_MIN_RESERVE_PX` for why this is a ceiling, not a
+///   promise — while the outer `max(8px, ...)` is the floor: on a
+///   viewport shorter than `MENU_PANEL_MIN_RESERVE_PX` the `min()` alone
+///   would go negative, pushing the panel's top edge ABOVE the viewport
+///   (off screen the other direction, and in the opposite sense
+///   `max-height` below assumes). `8px` keeps it a hair inside the top
+///   edge instead, matching the fallback's own resting position in
+///   app.css.
+/// - `right` is expressed as `calc(100vw - Xpx)` rather than a raw pixel
+///   offset: `right` measures from the viewport's RIGHT edge, but the
+///   toggle's rect only gives an offset from the viewport's LEFT edge.
+///   `100vw` lets the browser/webview do that unit conversion at paint
+///   time (and re-do it for free on resize) instead of this function
+///   needing to ask the renderer for the viewport's width itself, which
+///   would mean a `document::eval` round trip this fix deliberately
+///   avoids. The outer `max(8px, ...)` floors `right` itself: if
+///   `right_edge` ever reached or exceeded the viewport's own width (a
+///   toggle scrolled to the far right of an unusually narrow shell), the
+///   unclamped expression would go negative and push the panel's right
+///   edge PAST the viewport's own right side.
+/// - `max-width` shrinks from the CSS class's static 288px when there
+///   isn't `288px + MENU_PANEL_RIGHT_GAP_PX` of room between the panel's
+///   right edge and the viewport's LEFT edge — the horizontal twin of the
+///   `top` clamp. Without it, a toggle whose own left edge sits close to
+///   the viewport's left edge (the `.app-shell`-scrolled extreme: a
+///   narrow window scrolled far enough that the sidebar is partway off
+///   screen) would still try to grow the panel a full 288px leftward from
+///   `right_edge`, running its LEFT edge off screen. Floored at
+///   `MENU_PANEL_MIN_WIDTH_PX` rather than left to go negative — CSS
+///   treats a negative `max-width` as an INVALID declaration, which drops
+///   the whole property and silently reverts to the class's unclamped
+///   288px, the opposite of what this clamp exists for. The floor is a
+///   documented, accepted residual, not a full fix: in that one extreme
+///   (`right_edge` closer to the viewport's left edge than
+///   `MENU_PANEL_MIN_WIDTH_PX + MENU_PANEL_RIGHT_GAP_PX`), the panel may
+///   still hang a few pixels past the screen's left edge — a narrower
+///   panel than that would stop being legible, which is the worse
+///   failure between the two.
+fn menu_panel_style(toggle_rect: PixelsRect) -> String {
+    let top = toggle_rect.max_y() + MENU_PANEL_GAP_PX;
+    let right_edge = toggle_rect.min_x() - MENU_PANEL_RIGHT_GAP_PX;
+    let max_width = (right_edge - MENU_PANEL_RIGHT_GAP_PX).max(MENU_PANEL_MIN_WIDTH_PX);
+    // The clamped top is emitted ONCE, as a custom property, so the
+    // `max-height` can be derived from the same value: `calc(100vh -
+    // top - 8px)` is an EXACT ceiling on the space below the panel's
+    // start, where the class's static `max-height` (a fallback for the
+    // never-measured case) can only bound the panel against the whole
+    // viewport. Without this, a mode taller than
+    // `MENU_PANEL_MIN_RESERVE_PX` opened near the viewport's bottom
+    // would still overrun the screen edge by the difference — the same
+    // clipping this fix exists to end, just smaller.
+    format!(
+        "--menu-top: max(8px, min({top}px, calc(100vh - {MENU_PANEL_MIN_RESERVE_PX}px))); \
+         top: var(--menu-top); \
+         right: max(8px, calc(100vw - {right_edge}px)); \
+         max-width: min(288px, {max_width}px); \
+         max-height: calc(100vh - var(--menu-top) - 8px);"
+    )
+}
+
+/// Where the actions panel currently believes its own screen position is,
+/// while an async `get_client_rect()` measurement races the render that
+/// opened it.
+///
+/// The toggle's `onclick` opens the menu SYNCHRONOUSLY (see its own doc):
+/// `menu_open` flips before any `await`, so the panel is already mounted
+/// by the time a measurement can even start. `Unmeasured` is what that
+/// first render is — the panel exists in the DOM (so its own height is
+/// ready and tab order includes it, and any `autofocus` element inside it
+/// — the delete/archive confirm's cancel button, the rename field — can
+/// actually RECEIVE that focus; see `menu_panel_placement_style`'s own
+/// doc for why hiding via `visibility` would have silently broken that)
+/// but paints nothing, which is what keeps a still-pending measurement
+/// from ever flashing the panel at the CSS fallback position for one
+/// frame.
+#[derive(Clone, Copy, PartialEq)]
+enum PanelPlacement {
+    /// No measurement has resolved yet for the CURRENT open — freshly
+    /// reset every time the toggle opens (see its `onclick`), because a
+    /// rect measured for a PREVIOUS open can be stale (the toggle can
+    /// move between opens: a row above it changing height, the window
+    /// resizing) and is not safe to reuse as a stand-in.
+    Unmeasured,
+    /// `get_client_rect()` resolved; the panel renders at these exact
+    /// viewport coordinates via `menu_panel_style`.
+    Measured(PixelsRect),
+    /// The measurement itself failed — no mounted handle yet, or the
+    /// renderer's `get_client_rect()` returned `Err` — as opposed to
+    /// `Unmeasured`'s "hasn't resolved YET". This is not transient: it
+    /// persists for as long as the panel stays open in this state (a
+    /// renderer with no `get_client_rect()` support will fail on every
+    /// future measurement too), so the panel pins itself top-left over
+    /// the sidebar (coordinates emitted inline by
+    /// `menu_panel_placement_style` — the class deliberately carries NO
+    /// positional fallback, see its app.css comment) rather than staying
+    /// invisible — a toggle whose renderer cannot answer this query must
+    /// still open to SOMETHING, never become a dead button.
+    Fallback,
+}
+
+/// Maps a row's current `PanelPlacement` to the actions panel's inline
+/// `style` attribute — the presentation half of the state machine
+/// `PanelPlacement` itself documents.
+///
+/// `Unmeasured` hides the panel with `opacity: 0; pointer-events: none;`,
+/// NOT `visibility: hidden`. This is load-bearing, not a style
+/// preference: the confirm/rename sub-states use the plain HTML
+/// `autofocus` attribute (see `SessionRow`'s own doc) to land keyboard
+/// focus the instant they mount, and confirm/rename state SURVIVES
+/// closing and reopening the panel (`ListView` tracks them independently
+/// of `menu_open`) — so a row mid-confirmation that gets closed and
+/// reopened remounts its `autofocus` cancel button while `placement` is
+/// freshly `Unmeasured` again. The HTML focusable-area algorithm requires
+/// a computed `visibility` of `visible` for an element to be focusable at
+/// all; `visibility: hidden` would make that remounted button
+/// UNFOCUSABLE at the exact moment `autofocus` tries to focus it, and — per
+/// spec — a browser does not retry `autofocus` later once the candidate
+/// has been processed, so the safety default (focus lands on the SAFE
+/// action before a stray Enter/Space can reach anything) would silently
+/// fail for the rest of that open. `opacity` is not part of that
+/// algorithm at all: an `opacity: 0` element is exactly as focusable as a
+/// fully opaque one, so `autofocus` still succeeds while the panel is
+/// invisible, and nothing needs to re-focus anything once a measurement
+/// resolves and paints it. `pointer-events: none` is what still keeps it
+/// from intercepting stray clicks while invisible.
+///
+/// EVERY non-`Unmeasured` branch explicitly restates `opacity: 1;
+/// pointer-events: auto;` — never omits them to "fall through" to
+/// whatever the CSS class or an earlier render already set. This is not
+/// defensive redundancy: Dioxus's own JS interpreter does NOT treat a
+/// `style` attribute update as a plain replace (see
+/// `.session-row-menu-panel`'s own app.css doc for the exact mechanism,
+/// confirmed by reading `dioxus-interpreter-js` directly) — it RESTORES
+/// any inline style property the new string omits from whatever the
+/// PREVIOUS update on that same DOM node left behind. Omitting these two
+/// properties once `Unmeasured` has already set them to `0`/`none` would
+/// not fall back to the stylesheet at all; it would silently carry
+/// `Unmeasured`'s hidden, inert styling forward into the state that is
+/// supposed to make the panel visible and usable again.
+fn menu_panel_placement_style(placement: PanelPlacement) -> String {
+    // Every positional property ANY state sets is restated by every state
+    // that must not inherit it: the interpreter's style-restore quirk (see
+    // the type doc) carries an omitted property's previous value forward
+    // across `style` updates, so `Fallback`'s `left: 8px` would otherwise
+    // resurface under a later `Measured` render — and a fixed box with
+    // both `left` and `right` set stretches between them, ballooning the
+    // panel across the sidebar (the exact regression a class-level
+    // fallback `left` caused before coordinates moved fully in here).
+    match placement {
+        PanelPlacement::Unmeasured => "opacity: 0; pointer-events: none;".to_string(),
+        PanelPlacement::Measured(rect) => {
+            format!(
+                "opacity: 1; pointer-events: auto; left: auto; {}",
+                menu_panel_style(rect)
+            )
+        }
+        PanelPlacement::Fallback => "opacity: 1; pointer-events: auto; \
+                                     top: 8px; left: 8px; right: auto; \
+                                     max-width: 288px; max-height: calc(100vh - 16px);"
+            .to_string(),
+    }
+}
+
+/// Whether the toggle's `onmounted` should start its OWN measurement
+/// rather than leaving one to the `onclick` path that ordinarily starts
+/// every measurement.
+///
+/// `onmounted` fires once per DOM node, on every mount — including a
+/// remount that lands with the menu already open (see `onmounted`'s own
+/// doc for the failed-then-recovered listing read that causes this: a
+/// fresh row-local `placement` signal starts back at `Unmeasured` with no
+/// click of its own to trigger a measurement). Extracted as a pure
+/// predicate — rather than left as the inline `if` at the one call site —
+/// so this decision can be pinned by a unit test independent of the
+/// `onmounted` event, `MountedData`, and the `spawn`ed task around it,
+/// none of which a headless `VirtualDom` test (no real renderer attached)
+/// can exercise at all.
+fn should_measure_on_mount(menu_open: bool, placement: PanelPlacement) -> bool {
+    menu_open && placement == PanelPlacement::Unmeasured
+}
+
 /// One row, in two layers. The row itself is a plain `<div>` wrapper
 /// around two real `<button>`s — the open button (the session's stacked
 /// title/host/cwd/invocation lines) and the small "⋯" actions-menu
@@ -3458,6 +3827,64 @@ fn SessionRow(
     let rename_submit_id = session.id.clone();
     let controls = row_control_visibility(session.archived);
     let menu_id = session.id.clone();
+    // The toggle's own `MountedData`, captured once via `onmounted` below,
+    // and where the panel believes its own screen position currently is
+    // (`PanelPlacement` — its own doc has the state machine) — both
+    // row-local (unlike `menu_open`, which `ListView` owns so only one
+    // row's menu can ever be open). `ListView` has no business knowing
+    // this row's screen geometry, and this row has no business deciding
+    // WHETHER its menu is open — the split mirrors that division exactly.
+    let mut toggle_handle = use_signal(|| None::<Rc<MountedData>>);
+    let mut placement = use_signal(|| PanelPlacement::Unmeasured);
+    // Bumped on every FRESH open (the toggle's `onclick`, opening branch
+    // only — never on close, and never by the `onmounted` heal path,
+    // which reuses whatever generation is already current rather than
+    // starting a new one). A still-in-flight measurement from an OLDER
+    // open captures its own generation before awaiting, and discards its
+    // result if this counter has since moved on — see `spawn_measurement`
+    // below. This closes a race a plain "reset placement, then measure"
+    // scheme leaves open: two opens of the SAME toggle close enough
+    // together (a fast close-then-reopen, or reopen after the row itself
+    // moved) can have their measurements resolve out of order, and
+    // without this counter the OLDER one finishing LAST would silently
+    // overwrite the newer, correct measurement with a stale one.
+    let mut open_generation = use_signal(|| 0_u64);
+    // Shared by the toggle's `onclick` (every fresh open) and its
+    // `onmounted` (healing a remount that lands with the menu ALREADY
+    // open — see that handler's own doc for why that happens and why
+    // re-measuring there is what fixes it). Takes no arguments: both call
+    // sites close over this row's own `toggle_handle`/`placement`/
+    // `open_generation` directly, and both want the exact same
+    // capture-generation → query → classify-if-still-current sequence, so
+    // this is the one place that sequence is written.
+    let spawn_measurement = move || {
+        let handle = toggle_handle;
+        let mut placement = placement;
+        // Captured SYNCHRONOUSLY, before the `await` below yields — a
+        // generation bump landing after this line but before the read
+        // would otherwise be invisible to this task, defeating the guard
+        // it exists to provide.
+        let generation = open_generation();
+        spawn(async move {
+            let measured = match handle.peek().clone() {
+                Some(handle) => handle.get_client_rect().await.ok(),
+                None => None,
+            };
+            // A newer open has superseded this measurement — applying it
+            // now would clobber whatever that newer open's OWN
+            // measurement already wrote (or will still write), with
+            // coordinates for a toggle position this open no longer
+            // speaks for. See `open_generation`'s own doc for the
+            // concrete interleaving this guards against.
+            if *open_generation.peek() != generation {
+                return;
+            }
+            placement.set(match measured {
+                Some(rect) => PanelPlacement::Measured(rect),
+                None => PanelPlacement::Fallback,
+            });
+        });
+    };
     // A stale row is DIMMED and badged, never hidden or disabled: SPEC.md
     // requires such sessions to stay listed and be clearly marked, and their
     // lifecycle controls stay live because the helm's refusal (which names
@@ -3592,11 +4019,71 @@ fn SessionRow(
                     // read aloud in full.
                     aria_label: menu_label(&session.title),
                     aria_expanded: menu_open,
-                    onclick: move |_| on_menu_toggle.call(menu_id.clone()),
+                    // Fires once this button is actually in the DOM, giving
+                    // us a handle `get_client_rect()` can be called on
+                    // later. Also covers a rarer case: a FAILED listing
+                    // read unmounts every row (`ListView`'s render swaps to
+                    // an error banner) without clearing `menu_open` — that
+                    // flag is `ListView`'s, and a transient read failure is
+                    // not evidence the user changed their mind — so a row
+                    // that remounts on recovery can land here with
+                    // `menu_open` already true and `placement` back at its
+                    // freshly-initialized `Unmeasured` (a brand new
+                    // row-local signal). Nothing else would ever start a
+                    // measurement for that panel — the click that opened it
+                    // is long gone — so it would stay invisible forever
+                    // without this: healing it right here, the instant the
+                    // handle FIRST becomes usable, is what a plain "measure
+                    // once on open" scheme misses on this one path.
+                    onmounted: move |element| {
+                        toggle_handle.set(Some(element.data()));
+                        if should_measure_on_mount(menu_open, *placement.peek()) {
+                            spawn_measurement();
+                        }
+                    },
+                    onclick: move |_| {
+                        // `on_menu_toggle` fires FIRST and synchronously,
+                        // before any `await` — this is what keeps
+                        // `aria_expanded` truthful the instant the click
+                        // lands and keeps a fast double-click (or two
+                        // clicks landing close together on different rows)
+                        // from racing an async measurement into a stray
+                        // extra toggle. The panel mounts hidden
+                        // (`PanelPlacement::Unmeasured`) the same render —
+                        // see that variant's own doc — so opening no longer
+                        // needs to WAIT for a measurement, only closing
+                        // still needs none at all.
+                        let opening = !menu_open;
+                        on_menu_toggle.call(menu_id.clone());
+                        if !opening {
+                            return;
+                        }
+                        // A fresh measurement every open: the toggle can
+                        // move BETWEEN opens (a row above it changing
+                        // height, the window resizing), so a rect measured
+                        // for a previous open is not safe to reuse — hence
+                        // resetting to `Unmeasured` here rather than
+                        // leaving whatever `placement` last held. The
+                        // generation bump BEFORE `spawn_measurement` is
+                        // what keeps a measurement still in flight for a
+                        // PRIOR open of this SAME toggle from landing after
+                        // this reset and clobbering it — see
+                        // `open_generation`'s own doc for the exact race.
+                        open_generation += 1;
+                        placement.set(PanelPlacement::Unmeasured);
+                        spawn_measurement();
+                    },
                     "⋯"
                 }
                 if menu_open {
-                    div { class: "session-row-menu-panel",
+                    div {
+                        class: "session-row-menu-panel",
+                        // The presentation half of `PanelPlacement`'s state
+                        // machine — see that type's own doc for what each
+                        // variant means and why the panel needs three
+                        // states rather than a plain measured/unmeasured
+                        // flag.
+                        style: menu_panel_placement_style(placement()),
                         if confirming {
                             // Two elements, consequence first: an
                             // untruncatable consequence and a separately
@@ -3779,6 +4266,161 @@ mod tests {
                 delete: true,
             }
         );
+    }
+
+    /// Pins the geometry contract behind the actions-menu panel's
+    /// viewport-fixed positioning (see `menu_panel_style`'s own doc): the
+    /// panel's top sits just below the toggle EXCEPT where the top-clamp
+    /// (`min()`, floored by the outer `max(8px, ...)`) says otherwise; its
+    /// RIGHT edge sits `MENU_PANEL_RIGHT_GAP_PX` left of the toggle's own
+    /// left edge (floored so it cannot cross the viewport's own right
+    /// edge) — never under the toggle column, so a click on any OTHER
+    /// row's "⋯" always lands on a real button rather than this row's
+    /// floating panel; and its `max-width` narrows once there is not
+    /// `288px + MENU_PANEL_RIGHT_GAP_PX` of room to the viewport's left
+    /// edge, floored at `MENU_PANEL_MIN_WIDTH_PX` rather than allowed to
+    /// go negative (an invalid `max-width` CSS silently drops entirely).
+    ///
+    /// The exact `max()`/`min()`/`calc()` shape matters, not just the
+    /// numbers: a regression that dropped a clamp, swapped `100vw`/`100vh`,
+    /// or let `max-width` go unfloored would still pass a test that merely
+    /// checked the offsets some other way.
+    #[test]
+    fn menu_panel_style_anchors_below_and_left_of_the_toggle() {
+        let toggle_rect = PixelsRect::new(
+            dioxus::html::geometry::euclid::point2(100.0, 50.0),
+            dioxus::html::geometry::euclid::size2(30.0, 20.0),
+        );
+        assert_eq!(
+            menu_panel_style(toggle_rect),
+            "--menu-top: max(8px, min(72px, calc(100vh - 160px))); top: var(--menu-top); \
+             right: max(8px, calc(100vw - 92px)); max-width: min(288px, 96px); \
+             max-height: calc(100vh - var(--menu-top) - 8px);"
+        );
+    }
+
+    /// The horizontal `max-width` floor's OWN degenerate case: a toggle
+    /// close enough to the viewport's left edge (the `.app-shell`-scrolled
+    /// extreme `menu_panel_style`'s doc names) drives the natural
+    /// `right_edge - MENU_PANEL_RIGHT_GAP_PX` computation negative, which
+    /// is exactly what `MENU_PANEL_MIN_WIDTH_PX` exists to floor instead
+    /// of emitting — an unfloored negative `max-width` is invalid CSS that
+    /// silently drops the whole declaration, reverting to the class's
+    /// unclamped `288px` and defeating the very clamp meant to prevent
+    /// left-edge overflow in this exact scenario.
+    #[test]
+    fn menu_panel_style_floors_max_width_instead_of_going_negative() {
+        // right_edge = min_x - 8 = 3; (right_edge - 8) = -5, which the
+        // floor must replace with `MENU_PANEL_MIN_WIDTH_PX` (96) rather
+        // than emit as-is.
+        let toggle_rect = PixelsRect::new(
+            dioxus::html::geometry::euclid::point2(11.0, 50.0),
+            dioxus::html::geometry::euclid::size2(30.0, 20.0),
+        );
+        assert!(menu_panel_style(toggle_rect).contains("max-width: min(288px, 96px);"));
+    }
+
+    /// The placement→style mapping is the whole reason `PanelPlacement`
+    /// exists as three states rather than a plain `Option<PixelsRect>`
+    /// (see its own doc): each variant must render as its OWN distinct
+    /// CSS, not just "measured or not" — `Unmeasured` hides the panel
+    /// without a wrong-position flash, `Fallback` pins its own top-left
+    /// sidebar coordinates inline instead of hiding forever, and
+    /// `Measured` carries the real computed geometry
+    /// (already pinned above). A regression that collapsed any two of
+    /// these into the same style would reintroduce either the flash or
+    /// the dead-toggle failure mode the state machine exists to prevent.
+    ///
+    /// Also pins the fixes for two real bugs this exact scheme hit:
+    /// `Unmeasured` hides via `opacity`/`pointer-events`, NOT `visibility`
+    /// (see `menu_panel_placement_style`'s own doc for why
+    /// `visibility: hidden` would silently break `autofocus` on a reopened
+    /// confirm/rename panel); and every positional property one state sets
+    /// is explicitly restated (or `auto`-reset) by the others — Dioxus's
+    /// JS interpreter restores an omitted property from the PREVIOUS
+    /// inline style rather than treating a `style` update as a plain
+    /// replace, so `Fallback`'s `left: 8px` surviving into a later
+    /// `Measured` render would pin BOTH insets and stretch the panel
+    /// across the sidebar (the class-level-fallback regression this
+    /// mapping's per-state coordinates exist to prevent).
+    #[test]
+    fn menu_panel_placement_style_renders_each_variant_distinctly() {
+        assert_eq!(
+            menu_panel_placement_style(PanelPlacement::Unmeasured),
+            "opacity: 0; pointer-events: none;",
+        );
+        assert_eq!(
+            menu_panel_placement_style(PanelPlacement::Fallback),
+            "opacity: 1; pointer-events: auto; top: 8px; left: 8px; right: auto; \
+             max-width: 288px; max-height: calc(100vh - 16px);",
+        );
+        let toggle_rect = PixelsRect::new(
+            dioxus::html::geometry::euclid::point2(100.0, 50.0),
+            dioxus::html::geometry::euclid::size2(30.0, 20.0),
+        );
+        assert_eq!(
+            menu_panel_placement_style(PanelPlacement::Measured(toggle_rect)),
+            format!(
+                "opacity: 1; pointer-events: auto; left: auto; {}",
+                menu_panel_style(toggle_rect)
+            ),
+        );
+    }
+
+    /// `max-width`'s midband and cap, complementing the floor test below:
+    /// with ordinary room to the toggle's left the clamp must pass the
+    /// NATURAL available width through (not collapse everything to the
+    /// 96px floor), and with abundant room the 288px cap must win. An
+    /// implementation that always emitted the floor — or always the cap —
+    /// would pass the anchor and floor tests alone.
+    #[test]
+    fn menu_panel_style_max_width_tracks_available_room_up_to_the_cap() {
+        // right_edge = 200 - 8 = 192; available = 192 - 8 = 184, between
+        // floor and cap, so it must appear verbatim.
+        let midband = PixelsRect::new(
+            dioxus::html::geometry::euclid::point2(200.0, 50.0),
+            dioxus::html::geometry::euclid::size2(30.0, 20.0),
+        );
+        assert!(menu_panel_style(midband).contains("max-width: min(288px, 184px);"));
+
+        // right_edge = 500 - 8 = 492; available = 484, above the cap —
+        // `min()` hands the win to 288px at paint time.
+        let roomy = PixelsRect::new(
+            dioxus::html::geometry::euclid::point2(500.0, 50.0),
+            dioxus::html::geometry::euclid::size2(30.0, 20.0),
+        );
+        assert!(menu_panel_style(roomy).contains("max-width: min(288px, 484px);"));
+    }
+
+    /// Pins the remount-heal GATE (see `onmounted`'s own doc for the
+    /// failed-then-recovered-listing scenario this exists for): a
+    /// measurement starts on mount ONLY when the menu is already open AND
+    /// nothing has measured it yet. This is deliberately narrower than
+    /// "the menu is open" alone — a row that remounts already `Measured`
+    /// or `Fallback` (not the scenario this heals, but worth pinning
+    /// regardless) must not restart a measurement it does not need.
+    ///
+    /// This only pins the DECISION, not the remount-and-heal BEHAVIOR
+    /// end to end: `onmounted` firing at all requires a real renderer to
+    /// dispatch a mount event and supply a real `MountedData` handle for
+    /// `get_client_rect()` to call — a headless `VirtualDom` test (no
+    /// renderer attached, `NoOpMutations`) never fires `onmounted` in the
+    /// first place, so the ASYNC "measure and heal" half of this fix is
+    /// not something this test harness can exercise; that is what the
+    /// browser suite is for.
+    #[test]
+    fn should_measure_on_mount_only_when_open_and_unmeasured() {
+        assert!(should_measure_on_mount(true, PanelPlacement::Unmeasured));
+        assert!(!should_measure_on_mount(false, PanelPlacement::Unmeasured));
+        let toggle_rect = PixelsRect::new(
+            dioxus::html::geometry::euclid::point2(0.0, 0.0),
+            dioxus::html::geometry::euclid::size2(10.0, 10.0),
+        );
+        assert!(!should_measure_on_mount(
+            true,
+            PanelPlacement::Measured(toggle_rect)
+        ));
+        assert!(!should_measure_on_mount(true, PanelPlacement::Fallback));
     }
 
     /// Repeated parent refreshes must update direct callback props in place
