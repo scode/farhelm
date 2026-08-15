@@ -2,8 +2,9 @@
 
 Run coding agents (Claude Code, Codex, other terminal agents) on machines you control and supervise all of them from one
 interface, through their real TUIs. Two pieces: a per-host **supervisor** that owns sessions and their terminals, and a
-**helm** that connects to every supervisor over your existing SSH access and serves the UI. This README is the how; see
-SPEC.md for what the system is and is not, and SPEC_impl.md for how it is built and why.
+**helm** that connects to every supervisor — remote ones over your existing SSH access, the one on its own machine
+directly — and serves the UI. This README is the how; see SPEC.md for what the system is and is not, and SPEC_impl.md
+for how it is built and why.
 
 NOTE: This is early software. Usable for real work, minimal in everything else.
 
@@ -19,6 +20,10 @@ The quickest setup is the Mac app (Apple silicon) as your local helm, driving on
 the [releases page](https://github.com/scode/farhelm/releases). No Linux desktop app exists; on a Linux machine the helm
 is a user service and the UI is a browser tab (see below).
 
+NOTE: The macOS artifact is not published yet — the current release carries only the Linux archive. Until
+`Farhelm-macos-aarch64.zip` appears on the releases page, this quickstart cannot be followed; use "Running the helm on
+Linux" below instead.
+
 - Extract `Farhelm-macos-aarch64.zip` and start `Farhelm.app`. Because the app is unsigned, Control-click it in Finder,
   choose **Open**, then confirm **Open**. If macOS offers no confirmation there, attempt one normal launch and use
   **System Settings → Privacy & Security → Open Anyway** before trying again.
@@ -26,16 +31,17 @@ is a user service and the UI is a browser tab (see below).
   the app exits. The window shows the web UI at `http://127.0.0.1:7433/`. If another process owns that port, the app
   refuses to start instead of choosing an undiscoverable origin; stop the conflicting service and relaunch.
 - Add the remote host: open the hosts panel, choose "add host", and enter the host's SSH destination. Farhelm connects
-  with your existing passwordless SSH configuration, inspects the host, and shows the exact file-and-unit plan; it does
-  nothing until you confirm it. No root is involved at any point.
+  with your existing passwordless SSH configuration and inspects the host. A supervisor already running for your user is
+  registered as-is; on a host without one, Farhelm shows the exact file-and-unit plan and does nothing until you confirm
+  it. No root is involved at any point.
 - Create a session: "new session", pick the host, pick an agent profile — every fresh supervisor ships with editable
   starters for Claude Code and Codex. The working directory starts at `~`, which expands once against that host's home
-  at creation; any other directory is written out as it exists on that host (`~user` forms and variables never expand).
-  Submitting drops you straight into the agent's terminal.
+  at creation; any other directory must be an existing absolute path on that host — plain relative paths are rejected,
+  and `~user` forms and variables never expand. Submitting drops you straight into the agent's terminal.
 
 To use an ordinary browser instead of (or alongside) the app window, open `http://127.0.0.1:7433/` and paste the token
-printed by `Farhelm.app/Contents/MacOS/farhelm helm token show`. `farhelm helm token rotate` replaces that token and
-invalidates every browser that has signed in.
+printed by `Farhelm.app/Contents/MacOS/farhelm helm token show`. `Farhelm.app/Contents/MacOS/farhelm helm token rotate`
+replaces that token and invalidates every browser that has signed in.
 
 ## Setting up supervisors
 
@@ -71,17 +77,17 @@ the supervisor by hand with the bundled tmux first on `PATH`:
 PATH="/Applications/Farhelm.app/Contents/MacOS:$PATH" /Applications/Farhelm.app/Contents/MacOS/farhelm supervisor run
 ```
 
-(Any tmux 3.3+ on `PATH` works, Homebrew's included.) Then add the Mac by SSH destination from the hosts panel;
-discovery finds the running supervisor and registers it — automatic setup is not offered for Macs. Stopping the
-supervisor does not stop its sessions: tmux keeps them running and they reattach when the supervisor returns; only a
-reboot takes them down.
+Then add the Mac from the hosts panel: enter its SSH destination, and put
+`/Applications/Farhelm.app/Contents/MacOS/farhelm` in the "remote farhelm (optional)" field — the discovery probe runs
+`farhelm` over a fresh SSH login, whose `PATH` does not include the app bundle, so without that field (or a symlink onto
+the login shell's `PATH`) a running supervisor is reported as unreachable. Discovery then registers it — automatic setup
+is not offered for Macs. Stopping the supervisor does not stop its sessions: tmux keeps them running and they reattach
+when the supervisor returns; only a reboot takes them down.
 
 NOTE: do not start Farhelm.app itself on a Mac you mean to drive from another helm — the app has no helmless mode, so
 launching it starts a second helm, and running more than one helm is unsupported.
 
 ## Running the helm on Linux
-
-No desktop app here; the helm runs as a user service and you use a browser.
 
 - Extract `farhelm-linux-x86_64.tar.gz` into `~/.local/lib/farhelm/`.
 - Run `mkdir -p ~/.config/systemd/user`, then copy `~/.local/lib/farhelm/units/farhelm-helm.service` into that
