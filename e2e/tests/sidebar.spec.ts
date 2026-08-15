@@ -22,7 +22,7 @@
  * the suite's slowest project, and an area file keeps one subject's tests
  * findable and runnable together.
  */
-import { expect, test, type Page } from "@playwright/test";
+import { expect, test, type APIRequestContext, type Page } from "@playwright/test";
 import {
   cleanupSession,
   createSession,
@@ -35,6 +35,97 @@ import {
 
 function row(page: Page, id: string) {
   return page.locator(`[data-session-id="${id}"]`);
+}
+
+/**
+ * Clean up every session in `sessions`, even when some cleanups fail.
+ *
+ * A plain loop that stopped at the first failure would abandon every
+ * session after it — real sessions on the SHARED stack, still consuming a
+ * pty and a tmux pane, left for every later test to trip over. Every
+ * cleanup is attempted regardless of earlier failures; their errors are
+ * collected and reported together once the sweep is done, rather than
+ * losing all but the first.
+ */
+async function cleanupAll(
+  request: APIRequestContext,
+  sessions: { id: string }[],
+): Promise<void> {
+  const failures: string[] = [];
+  for (const session of sessions) {
+    try {
+      await cleanupSession(request, session.id);
+    } catch (error) {
+      failures.push(`${session.id}: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+  if (failures.length > 0) {
+    throw new Error(`cleanup failed for ${failures.length} session(s):\n${failures.join("\n")}`);
+  }
+}
+
+/**
+ * Create enough sessions that `.app-sidebar` — the sidebar's real vertical
+ * scroll container — must scroll to show them all, regardless of engine or
+ * viewport font metrics.
+ *
+ * `.session-list` itself carries `overflow-y: auto` in the stylesheet but
+ * no height constraint of its own, so it never actually scrolls; the
+ * bounded-height ancestor that does is `.app-sidebar` (see its own
+ * `onscroll` doc in lib.rs, and app.css's comment beside `.session-list`).
+ * A FIXED count rather than a computed one, because row height depends on
+ * font metrics this suite does not control — callers additionally poll for
+ * `scrollHeight > clientHeight` before trusting the fixture rather than
+ * trusting this number alone.
+ *
+ * Failure-atomic: a `createSession` failing partway through must not
+ * strand whichever sessions DID get created — this function's own caller
+ * never reaches its `finally` if this call throws before returning, so
+ * nothing else would ever clean those up. Every already-created id is
+ * torn down (via `cleanupAll`, so one cleanup failing does not mask
+ * another) before the original error is rethrown.
+ */
+async function fillSidebarPastOneScreen(
+  request: APIRequestContext,
+  marker: string,
+): Promise<{ id: string }[]> {
+  const created: { id: string }[] = [];
+  try {
+    for (let i = 0; i < 18; i++) {
+      created.push(
+        await createSession(request, {
+          title: `${marker}-${i}`,
+          cwd: "/tmp",
+          invocation: "sleep 300",
+        }),
+      );
+    }
+  } catch (error) {
+    await cleanupAll(request, created);
+    throw error;
+  }
+  return created;
+}
+
+/**
+ * Wait for the always-visible compact host strip's own MOUNT-TIME read to
+ * land, before opening a row menu whose test cares WHY the menu later
+ * closes (or stays open).
+ *
+ * `hosts_strip_shape` (list.rs) is one of the six signals the menu's own
+ * close-on-layout-shift effect watches: the strip changing shape — its
+ * "loading hosts…" note giving way to real chips, or a refresh-error line
+ * — is itself an internal layout cause, indistinguishable from whatever
+ * cause a test means to isolate (a toggle click, a real scroll, a resize)
+ * unless this read has already settled before the menu opens. Without
+ * this, a dismissal test can pass for the wrong reason (closed by the
+ * strip's own async landing, not by the cause under test), and a
+ * stays-open test can flake on unrelated host-read timing.
+ */
+async function waitForHostsStripSettled(page: Page): Promise<void> {
+  await expect(
+    page.locator(".hosts-compact-note", { hasText: "loading hosts" }),
+  ).toHaveCount(0, { timeout: 20_000 });
 }
 
 /**
@@ -990,4 +1081,514 @@ test("the empty-fleet placeholder appears only when proven and yields to auto-se
   await expect(page.locator(".titlebar .title")).toHaveText("placeholder-cycle", {
     timeout: 20_000,
   });
+});
+
+/**
+ * PR #162's own regression, proven directly: opening the menu on a row near
+ * the bottom of a SCROLLED list keeps the panel — including its last action
+ * button — entirely inside the browser VIEWPORT, not merely inside the
+ * sidebar's own clipped scroll window.
+ *
+ * The pre-fix scheme anchored the panel with `position: absolute` inside
+ * its row, so `.session-list`'s and `.app-sidebar`'s `overflow` clipped it
+ * at the scroll container's edge the moment the row sat near the bottom of
+ * the visible window — a row need not be the list's LAST row to trigger
+ * this, only near the bottom of what is currently scrolled into view. The
+ * sidebar spans the shell's full height (app.css's height:100% chain), so
+ * that scroll-container edge and the viewport's own bottom edge are nearly
+ * the same line — which is what makes a plain "bottom edge inside the
+ * viewport" assertion a faithful stand-in for "not clipped by the old
+ * scheme": under the old positioning this would have failed for the same
+ * reason the panel was invisible, just observed as geometry rather than as
+ * a screenshot. The fix (`menu_panel_style` in list.rs) escapes that clip
+ * by positioning `fixed` against the viewport instead, clamped on every
+ * edge.
+ */
+test("opening the last visible row's menu in a scrolled list stays inside the viewport", async ({
+  page,
+  request,
+}) => {
+  const marker = `clip-${Date.now()}`;
+  const created = await fillSidebarPastOneScreen(request, marker);
+  try {
+    // A modest viewport, set before navigation: fewer fixture sessions are
+    // needed to force a scroll, and the height is exactly what the
+    // "bottom edge inside the viewport" assertion below is measured
+    // against.
+    await page.setViewportSize({ width: 900, height: 500 });
+    await page.goto("/");
+    await expect(row(page, created[0].id)).toBeVisible({ timeout: 20_000 });
+    // Settled BEFORE any scroll or menu open: the strip's own async host
+    // read landing is itself one of the six internal layout causes
+    // list.rs's close-on-shift effect watches, and this test's whole
+    // premise (a row genuinely scrolled into view, then a menu that stays
+    // put) must not race it.
+    await waitForHostsStripSettled(page);
+
+    const sidebar = page.locator(".app-sidebar");
+    await expect
+      .poll(() => sidebar.evaluate((el) => el.scrollHeight > el.clientHeight + 1), {
+        timeout: 20_000,
+        message: "the sidebar must actually need to scroll for this regression to be meaningful",
+      })
+      .toBe(true);
+
+    // Actually scroll: the reported bug was about a row scrolled INTO
+    // view near the bottom of a long list, not merely one that happens to
+    // sit near the fold at rest. Scrolling all the way down also makes
+    // "the last visible row" and "the list's real last row" the same row
+    // — the truest reproduction of the original geometry.
+    await sidebar.evaluate((el) => {
+      el.scrollTop = el.scrollHeight;
+    });
+    const scrollTop = await sidebar.evaluate((el) => el.scrollTop);
+    expect(
+      scrollTop,
+      "the sidebar must have actually scrolled for this regression to be meaningful",
+    ).toBeGreaterThan(0);
+    // Let the scroll's own dismissal effect (proven by its own test below)
+    // fully settle before opening any menu: opening one while THIS
+    // scroll's `layout_epoch` bump is still being processed would race the
+    // very close-on-scroll behavior this test does not mean to exercise
+    // here (no menu is open yet to close, but a late-landing effect run
+    // could still catch a menu opened moments later). Two animation
+    // frames is a generous, standard barrier for "whatever this scroll
+    // was going to trigger has already run".
+    await page.evaluate(
+      () =>
+        new Promise<void>((resolve) =>
+          requestAnimationFrame(() => requestAnimationFrame(() => resolve())),
+        ),
+    );
+
+    // The last row FULLY visible in the now-scrolled window that is one of
+    // THIS TEST'S OWN fixture rows — not one whose top merely peeks above
+    // the fold, and never the shared `e2e-session` row. Scrolling all the
+    // way down (above) means the bottom-most fully-visible row is the
+    // fleet's own last row in whatever order the helm lists it, and on
+    // this shared stack that can genuinely be `e2e-session` itself — the
+    // stack's oldest session, and the one every later test in this suite
+    // depends on still existing. Walking upward from the bottom until
+    // landing on one of `created`'s own ids is what keeps the delete
+    // confirmation below aimed at a fixture this test made and cleans up
+    // itself; the geometry under test (a panel measured near the
+    // sidebar's own clipped bottom edge) holds identically for whichever
+    // row that walk lands on, since every row in a scrolled-to-bottom list
+    // is equally "near the bottom".
+    const ownIds = created.map((session) => session.id);
+    const targetId = await page.evaluate((ownIds) => {
+      const sidebarBottom = document.querySelector(".app-sidebar")!.getBoundingClientRect().bottom;
+      const rows = [...document.querySelectorAll(".session-row")];
+      const fullyVisible = rows.filter(
+        (candidate) => candidate.getBoundingClientRect().bottom <= sidebarBottom,
+      );
+      for (let i = fullyVisible.length - 1; i >= 0; i--) {
+        const id = fullyVisible[i].getAttribute("data-session-id");
+        if (id && ownIds.includes(id)) return id;
+      }
+      return null;
+    }, ownIds);
+    // Asserted loudly and separately from the evaluate's own `null` case:
+    // a regression that let the walk drift back onto a foreign row (a
+    // logic slip in the filter above, say) must name exactly which id it
+    // picked, not merely fail a later, unrelated-looking assertion three
+    // steps downstream with no hint this was the actual cause.
+    expect(
+      targetId,
+      "expected at least one of this test's own fixture rows fully visible after scrolling",
+    ).not.toBeNull();
+    expect(
+      ownIds,
+      `the chosen row ${JSON.stringify(targetId)} must be one of this test's own fixture sessions, never the shared stack's`,
+    ).toContain(targetId);
+
+    const target = row(page, targetId!);
+    await openRowMenu(target);
+
+    const panel = target.locator(".session-row-menu-panel");
+    // `openRowMenu` already refuses to return on a `Fallback` placement
+    // (see its own doc in fleet.ts), but this is the one test whose whole
+    // point IS the measured geometry, so it also asserts the discriminant
+    // directly: a silent regression back to the top-left fallback corner
+    // must fail HERE, loudly and specifically, rather than merely time out
+    // somewhere upstream with a less legible message.
+    const panelStyle = (await panel.getAttribute("style")) ?? "";
+    expect(
+      panelStyle,
+      "the panel must have measured against its real toggle, not fallen back to the top-left corner placement",
+    ).toContain("left: auto");
+
+    const viewport = page.viewportSize()!;
+    const panelBox = (await panel.boundingBox())!;
+    // All four edges: the old absolute scheme's failure mode was clipping
+    // at the BOTTOM/RIGHT, but a regression in the opposite direction —
+    // the panel pushed off the TOP or LEFT edge by a broken clamp — is
+    // just as real a way to fail "entirely inside the viewport".
+    expect(panelBox.x).toBeGreaterThanOrEqual(0);
+    expect(panelBox.y).toBeGreaterThanOrEqual(0);
+    expect(panelBox.y + panelBox.height).toBeLessThanOrEqual(viewport.height);
+    expect(panelBox.x + panelBox.width).toBeLessThanOrEqual(viewport.width);
+
+    // The LAST action button specifically (rename → stop → archive →
+    // delete, per SessionRow's own doc): if the panel's bottom clipped at
+    // all, this is the control most likely to be cut off or unreachable.
+    const deleteButton = target.locator(".session-row-menu-panel .session-row-delete");
+    const deleteBox = (await deleteButton.boundingBox())!;
+    expect(deleteBox.y + deleteBox.height).toBeLessThanOrEqual(viewport.height);
+    // Re-asserted open immediately before this test's own longest stretch
+    // of real elapsed time (the 18-session fixture plus every wait above
+    // it already make this the slowest test in the file) closes with an
+    // actual click: this is the one place in this file that both opens a
+    // menu AND still needs it open several real seconds later. `is_loading`
+    // (what `waitForHostsStripSettled` above watches) only ever flips ONCE,
+    // so it cannot catch a LATER hosts re-read landing with a different
+    // outcome — a real SSH host's connection flapping on a busy CI runner,
+    // say — flipping `hosts_strip_shape`'s error component and closing the
+    // menu out from under this test through no fault of the clipping fix
+    // itself. `openRowMenu` is idempotent on an already-open menu (its own
+    // doc, verified: it checks `aria-expanded` before ever clicking), so
+    // calling it again here is a no-op in the ordinary case and a genuine
+    // reopen in the raced one.
+    await openRowMenu(target);
+    // Genuinely clickable, not merely painted within bounds: Playwright's
+    // click waits for the target to be visible, stable, and unobscured by
+    // anything else before it fires.
+    await deleteButton.click();
+
+    // ONE bounded retry around the confirm prompt actually appearing.
+    // This is honest tolerance for a real, DESIGNED behavior, not
+    // flake-papering over an unproven race: list.rs closes the whole menu
+    // — panel and all — on any of six background layout causes it
+    // deliberately does not distinguish from a user-driven one (a host's
+    // phase flapping among them, via the compact strip's shape — see
+    // `waitForHostsStripSettled`'s own doc), and this test's own long
+    // fixture setup gives a real host on a shared, long-lived stack far
+    // more wall-clock time to do exactly that than an isolated repeat of
+    // this one test ever sees. None of those causes are a bug in the
+    // clipping fix this test exists to pin — its subject is measured-panel
+    // geometry and last-action clickability, and every dismissal behavior
+    // already has its own dedicated test elsewhere in this file. A retry
+    // that just re-clicked delete unconditionally would itself be wrong,
+    // though: `confirming` (list.rs) is set the instant the FIRST click
+    // lands and — per `SessionRow`'s own doc on why its cancel button's
+    // `autofocus` can fire more than once — SURVIVES the panel closing, so
+    // reopening after a raced dismissal typically lands directly back on
+    // the confirm view with no delete button left to click at all. Only
+    // re-click it if reopening genuinely did not.
+    const confirmConsequence = target.locator(".session-row-menu-panel .confirm-consequence");
+    const confirmedOnFirstTry = await confirmConsequence
+      .waitFor({ state: "visible", timeout: 3_000 })
+      .then(() => true)
+      .catch(() => false);
+    if (!confirmedOnFirstTry) {
+      await openRowMenu(target);
+      if (!(await confirmConsequence.isVisible())) {
+        await target.locator(".session-row-menu-panel .session-row-delete").click();
+      }
+    }
+    await expect(confirmConsequence).toBeVisible();
+    await target.locator(".confirm-cancel").click();
+  } finally {
+    await cleanupAll(request, created);
+  }
+});
+
+/**
+ * Scrolling the sidebar — the panel's real invalidation trigger, not merely
+ * "something happened somewhere" — closes an open row menu.
+ *
+ * The panel is positioned `fixed` against the viewport from a ONE-TIME
+ * measurement of the toggle's rect (list.rs's `PanelPlacement`); once the
+ * row scrolls, that snapshot is stale and the panel would float over
+ * whatever content the scroll left behind. `AppBody`'s `onscroll` on
+ * `.app-sidebar` (lib.rs) is what notices and closes it — this is the
+ * direct proof that listener actually fires and actually reaches the menu,
+ * as opposed to the layout-dismissal tests below, which go through the
+ * sidebar's OWN toggles instead.
+ */
+test("scrolling the sidebar closes an open row menu", async ({ page, request }) => {
+  const marker = `scroll-close-${Date.now()}`;
+  const created = await fillSidebarPastOneScreen(request, marker);
+  try {
+    await page.setViewportSize({ width: 900, height: 500 });
+    await page.goto("/");
+    await expect(row(page, created[0].id)).toBeVisible({ timeout: 20_000 });
+    // Settled before the menu opens — see `waitForHostsStripSettled`'s own
+    // doc for why an unsettled strip can close the menu for the wrong
+    // reason.
+    await waitForHostsStripSettled(page);
+
+    const sidebar = page.locator(".app-sidebar");
+    await expect
+      .poll(() => sidebar.evaluate((el) => el.scrollHeight > el.clientHeight + 1), {
+        timeout: 20_000,
+        message: "the sidebar must actually need to scroll for this regression to be meaningful",
+      })
+      .toBe(true);
+
+    // The topmost row, deliberately — NOT a specific fixture session: a
+    // row further down would already be scrolled into view by Playwright's
+    // own click-into-view behavior the moment its toggle is clicked, which
+    // would make the scroll below a no-op and the test vacuous. The first
+    // row is on screen at the sidebar's resting scrollTop of 0, so opening
+    // ITS menu cannot itself move the scroll position.
+    const target = page.locator(".session-row").first();
+    await openRowMenu(target);
+    const before = await sidebar.evaluate((el) => el.scrollTop);
+    expect(
+      before,
+      "opening the first row's menu must not itself have scrolled the sidebar, or the assertion below would be vacuous",
+    ).toBe(0);
+
+    await sidebar.evaluate((el) => {
+      el.scrollTop = el.scrollHeight;
+    });
+    // The scroll must have actually MOVED the container — asserting the
+    // menu closed without this would say nothing if the assignment above
+    // were a no-op (the list already fully visible, a stray CSS change
+    // pinning scrollTop, and so on).
+    await expect
+      .poll(() => sidebar.evaluate((el) => el.scrollTop), {
+        message: "the sidebar's scrollTop must actually change for this test to prove anything",
+      })
+      .not.toBe(before);
+
+    await expect(target.locator(".session-row-menu-panel")).toHaveCount(0);
+    await expect(target.locator(".session-row-menu")).toHaveAttribute("aria-expanded", "false");
+  } finally {
+    await cleanupAll(request, created);
+  }
+});
+
+/**
+ * The sidebar's own on-demand toggles are layout causes too: opening the
+ * hosts panel, the filter bar, or the create dialog each mounts a whole
+ * section above the rows (list.rs's `use_effect` near `show_create`), which
+ * is exactly the kind of internal shift `layout_epoch` does NOT cover (that
+ * counter is for the ancestor-owned scroll/resize listeners in lib.rs) —
+ * this component watches these three signals directly instead. One test
+ * per surface, because each is a separate signal the effect subscribes to
+ * and a regression could plausibly drop any one of the three independently.
+ */
+test("opening the hosts panel closes an open row menu", async ({ page, request }) => {
+  const session = await createSession(request, {
+    title: `menu-hosts-${Date.now()}`,
+    cwd: "/tmp",
+    invocation: "sleep 300",
+  });
+  try {
+    await page.goto("/");
+    const target = row(page, session.id);
+    await expect(target).toBeVisible({ timeout: 20_000 });
+    await waitForHostsStripSettled(page);
+    await openRowMenu(target);
+
+    await page.locator(".hosts-toggle").click();
+    // The surface actually appeared — without this, a toggle that silently
+    // failed to open anything would still make the assertions below pass
+    // (the menu was never touched either way), proving nothing about the
+    // dismissal this test claims.
+    await expect(page.locator(".hosts-panel")).toBeVisible();
+
+    await expect(target.locator(".session-row-menu-panel")).toHaveCount(0);
+    await expect(target.locator(".session-row-menu")).toHaveAttribute("aria-expanded", "false");
+  } finally {
+    await cleanupSession(request, session.id);
+  }
+});
+
+/** See "opening the hosts panel closes an open row menu" — same contract,
+ * the filter bar's own toggle. */
+test("opening the filter bar closes an open row menu", async ({ page, request }) => {
+  const session = await createSession(request, {
+    title: `menu-filter-${Date.now()}`,
+    cwd: "/tmp",
+    invocation: "sleep 300",
+  });
+  try {
+    await page.goto("/");
+    const target = row(page, session.id);
+    await expect(target).toBeVisible({ timeout: 20_000 });
+    await waitForHostsStripSettled(page);
+    await openRowMenu(target);
+
+    await page.locator(".filter-toggle").click();
+    await expect(page.locator(".session-filter")).toBeVisible();
+
+    await expect(target.locator(".session-row-menu-panel")).toHaveCount(0);
+    await expect(target.locator(".session-row-menu")).toHaveAttribute("aria-expanded", "false");
+  } finally {
+    await cleanupSession(request, session.id);
+  }
+});
+
+/** See "opening the hosts panel closes an open row menu" — same contract,
+ * the "new session" create dialog's own toggle. */
+test("opening the create-session form closes an open row menu", async ({ page, request }) => {
+  const session = await createSession(request, {
+    title: `menu-create-${Date.now()}`,
+    cwd: "/tmp",
+    invocation: "sleep 300",
+  });
+  try {
+    await page.goto("/");
+    const target = row(page, session.id);
+    await expect(target).toBeVisible({ timeout: 20_000 });
+    await waitForHostsStripSettled(page);
+    await openRowMenu(target);
+
+    await page.locator(".new-session-button").click();
+    await expect(page.locator(".create-session-form")).toBeVisible();
+
+    await expect(target.locator(".session-row-menu-panel")).toHaveCount(0);
+    await expect(target.locator(".session-row-menu")).toHaveAttribute("aria-expanded", "false");
+  } finally {
+    // Backend cleanup lives on its own, unconditional of any UI action:
+    // an earlier version of this test also clicked the toggle closed here
+    // for tidiness, which meant a failure in THAT click — nothing to do
+    // with the session itself — could skip `cleanupSession` entirely and
+    // strand a real session on the shared stack. Not worth the risk for
+    // pure hygiene, so this finally does the one thing it must.
+    await cleanupSession(request, session.id);
+  }
+});
+
+/**
+ * The complement to the three layout-dismissal tests above: a listing
+ * refresh that changes nothing LAYOUT-relevant — no scroll, no toggle, no
+ * row reorder, no row vanishing — leaves an open menu open.
+ *
+ * Without this, the three tests above could pass for the wrong reason: an
+ * implementation that closed the menu on every reply from the feed-driven
+ * re-read (rather than specifically on the layout causes list.rs's
+ * `use_effect` watches) would also close it here, and nothing else in this
+ * suite would catch that regression — every other menu test either never
+ * triggers a refresh mid-open or triggers one that DOES change the
+ * listing.
+ *
+ * The listing itself is a CONTROLLED, frozen fabrication — a route stub
+ * answering every `GET /api/sessions` with the exact same body, byte for
+ * byte — rather than the real backend's own live reply. A real
+ * `sleep 300` fixture session's status is free to flip between polls (say,
+ * from "unknown" to "idle" once the supervisor's sampler gets a look at
+ * it), and that would be a real, if harmless, content change riding along
+ * with the notification this test triggers on purpose — exactly the kind
+ * of confound "nothing layout-relevant changed" cannot afford. A frozen
+ * reply removes that possibility structurally instead of hoping the timing
+ * works out.
+ *
+ * The completion barrier is two-part, because dispatching a request is not
+ * receiving — let alone RENDERING — a reply: `page.waitForResponse` proves
+ * the round trip actually completed over the network (a plain read-COUNT
+ * check only proves a request was SENT), and the animation-frame pair past
+ * it is this suite's standard stand-in for "whatever that reply was going
+ * to change has already been patched into the DOM" (list.rs's own render
+ * commit runs inside the browser's normal frame-batched update cycle, with
+ * no other externally observable hook to await instead).
+ */
+test("a listing refresh with nothing layout-relevant to report leaves an open row menu open", async ({
+  page,
+  request,
+}) => {
+  const stamp = (await request.get("/api/sessions")).headers()["x-farhelm-build"] ?? "";
+  expect(stamp, "the helm must stamp its replies").toBeTruthy();
+  const sessionId = "menu-refresh-fixture-session";
+  // Served identically on every GET this route sees — see this test's own
+  // doc for why a frozen fabrication, not the real backend's reply, is
+  // what "nothing changed" actually needs.
+  const listingBody = {
+    sessions: [
+      {
+        id: sessionId,
+        title: `menu-refresh-${Date.now()}`,
+        cwd: "/tmp",
+        invocation: "sleep 300",
+        status: { state: "idle" },
+      },
+    ],
+    total: 1,
+    matching: 1,
+    truncated: false,
+  };
+  let listingReads = 0;
+  await page.route(
+    (url) => url.pathname === "/api/sessions",
+    async (route) => {
+      if (route.request().method() !== "GET") {
+        await route.continue();
+        return;
+      }
+      listingReads += 1;
+      await route.fulfill({
+        headers: { "x-farhelm-build": stamp, "content-type": "application/json" },
+        json: listingBody,
+      });
+    },
+  );
+  const feed = await stubFeed(page);
+  await page.goto("/");
+  await feed.waitForConnection(1);
+  feed.notify(1); // The handshake — the helm's own greeting on subscribe.
+
+  const target = row(page, sessionId);
+  await expect(target).toBeVisible({ timeout: 20_000 });
+  await waitForHostsStripSettled(page);
+  await openRowMenu(target);
+
+  const before = listingReads;
+  const responded = page.waitForResponse(
+    (r) => new URL(r.url()).pathname === "/api/sessions" && r.request().method() === "GET",
+  );
+  // A LATER bump: the helm's "something changed" signal, with the stub
+  // above guaranteeing the reply it provokes is identical to what the
+  // page already has.
+  feed.notify(2);
+  await responded;
+  expect(
+    listingReads,
+    "the notification must actually provoke a re-read for this test to prove anything",
+  ).toBeGreaterThan(before);
+  // Two animation frames past the response: see this test's own doc for
+  // why network arrival alone is not proof the reply was RENDERED.
+  await page.evaluate(
+    () =>
+      new Promise<void>((resolve) =>
+        requestAnimationFrame(() => requestAnimationFrame(() => resolve())),
+      ),
+  );
+
+  // The row survives (same position, same content) and so does its menu.
+  await expect(target.locator(".session-row-menu-panel")).toBeVisible();
+  await expect(target.locator(".session-row-menu")).toHaveAttribute("aria-expanded", "true");
+});
+
+/**
+ * Resizing the whole browser window closes an open row menu — the other
+ * half of `layout_epoch`'s external causes (lib.rs's `onresize` on
+ * `.app-sidebar`), independent of the scroll test above: a window resize
+ * narrow enough to trigger `.app-shell`'s horizontal scroll can move every
+ * row without ever firing `onscroll` on its own (lib.rs's own doc), so
+ * `onresize` is not a redundant listener and needs its own proof.
+ */
+test("resizing the viewport closes an open row menu", async ({ page, request }) => {
+  const session = await createSession(request, {
+    title: `menu-resize-${Date.now()}`,
+    cwd: "/tmp",
+    invocation: "sleep 300",
+  });
+  try {
+    await page.goto("/");
+    const target = row(page, session.id);
+    await expect(target).toBeVisible({ timeout: 20_000 });
+    await waitForHostsStripSettled(page);
+    await openRowMenu(target);
+
+    const before = page.viewportSize()!;
+    await page.setViewportSize({ width: before.width - 200, height: before.height - 100 });
+
+    await expect(target.locator(".session-row-menu-panel")).toHaveCount(0);
+    await expect(target.locator(".session-row-menu")).toHaveAttribute("aria-expanded", "false");
+  } finally {
+    await cleanupSession(request, session.id);
+  }
 });

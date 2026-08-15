@@ -768,8 +768,17 @@ export async function openFilterBar(page: Page): Promise<void> {
  * action — rename, stop, archive, delete, and their confirms — off the row
  * and into a floating panel behind the row's `⋯` toggle, so any test that
  * clicks or asserts on those controls opens the menu first through this
- * helper. Idempotent on purpose: `aria-expanded` is the toggle's own
- * truth, so calling this on an already-open menu does not close it.
+ * helper.
+ *
+ * The `⋯` button is a genuine TOGGLE — list.rs's own `onclick` flips
+ * `menu_open` unconditionally, closed→open and open→closed alike — so a
+ * caller that clicked it blindly on an already-open menu would close it,
+ * the opposite of this function's whole contract. The `aria-expanded`
+ * check below is what makes this function idempotent instead: it reads
+ * the toggle's own current truth and clicks ONLY when that truth is not
+ * already `"true"`, so calling this on an already-open menu (a defensive
+ * reopen after a background dismissal raced some earlier step, say) is a
+ * safe no-op rather than an accidental close.
  */
 export async function openRowMenu(row: Locator): Promise<void> {
   const menu = row.locator(".session-row-menu");
@@ -781,5 +790,40 @@ export async function openRowMenu(row: Locator): Promise<void> {
   // straight into bare-DOM `querySelector(...).click()` calls (the
   // actionability-bypass tests), where a not-yet-mounted button turns
   // into a silent no-op via `?.click()` rather than a visible failure.
-  await expect(row.locator(".session-row-menu-panel")).toBeVisible();
+  const panel = row.locator(".session-row-menu-panel");
+  await expect(panel).toBeVisible();
+  // `toBeVisible()` alone is not the MEASURED state: the panel mounts the
+  // instant the toggle opens, at `opacity: 0; pointer-events: none` —
+  // genuinely present and painted-nothing (`PanelPlacement::Unmeasured` in
+  // list.rs, while the toggle's own async `get_client_rect()` measurement
+  // is still in flight) — and Playwright's visibility check does not
+  // consult opacity or pointer-events at all, so a caller reading this
+  // panel's geometry immediately after this function used to return could
+  // be racing that measurement.
+  //
+  // Detected by reading the panel's own inline `style` for a literal
+  // `left: auto` — the one substring ONLY `PanelPlacement::Measured` ever
+  // writes (`Unmeasured` sets no `left` at all; `Fallback`, the renderer-
+  // could-not-measure-at-all state, sets a literal `left: 8px` instead) —
+  // rather than by comparing the panel's box to the toggle's own. Geometry
+  // would be the wrong test here: a genuinely MEASURED panel can still be
+  // clamped far from its toggle on a short viewport (list.rs's
+  // `menu_panel_style` — precisely what the clipping regression test in
+  // sidebar.spec.ts exercises), so a box-proximity check would either
+  // reject a real measured-and-clamped panel or, worse, accept `Fallback`
+  // coordinates that happen to fall near the toggle by coincidence. The
+  // style string has no such ambiguity: every non-`Measured` state is
+  // structurally incapable of containing it.
+  await expect
+    .poll(
+      async () => {
+        const info = await panel.evaluate((el) => ({
+          opacity: getComputedStyle(el).opacity,
+          style: el.getAttribute("style") ?? "",
+        }));
+        return info.opacity === "1" && info.style.includes("left: auto");
+      },
+      { message: "waiting for the actions panel to finish measuring against its own toggle" },
+    )
+    .toBe(true);
 }

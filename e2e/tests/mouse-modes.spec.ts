@@ -248,13 +248,30 @@ function rowByTitle(page: Page, title: string) {
  * silently point cleanup at the wrong session or at none at all). The id
  * captured here is the one and only source of truth `cleanupSession`
  * receives.
+ *
+ * POLLED, not single-shot: the helm's listing is eventually consistent
+ * with respect to a just-created session — a terminal can be fully
+ * attached and interactive while a listing read taken at that instant
+ * still lacks the row (observed live: a stale list, then the session
+ * present 90ms later). A single-shot read here intermittently returned
+ * `undefined`, which left `id` unset for the WHOLE test and turned any
+ * later outcome — including a fully passing body — into the `finally`
+ * block's loud lost-track failure, leaking the fake agent and (because
+ * cleanup never ran) compounding the odds for every later repeat against
+ * the same stack. Ten seconds is far above the observed lag and still
+ * fails fast enough to diagnose when something is genuinely wrong.
  */
 async function findSessionIdByTitle(
   request: APIRequestContext,
   title: string,
 ): Promise<string | undefined> {
-  const listing = await (await request.get("/api/sessions")).json();
-  return listing.sessions.find((s: any) => s.title === title)?.id;
+  const deadline = Date.now() + 10_000;
+  for (;;) {
+    const listing = await (await request.get("/api/sessions")).json();
+    const id = listing.sessions.find((s: any) => s.title === title)?.id;
+    if (id !== undefined || Date.now() > deadline) return id;
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
 }
 
 /** Stop and delete a session, tolerating either already being done. */

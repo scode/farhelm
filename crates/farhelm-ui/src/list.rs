@@ -3531,7 +3531,7 @@ fn menu_panel_style(toggle_rect: PixelsRect) -> String {
 /// but paints nothing, which is what keeps a still-pending measurement
 /// from ever flashing the panel at the CSS fallback position for one
 /// frame.
-#[derive(Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 enum PanelPlacement {
     /// No measurement has resolved yet for the CURRENT open — freshly
     /// reset every time the toggle opens (see its `onclick`), because a
@@ -3635,6 +3635,37 @@ fn menu_panel_placement_style(placement: PanelPlacement) -> String {
 /// can exercise at all.
 fn should_measure_on_mount(menu_open: bool, placement: PanelPlacement) -> bool {
     menu_open && placement == PanelPlacement::Unmeasured
+}
+
+/// Whether a resolved measurement is still current, and what `placement`
+/// should become if so — the apply-if-current half of `spawn_measurement`'s
+/// async body (below), split out for the same reason `should_measure_on_mount`
+/// is: a plain unit test can pin it, where the `spawn`ed task, the `Signal`
+/// captures, and the real `await` around it cannot run at all under a
+/// headless `VirtualDom` with no renderer attached.
+///
+/// `None` means "discard this measurement": `generation_now` has moved past
+/// `generation_at_capture`, so a newer open has already superseded it (see
+/// `open_generation`'s own doc for the exact interleaving this guards
+/// against — two opens of the same toggle close enough together that their
+/// measurements can resolve out of order). Applying a stale result here
+/// would silently overwrite whatever the newer open's own measurement
+/// already wrote, or will still write, with coordinates for a toggle
+/// position this open no longer speaks for.
+///
+/// `Some(_)` is the ordinary case: still current, so the measurement's own
+/// outcome decides the placement — `Measured` on a resolved rect, `Fallback`
+/// on a renderer that could not answer `get_client_rect()` at all (no
+/// mounted handle yet, or the query itself failed).
+fn measurement_outcome(
+    generation_at_capture: u64,
+    generation_now: u64,
+    measured: Option<PixelsRect>,
+) -> Option<PanelPlacement> {
+    if generation_at_capture != generation_now {
+        return None;
+    }
+    Some(measured.map_or(PanelPlacement::Fallback, PanelPlacement::Measured))
 }
 
 /// One row, in two layers. The row itself is a plain `<div>` wrapper
@@ -3870,19 +3901,17 @@ fn SessionRow(
                 Some(handle) => handle.get_client_rect().await.ok(),
                 None => None,
             };
-            // A newer open has superseded this measurement — applying it
-            // now would clobber whatever that newer open's OWN
-            // measurement already wrote (or will still write), with
-            // coordinates for a toggle position this open no longer
-            // speaks for. See `open_generation`'s own doc for the
-            // concrete interleaving this guards against.
-            if *open_generation.peek() != generation {
-                return;
+            // `measurement_outcome` (above) is the apply-if-current
+            // decision itself, pinned by its own unit test; this call is
+            // just where the real async race it guards against actually
+            // happens. See `open_generation`'s own doc for the concrete
+            // interleaving a newer open superseding this one guards
+            // against.
+            if let Some(outcome) =
+                measurement_outcome(generation, *open_generation.peek(), measured)
+            {
+                placement.set(outcome);
             }
-            placement.set(match measured {
-                Some(rect) => PanelPlacement::Measured(rect),
-                None => PanelPlacement::Fallback,
-            });
         });
     };
     // A stale row is DIMMED and badged, never hidden or disabled: SPEC.md
@@ -4421,6 +4450,49 @@ mod tests {
             PanelPlacement::Measured(toggle_rect)
         ));
         assert!(!should_measure_on_mount(true, PanelPlacement::Fallback));
+    }
+
+    /// Pins `spawn_measurement`'s own race directly: a measurement that
+    /// resolves for a SUPERSEDED open (`generation_now` has moved past
+    /// `generation_at_capture` — a fast close-then-reopen of the same
+    /// toggle, or a reopen after the row itself moved) must be discarded
+    /// rather than overwriting whatever the newer open's own measurement
+    /// already wrote or will still write. Every current-generation outcome
+    /// is pinned too — a resolved rect becomes `Measured`, and a renderer
+    /// that could not answer `get_client_rect()` at all (no mounted handle
+    /// yet, or the query itself failing) becomes `Fallback` rather than
+    /// leaving the panel invisible forever.
+    ///
+    /// This is the ONE piece of `spawn_measurement`'s async body that CAN
+    /// be pinned outside a real renderer: the `await` on
+    /// `MountedData::get_client_rect()` itself has no meaning without one
+    /// (see `should_measure_on_mount`'s own doc for why that half stays
+    /// with the browser suite). An injectable geometry-reader seam would
+    /// let a test drive that `await` too, but the decision actually worth
+    /// pinning — apply-if-current — is exactly what this function already
+    /// isolates, at no extra production cost: no new trait, no new type
+    /// threaded through `SessionRow`'s state, just this closure's own two
+    /// lines given a name and a return value instead of a direct write.
+    #[test]
+    fn measurement_outcome_discards_a_superseded_measurement() {
+        let toggle_rect = PixelsRect::new(
+            dioxus::html::geometry::euclid::point2(0.0, 0.0),
+            dioxus::html::geometry::euclid::size2(10.0, 10.0),
+        );
+        // Still current: both outcomes of the measurement itself apply.
+        assert_eq!(
+            measurement_outcome(1, 1, Some(toggle_rect)),
+            Some(PanelPlacement::Measured(toggle_rect)),
+        );
+        assert_eq!(
+            measurement_outcome(1, 1, None),
+            Some(PanelPlacement::Fallback),
+        );
+        // Superseded: a newer open has since bumped the generation, so
+        // this result — whichever it was — must be discarded outright
+        // rather than painted over the newer open's own placement.
+        assert_eq!(measurement_outcome(1, 2, Some(toggle_rect)), None);
+        assert_eq!(measurement_outcome(1, 2, None), None);
     }
 
     /// Repeated parent refreshes must update direct callback props in place

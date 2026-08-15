@@ -69,14 +69,14 @@ import { Page, expect } from "@playwright/test";
 export interface AgentMarkers {
   /**
    * Substrings that mean a blocking onboarding dialog is on screen,
-   * matched against the LIVE VIEWPORT only (see `waitUntilAgentReady`).
-   * Empty for an agent/configuration known not to show one — the fake
-   * agent, which has no onboarding UI at all, or a real agent whose
-   * workspace is already recorded as trusted. NOT "a real agent used
-   * before" in general: Claude Code's trust is PER-WORKSPACE, not
-   * global, so having run it once elsewhere proves nothing about THIS
-   * cwd. `waitUntilAgentReady` then degrades to "poll for the ready
-   * marker", which is exactly what the fake-agent leg exercises.
+   * matched against the FULL BUFFER (see `waitUntilAgentReady`). Empty
+   * for an agent/configuration known not to show one — the fake agent,
+   * which has no onboarding UI at all, or a real agent whose workspace is
+   * already recorded as trusted. NOT "a real agent used before" in
+   * general: Claude Code's trust is PER-WORKSPACE, not global, so having
+   * run it once elsewhere proves nothing about THIS cwd. `waitUntilAgentReady`
+   * then degrades to "poll for the ready marker", which is exactly what
+   * the fake-agent leg exercises.
    */
   trustDialogMarkers: string[];
   /** Substring proving the agent is booted and reading input. */
@@ -159,14 +159,18 @@ async function bufferText(page: Page, mode: "full" | "viewport"): Promise<string
 
 /**
  * Full text content of the terminal buffer (scrollback + viewport). Used
- * by `waitForReplyMarker`, which deliberately scans the WHOLE buffer —
- * unlike the viewport-only matching `waitUntilAgentReady` uses for dialog
- * and ready markers below, a reply marker must stay found even after
- * later output has pushed it off screen; "did a reply arrive" does not
- * stop being true just because the poll ran late.
+ * by both `waitForReplyMarker` and `waitUntilAgentReady`, for two
+ * distinct but related reasons a poll must not be fooled by content
+ * moving out of the current screenful: a reply marker must stay found
+ * even after later output has pushed it off screen ("did a reply arrive"
+ * does not stop being true just because the poll ran late), and a dialog
+ * or ready marker must stay found even after the post-mount font-swap
+ * refit RE-WRAPS everything already printed and leaves it at a different
+ * row than it went in at (see `waitUntilAgentReady`'s own doc for the
+ * concrete CI failure that motivated the second case).
  *
- * Private to this module (no exported use exists outside it) — duplicated
- * from terminal.spec.ts's identical helper rather than imported, per this
+ * Not exported (no use exists outside this module) — duplicated from
+ * terminal.spec.ts's identical helper rather than imported, per this
  * suite's testing decision that specs stay self-contained.
  */
 async function termText(page: Page): Promise<string> {
@@ -177,16 +181,14 @@ async function termText(page: Page): Promise<string> {
  * The currently VISIBLE screenful only — `term.rows` lines starting at
  * `buffer.viewportY` — as opposed to `termText`'s full scrollback.
  *
- * `waitUntilAgentReady` matches both its dialog and ready markers against
- * this, not the full buffer, for two reasons found together: a dialog
- * that has already been dismissed leaves its text sitting harmlessly in
- * SCROLLBACK, and matching the full buffer would keep "seeing" it and
- * pressing Enter forever at a dialog that is actually long gone; and a
- * ready marker (a startup banner) can likewise scroll into scrollback
- * while a LATER dialog is the thing actually on screen, and matching the
- * full buffer would then call the agent ready while it is still blocked.
- * Both symptoms are the same root cause — treating history as if it were
- * the current screen — and viewport-only matching is the one fix for it.
+ * NOT used for matching anymore (`waitUntilAgentReady` polls the full
+ * buffer for both its dialog and ready markers — see that function's own
+ * doc for why viewport-only matching turned out to be the wrong fix for
+ * the "stale text lingering in scrollback" problem it was built to solve).
+ * This function survives purely as the timeout error's diagnostic dump: a
+ * short, CURRENT-screen rendering is a more useful thing to paste into a
+ * bug report than a full scrollback dump that could run to hundreds of
+ * lines by the time a real agent has been running a while.
  */
 async function viewportText(page: Page): Promise<string> {
   return bufferText(page, "viewport");
@@ -213,9 +215,39 @@ async function viewportText(page: Page): Promise<string> {
  * its pane diagnostic, never firing. Checking first makes the deadline
  * unconditional: however the loop got here, time runs out.
  *
- * Both marker kinds are matched against the LIVE VIEWPORT
- * (`viewportText`), not the full scrollback — see that function's docs
- * for why scrollback matching is wrong for both directions at once.
+ * Both marker kinds are matched against the FULL BUFFER (`termText`), not
+ * the live viewport alone — the opposite of an earlier version of this
+ * function, and changed for a real, CI-observed reason: terminal.js's
+ * post-mount font swap (its `document.fonts.load(...).then(...)` block)
+ * re-fits the terminal once JetBrains Mono actually loads, and that
+ * second `fit.fit()` re-measures the cell size and can change `cols`,
+ * which makes xterm RE-WRAP every row already printed to the new column
+ * width. Content printed early — a startup banner, a ready marker — can
+ * come out of that reflow at a different row than it went in at, and
+ * nothing guarantees it stays inside the CURRENT `[viewportY, viewportY +
+ * rows)` window: this is exactly what timed out `spawn.spec.ts`'s own
+ * ready-marker wait on both engines, with an effectively blank rendered
+ * viewport and the marker sitting in scrollback above it. Reading the
+ * full buffer instead makes the wait immune to where the reflow happened
+ * to leave the marker.
+ *
+ * This does reopen the specific risk `viewportText`'s own retired doc
+ * described — a dialog marker's text lingering in scrollback after real
+ * dismissal, or a ready marker's banner staying matchable long after a
+ * LATER dialog has appeared — but the failure modes are not symmetric.
+ * Both trust-dialog marker strings ("Accessing workspace", "Do you
+ * trust") are dialog-specific UI copy a normally-running agent never
+ * prints again, and Claude Code's TUI redraws its current screen on every
+ * frame (including after a resize) rather than leaving a stale dialog
+ * sitting unrefreshed — so a genuinely dismissed dialog's marker text
+ * reappearing in a LATER poll is not the expected case. Where it could
+ * still happen, the cost is one redundant Enter into a running prompt
+ * (harmless — an empty submit an agent's own composer ignores), against a
+ * wait that used to hang past its deadline whenever a reflow knocked a
+ * legitimately-present marker out of the viewport. The timeout error
+ * below still renders the live viewport, not the full buffer, as its
+ * diagnostic dump — see `viewportText`'s own doc for why that stays the
+ * more useful thing to paste into a bug report.
  *
  * The dialog's Enter is sent alone, with no prompt text ahead of it, so
  * lesson (b)'s paste-heuristic risk does not apply here — that risk is
@@ -267,7 +299,7 @@ export async function waitUntilAgentReady(
           `rendered viewport:\n${text}`,
       );
     }
-    const text = await viewportText(page);
+    const text = await termText(page);
     if (markers.trustDialogMarkers.some((marker) => text.includes(marker))) {
       // Explicit focus before the dismissal keystroke: unlike
       // `submitPrompt`, this function has not typed anything yet by this
