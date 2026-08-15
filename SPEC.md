@@ -311,6 +311,15 @@ whatever the agent renders is what you see. There is no composer, no message abs
   attach is refused and that client lands where it actually stands: displaced, with the same take-control action any
   other displaced client has. Taking a session over stays a thing someone does on purpose, whether by opening it or by
   asking for it back.
+- Selecting text copies it to the system clipboard: a plain drag when the pane has no mouse reporting active, or
+  Shift-drag (Option-drag on macOS) to force a local selection when it does — the same modifier xterm itself uses to win
+  a selection back from an app that has grabbed the mouse. A terminal program's own OSC 52 WRITE is honored the same
+  way, and is the only path that reaches the clipboard for a selection an app under mouse reporting makes for itself; an
+  OSC 52 READ is never answered — no program running in a terminal is handed the system clipboard's contents, under any
+  circumstance. Every completed selection re-copies, even one identical to what is already on the clipboard. Clipboard
+  operations are explicitly best-effort and silent on failure — permission policy, secure-context requirements, and an
+  engine's own clipboard behavior are outside this system's control — a deliberate, named exception to the Errors and
+  diagnostics section's surface-every-error rule below, not a lapse in it.
 
 ## Attachments
 
@@ -450,11 +459,14 @@ each supervisor (SSH) — plus one deliberately local one.
 - **Client to helm**: the helm serves its web UI over plain HTTP bound to loopback only, with a required token. The helm
   refuses to bind non-loopback addresses in v1; TLS serving is post-v1. Reaching the UI from another machine means an
   SSH port forward the user sets up themselves — there is no built-in tunneling or Tailscale integration in v1. The
-  browser therefore always talks to localhost, which is conveniently a secure context, so browser clipboard features
-  work fully. The token still matters on loopback: it keeps other local processes and users out. The helm generates it
-  on first run; the user views or rotates it on the helm's machine (the app UI, or `farhelm helm token show|rotate`),
-  and the browser asks for it once per device and keeps a session thereafter. Rotating the token invalidates every
-  device session — that is what rotation is for. The native app embeds its helm; that edge is local.
+  browser therefore always talks to localhost, which is conveniently a secure context — the precondition the browser
+  clipboard APIs require to be reachable at all. Eligibility is not the same as success: engine policy and per-request
+  permission still apply on top of it, and a clipboard operation that the engine refuses fails silently by the Terminal
+  experience section's own clipboard contract above, not with an error. The token still matters on loopback: it keeps
+  other local processes and users out. The helm generates it on first run; the user views or rotates it on the helm's
+  machine (the app UI, or `farhelm helm token show|rotate`), and the browser asks for it once per device and keeps a
+  session thereafter. Rotating the token invalidates every device session — that is what rotation is for. The native app
+  embeds its helm; that edge is local.
 - **Helm to supervisor**: SSH, and only SSH, for every remote supervisor. Passwordless access from the helm's machine,
   as the user, is the requirement; authentication is the user's SSH keys, and supervisors listen on no network port of
   their own. Registering a host means giving the helm its SSH destination — there is no supervisor token to manage. The

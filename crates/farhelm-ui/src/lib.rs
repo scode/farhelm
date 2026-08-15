@@ -737,9 +737,46 @@ pub struct Tab {
     pub id: String,
 }
 
+// Provenance for the three xterm.js files below (none carried one before —
+// the minified UMD bundles have no room for a header comment, so this is
+// where it lives): `xterm.js` and `xterm.css` are the unmodified `lib/xterm.js`
+// and `css/xterm.css` from the `@xterm/xterm` npm package, version 6.0.0
+// (https://registry.npmjs.org/@xterm/xterm/-/xterm-6.0.0.tgz), identified by
+// SHA-256 match against the published tarball — the bundle embeds no version
+// string of its own. `addon-fit.js` is `lib/addon-fit.js` from
+// `@xterm/addon-fit`, vendored alongside it. `addon-clipboard.js` (below) was
+// vendored later, against this same xterm version.
 const VENDOR_XTERM_CSS: Asset = asset!("/assets/vendor/xterm.css");
 const VENDOR_XTERM_JS: Asset = asset!("/assets/vendor/xterm.js");
 const VENDOR_FIT_JS: Asset = asset!("/assets/vendor/addon-fit.js");
+// OSC 52 support: an agent TUI (Claude Code, Codex) that owns mouse
+// reporting handles its OWN text selection and reports what it copies via
+// the OSC 52 escape sequence rather than through any DOM selection this page
+// can see (see terminal.js's module docs for the full plain-drag-vs-Shift-
+// drag duality this addon exists to cover). xterm.js parses OSC 52 as a
+// no-op unless something registers a handler for it, so without this addon
+// that sequence was silently dropped — the diagnosis this half of the fix
+// closes. WRITE-only in how terminal.js actually uses it: `mount()`
+// constructs the addon with a provider that refuses every READ/query
+// outright (never touches `navigator.clipboard.readText`) rather than
+// handing a terminal program the system clipboard on request — that refusal
+// is the security boundary, not an accident of the addon's own defaults.
+//
+// The unmodified `lib/addon-clipboard.js` UMD bundle from `@xterm/addon-clipboard`
+// version 0.2.0 (https://registry.npmjs.org/@xterm/addon-clipboard/-/addon-clipboard-0.2.0.tgz,
+// dist-tag `latest` at vendoring time), which declares xterm.js v4+
+// compatibility in its own README and is confirmed against the 6.0.0 vendored
+// above. It bundles `js-base64` internally (a webpack chunk, not a separate
+// vendor file) so it needs nothing else loaded to register its
+// `window.ClipboardAddon.ClipboardAddon` global, the same one-file-one-global
+// shape as `addon-fit.js`'s `window.FitAddon.FitAddon`.
+//
+// License notices: MIT (the addon itself) plus BSD-3-Clause (the bundled
+// js-base64), neither of which the minified bundle can carry inline —
+// copied verbatim from both packages' own LICENSE files into
+// `assets/vendor/addon-clipboard-LICENSES.txt`, alongside this asset the
+// same way `assets/fonts/OFL.txt` sits alongside the vendored font files.
+const VENDOR_CLIPBOARD_JS: Asset = asset!("/assets/vendor/addon-clipboard.js");
 // The `onBinary` byte-conversion helper terminal.js calls into (PLAN_M6_5.md
 // item 1) — a separate asset, registered ahead of terminal.js, purely so
 // `node --test` can load this exact file rather than a copy of its logic.
@@ -798,6 +835,14 @@ const CLIPBOARD_NAME_JS: Asset = asset!("/assets/clipboard-name.js");
 // as a mount precondition (see its `mountWhenReady` docs) so the key
 // handler can never wire up half-loaded.
 const SHIFT_ENTER_KEY_JS: Asset = asset!("/assets/shift-enter-key.js");
+// The pure "does this mouseup end a LOCAL xterm selection worth copying"
+// decision terminal.js's herdr-style copy-on-select consults — the OTHER
+// half of the selection duality `VENDOR_CLIPBOARD_JS` above closes (a
+// selection this page's own DOM can see, as opposed to one an agent TUI made
+// for itself and reported over OSC 52). Its own asset for the same reason as
+// the three helpers above: `node --test` must run the exact shipped
+// function, and terminal.js treats this global as a mount precondition.
+const COPY_ON_SELECT_JS: Asset = asset!("/assets/copy-on-select.js");
 const TERMINAL_JS: Asset = asset!("/assets/terminal.js");
 // The invalidation feed's socket (PLAN_M6_75.md item 6) — its own asset
 // rather than a corner of terminal.js, because it has nothing to do with a
@@ -905,9 +950,11 @@ fn AppBody() -> Element {
         document::Link { rel: "stylesheet", href: APP_CSS }
         document::Script { src: VENDOR_XTERM_JS }
         document::Script { src: VENDOR_FIT_JS }
+        document::Script { src: VENDOR_CLIPBOARD_JS }
         document::Script { src: TERM_BYTES_JS }
         document::Script { src: CLIPBOARD_NAME_JS }
         document::Script { src: SHIFT_ENTER_KEY_JS }
+        document::Script { src: COPY_ON_SELECT_JS }
         document::Script { src: TERMINAL_JS }
         document::Script { src: EVENTS_JS }
         // Above both views and outside the match, deliberately: a build

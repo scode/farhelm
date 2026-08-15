@@ -218,6 +218,60 @@
 // transfer finishes. Nothing here ever calls `focus()`: an upload
 // completing must not steal the caret from wherever the user has since put
 // it.
+//
+// ## Copy to the system clipboard: two selections, two mechanisms
+//
+// A user selecting text in a session terminal used to show "copied" (an
+// agent TUI's own on-screen toast) while pasting elsewhere produced STALE
+// content — the TUI had reported a copy to itself, over an escape sequence
+// this file silently dropped, while nothing here ever touched the real
+// system clipboard for the drag the user actually made. Closing that gap
+// took two independent mechanisms, because a session terminal's "selected
+// text" is really two different things depending on whether the agent
+// program running in it has turned mouse reporting on — confirmed directly
+// against the vendored xterm.js, not assumed:
+//
+// - With mouse reporting ON (Claude Code, Codex, most full-screen TUIs), a
+//   PLAIN drag is handled by the TUI itself: xterm's own `SelectionService`
+//   is disabled for as long as an app has mouse events on
+//   (`CoreBrowserTerminal.bindMouse`'s `onProtocolChange` handler), so no
+//   LOCAL xterm selection is ever made and none of this file's selection
+//   handlers fire — the mouse events go to the pty instead. The only way
+//   for such a copy to reach the real clipboard is the program's own OSC 52
+//   write, which is why `mount()` loads the vendored `@xterm/addon-clipboard`
+//   (see its wiring comment there for the addon itself, and its silent-
+//   failure contract). OSC 52 is WRITE-only here: the addon's own read/query
+//   path would hand a program the real system clipboard on request, which
+//   this file refuses unconditionally (`clipboardProvider`'s own header
+//   covers why that is a security boundary, not an oversight).
+// - Holding SHIFT while dragging forces a local xterm selection even with
+//   mouse reporting on (`SelectionService.shouldForceSelection` keys
+//   directly off `event.shiftKey` — except on macOS, where it reads Option
+//   instead, per `macOptionClickForcesSelection` above), and so does every
+//   ordinary drag/double-click/triple-click whenever mouse reporting is off
+//   at all (a plain shell prompt, an editor that never grabbed the mouse).
+//   THIS is the selection herdr-style copy-on-select covers: a
+//   document-level `mouseup`, gated to gestures that started on this
+//   island's own element, pushes a completed LOCAL selection's text to the
+//   clipboard once it ends — including a drag released outside the
+//   terminal entirely (see that listener's own comment for the document-
+//   level reasoning, why its real work runs one macrotask later rather
+//   than inline, and copy-on-select.js's header for the full duality again
+//   from the pure decision's point of view). Every gesture that ends with
+//   a non-empty selection copies; there is no "already copied this" cache
+//   to suppress a re-copy (copy-on-select.js's header covers why an
+//   earlier version of that was a real bug).
+//
+// Neither mechanism can stand in for the other: OSC 52 says nothing about a
+// Shift-forced or mouse-reporting-off selection (the TUI never sees it, so
+// it never reports it), and a local-selection copy never fires for a plain
+// drag the TUI intercepted before xterm's own selection code could run.
+// Both are needed, and both fail silently in the same direction — no
+// clipboard change, no UI — because neither a webview's clipboard
+// permission policy nor an agent program's own OSC 52 support is something
+// this file can do anything about beyond trying. That silence is a
+// documented SPEC.md exception to the surface-every-error rule, not an
+// oversight (SPEC.md's Terminal experience section).
 
 (function () {
   const DEVICE_SECRET_KEY = "farhelm.device-secret";
@@ -351,6 +405,83 @@
   const UNCONNECTED_TEXT =
     "Not connected: this terminal never finished connecting, so nothing typed here would "
     + "reach the session — reopen the session to try again.";
+
+  // The clipboard provider handed to every mount's `ClipboardAddon`
+  // (`mount()`, below) in place of the addon's own default
+  // `BrowserClipboardProvider`. One shared, stateless object rather than
+  // one per mount — nothing here differs between islands, so there is
+  // nothing to gain from a fresh closure every time one attaches.
+  //
+  // ## Reads are refused outright — this is a security boundary, not a
+  //    missing feature
+  //
+  // An OSC 52 QUERY (`\x1b]52;c;?\x07`) asks the addon to hand the SYSTEM
+  // CLIPBOARD'S CONTENTS to whatever program is running in this pane. The
+  // default provider answers it with `navigator.clipboard.readText()` —
+  // which would let any agent TUI, or anything it shells out to, read
+  // whatever the user last copied ANYWHERE on their system, including
+  // content that has nothing to do with this session at all, and exfiltrate
+  // it however it likes (print it, write it to a file, send it over the
+  // network the agent already has). Nothing about "a terminal program can
+  // read escape sequences its own pty carries" implies it should be handed
+  // the clipboard on request, and this addon exists to make WRITES real,
+  // not to open a read channel nobody asked for.
+  //
+  // `readText` below therefore never calls `navigator.clipboard.readText`
+  // at all — not "catches whatever it returns and discards it", which would
+  // still trigger a real permission prompt and a real read on every query,
+  // but never invokes the browser API in the first place. Returning `""`
+  // synchronously (never a `Promise`) is what the addon's own source treats
+  // as "nothing to report" (`ClipboardAddon.ts`'s `_setOrReportClipboard`:
+  // a non-Promise result is used immediately as the report body), so a
+  // querying program sees an empty clipboard rather than an error or a
+  // hang — indistinguishable, from inside the pane, from a real clipboard
+  // that happens to be empty.
+  //
+  // ## Writes are fire-and-forget — the parser must never wait on browser
+  //    policy
+  //
+  // The addon's default `writeText` returns the raw
+  // `navigator.clipboard.writeText()` promise, and that promise becomes
+  // what xterm's OWN write buffer awaits before it resumes parsing any
+  // FURTHER bytes from this pty (`WriteBuffer`'s handling of a Promise-
+  // returning OSC handler result, confirmed against the vendored xterm.js).
+  // Two browser behaviors turn that into a real problem: a clipboard
+  // permission prompt the user has not yet answered leaves the promise
+  // PENDING indefinitely, and a policy refusal REJECTS it, which surfaces
+  // as an uncaught throw the write buffer turns into a `queueMicrotask`
+  // throw — neither of which this file may allow to stall a terminal's
+  // rendering or blow up the page over a clipboard write nobody asked to
+  // wait for.
+  //
+  // So `writeText` below starts the real write, attaches its own local
+  // `.catch(() => {})` so a rejection never escapes as an unhandled promise
+  // anywhere, and returns `undefined` — not the promise — synchronously.
+  // The addon's `_setOrReportClipboard` only awaits a RETURNED `Promise`
+  // (`result instanceof Promise`); handing back a plain value makes the OSC
+  // handler resolve on the spot, so parsing continues immediately no matter
+  // how long the real write takes or how it resolves. This is the same
+  // silent-failure contract `mount()`'s own OSC 52 comment describes for
+  // the addon's default behavior — restated here because this provider is
+  // now the one actually implementing it.
+  const clipboardProvider = {
+    /** Never answers a query with real clipboard contents — see this
+     * constant's own header for why that is a security boundary, not an
+     * oversight. `selection` is ignored: every kind of query gets the same
+     * empty, no-questions-asked refusal. */
+    readText() {
+      return "";
+    },
+    /** Fire off a real clipboard write without ever handing xterm's parser
+     * a promise to wait on — see this constant's own header. Only the `c`
+     * (system clipboard) selection is honored, matching the addon's own
+     * default provider; `p`/`q` (primary/secondary X selections) are
+     * silently ignored, exactly as upstream does. */
+    writeText(selection, text) {
+      if (selection !== "c") return;
+      navigator.clipboard?.writeText?.(text)?.catch(() => {});
+    },
+  };
 
   /**
    * This mount's catch-up controls, seeded from the three constants above
@@ -2085,10 +2216,12 @@
     },
 
     /**
-     * Wait for xterm's globals (`Terminal`, `FitAddon`), the term-bytes
-     * helper (`window.farhelmTermBytes`), the clipboard-naming helper
+     * Wait for xterm's globals (`Terminal`, `FitAddon`, and the vendored
+     * OSC 52 addon's `ClipboardAddon`), the term-bytes helper
+     * (`window.farhelmTermBytes`), the clipboard-naming helper
      * (`window.farhelmClipboardNames`), the Shift+Enter key decision
-     * (`window.farhelmShiftEnterKey`), and `spec.el` to exist, then
+     * (`window.farhelmShiftEnterKey`), the copy-on-select decision
+     * (`window.farhelmCopyOnSelect`), and `spec.el` to exist, then
      * mount — owning the ENTIRE retry loop that used to live in the
      * `document::eval` snippet calling this (lib.rs).
      *
@@ -2108,7 +2241,13 @@
      * would attach a key handler that calls into an undefined global on the
      * first Shift+Enter a user presses, rather than failing to attach at
      * all in a way that degrades to xterm's ordinary Enter-submits
-     * behavior.
+     * behavior. `ClipboardAddon` and `farhelmCopyOnSelect` join it for the
+     * same reason again, one per half of the copy-to-system-clipboard fix
+     * (see `mount()`'s own comments at each wiring site): mounting before
+     * either landed would silently drop OSC 52 writes or leave the mouseup
+     * listener calling into an undefined decision function, rather than
+     * failing the mount outright the way every other precondition here
+     * does.
      *
      * That move closes a real bug (the "stale mount retry" finding): the
      * old loop was a bare `setTimeout` chain with no handle anything
@@ -2149,9 +2288,11 @@
         if (
           window.Terminal &&
           window.FitAddon &&
+          window.ClipboardAddon &&
           window.farhelmTermBytes &&
           window.farhelmClipboardNames &&
           window.farhelmShiftEnterKey &&
+          window.farhelmCopyOnSelect &&
           document.getElementById(spec.el)
         ) {
           pendings.delete(spec.el);
@@ -2239,6 +2380,14 @@
       // nothing to stop it, and it would then flush a replay into (or
       // close the socket of) the terminal this catch block just disposed.
       let disposeDeferred = null;
+      // Herdr-style copy-on-select registers a DOCUMENT-level listener (see
+      // its own wiring comment below for why it must be document-level
+      // rather than only on the terminal element), which outlives this
+      // mount exactly like the window resize listener above — so a mount
+      // that throws after registering it must be able to remove it from
+      // the catch block too, or a failed mount leaks a listener that keeps
+      // firing into a disposed `term` forever.
+      let stopCopyOnSelect = null;
       let bannered = false;
       function showBanner(text, reclaimable) {
         // Sticky by design: the first banner wins for the life of the
@@ -2289,9 +2438,52 @@
           scrollback: 12000,
           fontSize: 14,
           cursorBlink: true,
+          // xterm's forced-selection gesture — the modifier that wins a
+          // local xterm selection even while an app has mouse reporting on
+          // (copy-on-select.js's header has the full duality) — is NOT the
+          // same key on every platform. Checked directly against the
+          // vendored xterm.js: `SelectionService.shouldForceSelection`
+          // reads `event.shiftKey` everywhere EXCEPT when `Browser.isMac`
+          // is true, where it instead reads `event.altKey` (Option) and
+          // only when this option says so — the default is `false`, which
+          // on a real Mac build (wry's WKWebView, or Safari) would leave
+          // Shift+drag doing nothing under mouse reporting and no forced-
+          // selection gesture at all. Enabling it is a no-op everywhere
+          // this suite's own engines run (`Browser.isMac` is false there),
+          // so this only ever changes behavior on an actual Mac.
+          macOptionClickForcesSelection: true,
         });
         const fit = new FitAddon.FitAddon();
         term.loadAddon(fit);
+        // OSC 52 support (the vendored `@xterm/addon-clipboard`; see
+        // `VENDOR_CLIPBOARD_JS`'s provenance comment in lib.rs for the
+        // exact version). This is the half of the copy-to-system-clipboard
+        // fix that covers a selection this page's own DOM never sees: an
+        // agent TUI with mouse reporting on (Claude Code, Codex) handles a
+        // plain drag itself and reports what it put on ITS clipboard via
+        // this escape sequence rather than through any DOM selection —
+        // confirmed against the vendored xterm.js, whose
+        // `CoreBrowserTerminal.bindMouse` disables the local
+        // `SelectionService` for exactly as long as an app has mouse
+        // events on (copy-on-select.js's header has the full duality, the
+        // other half of which is wired further down this function). Without
+        // this addon xterm.js parses OSC 52 as a no-op — the diagnosis this
+        // half of the fix closes.
+        //
+        // Constructed with `clipboardProvider` (declared above, module
+        // scope) in place of the addon's own default
+        // `BrowserClipboardProvider` — NEVER the default. That default
+        // answers an OSC 52 READ query with the real system clipboard,
+        // which is a data-exfiltration channel this file must not open
+        // (see `clipboardProvider`'s own header for the full reasoning) and
+        // also returns its write's raw promise into xterm's parser, which
+        // can stall rendering on a pending permission prompt. The addon's
+        // default `Base64` codec is kept — only the provider changes — via
+        // the SECOND constructor argument the addon documents for exactly
+        // this override.
+        term.loadAddon(
+          new ClipboardAddon.ClipboardAddon(new ClipboardAddon.Base64(), clipboardProvider),
+        );
         term.open(el);
         fit.fit();
 
@@ -3432,6 +3624,174 @@
         // intercepted paste has to run it by hand — the interception
         // stops the event before it can reach the listener just above
         // (see `installAttachments`).
+
+        // Herdr-style copy-on-select: the OTHER half of the
+        // copy-to-system-clipboard fix, covering a LOCAL xterm selection —
+        // Shift+drag under mouse reporting (Option+drag on macOS — see
+        // `macOptionClickForcesSelection` above), or an ordinary drag/
+        // double-click/triple-click whenever nothing has mouse reporting on
+        // (see the OSC 52 wiring above, and copy-on-select.js's header, for
+        // the full duality between the two paths a "selection" can take
+        // here).
+        //
+        // ## DOCUMENT-level mouseup, not just `term.element`
+        //
+        // A drag that ENDS outside the terminal — the mouse released over
+        // the sidebar, or outside the browser viewport entirely — never
+        // fires a `mouseup` on `term.element` at all; the event's target is
+        // wherever the pointer physically is. xterm.js itself handles this
+        // correctly for its OWN selection bookkeeping by listening on
+        // `document` rather than the element (`SelectionService`'s
+        // `_addMouseDownListeners`, armed at mousedown and torn down at
+        // mouseup) — a real selection is still finalized wherever the
+        // button comes up. A listener scoped to `term.element` alone would
+        // miss exactly that gesture and never copy it.
+        //
+        // So this listens on `document`, gated by a flag this island's own
+        // `mousedown` on `term.element` sets: only a mouseup whose matching
+        // mousedown started INSIDE this terminal counts, so one island's
+        // drag-release does not trigger a copy check for every OTHER
+        // island's listener on the same page (each mount registers its own
+        // document listener; see `stopCopyOnSelect`, below, for why it must
+        // also be individually removable).
+        //
+        // Reading `term.hasSelection()`/`term.getSelection()` from a
+        // document-level handler is NOT a race against xterm's own
+        // finalization: xterm updates its selection model LIVE on every
+        // `mousemove` during the drag (`SelectionService._handleMouseMove`
+        // writes `_model.selectionEnd` directly, which
+        // `hasSelection`/`getSelection` read straight through), so the
+        // model already reflects the drag's final extent by the time ANY
+        // mouseup fires — nothing here depends on the RELATIVE order of
+        // this listener and xterm's own document-level one.
+        //
+        // Neither listener needs capture phase. Checked directly against
+        // the vendored xterm.js: `Terminal`'s `cancelEvents` option
+        // defaults to `false`, and every vendored mousedown/mouseup path
+        // that could otherwise race these (`SelectionService`'s own
+        // listeners, `CoreBrowserTerminal`'s mouse-reporting listeners, the
+        // link hover handler) either never calls `stopPropagation()` at all
+        // or only does so through `cancel()`, which is a no-op while
+        // `cancelEvents` is off — unlike the paste listener above, whose
+        // capture phase is genuinely load-bearing because xterm's hidden
+        // helper textarea calls `stopPropagation()` on its own paste event
+        // UNCONDITIONALLY.
+        //
+        // No "did this change since last copied" cache any more (see
+        // copy-on-select.js's header for why an earlier version of that was
+        // a real bug, not a simplification worth keeping): every gesture
+        // that ends with a non-empty local selection copies, full stop.
+        //
+        // ## Why the real work is DEFERRED past the mouseup dispatch itself
+        //
+        // A cross-engine flake surfaced under repeat-each stress
+        // (mouse-modes.spec.ts's reattach test: a real click occasionally
+        // produced no SGR mouse report at all — see that test's own docs).
+        // Bisection pinned it to this PR; ablating the ClipboardAddon load
+        // and ablating this file's own copy-on-select listeners each ran
+        // clean across sizeable samples taken in isolation, but so did an
+        // UNABLATED build across a comparably sized sample gathered the
+        // same way — every visible failure across all three, traced
+        // through its own trace.zip, turned out to be a SEPARATE,
+        // pre-existing race (the shared test helper's session-listing
+        // lookup racing the helm's own cache) that also reproduces on
+        // origin/main, with the mouse-report assertions themselves having
+        // already passed earlier in the same run. That makes the live
+        // failure this fix targets rarer than what direct repetition
+        // reliably reproduces outside CI's own conditions — this is
+        // therefore a REASONED mitigation of the one concrete difference
+        // code-reading turned up, not a change validated by a captured
+        // failing trace of the report itself going missing.
+        //
+        // What that reading found: this listener's SHAPE is unlike every
+        // other one in this file. It is registered ONCE at mount time and
+        // left on `document` for the terminal's entire lifetime, where
+        // xterm's own mouse-reporting mouseup listener
+        // (`CoreBrowserTerminal.bindMouse`'s `requestedEvents.mouseup`) is
+        // instead added to `document` FRESH on every single mousedown and
+        // removed again inside its own mouseup handler — the two are never
+        // simultaneously "old", and ours is the only listener in this file
+        // whose registration predates the gesture it reacts to by an
+        // arbitrary amount of page lifetime. Nothing in the DOM Events spec
+        // names a hazard from that shape on its own (`cancelEvents` is off,
+        // so no vendored path here ever calls `stopPropagation`, and
+        // `stopImmediatePropagation` — used exactly once in the vendored
+        // source, in `SelectionService._handleMouseMove` — never runs on
+        // this path at all, since mouse-tracking mode disables
+        // `SelectionService` for a plain click in the first place, per
+        // `CoreBrowserTerminal.bindMouse`'s `onProtocolChange` handler).
+        // But a long-lived listener sharing a target and an event type with
+        // one that is added and removed on every gesture is exactly the
+        // shape where an engine-specific ordering or bookkeeping quirk
+        // could produce single-digit-percent, cross-engine,
+        // load-sensitive intermittency without leaving behind a
+        // reproducible trace of its own — which is consistent with what
+        // was observed, even though it was not directly witnessed.
+        //
+        // So this handler does the absolute minimum SYNCHRONOUSLY (consult
+        // and reset the gesture flag — no xterm API touched, no clipboard
+        // API touched) and pushes everything else onto its own macrotask
+        // via `setTimeout(..., 0)`, which cannot run until the CURRENT
+        // event's entire dispatch — every listener for this mouseup,
+        // xterm's own report-sending one very much included — has already
+        // finished. That removes this listener's unusual lifetime as a
+        // variable in xterm's own mouse-report dispatch ENTIRELY: whatever
+        // xterm does for this event finishes completely before this code
+        // ever reads `term` or calls `navigator.clipboard`, regardless of
+        // registration order or engine bookkeeping. The delay is
+        // imperceptible and invisible to both feature's own specs
+        // (terminal-clipboard.spec.ts polls for the clipboard to settle
+        // rather than asserting on synchronous timing), and OSC 52 writes
+        // — the addon's own parser-driven path, never routed through this
+        // listener at all — are untouched by this change.
+        let gestureStartedHere = false;
+        const handleTerminalMouseDown = () => {
+          gestureStartedHere = true;
+        };
+        const handleCopyOnSelectMouseUp = () => {
+          if (!gestureStartedHere) return;
+          gestureStartedHere = false;
+          setTimeout(() => {
+            // `alive` (declared further down, with the rest of this
+            // mount's deferred-work guards) is the same token
+            // `disposeDeferred` clears on teardown — this callback outlives
+            // its own dispatch by design now, so it checks the same flag
+            // every other deferred callback in this file does before
+            // touching a `term` that may by now be disposed.
+            if (!alive) return;
+            const hasSelection = term.hasSelection();
+            const selectionText = hasSelection ? term.getSelection() : "";
+            if (
+              !window.farhelmCopyOnSelect.copySelectionOnMouseUp({ hasSelection, selectionText })
+            ) {
+              return;
+            }
+            // Never awaited, and every way it can fail is swallowed rather
+            // than logged or surfaced: the optional chaining covers an
+            // engine (or a non-secure context) with no `navigator.clipboard`
+            // or no `writeText` at all, and the trailing `.catch` covers a
+            // present API that REJECTS — no trusted user gesture, a denied
+            // permission. Either way the terminal must keep working exactly
+            // as before, with the system clipboard simply unchanged and no
+            // UI anywhere saying so — the same silent-failure contract the
+            // OSC 52 half above carries. The selection itself is
+            // deliberately left in place (`term.clearSelection()` is never
+            // called here): copying must not visibly disturb what the user
+            // just selected.
+            navigator.clipboard?.writeText?.(selectionText)?.catch(() => {});
+          }, 0);
+        };
+        term.element.addEventListener("mousedown", handleTerminalMouseDown);
+        document.addEventListener("mouseup", handleCopyOnSelectMouseUp);
+        // Removable independently of every other per-mount listener (see
+        // this hoisted variable's own declaration above): a DOCUMENT
+        // listener outlives the element it was conceptually "for", so
+        // nothing else in this file's teardown would ever take it down on
+        // its own.
+        stopCopyOnSelect = () => {
+          term.element.removeEventListener("mousedown", handleTerminalMouseDown);
+          document.removeEventListener("mouseup", handleCopyOnSelectMouseUp);
+        };
         // `baseUrl`, not the `base` the socket was built from: uploads are
         // ordinary HTTP to the same origin the rest of this UI's API calls
         // go to, and an empty base (origin lookup failed) leaves a
@@ -3582,6 +3942,7 @@
           onWindowResize,
           paneObserver,
           attachments,
+          stopCopyOnSelect,
           testHook,
           // Everything `unmount()` needs to leave the catch-up
           // presentation behind: the invalidation that stops deferred work
@@ -3614,6 +3975,7 @@
         if (onWindowResize) window.removeEventListener("resize", onWindowResize);
         if (paneObserver) paneObserver.disconnect();
         if (attachments) attachments.dispose();
+        if (stopCopyOnSelect) stopCopyOnSelect();
         // Before the disposal below, not after: a still-armed idle timer
         // would otherwise flush this attach's buffer into the terminal
         // this line is about to destroy, and a still-armed heartbeat would
@@ -3674,6 +4036,12 @@
       // also aborts any upload still in flight, which is what stops a
       // transfer from completing into a terminal that no longer exists.
       if (island.attachments) island.attachments.dispose();
+      // Copy-on-select's mousedown/mouseup pair (`stopCopyOnSelect`, set in
+      // `mount()`) is the same class of leak again, and a document-level
+      // one specifically: nothing else in this teardown touches `document`
+      // at all, so leaving it live would keep firing into a disposed
+      // `term` on every mouseup anywhere on the page, forever.
+      if (island.stopCopyOnSelect) island.stopCopyOnSelect();
       // The island's deferred work is the same class of hazard one step
       // further along, and it has to be invalidated BEFORE the disposal
       // below rather than merely alongside it. Three things outlive this
