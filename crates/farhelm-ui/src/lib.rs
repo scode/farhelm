@@ -791,6 +791,13 @@ const TERM_BYTES_JS: Asset = asset!("/assets/term-bytes.js");
 // this global as a mount prerequisite, so paste can never fall back to a
 // second naming rule while asynchronous scripts are still loading.
 const CLIPBOARD_NAME_JS: Asset = asset!("/assets/clipboard-name.js");
+// The pure Shift+Enter "insert newline" decision terminal.js's
+// `attachCustomKeyEventHandler` callback consults. Its own asset for the
+// same reason as term-bytes.js and clipboard-name.js above: `node --test`
+// must run the exact shipped function, and terminal.js treats this global
+// as a mount precondition (see its `mountWhenReady` docs) so the key
+// handler can never wire up half-loaded.
+const SHIFT_ENTER_KEY_JS: Asset = asset!("/assets/shift-enter-key.js");
 const TERMINAL_JS: Asset = asset!("/assets/terminal.js");
 // The invalidation feed's socket (PLAN_M6_75.md item 6) — its own asset
 // rather than a corner of terminal.js, because it has nothing to do with a
@@ -900,6 +907,7 @@ fn AppBody() -> Element {
         document::Script { src: VENDOR_FIT_JS }
         document::Script { src: TERM_BYTES_JS }
         document::Script { src: CLIPBOARD_NAME_JS }
+        document::Script { src: SHIFT_ENTER_KEY_JS }
         document::Script { src: TERMINAL_JS }
         document::Script { src: EVENTS_JS }
         // Above both views and outside the match, deliberately: a build

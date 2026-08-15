@@ -4,10 +4,11 @@
 // layer entirely (SPEC_impl.md: the bypass is load-bearing — PTY-rate
 // output through a vdom would be a performance disaster).
 //
-// Loaded as plain scripts (xterm.js, addon-fit.js, term-bytes.js, this —
-// that is REGISTRATION order; Dioxus injects scripts asynchronously, so
-// mountWhenReady gates on the globals themselves, never on order) — no
-// bundler, no CDN: the UI must be fully self-contained.
+// Loaded as plain scripts (xterm.js, addon-fit.js, term-bytes.js,
+// clipboard-name.js, shift-enter-key.js, this — that is REGISTRATION order;
+// Dioxus injects scripts asynchronously, so mountWhenReady gates on the
+// globals themselves, never on order) — no bundler, no CDN: the UI must be
+// fully self-contained.
 //
 // ## One island per terminal, reconciled declaratively (PLAN_M4.md item 6)
 //
@@ -2085,7 +2086,9 @@
 
     /**
      * Wait for xterm's globals (`Terminal`, `FitAddon`), the term-bytes
-     * helper (`window.farhelmTermBytes`), and `spec.el` to exist, then
+     * helper (`window.farhelmTermBytes`), the clipboard-naming helper
+     * (`window.farhelmClipboardNames`), the Shift+Enter key decision
+     * (`window.farhelmShiftEnterKey`), and `spec.el` to exist, then
      * mount — owning the ENTIRE retry loop that used to live in the
      * `document::eval` snippet calling this (lib.rs).
      *
@@ -2100,7 +2103,12 @@
      * report, silently dropping that input rather than throwing somewhere
      * visible. Gating the mount on it — exactly like the `Terminal` and
      * `FitAddon` globals already are — makes term-bytes.js's own loading a
-     * mount PRECONDITION instead of a hopeful ordering.
+     * mount PRECONDITION instead of a hopeful ordering. `farhelmShiftEnterKey`
+     * joins the same gate for the same reason: mounting before it lands
+     * would attach a key handler that calls into an undefined global on the
+     * first Shift+Enter a user presses, rather than failing to attach at
+     * all in a way that degrades to xterm's ordinary Enter-submits
+     * behavior.
      *
      * That move closes a real bug (the "stale mount retry" finding): the
      * old loop was a bare `setTimeout` chain with no handle anything
@@ -2143,6 +2151,7 @@
           window.FitAddon &&
           window.farhelmTermBytes &&
           window.farhelmClipboardNames &&
+          window.farhelmShiftEnterKey &&
           document.getElementById(spec.el)
         ) {
           pendings.delete(spec.el);
@@ -3295,8 +3304,39 @@
           { intermediates: "$", final: "p" },
           swallowDecrqm,
         );
-        term.onData((d) => {
+        // Named (rather than inlined into `term.onData` below) so the
+        // Shift+Enter handler further down can write `\x1b\r` down the
+        // IDENTICAL path ordinary keystrokes take — same encoder, same
+        // open-check, same socket. Two independent send call sites here
+        // would be a standing risk that one of them drifts (a forgotten
+        // `readyState` guard, a different encoding) in a way that only
+        // shows up as a keystroke silently eaten during a reconnect race.
+        const sendData = (d) => {
           if (ws.readyState === WebSocket.OPEN) ws.send(enc.encode(d));
+        };
+        term.onData(sendData);
+        // Shift+Enter: make agent TUIs (Claude Code, Codex) treat it as
+        // "insert a newline" instead of "submit", matching what those
+        // programs already bind Shift+Enter to in a native terminal. xterm
+        // has no notion of Shift+Enter on its own — it encodes Enter as
+        // `\r` regardless of the Shift key — so left alone this key would
+        // submit the in-progress prompt every time a user meant to add a
+        // line. `shiftEnterKeyAction` (shift-enter-key.js) is the pure
+        // decision; see its module docs for why this handler sends only a
+        // bare `\x1b` PREFIX and then returns `true` rather than sending
+        // the full ESC CR itself and returning `false`: returning `true`
+        // lets xterm process the Enter through its own normal keydown path
+        // (scroll-to-bottom-on-input, selection dismissal, hidden-textarea
+        // cleanup, accessibility announcements) exactly as it would for a
+        // plain Enter, with only the leading ESC byte added ahead of it on
+        // the wire. Ordinary Enter is untouched: `shiftEnterKeyAction`
+        // returns "pass" for it, nothing is sent here, and xterm's default
+        // `\r` submission runs exactly as before.
+        term.attachCustomKeyEventHandler((ev) => {
+          if (window.farhelmShiftEnterKey.shiftEnterKeyAction(ev) === "prefix") {
+            sendData("\x1b");
+          }
+          return true;
         });
         // MT-6: xterm.js anchors a selection to buffer COORDINATES, not
         // to the text under it. Any input that reaches the pty can move
