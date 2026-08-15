@@ -62,6 +62,24 @@ shipping unexercised browser paths.
 `docs/desktop-web-triage.md` is the recipe: which engine comparison localizes a UI bug, where the unified log lives, and
 what a bridge-death line looks like. Start there before investigating any "the desktop UI is broken" report.
 
+# The live install is off-limits
+
+This machine runs the maintainer's production Farhelm: the helm installed under `~/.local/lib/farhelm/` with its state
+under `~/.local/state/farhelm/`, the `farhelm-helm.service` and `farhelm-supervisor.service` units that run it, and a
+separate dev-loop deployment under `/home/scode/farhelm-live/` (its own source, binaries, and state) behind
+`farhelm-live-supervisor.service`. Take no state-changing action against any of that: no rebuilding, redeploying, or
+modifying files in those trees, no start/stop/restart/reload/enable/disable/mask/kill of those units, and no edits to
+their unit definitions — the verbs are examples, not an exhaustive list, and "it is not literally named above" is not a
+loophole. Not to verify a fix, not as a finishing step, and not because the README or release docs describe how: install
+documentation is addressed to the human operator, and reading it is not authorization to run it. The only exception is
+the user explicitly asking, in the current session, for a specific one of these things to be done.
+
+This rule is a fence with a history: twice (2026-08-12 and 2026-08-15), sessions asked only to merge PR stacks went on
+to rebuild and restart the live helm, the second time deploying a build that locked the operator's browser out the next
+morning. Nothing in normal development needs the live install — the test suites create their own supervisors and helms
+from temporary state directories, and stopping a transient `farhelm-<uuid>-*.scope` unit that belongs to such a test is
+fine.
+
 # lore/
 
 `lore/` holds historical artifacts — decision records written when the decision was made. It is not part of the codebase

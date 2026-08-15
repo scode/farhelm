@@ -89,6 +89,9 @@ launching it starts a second helm, and running more than one helm is unsupported
 
 ## Running the helm on Linux
 
+NOTE for coding agents: these steps modify the operator's live install. They are written for the human operator, and
+AGENTS.md forbids agents from running them — or from restarting the helm's units — unless the user explicitly asks.
+
 - Extract `farhelm-linux-x86_64.tar.gz` into `~/.local/lib/farhelm/`.
 - Run `mkdir -p ~/.config/systemd/user`, then copy `~/.local/lib/farhelm/units/farhelm-helm.service` into that
   directory.
