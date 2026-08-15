@@ -202,9 +202,9 @@ test("a real Claude creates a jj workspace and spawns into it without refreshing
     workspace = path.join(scratch, "spawned-workspace");
     const host = await localHostId(request);
     const claude = (await listProfiles(request, host)).profiles.find(
-      (profile) => profile.name === "Claude Code",
+      (profile) => profile.name === "claude",
     );
-    if (!claude) throw new Error("the local supervisor has no exact `Claude Code` profile");
+    if (!claude) throw new Error("the local supervisor has no exact `claude` starter profile");
     parent = await createSession(request, {
       title: `real-spawn-parent-${stamp}`,
       cwd: repository,

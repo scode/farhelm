@@ -119,8 +119,9 @@ the app.
 Agent profiles belong to each supervisor: the invocation has to exist on the host that runs it. Creating a session
 offers the target host's profiles, and `--agent` on the spawn CLI resolves against the session's host. Syncing profiles
 across hosts is post-v1 convenience, not a v1 requirement. A fresh supervisor is not empty: it ships with editable
-starter profiles for Claude Code and Codex. Integrations are not user-authored — a profile optionally names an agent
-kind from Farhelm's built-in v1 catalog (Claude Code, Codex), which selects that kind's status heuristics and
+starter profiles for Claude Code and Codex, each in a plain and a permission-skipping ("yolo") variant: `claude`,
+`claude-yolo`, `codex`, and `codex-yolo`. Integrations are not user-authored — a profile optionally names an agent kind
+from Farhelm's built-in v1 catalog (Claude Code, Codex), which selects that kind's status heuristics and
 conversation-identity capture; profiles without a kind get generic treatment.
 
 Standard operation must never require falling back to SSH or a separate command line, with three v1 carve-outs:

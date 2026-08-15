@@ -155,7 +155,8 @@ const PROFILES_SCHEMA: &str = "CREATE TABLE profiles (
              ) STRICT;";
 
 /// The starter catalog SPEC.md promises every supervisor ships with —
-/// Claude Code and Codex — inserted ONCE, in the same transaction that
+/// plain and permission-skipping ("yolo") variants of Claude Code and
+/// Codex, four rows total — inserted ONCE, in the same transaction that
 /// creates the table (PLAN_M6_75.md item 4).
 ///
 /// ## Why seeding rides the schema ladder rather than a seeded-flag
@@ -190,20 +191,39 @@ const PROFILES_SCHEMA: &str = "CREATE TABLE profiles (
 /// user-created profile is impossible: creates mint UUIDs, which these are
 /// deliberately not shaped like.
 ///
-/// ## Why the resume templates are NULL
+/// ## Why the plain starters' resume templates are NULL but the yolo ones' are not
 ///
 /// NULL is `Profile::resume_template`'s "let the kind supply its default"
-/// (see that field's docs), which is precisely what a starter for an
-/// integrated kind wants. Writing the derived argv out here instead would
-/// fork each integration's default template into a second copy that a SQL
-/// literal can never keep in step — and would freeze it against the
-/// invocation, so a user editing `claude` to `/opt/bin/claude` would keep
-/// resuming through the old path. Deriving at create time
-/// (`IntegrationSnapshot::resolve`) follows the edit.
+/// (see that field's docs), which is precisely what `starter-claude` and
+/// `starter-codex` want: `IntegrationSnapshot::resolve` derives the resume
+/// argv from the invocation's argv0 alone (`default_resume_template` in
+/// `agent_kind/mod.rs`), so a user editing `claude` to `/opt/bin/claude`
+/// keeps resuming through the edited path with no second copy of the
+/// template to fall out of step.
+///
+/// That derivation is exactly why `starter-claude-yolo` and
+/// `starter-codex-yolo` CANNOT use NULL: derivation builds from argv0
+/// only, so it would produce `claude --resume {conversation}` and `codex
+/// resume {conversation}` — silently dropping
+/// `--dangerously-skip-permissions` / `--yolo` and resuming an unattended
+/// session back into a permission-gated one. These two rows instead carry
+/// an explicit template that re-asserts the flag. The tradeoff is the one
+/// the paragraph above describes in reverse: an explicit template is
+/// frozen against later edits to the invocation, so a user who repoints
+/// `codex --yolo` to a wrapper script keeps resuming through the literal
+/// `codex` executable and `--yolo` argument recorded here. That is
+/// accepted for these two rows
+/// because the alternative — silently losing the permission-skipping flag
+/// on resume — is the worse failure.
 const STARTER_PROFILES: &str = "INSERT INTO profiles \
                  (id, name, invocation, agent_kind, resume_template) VALUES \
-                 ('starter-claude', 'Claude Code', 'claude', 'claude', NULL), \
-                 ('starter-codex', 'Codex', 'codex', 'codex', NULL);";
+                 ('starter-claude', 'claude', 'claude', 'claude', NULL), \
+                 ('starter-claude-yolo', 'claude-yolo', \
+                  'claude --dangerously-skip-permissions', 'claude', \
+                  '[\"claude\",\"--dangerously-skip-permissions\",\"--resume\",\"{conversation}\"]'), \
+                 ('starter-codex', 'codex', 'codex', 'codex', NULL), \
+                 ('starter-codex-yolo', 'codex-yolo', 'codex --yolo', 'codex', \
+                  '[\"codex\",\"--yolo\",\"resume\",\"{conversation}\"]');";
 
 /// What the supervisor last WITNESSED about a session's agent, durably
 /// (PLAN_M3.md item 2). Not a cached liveness probe: see the module docs
@@ -8306,12 +8326,15 @@ mod tests {
     /// product decision somebody could plausibly "tidy" into something
     /// wrong: the KINDS are what select conversation capture and per-kind
     /// status sharpening at all (a starter that landed as `Generic` would
-    /// silently ship two profiles with no integration), and the NULL resume
-    /// templates are the deliberate "let the kind supply its default"
-    /// spelling rather than an omission — see `STARTER_PROFILES` for why
-    /// materializing them here would fork each integration's default.
+    /// silently ship a profile with no integration), the NULL resume
+    /// templates on the plain starters are the deliberate "let the kind
+    /// supply its default" spelling rather than an omission, and the
+    /// EXPLICIT resume templates on the yolo starters are what keeps a
+    /// resumed yolo session actually yolo instead of silently losing its
+    /// permission-skipping flag — see `STARTER_PROFILES` for the full
+    /// rationale on both.
     #[tokio::test]
-    async fn a_fresh_database_ships_the_two_starter_profiles() {
+    async fn a_fresh_database_ships_the_four_starter_profiles() {
         let (_dir, store) = fresh_store().await;
         let profiles = store.profiles().await.expect("catalog");
         assert_eq!(
@@ -8319,20 +8342,44 @@ mod tests {
             vec![
                 farhelm_proto::Profile {
                     id: "starter-claude".to_string(),
-                    name: "Claude Code".to_string(),
+                    name: "claude".to_string(),
                     invocation: "claude".to_string(),
                     agent_kind: farhelm_proto::AgentKind::Claude,
                     resume_template: None,
                 },
                 farhelm_proto::Profile {
+                    id: "starter-claude-yolo".to_string(),
+                    name: "claude-yolo".to_string(),
+                    invocation: "claude --dangerously-skip-permissions".to_string(),
+                    agent_kind: farhelm_proto::AgentKind::Claude,
+                    resume_template: Some(vec![
+                        "claude".to_string(),
+                        "--dangerously-skip-permissions".to_string(),
+                        "--resume".to_string(),
+                        "{conversation}".to_string(),
+                    ]),
+                },
+                farhelm_proto::Profile {
                     id: "starter-codex".to_string(),
-                    name: "Codex".to_string(),
+                    name: "codex".to_string(),
                     invocation: "codex".to_string(),
                     agent_kind: farhelm_proto::AgentKind::Codex,
                     resume_template: None,
                 },
+                farhelm_proto::Profile {
+                    id: "starter-codex-yolo".to_string(),
+                    name: "codex-yolo".to_string(),
+                    invocation: "codex --yolo".to_string(),
+                    agent_kind: farhelm_proto::AgentKind::Codex,
+                    resume_template: Some(vec![
+                        "codex".to_string(),
+                        "--yolo".to_string(),
+                        "resume".to_string(),
+                        "{conversation}".to_string(),
+                    ]),
+                },
             ],
-            "a fresh supervisor ships Claude Code and Codex, in id order"
+            "a fresh supervisor ships claude, claude-yolo, codex, and codex-yolo, in id order"
         );
     }
 
@@ -8356,9 +8403,17 @@ mod tests {
         let dir = tempfile::tempdir().expect("tempdir");
         let path = dir.path().join("supervisor.db");
         let store = SessionStore::open(&path, true).await.expect("open");
+        // Delete both Claude starters, leaving the two Codex ones — covers
+        // deletion of both a NULL-template and an explicit-template row.
         assert!(
             store
                 .delete_profile("starter-claude")
+                .await
+                .expect("delete")
+        );
+        assert!(
+            store
+                .delete_profile("starter-claude-yolo")
                 .await
                 .expect("delete")
         );
@@ -8379,11 +8434,28 @@ mod tests {
         let profiles = reopened.profiles().await.expect("catalog");
         assert_eq!(
             profiles.iter().map(|p| p.id.as_str()).collect::<Vec<_>>(),
-            vec!["starter-codex"],
-            "a deleted starter must not be re-seeded by a later start"
+            vec!["starter-codex", "starter-codex-yolo"],
+            "deleted starters must not be re-seeded by a later start, \
+             and the untouched yolo starter must survive alongside the edited one"
         );
         assert_eq!(profiles[0].name, "Codex (mine)");
         assert_eq!(profiles[0].invocation, "codex --search");
+        assert_eq!(
+            profiles[1],
+            farhelm_proto::Profile {
+                id: "starter-codex-yolo".to_string(),
+                name: "codex-yolo".to_string(),
+                invocation: "codex --yolo".to_string(),
+                agent_kind: farhelm_proto::AgentKind::Codex,
+                resume_template: Some(vec![
+                    "codex".to_string(),
+                    "--yolo".to_string(),
+                    "resume".to_string(),
+                    "{conversation}".to_string(),
+                ]),
+            },
+            "the untouched starter's explicit resume template survives too"
+        );
     }
 
     /// The catalog's CRUD contract end to end, through the on-disk round
@@ -8412,7 +8484,7 @@ mod tests {
             .expect("create")
         {
             ProfileCreation::Created(profile) => profile,
-            ProfileCreation::CatalogFull => panic!("a catalog of two starters is not full"),
+            ProfileCreation::CatalogFull => panic!("a catalog of four starters is not full"),
         };
         assert_ne!(created.id, "", "the store mints the id");
         assert_eq!(
@@ -8674,7 +8746,12 @@ mod tests {
                 .iter()
                 .map(|profile| profile.id.as_str())
                 .collect::<Vec<_>>(),
-            vec!["starter-claude", "starter-codex"],
+            vec![
+                "starter-claude",
+                "starter-claude-yolo",
+                "starter-codex",
+                "starter-codex-yolo",
+            ],
             "an upgrading host gets the starter catalog too"
         );
     }
@@ -8989,7 +9066,7 @@ mod tests {
                 .expect("read")
                 .expect("the starter is still there")
                 .name,
-            "Claude Code",
+            "claude",
             "and the refused updates must have left the row they targeted alone"
         );
     }

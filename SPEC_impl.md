@@ -330,16 +330,17 @@ remains that can never be represented on any page.
 - Agent profiles live in a `profiles` table in that same db, bounded on both axes — 128 profiles per host, 8 KiB of
   caller-supplied text per profile — so the unpaginated catalog reply can never outgrow a frame. That bound is not
   tidiness: the listing is also how a client finds the profile it wants to delete, so a catalog too large to list would
-  be one nobody could trim back. The starter profiles SPEC.md promises (Claude Code, Codex) are seeded by the schema
-  migration that creates the table, not by a check at startup. A migration step runs exactly once per database, so a
-  deleted starter stays deleted and an edited one stays edited, with no "already seeded" flag that could disagree with
-  the table it describes and re-seed what the user threw away. A profile names its kind explicitly (`generic` is the
-  spelling for "no kind"), and an absent resume template means the kind's own default, derived at create time from that
-  profile's invocation. A session records the id and name of the profile it was created from and nothing mutable;
-  whether that profile still exists, and whether it has since been renamed, is derived by one catalog lookup when a
-  reply is built (one per reply, not one per session), so an edit or a delete never rewrites historical rows and there
-  is only one copy of existence truth. Creating a session from a profile that has since been deleted fails as a
-  precondition — before any launch, with no session left behind — and never falls back to another profile.
+  be one nobody could trim back. The starter profiles SPEC.md promises (Claude Code and Codex, each in a plain and a
+  permission-skipping "yolo" variant, four rows total) are seeded by the schema migration that creates the table, not by
+  a check at startup. A migration step runs exactly once per database, so a deleted starter stays deleted and an edited
+  one stays edited, with no "already seeded" flag that could disagree with the table it describes and re-seed what the
+  user threw away. A profile names its kind explicitly (`generic` is the spelling for "no kind"), and an absent resume
+  template means the kind's own default, derived at create time from that profile's invocation. A session records the id
+  and name of the profile it was created from and nothing mutable; whether that profile still exists, and whether it has
+  since been renamed, is derived by one catalog lookup when a reply is built (one per reply, not one per session), so an
+  edit or a delete never rewrites historical rows and there is only one copy of existence truth. Creating a session from
+  a profile that has since been deleted fails as a precondition — before any launch, with no session left behind — and
+  never falls back to another profile.
 - Sessions launch through the user's shell as an interactive login shell inside the PTY —
   `$SHELL -l -i -c 'exec farhelm internal launch ...'` as the window's command, with the shim doing the final exec of
   the profile invocation (see exited-session semantics) — evaluated per launch. The `-i` is load-bearing, by different
