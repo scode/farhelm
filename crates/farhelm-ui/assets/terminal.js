@@ -2286,6 +2286,53 @@
         term.open(el);
         fit.fit();
 
+        // Swap in JetBrains Mono once it is actually usable, rather than
+        // gating the `new Terminal(...)` above on it. `mount()` runs
+        // synchronously start-to-finish today — the `islands.has` guard at
+        // this function's top is only meaningful because nothing yields
+        // between it and `publishIsland` below claiming this element.
+        // Awaiting a font load before construction would open a real
+        // re-entrancy window: `runReconnect` can call `mountWhenReady` again
+        // for this SAME element (see that function's docs), and a second
+        // call arriving while this one sat paused on `await` would sail
+        // past the guard — neither mount has published to `islands` yet —
+        // and race a second terminal and WebSocket into existence for one
+        // DOM node. Constructing immediately, with xterm's default font,
+        // keeps that single-tick guarantee intact.
+        //
+        // xterm measures its character cell from the configured font ONCE
+        // — at construction, or at an explicit re-measure — so simply
+        // setting `fontFamily` here without also re-fitting would leave the
+        // terminal's column math permanently sized off the fallback font's
+        // metrics even after the swap. `fit.fit()` forces that re-measure.
+        // Both weights are loaded (regular for the cell metrics that
+        // `fit.fit()` depends on; bold because xterm reuses this same
+        // family at `font-weight: bold` for SGR-bold text, which a
+        // terminal prints constantly) and NEVER awaited: a slow or failed
+        // load must not delay this mount or leave it half-finished, so the
+        // promise is fire-and-forget and `.catch` swallows a rejection
+        // (FontFaceSet rejects on a malformed descriptor, not on a merely
+        // slow fetch — but nothing here relies on that distinction). A
+        // terminal whose swap never lands keeps rendering in the fallback
+        // monospace font, which is the correct fail-open outcome.
+        Promise.all([
+          document.fonts.load('14px "JetBrains Mono"'),
+          document.fonts.load('700 14px "JetBrains Mono"'),
+        ])
+          .then(() => {
+            // `alive` (declared further down, with the rest of this
+            // mount's deferred-work guards) is the same token
+            // `disposeDeferred` clears on teardown — this callback outlives
+            // its island exactly like the write-completion callbacks and
+            // idle timer that comment describes, so it checks the same
+            // flag before touching a `term`/`fit` that may by now be
+            // disposed.
+            if (!alive) return;
+            term.options.fontFamily = '"JetBrains Mono", monospace';
+            fit.fit();
+          })
+          .catch(() => {});
+
         const base = baseUrl
           ? baseUrl.replace(/^http/, "ws")
           : (location.protocol === "https:" ? "wss://" : "ws://") + location.host;

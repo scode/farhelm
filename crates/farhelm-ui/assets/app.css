@@ -1,3 +1,43 @@
+/* JetBrains Mono Nerd Font, vendored under assets/fonts/ (OFL.txt there
+ * carries the full license) for the same self-contained reason xterm.js
+ * itself is vendored — see SPEC_impl.md's "Terminal widget: xterm.js
+ * island". terminal.js is the only consumer (its xterm.js `fontFamily`);
+ * nothing here applies "JetBrains Mono" to any other element, so this stays
+ * scoped to the terminal rather than becoming the app's chrome font.
+ *
+ * The `url()` paths are literal strings, not run through Rust's normal
+ * `{ASSET}` asset-hash interpolation, because this file is served as
+ * static text with no templating step. lib.rs registers both files with
+ * `with_hash_suffix(false)` specifically so the served path is this exact,
+ * predictable string — see the constants' own doc comment for why that
+ * trade (no cache-busting on these two files) is acceptable. Note the
+ * paths below are FLAT (`/assets/JetBrains...ttf`, no `fonts/` segment):
+ * the bundler names every asset from its basename alone, regardless of
+ * which subdirectory it started in under `assets/`, so `assets/fonts/`
+ * is a source-tree organization only and never appears in a served path. */
+@font-face {
+  font-family: "JetBrains Mono";
+  src: url("/assets/JetBrainsMonoNerdFont-Regular.ttf") format("truetype");
+  font-weight: 400;
+  font-style: normal;
+  /* `swap` matters less here than it would for prose: terminal.js does
+   * not even ask xterm.js to use this family until the font has actually
+   * finished loading (see its own `mount()` comment for why it swaps
+   * fonts in AFTER construction rather than gating construction on this
+   * load), so nothing on this page ever renders text in an invisible
+   * placeholder waiting on this face. Set anyway, for the same standard
+   * hygiene reason as any vendored web font. */
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "JetBrains Mono";
+  src: url("/assets/JetBrainsMonoNerdFont-Bold.ttf") format("truetype");
+  font-weight: 700;
+  font-style: normal;
+  font-display: swap;
+}
+
 /* Minimal M1 chrome: dark, terminal-first, nothing decorative. */
 html,
 body,

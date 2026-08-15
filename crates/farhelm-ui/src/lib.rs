@@ -745,6 +745,45 @@ const VENDOR_FIT_JS: Asset = asset!("/assets/vendor/addon-fit.js");
 // `node --test` can load this exact file rather than a copy of its logic.
 // Registration order is not execution order (script injection is async);
 // terminal.js's mount readiness gate waits for the helper's global.
+// JetBrains Mono Nerd Font, embedded for the same self-contained reason
+// xterm.js itself is vendored (SPEC_impl.md, "Terminal widget: xterm.js
+// island" — no CDN, no reliance on whatever happens to be installed on the
+// host). `terminal.js` sets it as xterm.js's `fontFamily`; nothing else on
+// the page references it, so it never touches sidebar/app typography.
+//
+// These two are declared differently from every other `Asset` constant in
+// this file: `app.css`'s `@font-face` `url()` needs a path it can write as
+// a plain string, but a static CSS file has no way to interpolate a Rust
+// value the way `document::Link`/`Script` do via `Display`. `manganis`'s
+// documented answer for an asset consumed outside Rust code, where the
+// caller must know the served path ahead of time, is `with_hash_suffix(false)`.
+// The macro argument below is the SOURCE path, not the served one — the
+// bundler serves every asset flat under `/assets/`, named from its
+// basename alone regardless of source subdirectory, so the served path
+// drops the `fonts/` segment. `app.css` hardcodes that served form
+// (verified against `dx build --platform web --release`'s actual output,
+// not assumed): `/assets/JetBrainsMonoNerdFont-Regular.ttf` and
+// `/assets/JetBrainsMonoNerdFont-Bold.ttf`. The cost of the fixed,
+// unhashed path is losing cache-busting for these two files specifically;
+// acceptable, since font bytes only change when someone deliberately
+// re-vendors them, unlike the app's own generated CSS/JS. `#[used]` is
+// required alongside it: unused by any Rust code (no Display call, no rsx
+// attribute — see above), these would otherwise be dead code the linker
+// could drop before the CLI's asset manifest scan ever sees them.
+//
+// Provenance: JetBrains Mono Nerd Font, from the nerd-fonts project's
+// `patched-fonts/JetBrainsMono` release build, OFL-1.1 licensed. Full
+// license text alongside the font files at `assets/fonts/OFL.txt`.
+#[used]
+static FONT_JETBRAINS_MONO_REGULAR: Asset = asset!(
+    "/assets/fonts/JetBrainsMonoNerdFont-Regular.ttf",
+    AssetOptions::builder().with_hash_suffix(false)
+);
+#[used]
+static FONT_JETBRAINS_MONO_BOLD: Asset = asset!(
+    "/assets/fonts/JetBrainsMonoNerdFont-Bold.ttf",
+    AssetOptions::builder().with_hash_suffix(false)
+);
 const TERM_BYTES_JS: Asset = asset!("/assets/term-bytes.js");
 // Clipboard fact capture, MIME-extension policy, and the pure filename
 // decision terminal.js calls. Kept as its own asset so node --test executes
