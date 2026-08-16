@@ -975,13 +975,31 @@ pub(crate) mod sleeper {
     /// own environment is never touched (a repo-wide rule).
     const SLEEPER_MODE_ENV: &str = "FARHELM_TEST_SLEEPER_MODE";
 
-    /// Spawn the sleeper with `extra_env` in its environment, returning
-    /// once it is provably past `exec`. The caller owns `kill`/`wait`;
-    /// clippy's zombie lint cannot see across that handoff, and the panic
-    /// paths in here leak at most one 30-second sleeper.
-    #[allow(clippy::zombie_processes)]
-    pub(crate) fn spawn(extra_env: &[(&str, &str)]) -> std::process::Child {
-        use std::io::BufRead as _;
+    /// Build the sleeper's command: the test binary re-invoked in sleeper
+    /// mode, carrying exactly the farhelm markers `extra_env` declares and
+    /// no others.
+    ///
+    /// The ambient-marker scrub is the load-bearing part. The test runner
+    /// itself may be running inside a Farhelm session — the ordinary state
+    /// of an agent developing farhelm on a farhelm-supervised box — where
+    /// `FARHELM_AGENT_ID` (or, from a tab, `FARHELM_TAB_ID`) sits in the
+    /// runner's own environment. A sleeper inheriting a marker its caller
+    /// never declared is no longer the shape the caller meant to spawn:
+    /// the sweep tests' marked process, declared with a session marker
+    /// only, picked up the host session's agent marker and read to the
+    /// sweep as another launch's agent — which the cross-session boundary
+    /// correctly refuses, failing four sweep tests on such hosts while CI
+    /// (marker-free) stayed green. Same bug class, and same child-only
+    /// remedy, as `MarkedDecoy::command`'s scrub in the e2e harness.
+    /// `env_remove` runs before `extra_env` is applied, so a test that
+    /// WANTS a marker still gets it by declaring it.
+    ///
+    /// Split from [`spawn`] so a test can assert the CONFIGURED env ops
+    /// via `Command::get_envs`: the scrub only changes a live child's
+    /// environment on a host whose runner carries the markers, so
+    /// inspecting the child would prove nothing on clean CI, while the
+    /// builder's op list is the same everywhere.
+    fn command(extra_env: &[(&str, &str)]) -> std::process::Command {
         let exe = std::env::current_exe().expect("the test binary knows its own path");
         let mut cmd = std::process::Command::new(exe);
         // `--exact` addresses the one test by its full libtest path;
@@ -993,10 +1011,23 @@ pub(crate) mod sleeper {
             "--nocapture",
         ]);
         cmd.env(SLEEPER_MODE_ENV, "1");
+        cmd.env_remove(crate::launch::SESSION_ID_ENV_VAR);
+        cmd.env_remove(crate::launch::AGENT_ID_ENV_VAR);
+        cmd.env_remove(crate::launch::TAB_ID_ENV_VAR);
         for (key, value) in extra_env {
             cmd.env(key, value);
         }
-        let mut child = cmd
+        cmd
+    }
+
+    /// Spawn the sleeper with `extra_env` in its environment, returning
+    /// once it is provably past `exec`. The caller owns `kill`/`wait`;
+    /// clippy's zombie lint cannot see across that handoff, and the panic
+    /// paths in here leak at most one 30-second sleeper.
+    #[allow(clippy::zombie_processes)]
+    pub(crate) fn spawn(extra_env: &[(&str, &str)]) -> std::process::Child {
+        use std::io::BufRead as _;
+        let mut child = command(extra_env)
             .stdin(std::process::Stdio::null())
             .stdout(std::process::Stdio::piped())
             .stderr(std::process::Stdio::null())
@@ -1016,6 +1047,43 @@ pub(crate) mod sleeper {
             if line.trim() == READY_LINE {
                 return child;
             }
+        }
+    }
+
+    /// The sleeper's builder must scrub every farhelm marker the runner
+    /// could ambiently carry, and a declared marker must survive the
+    /// scrub.
+    ///
+    /// This pins the fix for the four sweep tests that failed only when
+    /// the suite ran inside a Farhelm session (see [`command`]'s docs for
+    /// the mechanism). Asserted against `Command::get_envs` — the
+    /// CONFIGURED operations — because a live child's environment only
+    /// differs from a clean one on a polluted host, so this is the one
+    /// observation that fails the same way everywhere, CI included.
+    #[test]
+    fn sleeper_command_scrubs_ambient_markers_but_keeps_declared_ones() {
+        let cmd = command(&[(crate::launch::SESSION_ID_ENV_VAR, "declared-session")]);
+        let configured: std::collections::HashMap<_, _> = cmd
+            .get_envs()
+            .map(|(key, value)| (key.to_os_string(), value.map(|v| v.to_os_string())))
+            .collect();
+        assert_eq!(
+            configured
+                .get(std::ffi::OsStr::new(crate::launch::SESSION_ID_ENV_VAR))
+                .cloned(),
+            Some(Some("declared-session".into())),
+            "a marker the caller declares must survive the scrub"
+        );
+        for removed in [
+            crate::launch::AGENT_ID_ENV_VAR,
+            crate::launch::TAB_ID_ENV_VAR,
+        ] {
+            assert_eq!(
+                configured.get(std::ffi::OsStr::new(removed)).cloned(),
+                Some(None),
+                "{removed} must be configured as removed, or a runner inside a farhelm \
+                 session leaks it into every sleeper"
+            );
         }
     }
 
