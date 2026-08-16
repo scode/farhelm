@@ -21,7 +21,7 @@ use super::connection::{
 };
 use super::core::{
     CreateInputs, CreateMode, RequestError, SessionEntry, Supervisor, create_fingerprint,
-    ensure_title_printable, error_kind, truncate_for_error,
+    ensure_title_printable, error_kind, truncate_for_error, unknown_pane_owner_refusal,
 };
 use super::launch_artifacts::{
     cleanup_launch_artifacts, read_launch_sentinel, sentinel_could_still_apply,
@@ -47,6 +47,7 @@ use crate::store::DedupScope;
 use crate::store::{
     IntentClaim, LastOutcome, ProfileCreation, ProfileNames, Transition, validate_profile_fields,
 };
+use crate::tmux::PaneProbe;
 
 /// Authority-derived create policy.
 ///
@@ -708,7 +709,50 @@ async fn handle_stop_session(
                 .pane_process(&terminal.tmux_name, &terminal.pane)
                 .await
             {
-                Ok(pane) => pane,
+                Ok(PaneProbe::Owned(pane)) => Some(pane),
+                Ok(PaneProbe::Gone) => None,
+                // A RECOGNIZED owner folds into the dead-or-absent path,
+                // which is what makes the record below honest rather than
+                // merely convenient: another farhelm session holding this
+                // pane id proves the recording predates the current tmux
+                // server, so this session's agent DID exit on its own —
+                // with the server that owned its pane. A plain exit is
+                // exactly what happened, which is why this is not recorded
+                // as an annotated stop. The marker sweep that path runs is
+                // the SPEC.md-assigned mechanism for a past run's
+                // survivors and needs no pane; the stranger's pid is never
+                // touched. Erroring instead — what this used to do — left
+                // stop permanently unavailable after the 2026-08-16 tmux
+                // server death.
+                //
+                // An UNRECOGNIZED owner still errors. The recorded pane
+                // may be this session's own live agent under a renamed
+                // tmux session, and recording a plain exit for a process
+                // that never exited is a lie the user would act on.
+                Ok(PaneProbe::ForeignOwner { owner }) => {
+                    if !sup.known_session_tmux_name(&owner).await {
+                        send_reply(
+                            &tx,
+                            &ControlMsg::Error {
+                                req_id,
+                                message: unknown_pane_owner_refusal(
+                                    &terminal.pane,
+                                    &owner,
+                                    &terminal.tmux_name,
+                                ),
+                                kind: ErrorKind::Internal,
+                            },
+                        )
+                        .await;
+                        return;
+                    }
+                    warn!(
+                        session = %session_id, foreign_owner = %owner,
+                        "this session's recorded pane now belongs to another tmux session; the \
+                         stop records it as no longer running and sweeps by marker alone"
+                    );
+                    None
+                }
                 Err(e) => {
                     send_reply(
                         &tx,
