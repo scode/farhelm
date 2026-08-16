@@ -272,6 +272,69 @@
 // this file can do anything about beyond trying. That silence is a
 // documented SPEC.md exception to the surface-every-error rule, not an
 // oversight (SPEC.md's Terminal experience section).
+//
+// ## Font settling before mount
+//
+// JetBrains Mono Nerd Font is embedded (lib.rs's provenance comment) but,
+// like any @font-face, is not necessarily decoded and ready to lay text out
+// with by the time a terminal wants to mount — a font file the browser has
+// not finished parsing measures nothing until it has. xterm.js measures its
+// character CELL METRICS when `term.open()` runs, using whatever
+// `fontFamily`/`fontSize` are configured at that point, and automatically
+// RE-measures afterward whenever either option CHANGES (confirmed directly
+// against the vendored `CharSizeService`, which registers exactly that
+// listener) — but re-measuring is not the same as RESIZING. Nothing
+// recomputes the terminal's actual `cols`/`rows` or notifies the pty on its
+// own; only an explicit re-fit (`fit.fit()`) does that, and THAT is what
+// resizes the terminal and makes tmux reflow the pane it is attached to.
+// Constructing with the wrong font and swapping `fontFamily` in afterward
+// therefore still needs a `fit.fit()` to actually apply the new metrics —
+// and that reflow is not cosmetic: a session's FIRST attach can race real
+// pty output against it, landing a transient blank frame or a marker that
+// scrolled out from under a text-wait mid-redraw — real failures the
+// browser suite caught across both engines under load, not a hypothetical.
+//
+// The fix settles the font BEFORE any terminal is constructed, through the
+// SAME polling gate `mountWhenReady` already uses for every other mount
+// precondition (its own docs cover the mechanism) — never an `await`
+// inside `mount()` itself, whose synchronous, no-yield-points shape is
+// load-bearing (see the font-family wiring inside `mount()` for why).
+//
+// The settling machinery (`ensureFontSettling`, `pollFontWeight`, and the
+// module-scope state they share — all just above `mountWhenReady`) is
+// kicked from the FIRST `mountWhenReady` attempt, not from script
+// evaluation: a page that never opens a terminal at all — the token
+// prompt, a bare session list — must not pay for ~5.1 MB of font fetches
+// it will never render with.
+//
+// `fontSettled` is deliberately NOT the same kind of gate condition as
+// `window.Terminal`/`window.FitAddon` and the rest of `mountWhenReady`'s
+// list. Those name same-origin bundled files this app shipped itself —
+// failing to load one is a broken deployment, so that gate waits FOREVER
+// and mounting without one is never an option. A font is a best-effort
+// visual enhancement resolved by the ENGINE's own font matching, which this
+// file has no control over and no business blocking a terminal on
+// indefinitely — so `fontSettled` becomes true once the REGULAR weight's
+// own attempt is genuinely final (loaded, rejected, or its retries
+// exhausted — see `pollFontWeight`) OR when a ~3 second deadline fires,
+// whichever comes first. "Settled" is the gate condition, not "loaded": a
+// terminal is free to mount in the fallback font rather than wait any
+// longer, and `mount()` reads each weight's OWN recorded result — never
+// `document.fonts.check(...)`, whose own registration-race failure mode
+// `pollFontWeight`'s header covers in full — to decide at construction
+// time which font it actually got. The rare case where regular is still
+// pending when a mount happens anyway is still covered: `mount()` keeps a
+// reduced version of the original post-construction swap for exactly that
+// path, now a fallback rather than the common case; bold arriving late
+// gets its own narrower repaint-only path, covered where it is wired.
+//
+// This file's own review turned up a real, reproduced failure mode in an
+// earlier version of this design worth naming directly: `document.fonts`
+// itself, or an engine whose Font Loading API throws rather than behaving,
+// must never be allowed to break anything ELSE in this script — every
+// touch of that API is capability-guarded, and the guard's own failure
+// mode is the same fail-open answer as a deadline: settle immediately,
+// mount in the fallback font, forever.
 
 (function () {
   const DEVICE_SECRET_KEY = "farhelm.device-secret";
@@ -292,6 +355,252 @@
   }
 
   "use strict";
+
+  // How long a mount will wait for the font before giving up and accepting
+  // the fallback — also the outer bound on how long `pollFontWeight`'s own
+  // empty-result retries may keep re-issuing `load()` calls for a
+  // stylesheet that has not registered its `@font-face` yet. A named
+  // constant, not a bare literal, so a caller that needs to talk about it
+  // (a test asserting mount is not INSTANT, say) has something to read
+  // rather than a magic number to duplicate.
+  const FONT_SETTLE_DEADLINE_MS = 3000;
+
+  // How often an EMPTY load result — see `pollFontWeight`'s own header for
+  // what that means and why it is retried at all — gets a fresh attempt.
+  // Short relative to the deadline: several retries fit comfortably inside
+  // the budget even for a stylesheet that registers its face only a
+  // little late.
+  const FONT_RETRY_INTERVAL_MS = 150;
+
+  // True once this file has stopped waiting on the font, one way or
+  // another — the ONLY thing `mountWhenReady`'s gate reads. Starts false;
+  // `ensureFontSettling` (below) is what ever flips it, either immediately
+  // (no usable Font Loading API) or once the mechanisms it sets up decide
+  // there is nothing more to wait for.
+  let fontSettled = false;
+
+  // ONE shared setter, not three anonymous closures making the same
+  // assignment from three separate call sites (an earlier version of this
+  // file did exactly that) — every caller's INTENT here is identical: stop
+  // waiting, whatever the font trackers currently say is final enough to
+  // mount with.
+  function settleFont() {
+    fontSettled = true;
+  }
+
+  // Populated by `ensureFontSettling`, the first time it runs. `mount()`
+  // reads `regularFont.isLoaded()`/`boldFont.isLoaded()` and never
+  // `document.fonts.check(...)` directly — see `pollFontWeight`'s header
+  // for the registration-race failure mode that check() alone cannot be
+  // trusted against. Declared `null` here only to document the shape
+  // callers can expect; by the time ANY mount can run, `mountWhenReady`'s
+  // gate guarantees `ensureFontSettling` already ran and both are real
+  // trackers (possibly the do-nothing kind — see `dummyFontWeight`).
+  let regularFont = null;
+  let boldFont = null;
+  let fontKickStarted = false;
+
+  /**
+   * The shape `regularFont`/`boldFont` take when the Font Loading API is
+   * unusable at all (`ensureFontSettling`'s capability guard): `isLoaded()`
+   * stays false forever and `loaded`/`settled` never resolve, so every
+   * mount falls back to the default font — the correct, honest outcome for
+   * an engine this file cannot even ask about fonts. Never actually READ
+   * on this path today (the guard settles `fontSettled` itself and returns
+   * before anything would subscribe to `settled`), but shaped exactly like
+   * a real `pollFontWeight` tracker anyway, so `mount()` — and anything
+   * else that ever reads a font tracker — never needs to know which kind
+   * it got.
+   */
+  function dummyFontWeight() {
+    return { isLoaded: () => false, loaded: new Promise(() => {}), settled: new Promise(() => {}) };
+  }
+
+  /**
+   * Poll one font weight (`descriptor`, a CSS font shorthand like
+   * `14px "JetBrains Mono"`) to a genuine, final answer, bounded by
+   * `deadline` (a `Date.now()`-comparable timestamp). Two DIFFERENT
+   * completions, on purpose:
+   *
+   * - `loaded` resolves, and `isLoaded()` becomes true, the first time a
+   *   `document.fonts.load()` call for this descriptor returns a
+   *   NON-EMPTY face list — a genuine, positive answer. This is what
+   *   `mount()` reads to decide the font, and what its backstop and
+   *   bold-late paths wait on to swap it in.
+   * - `settled` resolves once this weight has stopped trying, for ANY
+   *   reason: a real load (the same moment `loaded` resolves), a hard
+   *   rejection or a synchronously-throwing `load()` call (nothing further
+   *   to attempt), or the retry loop below exhausting its budget at the
+   *   deadline with still nothing. This is what `ensureFontSettling` waits
+   *   on for the REGULAR weight to decide `fontSettled` — deliberately
+   *   NOT the same signal as `loaded`, because a definitive failure
+   *   (rejected, or synchronously throwing) is just as final an answer as
+   *   a success and must not cost a mount the full deadline merely because
+   *   the answer was "no" instead of "yes". Only a genuinely
+   *   still-in-flight attempt — a slow fetch, or an empty result still
+   *   within its retry budget — has any reason to make a caller wait.
+   *
+   * ## The registration race, and why an EMPTY result is retried rather
+   *    than trusted
+   *
+   * Dioxus injects `app.css` (carrying the `@font-face` rules) and
+   * `terminal.js` as independent `document::Script`/`Link` tags with no
+   * ordering guarantee between them — this file's OWN module docs make the
+   * identical point about the script-vs-globals race `mountWhenReady`
+   * already guards. If a `load()` call here runs before the stylesheet has
+   * registered the face, it does not fail: the CSS Font Loading spec has
+   * it resolve immediately with an EMPTY array, because there is nothing
+   * matching that family to load yet. Treating that empty, near-instant
+   * resolution as "settled, no font" — or worse, trusting
+   * `document.fonts.check()` at that same moment, which this file's own
+   * reviewers reproduced returning true for a family that merely LOOKS
+   * registered — would reopen the exact bug this whole mechanism exists to
+   * close, through a side door: settle fast on nothing, mount with the
+   * fallback, and if the stylesheet registers the face a moment later the
+   * font would still swap in eventually — WITHOUT a refit, because nothing
+   * here ever asked again. So an empty result retries the SAME call (a
+   * fresh `load()`, since the already-resolved promise cannot un-resolve)
+   * on a short interval until either a retry returns non-empty or the
+   * deadline passes, at which point this weight gives up (`settled`
+   * resolves, `loaded` never does) and the page settles into an honest
+   * fallback.
+   *
+   * A genuinely SLOW fetch — the font registered fine, just has not
+   * finished downloading or decoding — is not this case at all and needs
+   * no special handling: its `load()` promise simply stays pending for a
+   * while and then resolves non-empty on its own, whenever that is —
+   * including well past the deadline, which is exactly what lets the
+   * backstop swap in `mount()` still work for a font that finishes loading
+   * late.
+   */
+  function pollFontWeight(descriptor, deadline) {
+    let loadedFlag = false;
+    let resolveLoaded;
+    const loaded = new Promise((resolve) => {
+      resolveLoaded = resolve;
+    });
+    let settledFlag = false;
+    let resolveSettled;
+    const settled = new Promise((resolve) => {
+      resolveSettled = resolve;
+    });
+    function finish() {
+      if (settledFlag) return;
+      settledFlag = true;
+      resolveSettled();
+    }
+
+    function attempt() {
+      let request;
+      try {
+        request = document.fonts.load(descriptor);
+      } catch (_error) {
+        // A synchronously-throwing `load()` is as final an answer as a
+        // rejection: this weight never loads, and nothing here retries a
+        // call that just proved itself unsafe to make again.
+        finish();
+        return;
+      }
+      request.then(
+        (faces) => {
+          if (faces && faces.length > 0) {
+            loadedFlag = true;
+            resolveLoaded();
+            finish();
+            return;
+          }
+          if (Date.now() < deadline) {
+            setTimeout(attempt, FONT_RETRY_INTERVAL_MS);
+          } else {
+            // Retries exhausted with still nothing: give up. `isLoaded()`
+            // stays false forever from here, and `loaded` is simply never
+            // resolved — but `settled` still fires, because THIS weight
+            // has nothing further to try.
+            finish();
+          }
+        },
+        () => {
+          // FontFaceSet rejects on a malformed descriptor, not on a
+          // merely slow fetch — either way, final, nothing to retry.
+          finish();
+        },
+      );
+    }
+    attempt();
+
+    return { isLoaded: () => loadedFlag, loaded, settled };
+  }
+
+  /**
+   * Start settling the font — exactly once no matter how many times this
+   * is called (every `mountWhenReady` attempt calls it unconditionally;
+   * only the first actually does anything), which is what lets a page
+   * that never opens a terminal never pay for it.
+   *
+   * Deliberately NOT run at script evaluation, unlike an earlier version
+   * of this fix: kicking the load the moment this script parses fetches
+   * ~5.1 MB of font data on EVERY page this script reaches — the token
+   * prompt, a bare session list — never opening a terminal at all. Kicking
+   * from the first mount ATTEMPT instead means only a page that actually
+   * wants one pays for it.
+   */
+  function ensureFontSettling() {
+    if (fontKickStarted) return;
+    fontKickStarted = true;
+
+    // Capability guard, wrapping BOTH the property access and the type
+    // check: an engine with no `document.fonts`, or whose `.load` is not
+    // even callable — or where either of those simply THROWS — gets NO
+    // font enhancement at all. Settle immediately, and leave both
+    // trackers permanently "not loaded" so `mount()` always falls back.
+    // This must be the only path reachable when the API is unusable;
+    // nothing below it may run against something that just proved it
+    // cannot be trusted.
+    try {
+      if (!document.fonts || typeof document.fonts.load !== "function") {
+        throw new Error("no usable Font Loading API");
+      }
+    } catch (_error) {
+      regularFont = dummyFontWeight();
+      boldFont = dummyFontWeight();
+      settleFont();
+      return;
+    }
+
+    const deadline = Date.now() + FONT_SETTLE_DEADLINE_MS;
+    // Both weights: regular for the cell metrics `mount()`'s `fit.fit()`
+    // depends on, bold because xterm reuses this same family at
+    // `font-weight: bold` for SGR-bold text, which a terminal prints
+    // constantly. Tracked INDEPENDENTLY — never through one combined
+    // `Promise.all` the way an earlier version of this file did — because
+    // a combined promise rejects as soon as EITHER weight fails,
+    // discarding a later success on the OTHER one. That would mis-settle
+    // exactly the weight (regular) the constructor decision below depends
+    // on, over a failure that may have nothing to do with it.
+    regularFont = pollFontWeight('14px "JetBrains Mono"', deadline);
+    boldFont = pollFontWeight('700 14px "JetBrains Mono"', deadline);
+
+    // `fontSettled` follows REGULAR's `settled` — not `loaded` — alone:
+    // a definitive failure (rejected, or a synchronously-throwing `load()`)
+    // is exactly as final as a success and must not cost a mount the full
+    // deadline just because the answer was "no" (see `pollFontWeight`'s own
+    // header for why the two signals are kept apart at all). Bold arriving
+    // late is already handled gracefully after mount (see `mount()`'s own
+    // bold-refresh comment), so there is nothing to gain by making every
+    // FIRST mount wait on IT too, success or failure.
+    regularFont.settled.then(settleFont);
+    // The fail-open deadline, and non-negotiable for the same reason every
+    // other bound in this file is: a font fetch that never settles — a
+    // dead network path, an engine quirk — must not hold a terminal's
+    // mount hostage forever. Whichever of this timer or `regularFont`
+    // settling runs first wins; the loser's call to the already-idempotent
+    // `settleFont` is harmless. Largely redundant with `pollFontWeight`'s
+    // OWN internal deadline check by the time regular's retries would
+    // exhaust themselves — kept anyway as the same kind of belt-and-braces
+    // backstop this file uses everywhere else a single mechanism decides
+    // how long something may run.
+    setTimeout(settleFont, FONT_SETTLE_DEADLINE_MS);
+  }
 
   // Watermark backpressure (PLAN_M2_5.md step 4): term.write() buffers
   // asynchronously up to a hard ~50MB cap, then silently discards, so
@@ -2221,9 +2530,25 @@
      * (`window.farhelmTermBytes`), the clipboard-naming helper
      * (`window.farhelmClipboardNames`), the Shift+Enter key decision
      * (`window.farhelmShiftEnterKey`), the copy-on-select decision
-     * (`window.farhelmCopyOnSelect`), and `spec.el` to exist, then
-     * mount — owning the ENTIRE retry loop that used to live in the
-     * `document::eval` snippet calling this (lib.rs).
+     * (`window.farhelmCopyOnSelect`), `fontSettled`, and `spec.el` to
+     * exist, then mount — owning the ENTIRE retry loop that used to live
+     * in the `document::eval` snippet calling this (lib.rs).
+     *
+     * `fontSettled` is NOT the same kind of condition as the seven globals
+     * beside it, and reads that way on purpose (this file's own "## Font
+     * settling before mount" header has the full design). Every global
+     * above names a same-origin bundled file this app shipped itself, so
+     * its absence is a broken deployment this gate waits FOREVER for
+     * rather than ever mounting without. A font is a best-effort
+     * enhancement this file does not control the fetch of, so its
+     * condition is `settled` — the real load finished OR a ~3s deadline
+     * passed — never `loaded`: this gate must not wait forever for
+     * something that may never arrive, or a slow font turns into a
+     * terminal that never mounts at all. This function's own FIRST call is
+     * also what STARTS the font settling in the first place
+     * (`ensureFontSettling()`, below) — kicked from here rather than at
+     * script evaluation so a page that never attempts a mount never fetches
+     * font data it will never use.
      *
      * The term-bytes check belongs here for the same reason session_view.rs
      * documents for `window.farhelmTerm` itself (see its "sync-generation
@@ -2279,6 +2604,9 @@
      * above exactly the same key it had when there was only one island.
      */
     mountWhenReady(spec, baseUrl, attach, ifUnowned) {
+      // Idempotent (see its own docs) — every attempt calls it, only the
+      // first one does anything.
+      ensureFontSettling();
       const previous = pendings.get(spec.el);
       if (previous) clearTimeout(previous.timer);
       const attempt = { timer: null, path: spec.path, gen: spec.gen };
@@ -2293,6 +2621,7 @@
           window.farhelmClipboardNames &&
           window.farhelmShiftEnterKey &&
           window.farhelmCopyOnSelect &&
+          fontSettled &&
           document.getElementById(spec.el)
         ) {
           pendings.delete(spec.el);
@@ -2420,6 +2749,16 @@
         // "connecting…" would hide the one thing the user is waiting to
         // read, and take the control they might want to press with it.
         if (!reconnecting(spec.el)) paintConnecting(spec.connecting, true);
+        // `regularFont` (module scope, top of file) is guaranteed to exist
+        // by now: `mountWhenReady`'s gate never lets a mount happen before
+        // `ensureFontSettling()` has run. Reading its OWN recorded result
+        // — true in the overwhelmingly common case, since `fontSettled`
+        // (the gate) is almost always set by regular's real load finishing
+        // well inside the ~3s deadline rather than by the deadline itself
+        // — never `document.fonts.check(...)`: see `pollFontWeight`'s own
+        // header for the registration race that makes `check()` alone
+        // untrustworthy here (this file's reviewers reproduced it).
+        const fontReady = regularFont.isLoaded();
         term = new Terminal({
           // At most the tmux history floor (`HISTORY_LIMIT`,
           // farhelm-supervisor/src/tmux.rs), never more: PLAN_M2_5.md
@@ -2452,6 +2791,22 @@
           // this suite's own engines run (`Browser.isMac` is false there),
           // so this only ever changes behavior on an actual Mac.
           macOptionClickForcesSelection: true,
+          // Set DIRECTLY here, not after construction, when the font is
+          // already usable (the common case `fontReady` names) — xterm
+          // measures its character cell when `term.open()` runs, using
+          // whatever `fontFamily`/`fontSize` are configured at that point
+          // (this file's "## Font settling before mount" header has the
+          // exact mechanism, including why "measured once at construction"
+          // undersells it), so a family present from the start means the
+          // metrics are correct from the FIRST frame: no later re-fit, no
+          // resize, no tmux reflow, no blank redraw. The key is OMITTED
+          // rather than set to `undefined` when the font is not ready —
+          // xterm merges options over its own defaults, and an explicit
+          // `undefined` would overwrite whatever default was there with
+          // nothing, an outcome this file has not verified and has no
+          // reason to risk when simply omitting the key is known to
+          // preserve the intended fallback.
+          ...(fontReady ? { fontFamily: '"JetBrains Mono", monospace' } : {}),
         });
         const fit = new FitAddon.FitAddon();
         term.loadAddon(fit);
@@ -2487,52 +2842,74 @@
         term.open(el);
         fit.fit();
 
-        // Swap in JetBrains Mono once it is actually usable, rather than
-        // gating the `new Terminal(...)` above on it. `mount()` runs
-        // synchronously start-to-finish today — the `islands.has` guard at
-        // this function's top is only meaningful because nothing yields
-        // between it and `publishIsland` below claiming this element.
-        // Awaiting a font load before construction would open a real
-        // re-entrancy window: `runReconnect` can call `mountWhenReady` again
-        // for this SAME element (see that function's docs), and a second
-        // call arriving while this one sat paused on `await` would sail
-        // past the guard — neither mount has published to `islands` yet —
-        // and race a second terminal and WebSocket into existence for one
-        // DOM node. Constructing immediately, with xterm's default font,
-        // keeps that single-tick guarantee intact.
+        // The REGULAR backstop path only — `fontReady` above already
+        // covers the overwhelmingly common case (the font settled by a
+        // real load, so the constructor already got the right family and
+        // this block has nothing to do). This exists for the rare
+        // remainder: `ensureFontSettling`'s ~3s deadline fired before
+        // regular's own load finished, `fontSettled` went true on the
+        // TIMEOUT rather than the font, `fontReady` read false, and the
+        // constructor above used the fallback. If regular's real load
+        // finishes anyway, later — `regularFont.loaded` resolves whenever
+        // that genuinely happens, arbitrarily far past the deadline if
+        // need be — this is what still swaps the family in: the original
+        // design from before this fix, now demoted from the common path to
+        // a fallback for a fallback. `fit.fit()` is required alongside the
+        // swap: assigning `fontFamily` triggers xterm's own automatic
+        // re-MEASURE (`CharSizeService`'s
+        // `onMultipleOptionChange(['fontFamily', 'fontSize'], ...)`
+        // listener, confirmed directly against the vendored source), but
+        // measuring is not resizing — nothing recomputes `cols`/`rows` or
+        // notifies the pty on its own, and `fit.fit()` is what actually
+        // does that.
         //
-        // xterm measures its character cell from the configured font ONCE
-        // — at construction, or at an explicit re-measure — so simply
-        // setting `fontFamily` here without also re-fitting would leave the
-        // terminal's column math permanently sized off the fallback font's
-        // metrics even after the swap. `fit.fit()` forces that re-measure.
-        // Both weights are loaded (regular for the cell metrics that
-        // `fit.fit()` depends on; bold because xterm reuses this same
-        // family at `font-weight: bold` for SGR-bold text, which a
-        // terminal prints constantly) and NEVER awaited: a slow or failed
-        // load must not delay this mount or leave it half-finished, so the
-        // promise is fire-and-forget and `.catch` swallows a rejection
-        // (FontFaceSet rejects on a malformed descriptor, not on a merely
-        // slow fetch — but nothing here relies on that distinction). A
-        // terminal whose swap never lands keeps rendering in the fallback
-        // monospace font, which is the correct fail-open outcome.
-        Promise.all([
-          document.fonts.load('14px "JetBrains Mono"'),
-          document.fonts.load('700 14px "JetBrains Mono"'),
-        ])
-          .then(() => {
+        // Guarded on `fontReady` as an EFFICIENCY guard, not a correctness
+        // one: running this again on a terminal that already has the
+        // right family would just recompute the SAME `cols`/`rows`
+        // FitAddon already settled on at construction and, finding no
+        // real change, do nothing visible — wasted work worth skipping,
+        // not a regression worth preventing.
+        if (!fontReady) {
+          regularFont.loaded.then(() => {
             // `alive` (declared further down, with the rest of this
             // mount's deferred-work guards) is the same token
-            // `disposeDeferred` clears on teardown — this callback outlives
-            // its island exactly like the write-completion callbacks and
-            // idle timer that comment describes, so it checks the same
-            // flag before touching a `term`/`fit` that may by now be
-            // disposed.
+            // `disposeDeferred` clears on teardown — this callback
+            // outlives its island exactly like the write-completion
+            // callbacks and idle timer that comment describes, so it
+            // checks the same flag before touching a `term`/`fit` that
+            // may by now be disposed. No `.catch` needed: `loaded` is a
+            // manually-resolved promise (`pollFontWeight`) that never
+            // rejects — a weight that fails just leaves it pending
+            // forever instead.
             if (!alive) return;
             term.options.fontFamily = '"JetBrains Mono", monospace';
             fit.fit();
-          })
-          .catch(() => {});
+          });
+        }
+
+        // BOLD arriving late while regular was already ready at
+        // construction is a narrower, separate case — regular alone
+        // decided the metrics (either here, at construction, or via the
+        // backstop above once IT lands), so nothing about COLUMN MATH is
+        // ever at stake in this branch; only which face already-painted
+        // BOLD cells are currently using. A REPAINT, not a re-fit:
+        // re-fitting here would be the exact reflow this whole fix exists
+        // to remove, for a change that never needed one — `term.refresh`
+        // redraws the existing grid in place without touching `cols`/
+        // `rows` or the pty at all.
+        //
+        // Guarded so it only fires when there is something left to fix: if
+        // `fontReady` was false, the backstop above already repaints
+        // everything (bold included) once IT lands, so a second bold-only
+        // refresh would be redundant; if bold had already loaded by
+        // construction time, `boldFont.isLoaded()` is already true and
+        // there is nothing to wait for.
+        if (fontReady && !boldFont.isLoaded()) {
+          boldFont.loaded.then(() => {
+            if (!alive) return;
+            term.refresh(0, term.rows - 1);
+          });
+        }
 
         const base = baseUrl
           ? baseUrl.replace(/^http/, "ws")

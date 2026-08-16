@@ -164,10 +164,14 @@ async function bufferText(page: Page, mode: "full" | "viewport"): Promise<string
  * moving out of the current screenful: a reply marker must stay found
  * even after later output has pushed it off screen ("did a reply arrive"
  * does not stop being true just because the poll ran late), and a dialog
- * or ready marker must stay found even after the post-mount font-swap
- * refit RE-WRAPS everything already printed and leaves it at a different
- * row than it went in at (see `waitUntilAgentReady`'s own doc for the
- * concrete CI failure that motivated the second case).
+ * or ready marker must stay found even after the RARE font-settling
+ * backstop refit (terminal.js's own "## Font settling before mount"
+ * header — the deadline firing before the real load lands, now the only
+ * remaining source of a post-mount reflow) RE-WRAPS everything already
+ * printed and leaves it at a different row than it went in at (see
+ * `waitUntilAgentReady`'s own doc for the concrete CI failure that
+ * motivated the second case, from before that pre-mount settling
+ * existed).
  *
  * Not exported (no use exists outside this module) — duplicated from
  * terminal.spec.ts's identical helper rather than imported, per this
@@ -217,18 +221,25 @@ async function viewportText(page: Page): Promise<string> {
  *
  * Both marker kinds are matched against the FULL BUFFER (`termText`), not
  * the live viewport alone — the opposite of an earlier version of this
- * function, and changed for a real, CI-observed reason: terminal.js's
- * post-mount font swap (its `document.fonts.load(...).then(...)` block)
- * re-fits the terminal once JetBrains Mono actually loads, and that
- * second `fit.fit()` re-measures the cell size and can change `cols`,
- * which makes xterm RE-WRAP every row already printed to the new column
- * width. Content printed early — a startup banner, a ready marker — can
- * come out of that reflow at a different row than it went in at, and
- * nothing guarantees it stays inside the CURRENT `[viewportY, viewportY +
- * rows)` window: this is exactly what timed out `spawn.spec.ts`'s own
- * ready-marker wait on both engines, with an effectively blank rendered
- * viewport and the marker sitting in scrollback above it. Reading the
- * full buffer instead makes the wait immune to where the reflow happened
+ * function, and changed for a real, CI-observed reason: at the time, EVERY
+ * mount re-fit the terminal once JetBrains Mono actually loaded, and that
+ * `fit.fit()` re-measured the cell size and could change `cols`, which
+ * makes xterm RE-WRAP every row already printed to the new column width.
+ * terminal.js now settles the font BEFORE constructing a terminal in the
+ * common case (its own "## Font settling before mount" header), so this
+ * reflow is no longer the routine event it was when this comment was
+ * written — but it still happens on the rare backstop path (the settle
+ * deadline firing before the real load lands), and the SAME re-wrap
+ * follows from it: content printed early — a startup banner, a ready
+ * marker — can come out of that reflow at a different row than it went in
+ * at, and nothing guarantees it stays inside the CURRENT `[viewportY,
+ * viewportY + rows)` window. This is exactly what timed out
+ * `spawn.spec.ts`'s own ready-marker wait on both engines, before the
+ * pre-mount settling existed, with an effectively blank rendered viewport
+ * and the marker sitting in scrollback above it — kept here as a live
+ * behavior this helper still has to tolerate, not merely a historical
+ * note. Reading the full buffer instead makes the wait immune to where
+ * the reflow happened
  * to leave the marker.
  *
  * This does reopen the specific risk `viewportText`'s own retired doc

@@ -186,11 +186,14 @@ async function attachRawDumpSession(page: Page, id: string): Promise<void> {
   await target.locator(".session-row-open").click();
   await page.waitForFunction(() => (window as any).__farhelmTermReady === true);
   await page.waitForFunction(() => (window as any).__farhelmWs?.readyState === WebSocket.OPEN);
-  // (per terminal-clipboard.spec.ts's own hard-won lesson) past the
-  // post-mount font-swap refit: it triggers a real resize of the pty (a
-  // fresh `fit()` call), and letting that settle before typing keeps a
-  // resize's own SIGWINCH-driven repaint from landing in the middle of a
-  // byte-level dump this file is about to start asserting on exactly.
+  // (per terminal-clipboard.spec.ts's own hard-won lesson) past the RARE
+  // backstop path terminal.js falls back to when its pre-mount font
+  // settling gives up before the real load lands (its own "## Font
+  // settling before mount" header): that backstop triggers a real resize
+  // of the pty (a fresh `fit()` call), and letting it settle before typing
+  // keeps a resize's own SIGWINCH-driven repaint from landing in the
+  // middle of a byte-level dump this file is about to start asserting on
+  // exactly.
   await page.evaluate(() => (document as any).fonts.ready.then(() => undefined));
   // Click to FOCUS the terminal (attaching via the row click leaves focus
   // on the sidebar row) — every keyboard test in this codebase needs this

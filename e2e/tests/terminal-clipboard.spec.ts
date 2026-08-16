@@ -131,10 +131,13 @@ async function waitForTermText(page: Page, needle: string, timeout = 15_000) {
  * made an early version of this file's drag tests select a blank row
  * (xterm trims a blank-cells selection to `""`, so `hasSelection()` was
  * true while `getSelection()` had nothing to copy). And the search is
- * POLLED, not single-shot: the font-load refit (see terminal.js's font-swap
- * block) resizes the terminal shortly after attach, tmux redraws the pane,
- * and a one-time scan can land mid-redraw and see a buffer that briefly
- * lacks the marker even though a text-wait already saw it rendered.
+ * POLLED, not single-shot: terminal.js settles its font BEFORE mounting in
+ * the common case (its own "## Font settling before mount" header), but the
+ * rare backstop path — the settle deadline firing before the real load
+ * does — still resizes the terminal shortly after attach and makes tmux
+ * redraw the pane, and a one-time scan can land mid-redraw and see a buffer
+ * that briefly lacks the marker even though a text-wait already saw it
+ * rendered.
  */
 async function findViewportRow(
   page: Page,
@@ -177,8 +180,9 @@ async function findViewportRow(
  * pixels inside the CONTAINER can land outside the screen entirely and
  * never start a selection (observed as `hasSelection()` staying false on
  * this suite's first real run). The box is measured AFTER the row is
- * found, for the same font-refit reason `findViewportRow` polls: the
- * screen's on-page size can change under the swap, and coordinates derived
+ * found, for the same rare-backstop reason `findViewportRow` polls: on the
+ * uncommon path where the font settles late, the screen's on-page size can
+ * still change under the backstop's own re-fit, and coordinates derived
  * from a pre-refit box would drag across the wrong pixels.
  *
  * The two-stage move on the way out of mousedown (a short hop, then the
@@ -490,13 +494,16 @@ test("a real drag-select copies the local selection to the system clipboard exac
   request,
 }) => {
   // The printf sits behind the gate for a SECOND reason beyond the general
-  // one this file's header covers: the font swap terminal.js performs
-  // shortly after mount re-fits the terminal, the resize makes tmux reflow
-  // the pane, and content printed BEFORE that reflow can end up in
-  // scrollback above a blank viewport (observed on this suite's early
-  // runs: viewportY 3, every visible row empty, the marker in lines 0-2).
-  // Printing only after attach + fonts settle puts the marker on the
-  // screen the drag actually sees.
+  // one this file's header covers: on the RARE path where terminal.js's
+  // pre-mount font settling gives up before the real load lands (its own
+  // "## Font settling before mount" header), the backstop re-fits the
+  // terminal after the fact, the resize makes tmux reflow the pane, and
+  // content printed BEFORE that reflow can end up in scrollback above a
+  // blank viewport (observed on this suite's early runs, before that
+  // pre-mount settling existed at all: viewportY 3, every visible row
+  // empty, the marker in lines 0-2). Printing only after attach + fonts
+  // settle puts the marker on the screen the drag actually sees, common
+  // case or not.
   const marker = `copysel-e2e-${Date.now()}`;
   const session = await createSession(request, {
     title: `copysel-e2e-${Date.now()}`,
