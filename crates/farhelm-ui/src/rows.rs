@@ -151,6 +151,41 @@ pub(crate) fn retire_vanished_renames(
     });
 }
 
+/// Whether a session's open actions-menu panel should close because its
+/// ROW moved between two listings — an insert or removal ABOVE it in the
+/// helm's own order — as opposed to merely having its own fields updated
+/// in place.
+///
+/// `list::SessionRow`'s actions panel is `position: fixed`, positioned
+/// from a ONE-TIME measurement of its toggle's screen coordinates taken
+/// the instant it opened (`list::menu_panel_style`); nothing re-measures
+/// it while it stays open. A row that STAYS in the listing but changes
+/// INDEX still invalidates that measurement — the toggle is no longer
+/// where it was measured — even though the row's own continued presence
+/// (which a separate, simpler "is this id still listed" check already
+/// covers in `list::ListView`'s `commit_listing`) never changed. A row
+/// whose own fields merely updated (a status tick, say) keeps its index
+/// and must NOT close the menu — the user may still be reading it.
+///
+/// `previous` is `None` when there is no comparable baseline to diff
+/// against — a first load, or recovery from a failed read — which
+/// deliberately never counts as a reorder here: that recovery path is
+/// `SessionRow`'s own `onmounted` heal (a remount re-measures itself from
+/// scratch), not this reconciliation's job, and treating "nothing to
+/// compare against" as "moved" would just race that heal for no benefit.
+pub(crate) fn menu_row_reordered(
+    previous: Option<&[Session]>,
+    current: &[Session],
+    open_id: &str,
+) -> bool {
+    let Some(previous) = previous else {
+        return false;
+    };
+    let previous_index = previous.iter().position(|session| session.id == open_id);
+    let current_index = current.iter().position(|session| session.id == open_id);
+    previous_index != current_index
+}
+
 /// Whether the list should say "no sessions" and nothing else.
 ///
 /// The plain empty-fleet line replaces the banner, the rows, and every
@@ -563,6 +598,75 @@ mod tests {
         let mut listed = renamed.clone();
         retire_vanished_renames(&mut listed, &[session("a", "old-a")], 6);
         assert!(listed.contains_key("a"));
+    }
+
+    /// A row inserted or removed ABOVE the open one shifts its index even
+    /// though the row itself never left the listing — the exact case
+    /// `menu_row_reordered` exists to catch, since `commit_listing`'s
+    /// separate "is this id still listed" check cannot see it (the row IS
+    /// still listed, just not where the panel was measured against).
+    #[test]
+    fn a_row_inserted_or_removed_above_the_open_one_is_a_reorder() {
+        let before = vec![session("a", "a"), session("b", "b")];
+
+        let inserted_above = vec![session("new", "new"), session("a", "a"), session("b", "b")];
+        assert!(
+            menu_row_reordered(Some(&before), &inserted_above, "b"),
+            "a row inserted above the open one must count as a reorder"
+        );
+
+        let removed_above = vec![session("b", "b")];
+        assert!(
+            menu_row_reordered(Some(&before), &removed_above, "b"),
+            "a row removed from above the open one must count as a reorder"
+        );
+    }
+
+    /// The complement: a row whose own fields changed in place (a status
+    /// tick, say — modeled here as a title change, since only identity and
+    /// order matter to this function) keeps its INDEX, and must not read
+    /// as a reorder — the menu is still anchored exactly where it was
+    /// measured, and closing it out from under a user still reading it
+    /// would be a regression of its own.
+    #[test]
+    fn a_same_order_content_update_is_not_a_reorder() {
+        let before = vec![session("a", "a"), session("b", "b")];
+        let updated_in_place = vec![session("a", "a"), session("b", "b-updated")];
+        assert!(!menu_row_reordered(Some(&before), &updated_in_place, "b"));
+    }
+
+    /// Rows changing BELOW the open one leave its index — and therefore
+    /// its measured toggle position — exactly where it was, so they must
+    /// not read as a reorder: closing the menu there would interrupt the
+    /// user for zero positioning benefit. This is the guard against an
+    /// overbroad implementation that treats any listing-length change as
+    /// a reorder, which the above-row tests alone cannot catch.
+    #[test]
+    fn a_row_inserted_or_removed_below_the_open_one_is_not_a_reorder() {
+        let before = vec![session("a", "a"), session("b", "b")];
+
+        let inserted_below = vec![session("a", "a"), session("b", "b"), session("new", "new")];
+        assert!(
+            !menu_row_reordered(Some(&before), &inserted_below, "a"),
+            "a row inserted below the open one leaves its position untouched"
+        );
+
+        let removed_below = vec![session("a", "a")];
+        assert!(
+            !menu_row_reordered(Some(&before), &removed_below, "a"),
+            "a row removed from below the open one leaves its position untouched"
+        );
+    }
+
+    /// No baseline listing to diff against — a first load, or recovery
+    /// from a failed read — must never read as a reorder: that recovery
+    /// path is `SessionRow`'s own remount heal (see `menu_row_reordered`'s
+    /// own doc), and this function racing it to the same conclusion by a
+    /// different, coincidental route would buy nothing.
+    #[test]
+    fn no_baseline_listing_is_never_a_reorder() {
+        let current = vec![session("a", "a")];
+        assert!(!menu_row_reordered(None, &current, "a"));
     }
 
     /// An UNFILTERED listing carrying `rows` sessions, with the count fields

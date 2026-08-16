@@ -200,8 +200,16 @@ body,
   flex-direction: column;
   width: 100%;
   border-bottom: 1px solid #1d2026;
-  /* Anchor for the floating actions-menu panel. */
-  position: relative;
+  /* No `position: relative` here: the actions-menu panel below used to
+     anchor to this row with `position: absolute`, which meant every
+     scrolling/clipping ancestor — `.session-list`'s `overflow-y: auto`,
+     `.app-sidebar`'s `overflow: hidden auto` — clipped the panel along
+     with everything else outside the visible scroll window (the reported
+     bug: opening the menu on a row near the bottom of the list cut the
+     panel off mid-button). The panel is `position: fixed` now, positioned
+     from the toggle's own measured viewport rect instead of this row's
+     box, so it escapes that clip by construction and this row no longer
+     needs to BE an anchor for anything. */
 }
 
 .session-row:focus-within {
@@ -275,19 +283,108 @@ body,
 /* The floating panel the toggle anchors: rename/stop/archive/delete, and
    the in-menu confirm that replaces them for a destructive action. Floats
    over the rows below rather than pushing them down — a menu that
-   reflowed the list would move the very row the user is acting on. */
+   reflowed the list would move the very row the user is acting on.
+
+   `position: fixed`, not `absolute`: an absolutely positioned panel can
+   only ever be clipped by an ancestor's `overflow` — `.session-list`'s
+   `overflow-y: auto` and `.app-sidebar`'s `overflow: hidden auto` both
+   qualify — which cut the panel off at the scroll container's edge for
+   any row near the bottom of a full list (the reported bug: opening the
+   menu there showed only "rename" and half of "stop"). `fixed` resolves
+   `top`/`right`/`left` against the VIEWPORT instead, which is what
+   actually escapes that clip; it does so ONLY because no ancestor between
+   here and the viewport establishes a containing block or clipping
+   context for fixed-position descendants (several unrelated CSS
+   properties can do this — `transform`, `filter`, `perspective`, and some
+   but not all values of `contain`, among others — so this is a property
+   of the whole chain's CSS, not a fixed enumeration to grep for). This
+   file sets none of them on any ancestor here, and that absence is a real
+   invariant future ancestor CSS on this panel's chain must not break.
+
+   `top`/`right` are NOT set here for the MEASURED case: `SessionRow`
+   (list.rs) measures the toggle's own `get_client_rect()` on open and
+   writes them as an inline `style`, computed by `menu_panel_style` via
+   `menu_panel_placement_style` (list.rs) — see `PanelPlacement`'s own doc
+   for the three states that function renders and why. This rule's own
+   `top`/`left` below apply in exactly one of those states —
+   `PanelPlacement::Fallback`, when the measurement itself FAILED (no
+   mounted handle, or the renderer's `get_client_rect()` returned `Err`)
+   — and are a PERSISTENT fallback, not a one-render bridge: a renderer
+   that cannot answer this query will fail on every future measurement
+   too, so a toggle stuck in that state keeps opening to these coordinates
+   for as long as it stays open, rather than ever resolving to something
+   better. `left`, not `right`: the panel lives in a 340px sidebar
+   anchored at the viewport's OWN left edge, so a fallback pinned to the
+   viewport's right edge (as an earlier version of this rule had it) would
+   land the unmeasurable panel far from the row it belongs to — clear on
+   the OTHER side of a wide window's main pane — where `left: 8px` keeps
+   it directly over the sidebar instead. The other unmeasured state
+   (`PanelPlacement::Unmeasured`, the always-first state on open) does not
+   reach these coordinates at all — see the `opacity`/`pointer-events`
+   paragraph below for what it renders instead and why.
+
+   The `max-height` below is only the FALLBACK state's backstop; the
+   measured state carries its own exact `max-height`, derived from the
+   same clamped top (`calc(100vh - var(--menu-top) - 8px)` — see
+   `menu_panel_style`), so a mode taller than the clamp's reserve still
+   ends at the viewport edge and scrolls inside `overflow-y: auto` instead
+   of running off screen. `max-width` below is the same story on the
+   horizontal axis: the measured state derives its own narrower cap when
+   the toggle sits close to the viewport's left edge (see
+   `menu_panel_style`'s own doc for the `.app-shell`-scrolled extreme that
+   clamp exists for); this rule's static `288px` only backstops the
+   FALLBACK state, whose toggle position (and therefore how much room is
+   actually available) was never measured at all.
+
+   Every state `menu_panel_placement_style` can produce EXPLICITLY
+   restates `opacity`/`pointer-events` (never omits them to "fall through"
+   to this rule's own values) for a reason specific to this renderer:
+   Dioxus's shared JS interpreter (`dioxus-interpreter-js`,
+   `setAttributeInner`'s `"style"` case, loaded unmodified by both the
+   `web` and `desktop` targets) does NOT treat a `style` attribute update
+   as a plain replace the way `Element.setAttribute` normally would — it
+   snapshots the element's CURRENT inline style properties first, applies
+   the new attribute string, and then RESTORES any property from the old
+   snapshot that the new string left unset. A state that merely omitted
+   `opacity`/`pointer-events` to mean "use the CSS default" would instead
+   silently inherit whatever the PREVIOUS render's inline style said —
+   which, coming from `Unmeasured`'s `opacity: 0; pointer-events: none;`,
+   would leave a successfully measured panel invisible and unclickable
+   forever. `PanelPlacement::Unmeasured` itself is exempt from this
+   concern: it is always the FIRST state on every fresh mount (a brand
+   new DOM node with no prior style to restore from), which is also why
+   only it may still safely omit a property.
+
+   Closing on scroll (or resize, or an internal layout shift this
+   component causes itself) is NOT wired here or in `.session-list`
+   (list.rs tried scroll-only, on `.session-list` itself, once —
+   `.session-list` has no height constraint of its own, so it never
+   scrolls, and the `onscroll` never fired). `AppBody` (lib.rs) listens on
+   the sidebar's actual scrolling/resizing ancestors — `.app-sidebar` and
+   `.app-shell` — and bumps a shared `layout_epoch` counter; `ListView`
+   reacts to that AND to its own on-demand panels by closing any open menu
+   (see `layout_epoch`'s own doc in list.rs): a `fixed` panel does not
+   move WITH its row the way the old `absolute` one did, so leaving a
+   stale one open across any of these would visibly detach it from the
+   toggle it supposedly belongs to — a regression this fix must not trade
+   the clipping bug for. */
 .session-row-menu-panel {
-  position: absolute;
-  top: 2.4em;
-  /* Left of the toggle COLUMN, not flush with the sidebar edge: the
-     toggles all live at the rows' top-right, so a panel anchored at
-     `right: 8px` floated exactly over the next rows' toggles and made
-     them unclickable while any menu was open — switching menus took a
-     dismiss-then-open. Keeping the ~36px toggle column clear means one
-     click on any other row's "⋯" swaps the open panel directly. The
-     max-width shrinks in step so the panel's left edge stays inside the
-     340px sidebar. */
-  right: 44px;
+  position: fixed;
+  /* Content-box sizing (the default) would put the padding and border
+     below OUTSIDE both `max-height` values above — an 18px overrun
+     (2 × 8px padding + 2 × 1px border) that reintroduces a sliver of the
+     very off-screen-panel bug this rule exists to prevent. Border-box
+     sizing keeps `max-height` describing the box actually painted. */
+  box-sizing: border-box;
+  /* NO positional properties here, deliberately: coordinates are emitted
+     per placement state by `menu_panel_placement_style` (list.rs) — the
+     measured state anchors to the toggle's rect, the fallback state pins
+     top-left over the sidebar. A class-level `top`/`left` fallback (an
+     earlier revision of this fix) leaked into the MEASURED state too:
+     measured placement sets `right` but a class-level `left` stayed in
+     force, and a fixed box with BOTH insets and `width: auto` stretches
+     between them — every measured panel ballooned from the sidebar's
+     left edge to the toggle. Position must come from exactly one place. */
   z-index: 20;
   display: flex;
   flex-direction: column;
@@ -297,6 +394,8 @@ body,
   border: 1px solid #3a3f47;
   border-radius: 4px;
   max-width: 288px;
+  max-height: calc(100vh - 16px);
+  overflow-y: auto;
 }
 
 /* The ONE panel-specific override the title needs: the shared
