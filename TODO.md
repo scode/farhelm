@@ -1,0 +1,116 @@
+# TODO
+
+A running list of things the maintainer wants fixed or built, in no particular order. This is intent, not history: an
+entry is REMOVED in the same PR that addresses it, so the file only ever describes what is still wanted. It is not a
+roadmap and carries no priorities unless an entry says so itself.
+
+- Add a visual highlight in the left-hand sidebar showing clearly which agent session the main pane is currently
+  interacting with. The selected row should be obvious at a glance, not inferable only from the titlebar.
+
+- Make Shift+Enter insert a line break everywhere it plausibly should, not just in Claude Code. The terminal sends ESC
+  CR for the chord (the binding Claude Code's terminal-setup guide names, and it works there), but observed behavior
+  elsewhere: Codex treats the pair like a plain Enter (or close to it) — so Codex evidently does not honor ESC CR as
+  insert-newline and the right sequence for it needs investigating (candidates: whatever Codex's own terminal-setup
+  binds, or the CSI-u encoding `ESC [ 13 ; 2 u` that kitty-protocol-aware TUIs understand) — and a plain shell tab does
+  nothing visible with it. Decide and implement per-target behavior: Codex must get a real line break, and define what
+  (if anything) the chord should do in a bare shell rather than leaving it a silent no-op.
+
+- Finish the macOS release bundle. The release workflow's `macos` job (workflow_dispatch-gated; builds an
+  aarch64-apple-darwin `Farhelm.app` with embedded helm, managed supervisor, private tmux, and the CLI at
+  `Contents/MacOS/farhelm`) has never completed, which means the README's primary quickstart references an artifact that
+  does not exist. Two failed attempts so far, 23 minutes spent of a standing 180-minute macOS-runner budget: attempt 1
+  died on ncurses terminfo installation under case-insensitive APFS (already fixed — `--disable-db-install` + system
+  terminfo); attempt 2 died because tmux 3.7b's darwin configure demands an explicit utf8proc decision.
+  Believed-complete next step: add `--disable-utf8proc` to the darwin tmux configure in `scripts/build-private-tmux.sh`
+  (utf8proc is not a pinned source, and tmux runs without it on Linux); budget for one more configure-iteration stop
+  behind it. With the old stack long merged, the stacked-history mechanics in the original mop-up entry no longer apply:
+  land the script fix on main, tag the release commit, and
+  `gh workflow run release.yml --ref <tag> -f release_tag=<tag>`, counting the job against the remaining 157 minutes.
+  Unblocks the manual Mac checklist (`docs/manual-mac-checklist.md`) and the README quickstart NOTE.
+
+- Review the two security-relevant resolutions made during the M7 run, and record a dated verdict (a note in
+  SPEC_impl.md or a review comment on PR #117). (a) A product-spec/impl-spec conflict over where the web token is stored
+  was resolved in the product spec's favor, with the impl spec amended in #117 — confirm the amendment says what the
+  code does. (b) The web credential's transport was redesigned mid-run from an HttpOnly cookie to localStorage + an
+  Authorization bearer header + a WebSocket subprotocol, because cookies are host-scoped rather than port-scoped:
+  another local user's loopback-port server could lure the browser and replay the cookie under a forged Origin. The
+  deliberate trade: giving up HttpOnly means in-origin XSS can read the credential, judged acceptable because in-origin
+  XSS already has the API authority the credential grants. The review is completable from this checklist alone — verify
+  that: the master token is stored recoverably server-side and `farhelm helm token show|rotate` both work after a helm
+  restart; device secrets are stored hash-only; the browser credential lives in localStorage with no ambient cookie sent
+  or honored anywhere; REST carries it as a bearer header and WebSockets as a subprotocol; and rotation both 401s every
+  existing device session and drops already-open feed/terminal sockets. Implementation surfaces: the helm's auth and
+  middleware modules, the UI's auth/api modules. Spec surfaces: SPEC.md's token section, SPEC_impl.md's auth/storage
+  section as amended in #117.
+
+- Make the e2e harness clean up after itself on abnormal exit. Each browser-suite run builds roughly 65 MB of state
+  directories under /tmp, and killed test stacks orphan them — one long day accumulated 423 orphans (~22 GB) and hit
+  disk-full, killing unrelated work. A partial backstop exists (`e2e/start-stack.sh` sweeps `/tmp/fh-e2e.*` older than
+  60 minutes at stack startup, with deliberate safety guards: directories only, owned only, age-gated, NUL-delimited),
+  but the incident proved its two gaps: much of the leaked volume sat under `tempfile`-default `.tmpXXXXXX` names the
+  sweep never matches, and the sweep runs only when a NEW stack starts, so a long-lived session accumulates without
+  bound. The fix is a design pass: route everything the harness creates through one shared, sweepable naming scheme
+  (beats chasing tempfile defaults), extend the sweep to cover it, keep the existing safety guards, and never reap a
+  concurrent run's live state.
+
+- Dispose of prerelease v0.0.3-rc.1 — the release AND the tag together — once a real release exists. Both were minted
+  only to exercise the release workflow (it checks out and verifies `refs/tags/<release_tag>` before building, so a real
+  tag was required). Not before a real release exists: rc.1 currently carries the only published Linux artifact, so
+  deleting it today would leave the README's install path pointing at an empty releases page. Deleting only the release
+  would leave a tag pointing into abandoned pre-merge history — remove both (`gh release delete v0.0.3-rc.1` and
+  `gh api -X DELETE repos/<owner>/<repo>/git/refs/tags/v0.0.3-rc.1`).
+
+- Decide the reservation tombstone scope for interactive creates, then do the work the verdict leaves standing. When a
+  client attaches an intent key to a create, the supervisor records it in `create_reservations` so a retried request
+  returns the already-created session instead of double-launching an agent. The durability-era decision made these
+  reservations PERMANENT for interactive creates (spawn's are session-bounded), which makes `create_reservations` the
+  only store table that grows without bound — every interactive create ever made adds a row nothing deletes. Two
+  follow-on debts, deliberately distinct: (a) digest the reservation fingerprint — rows currently retain enough of the
+  original request to match retries, i.e. request plaintext (titles, cwds, invocations) retained forever; hashing bounds
+  each row and ends the plaintext retention but does nothing about row count; (b) expiry/pruning — actually bounds the
+  count, at the deliberate cost that a pruned key becomes reusable after the horizon (a very late retry could
+  double-create). The digest half is worth doing under either verdict. If the verdict bounds the scope (session-lifetime
+  — defensible, since a retry outliving the session it protects is protecting nothing), the pruning half mostly
+  evaporates; that reverses a durability-milestone decision, so record the reversal where that decision lives. The store
+  module's own docs describe both debts.
+
+- Run the review-cap residue pass: one targeted review (test-quality and docs lenses only) over the three largest M7
+  surfaces — auth, provisioning, packaging. During the M7 stack's reviews, the test-quality lens (often docs too) was
+  still producing ACCEPTED findings at the hard three-pass cap on every large PR (#114, #115, #117, #118, #119/#120,
+  #121, #122, #123) — those reviews ended because the budget ran out, not because the reviewers ran dry, so there are
+  almost certainly real accepted-grade findings never surfaced in security-critical code. Treat a pass that returns zero
+  accepted findings as saturation finally reached; anything it does return gets the normal fix-or-reject treatment.
+  Cheap to run, and the difference between "reviewed until done" and "reviewed until the meter ran out" — do it before
+  declaring the first real release final.
+
+- Close the HostId-reuse create-default window. The create dialog defaults its host field to the selected session's host
+  BY ROW ID, but a host row id survives a retarget (or an adopt where a new install takes over) while the machine behind
+  it changes: look at a session on the old machine, have the row retargeted, open the create dialog within one
+  listing-refresh interval, and the create lands on the successor install. The request's own install-incarnation check
+  passes — the request was genuinely built against the successor — so the system does what it was told while the user's
+  intent lands on the wrong machine. Raised as a definite security finding in #156's review; accepted there as residual
+  because selection reconciliation already narrows the window to one refresh interval. The full fix: the helm's listing
+  must denormalize install identity per session so the client binds its create default to the install the user was
+  actually looking at, not the row id. Not urgent (needs a concurrent retarget plus a one-interval race), but "accepted
+  residual" should not quietly become "permanent".
+
+- Run the manual Mac checklist (`docs/manual-mac-checklist.md` — that file IS the record; its "Observed:" fields are the
+  state, all "not run"). Blocked on the macOS release bundle above and a human with a real Mac. Not covered by any CI:
+  Playwright's WebKit is not WKWebView.
+
+- Decide the count banner's denominator: "N matching of M sessions" counts the whole fleet as M while the default view
+  excludes archived sessions, so the two numbers disagree out of the box. Shipped choice: fleet total (archived sessions
+  are still fleet members); alternative: exclude archived so the default view is self-consistent. Cheap UX verdict,
+  worth making explicitly.
+
+- Reassess the host row's component-prop shape: the earlier "regroup when props are actively growing" condition has
+  fired (provisioning grew it to 20 props). Only with a memoization-preserving grouping — state-only structs, never
+  callback structs (the framework's callback-prop memoization does not survive struct nesting; the session row learned
+  this) — and with a host-row render-count regression test like the session row's.
+
+- Desktop cross-restart selection memory: browser clients remember the last-selected session across reloads
+  (localStorage `{helm, id}` record); the desktop app remembers only within a process, so a relaunch auto-attaches the
+  newest-created session. SPEC.md documents exactly this, so nothing is WRONG — it was deferred because the webview's
+  localStorage is not synchronously reachable from native Rust, not because the fallback is right. If desktop use makes
+  it annoying: persist the record native-side (the desktop bootstrap owns a state dir) and restore it before the
+  fallback in `list.rs`'s auto-select effect.

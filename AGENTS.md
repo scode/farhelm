@@ -57,6 +57,12 @@ This split lets changes accumulate across a stack and surface bugs once, before 
 suite's cost — but it also means NOTHING else runs it: CI green does not include e2e, so skipping it at merge time means
 shipping unexercised browser paths.
 
+# TODO.md
+
+`TODO.md` is the maintainer's running list of wanted fixes and features. When a PR addresses an entry, remove that entry
+in the same PR — the file only ever describes what is still wanted. Do not add entries on your own initiative; they are
+the maintainer's.
+
 # Desktop/web UI bug triage
 
 `docs/desktop-web-triage.md` is the recipe: which engine comparison localizes a UI bug, where the unified log lives, and
