@@ -1156,15 +1156,45 @@ impl MarkedDecoy {
     /// `Command::env` sets the CHILD's environment, never this process's,
     /// which is the repo rule this file lives under. `sleep 120` bounds the
     /// leak if the test dies before its own cleanup runs.
+    ///
+    /// The kind markers are scrubbed because the test runner itself may be
+    /// running inside a Farhelm session — the ordinary state of an agent
+    /// developing farhelm on a farhelm-supervised box — where
+    /// `FARHELM_AGENT_ID` (or, from a tab, `FARHELM_TAB_ID`) sits in the
+    /// runner's own environment. A decoy inheriting either marker is no
+    /// longer the legacy shape it exists to embody (session marker, no
+    /// kind marker): the sweep's any-agent/any-tab rules read the
+    /// inherited marker as "already claimed by someone else's launch" and
+    /// the legacy bucket correctly refuses it, timing out both
+    /// sweep-backstop tests. (The spawn-CLI tests take the same child-only
+    /// precaution for the different trio of variables they care about —
+    /// session id, token, supervisor socket.)
+    ///
+    /// Split from [`MarkedDecoy::spawn`] so a test can assert the
+    /// CONFIGURED environment operations via `Command::get_envs` — the
+    /// scrub only changes a child's actual environment on a host whose
+    /// runner carries the markers, so inspecting a live child would prove
+    /// nothing on clean CI, while the builder's op list is the same
+    /// everywhere.
+    pub(crate) fn command(session_id: &str) -> std::process::Command {
+        let mut command = std::process::Command::new("sh");
+        command
+            .arg("-c")
+            .arg("sleep 120")
+            .env("FARHELM_SESSION_ID", session_id)
+            .env_remove("FARHELM_AGENT_ID")
+            .env_remove("FARHELM_TAB_ID")
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null());
+        command
+    }
+
+    /// Launch [`MarkedDecoy::command`]'s spec, owning the `Child` so the
+    /// zombie is reaped on drop (see the struct docs).
     pub(crate) fn spawn(session_id: &str) -> MarkedDecoy {
         MarkedDecoy(
-            std::process::Command::new("sh")
-                .arg("-c")
-                .arg("sleep 120")
-                .env("FARHELM_SESSION_ID", session_id)
-                .stdin(std::process::Stdio::null())
-                .stdout(std::process::Stdio::null())
-                .stderr(std::process::Stdio::null())
+            Self::command(session_id)
                 .spawn()
                 .expect("spawning the marked decoy"),
         )

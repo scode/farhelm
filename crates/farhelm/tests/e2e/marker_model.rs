@@ -117,6 +117,45 @@ async fn a_session_marked_process_with_no_kind_marker_is_still_reaped_by_stop() 
     wait_until_pid_gone(legacy_pid, 15).await;
 }
 
+/// The decoy must scrub inherited kind markers, and that scrub must be
+/// provable on a marker-clean host.
+///
+/// The bug this pins: a test runner that itself lives inside a Farhelm
+/// session carries `FARHELM_AGENT_ID` (or, from a tab, `FARHELM_TAB_ID`),
+/// and a decoy inheriting either stops being the legacy shape the tests
+/// above depend on — the sweep reads the marker as "already claimed" and
+/// correctly refuses the decoy, timing out both sweep-backstop tests. That
+/// failure only manifests on such a host, so a live-child check would pass
+/// on clean CI even with the scrub deleted. Asserting the CONFIGURED
+/// operations on the builder (`Command::get_envs`, where an `env_remove`
+/// appears as a `None` value) makes a dropped scrub visible everywhere.
+#[test]
+fn the_marked_decoy_scrubs_inherited_kind_markers_from_its_child() {
+    let command = MarkedDecoy::command("some-session");
+    let envs: Vec<(std::ffi::OsString, Option<std::ffi::OsString>)> = command
+        .get_envs()
+        .map(|(key, value)| (key.to_os_string(), value.map(|v| v.to_os_string())))
+        .collect();
+    let entry = |key: &str, value: Option<&str>| {
+        (
+            std::ffi::OsString::from(key),
+            value.map(std::ffi::OsString::from),
+        )
+    };
+    assert!(
+        envs.contains(&entry("FARHELM_SESSION_ID", Some("some-session"))),
+        "the decoy must still carry the session marker it exists to wear"
+    );
+    assert!(
+        envs.contains(&entry("FARHELM_AGENT_ID", None)),
+        "the decoy must scrub an inherited agent kind marker"
+    );
+    assert!(
+        envs.contains(&entry("FARHELM_TAB_ID", None)),
+        "the decoy must scrub an inherited tab kind marker"
+    );
+}
+
 /// The agent's window carries its marker after a create AND after a
 /// restart that reuses the same pane (PLAN_M4.md item 2).
 ///
