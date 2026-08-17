@@ -51,7 +51,7 @@ use crate::store::{
     RetryClaim, SessionStore, Settlement, StoredSession, Transition, now_unix,
 };
 use crate::tmux::{
-    AGENT_WINDOW_OPTION, PaneState, ReplayStreamCandidate, TAB_WINDOW_OPTION, TmuxDriver,
+    AGENT_WINDOW_OPTION, PaneProbe, PaneState, ReplayStreamCandidate, TAB_WINDOW_OPTION, TmuxDriver,
 };
 use anyhow::Context;
 use farhelm_proto::{
@@ -3001,6 +3001,28 @@ struct CaptureHistory {
     /// capture state can distinguish "one pass" from "two identical
     /// passes".
     completed_count: u64,
+}
+
+/// The refusal every lifecycle verb returns for an UNRECOGNIZED foreign
+/// pane owner — delete, archive, stop, restart, and close-tab all say this
+/// same sentence, which is why it is written once.
+///
+/// It has to carry both halves an operator needs to act: which tmux
+/// session actually holds the pane, and why an unrecognized name is what
+/// stops the verb rather than merely being logged. The wording keeps the
+/// substance of the `bail!` this classification replaced
+/// ([`crate::tmux::PaneProbe`]), because that text is what the 2026-08-16
+/// incident's journal entries and any search for it will match — the
+/// change is that it now appears only for the case that still deserves it.
+/// [`Supervisor::known_session_tmux_name`] holds the reasoning for the
+/// split.
+pub(crate) fn unknown_pane_owner_refusal(pane: &str, owner: &str, expected: &str) -> String {
+    format!(
+        "pane {pane} belongs to session {owner:?}, not {expected:?}, and {owner:?} is not a \
+         session this supervisor knows; refusing to treat it as this session's terminal — the \
+         recorded pane may be this session's own live terminal, renamed or moved out from under \
+         us, and acting on that guess would touch an agent that is still running"
+    )
 }
 
 impl Supervisor {
@@ -6310,6 +6332,62 @@ impl Supervisor {
         Ok(info)
     }
 
+    /// Is `owner` the tmux session name of a session this supervisor
+    /// currently holds in its map? This is the discriminator every
+    /// lifecycle verb applies to a [`PaneProbe::ForeignOwner`], and it
+    /// separates two situations the probe itself cannot tell apart but
+    /// which have opposite safety profiles.
+    ///
+    /// **Known owner ⇒ the recorded pane's terminal is provably dead.**
+    /// tmux pane ids are never reused within one server generation, so if
+    /// the current server handed our recorded id to a session THIS
+    /// supervisor launched, the recording must predate the current server
+    /// — i.e. the server that owned the recorded pane is gone, and with it
+    /// that pane, its terminal, and the agent that ran in it. This is the
+    /// 2026-08-16 incident. Proceeding without a pane root and without
+    /// stop-consent is then both safe and correct: there is no husk left
+    /// to clean up, and any daemonized survivor of the dead run is the
+    /// marker sweep's job, which SPEC.md already sanctions without
+    /// consent.
+    ///
+    /// **Unknown owner ⇒ assume it may be OUR live terminal.** A pane
+    /// whose session name we do not recognize is most cheaply explained by
+    /// an out-of-band `rename-session` or `move-pane` on the private
+    /// socket — in which case the recorded pane is still this session's
+    /// running agent, merely answering to a different name. Every verb
+    /// then has something to lose by proceeding: restart and delete would
+    /// kill a live agent without consent, stop would record a plain exit
+    /// that never happened, and delete/archive/close-tab would leave the
+    /// renamed container, its scrollback, and its tabs behind while
+    /// reporting success. So the verbs fail closed there, exactly as they
+    /// did before the probe was made classifying.
+    ///
+    /// The residual blind spot, stated plainly: an external `move-pane`
+    /// that moved our LIVE pane into another farhelm session's tmux
+    /// session would present as the known-owner case and be treated as a
+    /// recycle. Nothing farhelm does can produce that arrangement, and
+    /// perfect defense against an operator deliberately rearranging their
+    /// own private tmux socket is a non-goal — the fence here is against
+    /// accident and against the incident shape, not against the account
+    /// owner.
+    ///
+    /// Matches both the name a session's `Terminal` currently records and
+    /// the name minted from its id ([`new_session_identity`]) — they are
+    /// the same string in every ordinary state, but an entry caught
+    /// between a relaunch's teardown and its republication has no recorded
+    /// terminal while its tmux session name is still very much farhelm's.
+    /// Either match establishes the same thing the proof needs: farhelm
+    /// launched that session, on this server.
+    pub(crate) async fn known_session_tmux_name(&self, owner: &str) -> bool {
+        self.sessions.lock().await.iter().any(|(id, entry)| {
+            format!("fh-{id}") == owner
+                || entry
+                    .terminal
+                    .as_ref()
+                    .is_some_and(|terminal| terminal.tmux_name == owner)
+        })
+    }
+
     /// Relaunch a session's agent in place — SPEC.md's restart, PLAN_M3.md
     /// item 9. The only relaunch mechanism there is: the resume offered
     /// when opening an interrupted session lands here too.
@@ -6455,11 +6533,54 @@ impl Supervisor {
         // running": that would be the one direction that can kill nothing
         // and relaunch beside a live agent.
         let pane_state = match entry.terminal.as_ref() {
-            Some(terminal) => self
+            Some(terminal) => match self
                 .tmux
                 .pane_process(&terminal.tmux_name, &terminal.pane)
                 .await
-                .context("rechecking whether this session's agent is still running")?,
+                .context("rechecking whether this session's agent is still running")?
+            {
+                PaneProbe::Owned(pane) => Some(pane),
+                PaneProbe::Gone => None,
+                // A RECOGNIZED owner reads exactly as `Gone`, and the
+                // consent question below is why that is not merely a
+                // convenience. Pane ids are unique within a server
+                // generation, so a session farhelm launched holding our
+                // recorded id proves the recording predates the current
+                // server — this session's agent died with the server that
+                // owned its pane. There is therefore no live agent for
+                // `stop_if_running` to protect, and the else-branch's
+                // survivors hunt (marker-keyed, not pane-keyed) is the
+                // no-consent reaping SPEC.md already assigns to a restart
+                // following an agent that exited on its own. The second
+                // half of `None` matters too: it makes `terminal_survives`
+                // false below, so the relaunch builds a fresh terminal
+                // instead of a reuse that could not have worked. Logged
+                // loudly because reaching it means a tmux server died
+                // under a running supervisor.
+                //
+                // An UNRECOGNIZED owner gets the pre-classification
+                // behavior back: the recheck fails and the restart never
+                // starts. The recorded pane may be this session's own
+                // agent under a renamed tmux session, and a restart that
+                // guessed otherwise would kill a live agent without the
+                // consent `stop_if_running` exists to obtain.
+                PaneProbe::ForeignOwner { owner } => {
+                    if !self.known_session_tmux_name(&owner).await {
+                        return Err(anyhow::anyhow!(unknown_pane_owner_refusal(
+                            &terminal.pane,
+                            &owner,
+                            &terminal.tmux_name
+                        ))
+                        .context("rechecking whether this session's agent is still running"));
+                    }
+                    warn!(
+                        session = %session_id, foreign_owner = %owner,
+                        "this session's recorded pane now belongs to another tmux session, so \
+                         the restart treats its terminal as gone and creates a fresh one"
+                    );
+                    None
+                }
+            },
             None => None,
         };
         let alive_pane = pane_state.filter(|pane| !pane.dead);
@@ -6541,6 +6662,16 @@ impl Supervisor {
         // disconnects mid-restart loses only its reply.
         let sup = Arc::clone(self);
         let entry_for_task = Arc::clone(&entry);
+        // "Survives" means the recorded pane is still THIS session's to
+        // respawn into. A recognized foreign owner already collapsed to
+        // `None` above precisely so it lands here as "did not survive" —
+        // not because reuse would be dangerous (it could not even happen:
+        // `relaunch_in_pane` targets `pane_in_session(session, pane)`, and
+        // tmux rejects a mismatched session/pane pairing atomically, see
+        // that method's docs), but because reuse would be a GUARANTEED
+        // failure. Saying "did not survive" is what lets a fresh terminal
+        // be created instead; the driver's session-paired target remains
+        // the cross-session safety barrier either way.
         let terminal_survives = pane_state.is_some();
         let relaunch = tokio::spawn(async move {
             // The claim MOVES into the task with the work it protects.
@@ -7213,22 +7344,47 @@ impl Supervisor {
         ));
         // For a reused pane the question is "is a process running in it
         // now"; for a fresh terminal it is "does the session exist". Either
-        // answer being unavailable is itself ambiguity.
+        // answer being unavailable is itself ambiguity — hence the inner
+        // `Option`: `None` is "tmux answered, but not about our pane".
         let applied = match reuse {
             Some(terminal) => self
                 .tmux
                 .pane_process(&terminal.tmux_name, &terminal.pane)
                 .await
-                .map(|pane| pane.is_some_and(|pane| !pane.dead)),
-            None => self.tmux.has_session(tmux_name).await,
+                .map(|probe| match probe {
+                    PaneProbe::Owned(pane) => Some(!pane.dead),
+                    PaneProbe::Gone => Some(false),
+                    // Ambiguous for EITHER kind of foreign owner, which is
+                    // why this is the one site that does not ask
+                    // `known_session_tmux_name` which kind it has. The
+                    // lifecycle verbs ask "is this session's agent
+                    // running", and a recognized owner answers that no;
+                    // here the question is "did the respawn we just issued
+                    // into THIS pane apply", and nothing about the owner's
+                    // identity answers it — the respawn may have landed
+                    // before whatever rearranged ownership, whichever
+                    // rearrangement it was. Unwinding on a guess would
+                    // delete a live agent's spec out from under it, so
+                    // this stays conservative and keeps the launching
+                    // record.
+                    PaneProbe::ForeignOwner { .. } => None,
+                }),
+            None => self.tmux.has_session(tmux_name).await.map(Some),
         };
         match applied {
-            Ok(false) => {}
-            Ok(true) => {
+            Ok(Some(false)) => {}
+            Ok(Some(true)) => {
                 return RelaunchFailure::ambiguous(error.context(
                     "tmux reports a live process for this session despite the failure, so the \
                      launch may have taken; it is kept as a launching record rather than \
                      unwound",
+                ));
+            }
+            Ok(None) => {
+                return RelaunchFailure::ambiguous(error.context(
+                    "the pane this relaunch reused now belongs to a different tmux session, so \
+                     whether the launch took cannot be established; it is kept as a launching \
+                     record rather than unwound",
                 ));
             }
             Err(probe) => {
@@ -8800,16 +8956,40 @@ impl Supervisor {
     /// call. A query error ends the settle immediately: an open that
     /// cannot ask tmux anything must not spend the whole window
     /// re-asking, and the caller refuses on it either way.
+    ///
+    /// A FOREIGN owner is an error here whoever the owner is — the one
+    /// call site that does not consult
+    /// [`Supervisor::known_session_tmux_name`] at all. This pane was
+    /// created by this process moments ago, in this session, so ANY other
+    /// owner is an invariant violation rather than the staleness the
+    /// lifecycle verbs classify: a recycled id cannot explain it either,
+    /// because the recycle story needs a server generation to have passed
+    /// since the pane was recorded, and none has. Erroring routes it into
+    /// the caller's refusal-and-unwind path instead of letting the open
+    /// report success over a pane it does not own.
     async fn settled_tab_pane(
         &self,
         terminal: &Terminal,
     ) -> anyhow::Result<Option<crate::tmux::PaneProcess>> {
         let deadline = tokio::time::Instant::now() + TAB_LAUNCH_SETTLE;
         loop {
-            let observed = self
+            let observed = match self
                 .tmux
                 .pane_process(&terminal.tmux_name, &terminal.pane)
-                .await?;
+                .await?
+            {
+                PaneProbe::Owned(state) => Some(state),
+                PaneProbe::Gone => None,
+                PaneProbe::ForeignOwner { owner } => {
+                    anyhow::bail!(
+                        "pane {} belongs to session {owner:?}, not {:?}; refusing to treat it \
+                         as this tab's terminal (a stale or reused pane id would otherwise \
+                         cross-wire two sessions' process trees)",
+                        terminal.pane,
+                        terminal.tmux_name
+                    );
+                }
+            };
             let alive = observed.is_some_and(|state| !state.dead);
             if !alive || tokio::time::Instant::now() >= deadline {
                 return Ok(observed);
@@ -8852,12 +9032,14 @@ impl Supervisor {
     ///
     /// Shared by `close_tab` and by the failed-open unwind so both reap
     /// identically. The pane's own pid is looked up here rather than
-    /// passed in, and the three answers are NOT the same: a live pane is
+    /// passed in, and the answers are NOT the same: a live pane is
     /// the PPID closure's root, a CONFIRMED-absent or dead pane means
     /// there is no root to walk from (a dead pane's remembered pid may
-    /// already be recycled), and a pane query that FAILED propagates —
-    /// falling back to the marker scan there would let a close report
-    /// success having quietly swept less than it claims.
+    /// already be recycled), a pane owned by a DIFFERENT session splits by
+    /// whether that owner is a session this supervisor knows (no root, or
+    /// a refusal — see the match arm below), and a pane query that FAILED
+    /// propagates — falling back to the marker scan there would let a
+    /// close report success having quietly swept less than it claims.
     ///
     /// `anchor` says whether to look the pane up at all, and the caller
     /// that says `MarkerOnly` is not being lazy: after `kill-window` the
@@ -8885,13 +9067,40 @@ impl Supervisor {
         anchor: TabReapAnchor,
     ) -> anyhow::Result<()> {
         let root_pid = match anchor {
-            TabReapAnchor::PaneIfLive => self
+            TabReapAnchor::PaneIfLive => match self
                 .tmux
                 .pane_process(&terminal.tmux_name, &terminal.pane)
                 .await
                 .context("reading a terminal tab's pane process before reaping it")?
-                .filter(|state| !state.dead)
-                .map(|state| state.pid),
+            {
+                PaneProbe::Owned(state) if !state.dead => Some(state.pid),
+                PaneProbe::Owned(_) | PaneProbe::Gone => None,
+                // A RECOGNIZED foreign owner gives no root to walk from —
+                // the recorded pane died with a previous tmux server, and
+                // walking the stranger that inherited its id would reap
+                // THEIR tab — so the close falls back to the marker sweep
+                // and the tab's own scope, exactly as the confirmed-absent
+                // case does.
+                //
+                // An UNRECOGNIZED owner is an `Err`, which is the same
+                // fail-closed direction the failed-query case takes and
+                // for a stronger reason here: the pane may be this tab's
+                // own live shell under a renamed tmux session, so a close
+                // that swept by marker alone would report the tab removed
+                // while its window, pane, and shell went on living. The
+                // failed-open unwind inherits that too — it reports an
+                // incomplete cleanup instead of claiming removal.
+                PaneProbe::ForeignOwner { owner } => {
+                    if !self.known_session_tmux_name(&owner).await {
+                        anyhow::bail!(unknown_pane_owner_refusal(
+                            &terminal.pane,
+                            &owner,
+                            &terminal.tmux_name
+                        ));
+                    }
+                    None
+                }
+            },
             TabReapAnchor::MarkerOnly => None,
         };
         let units: Vec<String> = crate::scope::tab_unit_name(session_id, tab_id)
@@ -14597,12 +14806,17 @@ pub(crate) mod tests {
              replaced — a recovery that republished the pre-restart entry would leave the live \
              terminal unreferenced"
         );
+        // `Owned`, not merely "not gone": the pane must both exist AND be
+        // this session's, which is the whole point of the map pointing at
+        // it.
         assert!(
-            sup.tmux
-                .pane_process(&published.tmux_name, &published.pane)
-                .await
-                .expect("probe the published pane")
-                .is_some(),
+            matches!(
+                sup.tmux
+                    .pane_process(&published.tmux_name, &published.pane)
+                    .await
+                    .expect("probe the published pane"),
+                PaneProbe::Owned(_)
+            ),
             "and it must be attachable: tmux has to know the pane the map points at"
         );
     }

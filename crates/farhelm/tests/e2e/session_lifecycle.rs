@@ -3323,6 +3323,359 @@ async fn stale_pane_id_after_server_restart_does_not_inherit_a_new_sessions_stat
     );
 }
 
+/// The wedge the four lifecycle regressions below all start from: one
+/// session whose recorded pane id has been taken over by a DIFFERENT
+/// session on a replacement tmux server.
+///
+/// This is the 2026-08-16 production incident reduced to its mechanism.
+/// The private tmux server segfaulted while the supervisor kept running;
+/// nothing refreshes in-memory `Terminal` rows mid-flight, so the wedged
+/// session went on pointing at `%0` while the replacement server — whose
+/// pane counter restarts from scratch — handed that same `%0` to the next
+/// session created. Every lifecycle verb for the wedged session then
+/// refused, because `pane_process` used to treat a session mismatch as a
+/// hard error, and the session stayed unusable until the supervisor was
+/// restarted.
+///
+/// Built exactly like `stale_pane_id_after_server_restart_does_not_inherit_a_new_sessions_status`,
+/// which pins the sibling half of the contract (a stale pane must not
+/// inherit the new session's STATUS): the old session is the first this
+/// harness creates, so its pane really is `%0`; the server is killed; and
+/// a second session on the SAME live supervisor lands on the auto-started
+/// replacement's `%0`.
+struct RecycledPaneWedge {
+    h: Harness,
+    /// The wedged session: its `Terminal` still records a pane that now
+    /// belongs to `new`.
+    old: SessionInfo,
+    /// The innocent bystander that inherited the recycled pane id. Every
+    /// lifecycle test below asserts this one comes through untouched — a
+    /// fix that reached for the foreign pane's pid would reap THIS
+    /// session's tree. It doubles as the discriminator's positive case:
+    /// because the supervisor knows it, its name is what proves the
+    /// wedged session's recorded pane is a RECYCLE rather than a rename.
+    new: SessionInfo,
+    /// The recycled id itself, so assertions can name it rather than
+    /// hard-coding `%0`.
+    pane: String,
+    /// The sessions' working directories, which must outlive their
+    /// launches (they are the sessions' cwds).
+    _work_old: tempfile::TempDir,
+    _work_new: tempfile::TempDir,
+}
+
+/// Construct the wedge, asserting its own precondition.
+///
+/// The precondition assertion is not optional decoration: if tmux ever
+/// stopped restarting its pane-id counter with the server, every test
+/// below would keep passing while exercising nothing at all. This is
+/// what fails instead.
+async fn recycled_pane_wedge() -> RecycledPaneWedge {
+    let h = harness().await;
+    let (old, _work_old) = basic_session(&h).await;
+    let sock = h.state.path().join("tmux.sock");
+    let old_pane_id = pane_id_of(&sock, &format!("fh-{}", old.id)).await;
+
+    kill_tmux_server_and_wait(&sock).await;
+
+    let (new, _work_new) = basic_session(&h).await;
+    let new_pane_id = pane_id_of(&sock, &format!("fh-{}", new.id)).await;
+    assert_eq!(
+        old_pane_id, new_pane_id,
+        "test precondition: the wedge only exists if the two sessions really share a recycled \
+         pane id — without that, these tests exercise an ordinary dead-pane path and prove \
+         nothing about the incident"
+    );
+
+    RecycledPaneWedge {
+        h,
+        old,
+        new,
+        pane: old_pane_id,
+        _work_old,
+        _work_new,
+    }
+}
+
+/// Deleting a session whose recorded pane was recycled onto another
+/// session must SUCCEED — the headline fix for the 2026-08-16 incident,
+/// where delete was the verb the operator actually needed and could not
+/// use.
+///
+/// Also pins the driver-level contract the other three regressions rest
+/// on: `pane_process` classifies the recycled id as a foreign owner and
+/// names that owner, rather than erroring. Delete recognizes that owner
+/// as another of its own sessions, reads the pane as "no live root", and
+/// falls back to the marker sweep and the session's cgroup scopes — which
+/// is why the bystander's process tree is untouched: nothing here ever
+/// reads the stranger's pid.
+#[tokio::test]
+async fn delete_succeeds_when_the_recorded_pane_was_recycled_onto_another_session() {
+    let w = recycled_pane_wedge().await;
+
+    // The driver-level classification, asked directly rather than
+    // inferred from the lifecycle verb's success: a delete that started
+    // succeeding for some unrelated reason would otherwise look like this
+    // fix working.
+    let driver = farhelm_supervisor::tmux::TmuxDriver::new(w.h.state.path());
+    let probe = driver
+        .pane_process(&format!("fh-{}", w.old.id), &w.pane)
+        .await
+        .expect("probing a recycled pane id is an answer, not a failure");
+    assert_eq!(
+        probe,
+        farhelm_supervisor::tmux::PaneProbe::ForeignOwner {
+            owner: format!("fh-{}", w.new.id)
+        },
+        "the probe must name the session that now owns the pane, so callers can log the \
+         incident shape and refuse to touch that pid"
+    );
+
+    w.h.client
+        .delete_session(&w.old.id)
+        .await
+        .expect("delete must tolerate a pane id recycled onto another session");
+
+    let listed = wait_for_listing(
+        &w.h.client,
+        30,
+        "the deleted session is gone and the bystander is still live",
+        |sessions| {
+            sessions.iter().all(|s| s.id != w.old.id)
+                && sessions
+                    .iter()
+                    .any(|s| s.id == w.new.id && s.status.is_live())
+        },
+    )
+    .await;
+    assert_eq!(
+        listed.len(),
+        1,
+        "exactly the bystander must remain: {listed:?}"
+    );
+    assert_eq!(
+        pane_id_of(
+            &w.h.state.path().join("tmux.sock"),
+            &format!("fh-{}", w.new.id)
+        )
+        .await,
+        w.pane,
+        "and it must still hold the recycled pane itself — a delete that killed the pane it \
+         found would have taken down the wrong session's terminal"
+    );
+}
+
+/// Restarting a session whose recorded pane was recycled must succeed,
+/// WITHOUT stop consent, and build a FRESH terminal.
+///
+/// The incident wedged restart alongside delete. Two things are pinned
+/// here, and the consent half is the one a reader is most likely to get
+/// wrong. `stop_if_running: false` is what the UI actually sends for a
+/// session it lists as exited, so a recycled pane classified as "maybe a
+/// live agent" would turn into a `Conflict` demanding confirmation for an
+/// agent that provably died with its tmux server — the wedge in a new
+/// costume. The terminal half is the other: the recorded pane did not
+/// survive, so `terminal_survives` must be false and the relaunch must
+/// build its own terminal rather than attempt a reuse tmux would reject
+/// outright (`relaunch_in_pane` targets session and pane together).
+#[tokio::test]
+async fn restart_succeeds_when_the_recorded_pane_was_recycled_onto_another_session() {
+    let w = recycled_pane_wedge().await;
+    let sock = w.h.state.path().join("tmux.sock");
+
+    let restarted =
+        w.h.client
+            .restart_session(&w.old.id, farhelm_proto::RestartMode::Fresh, false)
+            .await
+            .expect(
+                "restart must tolerate a pane id recycled onto another session, and must not \
+                 demand stop consent for an agent that died with its server",
+            );
+    assert_eq!(restarted.id, w.old.id);
+
+    wait_for_live_status(&w.h.client, &w.old.id, 30).await;
+    let restarted_pane = pane_id_of(&sock, &format!("fh-{}", w.old.id)).await;
+    assert_ne!(
+        restarted_pane, w.pane,
+        "the relaunch must own a new pane on the current server, not the one another session \
+         holds"
+    );
+    assert_eq!(
+        pane_id_of(&sock, &format!("fh-{}", w.new.id)).await,
+        w.pane,
+        "and the bystander must keep the pane it legitimately owns"
+    );
+    let listed = wait_for_listing(
+        &w.h.client,
+        30,
+        "both the restarted session and the bystander are live",
+        |sessions| {
+            sessions
+                .iter()
+                .filter(|s| (s.id == w.old.id || s.id == w.new.id) && s.status.is_live())
+                .count()
+                == 2
+        },
+    )
+    .await;
+    assert_eq!(listed.len(), 2, "no session may have been lost: {listed:?}");
+}
+
+/// Stopping a session whose recorded pane was recycled must record the
+/// dead-or-absent classification rather than erroring.
+///
+/// Stop is the verb whose refusal is least defensible in the incident
+/// state: there is provably nothing of this session's running in that
+/// pane, so "I cannot tell you" was never the honest answer. `Exited` is
+/// — and the marker sweep that runs on the same path is what still
+/// collects any survivor of the pre-crash run.
+#[tokio::test]
+async fn stop_succeeds_when_the_recorded_pane_was_recycled_onto_another_session() {
+    let w = recycled_pane_wedge().await;
+
+    w.h.client
+        .stop_session(&w.old.id)
+        .await
+        .expect("stop must tolerate a pane id recycled onto another session");
+
+    let listed = wait_for_listing(
+        &w.h.client,
+        30,
+        "the stopped session reads as exited while the bystander stays live",
+        |sessions| {
+            sessions.iter().any(|s| {
+                s.id == w.old.id && matches!(s.status, SessionStatus::Exited { exit_code: None })
+            }) && sessions
+                .iter()
+                .any(|s| s.id == w.new.id && s.status.is_live())
+        },
+    )
+    .await;
+    assert_eq!(listed.len(), 2, "no session may have been lost: {listed:?}");
+    assert_eq!(
+        pane_id_of(
+            &w.h.state.path().join("tmux.sock"),
+            &format!("fh-{}", w.new.id)
+        )
+        .await,
+        w.pane,
+        "and the bystander must still hold the recycled pane: a stop that walked the foreign \
+         pid would have killed its agent"
+    );
+}
+
+/// Archiving a session whose recorded pane was recycled must succeed.
+///
+/// Archive shares delete's teardown shape but publishes a retained row
+/// instead of removing one, so it needs its own coverage: the archive
+/// flag is committed only after every process and terminal artifact is
+/// gone, which means a probe refusal left the session neither archived
+/// nor cleanly deletable.
+#[tokio::test]
+async fn archive_succeeds_when_the_recorded_pane_was_recycled_onto_another_session() {
+    let w = recycled_pane_wedge().await;
+
+    let archived =
+        w.h.client
+            .archive_session(&w.old.id)
+            .await
+            .expect("archive must tolerate a pane id recycled onto another session");
+    assert!(
+        archived.archived,
+        "the archive flag is committed only after teardown finished: {archived:?}"
+    );
+
+    // An archived session stays LISTED (archiving retains the row, it
+    // does not remove it) — what changes is the flag and the settled
+    // exited status, which is why this asserts on the row rather than on
+    // its absence.
+    let listed = wait_for_listing(
+        &w.h.client,
+        30,
+        "the archived session settles as an archived, exited row while the bystander stays live",
+        |sessions| {
+            sessions.iter().any(|s| {
+                s.id == w.old.id
+                    && s.archived
+                    && matches!(s.status, SessionStatus::Exited { exit_code: None })
+            }) && sessions
+                .iter()
+                .any(|s| s.id == w.new.id && s.status.is_live())
+        },
+    )
+    .await;
+    assert_eq!(listed.len(), 2, "no session may have been lost: {listed:?}");
+    assert_eq!(
+        pane_id_of(
+            &w.h.state.path().join("tmux.sock"),
+            &format!("fh-{}", w.new.id)
+        )
+        .await,
+        w.pane,
+        "and the bystander must still hold the recycled pane"
+    );
+}
+
+/// `pane_process` must report the owning session's FULL name, even when
+/// that name begins with exactly the name the caller asked about.
+///
+/// This is the parse contract the whole foreign-owner policy stands on,
+/// and it was broken in the first cut of this change: the tmux format put
+/// `#{session_name}` FIRST and the parser split on whitespace, so a name
+/// like `fh-<id> trailing` matched the expected session on its first
+/// token and then wedged on `trailing` as a pane pid — a parse error,
+/// which every lifecycle verb treats as a hard failure. A poisoned name
+/// could therefore re-create the very wedge this change exists to remove,
+/// and — worse in the other direction — a name that merely PREFIX-matched
+/// could be mistaken for our own session. tmux allows spaces in session
+/// names and the private socket is reachable by whoever owns the account,
+/// so neither is hypothetical.
+///
+/// Built on the recycled-pane wedge only because it is the cheapest way
+/// to get a pane owned by a session other than the one being asked about;
+/// nothing here depends on the recycle itself.
+#[tokio::test]
+async fn the_pane_probe_reports_a_spaced_owner_name_whole() {
+    let w = recycled_pane_wedge().await;
+    let sock = w.h.state.path().join("tmux.sock");
+    let expected_owner = format!("fh-{} trailing", w.old.id);
+
+    // The bystander — which really does hold the recycled pane — takes on
+    // a name whose FIRST TOKEN is exactly what the probe below asks
+    // about. Anything that reads the owner one token at a time now sees a
+    // match where there is none.
+    let renamed = tmux_query(
+        &sock,
+        &[
+            "rename-session",
+            "-t",
+            &format!("fh-{}", w.new.id),
+            &expected_owner,
+        ],
+    )
+    .await;
+    assert!(
+        renamed.status.success(),
+        "test setup: rename-session must succeed, got: {}",
+        String::from_utf8_lossy(&renamed.stderr)
+    );
+
+    let driver = farhelm_supervisor::tmux::TmuxDriver::new(w.h.state.path());
+    let probe = driver
+        .pane_process(&format!("fh-{}", w.old.id), &w.pane)
+        .await
+        .expect("a poisoned owner name is an answer to classify, not a query failure");
+    assert_eq!(
+        probe,
+        farhelm_supervisor::tmux::PaneProbe::ForeignOwner {
+            owner: expected_owner
+        },
+        "the probe must carry the whole owner name: truncating it at the first space would \
+         both destroy the caller's ability to recognize the owner and, in this case, make the \
+         pane look like the asking session's own"
+    );
+}
+
 /// The restart-gap decision is PER SESSION, not one answer applied to the
 /// whole reloaded batch.
 ///
@@ -4885,31 +5238,77 @@ async fn delete_after_externally_killed_tmux_session_succeeds() {
     );
 }
 
-/// A reachable, deterministic fail-closed path for delete's teardown.
+/// A pane whose tmux session was RENAMED out from under a live
+/// `SessionEntry` must make delete FAIL CLOSED — the other half of the
+/// foreign-owner policy, and the half with an agent's life riding on it.
 ///
-/// The obvious candidate — an absent pane — does NOT fail closed anymore:
-/// per `kill_process_tree`'s `root_pid: None` handling, an absent or dead
-/// pane runs the marker-only sweep and then SUCCEEDS
-/// (`delete_after_externally_killed_tmux_session_succeeds` pins exactly
-/// that). What DOES still fail closed is `pane_process`'s own session-
-/// scoping check: renaming the underlying tmux session out from under a
-/// live `SessionEntry` (verified empirically — `display-message -t
+/// Renaming the session (verified empirically — `display-message -t
 /// <pane>` happily resolves the renamed session and reports its NEW name)
-/// makes the stored `tmux_name` mismatch what tmux now reports, which
-/// `pane_process` treats as a hard error rather than "gone" — refusing to
-/// guess which session a suspiciously-renamed pane now belongs to. Delete
-/// must surface that as `Error`/`Internal` with the row and map entry
-/// left in place, not a false `SessionDeleted`.
+/// makes the stored `tmux_name` mismatch what tmux reports, so
+/// `pane_process` classifies the pane as foreign exactly as a recycled
+/// pane id does. The two are not interchangeable, which is the whole
+/// point of `Supervisor::known_session_tmux_name`: a recycled id is owned
+/// by another session THIS supervisor launched and therefore proves the
+/// recorded terminal died with a previous tmux server, while an owner
+/// nobody recognizes may be this very session's live terminal wearing a
+/// different name. Proceeding on the second would kill a running agent
+/// without consent and still leave the renamed session, its scrollback,
+/// and its tabs behind while reporting the session deleted.
+///
+/// So this pins the refusal end to end: `Internal`, the row and map entry
+/// left in place for a retry, and — the assertion that makes the refusal
+/// worth anything — the agent still ALIVE afterwards. A refusal that
+/// killed on its way out would be strictly worse than proceeding.
+///
+/// The new name deliberately CONTAINS SPACES. tmux allows that, and
+/// `pane_process`'s format puts the session name last precisely so it
+/// survives whole; a parser that split on whitespace would truncate this
+/// to `renamed`, and the owner the policy compares against would be a
+/// name that never existed.
 #[tokio::test]
 async fn delete_after_renamed_tmux_session_fails_closed() {
     let h = harness().await;
-    let (session, _work) = basic_session(&h).await;
+    let work = tempfile::tempdir().unwrap();
+    let session = h
+        .client
+        .create_session(
+            &work.path().to_string_lossy(),
+            &agent_cmd("internal fake-agent --script basic"),
+            None,
+            80,
+            24,
+        )
+        .await
+        .expect("create");
+    let _cleanup = MarkerCleanupGuard::new(session.id.clone());
+    let (_chan, mut rx) = h.client.attach(&session.id, 80, 24).await.expect("attach");
+    let mut seen = Vec::new();
+    wait_for(&mut rx, &mut seen, "FAKE-AGENT READY", 20).await;
 
+    // The pane's own process, read from tmux BEFORE the rename: after it,
+    // the pane can no longer be resolved under the recorded name at all.
+    // This pid is what the liveness assertion at the end reads, and the
+    // basic script prints no pid of its own to use instead.
     let tmux_name = format!("fh-{}", session.id);
     let sock = h.state.path().join("tmux.sock");
+    let pane_pid_out = tmux_query(
+        &sock,
+        &["display-message", "-p", "-t", &tmux_name, "#{pane_pid}"],
+    )
+    .await;
+    assert!(
+        pane_pid_out.status.success(),
+        "test setup: querying the pane pid must succeed, got: {}",
+        String::from_utf8_lossy(&pane_pid_out.stderr)
+    );
+    let pane_pid: u32 = String::from_utf8_lossy(&pane_pid_out.stdout)
+        .trim()
+        .parse()
+        .expect("tmux reports a numeric pane pid");
+
     let renamed = tmux_query(
         &sock,
-        &["rename-session", "-t", &tmux_name, "renamed-out-from-under"],
+        &["rename-session", "-t", &tmux_name, "renamed out from under"],
     )
     .await;
     assert!(
@@ -4940,6 +5339,12 @@ async fn delete_after_renamed_tmux_session_fails_closed() {
          — the rename changes the session name tmux reports for this pane, so the identity \
          can no longer be positively confirmed, and the honest answer is Exited, not a \
          guess either way"
+    );
+    assert!(
+        !process_is_gone(pane_pid),
+        "the refusal must kill NOTHING: the agent is still running under the renamed \
+         session, and a delete that swept first and refused afterwards would have destroyed \
+         exactly what the refusal exists to protect"
     );
 }
 

@@ -734,6 +734,66 @@ pub struct PaneProcess {
     pub dead: bool,
 }
 
+/// Outcome of [`TmuxDriver::pane_process`]: a recorded pane id is either
+/// still this session's terminal, gone, or demonstrably somebody else's.
+///
+/// The third case exists because tmux pane ids (`%N`) come from a
+/// server-wide counter that is monotonic only WITHIN one server's
+/// lifetime: it restarts at `%0` with the server. Several unrelated
+/// things therefore produce a foreign owner, and the list is not closed:
+/// the recorded id may predate the current server generation and have
+/// been handed to a session that started later (the 2026-08-16 incident:
+/// the private tmux server segfaulted out from under a running
+/// supervisor, whose in-memory `Terminal` rows kept pointing at the dead
+/// server's `%0`); the pane's own session may have been renamed
+/// out-of-band, so the pane is still ours but no longer answers to the
+/// recorded name; or panes may have been rearranged across sessions
+/// (`move-pane`/`break-pane`). Nothing in farhelm does the latter two on
+/// its private server, but the socket is reachable by whoever owns the
+/// account.
+///
+/// Those causes do NOT share a safety profile, which is why this type
+/// deliberately stops at "the recorded name is not what tmux reports" and
+/// leaves the verdict to callers. A recycled id means the old terminal
+/// provably died with its server; a rename or a move may mean the
+/// recorded pane is still a LIVE agent of ours under another name, and
+/// tearing it down would kill an agent without consent. The discriminator
+/// — is `owner` the tmux name of another session this supervisor knows? —
+/// and the reasoning behind it live at
+/// `Supervisor::known_session_tmux_name`, which every lifecycle call site
+/// consults.
+///
+/// Modelled as an outcome rather than an error — the precedent is
+/// [`AltScreenCapture::SessionMismatch`], which already distinguishes the
+/// same hazard for captures — because a foreign owner is not a failure to
+/// ask tmux anything. It is a decisive answer about the NAME, and each
+/// caller decides what that means for its own operation: the lifecycle
+/// verbs proceed on other kill mechanisms for a recycled id and refuse
+/// otherwise, while a pane this process created moments ago being foreign
+/// is an invariant violation under any cause. What NO caller may do is
+/// read the foreign pane's pid: it anchors kills and descendant sweeps,
+/// and pointing those at a stranger is precisely the cross-wiring the
+/// session scoping exists to prevent.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum PaneProbe {
+    /// The pane exists and `#{session_name}` matches the session it was
+    /// recorded under: the recorded terminal is real and this pid may
+    /// anchor a kill (subject to [`PaneProcess::dead`]).
+    Owned(PaneProcess),
+    /// The pane id resolves to nothing — an unassigned id, a session
+    /// killed out from under us, or no server at all. Callers read this
+    /// as "nothing is running", the same as a positively dead pane.
+    Gone,
+    /// The pane exists but `#{session_name}` is `owner`, not the name it
+    /// was recorded under. `owner` is the COMPLETE name including any
+    /// spaces, because callers compare it against their own session names
+    /// to tell a recycled id from a rename (see the type's docs); a
+    /// truncated name would silently fail that comparison. The pid is
+    /// deliberately not carried, because no caller has any business using
+    /// it.
+    ForeignOwner { owner: String },
+}
+
 /// Outcome of [`TmuxDriver::capture_alt_screen_if_active`]: whether there
 /// is a snapshot worth storing, and if not, why not — the caller
 /// (service.rs's `StopSession` handler) needs the distinction to decide
@@ -2277,36 +2337,56 @@ impl TmuxDriver {
     /// or coincidentally-reused pane id can never be mistaken for a
     /// different session's terminal.
     ///
-    /// That scoping matters because pane ids (`%N`) are assigned by a
-    /// server-wide counter that resets to `%0` whenever the private tmux
-    /// server itself restarts (the restart-gap case, PLAN_M2.md) — a
-    /// `Terminal` is only ever populated for a pane this process has
-    /// separately confirmed belongs to a currently-live server (see
-    /// `Supervisor::reload_sessions`'s `has_session` check), so in
-    /// practice no caller today can hand this a pane from a dead server.
-    /// The `#{session_name}` check below is the same belt this crate
-    /// applies everywhere else it can afford to (see e.g. `has_session`'s
-    /// exact-match `=` prefix): a structural guarantee that does not rely
-    /// on every future call site preserving that invariant by convention.
+    /// This CLASSIFIES staleness rather than assuming it away, and the
+    /// distinction is not academic. An earlier version of these docs
+    /// argued that no caller could hand this a pane from a dead server,
+    /// because a `Terminal` is only ever populated for a pane confirmed
+    /// against a live server at load time (`Supervisor::reload_sessions`'s
+    /// `has_session` check) — and it treated a session mismatch as a hard
+    /// error on the strength of that. On 2026-08-16 the production tmux
+    /// server segfaulted mid-flight: nothing refreshes `Terminal` rows
+    /// while a supervisor runs, the replacement server's pane counter
+    /// restarted at `%0`, another session claimed that id, and every
+    /// lifecycle verb for the original session — delete, archive, stop,
+    /// restart, close-tab — failed on the mismatch until the supervisor
+    /// was restarted. The invariant holds only at load; the mismatch is
+    /// reachable in normal operation.
     ///
-    /// Returns `Ok(None)` — not an error — when the pane or its session no
-    /// longer exists at all: the same tolerated tmux diagnostics
-    /// `has_session`/`kill_session` already treat as "not there" (a
-    /// concurrent external `kill-session`, or the whole private server
-    /// having gone away). Stop and delete both read that as "nothing is
-    /// running", the same as a positively dead pane.
-    pub async fn pane_process(
-        &self,
-        session: &str,
-        pane: &str,
-    ) -> anyhow::Result<Option<PaneProcess>> {
+    /// So the three outcomes of [`PaneProbe`] are the contract, and each
+    /// caller owns the decision its own operation needs. The
+    /// `#{session_name}` check that produces `ForeignOwner` stays exactly
+    /// as strict as before — it is the same belt this crate applies
+    /// everywhere it can afford to (see `has_session`'s exact-match `=`
+    /// prefix), and the foreign pane's pid still never escapes this
+    /// function — but refusing to answer is not the same as refusing to
+    /// act on the answer.
+    ///
+    /// `Err` is reserved for a query that did not produce an answer at
+    /// all: a tmux invocation that could not be spawned, tmux exiting
+    /// nonzero with any diagnostic OUTSIDE the tolerated "not there" set,
+    /// or output that would not parse. Those tolerated diagnostics —
+    /// the same ones `has_session`/`kill_session` recognize, covering a
+    /// concurrent external `kill-session` and the whole private server
+    /// having gone away — are [`PaneProbe::Gone`] instead.
+    pub async fn pane_process(&self, session: &str, pane: &str) -> anyhow::Result<PaneProbe> {
         let out = match self
             .run(&[
                 "display-message",
                 "-p",
                 "-t",
                 pane,
-                "#{session_name} #{pane_pid} #{pane_dead}",
+                // SPACE-FREE FIELDS FIRST, session name LAST — the same
+                // ordering `PANE_FACT_FORMAT` uses, and for the same
+                // reason. tmux session names may contain spaces, so a name
+                // in any position but the last cannot be told apart from
+                // the fields following it. With the name leading (as this
+                // did until the spaced-name regression), a session called
+                // `renamed session` truncated to `renamed`, and one called
+                // `<expected name> suffix` matched the expected name on
+                // its first token and then wedged every lifecycle verb on
+                // a parse error trying to read `suffix` as a pid. As the
+                // trailing remainder, neither is expressible.
+                "#{pane_pid} #{pane_dead} #{session_name}",
             ])
             .await
         {
@@ -2320,10 +2400,16 @@ impl TmuxDriver {
                 .iter()
                 .any(|diagnostic| e.to_string().contains(diagnostic)) =>
             {
-                return Ok(None);
+                return Ok(PaneProbe::Gone);
             }
             Err(e) => return Err(e).context("querying pane process state"),
         };
+        // Only the line terminator is stripped, never surrounding spaces:
+        // a session name's own leading or trailing whitespace is part of
+        // the name, and the trailing field must survive verbatim so
+        // `ForeignOwner` can carry the FULL name a caller would log or
+        // compare against.
+        let line = out.trim_end_matches(['\r', '\n']);
         // A stale pane id against a server that has since dropped every
         // session it knew (this one killed, nothing else ever created)
         // does NOT error the way `has_session`'s docs describe for
@@ -2331,33 +2417,40 @@ impl TmuxDriver {
         // config's `exit-empty off` server — it exits zero with every
         // format variable expanding empty, mirroring the same "nothing to
         // inspect" shape `bracket_paste_flag_is_missing` already handles
-        // for pane-mode queries. `split_whitespace` never yields an empty
-        // token, so an entirely-blank `out` (that all-empty-expansion
-        // case) makes `.next()` return `None` directly — no separate
-        // emptiness check needed, and `None` here IS the tell: a real
-        // session is never named the empty string, so this means "no
-        // such pane", not "a pane named ''".
-        let mut fields = out.split_whitespace();
-        let Some(found_session) = fields.next() else {
-            return Ok(None);
-        };
-        if found_session != session {
-            bail!(
-                "pane {pane} belongs to session {found_session:?}, not {session:?}; refusing to \
-                 treat it as this session's terminal (a stale or reused pane id would otherwise \
-                 cross-wire two sessions' process trees)"
-            );
+        // for pane-mode queries. With the fields reordered, that case is
+        // the whole line collapsing to the format's own two separator
+        // spaces, which is why the tell is a blank line rather than a
+        // missing field: a pane that exists always has a numeric
+        // `pane_pid`, so nothing real expands to whitespace alone.
+        if line.trim().is_empty() {
+            return Ok(PaneProbe::Gone);
         }
-        let pid = fields
+        // Exactly two splits: the third piece is the session name, spaces
+        // and all.
+        let mut fields = line.splitn(3, ' ');
+        let pid_field = fields
             .next()
-            .with_context(|| format!("pane process query returned no pane_pid: {out:?}"))?
+            .with_context(|| format!("pane process query returned no pane_pid: {line:?}"))?;
+        let dead_field = fields
+            .next()
+            .with_context(|| format!("pane process query returned no pane_dead: {line:?}"))?;
+        let found_session = fields
+            .next()
+            .with_context(|| format!("pane process query returned no session_name: {line:?}"))?;
+        if found_session != session {
+            // Ownership is settled before the pid is parsed, so a
+            // stranger's pid never becomes a value any caller could reach
+            // for — and a foreign pane with output this parser would
+            // reject still classifies rather than erroring.
+            return Ok(PaneProbe::ForeignOwner {
+                owner: found_session.to_string(),
+            });
+        }
+        let pid = pid_field
             .parse()
-            .with_context(|| format!("parsing pane_pid from {out:?}"))?;
-        let dead = fields
-            .next()
-            .with_context(|| format!("pane process query returned no pane_dead: {out:?}"))?
-            == "1";
-        Ok(Some(PaneProcess { pid, dead }))
+            .with_context(|| format!("parsing pane_pid from {line:?}"))?;
+        let dead = dead_field == "1";
+        Ok(PaneProbe::Owned(PaneProcess { pid, dead }))
     }
 
     /// Atomically check whether `pane` is on the alternate screen and, if

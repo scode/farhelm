@@ -63,7 +63,7 @@
 //! depend on branches inside delete's fail-closed removal sequence.
 
 use super::connection::notify_detached;
-use super::core::{ArchiveStage, SessionEntry, Supervisor};
+use super::core::{ArchiveStage, SessionEntry, Supervisor, unknown_pane_owner_refusal};
 use super::launch_artifacts::{remove_fail_closed, remove_launch_artifacts_for_session};
 use super::snapshots::snapshot_path;
 use super::sweep::{SweepTarget, reap_process_tree};
@@ -71,14 +71,16 @@ use super::terminals::{ActiveAttach, AttachmentKey};
 use super::ticker::ActivitySample;
 use super::uploads::abort_session_uploads;
 use crate::store::LastOutcome;
+use crate::tmux::PaneProbe;
 use farhelm_proto::{STOP_ANNOTATION, SessionStatus};
 use std::path::PathBuf;
 use std::sync::Arc;
-use tracing::debug;
+use tracing::{debug, warn};
 
 /// Every way a teardown can fail before the session is gone, as one
 /// variant per failure CLASS — not per failure site. The four probe/sweep
-/// variants each have exactly one site; [`TeardownError::FailClosed`]
+/// variants each cover exactly one step of the teardown (whatever number
+/// of ways that step has of failing); [`TeardownError::FailClosed`]
 /// covers the five steps inside the fail-closed block, which is sound
 /// because those five already render their own site-specific message and
 /// this variant carries it through verbatim.
@@ -99,8 +101,12 @@ use tracing::debug;
 /// attachment directory), which bounds the mess a failed teardown leaves
 /// behind without ever completing it.
 pub(crate) enum TeardownError {
-    /// tmux could not be asked what process the agent's pane holds, so the
-    /// sweep has no root pid to work from.
+    /// The agent's pane could not be resolved into a trustworthy root pid:
+    /// either tmux could not be asked at all, or it answered that the pane
+    /// belongs to a tmux session this supervisor does not recognize — a
+    /// possible rename or move of this session's own live terminal, which
+    /// a delete must not act on (see
+    /// [`Supervisor::known_session_tmux_name`]).
     PaneProbe(anyhow::Error),
     /// tmux could not be asked for this session's tabs. Strictly a
     /// failure: see the call site for why "we could not ask" must not
@@ -130,6 +136,9 @@ pub(crate) enum TeardownError {
 /// Every variant is fail-closed: the archived flag is written only after
 /// the process sweep and tmux teardown have succeeded. The handler owns
 /// rendering because these messages are part of the wire contract.
+///
+/// The variants mirror [`TeardownError`]'s one-for-one and carry the same
+/// meanings; see that type for what each failure class covers.
 pub(crate) enum ArchiveError {
     PaneProbe(anyhow::Error),
     TabRediscovery(anyhow::Error),
@@ -181,10 +190,44 @@ impl Supervisor {
                         .await
                         .map_err(ArchiveError::PaneProbe)?;
                 }
-                self.tmux
+                match self
+                    .tmux
                     .pane_process(&terminal.tmux_name, &terminal.pane)
                     .await
                     .map_err(ArchiveError::PaneProbe)?
+                {
+                    PaneProbe::Owned(pane) => Some(pane),
+                    PaneProbe::Gone => None,
+                    // Same treatment delete gives it, and for the same
+                    // reason. A RECOGNIZED owner means the recorded pane
+                    // predates the current tmux server, so there is no
+                    // root pid here and nothing left of that terminal to
+                    // clean — the marker sweep and the per-tab cgroup
+                    // scopes reaped below need no pane, and refusing here
+                    // is what wedged archive in the 2026-08-16 incident.
+                    // An UNRECOGNIZED owner fails closed: the pane may be
+                    // this session's own live terminal under a renamed
+                    // tmux session, and archiving it would publish a
+                    // terminal-less archive while that terminal, its
+                    // scrollback, and its tabs went on existing.
+                    PaneProbe::ForeignOwner { owner } => {
+                        if !self.known_session_tmux_name(&owner).await {
+                            return Err(ArchiveError::PaneProbe(anyhow::anyhow!(
+                                unknown_pane_owner_refusal(
+                                    &terminal.pane,
+                                    &owner,
+                                    &terminal.tmux_name
+                                )
+                            )));
+                        }
+                        warn!(
+                            session = %session_id, foreign_owner = %owner,
+                            "this session's recorded pane now belongs to another tmux session; \
+                             archiving on the marker sweep and cgroup scopes alone"
+                        );
+                        None
+                    }
+                }
             }
             None => None,
         };
@@ -448,11 +491,50 @@ impl Supervisor {
         // the marker sweep still runs even with no live pane pid, for
         // the same leftover-reaping reason documented there.
         let live_pane = match entry.terminal.as_ref() {
-            Some(terminal) => self
+            Some(terminal) => match self
                 .tmux
                 .pane_process(&terminal.tmux_name, &terminal.pane)
                 .await
-                .map_err(TeardownError::PaneProbe)?,
+                .map_err(TeardownError::PaneProbe)?
+            {
+                PaneProbe::Owned(pane) => Some(pane),
+                PaneProbe::Gone => None,
+                // The headline case of the 2026-08-16 incident: a pane id
+                // recycled onto another session used to make this probe a
+                // hard error, and delete became impossible for the rest of
+                // the supervisor's life. A RECOGNIZED owner means exactly
+                // that recycle, so there is no live pane root here and
+                // nothing of the old terminal left to remove; the sweep
+                // below still reaps by environment marker and through the
+                // session's cgroup scopes (enumeration only NAMES those
+                // units — `reap_process_tree` is what kills), neither of
+                // which needs a pane. Using the stranger's pid instead
+                // would reap THEIR process tree, which is the outcome the
+                // session scoping exists to prevent.
+                //
+                // An UNRECOGNIZED owner fails closed, as every verb did
+                // before this probe classified: the recorded pane may be
+                // this session's own live terminal under a renamed tmux
+                // session, and a delete would then kill a live agent
+                // without consent and still leave the renamed container,
+                // its scrollback, and its tabs behind while reporting
+                // success. The row and the map entry survive the refusal,
+                // so a retry — or an operator undoing the rename — can
+                // finish the job.
+                PaneProbe::ForeignOwner { owner } => {
+                    if !self.known_session_tmux_name(&owner).await {
+                        return Err(TeardownError::PaneProbe(anyhow::anyhow!(
+                            unknown_pane_owner_refusal(&terminal.pane, &owner, &terminal.tmux_name)
+                        )));
+                    }
+                    warn!(
+                        session = %session_id, foreign_owner = %owner,
+                        "this session's recorded pane now belongs to another tmux session; \
+                         deleting on the marker sweep and cgroup scopes alone"
+                    );
+                    None
+                }
+            },
             None => None,
         };
         let root_pid = live_pane.filter(|pane| !pane.dead).map(|pane| pane.pid);
