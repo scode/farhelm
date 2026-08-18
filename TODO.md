@@ -4,6 +4,17 @@ A running list of things the maintainer wants fixed or built, in no particular o
 entry is REMOVED in the same PR that addresses it, so the file only ever describes what is still wanted. It is not a
 roadmap and carries no priorities unless an entry says so itself.
 
+- Add a visual highlight in the left-hand sidebar showing clearly which agent session the main pane is currently
+  interacting with. The selected row should be obvious at a glance, not inferable only from the titlebar.
+
+- Make Shift+Enter insert a line break everywhere it plausibly should, not just in Claude Code. The terminal sends ESC
+  CR for the chord (the binding Claude Code's terminal-setup guide names, and it works there), but observed behavior
+  elsewhere: Codex treats the pair like a plain Enter (or close to it) — so Codex evidently does not honor ESC CR as
+  insert-newline and the right sequence for it needs investigating (candidates: whatever Codex's own terminal-setup
+  binds, or the CSI-u encoding `ESC [ 13 ; 2 u` that kitty-protocol-aware TUIs understand) — and a plain shell tab does
+  nothing visible with it. Decide and implement per-target behavior: Codex must get a real line break, and define what
+  (if anything) the chord should do in a bare shell rather than leaving it a silent no-op.
+
 - Finish the macOS release bundle. The release workflow's `macos` job (workflow_dispatch-gated; builds an
   aarch64-apple-darwin `Farhelm.app` with embedded helm, managed supervisor, private tmux, and the CLI at
   `Contents/MacOS/farhelm`) has never completed, which means the README's primary quickstart references an artifact that
@@ -32,23 +43,29 @@ roadmap and carries no priorities unless an entry says so itself.
   middleware modules, the UI's auth/api modules. Spec surfaces: SPEC.md's token section, SPEC_impl.md's auth/storage
   section as amended in #117.
 
-- Deflake `terminal_tabs::a_killed_supervisor_leaves_no_orphaned_sink_client` on CI. It failed three CI runs on
-  2026-08-16/17 with "a control client outlived the supervisor that owned it: 1 still attached"
-  (crates/farhelm/tests/e2e/terminal_tabs.rs, the 20-second drain loop after the SIGKILL), each time passing on a plain
-  rerun of the same commit, and it has never failed locally — including three full-suite runs on the 6-core devbox the
-  same day. Failing runs for reference: actions/runs/31953418151/job/95180287538 (on #172, so it predates the PaneProbe
-  work entirely), actions/runs/31980616526/job/95246609920 and actions/runs/31992550444/job/95278542779 (on #174). What
-  the test pins: a SIGKILLed supervisor's three tmux control clients (output, input, session sink) must all die from
-  stdin EOF when the kernel reaps the supervisor's pipe ends — teardown by protocol, not by cleanup code. On CI (4
-  vCPUs, `--test-threads=4`, three other process-heavy tests running concurrently) exactly one client is still attached
-  when the 20s deadline expires. The survivor-identifying diagnostics are DONE: the expiry panic now carries a
-  role-identifying roster (input = `no-output` flag, replay = `pause-after`, sink = neither), the pre-kill roster for
-  comparison, and a /proc scan naming every holder of each survivor's stdin pipe with its access mode (the scan marks
-  itself INCOMPLETE when it had blind spots). What remains is the verdict the next occurrence's report will hand over: a
-  live write-end holder that is not the dead supervisor means a leaked stdin duplicate — a real bug in exactly the
-  guarantee the test exists to pin. No write-end holder on a COMPLETE scan points away from the leak, toward deadline
-  pressure or some other client-side shutdown stall — supporting evidence for a timeout change, not proof by itself. Do
-  not reach for a bigger timeout until the survivor's identity rules the leak out.
+- Deflake `terminal_tabs::a_tab_whose_shell_is_dead_by_reply_time_is_refused_with_its_last_words` if it ever fires
+  outside an artificial recipe. The test's premise is a race it assumes it wins: the fixture shell (`exit 9`) must be
+  dead BEFORE `open_tab`'s reply, so the open is refused with the shell's last words. Under a deliberately brutal repro
+  recipe (2026-08-18: THREE concurrent e2e test binaries pinned to the terminal_tabs module on a 4-core box — harsher
+  than any real runner) the dying shell was routinely delayed past reply time, `open_tab` returned a live TabInfo, and
+  the `expect_err` at terminal_tabs.rs:428 fired in roughly half the iterations. It has never failed on CI or under a
+  normal local run, which is why this is recorded rather than fixed: the honest fix (have the test wait for the pane to
+  be observed dead before opening the tab, or drive the shell's death through a barrier instead of a sprint) is real
+  work, and the failure mode is currently confined to a recipe nothing real resembles. If it shows up on CI, this entry
+  has the mechanism ready. Same recipe, same class, one occurrence and recorded here rather than separately:
+  `a_tab_runs_a_shell_in_the_sessions_working_directory` failed once with "timed out waiting for XREADYX", transcript
+  empty. The interesting part is WHERE it failed: `wait_for_shell` (terminal_tabs.rs) retries a 3-second shell round
+  trip inside a 30-second budget, but each round's inner `wait_for` panics at its OWN 3-second deadline, racing the
+  outer `tokio::time::timeout` that was supposed to convert the round into a retry — when the panic wins, one slow first
+  round fails the test with 27 seconds of budget unspent. Fixing the ladder (give the inner wait no deadline of its own,
+  or a longer one than the wrapper) would make the observed failure impossible without changing what is pinned. Finally,
+  the same campaign confirmed a third, deeper shape (3 occurrences in ~700 iterations of the concurrent recipe, tmux
+  3.6): SIGKILLing a supervisor while its control clients hold queued output can abort the tmux SERVER itself —
+  `a_killed_supervisor_leaves_no_orphaned_sink_client`'s setup then fails with "no server running on
+  <sock>", both fabricated clients refused. This is the ci.yml-documented unsafe-control-client-teardown abort class and
+  the M6.5 ledger's pane-silenced server-death, seen from a new angle; farhelm cannot make a DEAD supervisor's teardown
+  safe, so this is a substrate risk to track (does 3.7b's abort fix cover it? does the distro tmux on CI?), not
+  something a test or product change here can remove. The test's setup panic now names the shape outright when it fires.
 
 - Deflake `boot_id_durable_outcome::a_list_polling_through_a_stop_never_erases_the_annotation` under local full-suite
   load. One occurrence so far: 2026-08-18, full workspace suite at libtest's default thread count (one runnable test per
@@ -109,6 +126,17 @@ roadmap and carries no priorities unless an entry says so itself.
   accepted findings as saturation finally reached; anything it does return gets the normal fix-or-reject treatment.
   Cheap to run, and the difference between "reviewed until done" and "reviewed until the meter ran out" — do it before
   declaring the first real release final.
+
+- Close the HostId-reuse create-default window. The create dialog defaults its host field to the selected session's host
+  BY ROW ID, but a host row id survives a retarget (or an adopt where a new install takes over) while the machine behind
+  it changes: look at a session on the old machine, have the row retargeted, open the create dialog within one
+  listing-refresh interval, and the create lands on the successor install. The request's own install-incarnation check
+  passes — the request was genuinely built against the successor — so the system does what it was told while the user's
+  intent lands on the wrong machine. Raised as a definite security finding in #156's review; accepted there as residual
+  because selection reconciliation already narrows the window to one refresh interval. The full fix: the helm's listing
+  must denormalize install identity per session so the client binds its create default to the install the user was
+  actually looking at, not the row id. Not urgent (needs a concurrent retarget plus a one-interval race), but "accepted
+  residual" should not quietly become "permanent".
 
 - Run the manual Mac checklist (`docs/manual-mac-checklist.md` — that file IS the record; its "Observed:" fields are the
   state, all "not run"). Blocked on the macOS release bundle above and a human with a real Mac. Not covered by any CI:

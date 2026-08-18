@@ -809,6 +809,16 @@ impl StateDirOwnership {
     /// looks like) — it simply may not migrate the schema or write any
     /// reconciliation, and its `serve` will refuse.
     ///
+    /// The `bool` alongside the claim is true only when THIS call took
+    /// the OS lock — as opposed to reusing a claim some other
+    /// `Supervisor` in this process already holds. The distinction
+    /// matters to exactly one caller: the startup reap of stale tmux
+    /// control clients, whose "everything attached is a dead
+    /// predecessor's" premise is true when the lock was just acquired
+    /// (nothing in this process OR any other owned the directory a
+    /// moment ago) and FALSE for a reused claim (the incumbent holding
+    /// it has live, healthy clients this constructor must not touch).
+    ///
     /// One benign race is left deliberately: a claim being DROPPED
     /// concurrently with this call can leave the registry entry already
     /// dead while its lock file has not finished closing, so the
@@ -816,14 +826,14 @@ impl StateDirOwnership {
     /// another process held the directory. It resolves itself on the next
     /// construction, and it fails in the safe direction (no migration, no
     /// reconciliation) — the only direction worth being sure of.
-    fn claim(state_dir: &Path) -> anyhow::Result<Option<Arc<StateDirOwnership>>> {
+    fn claim(state_dir: &Path) -> anyhow::Result<Option<(Arc<StateDirOwnership>, bool)>> {
         // Canonicalized so two spellings of the same directory cannot
         // yield two claims; the directory exists by now (`ensure_private_dir`).
         let path = std::fs::canonicalize(state_dir)
             .with_context(|| format!("resolving state dir {}", state_dir.display()))?;
         let mut claims = STATE_DIR_CLAIMS.lock().expect("claims mutex poisoned");
         if let Some(existing) = claims.get(&path).and_then(std::sync::Weak::upgrade) {
-            return Ok(Some(existing));
+            return Ok(Some((existing, false)));
         }
         let lock_path = path.join("supervisor.lock");
         let lock = std::fs::OpenOptions::new()
@@ -841,7 +851,7 @@ impl StateDirOwnership {
             serving: std::sync::atomic::AtomicBool::new(false),
         });
         claims.insert(path, Arc::downgrade(&owned));
-        Ok(Some(owned))
+        Ok(Some((owned, true)))
     }
 
     /// Take the right to serve, or report that something already has it.
@@ -3406,7 +3416,10 @@ impl Supervisor {
         // incumbent and a predecessor's live sessions recorded as ended —
         // and for why an unclaimed supervisor is still constructible
         // rather than fatal here.
-        let ownership = StateDirOwnership::claim(&state_dir)?;
+        let (ownership, lock_newly_acquired) = match StateDirOwnership::claim(&state_dir)? {
+            Some((ownership, newly_acquired)) => (Some(ownership), newly_acquired),
+            None => (None, false),
+        };
         if ownership.is_none() {
             warn!(
                 state_dir = %state_dir.display(),
@@ -3460,6 +3473,27 @@ impl Supervisor {
             },
         );
         tmux.ensure_server().await?;
+        // Anything attached to the private server at this instant
+        // predates this supervisor, and a control client whose owner
+        // died with output in flight can be wedged in tmux's
+        // deferred-exit trap forever — see `reap_stale_control_clients`
+        // for the whole story. Reaped before any session work so a
+        // stale sink cannot sit alongside (or shadow) the fresh one
+        // this process is about to bring up. Gated on the lock being
+        // NEWLY acquired, which is what makes "everything attached is a
+        // dead predecessor's" true: a claimless constructor lost the
+        // race to a live owner in another process, and a reused claim
+        // means a live incumbent in THIS process — either way the
+        // attached clients are someone's healthy, working clients.
+        if lock_newly_acquired {
+            let reaped = tmux.reap_stale_control_clients().await?;
+            if reaped > 0 {
+                info!(
+                    reaped,
+                    "reaped stale control clients left by a dead predecessor"
+                );
+            }
+        }
 
         // Resolved before the first reload, because that reload already
         // runs a capture pass: a session whose first input landed before a

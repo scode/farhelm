@@ -64,3 +64,10 @@ cargo test -p farhelm --test e2e \
 cargo test -p farhelm --test e2e \
   restart_restores_and_notifies_while_output_cleanup_is_pending \
   -- --show-output --test-threads=1
+# The startup reap closes stale control clients that are carrying queued
+# output — exactly the shape whose unsafe teardown aborts this tmux
+# version — so it must be proven against the pinned binary, not only
+# against whatever the distro ships.
+cargo test -p farhelm --test e2e \
+  a_killed_supervisor_leaves_no_orphaned_sink_client \
+  -- --show-output --test-threads=1
