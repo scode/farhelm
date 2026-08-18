@@ -463,18 +463,130 @@ assert_watchdog_silent() {
   esac
 }
 
-if [ "${DESKTOP_SMOKE_LEGACY_INTERACTION:-}" != 1 ]; then
-  assert_watchdog_silent
-  DISPLAY=$DISP xdotool windowactivate "$WID" key alt+F4
-  FINAL_DESKTOP_PID=$(cat "$X/desktop.pid")
+# Focus the window and verify focus actually landed before returning.
+# `xdotool windowactivate` is a REQUEST that returns before openbox acts on
+# it, and a bare `key` chord goes to whichever window holds focus at that
+# instant — so a close chord sent without this verification can fire before
+# focus lands and ask nothing at all to exit. That race is the leading
+# suspect for this gate's "did not exit cleanly" CI flakes (2026-08-16/17),
+# which never reproduced locally. A bounded verify loop rather than
+# `windowactivate --sync`, deliberately: --sync can block forever against a
+# stalled window manager, and a smoke leg must always reach its own failure
+# path.
+activate_and_verify() {
+  for _ in $(seq 1 10); do
+    DISPLAY=$DISP xdotool windowactivate "$1" 2>/dev/null
+    sleep 0.5
+    [ "$(DISPLAY=$DISP xdotool getactivewindow 2>/dev/null)" = "$1" ] && return 0
+  done
+  return 1
+}
+
+# One observation: gone from the process table, or a zombie (which counts
+# as exited — the caller reaps it with `wait`).
+pid_gone() {
+  STAT=$(ps -o stat= -p "$1" 2>/dev/null | tr -d ' ')
+  [ -z "$STAT" ] || [ "${STAT#Z}" != "$STAT" ]
+}
+
+# Wait up to 10 seconds for a pid to leave the process table.
+wait_for_pid_exit() {
   for _ in $(seq 1 20); do
-    DESKTOP_STAT=$(ps -o stat= -p "$FINAL_DESKTOP_PID" 2>/dev/null | tr -d ' ')
-    [ -z "$DESKTOP_STAT" ] || [ "${DESKTOP_STAT#Z}" != "$DESKTOP_STAT" ] && break
+    pid_gone "$1" && return 0
     sleep 0.5
   done
-  DESKTOP_STAT=$(ps -o stat= -p "$FINAL_DESKTOP_PID" 2>/dev/null | tr -d ' ')
-  [ -z "$DESKTOP_STAT" ] || [ "${DESKTOP_STAT#Z}" != "$DESKTOP_STAT" ] || fail "desktop app did not exit cleanly"
-  wait "$FINAL_DESKTOP_PID" || fail "desktop app exited unsuccessfully"
+  # One observation AFTER the final sleep. Without it, an app exiting in
+  # the last half-second reads as still alive — the pre-helper code made
+  # this final check, and losing it would mint a fresh clean-exit flake
+  # inside the change meant to remove one.
+  pid_gone "$1"
+}
+
+# Deliver the close chord to the currently focused window. The one seam —
+# DESKTOP_SMOKE_FAULT_FIRST_CHORD=1 turns the FIRST delivery into a
+# harmless F24 — exists so the recovery branch below can be exercised on
+# demand instead of trusting a one-off manual validation; nothing in CI
+# sets it.
+send_close_chord() { # $1 = first | retry
+  if [ "$1" = first ] && [ "${DESKTOP_SMOKE_FAULT_FIRST_CHORD:-}" = 1 ]; then
+    DISPLAY=$DISP xdotool key F24
+    return $?
+  fi
+  DISPLAY=$DISP xdotool key alt+F4
+}
+
+# Evidence dump for a failed exit leg, written into the run dir so the CI
+# failure artifact carries it: which window held focus, what farhelm
+# windows existed, and what state the app process was in. Focus here is
+# sampled after the fact rather than atomically with the chord, so this
+# helps distinguish "the keystroke never landed" from "the app is
+# genuinely wedged on shutdown" — the two candidate mechanisms behind the
+# CI flake — without on its own proving either.
+report_exit_leg_state() { # $1 = expected window id, $2 = app pid
+  {
+    echo "active window: $(DISPLAY=$DISP xdotool getactivewindow 2>/dev/null)"
+    echo "expected window: $1"
+    echo "farhelm windows: $(DISPLAY=$DISP xdotool search --name farhelm 2>/dev/null | tr '\n' ' ')"
+    echo "app process: $(ps -o pid=,stat=,wchan=,cmd= -p "$2" 2>/dev/null)"
+  } | tee "$X/exit-leg-state.txt" >&2
+}
+
+# Close the app the way a user would (alt+F4 through the window manager),
+# wait for the process to exit, and reap it, tolerating exactly one lost
+# chord: if the app is still alive after the first 10-second wait,
+# re-verify focus and re-deliver once before concluding it is wedged. A
+# second silent loss in a row with focus verified both times would be
+# evidence of something worse than the known activation race, and should
+# fail. Each failure path names a DISTINCT verdict, because the whole
+# point of this leg's diagnostics is telling input-delivery failures
+# apart from application-shutdown failures.
+close_app_and_wait() { # $1 = window id, $2 = app pid
+  if ! activate_and_verify "$1"; then
+    report_exit_leg_state "$1" "$2"
+    # A process that already exited has no window to focus; blaming the
+    # focus race would send the investigation at input delivery when the
+    # app crashed on its own.
+    if pid_gone "$2"; then
+      fail "desktop app exited on its own before the close chord was ever delivered"
+    fi
+    fail "the app window never took focus for the close chord"
+  fi
+  send_close_chord first || {
+    report_exit_leg_state "$1" "$2"
+    fail "xdotool could not deliver the close chord"
+  }
+  if ! wait_for_pid_exit "$2"; then
+    echo "== app alive 10s after close chord; re-verifying focus and re-delivering once" >&2
+    # A vanished window over a live process is its own verdict: the chord
+    # landed, the UI died, and the process is stuck in shutdown.
+    # Re-activating the dead window id would misreport that as an
+    # input-delivery failure.
+    if ! DISPLAY=$DISP xdotool search --name farhelm 2>/dev/null | grep -qx "$1"; then
+      report_exit_leg_state "$1" "$2"
+      fail "window closed but the process is still alive: wedged in shutdown, not missing input"
+    fi
+    activate_and_verify "$1" || {
+      report_exit_leg_state "$1" "$2"
+      fail "the app window lost focus after the first close chord"
+    }
+    send_close_chord retry || {
+      report_exit_leg_state "$1" "$2"
+      fail "xdotool could not deliver the retry close chord"
+    }
+    wait_for_pid_exit "$2" || {
+      report_exit_leg_state "$1" "$2"
+      fail "desktop app did not exit after a focus-verified, re-delivered close"
+    }
+  fi
+  # Reaping lives here rather than at the call sites: both legs need the
+  # same wait-and-status check, and a caller that forgot it would
+  # silently accept an unsuccessful exit.
+  wait "$2" || fail "desktop app exited unsuccessfully"
+}
+
+if [ "${DESKTOP_SMOKE_LEGACY_INTERACTION:-}" != 1 ]; then
+  assert_watchdog_silent
+  close_app_and_wait "$WID" "$(cat "$X/desktop.pid")"
   echo "== PASS: embedded helm, dual auth, local supervisor, and a tmux-held session survive restart"
   PASS=1
   exit 0
@@ -592,16 +704,7 @@ done
 
 curl_auth -sf --max-time 5 -X DELETE "$API/api/sessions/$SID" >/dev/null || fail "cleaning up smoke session"
 SID=""
-DISPLAY=$DISP xdotool windowactivate "$WID" key alt+F4
-FINAL_DESKTOP_PID=$(cat "$X/desktop.pid")
-for _ in $(seq 1 20); do
-  DESKTOP_STAT=$(ps -o stat= -p "$FINAL_DESKTOP_PID" 2>/dev/null | tr -d ' ')
-  [ -z "$DESKTOP_STAT" ] || [ "${DESKTOP_STAT#Z}" != "$DESKTOP_STAT" ] && break
-  sleep 0.5
-done
-DESKTOP_STAT=$(ps -o stat= -p "$FINAL_DESKTOP_PID" 2>/dev/null | tr -d ' ')
-[ -z "$DESKTOP_STAT" ] || [ "${DESKTOP_STAT#Z}" != "$DESKTOP_STAT" ] || fail "desktop app did not exit cleanly"
-wait "$FINAL_DESKTOP_PID" || fail "desktop app exited unsuccessfully"
+close_app_and_wait "$WID" "$(cat "$X/desktop.pid")"
 
 # The legacy path's ONE watchdog check, after every interaction that could
 # have provoked a false positive — see assert_watchdog_silent's comment.

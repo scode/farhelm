@@ -50,20 +50,6 @@ roadmap and carries no priorities unless an entry says so itself.
   pressure or some other client-side shutdown stall — supporting evidence for a timeout change, not proof by itself. Do
   not reach for a bigger timeout until the survivor's identity rules the leak out.
 
-- Deflake desktop-smoke's clean-exit leg on CI. Twice on 2026-08-16/17 the gate failed with "desktop app did not exit
-  cleanly" — scripts/desktop-smoke.sh's final leg sends alt+F4 via xdotool and gives the app 10 seconds (20 × 0.5s) to
-  leave the process table — immediately after the "rotating the token and refreshing both client stacks on 401" step.
-  Same commit failed and then passed on rerun (actions/runs/31990446660: job/95272892308 fail, job/95274891991 pass;
-  also actions/runs/31979811670/job/95244680072), and the leg has never failed locally, so this is nondeterministic, not
-  content-driven. Candidate mechanisms, unverified: the alt+F4 keystroke races window focus under openbox on a loaded
-  runner (xdotool windowactivate returns before focus actually lands, so the chord goes nowhere and nothing was ever
-  asked to exit), or the just-rotated-token state leaves the app genuinely slow or stuck on its shutdown path — the
-  script keeps `failure.png` and the state dir on failure, so the next CI failure's artifacts can distinguish "window
-  still up, never got the keystroke" from "window gone, process wedged". First steps: upload the kept state as an
-  actions artifact on failure (today it dies with the runner), and make the leg re-deliver alt+F4 once after
-  re-verifying focus before concluding the app is wedged; only then consider whether 10s is honestly enough on a 4-vCPU
-  runner.
-
 - Deflake `boot_id_durable_outcome::a_list_polling_through_a_stop_never_erases_the_annotation` under local full-suite
   load. One occurrence so far: 2026-08-18, full workspace suite at libtest's default thread count (one runnable test per
   logical CPU — six on this devbox); passed in isolation immediately after, and has never failed on CI. The assertion at
@@ -82,6 +68,17 @@ roadmap and carries no priorities unless an entry says so itself.
   pre-shim way under investigation), so a launch that never started fails setup by name instead of corrupting the
   assertion under test — every basic_session caller shares this exposure — and capture the scope wrapper's stderr on the
   never-started path so the next occurrence says which of the two candidates it was.
+
+- Deflake `provisioning::tests::local_provisioning_and_update_preserve_a_running_session` under heavy CPU contention.
+  One occurrence so far: 2026-08-18 on the 6-core devbox, panic "real provisioning run did not finish: deadline has
+  elapsed" (crates/farhelm-helm/src/provisioning.rs, the bounded wait around the real local provisioning run), during a
+  full workspace suite that was — honest context — sharing the box with an unrelated multi-agent review workload, so
+  total load was well above a normal full-suite run. Passed in isolation right after, taking 79s alone, which says the
+  test's real work is already a large fraction of whatever deadline it is given. Candidate mechanism, unverified: the
+  deadline is sized for an idle box and the test loses it under CPU contention rather than anything being wedged. First
+  steps: find the deadline constant behind that panic and measure the test's runtime distribution under a loaded
+  full-suite loop; if the margin is thin, either give the bound honest headroom or make the panic distinguish "no
+  progress" from "progress but slow" so a genuine wedge stays loud.
 
 - Dispose of prerelease v0.0.3-rc.1 — the release AND the tag together — once a real release exists. Both were minted
   only to exercise the release workflow (it checks out and verifies `refs/tags/<release_tag>` before building, so a real
