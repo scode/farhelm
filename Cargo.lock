@@ -1725,6 +1725,7 @@ dependencies = [
  "farhelm-helm",
  "farhelm-proto",
  "farhelm-supervisor",
+ "farhelm-teststate",
  "libc",
  "reqwest",
  "serde_json",
@@ -1795,6 +1796,14 @@ dependencies = [
  "tokio",
  "tracing",
  "uuid",
+]
+
+[[package]]
+name = "farhelm-teststate"
+version = "0.0.3"
+dependencies = [
+ "libc",
+ "tempfile",
 ]
 
 [[package]]

@@ -12,6 +12,13 @@ clap.workspace = true
 farhelm-helm.workspace = true
 farhelm-proto.workspace = true
 farhelm-supervisor.workspace = true
+# `internal sweep-test-state` (main.rs): the test harnesses' /tmp sweep
+# ships in the product binary because e2e/start-stack.sh already requires
+# the built binary and must not grow a second, diverging shell copy of the
+# sweep. A regular dependency rather than a dev-dependency on purpose —
+# dev targets see regular deps too, so this one entry also serves the
+# integration tests under tests/ that route their state dirs through it.
+farhelm-teststate.workspace = true
 # Only for the `hexecho` fake-agent script's raw-mode termios calls
 # (fake_agent.rs); everything else in this binary stays on tokio/std.
 libc.workspace = true

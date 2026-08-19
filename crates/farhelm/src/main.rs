@@ -141,6 +141,12 @@ enum InternalCmd {
         #[arg(long)]
         record_home: Option<PathBuf>,
     },
+    /// Reap dead test-harness state dirs under /tmp (see farhelm_teststate
+    /// for the naming scheme and flock liveness protocol). Called by
+    /// e2e/start-stack.sh at stack startup; the Rust integration tests
+    /// reach the same sweep in-process. Best-effort and always exits 0 —
+    /// a broken sweep must not block testing.
+    SweepTestState,
 }
 
 fn main() -> anyhow::Result<()> {
@@ -222,6 +228,14 @@ fn main() -> anyhow::Result<()> {
                 script,
                 record_home,
             } => fake_agent::run(script, record_home),
+            InternalCmd::SweepTestState => {
+                let outcome = farhelm_teststate::sweep(
+                    std::path::Path::new(farhelm_teststate::TMP_ROOT),
+                    &farhelm_teststate::SweepPolicy::default(),
+                );
+                farhelm_teststate::report(&outcome);
+                Ok(())
+            }
         },
     }
 }
@@ -527,5 +541,20 @@ mod tests {
                 }
             ));
         }
+    }
+
+    /// The sweep verb parses under the hidden internal namespace — the
+    /// exact invocation e2e/start-stack.sh performs, pinned here so a
+    /// rename breaks a test instead of silently breaking the script's
+    /// startup sweep.
+    #[test]
+    fn internal_sweep_test_state_parses() {
+        let cli = Cli::try_parse_from(["farhelm", "internal", "sweep-test-state"]).unwrap();
+        assert!(matches!(
+            cli.command,
+            Cmd::Internal {
+                command: InternalCmd::SweepTestState
+            }
+        ));
     }
 }

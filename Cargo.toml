@@ -5,6 +5,7 @@ members = [
   "crates/farhelm-helm",
   "crates/farhelm-proto",
   "crates/farhelm-supervisor",
+  "crates/farhelm-teststate",
   "crates/farhelm-ui",
 ]
 
@@ -100,6 +101,7 @@ web-sys = { version = "0.3", features = ["Window", "Location"] }
 farhelm-helm = { path = "crates/farhelm-helm" }
 farhelm-proto = { path = "crates/farhelm-proto" }
 farhelm-supervisor = { path = "crates/farhelm-supervisor" }
+farhelm-teststate = { path = "crates/farhelm-teststate" }
 
 # `wasm-release` is the cargo profile dx compiles the web UI under; this
 # stanza merges into dx's own definition of it. The strip exists because

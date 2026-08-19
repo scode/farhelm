@@ -1,0 +1,17 @@
+[package]
+name = "farhelm-teststate"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Shared /tmp naming, locking, and sweeping for Farhelm's test harnesses"
+
+[dependencies]
+# flock and geteuid. The lock protocol is flock-based on purpose: an flock
+# dies with its holder, which is what makes "is this run alive" answerable
+# after a SIGKILL when a PID file would lie.
+libc.workspace = true
+# `TestDir` wraps a real `TempDir` so the normal (non-killed) path keeps
+# tempfile's battle-tested drop-time removal; this crate only adds the
+# naming and the lock on top.
+tempfile.workspace = true
