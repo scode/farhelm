@@ -157,7 +157,13 @@ Session creation is one action, not a wizard. Only the working directory is fund
   succeed, and the later write is the title that sticks.
 - Agent profile: defaults to the last-used profile on the target host; if that profile no longer exists, the client asks
   instead of guessing.
-- Host: defaults to the host of the currently open session, else the helm's own host.
+- Host: defaults to the host of the currently open session, else the helm's own host. "The host of the currently open
+  session" means the install the user was looking at, not merely its registry row id: a row retargeted or adopted onto a
+  different install after the session was selected falls back to the helm's own host rather than silently aiming the
+  create at the successor. The comparison is by the registry's recorded install identity, so it protects exactly the
+  installs that have one: a host that has never identified itself to the registry is compared by row id alone, and its
+  replacement by another identity-less install goes unnoticed — an accepted residual, since absent identities carry no
+  continuity evidence in either direction.
 
 Creation launches the agent; you type your first prompt into its terminal. Automatic initial-prompt delivery is post-v1.
 The expected shape when it comes: for agents that accept an initial prompt on the command line (Claude Code and Codex

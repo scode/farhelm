@@ -391,6 +391,30 @@ pub struct Session {
     /// asked for. The create path therefore fills this in from what it
     /// selected (see `list::CreateSessionForm`) rather than reading it back.
     pub host: Option<HostId>,
+    /// The install identity the registry recorded for `host` when this row
+    /// was built — what lets the create dialog's host default follow the
+    /// INSTALL the user was looking at rather than the row id, which
+    /// survives retargets and adoptions while the machine behind it
+    /// changes (the #156-review residual this closes).
+    ///
+    /// Double-`Option` because the two absences mean different things and
+    /// must not collapse. The OUTER `None` is "the key was absent from the
+    /// payload this value was decoded from": for a LIST or DETAIL row that
+    /// means the helm predates the field — the only case the create
+    /// default may degrade to the old row-id-only check — but mutation and
+    /// create replies are bare `SessionInfo` from ANY helm, so their outer
+    /// `None` says nothing about age and the caller normalizes it before
+    /// the value stands in for a row (the archive merge retains the prior
+    /// binding; the create path backfills the submitted host's identity).
+    /// `Some(None)` is "this helm says the host has no recorded identity"
+    /// (JSON `null`), which still participates in the install comparison —
+    /// an identity later appearing for that row is a transition whose
+    /// continuity cannot be verified, so the comparison falls back safely
+    /// rather than treating it as proof of anything. The custom
+    /// deserializer is what preserves the distinction: plain
+    /// `Option<Option<_>>` folds `null` into the outer `None`.
+    #[serde(default, deserialize_with = "double_option")]
+    pub host_identity: Option<Option<String>>,
     /// The host's display name as the helm renders it, denormalized onto
     /// the row so a list can name every session's host without a second
     /// request. `None` for the same reason `host` is.
@@ -416,6 +440,21 @@ pub struct Session {
     /// an `Option` as `None`, which is also what a helm predating the field
     /// sends. Both readings agree: no profile is known for this session.
     pub source_profile: Option<SourceProfile>,
+}
+
+/// Deserialize `Session::host_identity`, whose key PRESENCE carries meaning
+/// separately from its value: an absent key stays the outer `None` (via
+/// `#[serde(default)]`), while a present key — `null` included — lands in
+/// `Some(inner)`. Serde's stock `Option<Option<T>>` handling cannot express
+/// this: it decodes `null` and "absent" to the same outer `None`, which is
+/// exactly the collapse that field's contract forbids. Deliberately NOT
+/// generic: one field uses it, and the concrete signature keeps the wire
+/// shape it implements in plain sight.
+fn double_option<'de, D>(deserializer: D) -> Result<Option<Option<String>>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    Option::<String>::deserialize(deserializer).map(Some)
 }
 
 /// Mirror of the helm's `source_profile` object (farhelm-proto's
@@ -1027,7 +1066,15 @@ fn AppBody() -> Element {
                         // which selections were user-initiated); this
                         // handler only owns the signal.
                         on_open: move |session: Session| current.set(Some(session)),
-                        open_host: current.read().as_ref().and_then(|session| session.host),
+                        // The id AND the install identity the row reported,
+                        // snapshotted together at selection time: the pair is
+                        // what lets the create default notice the row id
+                        // being retargeted onto another install after this
+                        // selection was made (see `list::OpenHost`).
+                        open_host: current
+                            .read()
+                            .as_ref()
+                            .and_then(list::OpenHost::of_session),
                         selected: selected_id,
                         fleet_empty,
                         // A confirmed rename patches the selected session's
@@ -1258,6 +1305,40 @@ mod tests {
         });
         serde_json::from_value::<Session>(stale)
             .expect_err("`alive` was replaced at PROTOCOL_VERSION 10, not kept as an alias");
+    }
+
+    /// `host_identity`'s three wire shapes decode to three DISTINCT values:
+    /// an absent key (a helm predating the field) to the outer `None`, JSON
+    /// `null` (a current helm, host with no recorded identity) to
+    /// `Some(None)`, and a string to `Some(Some(_))`.
+    ///
+    /// The absent/null distinction is the entire compatibility contract for
+    /// the create default's install check (see the field's docs): only the
+    /// absent case may degrade to the old row-id-only behavior, so a decoder
+    /// that folded `null` into the outer `None` — which serde's stock
+    /// `Option<Option<_>>` handling does — would silently reopen the
+    /// new-install-took-over window for identity-less hosts.
+    #[test]
+    fn host_identity_decodes_absent_null_and_present_distinctly() {
+        let body = |host_identity: Option<serde_json::Value>| {
+            let mut json = serde_json::json!({
+                "id": "s1",
+                "title": "demo",
+                "cwd": "/tmp",
+                "invocation": "agent",
+            });
+            if let Some(value) = host_identity {
+                json["host_identity"] = value;
+            }
+            json
+        };
+        let absent: Session = serde_json::from_value(body(None)).unwrap();
+        assert_eq!(absent.host_identity, None);
+        let null: Session = serde_json::from_value(body(Some(serde_json::Value::Null))).unwrap();
+        assert_eq!(null.host_identity, Some(None));
+        let present: Session =
+            serde_json::from_value(body(Some(serde_json::json!("install-a")))).unwrap();
+        assert_eq!(present.host_identity, Some(Some("install-a".to_string())));
     }
 
     /// An old-shaped `Session` JSON (no `status` field at all — exactly

@@ -248,6 +248,25 @@ fn admit_detail(
     Admission::Apply
 }
 
+/// Carry the helm-owned routing labels from the row a mutation was issued
+/// against onto the mutation's bare-`SessionInfo` reply.
+///
+/// Mutation replies (archive today) carry none of the listing's flattened
+/// host fields, and the merged result stands in for the detail row until
+/// the authoritative follow-up read lands. Every label here is load-bearing
+/// for that interval: `host`/`host_name` keep the view routed and titled,
+/// `stale` keeps the staleness notice honest, and `host_identity` keeps the
+/// create default bound to the INSTALL the user was looking at — dropping
+/// it would leave the outer `None` that means "trust the row id", silently
+/// reopening the wrong-install create window for exactly the
+/// refresh-in-flight interval this merge exists to cover.
+fn retain_helm_routing_labels(reply: &mut Session, before: &Session) {
+    reply.host = before.host;
+    reply.host_name = before.host_name.clone();
+    reply.host_identity = before.host_identity.clone();
+    reply.stale = before.stale;
+}
+
 #[component]
 pub(crate) fn SessionView(
     session: Session,
@@ -897,12 +916,7 @@ pub(crate) fn SessionView(
         spawn(async move {
             match archive_session(&base, &id).await {
                 Ok(mut archived) => {
-                    // The mutation reply is bare `SessionInfo`; retain the
-                    // helm-owned routing labels from the detail row while the
-                    // authoritative follow-up read is in flight.
-                    archived.host = before.host;
-                    archived.host_name = before.host_name;
-                    archived.stale = before.stale;
+                    retain_helm_routing_labels(&mut archived, &before);
                     current.set(archived);
                     confirming.set(false);
                     confirming_archive.set(false);
@@ -1682,6 +1696,62 @@ fn restart_button_label(offer: RestartOffer) -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A mutation reply must not cost the view its install binding.
+    ///
+    /// Archive replies are bare `SessionInfo`: no host fields at all. The
+    /// merged result IS the selected session until the follow-up detail
+    /// read lands, and the create default reads its install binding from
+    /// exactly that value — so a merge that carries `host`/`host_name`/
+    /// `stale` but drops `host_identity` reverts the default to the row-id
+    /// check for the whole refresh-in-flight window (the regression this
+    /// pins, found in the item-2 review). All four labels are asserted so
+    /// no single one can fall out of the set unnoticed.
+    #[test]
+    fn a_mutation_reply_keeps_the_rows_routing_labels_and_install_binding() {
+        // A bare session as a mutation reply decodes: no helm-owned host
+        // fields on it. `Session` has no Default on purpose (the decoder
+        // is the only production constructor), so the fixture spells out
+        // every field.
+        fn bare(id: &str) -> Session {
+            Session {
+                id: id.to_string(),
+                title: id.to_string(),
+                cwd: "/tmp".to_string(),
+                invocation: "agent".to_string(),
+                status: crate::SessionStatus::Exited { exit_code: Some(0) },
+                annotation: None,
+                restart_offer: crate::RestartOffer::FreshOnly,
+                archived: true,
+                tabs: Vec::new(),
+                host: None,
+                host_identity: None,
+                host_name: None,
+                stale: false,
+                source_profile: None,
+            }
+        }
+        let before = Session {
+            host: Some(7),
+            host_name: Some("user@remote".to_string()),
+            host_identity: Some(Some("install-a".to_string())),
+            stale: true,
+            ..bare("sess")
+        };
+        let mut reply = bare("sess");
+
+        retain_helm_routing_labels(&mut reply, &before);
+
+        assert_eq!(reply.host, Some(7));
+        assert_eq!(reply.host_name.as_deref(), Some("user@remote"));
+        assert_eq!(
+            reply.host_identity,
+            Some(Some("install-a".to_string())),
+            "the install binding survives the merge — outer None here would \
+             mean \"trust the row id\" until the next detail refresh"
+        );
+        assert!(reply.stale);
+    }
 
     /// An older detail reply must never overwrite a newer one, and the case
     /// that matters is the one that happens: the NEWER read completing

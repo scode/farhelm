@@ -149,6 +149,7 @@ mod tests {
                 })
                 .collect(),
             host: None,
+            host_identity: None,
             host_name: None,
             stale: false,
             source_profile: None,

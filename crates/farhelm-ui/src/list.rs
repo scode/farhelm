@@ -300,6 +300,22 @@ struct HostOption {
     /// Distinct from the fingerprint above: that one describes the registry
     /// ROW, this one the live connection behind it.
     connection: u64,
+    /// The registry's recorded install identity (`Host::identity`), the
+    /// third identity notion here and the one the create DEFAULT compares
+    /// (see [`default_create_host`]): unlike the fingerprint it survives a
+    /// pure address retarget of the same machine, and unlike the connection
+    /// token it survives a reconnect — it changes exactly when the install
+    /// behind the row does, which is the only change that should evict a
+    /// default derived from "the session the user is looking at".
+    identity: Option<String>,
+    /// Whether the host sits in the identity-mismatch phase: the endpoint
+    /// reported an identity DIFFERENT from the recorded one and the helm
+    /// froze awaiting adopt-or-fix. `identity` above still holds the
+    /// RECORDED (predecessor) value in that phase, so an identity
+    /// comparison alone would keep matching a row known to front a
+    /// different install — this flag is what lets the create default
+    /// disqualify it instead (see [`default_create_host`]).
+    identity_mismatch: bool,
 }
 
 impl HostOption {
@@ -430,6 +446,42 @@ const FILTERABLE_STATUSES: [&str; 6] = [
     "error",
 ];
 
+/// The selected session's host as the create default's input: the row id
+/// the session row named, plus the install identity it named alongside it.
+///
+/// Snapshotted from the `Session` at selection time (see `AppBody`'s
+/// `open_host` wiring), so `identity` says which INSTALL the user was
+/// looking at when they selected — which is exactly what
+/// [`default_create_host`] compares against the registry as it stands at
+/// create time. `identity`'s two `None` layers keep the wire's two
+/// absences apart; see `Session::host_identity` for the contract.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct OpenHost {
+    pub(crate) id: HostId,
+    pub(crate) identity: Option<Option<String>>,
+}
+
+impl OpenHost {
+    /// The selected session's host binding — id AND the install identity
+    /// the row reported, snapshotted together at selection time.
+    ///
+    /// This is THE production adapter from a `Session` to the create
+    /// default's input: `AppBody` calls it on the selected session, and
+    /// [`default_create_host`] compares what it produces. It exists as a
+    /// named function (rather than an inline struct literal at the call
+    /// site) so a test can pin that the identity actually rides along — an
+    /// adapter that dropped it would silently restore the row-id-only
+    /// behavior while every comparison-level test stayed green. `None` for
+    /// a session that names no host (a helm too old to send `host` has
+    /// nothing to bind a default to).
+    pub(crate) fn of_session(session: &Session) -> Option<OpenHost> {
+        Some(OpenHost {
+            id: session.host?,
+            identity: session.host_identity.clone(),
+        })
+    }
+}
+
 /// Which host a fresh create dialog should target: the LOCAL row, whatever
 /// phase it is in.
 ///
@@ -443,8 +495,30 @@ const FILTERABLE_STATUSES: [&str; 6] = [
 /// is the SELECTED session's host — the one open right now, never a
 /// remembered last-viewed one, because a session the user deselected is
 /// not open — and it only wins while that host is still in the registry
-/// (an open session whose host was removed must not aim a create at a
-/// selector entry that no longer exists).
+/// AND still the install the session row reported (an open session whose
+/// host was removed must not aim a create at a selector entry that no
+/// longer exists, and one whose host row was retargeted or adopted onto a
+/// DIFFERENT install must not aim a create at the successor — the row id
+/// survives both edits, which is exactly why the id alone was the
+/// #156-review residual this check closes).
+///
+/// The install comparison: a row whose `identity` is the outer `None`
+/// came from a helm that predates `host_identity`, and gets the old
+/// row-id-only behavior — degrading, not failing, is what keeps a new UI
+/// working against an old helm. Otherwise the session row's recorded
+/// identity must equal the registry's current one, where `None == None`
+/// (identity-less then, identity-less now) deliberately passes. That is a
+/// KNOWN residual, accepted rather than closable: an identity-less host is
+/// one whose install has never identified itself to the registry (see the
+/// helm store's first-contact and retarget docs), so two absent identities
+/// carry no continuity evidence in either direction — and failing the
+/// comparison on "no evidence" would break the default for every
+/// never-probed host, trading a rare wrong-default window on identity-less
+/// installs for a broken default on all of them. A host frozen in the
+/// identity-mismatch phase is disqualified outright: its recorded identity
+/// still names the predecessor while the endpoint already reports a
+/// different install, so an identity match there is precisely the false
+/// positive this function exists to refuse.
 ///
 /// ## Two things the fallback deliberately does not do
 ///
@@ -459,9 +533,22 @@ const FILTERABLE_STATUSES: [&str; 6] = [
 ///   chosen, which the form refuses to submit — is the honest answer, and it
 ///   only arises before the first hosts read lands, since a live helm always
 ///   has its local row.
-fn default_create_host(hosts: &[HostOption], open_host: Option<HostId>) -> Option<HostId> {
+fn default_create_host(hosts: &[HostOption], open_host: Option<&OpenHost>) -> Option<HostId> {
     open_host
-        .filter(|open| hosts.iter().any(|host| host.id == *open))
+        .filter(|open| {
+            hosts.iter().any(|host| {
+                // An outer-None `open.identity` is a row from a helm that
+                // predates the field: no identity claim at all, so the id
+                // is the only comparable fact and it alone decides.
+                host.id == open.id
+                    && !host.identity_mismatch
+                    && open
+                        .identity
+                        .as_ref()
+                        .is_none_or(|seen| *seen == host.identity)
+            })
+        })
+        .map(|open| open.id)
         .or_else(|| hosts.iter().find(|host| host.local).map(|host| host.id))
 }
 
@@ -478,11 +565,41 @@ fn default_create_host(hosts: &[HostOption], open_host: Option<HostId>) -> Optio
 fn effective_create_host(
     hosts: &[HostOption],
     chosen: Option<HostId>,
-    open_host: Option<HostId>,
+    open_host: Option<&OpenHost>,
 ) -> Option<HostId> {
     chosen
         .filter(|chosen| hosts.iter().any(|host| host.id == *chosen))
         .or_else(|| default_create_host(hosts, open_host))
+}
+
+/// Fill the helm-owned host fields a create reply deliberately omits.
+///
+/// `POST /api/sessions` answers with bare `SessionInfo` — no host, no
+/// identity — because the caller already knows which host it asked for.
+/// This is where that knowledge is applied: `host` is the submitted row and
+/// `identity` the submitted option's registry identity, so the created
+/// session can stand in as the selected row (naming the right host, holding
+/// the create default) before the first authoritative detail read answers.
+/// Removing this enrichment would not break any listing — it would only
+/// reopen the wrong-default window for exactly the interval between a
+/// create and its first refresh, which is why it has its own test.
+///
+/// Known residual, accepted: the identity is the form's snapshot, and a
+/// host that learns its identity between that snapshot and the create
+/// succeeding gets stamped a stale `Some(None)` here. The skew fails
+/// toward MISMATCH — the next default falls back locally instead of
+/// following the row — and the first detail refresh replaces the stamp, so
+/// the cost is a briefly conservative default, not a wrong-machine create.
+fn enrich_created_session(
+    reply: Session,
+    host: HostId,
+    identity: Option<Option<String>>,
+) -> Session {
+    Session {
+        host: reply.host.or(Some(host)),
+        host_identity: reply.host_identity.or(identity),
+        ..reply
+    }
 }
 
 /// Every registered host as the create dialog and the filter surface offer
@@ -505,6 +622,8 @@ fn host_options(hosts: &[Host]) -> Vec<HostOption> {
             phase: (!is_connected(&host.state)).then(|| phase_label(&host.state).to_string()),
             incarnation: host_incarnation(host),
             connection: host.incarnation,
+            identity: host.identity.clone(),
+            identity_mismatch: matches!(host.state, crate::HostPhase::IdentityMismatch { .. }),
         })
         .collect()
 }
@@ -655,8 +774,10 @@ pub(crate) fn ListView(
     /// default clause, supplied by `App` because only it knows the
     /// selection. `None` when nothing is selected (or the selected
     /// session predates per-host metadata), which falls back to the
-    /// helm's own host.
-    open_host: Option<HostId>,
+    /// helm's own host. Carries the install identity the session row
+    /// reported beside the row id, so the default can notice a retarget
+    /// or adopt landing between selection and create — see [`OpenHost`].
+    open_host: Option<OpenHost>,
     /// The SHARED live-operation token (see `ops`'s module docs): owned by
     /// `AppBody` rather than created here, because the selected session's
     /// view claims the same token for its own restart/archive — a private
@@ -1008,7 +1129,7 @@ pub(crate) fn ListView(
             .then(|| {
                 let read = hosts.read();
                 let options = host_options(read.hosts().unwrap_or_default());
-                let effective = effective_create_host(&options, chosen_host(), open_host);
+                let effective = effective_create_host(&options, chosen_host(), open_host.as_ref());
                 options
                     .into_iter()
                     .find(|host| Some(host.id) == effective)
@@ -2706,8 +2827,9 @@ pub(crate) fn ListView(
 fn CreateSessionForm(
     hosts: Vec<HostOption>,
     /// See `ListView`'s parameter of the same name: the selected session's
-    /// host, SPEC.md's first create-default clause.
-    open_host: Option<HostId>,
+    /// host and its reported install identity, SPEC.md's first
+    /// create-default clause.
+    open_host: Option<OpenHost>,
     /// Whether the hosts read has EVER succeeded. Distinguishes "there are
     /// no hosts" (impossible for a live helm, which always has its local
     /// row) from "nothing has come back yet", which is what a submit has to
@@ -2754,7 +2876,7 @@ fn CreateSessionForm(
     // (a re-added destination) silently reinstates the user's choice.
     let choice_vanished =
         chosen_host().is_some_and(|chosen| !hosts.iter().any(|host| host.id == chosen));
-    let selected = effective_create_host(&hosts, chosen_host(), open_host);
+    let selected = effective_create_host(&hosts, chosen_host(), open_host.as_ref());
     // This form's current intended create, if one has been submitted yet
     // (PLAN_M3.md item 6), together with the BINDING it was minted for.
     // Minted at first submit, reused by every later submit of the same
@@ -2945,7 +3067,8 @@ fn CreateSessionForm(
                 // captured host would send the create to the PREVIOUS machine
                 // while the selector on screen names another.
                 let target_now = catalog.target();
-                let selected_now = effective_create_host(&hosts, chosen_host.peek().to_owned(), open_host);
+                let selected_now =
+                    effective_create_host(&hosts, chosen_host.peek().to_owned(), open_host.as_ref());
                 // And the catalog the agent was just resolved against has to
                 // be the catalog OF that host. When they disagree the target
                 // effect has not caught up with the selector yet — a window of
@@ -2983,6 +3106,17 @@ fn CreateSessionForm(
                     return;
                 };
                 let base = base.clone();
+                // The target row's install identity as this form knew it at
+                // submit — resolved here, outside the spawn, because
+                // `binding.host` is frozen (the mint loop re-reads text
+                // fields only) and the reply below carries no host facts to
+                // resolve it from. It backfills the created `Session` so
+                // the selection this create becomes carries the same
+                // install claim a listing row would have carried.
+                let created_host_identity = hosts
+                    .iter()
+                    .find(|host| host.id == binding.host)
+                    .map(|host| host.identity.clone());
                 error.set(None);
                 spawn(async move {
                     // Mint until the key and the binding agree.
@@ -3090,22 +3224,17 @@ fn CreateSessionForm(
                         )
                         .await
                     {
-                        // The reply is the bare `SessionInfo` — the helm
-                        // deliberately puts no host fields on it, since the
-                        // caller already knows which host it asked for. This
-                        // is that caller: filling the target in here is what
-                        // lets the session view name the right host before
-                        // the first detail poll answers.
                         Ok(session) => {
                             // Released BEFORE navigating: `on_created`
                             // unmounts this component, and a token released
                             // afterwards would be released by a task nobody
                             // is left to run.
                             ops.release();
-                            on_created.call(Session {
-                                host: session.host.or(Some(bound.host)),
-                                ..session
-                            });
+                            on_created.call(enrich_created_session(
+                                session,
+                                bound.host,
+                                created_host_identity,
+                            ));
                         }
                         Err(e) => {
                             // Gated on the target this request was DISPATCHED
@@ -4546,6 +4675,7 @@ mod tests {
             archived: false,
             tabs: Vec::new(),
             host: None,
+            host_identity: None,
             host_name: None,
             stale: false,
             source_profile: None,
@@ -4798,6 +4928,18 @@ mod tests {
             phase: None,
             incarnation: format!("incarnation-{id}"),
             connection: 1,
+            identity: Some(format!("install-{id}")),
+            identity_mismatch: false,
+        }
+    }
+
+    /// The selected session's host as a row from a CURRENT helm would
+    /// report it: id plus the same install identity [`option`] gives that
+    /// row, i.e. selection and registry agree.
+    fn open(id: HostId) -> OpenHost {
+        OpenHost {
+            id,
+            identity: Some(Some(format!("install-{id}"))),
         }
     }
 
@@ -4832,11 +4974,221 @@ mod tests {
             option(1, "this machine", true),
             option(2, "user@box", false),
         ];
-        assert_eq!(default_create_host(&hosts, Some(2)), Some(2));
+        assert_eq!(default_create_host(&hosts, Some(&open(2))), Some(2));
         assert_eq!(
-            default_create_host(&hosts, Some(99)),
+            default_create_host(&hosts, Some(&open(99))),
             Some(1),
             "a selected session whose host left the registry falls back to the helm's own host"
+        );
+    }
+
+    /// The first clause is bound to the INSTALL, not the row id: a row id
+    /// survives retargets and adoptions while the machine behind it
+    /// changes, so a selection made against one install must not default a
+    /// create onto its successor (the #156-review residual).
+    ///
+    /// The install-comparison cases, one per line of the contract in
+    /// [`default_create_host`]'s doc (the agreeing case — identity match
+    /// keeps the default — is already pinned by
+    /// `the_open_sessions_host_wins_while_it_exists` above): disagreement
+    /// falls back to the local row, in BOTH directions — an identity
+    /// appearing where the row reported none, and an identity vanishing
+    /// where the row reported one, are transitions whose continuity cannot
+    /// be verified, so the default falls back rather than guessing; and a
+    /// session from a helm that predates `host_identity` (outer `None`)
+    /// degrades to the row-id-only behavior rather than losing the
+    /// default.
+    #[test]
+    fn the_open_sessions_host_wins_only_while_it_is_the_same_install() {
+        let hosts = vec![
+            option(1, "this machine", true),
+            option(2, "user@box", false),
+        ];
+        let retargeted = OpenHost {
+            id: 2,
+            identity: Some(Some("install-superseded".to_string())),
+        };
+        assert_eq!(
+            default_create_host(&hosts, Some(&retargeted)),
+            Some(1),
+            "a row id now naming a different install must not aim the default at the successor"
+        );
+
+        let was_identityless = OpenHost {
+            id: 2,
+            identity: Some(None),
+        };
+        assert_eq!(
+            default_create_host(&hosts, Some(&was_identityless)),
+            Some(1),
+            "an identity appearing on a previously identity-less row cannot be verified as the \
+             same install, so the default falls back rather than guessing"
+        );
+
+        let identity_cleared = OpenHost {
+            id: 2,
+            identity: Some(Some("install-2".to_string())),
+        };
+        let now_identityless = vec![
+            option(1, "this machine", true),
+            HostOption {
+                identity: None,
+                ..option(2, "user@box", false)
+            },
+        ];
+        assert_eq!(
+            default_create_host(&now_identityless, Some(&identity_cleared)),
+            Some(1),
+            "a row that reported an identity while the registry now records none is the same \
+             unverifiable transition in reverse — treating every currently identity-less row \
+             as compatible would wave it through"
+        );
+
+        let old_helm = OpenHost {
+            id: 2,
+            identity: None,
+        };
+        assert_eq!(
+            default_create_host(&hosts, Some(&old_helm)),
+            Some(2),
+            "a helm that predates host_identity keeps the old row-id behavior instead of \
+             dropping the default"
+        );
+    }
+
+    /// Identity-less rows from a CURRENT helm still hold the default while
+    /// the registry stays identity-less: `None == None` passes on purpose.
+    ///
+    /// Why the exception is retained: an identity-less host has never
+    /// identified itself to the registry, so two absent identities carry no
+    /// continuity evidence in either direction — there is nothing to
+    /// compare, not a comparison that passed. Failing on "no evidence"
+    /// would break the default for every never-probed host; the price is
+    /// the narrow residual that an identity-less install replaced by
+    /// another identity-less install goes unnoticed (documented on
+    /// [`default_create_host`] and in SPEC_impl.md's creation-default
+    /// note).
+    #[test]
+    fn an_identityless_row_matching_an_identityless_registry_keeps_the_default() {
+        let identityless = HostOption {
+            identity: None,
+            ..option(2, "user@box", false)
+        };
+        let hosts = vec![option(1, "this machine", true), identityless];
+        let selection = OpenHost {
+            id: 2,
+            identity: Some(None),
+        };
+        assert_eq!(default_create_host(&hosts, Some(&selection)), Some(2));
+    }
+
+    /// A create reply is bare `SessionInfo`; the enrichment is what makes
+    /// the created session able to hold the create default before its
+    /// first detail refresh.
+    ///
+    /// Why this exists: removing [`enrich_created_session`] (or dropping
+    /// the identity half of it) breaks no listing and no other test — it
+    /// only reopens the wrong-default window for the interval between a
+    /// create and its first refresh. Both halves are pinned: the submitted
+    /// host and identity land on a bare reply, and a reply that somehow
+    /// carried its own values keeps them (`or`, not overwrite).
+    #[test]
+    fn a_created_session_is_stamped_with_the_submitted_host_and_identity() {
+        let bare = row_specimen("made");
+        let enriched = enrich_created_session(bare, 7, Some(Some("install-7".to_string())));
+        assert_eq!(enriched.host, Some(7));
+        assert_eq!(enriched.host_identity, Some(Some("install-7".to_string())));
+
+        let mut already = row_specimen("made");
+        already.host = Some(3);
+        already.host_identity = Some(Some("install-3".to_string()));
+        let kept = enrich_created_session(already, 7, Some(Some("install-7".to_string())));
+        assert_eq!(
+            (kept.host, kept.host_identity),
+            (Some(3), Some(Some("install-3".to_string()))),
+            "a reply that names its own host fields is authoritative over the stamp"
+        );
+    }
+
+    /// The two production adapters feeding [`default_create_host`] must
+    /// both carry the install identity through — dropping it in either one
+    /// restores the row-id-only behavior while every comparison-level test
+    /// above stays green, which is exactly how the #156 residual would
+    /// quietly come back.
+    ///
+    /// [`OpenHost::of_session`] is what `AppBody` calls on the selected
+    /// session; [`host_options`] is what `ListView` reduces the host
+    /// catalog through. Each is asserted on the fields the comparison
+    /// reads: id + identity (+ the identity-mismatch disqualifier on the
+    /// catalog side).
+    #[test]
+    fn the_identity_survives_both_adapters_into_the_comparison() {
+        let mut session = row_specimen("sess");
+        session.host = Some(7);
+        session.host_identity = Some(Some("install-7".to_string()));
+        let open = OpenHost::of_session(&session).expect("a hosted session adapts");
+        assert_eq!(open.id, 7);
+        assert_eq!(open.identity, Some(Some("install-7".to_string())));
+
+        let mut hostless = row_specimen("sess");
+        hostless.host = None;
+        assert_eq!(
+            OpenHost::of_session(&hostless),
+            None,
+            "a session naming no host binds no default"
+        );
+
+        let catalog = vec![Host {
+            id: 7,
+            kind: HostKind::Ssh,
+            destination: Some("user@box".to_string()),
+            name: "user@box".to_string(),
+            identity: Some("install-7".to_string()),
+            remote_farhelm: None,
+            remote_state_dir: None,
+            state: crate::HostPhase::IdentityMismatch {
+                recorded: "install-7".to_string(),
+                reported: "install-8".to_string(),
+            },
+            incarnation: 3,
+        }];
+        let options = host_options(&catalog);
+        assert_eq!(options[0].id, 7);
+        assert_eq!(
+            options[0].identity,
+            Some("install-7".to_string()),
+            "the catalog adapter carries the registry identity"
+        );
+        assert!(
+            options[0].identity_mismatch,
+            "and surfaces the mismatch phase the comparison must disqualify on"
+        );
+    }
+
+    /// A host frozen in the identity-mismatch phase loses the default even
+    /// though its RECORDED identity still equals the one the session row
+    /// reported.
+    ///
+    /// Why this matters: in that phase the registry's identity names the
+    /// predecessor while the endpoint already reports a different install,
+    /// so the recorded-identity comparison alone is a false positive — the
+    /// one shape of "same identity, different machine" the comparison
+    /// cannot see. SPEC.md's default must fall back locally rather than
+    /// aim a create at a row the helm would refuse anyway.
+    #[test]
+    fn an_identity_mismatched_host_loses_the_default_despite_matching_identity() {
+        let hosts = vec![
+            option(1, "this machine", true),
+            HostOption {
+                identity_mismatch: true,
+                phase: Some("identity-mismatch".to_string()),
+                ..option(2, "user@box", false)
+            },
+        ];
+        assert_eq!(
+            default_create_host(&hosts, Some(&open(2))),
+            Some(1),
+            "a row known to front a different install than it records must not hold the default"
         );
     }
 
@@ -5034,17 +5386,17 @@ mod tests {
             option(3, "user@other", false),
         ];
         assert_eq!(
-            effective_create_host(&hosts, Some(3), Some(2)),
+            effective_create_host(&hosts, Some(3), Some(&open(2))),
             Some(3),
             "a valid explicit choice beats the open session's host"
         );
         assert_eq!(
-            effective_create_host(&hosts, Some(99), Some(2)),
+            effective_create_host(&hosts, Some(99), Some(&open(2))),
             Some(2),
             "a vanished choice falls back to the open session's host, not to local"
         );
         assert_eq!(
-            effective_create_host(&hosts, Some(99), Some(98)),
+            effective_create_host(&hosts, Some(99), Some(&open(98))),
             Some(1),
             "and only when BOTH are gone does the local row answer"
         );

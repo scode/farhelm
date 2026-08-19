@@ -458,6 +458,7 @@ mod tests {
             archived: false,
             tabs: Vec::new(),
             host: None,
+            host_identity: None,
             host_name: None,
             stale: false,
             // Raw-created, like every session these helpers reason about: the
