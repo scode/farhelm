@@ -109,6 +109,15 @@ struct RowState {
     /// the hosts panel's `profiles_open` shape, derived from `ListView`'s
     /// `menu_open` signal.
     menu_open: bool,
+    /// Whether this row's session is the one the right pane currently
+    /// shows — derived from `ListView`'s `selected` signal, same shape as
+    /// `menu_open`, and grouped here because it is row display state,
+    /// which is this struct's whole charter. Memoization does not require
+    /// the grouping — a directly-compared bool prop would behave the same
+    /// — it only requires the value to stay part of the compared props,
+    /// which is what keeps a selection switch down to two row renders
+    /// (see the render-count tests below).
+    selected: bool,
 }
 
 /// Which ordinary row controls exist for the current retention state.
@@ -130,6 +139,26 @@ fn row_control_visibility(archived: bool) -> RowControlVisibility {
         stop: !archived,
         archive: !archived,
         delete: true,
+    }
+}
+
+/// The session row's class list for its two independent visual states.
+///
+/// A stale row is DIMMED and badged, never hidden or disabled: SPEC.md
+/// requires such sessions to stay listed and be clearly marked, and their
+/// lifecycle controls stay live because the helm's refusal (which names
+/// the host's state) is a better answer than a dead button. `selected`
+/// composes with staleness rather than replacing it — the stale dimming
+/// lives on `.session-row-open`'s opacity while the selection highlight is
+/// the ROW's background, so a selected stale row shows both truthfully.
+/// Static strings per combination, matching the prior two-state shape,
+/// rather than a formatted class string.
+fn row_class(stale: bool, selected: bool) -> &'static str {
+    match (stale, selected) {
+        (true, true) => "session-row stale selected",
+        (true, false) => "session-row stale",
+        (false, true) => "session-row selected",
+        (false, false) => "session-row",
     }
 }
 
@@ -2519,6 +2548,8 @@ pub(crate) fn ListView(
                                     nav_disabled: nav_locked,
                                     menu_open: menu_open.read().as_deref()
                                         == Some(session.id.as_str()),
+                                    selected: selected.read().as_deref()
+                                        == Some(session.id.as_str()),
                                 },
                                 rename_draft,
                                 on_open: guarded_open,
@@ -3707,7 +3738,10 @@ fn measurement_outcome(
 /// quietly banked.
 ///
 /// `data-session-id` stays on the outer wrapper for Playwright to key off
-/// of, joined by `data-session-stale`. No `stop_propagation` on the
+/// of, joined by `data-session-stale` and `data-session-selected` (the
+/// latter mirrors the `.selected` highlight — see `RowState::selected` —
+/// so e2e can assert selection without matching CSS classes). No
+/// `stop_propagation` on the
 /// stop/delete buttons: the wrapper
 /// `<div>` has no click handler of its own for a click to bubble into
 /// (the open action lives on its own sibling button), so there is nothing
@@ -3835,6 +3869,7 @@ fn SessionRow(
         renaming,
         nav_disabled,
         menu_open,
+        selected,
     } = state;
     #[cfg(test)]
     SESSION_ROW_RENDERS.with(|renders| renders.set(renders.get() + 1));
@@ -3914,15 +3949,7 @@ fn SessionRow(
             }
         });
     };
-    // A stale row is DIMMED and badged, never hidden or disabled: SPEC.md
-    // requires such sessions to stay listed and be clearly marked, and their
-    // lifecycle controls stay live because the helm's refusal (which names
-    // the host's state) is a better answer than a dead button.
-    let row_class = if session.stale {
-        "session-row stale"
-    } else {
-        "session-row"
-    };
+    let row_class = row_class(session.stale, selected);
 
     rsx! {
         div {
@@ -3930,6 +3957,7 @@ fn SessionRow(
             "data-session-id": "{session.id}",
             "data-session-stale": "{session.stale}",
             "data-session-archived": "{session.archived}",
+            "data-session-selected": "{selected}",
             // Two stacked rows, not one: the buttons need a plain flex
             // ROW (see `.session-row-main` in app.css), but a per-session
             // error line needs its own full-width row underneath rather
@@ -3940,6 +3968,14 @@ fn SessionRow(
                 button {
                     r#type: "button",
                     class: "session-row-open",
+                    // The accessible counterpart of the visual highlight:
+                    // the sidebar is a navigation-shaped list of open
+                    // buttons, and `aria-current` is the native way to say
+                    // "this one is where you are" without inventing a
+                    // listbox role for a list that is not one. Absent
+                    // entirely on unselected rows (a conditional
+                    // attribute), not `"false"`.
+                    aria_current: if selected { "true" },
                     // Disabled by ANY of the three locks: the global nav
                     // lock (any in-flight op anywhere), or this row's own
                     // confirmation or rename field being open — the
@@ -4495,6 +4531,27 @@ mod tests {
         assert_eq!(measurement_outcome(1, 2, None), None);
     }
 
+    /// One session as the row render tests below need it: real enough for
+    /// `SessionRow` to render, stable so that reconstructing it every
+    /// parent render compares equal and memoization is what is measured.
+    fn row_specimen(id: &str) -> Session {
+        Session {
+            id: id.to_string(),
+            title: "stable".to_string(),
+            cwd: "/tmp".to_string(),
+            invocation: "agent".to_string(),
+            status: SessionStatus::Exited { exit_code: Some(0) },
+            annotation: None,
+            restart_offer: crate::RestartOffer::FreshOnly,
+            archived: false,
+            tabs: Vec::new(),
+            host: None,
+            host_name: None,
+            stale: false,
+            source_profile: None,
+        }
+    }
+
     /// Repeated parent refreshes must update direct callback props in place
     /// without rerendering an otherwise unchanged session row.
     ///
@@ -4519,21 +4576,7 @@ mod tests {
             let on_rename_submit = use_callback(|_: (String, String)| {});
             let on_rename_cancel = use_callback(|_: ()| {});
             let on_menu_toggle = use_callback(|_: String| {});
-            let session = Session {
-                id: "session-1".to_string(),
-                title: "stable".to_string(),
-                cwd: "/tmp".to_string(),
-                invocation: "agent".to_string(),
-                status: SessionStatus::Exited { exit_code: Some(0) },
-                annotation: None,
-                restart_offer: crate::RestartOffer::FreshOnly,
-                archived: false,
-                tabs: Vec::new(),
-                host: None,
-                host_name: None,
-                stale: false,
-                source_profile: None,
-            };
+            let session = row_specimen("session-1");
             rsx! {
                 SessionRow {
                     session,
@@ -4545,6 +4588,7 @@ mod tests {
                         renaming: false,
                         nav_disabled: false,
                         menu_open: false,
+                        selected: false,
                     },
                     rename_draft,
                     on_open,
@@ -4577,6 +4621,108 @@ mod tests {
                 "unchanged rows must stay memoized across fleet refreshes"
             );
         });
+    }
+
+    /// A selection switch rerenders exactly the two rows whose `selected`
+    /// flag changed; every other row stays memoized.
+    ///
+    /// This is the cost model the selection highlight was designed to: the
+    /// flag participates in prop comparison (via `RowState`'s `PartialEq`,
+    /// though any compared prop position would do), so a selection change
+    /// is two row renders, not a fleet-wide repaint. If selection ever
+    /// stops being part of what memoization compares — or starts invalidating
+    /// rows it does not describe — this count drifts from 2 and catches it.
+    #[test]
+    fn a_selection_change_rerenders_only_the_affected_rows() {
+        // The selection lives OUTSIDE the virtual DOM (the test flips it
+        // between renders, the way `AppBody`'s signal changes between
+        // `ListView` renders); the app below re-derives every `RowState`
+        // from it on each parent render, so memoization alone decides
+        // which rows actually run.
+        std::thread_local! {
+            static SELECTED: std::cell::Cell<&'static str> = const { std::cell::Cell::new("session-1") };
+        }
+
+        fn app() -> Element {
+            let rename_draft = use_signal(String::new);
+            let on_open = use_callback(|_: Session| {});
+            let on_stop = use_callback(|_: String| {});
+            let on_delete = use_callback(|_: DeleteTarget| {});
+            let on_confirm_delete = use_callback(|_: String| {});
+            let on_cancel_delete = use_callback(|_: String| {});
+            let on_archive = use_callback(|_: Session| {});
+            let on_confirm_archive = use_callback(|_: String| {});
+            let on_cancel_archive = use_callback(|_: String| {});
+            let on_rename_start = use_callback(|_: (String, String)| {});
+            let on_rename_submit = use_callback(|_: (String, String)| {});
+            let on_rename_cancel = use_callback(|_: ()| {});
+            let on_menu_toggle = use_callback(|_: String| {});
+            let selected = SELECTED.with(|selected| selected.get());
+            rsx! {
+                for id in ["session-1", "session-2", "session-3"] {
+                    SessionRow {
+                        key: "{id}",
+                        session: row_specimen(id),
+                        state: RowState {
+                            error: None,
+                            busy: false,
+                            confirming: false,
+                            confirming_archive: false,
+                            renaming: false,
+                            nav_disabled: false,
+                            menu_open: false,
+                            selected: selected == id,
+                        },
+                        rename_draft,
+                        on_open,
+                        on_stop,
+                        on_delete,
+                        on_confirm_delete,
+                        on_cancel_delete,
+                        on_archive,
+                        on_confirm_archive,
+                        on_cancel_archive,
+                        on_rename_start,
+                        on_rename_submit,
+                        on_rename_cancel,
+                        on_menu_toggle,
+                    }
+                }
+            }
+        }
+
+        SELECTED.with(|selected| selected.set("session-1"));
+        SESSION_ROW_RENDERS.with(|renders| renders.set(0));
+        let mut dom = VirtualDom::new(app);
+        dom.rebuild_to_vec();
+        SESSION_ROW_RENDERS.with(|renders| {
+            assert_eq!(renders.get(), 3, "initial build renders every row once");
+        });
+
+        SELECTED.with(|selected| selected.set("session-2"));
+        dom.mark_dirty(dioxus::core::ScopeId::APP);
+        dom.render_immediate(&mut dioxus::core::NoOpMutations);
+        SESSION_ROW_RENDERS.with(|renders| {
+            assert_eq!(
+                renders.get(),
+                5,
+                "a selection switch must rerender the deselected and newly \
+                 selected rows and nothing else"
+            );
+        });
+    }
+
+    /// `stale` and `selected` are independent row states and every
+    /// combination must say so in the class list — in particular a
+    /// selected STALE row carries both, because selection must not hide
+    /// the SPEC.md-required stale marking and staleness must not hide
+    /// which session the main pane is on.
+    #[test]
+    fn row_class_composes_stale_and_selected_independently() {
+        assert_eq!(row_class(false, false), "session-row");
+        assert_eq!(row_class(true, false), "session-row stale");
+        assert_eq!(row_class(false, true), "session-row selected");
+        assert_eq!(row_class(true, true), "session-row stale selected");
     }
 
     /// A reply is refused when it answers a filter that is no longer

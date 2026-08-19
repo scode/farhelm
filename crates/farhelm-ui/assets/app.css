@@ -259,6 +259,42 @@ body,
   background: #1d2026;
 }
 
+/* The selected row is the session the right pane currently shows. Same
+   visual language as `.tab.selected` (filled background plus an inset
+   accent bar), and for the same stated reason: selection has to be
+   readable at a glance from across the whole sidebar, not inferable from
+   the titlebar. The fill is deliberately a step brighter than the
+   #1d2026 hover/focus tint so the two states cannot be confused, the
+   accent bar is the brightest neutral in the palette (the accent is a
+   state indicator, so it needs real contrast against both the fill and
+   the page, which the strip's #4d5666 border tint does not reach), and
+   the title goes full white below — three cues, so no single one has to
+   carry a low-vision reader alone. `box-shadow: inset` for the accent
+   bar simply because it needs no extra element and no positioning rule —
+   a left border would shift the row's content by its own width. NOT
+   opacity-based: stale rows and disabled open buttons already speak
+   through opacity, and a background fill composes with both instead of
+   multiplying against them. */
+.session-row.selected {
+  background: #2f3641;
+  box-shadow: inset 3px 0 0 #8a919e;
+}
+
+.session-row.selected .session-title {
+  color: #fff;
+}
+
+/* Without these, the open button's own hover/focus rule (below) paints
+   its #1d2026 tint over nearly the whole row — and since clicking a row
+   is exactly what selects it, the highlight would be at its weakest the
+   moment it appears, under the still-focused, still-hovered button. A
+   brighter tint keeps hover/focus feedback on a selected row without
+   letting it swallow the selection. */
+.session-row.selected .session-row-open:hover:not(:disabled),
+.session-row.selected .session-row-open:focus {
+  background: #3a4250;
+}
+
 .session-row-main {
   /* No explicit `width: 100%`: a flex COLUMN parent's default
      `align-items: stretch` already fills this child to the parent's

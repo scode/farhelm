@@ -213,12 +213,55 @@ test("switching sessions directly tears the old view down and mounts the new one
 
     await row(page, a.id).locator(".session-row-open").click();
     await expect(page.locator(".titlebar .title")).toContainText(a.title);
+    // The sidebar highlight (SPEC.md: the selected session's row is
+    // visibly marked) tracks the selection through the whole switch.
+    // Three layers, each catching a different regression: the data
+    // attribute (the selection bookkeeping), the production class (the
+    // styling hook), and the computed backgrounds (the VISIBLE result —
+    // a deleted or misspelled CSS rule leaves the first two green). The
+    // visual check runs in the post-click state on purpose: the clicked
+    // button is still focused, which is exactly when the button's own
+    // focus tint once painted over the row's highlight.
+    await expect(row(page, a.id)).toHaveAttribute("data-session-selected", "true");
+    await expect(row(page, b.id)).toHaveAttribute("data-session-selected", "false");
+    await expect(row(page, a.id)).toHaveClass(/(^| )selected( |$)/);
+    await expect(row(page, b.id)).not.toHaveClass(/(^| )selected( |$)/);
+    const background = (id: string) =>
+      row(page, id).evaluate((el) => getComputedStyle(el).backgroundColor);
+    expect(
+      await background(a.id),
+      "the selected row must be visibly distinct, not just attributed",
+    ).not.toBe(await background(b.id));
+    // The accessible counterpart: aria-current marks exactly the selected
+    // row's open button, and is ABSENT (not "false") elsewhere.
+    await expect(row(page, a.id).locator(".session-row-open")).toHaveAttribute(
+      "aria-current",
+      "true",
+    );
+    await expect(row(page, b.id).locator(".session-row-open")).not.toHaveAttribute(
+      "aria-current",
+      /.*/,
+    );
     const viewA = await page.locator(".app-main .layout").elementHandle();
     expect(viewA).not.toBeNull();
 
     // No Back in between — this is the direct switch the key exists for.
     await row(page, b.id).locator(".session-row-open").click();
     await expect(page.locator(".titlebar .title")).toContainText(b.title);
+    // The highlight moved with the selection: exactly one row marked, in
+    // every layer.
+    await expect(row(page, b.id)).toHaveAttribute("data-session-selected", "true");
+    await expect(row(page, a.id)).toHaveAttribute("data-session-selected", "false");
+    await expect(row(page, b.id)).toHaveClass(/(^| )selected( |$)/);
+    await expect(row(page, a.id)).not.toHaveClass(/(^| )selected( |$)/);
+    await expect(row(page, b.id).locator(".session-row-open")).toHaveAttribute(
+      "aria-current",
+      "true",
+    );
+    await expect(row(page, a.id).locator(".session-row-open")).not.toHaveAttribute(
+      "aria-current",
+      /.*/,
+    );
     expect(
       await viewA!.evaluate((el) => el.isConnected),
       "the previous session view's DOM must be discarded on a keyed remount — " +
