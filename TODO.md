@@ -4,9 +4,6 @@ A running list of things the maintainer wants fixed or built, in no particular o
 entry is REMOVED in the same PR that addresses it, so the file only ever describes what is still wanted. It is not a
 roadmap and carries no priorities unless an entry says so itself.
 
-- Add a visual highlight in the left-hand sidebar showing clearly which agent session the main pane is currently
-  interacting with. The selected row should be obvious at a glance, not inferable only from the titlebar.
-
 - Make Shift+Enter insert a line break everywhere it plausibly should, not just in Claude Code. The terminal sends ESC
   CR for the chord (the binding Claude Code's terminal-setup guide names, and it works there), but observed behavior
   elsewhere: Codex treats the pair like a plain Enter (or close to it) — so Codex evidently does not honor ESC CR as

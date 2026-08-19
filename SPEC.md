@@ -282,7 +282,10 @@ whatever the agent renders is what you see. There is no composer, no message abs
   attached client owns input and terminal dimensions: the PTY resizes to that client, and the last size sticks when
   nothing is attached. Reconnecting replays the terminal so the session looks as it would have had the client stayed
   attached, modulo redraws caused by dimension changes. The floor: the host-side terminal retains, and replay covers, at
-  least the current screen plus 10,000 lines of scrollback.
+  least the current screen plus 10,000 lines of scrollback. The sidebar visibly marks the selected session's row
+  whenever that session is listed, so which session the main pane is interacting with is readable at a glance rather
+  than only from the titlebar. A filter that excludes the selected session leaves no row to mark — the titlebar remains
+  the identifier in that state, and the main pane deliberately stays put (filtering the list is not deselecting).
 - One attached client per session, enforced by the supervisor: attaching from a second client visibly detaches the
   first, which keeps a non-live snapshot and an explicit take-control action. No shared-input mirroring in v1.
 - A viewer that is slow is served slowly, for as long as it takes. Honoring that can briefly slow the agent's OUTPUT — a
