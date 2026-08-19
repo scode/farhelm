@@ -1114,6 +1114,20 @@ pub(crate) async fn get_session(
     State(state): State<Arc<AppState>>,
     AxPath(id): AxPath<String>,
 ) -> impl IntoResponse {
+    // The registry-identity join, same terms as the merged listing's (see
+    // `aggregate::row_of`): helm.db is the identity authority, and the
+    // snapshot cannot carry a fresh copy. Read BEFORE the owner/status
+    // capture below for the same ordering reason the listing documents at
+    // its identity join: a retarget straddling the two reads must produce
+    // a stale identity on fresh session content (mismatch → the create
+    // default falls back locally) rather than a fresh identity on stale
+    // content (a false match onto the wrong machine). The whole registry
+    // is read because the owner is not known yet — one indexed lookup
+    // against a list this small is cheaper than being wrong.
+    let identities: Vec<store::HostRow> = match state.store.list_hosts().await {
+        Ok(rows) => rows,
+        Err(e) => return http_error(e),
+    };
     let (host, status) = match resolve_owner(&state, &id).await {
         Ok(owner) => owner,
         Err(e) => return http_error(e),
@@ -1130,6 +1144,10 @@ pub(crate) async fn get_session(
         }));
     };
     let host_name = aggregate::host_display_name(snapshot.kind, snapshot.destination.as_deref());
+    let host_identity = identities
+        .into_iter()
+        .find(|row| row.id == host)
+        .and_then(|row| row.host_identity);
 
     // The client comes from the SAME status read that resolved the owner,
     // so "ask the host" and "say this row is live" cannot disagree.
@@ -1142,6 +1160,7 @@ pub(crate) async fn get_session(
             Some(info) => axum::Json(aggregate::SessionRow {
                 info,
                 host,
+                host_identity,
                 host_name,
                 stale: true,
             })
@@ -1160,6 +1179,7 @@ pub(crate) async fn get_session(
             Some(info) => axum::Json(aggregate::SessionRow {
                 info,
                 host,
+                host_identity,
                 host_name,
                 stale: false,
             })
@@ -1813,10 +1833,10 @@ mod tests {
     /// Two halves, both load-bearing for the UI PRs that follow. The M2
     /// envelope (`sessions`/`total`/`truncated`) is still there under the
     /// same names, so the list UI in this tree keeps decoding it unchanged;
-    /// and each row now carries `host`/`host_name`/`stale` as ADDITIVE
-    /// siblings of the session's own fields, never nested under a wrapper —
-    /// which is the whole reason `SessionRow` flattens `SessionInfo`
-    /// instead of embedding it.
+    /// and each row now carries `host`/`host_identity`/`host_name`/`stale`
+    /// as ADDITIVE siblings of the session's own fields, never nested under
+    /// a wrapper — which is the whole reason `SessionRow` flattens
+    /// `SessionInfo` instead of embedding it.
     ///
     /// Asserted on raw JSON rather than a decoded type, because the UI
     /// decodes JSON: a serialization change that a round trip through the
@@ -1867,6 +1887,66 @@ mod tests {
             row["stale"], false,
             "a connected host's rows are live knowledge"
         );
+        assert_eq!(
+            row["host_identity"], "local-identity",
+            "the row carries the registry's RECORDED identity for its host — \
+             the helm.db join, not a snapshot-side copy that would sit null \
+             until the next reconcile (the serialized-even-when-NULL half of \
+             the wire contract is pinned where a host is actually \
+             identity-less, in \
+             an_identity_less_hosts_sessions_serve_while_connected_and_vanish_after)"
+        );
+    }
+
+    /// Each row's `host_identity` is ITS host's registry identity, not the
+    /// fleet's first or only one.
+    ///
+    /// Why this exists: the single-host shape test above cannot tell a
+    /// correct per-host join from a join by the wrong key, a copy of the
+    /// first identity onto every row, or a connection-scoped value that
+    /// happens to coincide — any of those regressions stays green with one
+    /// host whose identities all agree. Two hosts with distinct recorded
+    /// identities make the join's key observable.
+    #[tokio::test]
+    async fn each_listing_row_carries_its_own_hosts_identity() {
+        let (builder, remote) = rest_harness::FleetBuilder::new()
+            .await
+            .local(rest_harness::HostScript {
+                identity: Some("install-local".to_string()),
+                sessions: vec![rest_harness::session("on-local", 200)],
+                ..rest_harness::HostScript::default()
+            })
+            .await
+            .ssh(
+                "user@remote",
+                rest_harness::HostScript {
+                    identity: Some("install-remote".to_string()),
+                    sessions: vec![rest_harness::session("on-remote", 100)],
+                    ..rest_harness::HostScript::default()
+                },
+            )
+            .await;
+        let harness = builder.start().await;
+        let local = rest_harness::local_id(&harness.store).await;
+        harness.await_refreshed(local).await;
+        harness.await_refreshed(remote).await;
+
+        let (status, value) = get_json(&harness, "/api/sessions").await;
+        assert_eq!(status, axum::http::StatusCode::OK);
+        let rows = value["sessions"].as_array().expect("rows array");
+        assert_eq!(rows.len(), 2);
+        for row in rows {
+            let expected = if row["host"] == serde_json::json!(local) {
+                "install-local"
+            } else {
+                "install-remote"
+            };
+            assert_eq!(
+                row["host_identity"], expected,
+                "row {} must carry the identity recorded for ITS host",
+                row["id"]
+            );
+        }
     }
 
     /// `GET /api/sessions/{id}` — the session-detail route a session view
@@ -1915,6 +1995,12 @@ mod tests {
             value["host"],
             rest_harness::local_id(&harness.store).await,
             "the detail route carries the same host fields a list row does"
+        );
+        assert_eq!(
+            value["host_identity"], "local-identity",
+            "the live detail branch joins the registry identity like a list \
+             row — a detail refresh that dropped it would silently downgrade \
+             the create default to the row-id-only check"
         );
     }
 
@@ -3835,6 +3921,24 @@ mod tests {
             value["sessions"][0]["stale"], false,
             "it is connected, so these are live rows"
         );
+        assert!(
+            value["sessions"][0]
+                .as_object()
+                .unwrap()
+                .contains_key("host_identity"),
+            "host_identity is serialized even when null: key PRESENCE is how \
+             a client tells \"this helm records no identity\" apart from \
+             \"this helm predates the field\", and only the latter may \
+             degrade the create default to the row-id-only check"
+        );
+        assert_eq!(
+            value["sessions"][0]["host_identity"],
+            serde_json::Value::Null,
+            "an identity-less host's rows say null explicitly — a \
+             skip_serializing_if regression would erase the \
+             current-helm-vs-old-helm distinction and no other test would \
+             notice"
+        );
 
         // Nothing is persisted — the identity binding has nothing to bind
         // to — which is exactly why the manager has to hold them.
@@ -4946,6 +5050,12 @@ mod tests {
         assert_eq!(
             value["stale"], true,
             "the metadata is last-known knowledge and must say so"
+        );
+        assert_eq!(
+            value["host_identity"], "identity-original",
+            "the cached detail branch must carry the registry identity too — \
+             a stale session is exactly the one whose install binding the \
+             create default still leans on"
         );
     }
 

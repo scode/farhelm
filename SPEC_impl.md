@@ -465,6 +465,17 @@ remains that can never be represented on any page.
   the row that holds it, which the manager renders as the ordinary duplicate state. Databases predating the constraint
   are resolved by its migration: the lowest host id keeps the claim, later rows are demoted to unclaimed and lose the
   cache that was only meaningful under it, so they re-learn at next contact and freeze as duplicates properly.
+- SPEC.md's install-bound create default rides on a denormalization of that recorded identity: every session listing and
+  detail row carries `host_identity` (the registry's value for the row's host), the UI snapshots it together with the
+  host id at selection time, and the default holds only while the row still reports the same identity — the identity,
+  not the client-side fingerprint or the connection token, because only it changes exactly when the install does (an
+  address-only retarget or a reconnect must not evict the default). The key is serialized even when `null` so a client
+  can tell "records no identity" from "predates the field", and only the latter degrades to the row-id-only comparison.
+  The identity is a second read beside the session snapshot and cannot be atomic with it, so both assembly paths read
+  the registry FIRST: a retarget straddling the reads then yields a stale identity on fresh content — mismatch, safe
+  fallback — rather than a fresh identity on stale content, which would be a false match onto the wrong machine. The
+  identity-less residual SPEC.md accepts shows up here as `null == null` passing; a host frozen in the identity-mismatch
+  phase is disqualified outright, since its recorded identity still names the predecessor.
 - Both identity writes also carry the connection-defining configuration the attempt was DIALED under (destination,
   remote farhelm, remote state dir) and are refused if the row no longer matches. A hello that crossed the wire while
   the user was retargeting a row describes the old endpoint, and committing its identity under the new configuration

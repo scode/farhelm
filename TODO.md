@@ -80,17 +80,6 @@ roadmap and carries no priorities unless an entry says so itself.
   Cheap to run, and the difference between "reviewed until done" and "reviewed until the meter ran out" — do it before
   declaring the first real release final.
 
-- Close the HostId-reuse create-default window. The create dialog defaults its host field to the selected session's host
-  BY ROW ID, but a host row id survives a retarget (or an adopt where a new install takes over) while the machine behind
-  it changes: look at a session on the old machine, have the row retargeted, open the create dialog within one
-  listing-refresh interval, and the create lands on the successor install. The request's own install-incarnation check
-  passes — the request was genuinely built against the successor — so the system does what it was told while the user's
-  intent lands on the wrong machine. Raised as a definite security finding in #156's review; accepted there as residual
-  because selection reconciliation already narrows the window to one refresh interval. The full fix: the helm's listing
-  must denormalize install identity per session so the client binds its create default to the install the user was
-  actually looking at, not the row id. Not urgent (needs a concurrent retarget plus a one-interval race), but "accepted
-  residual" should not quietly become "permanent".
-
 - Run the manual Mac checklist (`docs/manual-mac-checklist.md` — that file IS the record; its "Observed:" fields are the
   state, all "not run"). Blocked on the macOS release bundle above and a human with a real Mac. Not covered by any CI:
   Playwright's WebKit is not WKWebView.

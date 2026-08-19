@@ -224,6 +224,26 @@ pub(crate) struct SessionRow {
     /// client hands back to `POST /api/sessions` to create alongside it,
     /// and the join key into `GET /api/hosts`.
     pub(crate) host: HostId,
+    /// The install identity the REGISTRY held for that host when the reply
+    /// was being built (`HostView::identity`'s value), denormalized onto
+    /// the row so a client can bind "the session the user is looking at"
+    /// to the INSTALL behind it rather than to the row id alone. "Was
+    /// being built" is deliberate: the identity is sampled beside the
+    /// session content, not atomically with it, and can be one write stale
+    /// by the time the reply lands — the assembly orders its reads so that
+    /// such skew mismatches (and the client falls back safely) rather than
+    /// falsely matching; see the identity join in `session_page_staged`. A `HostId` outlives
+    /// retargets and adoptions while the machine behind it changes; this
+    /// field is what lets the create dialog's host default notice that the
+    /// install it was derived from is no longer the one the row id now
+    /// names (the #156-review residual).
+    ///
+    /// `None` means the registry records no identity for the host (never
+    /// reached, or it reports none) — and the key is ALWAYS serialized, so
+    /// a client can tell "this helm says no identity" (`null`) from "this
+    /// helm predates the field" (key absent) and degrade to the old
+    /// row-id-only behavior only in the latter case.
+    pub(crate) host_identity: Option<String>,
     /// [`host_display_name`]'s rendering of that host, denormalized onto
     /// the row so a list can be drawn without a second request.
     pub(crate) host_name: String,
@@ -552,10 +572,18 @@ fn order_key(info: &SessionInfo, host: HostId) -> (std::cmp::Reverse<i64>, &str,
 }
 
 /// Tag one host's session with that host, for the merged list.
-fn row_of(host: &HostSnapshot, info: SessionInfo) -> SessionRow {
+///
+/// `identity` is the registry's recorded install identity for the host —
+/// passed alongside the snapshot rather than read from it because the
+/// snapshot cannot carry a fresh one: first contact writes the identity to
+/// helm.db without the actor being reconciled, so a snapshot-side copy
+/// would sit at `NULL` for most hosts most of the time (the same reasoning
+/// `hosts`' module doc gives for joining the two reads in `host_views`).
+fn row_of(host: &HostSnapshot, identity: Option<&str>, info: SessionInfo) -> SessionRow {
     SessionRow {
         info,
         host: host.id,
+        host_identity: identity.map(str::to_string),
         host_name: host_display_name(host.kind, host.destination.as_deref()),
         stale: !host.state.is_connected(),
     }
@@ -638,14 +666,26 @@ impl<'a> MergeSource<'a> {
     ///
     /// `hosts` is consulted for the persisted source, whose rows can name
     /// any host in scope; a live source already knows its own.
+    /// `identities` is the registry-identity join for [`row_of`] — keyed
+    /// the same way, consulted for both source kinds.
     fn take(
         &mut self,
         hosts: &std::collections::HashMap<HostId, &HostSnapshot>,
+        identities: &std::collections::HashMap<HostId, Option<String>>,
     ) -> Option<MergeItem> {
+        let identity_of = |host: HostId| {
+            identities
+                .get(&host)
+                .and_then(|identity| identity.as_deref())
+        };
         if let Some(scanned) = self.persisted.pop_front() {
-            let row = scanned
-                .info
-                .and_then(|info| Some(row_of(hosts.get(&scanned.key.host)?, info)));
+            let row = scanned.info.and_then(|info| {
+                Some(row_of(
+                    hosts.get(&scanned.key.host)?,
+                    identity_of(scanned.key.host),
+                    info,
+                ))
+            });
             return Some(MergeItem {
                 key: scanned.key,
                 row,
@@ -660,7 +700,7 @@ impl<'a> MergeSource<'a> {
                 session_id: info.id.clone(),
                 host: snapshot.id,
             },
-            row: Some(row_of(snapshot, info.clone())),
+            row: Some(row_of(snapshot, identity_of(snapshot.id), info.clone())),
         })
     }
 }
@@ -785,11 +825,12 @@ pub(crate) async fn session_page(
         limit,
         filter,
         std::future::ready(()),
+        std::future::ready(()),
     )
     .await
 }
 
-/// [`session_page`], with a seam where a test can stage a concurrent fleet
+/// [`session_page`], with seams where a test can stage a concurrent fleet
 /// mutation.
 ///
 /// `staged` is awaited after the cursor is decoded and BEFORE anything about
@@ -803,6 +844,13 @@ pub(crate) async fn session_page(
 /// which is exactly the arrangement a mutation landing at this barrier
 /// defeated (see [`MatchingCounts`]) — so a future edit that reintroduces a
 /// pre-snapshot sample of anything fleet-wide fails the test that stands here.
+///
+/// `staged_between_reads` is awaited between the registry-identity read and
+/// the fleet snapshot — the window where a retarget skews the identity join.
+/// The read order makes that skew fail SAFE (see the comment at the identity
+/// join), and the test standing on this seam is what keeps a refactor from
+/// quietly swapping the reads back into the dangerous order.
+#[allow(clippy::too_many_arguments)]
 async fn session_page_staged(
     manager: &ConnectionManager,
     store: &HelmStore,
@@ -811,6 +859,7 @@ async fn session_page_staged(
     limit: usize,
     filter: &store::SessionFilter,
     staged: impl std::future::Future<Output = ()>,
+    staged_between_reads: impl std::future::Future<Output = ()>,
 ) -> anyhow::Result<SessionPageBody> {
     let digest = filter.digest();
     let after = match cursor {
@@ -824,10 +873,37 @@ async fn session_page_staged(
         }
     };
     staged.await;
+    // The registry-identity join for `SessionRow::host_identity` — a second
+    // read beside the snapshot, on the same two-reads-joined terms as
+    // `hosts::host_views` and for the same reason (see `row_of`): helm.db is
+    // the authority for recorded identity, and the snapshot cannot carry a
+    // fresh copy. Deliberately OUTSIDE the one-snapshot coherence claim
+    // below, which is about rows/scope/counts agreeing with each other.
+    //
+    // ORDER MATTERS: identities are read BEFORE the snapshot, and that is a
+    // correctness invariant, not style. The two reads can straddle a
+    // retarget, and the direction of the skew decides who gets hurt. Read
+    // this way, a retarget landing between them yields the PREDECESSOR's
+    // identity on the SUCCESSOR's sessions — the create default's install
+    // check sees a mismatch and falls back to the local row, the safe
+    // direction. Read the other way (snapshot first), the same window
+    // labels the predecessor's sessions with the successor's identity — a
+    // false MATCH that defaults a create onto the wrong machine, which is
+    // precisely the bug `host_identity` exists to close.
+    // `a_retarget_between_the_identity_read_and_the_snapshot_fails_safe`
+    // stands on the seam below to keep the order honest.
+    let identities: std::collections::HashMap<HostId, Option<String>> = store
+        .list_hosts()
+        .await?
+        .into_iter()
+        .map(|row| (row.id, row.host_identity))
+        .collect();
+    staged_between_reads.await;
     // ONE snapshot, for the rows, the scope, and the live matching count
-    // alike. Nothing fleet-wide is sampled before it, and nothing this reply
-    // says about the live hosts comes from anywhere else — which is what makes
-    // the count and the rows one answer.
+    // alike. Nothing fleet-wide is sampled before it except the identity
+    // join above (ordered first on purpose — see its comment), and nothing
+    // this reply says about the live hosts comes from anywhere else — which
+    // is what makes the count and the rows one answer.
     let snapshots = manager.snapshots();
     let by_id: std::collections::HashMap<HostId, &HostSnapshot> = snapshots
         .iter()
@@ -978,7 +1054,7 @@ async fn session_page_staged(
             more = true;
             break;
         }
-        let Some(item) = sources[index].take(&by_id) else {
+        let Some(item) = sources[index].take(&by_id, &identities) else {
             break;
         };
         // Measured on the row that will actually be serialized, and applied
@@ -1116,6 +1192,7 @@ mod tests {
                 source_profile: None,
             },
             host,
+            host_identity: None,
             host_name: "this machine".to_string(),
             stale: false,
         }
@@ -1493,6 +1570,7 @@ mod tests {
                     })
                     .await;
             },
+            std::future::ready(()),
         )
         .await
         .expect("the second page reads");
@@ -1510,6 +1588,78 @@ mod tests {
         assert_eq!(
             second.total, 3,
             "the fleet total counts the same three sessions"
+        );
+    }
+
+    /// A retarget landing between the registry-identity read and the fleet
+    /// snapshot must skew toward MISMATCH, never toward a false match.
+    ///
+    /// Why this matters: the two reads cannot be atomic (helm.db vs the
+    /// manager's memory), so the read ORDER is the entire correctness
+    /// argument — identities first means a mid-request identity change
+    /// labels rows with the OLD identity, which the create default treats
+    /// as "fall back to the local row". Swapped reads would label the
+    /// predecessor's sessions with the successor's identity: a false match
+    /// that re-opens the wrong-machine create this field exists to close.
+    ///
+    /// What is tested: an identity-less host's registry row gains an
+    /// identity inside the between-reads seam; the page built around that
+    /// write must still carry the pre-write `host_identity` (null) on the
+    /// host's rows. An implementation that samples identities after the
+    /// seam returns the new identity instead and fails here.
+    #[tokio::test]
+    async fn a_retarget_between_the_identity_read_and_the_snapshot_fails_safe() {
+        use crate::rest_harness;
+
+        let builder = rest_harness::FleetBuilder::new()
+            .await
+            .local(rest_harness::HostScript {
+                // Identity-less on purpose: its rows serve from memory and
+                // its registry row is free to gain an identity mid-request.
+                identity: None,
+                sessions: vec![rest_harness::session("live-1", 300)],
+                ..rest_harness::HostScript::default()
+            })
+            .await;
+        let harness = builder.start().await;
+        let local = rest_harness::local_id(&harness.store).await;
+        harness.await_refreshed(local).await;
+
+        let page = session_page_staged(
+            &harness.manager,
+            &harness.store,
+            &harness.state.counts,
+            None,
+            50,
+            &store::SessionFilter::default(),
+            std::future::ready(()),
+            async {
+                let rows = harness.store.list_hosts().await.expect("hosts list");
+                let row = rows
+                    .iter()
+                    .find(|row| row.id == local)
+                    .expect("the local row exists");
+                let outcome = harness
+                    .store
+                    .record_first_contact(local, &store::DialedAs::of(row), "install-late")
+                    .await
+                    .expect("the identity write runs");
+                assert!(
+                    matches!(outcome, store::FirstContactOutcome::Recorded),
+                    "the staged identity write must actually land for the \
+                     race to be exercised"
+                );
+            },
+        )
+        .await
+        .expect("the page reads");
+
+        assert_eq!(page.sessions.len(), 1);
+        assert_eq!(
+            page.sessions[0].host_identity, None,
+            "a mid-request identity write must not be attributed to rows \
+             sampled beside it — stale identity mismatches safely, a fresh \
+             one would falsely match"
         );
     }
 
