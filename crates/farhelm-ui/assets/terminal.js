@@ -3873,37 +3873,55 @@
           { intermediates: "$", final: "p" },
           swallowDecrqm,
         );
-        // Named (rather than inlined into `term.onData` below) so the
-        // Shift+Enter handler further down can write `\x1b\r` down the
-        // IDENTICAL path ordinary keystrokes take — same encoder, same
-        // open-check, same socket. Two independent send call sites here
-        // would be a standing risk that one of them drifts (a forgotten
-        // `readyState` guard, a different encoding) in a way that only
-        // shows up as a keystroke silently eaten during a reconnect race.
+        // Named (rather than inlined into the `term.onData` wrapper below)
+        // so every outbound TEXT-input chunk — ordinary keystrokes, pastes,
+        // and the merged Shift+Enter sequence alike — leaves through one
+        // path: same encoder, same open-check, same socket. (The
+        // `onBinary` route is deliberately separate: its payloads are raw
+        // bytes that must not pass through `TextEncoder`.) Two independent text-send
+        // call sites here would be a standing risk that one of them drifts
+        // (a forgotten `readyState` guard, a different encoding) in a way
+        // that only shows up as a keystroke silently eaten during a
+        // reconnect race.
         const sendData = (d) => {
           if (ws.readyState === WebSocket.OPEN) ws.send(enc.encode(d));
         };
-        term.onData(sendData);
         // Shift+Enter: make agent TUIs (Claude Code, Codex) treat it as
-        // "insert a newline" instead of "submit", matching what those
-        // programs already bind Shift+Enter to in a native terminal. xterm
-        // has no notion of Shift+Enter on its own — it encodes Enter as
-        // `\r` regardless of the Shift key — so left alone this key would
-        // submit the in-progress prompt every time a user meant to add a
-        // line. `shiftEnterKeyAction` (shift-enter-key.js) is the pure
-        // decision; see its module docs for why this handler sends only a
-        // bare `\x1b` PREFIX and then returns `true` rather than sending
-        // the full ESC CR itself and returning `false`: returning `true`
-        // lets xterm process the Enter through its own normal keydown path
-        // (scroll-to-bottom-on-input, selection dismissal, hidden-textarea
-        // cleanup, accessibility announcements) exactly as it would for a
-        // plain Enter, with only the leading ESC byte added ahead of it on
-        // the wire. Ordinary Enter is untouched: `shiftEnterKeyAction`
-        // returns "pass" for it, nothing is sent here, and xterm's default
-        // `\r` submission runs exactly as before.
+        // "insert a newline" instead of "submit". xterm has no notion of
+        // Shift+Enter on its own — it encodes Enter as `\r` regardless of
+        // the Shift key — so left alone this key would submit the
+        // in-progress prompt every time a user meant to add a line. The
+        // chord becomes ESC CR in ONE websocket message: a message this
+        // small is one `send-keys` command and one pty write (larger input
+        // is chunked — the guarantee is scoped to this two-byte sequence,
+        // see shift-enter-key.js's header), and a SPLIT pair (ESC in its
+        // own message, as an earlier revision sent it) reads as
+        // Escape-then-Enter to any pane program that disambiguates a lone
+        // ESC by read boundary — Codex submitted instead of inserting a
+        // newline. shift-enter-key.js owns the pure decisions and the full
+        // rationale: `shiftEnterKeyAction` recognizes the chord on keydown
+        // and ARMS the merge (returning `true` keeps xterm's own Enter
+        // path — scroll-to-bottom, selection dismissal, hidden-textarea
+        // cleanup, accessibility — fully intact), and `mergeArmedPrefix`
+        // joins the ESC onto the `\r` xterm emits synchronously for that
+        // same keystroke. The microtask below is the arm's whole lifetime:
+        // queued at arm time, it runs when the synchronous keydown
+        // dispatch — the only window in which the chord's own `\r` can
+        // arrive — has finished, so a fizzled chord cannot leave a stale
+        // arm that would ESC-prefix some later unrelated Enter. Ordinary
+        // input is untouched: unarmed chunks pass through byte-for-byte.
+        let shiftEnterArmed = false;
+        term.onData((d) => {
+          const merged = window.farhelmShiftEnterKey.mergeArmedPrefix(shiftEnterArmed, d);
+          shiftEnterArmed = merged.armed;
+          sendData(merged.send);
+        });
         term.attachCustomKeyEventHandler((ev) => {
-          if (window.farhelmShiftEnterKey.shiftEnterKeyAction(ev) === "prefix") {
-            sendData("\x1b");
+          if (window.farhelmShiftEnterKey.shiftEnterKeyAction(ev) === "arm") {
+            shiftEnterArmed = true;
+            queueMicrotask(() => {
+              shiftEnterArmed = false;
+            });
           }
           return true;
         });

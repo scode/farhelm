@@ -274,9 +274,14 @@ The real TUI is the primary and, in v1, the only interaction surface. Typing goe
 whatever the agent renders is what you see. There is no composer, no message abstraction, no send button in v1.
 
 - Full fidelity: colors, cursor movement, alternate screens, resize. If it works over plain SSH it must work here.
-- Shift+Enter (the exact chord — no other modifier held, not mid-IME-composition) is sent as ESC CR, the newline binding
-  Claude Code and Codex expect in place of submit, in every terminal tab alike, agent and shell. Other programs receive
-  the same bytes and interpret them per their own line editing.
+- Shift+Enter (the exact chord — no other modifier held, not mid-IME-composition) is sent as ESC CR in a SINGLE write,
+  in every terminal tab alike, agent and shell. Single-write delivery is part of the promise, not an implementation
+  detail: a lone ESC arriving in its own read is indistinguishable from the Escape key to line editors that disambiguate
+  by read boundary or a short timeout (Codex's input stack; zsh with a small KEYTIMEOUT), which turns the chord into
+  Escape-plus-submit. Delivered whole, the sequence is the newline binding Claude Code and Codex honor in place of
+  submit (verified against both, 2026-08-19). Other programs receive the same bytes and interpret them per their own
+  line editing — stock emacs-mode zsh inserts a newline, bash's default quietly ignores the pair — the same outcomes
+  those shells give under a reference terminal that encodes the chord identically (Ghostty).
 - Scrollback is whatever the host-side terminal naturally retains, and it survives client disconnects: detach, reconnect
   a day later, and the buffer is still there. There is no separate history store — when a host reboots or a session is
   archived, terminal contents are gone, and recovering the conversation is the agent's job (resume). A stopped or exited
