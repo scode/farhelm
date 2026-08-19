@@ -175,6 +175,29 @@ const RAW_DUMP_INVOCATION =
   "printf \"RAWREADY\\n\" && od -v -An -tx1 -w1'";
 
 /**
+ * The read-boundary variant of [`RAW_DUMP_INVOCATION`]: same gate and
+ * `stty` preamble, but the dump prints one LINE per `read(2)` — each
+ * iteration's `dd bs=4096 count=1` performs exactly one read, and the
+ * bytes it got are printed as concatenated hex terminated by `|`.
+ *
+ * This is the fixture for the single-write delivery claim: `od` alone can
+ * never show where one pty write ended and the next began, and the whole
+ * Shift+Enter bug was ABOUT that boundary (a split pair reads as
+ * Escape-then-Enter to boundary-sensitive line editors; see
+ * shift-enter-key.js's header). One caveat keeps this observation honest
+ * in one direction only: bytes arriving while `dd` is between reads
+ * coalesce in the pty buffer, so a split COULD read as one line on a slow
+ * machine — but a genuinely single write can never read as two. The
+ * DETERMINISTIC half of the claim therefore lives beside it in the same
+ * test: a websocket-frame capture asserting the chord leaves the browser
+ * as exactly one two-byte frame, which no pty timing can blur.
+ */
+const READ_GROUPED_DUMP_INVOCATION =
+  "sh -c 'read _gate && stty -echo -icanon -icrnl -inlcr -igncr min 1 time 0 && " +
+  "printf \"RAWREADY\\n\" && while :; do dd bs=4096 count=1 2>/dev/null | od -v -An -tx1 | " +
+  "tr -d \" \\n\"; printf \"|\\n\"; done'";
+
+/**
  * Attach a raw-dump fixture session, release its `read _gate`, and wait for
  * `RAWREADY` — the identical three-step preamble every test in this file
  * needs before it may send a single real keystroke, folded into one call
@@ -223,10 +246,11 @@ test.describe("Shift+Enter's ESC-prefix reaches the pty as exact bytes", () => {
 
       const before = bytesIn(await termText(page));
       await page.keyboard.press("Shift+Enter");
-      // `shiftEnterKeyAction` returns "prefix" for this chord (see
-      // shift-enter-key.js's own doc): a bare `\x1b` written down the same
-      // path as ordinary input, immediately followed by xterm's own
-      // ordinary `\r` for the Enter it still processes normally.
+      // `shiftEnterKeyAction` returns "arm" for this chord and
+      // `mergeArmedPrefix` glues the `\x1b` onto xterm's own ordinary `\r`
+      // (see shift-enter-key.js's docs): one message carrying both bytes,
+      // down the same path as ordinary input. This test pins the byte
+      // VALUES; the read-boundary test below pins the one-write shape.
       await page.keyboard.press("z");
       await waitForTermText(page, " 7a");
 
@@ -253,9 +277,10 @@ test.describe("Shift+Enter's ESC-prefix reaches the pty as exact bytes", () => {
 
       const before = bytesIn(await termText(page));
       await page.keyboard.press("Enter");
-      // `shiftEnterKeyAction` returns "pass" for a plain Enter — see
-      // shift-enter-key.js's own doc — so nothing here should ever send a
-      // leading ESC; only xterm's own ordinary `\r` should land.
+      // `shiftEnterKeyAction` returns "pass" for a plain Enter and the
+      // unarmed merge is byte-transparent — see shift-enter-key.js's docs —
+      // so nothing here should ever send a leading ESC; only xterm's own
+      // ordinary `\r` should land.
       await page.keyboard.press("z");
       await waitForTermText(page, " 7a");
 
@@ -309,6 +334,104 @@ test.describe("Shift+Enter's ESC-prefix reaches the pty as exact bytes", () => {
         delta[delta.length - 1],
         "the sentinel must be the last byte observed, proving the pty stayed live through the chord",
       ).toBe("7a");
+    } finally {
+      await cleanupSession(request, session.id);
+    }
+  });
+});
+
+test.describe("Shift+Enter's ESC CR reaches the pane as one write", () => {
+  test("the pane reads ESC CR in a single read, never a lone ESC", async ({ page, request }) => {
+    const session = await createSession(request, {
+      title: `keys-shift-enter-one-write-${Date.now()}`,
+      cwd: "/tmp",
+      invocation: READ_GROUPED_DUMP_INVOCATION,
+    });
+    try {
+      await page.goto("/");
+      await attachRawDumpSession(page, session.id);
+
+      // The deterministic half of the claim: capture what the browser
+      // actually sends. Read-boundary observation below is inherently
+      // one-sided (bytes can coalesce in the pty buffer between the
+      // fixture's reads), but the frame boundary is not — one websocket
+      // frame carrying both bytes IS the single-write contract at its
+      // source, and a regression back to the two-producer design shows up
+      // here as two frames no matter how the pty timing falls.
+      await page.evaluate(() => {
+        const ws = (window as any).__farhelmWs;
+        (window as any).__sentFrames = [];
+        const orig = ws.send.bind(ws);
+        ws.send = (payload: any) => {
+          (window as any).__sentFrames.push(
+            Array.from(new Uint8Array(payload))
+              .map((b: number) => b.toString(16).padStart(2, "0"))
+              .join(""),
+          );
+          orig(payload);
+        };
+      });
+      await page.keyboard.press("Shift+Enter");
+      const chordFrames = await page.evaluate(() => (window as any).__sentFrames);
+      expect(
+        chordFrames,
+        "the chord must leave the browser as exactly one two-byte frame",
+      ).toEqual(["1b0d"]);
+
+      await page.keyboard.press("z");
+      await waitForTermText(page, "7a|");
+
+      const text = await termText(page);
+      // The plumbing half: both bytes inside one read line. Matched as a
+      // pattern rather than the exact line `1b0d|` because the sentinel
+      // (or any later byte) can legitimately coalesce into the SAME read
+      // while the fixture's `dd` is between reads — `1b0d7a|` is still a
+      // pass, since the claim is "never split", not "read in isolation".
+      expect(
+        text,
+        "the chord's two bytes must arrive within one read",
+      ).toMatch(/1b0d[0-9a-f]*\|/);
+      // The failure shape, named exactly: a read that ENDED on the lone
+      // ESC. (`1b\|` cannot match inside `1b0d…|`, so this is a clean
+      // negative.)
+      expect(
+        text,
+        "no read may ever end on the chord's lone ESC",
+      ).not.toMatch(/1b\|/);
+    } finally {
+      await cleanupSession(request, session.id);
+    }
+  });
+
+  test("a plain Enter after the chord stays bare — the arm does not linger", async ({
+    page,
+    request,
+  }) => {
+    const session = await createSession(request, {
+      title: `keys-shift-enter-disarm-${Date.now()}`,
+      cwd: "/tmp",
+      invocation: RAW_DUMP_INVOCATION,
+    });
+    try {
+      await page.goto("/");
+      await attachRawDumpSession(page, session.id);
+
+      const before = bytesIn(await termText(page));
+      // Same terminal, chord then plain Enter: the regression this pins is
+      // wiring-level, not merge-level — an arm that survived its dispatch
+      // (the microtask expiry in terminal.js dropped, or `merged.armed` no
+      // longer assigned back) would ESC-prefix the SECOND Enter too, and
+      // no fresh-terminal test can see that.
+      await page.keyboard.press("Shift+Enter");
+      await page.keyboard.press("Enter");
+      await page.keyboard.press("z");
+      await waitForTermText(page, " 7a");
+
+      const delta = bytesIn(await termText(page)).slice(before.length);
+      expect(
+        delta,
+        "one prefixed pair, then a bare CR — a phantom second ESC means a stale arm",
+      ).toEqual(["1b", "0d", "0d", "7a"]);
     } finally {
       await cleanupSession(request, session.id);
     }

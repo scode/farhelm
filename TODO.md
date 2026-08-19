@@ -4,14 +4,6 @@ A running list of things the maintainer wants fixed or built, in no particular o
 entry is REMOVED in the same PR that addresses it, so the file only ever describes what is still wanted. It is not a
 roadmap and carries no priorities unless an entry says so itself.
 
-- Make Shift+Enter insert a line break everywhere it plausibly should, not just in Claude Code. The terminal sends ESC
-  CR for the chord (the binding Claude Code's terminal-setup guide names, and it works there), but observed behavior
-  elsewhere: Codex treats the pair like a plain Enter (or close to it) — so Codex evidently does not honor ESC CR as
-  insert-newline and the right sequence for it needs investigating (candidates: whatever Codex's own terminal-setup
-  binds, or the CSI-u encoding `ESC [ 13 ; 2 u` that kitty-protocol-aware TUIs understand) — and a plain shell tab does
-  nothing visible with it. Decide and implement per-target behavior: Codex must get a real line break, and define what
-  (if anything) the chord should do in a bare shell rather than leaving it a silent no-op.
-
 - Finish the macOS release bundle. The release workflow's `macos` job (workflow_dispatch-gated; builds an
   aarch64-apple-darwin `Farhelm.app` with embedded helm, managed supervisor, private tmux, and the CLI at
   `Contents/MacOS/farhelm`) has never completed, which means the README's primary quickstart references an artifact that

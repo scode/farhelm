@@ -139,6 +139,22 @@ invariant tests must pin — which makes the replay-based catch-up's end state o
 delivery: every byte still within the terminal's own retention is present, and bytes beyond it would have been evicted
 from scrollback even had they been delivered one at a time.
 
+Outbound key delivery has one non-obvious mechanic: for input small enough to fit one protocol frame and one `send-keys`
+command, message boundaries are pty write boundaries. The transport frames input at 32KiB and the supervisor chunks each
+frame into `send-keys -H` commands of at most 256 bytes, so larger input is deliberately split — nothing may depend on
+atomic delivery of an arbitrary message. But a message at or under one command IS one command, and tmux flushes each
+command to the pane as its own write — measured on the pinned 3.7b: two commands landed as two reads ~7ms apart, never
+coalesced. For almost all input none of this matters, but SPEC.md's Shift+Enter chord (ESC CR, two bytes, always one
+frame and one command) is exactly the sequence where the boundary is meaning: split across two writes it reads as
+Escape-then-Enter to boundary-sensitive line editors, which is how the chord shipped broken for Codex while bash's 500ms
+readline timeout hid the split. The implementation therefore merges the pair into ONE message at the source
+(`shift-enter-key.js`, whose header owns the full design rationale): the chord's keydown arms the merge and returns
+`true` so xterm's own Enter path — scroll-on-input, selection dismissal, hidden-textarea cleanup, accessibility — runs
+untouched, and the `term.onData` wrapper prepends the pending ESC onto the `\r` xterm emits synchronously for that same
+keystroke. The arm's lifetime is that one synchronous dispatch (expired in a microtask queued at arm time), so a fizzled
+chord leaves no stale arm behind and the ESC is never flushed alone: a stray lone ESC is the byte shape the merge exists
+to never emit.
+
 ## Terminal substrate: private tmux server
 
 Each supervisor runs a dedicated tmux server on a private socket (`~/.local/state/farhelm/tmux.sock`) with a locked-down
