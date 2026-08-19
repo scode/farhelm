@@ -11,7 +11,6 @@
 // real-agent.spec.ts when ungated.
 import { expect, test, type APIRequestContext, type Page } from "@playwright/test";
 import fs from "node:fs";
-import os from "node:os";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
 import {
@@ -33,6 +32,7 @@ import {
   waitUntilAgentReady,
 } from "./helpers/real-agent";
 import { requireProductPageAuth } from "./helpers/device-auth";
+import { stackScratchDir } from "./helpers/scratch";
 
 const FARHELM = path.resolve(__dirname, "../../target/debug/farhelm");
 const SPAWN_AGENT = `"${FARHELM}" internal fake-agent --script spawn`;
@@ -95,7 +95,7 @@ test("a fake agent spawns children that appear without refreshing the observer",
 
   try {
     await requireProductPageAuth(context);
-    root = fs.mkdtempSync(path.join(os.tmpdir(), `farhelm-spawn-${stamp}-`));
+    root = stackScratchDir(`farhelm-spawn-${stamp}-`);
     const unparentedDir = path.join(root, "unparented-child");
     const parentedDir = path.join(root, "parented-child");
     fs.mkdirSync(unparentedDir);
@@ -198,7 +198,7 @@ test("a real Claude creates a jj workspace and spawns into it without refreshing
   const marker = [...probe].reverse().join("");
 
   try {
-    scratch = fs.mkdtempSync(path.join(os.tmpdir(), `farhelm-real-spawn-${stamp}-`));
+    scratch = stackScratchDir(`farhelm-real-spawn-${stamp}-`);
     workspace = path.join(scratch, "spawned-workspace");
     const host = await localHostId(request);
     const claude = (await listProfiles(request, host)).profiles.find(

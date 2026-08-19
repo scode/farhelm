@@ -18,7 +18,6 @@
 // about whatever this page happens to hold.
 import { expect, Page, Route, test } from "@playwright/test";
 import fs from "node:fs";
-import os from "node:os";
 import path from "node:path";
 import {
   cleanupSession,
@@ -33,6 +32,7 @@ import {
   stopSession,
   stubFeed,
 } from "./helpers/fleet";
+import { stackScratchDir } from "./helpers/scratch";
 
 /** The row for one session id, as the list renders it. */
 function row(page: Page, id: string) {
@@ -339,7 +339,7 @@ test.describe("session list filtering", () => {
     page,
     request,
   }) => {
-    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "fh-filter-"));
+    const dir = stackScratchDir("fh-filter-");
     directories.push(dir);
     const here = await createSession(request, { title: `dir-here-${Date.now()}`, cwd: dir });
     const elsewhere = await createSession(request, { title: `dir-elsewhere-${Date.now()}` });
