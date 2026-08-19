@@ -67,7 +67,7 @@ async fn create_profile_child(
 #[tokio::test]
 async fn archive_tears_down_processes_and_tabs_but_restart_keeps_the_attachment() {
     let h = harness().await;
-    let work = tempfile::tempdir().expect("workdir");
+    let work = farhelm_teststate::tempdir().expect("workdir");
     let script = work.path().join("agent.sh");
     let first_pid = work.path().join("first.pid");
     let child_pid_path = work.path().join("child.pid");
@@ -298,7 +298,7 @@ async fn archive_tears_down_processes_and_tabs_but_restart_keeps_the_attachment(
 #[tokio::test]
 async fn archive_succeeds_after_the_working_directory_disappears() {
     let h = harness().await;
-    let work = tempfile::tempdir().expect("workdir");
+    let work = farhelm_teststate::tempdir().expect("workdir");
     let cwd = work.path().to_path_buf();
     let session = h
         .client
@@ -335,7 +335,7 @@ async fn archive_succeeds_after_the_working_directory_disappears() {
 #[tokio::test]
 async fn deleting_an_archived_session_removes_its_row_and_attachments() {
     let h = harness().await;
-    let work = tempfile::tempdir().expect("workdir");
+    let work = farhelm_teststate::tempdir().expect("workdir");
     let session = h
         .client
         .create_session(
@@ -406,7 +406,7 @@ async fn archive_seam_failures_leave_the_session_unarchived() {
             },
         )
         .await;
-        let work = tempfile::tempdir().expect("workdir");
+        let work = farhelm_teststate::tempdir().expect("workdir");
         let session = h
             .client
             .create_session(
@@ -441,7 +441,7 @@ async fn archive_seam_failures_leave_the_session_unarchived() {
 #[tokio::test]
 async fn reopening_an_archived_row_ignores_a_same_named_tmux_husk() {
     let h = harness().await;
-    let work = tempfile::tempdir().expect("workdir");
+    let work = farhelm_teststate::tempdir().expect("workdir");
     let session = h
         .client
         .create_session(

@@ -177,7 +177,7 @@ fn a_missing_supervisor_socket_is_a_clean_precondition_failure() {
 /// remedy, and validation reaches it before any attempt to open the socket.
 #[test]
 fn a_preupgrade_session_is_told_to_restart_before_spawning() {
-    let temp = tempfile::tempdir().unwrap();
+    let temp = farhelm_teststate::tempdir().unwrap();
     let socket = temp.path().join("supervisor.sock");
     let listener = std::os::unix::net::UnixListener::bind(&socket).unwrap();
     let output = spawn_command()
@@ -198,7 +198,7 @@ fn a_preupgrade_session_is_told_to_restart_before_spawning() {
 /// the failure is detected before the socket can observe a connection.
 #[test]
 fn a_missing_session_id_is_a_clean_precondition_failure() {
-    let temp = tempfile::tempdir().unwrap();
+    let temp = farhelm_teststate::tempdir().unwrap();
     let socket = temp.path().join("supervisor.sock");
     let listener = std::os::unix::net::UnixListener::bind(&socket).unwrap();
     let output = spawn_command()
@@ -229,7 +229,7 @@ fn non_utf8_spawn_environment_values_are_refused_before_dialing() {
         "FARHELM_SESSION_TOKEN",
         "FARHELM_SUPERVISOR_SOCK",
     ] {
-        let temp = tempfile::tempdir().unwrap();
+        let temp = farhelm_teststate::tempdir().unwrap();
         let socket = temp.path().join("supervisor.sock");
         let listener = std::os::unix::net::UnixListener::bind(&socket).unwrap();
         let output = spawn_command()
@@ -271,7 +271,7 @@ fn cwd_is_required_by_the_cli_surface() {
 /// flag onto the authenticated CreateSession request.
 #[test]
 fn success_is_one_stdout_line_and_the_wire_request_preserves_every_flag() {
-    let temp = tempfile::tempdir().expect("tempdir");
+    let temp = farhelm_teststate::tempdir().expect("tempdir");
     let real = temp.path().join("real-work");
     std::fs::create_dir(&real).expect("working directory");
     std::os::unix::fs::symlink("real-work", temp.path().join("alias")).expect("symlink alias");
@@ -356,7 +356,7 @@ fn a_created_child_id_succeeds_even_when_its_status_is_already_terminal() {
             detail: "agent executable was missing".to_string(),
         },
     ] {
-        let temp = tempfile::tempdir().unwrap();
+        let temp = farhelm_teststate::tempdir().unwrap();
         let socket = temp.path().join("supervisor.sock");
         let (done, server) = mock_supervisor(&socket, move |request| {
             let ControlMsg::CreateSession { req_id, cwd, .. } = request else {
@@ -396,7 +396,7 @@ fn supervisor_error_replies_exit_nonzero_with_empty_stdout() {
             "idempotency key conflicts",
         ),
     ] {
-        let temp = tempfile::tempdir().unwrap();
+        let temp = farhelm_teststate::tempdir().unwrap();
         let socket = temp.path().join("supervisor.sock");
         let (done, server) = mock_supervisor(&socket, move |_| ControlMsg::Error {
             req_id,
@@ -421,7 +421,7 @@ fn supervisor_error_replies_exit_nonzero_with_empty_stdout() {
 /// an event to discard while waiting forever for a reply that may never come.
 #[test]
 fn an_unexpected_reply_fails_instead_of_hanging() {
-    let temp = tempfile::tempdir().unwrap();
+    let temp = farhelm_teststate::tempdir().unwrap();
     let socket = temp.path().join("supervisor.sock");
     let (done, server) = mock_supervisor(&socket, |_| ControlMsg::SessionCreated {
         req_id: 99,
@@ -456,7 +456,7 @@ fn an_unexpected_reply_fails_instead_of_hanging() {
 /// literally named `~user` that dodges the supervisor's refusal.
 #[test]
 fn tilde_cwds_cross_the_wire_verbatim() {
-    let temp = tempfile::tempdir().expect("tempdir");
+    let temp = farhelm_teststate::tempdir().expect("tempdir");
     let socket = temp.path().join("supervisor.sock");
     for (sent, expected) in [
         ("~", "~".to_string()),

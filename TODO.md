@@ -32,16 +32,6 @@ roadmap and carries no priorities unless an entry says so itself.
   middleware modules, the UI's auth/api modules. Spec surfaces: SPEC.md's token section, SPEC_impl.md's auth/storage
   section as amended in #117.
 
-- Make the e2e harness clean up after itself on abnormal exit. Each browser-suite run builds roughly 65 MB of state
-  directories under /tmp, and killed test stacks orphan them — one long day accumulated 423 orphans (~22 GB) and hit
-  disk-full, killing unrelated work. A partial backstop exists (`e2e/start-stack.sh` sweeps `/tmp/fh-e2e.*` older than
-  60 minutes at stack startup, with deliberate safety guards: directories only, owned only, age-gated, NUL-delimited),
-  but the incident proved its two gaps: much of the leaked volume sat under `tempfile`-default `.tmpXXXXXX` names the
-  sweep never matches, and the sweep runs only when a NEW stack starts, so a long-lived session accumulates without
-  bound. The fix is a design pass: route everything the harness creates through one shared, sweepable naming scheme
-  (beats chasing tempfile defaults), extend the sweep to cover it, keep the existing safety guards, and never reap a
-  concurrent run's live state.
-
 - Dispose of prerelease v0.0.3-rc.1 — the release AND the tag together — once a real release exists. Both were minted
   only to exercise the release workflow (it checks out and verifies `refs/tags/<release_tag>` before building, so a real
   tag was required). Not before a real release exists: rc.1 currently carries the only published Linux artifact, so

@@ -19,7 +19,7 @@ fn run_stdio(state_dir: &std::path::Path) -> std::process::ExitStatus {
 /// error must not grant the helm permission to offer provisioning.
 #[test]
 fn stdio_exit_75_is_reserved_for_positive_absence() {
-    let root = tempfile::tempdir().expect("isolated stdio state roots");
+    let root = farhelm_teststate::tempdir().expect("isolated stdio state roots");
     assert_eq!(run_stdio(&root.path().join("missing")).code(), Some(75));
 
     let refused = root.path().join("refused");

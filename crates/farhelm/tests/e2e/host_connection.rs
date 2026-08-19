@@ -131,8 +131,8 @@ struct RemoteSupervisor {
     /// serves from disappear underneath it.
     _serving: ServeGuard,
     _tmux: TmuxServerGuard,
-    state: tempfile::TempDir,
-    _work: tempfile::TempDir,
+    state: farhelm_teststate::TestDir,
+    _work: farhelm_teststate::TestDir,
     session: SessionInfo,
     _slot: tokio::sync::SemaphorePermit<'static>,
 }
@@ -176,7 +176,7 @@ type ServeFailure = std::sync::Arc<std::sync::Mutex<Option<String>>>;
 /// let a broken refresh pass as "cached zero sessions, correctly".
 async fn remote_supervisor() -> RemoteSupervisor {
     let slot = SLOTS.acquire().await.expect("semaphore is never closed");
-    let state = tempfile::tempdir().expect("state dir");
+    let state = farhelm_teststate::tempdir().expect("state dir");
     let sup =
         Supervisor::new_with_exe_and_timeouts(state.path(), farhelm_bin().into(), suite_timeouts())
             .await
@@ -210,7 +210,7 @@ async fn remote_supervisor() -> RemoteSupervisor {
         .clone()
         .expect("a served supervisor always reports its minted identity");
 
-    let work = tempfile::tempdir().expect("workdir");
+    let work = farhelm_teststate::tempdir().expect("workdir");
     let session = control
         .create_session(
             &work.path().to_string_lossy(),
@@ -341,7 +341,7 @@ async fn an_ssh_row_reaches_a_real_supervisor_and_caches_its_sessions() {
 
     // The helm's own state dir, separate from the "remote" supervisor's:
     // it holds helm.db and the ssh ControlMaster sockets, and nothing else.
-    let helm_state = tempfile::tempdir().expect("helm state dir");
+    let helm_state = farhelm_teststate::tempdir().expect("helm state dir");
     let store = HelmStore::open(&helm_state.path().join("helm.db"))
         .await
         .expect("open helm.db");

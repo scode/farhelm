@@ -8,7 +8,7 @@ use std::time::{Duration, Instant};
 /// turn the real supervisor error into a permanently wedged child.
 #[test]
 fn supervisor_startup_failure_is_not_held_open_by_the_stdin_tether() {
-    let root = tempfile::tempdir().unwrap();
+    let root = farhelm_teststate::tempdir().unwrap();
     let blocking_file = root.path().join("not-a-directory");
     std::fs::write(&blocking_file, b"fixture").unwrap();
     let state_dir = blocking_file.join("state");

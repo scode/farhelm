@@ -647,7 +647,7 @@ async fn a_tab_attach_is_marked_on_the_channel_it_attached() {
 #[tokio::test]
 async fn an_alternate_screen_attach_marks_after_its_visible_snapshot() {
     let h = harness().await;
-    let work = tempfile::tempdir().expect("workdir");
+    let work = farhelm_teststate::tempdir().expect("workdir");
     let session = h
         .client
         .create_session(
@@ -772,7 +772,7 @@ async fn a_dead_pane_attach_is_marked_after_its_replay_with_no_output_after_it()
 #[tokio::test]
 async fn an_attach_is_marked_even_when_no_live_output_ever_follows() {
     let h = harness().await;
-    let work = tempfile::tempdir().expect("workdir");
+    let work = farhelm_teststate::tempdir().expect("workdir");
     let session = h
         .client
         .create_session(
@@ -986,7 +986,7 @@ async fn a_takeover_during_the_catch_up_ends_it_with_or_without_a_marker() {
 #[tokio::test]
 async fn a_tmux_pause_catch_up_replays_without_a_marker() {
     let h = harness().await;
-    let work = tempfile::tempdir().expect("workdir");
+    let work = farhelm_teststate::tempdir().expect("workdir");
     // `counter` runs until its session is killed, so live output is still
     // arriving when the pause is forced — the shape a real `%pause` takes.
     let session = h

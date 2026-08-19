@@ -56,7 +56,7 @@ const SETTLE: Duration = Duration::from_secs(90);
 struct SupervisorProcess {
     _child: tokio::process::Child,
     _tmux: TmuxServerGuard,
-    state: tempfile::TempDir,
+    state: farhelm_teststate::TestDir,
 }
 
 /// Start a real `farhelm supervisor run` on a fresh state directory and
@@ -67,7 +67,7 @@ struct SupervisorProcess {
 /// retries — but it would turn every later assertion into a race with the
 /// reconnect ladder.
 async fn supervisor_process() -> SupervisorProcess {
-    let state = tempfile::tempdir().expect("supervisor state dir");
+    let state = farhelm_teststate::tempdir().expect("supervisor state dir");
     let child = tokio::process::Command::new(farhelm_bin())
         .args(["supervisor", "run", "--state-dir"])
         .arg(state.path())
@@ -339,7 +339,7 @@ async fn two_real_hosts_serve_one_merged_list_and_both_are_operable() {
     let ssh_id = ssh_row["id"].as_i64().expect("host id");
 
     // One session per host, created the only way sessions are created now.
-    let work = tempfile::tempdir().expect("work dir");
+    let work = farhelm_teststate::tempdir().expect("work dir");
     let mut created: Vec<(i64, String)> = Vec::new();
     for (host, title) in [(local_id, "on-this-machine"), (ssh_id, "on-the-remote")] {
         let (status, body) = post(

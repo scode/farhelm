@@ -77,7 +77,7 @@ pub(crate) async fn supervisor_believing_boot(
 /// depending on whether this host publishes a real boot id at all.
 pub(crate) async fn harness_believing_boot(boot: &str) -> Harness {
     let slot = SLOTS.acquire().await.expect("semaphore is never closed");
-    let state = tempfile::tempdir().expect("tempdir");
+    let state = farhelm_teststate::tempdir().expect("tempdir");
     let sup = supervisor_believing_boot(state.path(), Some(boot)).await;
     let guard = TmuxServerGuard(state.path().join("tmux.sock"));
     let client = connect_client(&sup).await;
@@ -146,7 +146,7 @@ pub(crate) async fn listed(client: &SupervisorClient, id: &str) -> SessionInfo {
 async fn same_boot_classification_is_per_session_and_never_interrupted() {
     let h = harness().await;
     let sock = h.state.path().join("tmux.sock");
-    let work = tempfile::tempdir().expect("workdir");
+    let work = farhelm_teststate::tempdir().expect("workdir");
 
     let exiting = h
         .client
@@ -250,7 +250,7 @@ async fn a_reboot_interrupts_live_sessions_and_preserves_ended_ones() {
     // is where its exit code is witnessed, so what survives below is the
     // supervisor's durable recording rather than anything recovered from the
     // pane after it is gone.
-    let work = tempfile::tempdir().expect("workdir");
+    let work = farhelm_teststate::tempdir().expect("workdir");
     let ended = h
         .client
         .create_session(
@@ -392,11 +392,11 @@ async fn a_reboot_interrupts_live_sessions_and_preserves_ended_ones() {
 #[tokio::test]
 async fn a_database_without_a_stored_boot_id_does_not_claim_a_reboot() {
     let slot = SLOTS.acquire().await.expect("semaphore is never closed");
-    let state = tempfile::tempdir().expect("tempdir");
+    let state = farhelm_teststate::tempdir().expect("tempdir");
     let _tmux = TmuxServerGuard(state.path().join("tmux.sock"));
     let sup1 = supervisor_believing_boot(state.path(), None).await;
     let client1 = connect_client(&sup1).await;
-    let work = tempfile::tempdir().expect("workdir");
+    let work = farhelm_teststate::tempdir().expect("workdir");
     let session = client1
         .create_session(
             &work.path().to_string_lossy(),
@@ -450,7 +450,7 @@ async fn a_database_without_a_stored_boot_id_does_not_claim_a_reboot() {
 #[tokio::test]
 async fn a_crash_after_the_launching_record_leaves_evidence_and_stays_pending() {
     let slot = SLOTS.acquire().await.expect("semaphore is never closed");
-    let state = tempfile::tempdir().expect("tempdir");
+    let state = farhelm_teststate::tempdir().expect("tempdir");
     let _tmux = TmuxServerGuard(state.path().join("tmux.sock"));
     let sup1 = Supervisor::new_with_seams(
         state.path(),
@@ -464,7 +464,7 @@ async fn a_crash_after_the_launching_record_leaves_evidence_and_stays_pending() 
     .await
     .expect("supervisor");
     let client1 = connect_client(&sup1).await;
-    let work = tempfile::tempdir().expect("workdir");
+    let work = farhelm_teststate::tempdir().expect("workdir");
     client1
         .create_session(
             &work.path().to_string_lossy(),
@@ -633,7 +633,7 @@ async fn a_list_polling_through_a_stop_never_erases_the_annotation() {
 #[tokio::test]
 async fn stopping_an_already_exited_session_records_no_annotation() {
     let h = harness().await;
-    let work = tempfile::tempdir().expect("workdir");
+    let work = farhelm_teststate::tempdir().expect("workdir");
     let session = h
         .client
         .create_session(
