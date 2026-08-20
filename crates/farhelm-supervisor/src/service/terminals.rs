@@ -1,4 +1,4 @@
-//! Terminal identity and the attach/lease/sink types built on it.
+//! Terminal identity and the output-reap and sink lifecycles built around it.
 //!
 //! `TerminalId`/`Terminal` name which of a session's terminals (the agent
 //! or one of its tabs) a request means and which tmux handles back it;
@@ -6,10 +6,12 @@
 //! `Attach` installs and every later `Resize`/`Detach`/input frame looks
 //! up by. `SessionSinkHandle`/`run_session_sink` are the per-tmux-session
 //! control client every attachment shares, supervised independently of
-//! any one attachment's lifetime.
+//! any one attachment's lifetime. The `Supervisor` extension methods below
+//! own the lifecycle transitions around those types: output-client cleanup
+//! barriers and per-session sink opening, handoff, reaping, and readiness.
 
 use super::core::{RequestError, SessionEntry, Supervisor, error_kind, truncate_for_error};
-use crate::tmux::{InputClient, SessionSink};
+use crate::tmux::{InputClient, ReplayStreamCandidate, SessionSink};
 use anyhow::Context;
 use farhelm_proto::{ErrorKind, Frame, TerminalSelector};
 use std::collections::{HashMap, HashSet};
@@ -1303,8 +1305,762 @@ impl ActiveAttach {
     }
 }
 
+// Output-reap barriers serialize replacement against terminal-client cleanup.
+impl Supervisor {
+    /// Publish a terminal's cleanup barrier before requesting shutdown.
+    ///
+    /// Callers hold `attachments` while removing the corresponding live entry.
+    /// Installing a deferred barrier before that lock is released closes the
+    /// only gap in which a replacement could see neither the old attachment nor
+    /// its still-running cleanup. Join failure is permanent for this supervisor
+    /// process: the task lost the only proof that its output client reached the
+    /// safe boundary, so retrying an attach would be a guess.
+    pub(crate) fn begin_forwarder_shutdown(&self, key: AttachmentKey, attachment: &ActiveAttach) {
+        self.track_output_reap(key, attachment.forwarder_cleanup.clone());
+        attachment.request_forwarder_shutdown();
+    }
+
+    /// Open a provisional replay client without tying its cleanup to a request.
+    ///
+    /// The barrier is published before the runtime-owned open begins and stays
+    /// until the caller installs the returned guard or abandoning it proves the
+    /// client safely reaped. The request-facing wait is bounded; timing out does
+    /// not cancel the opener or erase the per-terminal barrier.
+    pub(crate) async fn open_replay_stream_candidate(
+        &self,
+        key: AttachmentKey,
+        tmux_name: &str,
+        pane: &str,
+    ) -> anyhow::Result<ReplayStreamCandidate> {
+        let (completion, completion_rx) = watch::channel(None);
+        self.track_output_reap(key, completion_rx);
+        let (send, receive) = tokio::sync::oneshot::channel();
+        let tmux = self.tmux.clone();
+        let tmux_name = tmux_name.to_string();
+        let pane = pane.to_string();
+        tokio::spawn(async move {
+            match tmux.open_replay_stream_candidate(&tmux_name, &pane).await {
+                Ok(mut candidate) => {
+                    candidate.set_completion(completion);
+                    let _ = send.send(Ok(candidate));
+                }
+                Err(error) => {
+                    completion.send_replace(Some(Ok(())));
+                    let _ = send.send(Err(error));
+                }
+            }
+        });
+        tokio::time::timeout(self.timeouts.sink_ready, receive)
+            .await
+            .with_context(|| {
+                format!(
+                    "the terminal-output client did not finish opening within {:?}",
+                    self.timeouts.sink_ready
+                )
+            })?
+            .context("the runtime-owned terminal-output opener stopped")?
+    }
+
+    /// Install one reap receiver and own its eventual registry transition.
+    fn track_output_reap(&self, key: AttachmentKey, done: OutputReapReceiver) {
+        self.output_reaps
+            .lock()
+            .expect("output-reap registry poisoned")
+            .insert(key.clone(), OutputReapEntry::Reaping(done.clone()));
+
+        let registry = Arc::clone(&self.output_reaps);
+        tokio::spawn(async move {
+            let identity = done.clone();
+            let mut done = done;
+            let outcome = loop {
+                if let Some(outcome) = done.borrow().clone() {
+                    break outcome;
+                }
+                if done.changed().await.is_err() {
+                    break Err(Arc::<str>::from(
+                        "terminal-output cleanup task ended without a result",
+                    ));
+                }
+            };
+            let mut registry = registry.lock().expect("output-reap registry poisoned");
+            let same = registry.get(&key).is_some_and(|entry| match entry {
+                OutputReapEntry::Reaping(current) => current.same_channel(&identity),
+                OutputReapEntry::Failed(_) => false,
+            });
+            if same {
+                match outcome {
+                    Ok(()) => {
+                        registry.remove(&key);
+                    }
+                    Err(error) => {
+                        registry.insert(key, OutputReapEntry::Failed(error));
+                    }
+                }
+            }
+        });
+    }
+
+    /// Preserve a join failure as fail-closed evidence for this terminal.
+    pub(crate) fn record_forwarder_join(
+        &self,
+        key: AttachmentKey,
+        joined: Result<(), tokio::task::JoinError>,
+    ) -> Result<(), Arc<str>> {
+        match joined {
+            Ok(()) => Ok(()),
+            Err(join) => {
+                let error = Arc::<str>::from(format!(
+                    "terminal {:?} output forwarder panicked or was cancelled: {join}",
+                    key.terminal
+                ));
+                self.output_reaps
+                    .lock()
+                    .expect("output-reap registry poisoned")
+                    .insert(key, OutputReapEntry::Failed(Arc::clone(&error)));
+                Err(error)
+            }
+        }
+    }
+
+    /// Whether any terminal in `session` still has an unresolved output client.
+    ///
+    /// The caller uses this while holding `attachments`; teardown publishes
+    /// under that same async lock, making the check atomic with new attachment
+    /// installation even though the registry itself uses a synchronous lock.
+    pub(crate) fn has_output_reap_for_session(&self, session: &str) -> bool {
+        let mut registry = self
+            .output_reaps
+            .lock()
+            .expect("output-reap registry poisoned");
+        let settled: Vec<(AttachmentKey, Result<(), Arc<str>>)> = registry
+            .iter()
+            .filter_map(|(key, entry)| match entry {
+                OutputReapEntry::Reaping(done) => {
+                    done.borrow().clone().map(|outcome| (key.clone(), outcome))
+                }
+                OutputReapEntry::Failed(_) => None,
+            })
+            .collect();
+        for (key, outcome) in settled {
+            match outcome {
+                Ok(()) => {
+                    registry.remove(&key);
+                }
+                Err(error) => {
+                    registry.insert(key, OutputReapEntry::Failed(error));
+                }
+            }
+        }
+        registry.keys().any(|key| key.session == session)
+    }
+
+    /// Whether `key` still has an unresolved output client.
+    ///
+    /// Output-client overlap is a per-terminal hazard. Restart, tab close, and
+    /// attach therefore use this narrower check; archive and delete retain the
+    /// session-wide check because they tear down every terminal together.
+    pub(crate) fn has_output_reap_for_key(&self, key: &AttachmentKey) -> bool {
+        let mut registry = self
+            .output_reaps
+            .lock()
+            .expect("output-reap registry poisoned");
+        let settled = registry.get(key).and_then(|entry| match entry {
+            OutputReapEntry::Reaping(done) => done.borrow().clone(),
+            OutputReapEntry::Failed(_) => None,
+        });
+        if let Some(outcome) = settled {
+            match outcome {
+                Ok(()) => {
+                    registry.remove(key);
+                }
+                Err(error) => {
+                    registry.insert(key.clone(), OutputReapEntry::Failed(error));
+                }
+            }
+        }
+        registry.contains_key(key)
+    }
+
+    /// Wait for one terminal's old output client, without pinning a request.
+    ///
+    /// The runtime-owned reaper keeps running after this budget expires. A
+    /// caller gets a retryable failure instead of wedging its connection's
+    /// dispatcher behind cleanup that may legitimately retry forever.
+    pub(crate) async fn wait_for_output_reap(&self, key: &AttachmentKey) -> Result<(), Arc<str>> {
+        let key = key.clone();
+        let budget = self.timeouts.sink_ready;
+        tokio::time::timeout(budget, async {
+            loop {
+                let mut done = {
+                    let registry = self
+                        .output_reaps
+                        .lock()
+                        .expect("output-reap registry poisoned");
+                    match registry.get(&key) {
+                        Some(OutputReapEntry::Reaping(done)) => done.clone(),
+                        Some(OutputReapEntry::Failed(error)) => {
+                            return Err(Arc::clone(error));
+                        }
+                        None => return Ok(()),
+                    }
+                };
+                loop {
+                    if let Some(outcome) = done.borrow().clone() {
+                        outcome?;
+                        break;
+                    }
+                    done.changed().await.map_err(|_| {
+                        Arc::<str>::from("terminal-output cleanup task ended without a result")
+                    })?;
+                }
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .map_err(|_| {
+            Arc::<str>::from(format!(
+                "terminal-output cleanup did not finish within {budget:?}"
+            ))
+        })?
+    }
+
+    /// Wait outside `attachments` for every old output client on one session.
+    ///
+    /// A test seam for the whole-session registry contract. Production archive
+    /// and delete fail fast when this state exists; they do not pin a request
+    /// while runtime-owned reapers keep retrying.
+    #[cfg(test)]
+    pub(crate) async fn wait_for_output_reaps(&self, session: &str) -> Result<(), Arc<str>> {
+        let budget = self.timeouts.sink_ready;
+        tokio::time::timeout(budget, async {
+            loop {
+                let pending: Vec<OutputReapReceiver> = {
+                    let registry = self
+                        .output_reaps
+                        .lock()
+                        .expect("output-reap registry poisoned");
+                    let mut pending = Vec::new();
+                    for (key, entry) in registry.iter().filter(|(key, _)| key.session == session) {
+                        match entry {
+                            OutputReapEntry::Reaping(done) => pending.push(done.clone()),
+                            OutputReapEntry::Failed(error) => {
+                                return Err(Arc::<str>::from(format!(
+                                    "terminal {:?} cleanup is unconfirmed: {error}",
+                                    key.terminal
+                                )));
+                            }
+                        }
+                    }
+                    pending
+                };
+                if pending.is_empty() {
+                    return Ok(());
+                }
+
+                let mut waits = tokio::task::JoinSet::new();
+                for mut done in pending {
+                    waits.spawn(async move {
+                        loop {
+                            if let Some(outcome) = done.borrow().clone() {
+                                return outcome;
+                            }
+                            if done.changed().await.is_err() {
+                                return Err(Arc::<str>::from(
+                                    "terminal-output cleanup task ended without a result",
+                                ));
+                            }
+                        }
+                    });
+                }
+                while let Some(joined) = waits.join_next().await {
+                    match joined {
+                        Ok(Ok(())) => {}
+                        Ok(Err(error)) => return Err(error),
+                        Err(join) => {
+                            return Err(Arc::<str>::from(format!(
+                                "waiting for terminal-output cleanup failed: {join}"
+                            )));
+                        }
+                    }
+                }
+                // The watcher that owns registry cleanup may be one scheduling turn
+                // behind the completion we just observed.
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .map_err(|_| {
+            Arc::<str>::from(format!(
+                "terminal-output cleanup for session {session} did not finish within {budget:?}"
+            ))
+        })?
+    }
+}
+
+// The session-sink lifecycle keeps pane filters backed by a live reader.
+impl Supervisor {
+    /// Open a candidate in a task that survives cancellation of its caller.
+    ///
+    /// Opening a tmux control client spawns a process before its bounded
+    /// attach exchange completes. If the request awaiting that exchange is
+    /// cancelled, the runtime-owned task finishes it. `open_session_sink`
+    /// retains and retries cleanup for any child whose attach fails, so this
+    /// task cannot release the candidate barrier until returning an attached
+    /// client or a failure whose child is confirmed gone.
+    async fn open_sink_candidate(
+        &self,
+        tmux_name: &str,
+        candidate: SessionSinkCandidate,
+    ) -> anyhow::Result<SessionSinkCandidate> {
+        let (send, receive) = tokio::sync::oneshot::channel();
+        let tmux = self.tmux.clone();
+        let tmux_name = tmux_name.to_string();
+        let waiting_for = tmux_name.clone();
+        tokio::spawn(async move {
+            let mut candidate = candidate;
+            candidate.mark_opening_started();
+            let outcome: anyhow::Result<SessionSinkHandle> = async {
+                let client = tmux.open_session_sink(&tmux_name).await?;
+                let (state, _) = watch::channel(client.pid());
+                let (shutdown, shutdown_rx) = tokio::sync::oneshot::channel();
+                let replacement_tmux = tmux.clone();
+                Ok(SessionSinkHandle {
+                    tmux_name: tmux_name.clone(),
+                    task: Some(tokio::spawn(run_session_sink(
+                        tmux_name.clone(),
+                        client,
+                        state.clone(),
+                        shutdown_rx,
+                        #[cfg(test)]
+                        None,
+                        move |name| {
+                            let tmux = replacement_tmux.clone();
+                            async move { tmux.open_session_sink(&name).await }
+                        },
+                    ))),
+                    shutdown: Some(shutdown),
+                    state,
+                })
+            }
+            .await;
+            match outcome {
+                Ok(handle) => {
+                    candidate.set_handle(handle);
+                    // If the receiver vanished before OR after this send,
+                    // dropping the guard reaps the client before completing
+                    // the already-published candidate barrier.
+                    let _ = send.send(Ok(candidate));
+                }
+                Err(error) => {
+                    candidate.finish_without_handle(Ok(()));
+                    let _ = send.send(Err(error));
+                }
+            }
+        });
+        tokio::time::timeout(self.timeouts.sink_ready, receive)
+            .await
+            .with_context(|| {
+                format!(
+                    "the session-sink opener for {waiting_for} did not finish within {:?}",
+                    self.timeouts.sink_ready
+                )
+            })?
+            .context("the runtime-owned session-sink opener stopped")?
+    }
+
+    /// Reap an unregistered candidate, poisoning the session on failure.
+    ///
+    /// Concurrent first attaches may each open a control client before one
+    /// wins the registry race. A losing client is outside the registered
+    /// lease protocol, but its unconfirmed exit is just as dangerous as a
+    /// registered reap failure: either one can overlap every later client
+    /// for this tmux session. Recording `Failed` makes that uncertainty a
+    /// durable in-process barrier instead of an error seen by only one caller.
+    async fn reap_competing_sink(
+        &self,
+        tmux_name: &str,
+        candidate: SessionSinkCandidate,
+    ) -> anyhow::Result<()> {
+        let sinks = Arc::clone(&self.sinks);
+        let tmux_name = tmux_name.to_string();
+        tokio::spawn(async move {
+            if let Err(message) = candidate.shutdown().await {
+                sinks.lock().expect("sink registry poisoned").insert(
+                    tmux_name.clone(),
+                    SinkRegistryEntry::Failed(Arc::clone(&message)),
+                );
+                anyhow::bail!(
+                    "a competing session sink for {tmux_name} could not be reaped: {message}"
+                );
+            }
+            Ok(())
+        })
+        .await
+        .context("joining the competing session-sink reaper")?
+    }
+
+    /// Wait for every candidate open or reap already published for a session.
+    ///
+    /// Candidate operations live beside, not instead of, the registered sink
+    /// state: a live winner and an abandoned loser can coexist briefly. Every
+    /// ensure passes this barrier before opening and again before returning,
+    /// so neither case exposes a client while that loser is still unresolved.
+    async fn await_sink_candidates(&self, tmux_name: &str) -> anyhow::Result<()> {
+        let sink_ready = self.timeouts.sink_ready;
+        let deadline = tokio::time::Instant::now() + sink_ready;
+        loop {
+            let mut pending = {
+                let mut sinks = self.sinks.lock().expect("sink registry poisoned");
+                if let Some(candidates) = sinks.candidates.get_mut(tmux_name) {
+                    candidates.retain(|done| !matches!(&*done.borrow(), Some(Ok(()))));
+                    if candidates.is_empty() {
+                        sinks.candidates.remove(tmux_name);
+                        Vec::new()
+                    } else {
+                        candidates.clone()
+                    }
+                } else {
+                    Vec::new()
+                }
+            };
+            if pending.is_empty() {
+                return Ok(());
+            }
+            let outcome = tokio::time::timeout_at(deadline, async {
+                for done in &mut pending {
+                    loop {
+                        if let Some(outcome) = done.borrow().clone() {
+                            outcome?;
+                            break;
+                        }
+                        done.changed().await.map_err(|_| {
+                            Arc::<str>::from(
+                                "a candidate sink lost its reaper before process exit was confirmed",
+                            )
+                        })?;
+                    }
+                }
+                Ok::<(), Arc<str>>(())
+            })
+            .await;
+            match outcome {
+                Ok(Ok(())) => {}
+                Ok(Err(message)) => anyhow::bail!(
+                    "a candidate session sink for {tmux_name} could not be reaped: {message}"
+                ),
+                Err(_) => anyhow::bail!(
+                    "a candidate session sink for {tmux_name} did not settle within \
+                     {sink_ready:?}"
+                ),
+            }
+        }
+    }
+
+    /// The sink client for `tmux_name`, attaching one if this is the
+    /// session's first attachment (see [`SessionSinkHandle`]).
+    ///
+    /// The caller must hold the returned lease for as long as its attachment
+    /// lives, and must call this BEFORE opening any per-terminal client
+    /// for the session: the pane filter those clients install is only safe
+    /// while a sink is already attached (see [`crate::tmux::SessionSink`]).
+    ///
+    /// # What "ensure" promises
+    ///
+    /// Not merely that a handle exists — that a client is ATTACHED RIGHT
+    /// NOW. A handle whose sink is mid-respawn is the one state in which
+    /// installing pane filters is actively harmful (filters on, sink off,
+    /// and tmux stops reading a pane nobody is watching), so this waits
+    /// out that window rather than handing back a handle that is only
+    /// nominally healthy. The wait is bounded by
+    /// [`super::core::SupervisorTimeouts::sink_ready`] (production:
+    /// [`SINK_READY_TIMEOUT`]) and its expiry
+    /// fails the attach loudly; it is not a state a healthy host reaches,
+    /// and pretending otherwise would mean attaching into exactly the
+    /// configuration the wait exists to avoid.
+    ///
+    /// # Locking
+    ///
+    /// Takes no lock but its own and must not be called while `attachments`
+    /// is held (see the attach handler's cost note). The synchronous registry
+    /// lock covers memory-only state transitions and is never held across a
+    /// spawn, reply exchange, readiness wait, or reap. Candidate inspection,
+    /// registered-sink lookup, and a missing-sink reservation share one such
+    /// critical section, so only one first attach opens a client; later callers
+    /// wait on its per-session barrier without delaying unrelated sessions.
+    /// Reaping an old registered sink uses the same per-session waiting rule.
+    ///
+    /// # Failure
+    ///
+    /// Failing here fails the attach, which is a deliberate choice over
+    /// degrading silently. Ordinary open failures — a vanished tmux session,
+    /// an unresponsive server, exhausted process limits — are early news of
+    /// conditions that would fail the per-terminal clients opened next.
+    /// Lifecycle failures are different: an earlier, competing, or abandoned
+    /// sink whose process exit was not confirmed leaves a fail-closed barrier,
+    /// even when tmux is otherwise healthy, because opening another client
+    /// would risk the overlap this handoff exists to prevent. A runtime-owned
+    /// opener or reaper stopping unexpectedly is surfaced for the same reason.
+    pub(crate) async fn ensure_session_sink(
+        &self,
+        tmux_name: &str,
+    ) -> anyhow::Result<SessionSinkLease> {
+        enum Lookup {
+            Candidate,
+            Live(Arc<SessionSinkHandle>),
+            Reaping(watch::Receiver<Option<Result<(), Arc<str>>>>),
+            Failed(Arc<str>),
+            Missing(SessionSinkCandidate),
+        }
+
+        let lease = loop {
+            self.await_sink_candidates(tmux_name).await?;
+            if let Some(gate) = &self.seams.sink_lookup_gate {
+                gate().await;
+            }
+            let lookup = {
+                let registry = Arc::clone(&self.sinks);
+                let mut sinks = registry.lock().expect("sink registry poisoned");
+                Self::prune_dead_sinks(&mut sinks);
+                let candidate_pending = sinks.candidates.get(tmux_name).is_some_and(|candidates| {
+                    candidates
+                        .iter()
+                        .any(|done| !matches!(&*done.borrow(), Some(Ok(()))))
+                });
+                if candidate_pending {
+                    Lookup::Candidate
+                } else {
+                    sinks.candidates.remove(tmux_name);
+                    match sinks.get(tmux_name) {
+                        Some(SinkRegistryEntry::Live(handle)) => {
+                            handle.upgrade().map(Lookup::Live).unwrap_or_else(|| {
+                                Lookup::Missing(SessionSinkCandidate::begin_locked(
+                                    tmux_name.to_string(),
+                                    Arc::clone(&registry),
+                                    &mut sinks,
+                                ))
+                            })
+                        }
+                        Some(SinkRegistryEntry::Reaping(done)) => Lookup::Reaping(done.clone()),
+                        Some(SinkRegistryEntry::Failed(error)) => Lookup::Failed(Arc::clone(error)),
+                        None => Lookup::Missing(SessionSinkCandidate::begin_locked(
+                            tmux_name.to_string(),
+                            Arc::clone(&registry),
+                            &mut sinks,
+                        )),
+                    }
+                }
+            };
+            let candidate = match lookup {
+                Lookup::Candidate => {
+                    if let Some(gate) = &self.seams.sink_candidate_wait_gate {
+                        gate().await;
+                    }
+                    continue;
+                }
+                Lookup::Live(handle) => {
+                    break SessionSinkLease::new(handle, Arc::clone(&self.sinks));
+                }
+                Lookup::Reaping(mut done) => {
+                    let sink_ready = self.timeouts.sink_ready;
+                    let outcome = tokio::time::timeout(sink_ready, async {
+                        loop {
+                            if let Some(outcome) = done.borrow().clone() {
+                                return Some(outcome);
+                            }
+                            if done.changed().await.is_err() {
+                                return None;
+                            }
+                        }
+                    })
+                    .await;
+                    match outcome {
+                        Ok(Some(Ok(()))) => continue,
+                        Ok(Some(Err(message))) => anyhow::bail!(
+                            "the previous session sink for {tmux_name} could not be reaped: \
+                             {message}"
+                        ),
+                        Ok(None) => anyhow::bail!(
+                            "the previous session sink for {tmux_name} lost its reaper before \
+                             process exit was confirmed"
+                        ),
+                        Err(_) => anyhow::bail!(
+                            "the previous session sink for {tmux_name} did not finish shutting \
+                             down within {sink_ready:?}"
+                        ),
+                    }
+                }
+                Lookup::Failed(message) => anyhow::bail!(
+                    "the previous session sink for {tmux_name} could not be reaped: {message}"
+                ),
+                Lookup::Missing(candidate) => candidate,
+            };
+            if let Some(gate) = &self.seams.sink_reservation_gate {
+                gate().await;
+            }
+
+            {
+                let candidate = self.open_sink_candidate(tmux_name, candidate).await?;
+                enum Install {
+                    Winner(Arc<SessionSinkHandle>),
+                    Reaping,
+                    Failed(Arc<str>),
+                    Installed(Arc<SessionSinkHandle>),
+                }
+                let mut candidate = Some(candidate);
+                // Re-check under the lock: another first-attach may have
+                // finished while this one was spawning. Whoever is already
+                // registered wins. Reap the losing client before returning;
+                // abort-on-drop requests a kill but would let both first
+                // attaches overlap until that process actually exited.
+                let install = {
+                    let mut sinks = self.sinks.lock().expect("sink registry poisoned");
+                    Self::prune_dead_sinks(&mut sinks);
+                    match sinks.get(tmux_name) {
+                        Some(SinkRegistryEntry::Live(winner)) if winner.strong_count() > 0 => {
+                            Install::Winner(
+                                winner
+                                    .upgrade()
+                                    .expect("a positive strong count must upgrade"),
+                            )
+                        }
+                        Some(SinkRegistryEntry::Reaping(_)) => Install::Reaping,
+                        Some(SinkRegistryEntry::Failed(error)) => {
+                            Install::Failed(Arc::clone(error))
+                        }
+                        _ => {
+                            let handle =
+                                Arc::new(candidate.take().expect("candidate available").install());
+                            sinks.insert(
+                                tmux_name.to_string(),
+                                SinkRegistryEntry::Live(Arc::downgrade(&handle)),
+                            );
+                            Install::Installed(handle)
+                        }
+                    }
+                };
+                match install {
+                    Install::Winner(winner) => {
+                        let winner = SessionSinkLease::new(winner, Arc::clone(&self.sinks));
+                        self.reap_competing_sink(
+                            tmux_name,
+                            candidate
+                                .take()
+                                .expect("a losing candidate remains available"),
+                        )
+                        .await?;
+                        break winner;
+                    }
+                    Install::Reaping => {
+                        self.reap_competing_sink(
+                            tmux_name,
+                            candidate
+                                .take()
+                                .expect("a losing candidate remains available"),
+                        )
+                        .await?;
+                        continue;
+                    }
+                    Install::Failed(error) => {
+                        self.reap_competing_sink(
+                            tmux_name,
+                            candidate
+                                .take()
+                                .expect("a losing candidate remains available"),
+                        )
+                        .await?;
+                        anyhow::bail!(
+                            "the previous session sink for {tmux_name} could not be reaped: \
+                             {error}"
+                        );
+                    }
+                    Install::Installed(handle) => {
+                        break SessionSinkLease::new(handle, Arc::clone(&self.sinks));
+                    }
+                }
+            }
+        };
+        self.await_sink_candidates(tmux_name).await?;
+        // Readiness, whether the handle is new (already attached, so this
+        // returns at once) or adopted (possibly mid-respawn).
+        let mut state = lease.state.subscribe();
+        if state.borrow().is_none() {
+            let sink_ready = self.timeouts.sink_ready;
+            let ready = tokio::time::timeout(sink_ready, async {
+                while state.changed().await.is_ok() {
+                    if state.borrow().is_some() {
+                        return true;
+                    }
+                }
+                false
+            })
+            .await;
+            match ready {
+                Ok(true) => {}
+                Ok(false) => anyhow::bail!(
+                    "the session sink for {tmux_name} stopped being supervised while this \
+                     attach waited for it; attach again"
+                ),
+                Err(_) => anyhow::bail!(
+                    "the session sink for {tmux_name} did not come back within \
+                     {sink_ready:?}; the tmux server is not answering"
+                ),
+            }
+        }
+        Ok(lease)
+    }
+
+    /// Drop registry entries whose handle is gone.
+    ///
+    /// Dead `Live` entries carry no owner and completed successful reaps no
+    /// longer carry a handoff, so both may be discarded. An in-progress
+    /// reap and a failed reap are deliberately retained: the former blocks
+    /// overlap until completion, while the latter is the fail-closed proof
+    /// that process exit was never confirmed. Opportunistic rather than
+    /// scheduled because every path that can grow the map passes here.
+    fn prune_dead_sinks(sinks: &mut HashMap<String, SinkRegistryEntry>) {
+        sinks.retain(|_, entry| match entry {
+            SinkRegistryEntry::Live(handle) => handle.strong_count() > 0,
+            SinkRegistryEntry::Reaping(done) => !matches!(&*done.borrow(), Some(Ok(()))),
+            SinkRegistryEntry::Failed(_) => true,
+        });
+    }
+
+    /// The process id of `tmux_name`'s live sink client, or `None` when
+    /// that session has no sink (no attachments) or its sink is between
+    /// incarnations.
+    ///
+    /// A test seam with no production caller: the sink's whole contract is
+    /// about a PROCESS being attached, and neither its presence, its
+    /// absence, nor its replacement after a `kill -9` is observable from
+    /// the wire protocol. Reads the registry rather than a live tmux query
+    /// so a test can tell "the supervisor believes it has a sink" apart
+    /// from "some client happens to be attached".
+    pub fn session_sink_pid(&self, tmux_name: &str) -> Option<u32> {
+        let sinks = self.sinks.lock().expect("sink registry poisoned");
+        let Some(SinkRegistryEntry::Live(handle)) = sinks.get(tmux_name) else {
+            return None;
+        };
+        let handle = handle.upgrade()?;
+        *handle.state.borrow()
+    }
+
+    /// How many registered sink-state entries the registry is holding.
+    ///
+    /// A test seam for the churn test that pins [`Self::prune_dead_sinks`]
+    /// doing its job: "the map stays bounded" is not observable in any
+    /// other way, and a leak here would be invisible until a long-lived
+    /// supervisor's memory made it obvious. Transient candidate-operation
+    /// barriers are deliberately excluded; their own tests inspect their
+    /// completion boundary rather than treating in-flight work as a leak.
+    pub fn session_sink_registry_len(&self) -> usize {
+        self.sinks.lock().expect("sink registry poisoned").len()
+    }
+}
+
 #[cfg(test)]
 mod tests {
+    use super::super::core::tests::{StateDir, dummy_exe};
+    use super::super::core::{SupervisorSeams, SupervisorTimeouts};
     use super::*;
     use crate::tmux::PaneState;
     use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
@@ -1316,6 +2072,535 @@ mod tests {
         fn drop(&mut self) {
             self.0.store(true, Ordering::Relaxed);
         }
+    }
+
+    /// A replacement cannot pass a published output-reap barrier early.
+    ///
+    /// The forwarder may return after handing its client to a runtime-owned
+    /// reaper. This test pins the registry half of that handoff: waiting stays
+    /// blocked while the result is absent, then the successful result removes
+    /// the barrier instead of leaving a terminal permanently unattached.
+    #[tokio::test]
+    async fn an_output_reap_barrier_blocks_until_cleanup_succeeds() {
+        let state = StateDir::new();
+        let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
+            .await
+            .expect("supervisor");
+        let key = AttachmentKey::new("session", TerminalId::Agent);
+        let (done, done_rx) = watch::channel(None);
+        sup.track_output_reap(key, done_rx);
+
+        let waiting_sup = Arc::clone(&sup);
+        let waiting =
+            tokio::spawn(async move { waiting_sup.wait_for_output_reaps("session").await });
+        tokio::task::yield_now().await;
+        assert!(
+            !waiting.is_finished(),
+            "an unresolved client cleanup must hold replacement attach behind its barrier"
+        );
+
+        done.send_replace(Some(Ok(())));
+        tokio::time::timeout(Duration::from_secs(2), waiting)
+            .await
+            .expect("the successful cleanup must release its waiter")
+            .expect("joining the output-reap waiter")
+            .expect("successful cleanup must permit replacement");
+        assert!(
+            !sup.has_output_reap_for_session("session"),
+            "a successful cleanup must remove its registry entry"
+        );
+    }
+
+    /// Lost cleanup proof remains a durable fail-closed attachment barrier.
+    ///
+    /// Treating a failed reaper like success would recreate the overlapping
+    /// control-client race on the next attach. The error must therefore reach
+    /// the waiter and remain in the registry for every later attempt.
+    #[tokio::test]
+    async fn a_failed_output_reap_remains_fail_closed() {
+        let state = StateDir::new();
+        let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
+            .await
+            .expect("supervisor");
+        let key = AttachmentKey::new("session", TerminalId::Agent);
+        let (done, done_rx) = watch::channel(None);
+        sup.track_output_reap(key, done_rx);
+        done.send_replace(Some(Err(Arc::<str>::from("injected cleanup loss"))));
+
+        let error = sup
+            .wait_for_output_reaps("session")
+            .await
+            .expect_err("unconfirmed cleanup must refuse replacement");
+        assert!(
+            error.contains("injected cleanup loss"),
+            "the refusal must preserve the cause: {error}"
+        );
+        assert!(
+            sup.has_output_reap_for_session("session"),
+            "a cleanup failure must remain visible after the first waiter returns"
+        );
+        assert!(
+            sup.wait_for_output_reaps("session").await.is_err(),
+            "later attaches must see the same fail-closed state"
+        );
+    }
+
+    /// An unresolved tab client does not block the agent terminal's attach.
+    ///
+    /// Output-client overlap is per pane, even though both clients attach to
+    /// the same tmux session. A session-wide check here would let one stuck tab
+    /// make every otherwise-independent terminal unavailable.
+    #[tokio::test]
+    async fn output_reap_barriers_are_scoped_to_one_terminal() {
+        let state = StateDir::new();
+        let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
+            .await
+            .expect("supervisor");
+        let tab = AttachmentKey::new("session", TerminalId::Tab("tab-1".to_string()));
+        let agent = AttachmentKey::new("session", TerminalId::Agent);
+        let (_done, done_rx) = watch::channel(None);
+        sup.track_output_reap(tab.clone(), done_rx);
+
+        assert!(sup.has_output_reap_for_key(&tab));
+        assert!(
+            !sup.has_output_reap_for_key(&agent),
+            "a tab cleanup barrier must not cover the agent terminal"
+        );
+        tokio::time::timeout(Duration::from_secs(1), sup.wait_for_output_reap(&agent))
+            .await
+            .expect("the unrelated terminal returns immediately")
+            .expect("the unrelated terminal has no cleanup failure");
+    }
+
+    /// A request stops waiting while its runtime-owned output reaper remains.
+    ///
+    /// Reapers intentionally retry forever when tmux cannot acknowledge the
+    /// safe boundary. The connection dispatcher must still regain control, and
+    /// the retained registry entry must keep later replacement attempts closed.
+    #[tokio::test]
+    async fn output_reap_waits_are_bounded_without_erasing_the_barrier() {
+        let state = StateDir::new();
+        let sup = Supervisor::new_with_exe_and_timeouts(
+            state.path(),
+            dummy_exe(),
+            SupervisorTimeouts {
+                sink_ready: Duration::from_millis(25),
+                ..SupervisorTimeouts::default()
+            },
+        )
+        .await
+        .expect("supervisor");
+        let key = AttachmentKey::new("session", TerminalId::Agent);
+        let (_done, done_rx) = watch::channel(None);
+        sup.track_output_reap(key.clone(), done_rx);
+
+        let error = sup
+            .wait_for_output_reap(&key)
+            .await
+            .expect_err("an unresolved reaper must exhaust the request budget");
+        assert!(
+            error.contains("did not finish within"),
+            "the timeout must describe the retained cleanup boundary: {error}"
+        );
+        assert!(
+            sup.has_output_reap_for_key(&key),
+            "timing out the request must not erase its fail-closed barrier"
+        );
+    }
+
+    /// A competing first-attach caller does not return before its client is
+    /// confirmed shut down.
+    ///
+    /// The candidate is unregistered, so the per-session lease barrier cannot
+    /// protect this boundary. The runtime-owned competing reaper must still
+    /// keep the losing request pending until its task acknowledges teardown.
+    #[tokio::test]
+    async fn a_competing_sink_reaper_waits_for_shutdown_before_returning() {
+        let state = StateDir::new();
+        let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
+            .await
+            .expect("supervisor");
+        let (shutdown, shutdown_rx) = tokio::sync::oneshot::channel();
+        let entered = Arc::new(tokio::sync::Notify::new());
+        let release = Arc::new(tokio::sync::Notify::new());
+        let task_entered = Arc::clone(&entered);
+        let task_release = Arc::clone(&release);
+        let candidate = SessionSinkHandle {
+            tmux_name: "fh-test".to_string(),
+            task: Some(tokio::spawn(async move {
+                let _ = shutdown_rx.await;
+                task_entered.notify_one();
+                task_release.notified().await;
+                Ok(())
+            })),
+            shutdown: Some(shutdown),
+            state: watch::channel(Some(1)).0,
+        };
+        let mut guarded =
+            SessionSinkCandidate::begin("fh-test".to_string(), Arc::clone(&sup.sinks));
+        guarded.set_handle(candidate);
+        let future = sup.reap_competing_sink("fh-test", guarded);
+        tokio::pin!(future);
+
+        tokio::select! {
+            result = future.as_mut() => panic!("competing reap returned early: {result:?}"),
+            _ = entered.notified() => {}
+        }
+        let remained_pending = std::future::poll_fn(|cx| {
+            std::task::Poll::Ready(future.as_mut().poll(cx).is_pending())
+        })
+        .await;
+        assert!(
+            remained_pending,
+            "the losing attach returned before its candidate finished shutting down"
+        );
+
+        release.notify_one();
+        future.await.expect("the competing sink is reaped");
+    }
+
+    /// A competing client whose exit is unconfirmed blocks every later open.
+    ///
+    /// The failure must survive the losing request and be consulted by the
+    /// next ensure call; otherwise one caller would see an error while another
+    /// immediately created the overlapping client that error warned about.
+    #[tokio::test]
+    async fn a_failed_competing_reap_poison_is_refused_by_the_next_ensure() {
+        let state = StateDir::new();
+        let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
+            .await
+            .expect("supervisor");
+        let (shutdown, shutdown_rx) = tokio::sync::oneshot::channel();
+        let candidate = SessionSinkHandle {
+            tmux_name: "fh-test".to_string(),
+            task: Some(tokio::spawn(async move {
+                let _ = shutdown_rx.await;
+                anyhow::bail!("the competing process exit was not confirmed")
+            })),
+            shutdown: Some(shutdown),
+            state: watch::channel(Some(1)).0,
+        };
+        let mut guarded =
+            SessionSinkCandidate::begin("fh-test".to_string(), Arc::clone(&sup.sinks));
+        guarded.set_handle(candidate);
+
+        assert!(
+            sup.reap_competing_sink("fh-test", guarded).await.is_err(),
+            "the losing request must receive the reap failure"
+        );
+        assert!(matches!(
+            sup.sinks.lock().expect("sink registry").get("fh-test"),
+            Some(SinkRegistryEntry::Failed(_))
+        ));
+        let error = match sup.ensure_session_sink("fh-test").await {
+            Ok(_) => panic!("a failed reap must prevent another same-session client"),
+            Err(error) => error,
+        };
+        assert!(
+            format!("{error:#}").contains("could not be reaped"),
+            "the next attach must report the retained reap failure: {error:#}"
+        );
+    }
+
+    /// Cancelling a provisional readiness wait publishes final-owner reaping.
+    ///
+    /// A mid-respawn handle is a real owner even though its attach has not
+    /// committed yet. If the last committed lease disappears and that wait is
+    /// then cancelled, the provisional lease must install `Reaping`
+    /// synchronously instead of dropping the handle through abort-only cleanup.
+    #[tokio::test]
+    async fn cancelling_provisional_sink_readiness_publishes_a_reaping_barrier() {
+        let state = StateDir::new();
+        let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
+            .await
+            .expect("supervisor");
+        let (shutdown, shutdown_rx) = tokio::sync::oneshot::channel();
+        let entered = Arc::new(tokio::sync::Notify::new());
+        let release = Arc::new(tokio::sync::Notify::new());
+        let task_entered = Arc::clone(&entered);
+        let task_release = Arc::clone(&release);
+        let handle = Arc::new(SessionSinkHandle {
+            tmux_name: "fh-test".to_string(),
+            task: Some(tokio::spawn(async move {
+                let _ = shutdown_rx.await;
+                task_entered.notify_one();
+                task_release.notified().await;
+                Ok(())
+            })),
+            shutdown: Some(shutdown),
+            state: watch::channel(None).0,
+        });
+        sup.sinks.lock().expect("sink registry").insert(
+            "fh-test".to_string(),
+            SinkRegistryEntry::Live(Arc::downgrade(&handle)),
+        );
+        let committed = SessionSinkLease::new(handle, Arc::clone(&sup.sinks));
+        let mut provisional = Box::pin(sup.ensure_session_sink("fh-test"));
+        let waiting = std::future::poll_fn(|cx| {
+            std::task::Poll::Ready(provisional.as_mut().poll(cx).is_pending())
+        })
+        .await;
+        assert!(waiting, "the provisional attach must wait for readiness");
+
+        drop(committed);
+        assert!(matches!(
+            sup.sinks.lock().expect("sink registry").get("fh-test"),
+            Some(SinkRegistryEntry::Live(_))
+        ));
+        drop(provisional);
+        assert!(matches!(
+            sup.sinks.lock().expect("sink registry").get("fh-test"),
+            Some(SinkRegistryEntry::Reaping(_))
+        ));
+
+        entered.notified().await;
+        release.notify_one();
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(30);
+        loop {
+            if sup
+                .sinks
+                .lock()
+                .expect("sink registry")
+                .get("fh-test")
+                .is_none()
+            {
+                break;
+            }
+            assert!(
+                tokio::time::Instant::now() < deadline,
+                "the provisional lease reaper did not clear its barrier"
+            );
+            tokio::task::yield_now().await;
+        }
+    }
+
+    /// A same-session ensure cannot overtake a controlled reaper.
+    ///
+    /// This is the request boundary behind an immediate detach/reattach: the
+    /// old sink's shutdown is deliberately held open, and the replacement
+    /// ensure must remain pending until that reaper publishes an outcome.
+    /// Returning while the gate is closed would let the wire attach reply
+    /// overtake process exit even if cleanup finished moments afterward.
+    #[tokio::test]
+    async fn a_same_session_ensure_waits_for_the_reaper_outcome() {
+        let state = StateDir::new();
+        let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
+            .await
+            .expect("supervisor");
+        let (shutdown, shutdown_rx) = tokio::sync::oneshot::channel();
+        let entered = Arc::new(tokio::sync::Notify::new());
+        let release = Arc::new(tokio::sync::Notify::new());
+        let task_entered = Arc::clone(&entered);
+        let task_release = Arc::clone(&release);
+        let handle = Arc::new(SessionSinkHandle {
+            tmux_name: "fh-test".to_string(),
+            task: Some(tokio::spawn(async move {
+                let _ = shutdown_rx.await;
+                task_entered.notify_one();
+                task_release.notified().await;
+                anyhow::bail!("controlled reap outcome")
+            })),
+            shutdown: Some(shutdown),
+            state: watch::channel(Some(1)).0,
+        });
+        sup.sinks.lock().expect("sink registry").insert(
+            "fh-test".to_string(),
+            SinkRegistryEntry::Live(Arc::downgrade(&handle)),
+        );
+        drop(SessionSinkLease::new(handle, Arc::clone(&sup.sinks)));
+        entered.notified().await;
+
+        let mut ensure = Box::pin(sup.ensure_session_sink("fh-test"));
+        let remained_pending = std::future::poll_fn(|cx| {
+            std::task::Poll::Ready(ensure.as_mut().poll(cx).is_pending())
+        })
+        .await;
+        assert!(
+            remained_pending,
+            "same-session ensure returned while the old sink reaper was gated"
+        );
+
+        release.notify_one();
+        let error = match ensure.await {
+            Ok(_) => panic!("the controlled reap failure must fail the waiting ensure"),
+            Err(error) => error,
+        };
+        assert!(
+            format!("{error:#}").contains("controlled reap outcome"),
+            "the waiting ensure must receive the reaper's outcome: {error:#}"
+        );
+    }
+
+    /// An abandoned candidate blocks adoption of an otherwise-live winner.
+    ///
+    /// Candidate cleanup is tracked separately from the registered sink, so a
+    /// successful ensure cannot return the winner while an abandoned control
+    /// client for the same tmux session is still being reaped.
+    #[tokio::test]
+    async fn an_abandoned_candidate_blocks_ensure_until_its_reap_finishes() {
+        let state = StateDir::new();
+        let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
+            .await
+            .expect("supervisor");
+        let (winner_shutdown, winner_shutdown_rx) = tokio::sync::oneshot::channel();
+        let winner = Arc::new(SessionSinkHandle {
+            tmux_name: "fh-test".to_string(),
+            task: Some(tokio::spawn(async move {
+                let _ = winner_shutdown_rx.await;
+                Ok(())
+            })),
+            shutdown: Some(winner_shutdown),
+            state: watch::channel(Some(1)).0,
+        });
+        sup.sinks.lock().expect("sink registry").insert(
+            "fh-test".to_string(),
+            SinkRegistryEntry::Live(Arc::downgrade(&winner)),
+        );
+        let winner_owner = SessionSinkLease::new(winner, Arc::clone(&sup.sinks));
+
+        let (candidate_shutdown, candidate_shutdown_rx) = tokio::sync::oneshot::channel();
+        let entered = Arc::new(tokio::sync::Notify::new());
+        let release = Arc::new(tokio::sync::Notify::new());
+        let task_entered = Arc::clone(&entered);
+        let task_release = Arc::clone(&release);
+        let candidate_handle = SessionSinkHandle {
+            tmux_name: "fh-test".to_string(),
+            task: Some(tokio::spawn(async move {
+                let _ = candidate_shutdown_rx.await;
+                task_entered.notify_one();
+                task_release.notified().await;
+                Ok(())
+            })),
+            shutdown: Some(candidate_shutdown),
+            state: watch::channel(Some(2)).0,
+        };
+        let mut candidate =
+            SessionSinkCandidate::begin("fh-test".to_string(), Arc::clone(&sup.sinks));
+        candidate.set_handle(candidate_handle);
+        drop(candidate);
+        entered.notified().await;
+
+        let mut ensure = Box::pin(sup.ensure_session_sink("fh-test"));
+        let remained_pending = std::future::poll_fn(|cx| {
+            std::task::Poll::Ready(ensure.as_mut().poll(cx).is_pending())
+        })
+        .await;
+        assert!(
+            remained_pending,
+            "ensure returned the winner while an abandoned candidate was still reaping"
+        );
+
+        release.notify_one();
+        let adopted = ensure
+            .await
+            .expect("ensure adopts the winner after candidate cleanup");
+        assert_eq!(*adopted.state.borrow(), Some(1));
+        drop(adopted);
+        drop(winner_owner);
+    }
+
+    /// Reserving a missing sink publishes its barrier before opening can pause.
+    ///
+    /// This pins the lock boundary itself: the first ensure is stopped after
+    /// its missing decision but before tmux is touched. A second ensure must
+    /// already wait on that reservation instead of making another missing
+    /// decision and exposing a competing client.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn a_missing_sink_reservation_is_visible_before_opening_begins() {
+        let state = StateDir::new();
+        let lookup_barrier = Arc::new(tokio::sync::Barrier::new(3));
+        let lookup_calls = Arc::new(AtomicU64::new(0));
+        let (candidate_observed, mut candidate_observed_rx) = mpsc::unbounded_channel();
+        let reservation_entered = Arc::new(tokio::sync::Notify::new());
+        let reservation_release = Arc::new(tokio::sync::Notify::new());
+        let reservation_calls = Arc::new(AtomicU64::new(0));
+        let gate_lookup_barrier = Arc::clone(&lookup_barrier);
+        let gate_lookup_calls = Arc::clone(&lookup_calls);
+        let gate_reservation_entered = Arc::clone(&reservation_entered);
+        let gate_reservation_release = Arc::clone(&reservation_release);
+        let gate_reservation_calls = Arc::clone(&reservation_calls);
+        let sup = Supervisor::new_with_seams(
+            state.path(),
+            dummy_exe(),
+            SupervisorTimeouts::default(),
+            SupervisorSeams {
+                sink_lookup_gate: Some(Arc::new(move || {
+                    let barrier = Arc::clone(&gate_lookup_barrier);
+                    let call = gate_lookup_calls.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                    Box::pin(async move {
+                        if call < 2 {
+                            barrier.wait().await;
+                        }
+                    })
+                })),
+                sink_candidate_wait_gate: Some(Arc::new(move || {
+                    let observed = candidate_observed.clone();
+                    Box::pin(async move {
+                        let _ = observed.send(());
+                    })
+                })),
+                sink_reservation_gate: Some(Arc::new(move || {
+                    let entered = Arc::clone(&gate_reservation_entered);
+                    let release = Arc::clone(&gate_reservation_release);
+                    let call =
+                        gate_reservation_calls.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                    Box::pin(async move {
+                        if call == 0 {
+                            entered.notify_one();
+                            release.notified().await;
+                        }
+                    })
+                })),
+                ..SupervisorSeams::default()
+            },
+        )
+        .await
+        .expect("supervisor");
+
+        let first_sup = Arc::clone(&sup);
+        let first =
+            tokio::spawn(
+                async move { first_sup.ensure_session_sink("fh-missing").await.map(drop) },
+            );
+        let second_sup = Arc::clone(&sup);
+        let second =
+            tokio::spawn(
+                async move { second_sup.ensure_session_sink("fh-missing").await.map(drop) },
+            );
+        lookup_barrier.wait().await;
+        reservation_entered.notified().await;
+        candidate_observed_rx
+            .recv()
+            .await
+            .expect("the losing lookup observes the winner's candidate barrier");
+
+        assert_eq!(
+            reservation_calls.load(std::sync::atomic::Ordering::Relaxed),
+            1,
+            "only one simultaneous missing decision may reserve an opener"
+        );
+        assert_eq!(
+            sup.sinks
+                .lock()
+                .expect("sink registry")
+                .candidates
+                .get("fh-missing")
+                .map(Vec::len),
+            Some(1),
+            "the missing decision must publish its candidate barrier atomically"
+        );
+        assert!(
+            !first.is_finished() && !second.is_finished(),
+            "an ensure escaped while the sole reserved opener was gated"
+        );
+
+        reservation_release.notify_one();
+        let (first_result, second_result) = tokio::join!(first, second);
+        assert!(
+            first_result.expect("first ensure task joins").is_err()
+                && second_result.expect("second ensure task joins").is_err(),
+            "the nonexistent fixture session must reject both opens"
+        );
     }
 
     /// A pane-state map is a whole tmux SERVER's worth of panes, and this

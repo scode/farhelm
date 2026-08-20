@@ -67,18 +67,20 @@
 //! reads and writes, and this file is a re-export shell so nothing outside
 //! `service` has to know the split happened. A submodule may EXTEND
 //! `Supervisor` with an impl block of its own where the operation is
-//! genuinely a method on it (`teardown`'s `teardown_session` and
-//! `capture`'s pass scheduling do today); `core` owns the type and the
+//! genuinely a method on it (`teardown`'s `teardown_session`, `capture`'s
+//! pass scheduling, and `terminals`' sink/output-reap lifecycle do today);
+//! `core` owns the type and the
 //! common lifecycle, not a monopoly on its methods.
 //!
-//! Four of those slices were carved out of `core` and `handlers` later,
+//! Five of those slices were carved out of `core` and `handlers` later,
 //! on the same functional-no-op terms, once each had grown into a contract
 //! of its own: `status` (how a session's liveness, restart offer, and
 //! reply-shaped `SessionInfo` are derived), `listing` (the `ListSessions`
-//! order, cursor, page cuts, and the walk itself), and `teardown` (the
-//! whole of what `DeleteSession` does, minus the reply), and `capture` (the
+//! order, cursor, page cuts, and the walk itself), `teardown` (the whole of
+//! what `DeleteSession` does, minus the reply), `capture` (the
 //! first-input anchor, claim ladder, scheduling, and durable correlation
-//! pass). Each owns a sequence or a precedence whose parts have to agree
+//! pass), and `terminals` (terminal identity plus the sink and output-reap
+//! lifecycle). Each owns a sequence or a precedence whose parts have to agree
 //! with each other; see their own module docs for what each one is holding
 //! together.
 
