@@ -39,7 +39,7 @@
 //! during create validation, recording the first-input timestamp capture
 //! correlates on, and running the rescan that claims an identity. The
 //! rescan deliberately has no watcher thread and no inotify — it is a
-//! POLLED pass (see `core::capture_pass` for the cost envelope and why
+//! POLLED pass (see `capture::capture_pass` for the cost envelope and why
 //! polling is sufficient here), driven from two cadences that answer
 //! different questions: the `ticker` task, which guarantees progress with
 //! nobody connected, and the `ListSessions`, restart, and reload passes,
@@ -67,19 +67,22 @@
 //! reads and writes, and this file is a re-export shell so nothing outside
 //! `service` has to know the split happened. A submodule may EXTEND
 //! `Supervisor` with an impl block of its own where the operation is
-//! genuinely a method on it (`teardown`'s `teardown_session` is the one
-//! that does today); `core` owns the type and the common lifecycle, not a
-//! monopoly on its methods.
+//! genuinely a method on it (`teardown`'s `teardown_session` and
+//! `capture`'s pass scheduling do today); `core` owns the type and the
+//! common lifecycle, not a monopoly on its methods.
 //!
-//! Three of those slices were carved out of `core` and `handlers` later,
+//! Four of those slices were carved out of `core` and `handlers` later,
 //! on the same functional-no-op terms, once each had grown into a contract
 //! of its own: `status` (how a session's liveness, restart offer, and
 //! reply-shaped `SessionInfo` are derived), `listing` (the `ListSessions`
 //! order, cursor, page cuts, and the walk itself), and `teardown` (the
-//! whole of what `DeleteSession` does, minus the reply). Each owns a
-//! sequence or a precedence whose parts have to agree with each other; see
-//! their own module docs for what each one is holding together.
+//! whole of what `DeleteSession` does, minus the reply), and `capture` (the
+//! first-input anchor, claim ladder, scheduling, and durable correlation
+//! pass). Each owns a sequence or a precedence whose parts have to agree
+//! with each other; see their own module docs for what each one is holding
+//! together.
 
+mod capture;
 mod connection;
 mod core;
 mod handlers;
@@ -93,14 +96,14 @@ mod terminals;
 mod ticker;
 mod uploads;
 
+pub use capture::{CaptureStoreFault, CaptureWrite};
 pub use connection::handle_connection;
 #[cfg(test)]
 pub(crate) use core::recovered_archive_flag;
 pub use core::{
-    ArchiveGate, ArchiveStage, BootIdSource, CaptureStoreFault, CaptureWrite, CreateCrashSeam,
-    CreateStage, ForwarderCleanupGate, NaturalDetachGate, STALL_DETACH_TIMEOUT, SampleFault,
-    SampleRead, SessionSnapshot, StateDirOwnership, Supervisor, SupervisorSeams,
-    SupervisorTimeouts, TabOpenFault, TabOpenStage, UPLOAD_DISK_STAGE_TIMEOUT,
-    UPLOAD_PROGRESS_TIMEOUT, WRITER_STALL_TIMEOUT, connect, run,
+    ArchiveGate, ArchiveStage, BootIdSource, CreateCrashSeam, CreateStage, ForwarderCleanupGate,
+    NaturalDetachGate, STALL_DETACH_TIMEOUT, SampleFault, SampleRead, SessionSnapshot,
+    StateDirOwnership, Supervisor, SupervisorSeams, SupervisorTimeouts, TabOpenFault, TabOpenStage,
+    UPLOAD_DISK_STAGE_TIMEOUT, UPLOAD_PROGRESS_TIMEOUT, WRITER_STALL_TIMEOUT, connect, run,
 };
 pub use listing::LIST_SESSION_CAP;

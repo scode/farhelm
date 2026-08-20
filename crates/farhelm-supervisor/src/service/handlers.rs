@@ -2966,9 +2966,10 @@ pub(crate) async fn handle_restricted_control(
 
 #[cfg(test)]
 mod tests {
+    use super::super::capture::{CaptureState, FirstInput};
     use super::super::connection::CONNECTION_WRITER_QUEUE;
     use super::super::core::tests::{StateDir, dummy_exe, entry_with, no_uploads};
-    use super::super::core::{ArchiveStage, CaptureState, FirstInput, SupervisorSeams};
+    use super::super::core::{ArchiveStage, SupervisorSeams};
     use super::super::listing::encode_list_cursor;
     use super::super::terminals::Terminal;
     use super::*;
