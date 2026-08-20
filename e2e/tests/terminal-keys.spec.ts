@@ -92,32 +92,7 @@
 // window.
 import { expect, test, type Page } from "@playwright/test";
 import { cleanupSession, createSession } from "./helpers/fleet";
-
-/** Full text content of the terminal buffer (scrollback + viewport),
- * duplicated from terminal-clipboard.spec.ts's identical helper rather than
- * imported — this suite's per-area-file convention (mouse-modes.spec.ts's
- * own header) treats each new spec as starting clean. */
-async function termText(page: Page): Promise<string> {
-  return page.evaluate(() => {
-    const term = (window as any).__farhelmTerm;
-    if (!term) return "";
-    const buf = term.buffer.active;
-    const lines: string[] = [];
-    for (let i = 0; i < buf.length; i++) {
-      lines.push(buf.getLine(i)?.translateToString(true) ?? "");
-    }
-    return lines.join("\n");
-  });
-}
-
-/** Poll the buffer until `needle` shows up — terminal output arrives
- * asynchronously over the WebSocket with no DOM event to await (the same
- * reason terminal-clipboard.spec.ts's identical helper polls). */
-async function waitForTermText(page: Page, needle: string) {
-  await expect
-    .poll(() => termText(page), { timeout: 15_000, message: `waiting for ${needle}` })
-    .toContain(needle);
-}
+import { termText, waitForTermText } from "./helpers/term";
 
 /**
  * Every hex byte VALUE `od -v -An -tx1 -w1` has printed so far, in order,

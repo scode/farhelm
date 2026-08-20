@@ -3,22 +3,12 @@
 // deterministic control of the two channels the feed work is about — the
 // invalidation socket and the build stamp.
 //
-// A helper MODULE rather than another copy pasted per spec, unlike
-// sidebar.spec.ts's and mouse-modes.spec.ts's duplicated terminal helpers.
-// The difference is what is being shared: those files each needed one
-// small, stable snippet, while the three feed/filter specs share a
-// non-obvious CONTRACT — what a stubbed feed does, what counts as a
-// periodic read, how skew is forced — and three copies of that would drift
-// into three different definitions of "the feed is healthy", which is
-// exactly the claim those tests exist to make.
-//
-// The pre-existing specs keep their own copies of the SESSION helpers, and
-// that is still deliberate. One export has since crossed over:
-// terminal.spec.ts imports `stubFeed`, because a dozen of its tests had to
-// stop waiting for the polls M6.75 removed and take control of invalidation
-// instead. That one is a contract rather than a snippet — what "the feed is
-// healthy" means — and two definitions of it would drift apart while the
-// specs that depend on the difference kept passing.
+// This module owns the shared fleet contract: real API fixtures and the
+// non-obvious feed behavior that specs need to control. The terminal island
+// has a separate contract in helpers/term.ts — `window.__farhelmTerm`,
+// `term.buffer.active`, and readiness globals — because terminal assertions
+// rely on that surface across spec files. Genuinely one-off snippets still
+// stay local.
 import { APIRequestContext, expect, Locator, Page, Route, WebSocketRoute } from "@playwright/test";
 import path from "node:path";
 

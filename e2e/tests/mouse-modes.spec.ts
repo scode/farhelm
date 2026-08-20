@@ -30,6 +30,7 @@
 // closes that gap.
 import { test, expect, Page, APIRequestContext } from "@playwright/test";
 import path from "node:path";
+import { cleanupSession, fillCreateForm, termText, waitForTermText } from "./helpers/term";
 
 /**
  * The mouse-mode fake-agent script (`crates/farhelm/src/fake_agent.rs`'s
@@ -52,60 +53,6 @@ const MOUSE_MODES_AGENT_INVOCATION = `"${
  */
 const LEGACY_REPORT_PREFIX = [0x1b, 0x5b, 0x4d] as const; // ESC [ M
 const SGR_REPORT_PREFIX = [0x1b, 0x5b, 0x3c] as const; // ESC [ <
-
-/**
- * Open the list view's inline create form and fill in its three fields.
- * Duplicated from terminal.spec.ts's identical helper rather than
- * imported: that file exports nothing (every earlier spec in this suite
- * is self-contained), and per this milestone's testing decision new spec
- * files are meant to start clean rather than reach back into it.
- */
-async function fillCreateForm(
-  page: Page,
-  { cwd, invocation, title }: { cwd: string; invocation: string; title: string },
-) {
-  await page.locator(".new-session-button").click();
-  const form = page.locator(".create-session-form");
-  await expect(form).toBeVisible();
-  // The agent picker is told, explicitly, that this create means the command
-  // below. It is not a formality: the dialog defaults to the target host's
-  // last-used profile, and when that profile has since been DELETED — which
-  // is the state any run that exercised profiles leaves the shared stack in —
-  // it selects nothing at all and blocks the create until someone answers
-  // (SPEC.md's ask-don't-guess). Saying "custom command" here is what a user
-  // in that state would do, and it makes this helper independent of whatever
-  // the last profile-backed create left behind.
-  await form.locator(".create-session-profile").selectOption("");
-  await form.locator('input[type="text"]').nth(0).fill(cwd);
-  await form.locator('input[type="text"]').nth(1).fill(invocation);
-  await form.locator('input[type="text"]').nth(2).fill(title);
-  return form;
-}
-
-/** Full text content of the terminal buffer (scrollback + viewport). */
-async function termText(page: Page): Promise<string> {
-  return page.evaluate(() => {
-    const term = (window as any).__farhelmTerm;
-    if (!term) return "";
-    const buf = term.buffer.active;
-    const lines: string[] = [];
-    for (let i = 0; i < buf.length; i++) {
-      lines.push(buf.getLine(i)?.translateToString(true) ?? "");
-    }
-    return lines.join("\n");
-  });
-}
-
-/**
- * Poll the buffer until `needle` shows up. Polling, not a one-shot read:
- * terminal output arrives asynchronously over the WebSocket with no DOM
- * event to await.
- */
-async function waitForTermText(page: Page, needle: string, timeout = 15_000) {
-  await expect
-    .poll(() => termText(page), { timeout, message: `waiting for ${needle}` })
-    .toContain(needle);
-}
 
 /**
  * Reconstruct the ordered byte stream the fake agent's hex echo produced,
@@ -271,22 +218,6 @@ async function findSessionIdByTitle(
     const id = listing.sessions.find((s: any) => s.title === title)?.id;
     if (id !== undefined || Date.now() > deadline) return id;
     await new Promise((resolve) => setTimeout(resolve, 100));
-  }
-}
-
-/** Stop and delete a session, tolerating either already being done. */
-async function cleanupSession(request: APIRequestContext, id: string) {
-  const stopped = await request.post(`/api/sessions/${id}/stop`);
-  if (!stopped.ok() && stopped.status() !== 404) {
-    throw new Error(
-      `cleanup: stopping session ${id} failed (${stopped.status()}): ${await stopped.text()}`,
-    );
-  }
-  const deleted = await request.delete(`/api/sessions/${id}`);
-  if (!deleted.ok() && deleted.status() !== 404) {
-    throw new Error(
-      `cleanup: deleting session ${id} failed (${deleted.status()}): ${await deleted.text()}`,
-    );
   }
 }
 
