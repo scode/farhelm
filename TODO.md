@@ -142,6 +142,10 @@ roadmap and carries no priorities unless an entry says so itself.
   are still fleet members); alternative: exclude archived so the default view is self-consistent. Cheap UX verdict,
   worth making explicitly.
 
+- Add a "sort by" control for the left sidebar's session rows. Default to most recently active, with alphabetical and
+  newest-created options; newest-created is the current behavior (`created_at` descending). Define the activity signal
+  and stable tie-breakers when implementing it so equally active rows do not jump around nondeterministically.
+
 - Reassess the host row's component-prop shape: the earlier "regroup when props are actively growing" condition has
   fired (provisioning grew it to 20 props). Only with a memoization-preserving grouping — state-only structs, never
   callback structs (the framework's callback-prop memoization does not survive struct nesting; the session row learned
