@@ -28,7 +28,6 @@
 // instead of a re-discovery.
 import { test, expect, Page, APIRequestContext } from "@playwright/test";
 import path from "node:path";
-import os from "node:os";
 import fs from "node:fs";
 import {
   CLAUDE_CODE_MARKERS,
@@ -37,6 +36,7 @@ import {
   waitUntilAgentReady,
   type SubmitPromptEvent,
 } from "./helpers/real-agent";
+import { stackScratchDir } from "./helpers/scratch";
 
 /**
  * The fake-agent invocation for every CI-runnable leg below, built from
@@ -463,7 +463,7 @@ test("drives a real `claude` session through the trust dialog to a detected repl
   // since accepting trust is the vendor's OWN write into the user's real
   // `~/.claude.json`, never into this directory, and is not this test's
   // concern to undo.
-  const scratch = fs.mkdtempSync(path.join(os.tmpdir(), "farhelm-real-agent-"));
+  const scratch = stackScratchDir("farhelm-real-agent-");
   const title = `real-agent-${Date.now()}`;
   let id: string | undefined;
   try {

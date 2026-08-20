@@ -67,7 +67,7 @@ import path from "node:path";
 // directory this process creates is the same directory the supervisor's
 // shell lands in.
 import fs from "node:fs";
-import os from "node:os";
+import { stackScratchDir } from "./helpers/scratch";
 // The multi-host tests at the very end of this file kill and restart the
 // harness's "remote" supervisor to drive a host through unreachable and
 // back — the one thing in this suite that has to reach behind the API,
@@ -5912,7 +5912,7 @@ async function createTabSession(
   request: APIRequestContext,
   title: string,
 ): Promise<{ id: string; cwd: string }> {
-  const cwd = fs.mkdtempSync(path.join(os.tmpdir(), "fh-tabs-"));
+  const cwd = stackScratchDir("fh-tabs-");
   tabSessionDirs.push(cwd);
   const created = await request.post("/api/sessions", {
     data: { cwd, invocation: FAKE_AGENT_INVOCATION, title },

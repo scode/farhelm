@@ -201,9 +201,12 @@ print(json.dumps({
 # ids — the tests read from /api/hosts, which is the authority for them
 # anyway.
 #
-# The state directory is now published for one narrow reason: auth.spec.ts and
-# the global setup invoke the shipped token CLI against it. Browser behavior
-# still reaches the helm through HTTP; no test reads helm.db directly.
+# The state directory is published for two consumers: auth.spec.ts and the
+# global setup invoke the shipped token CLI against it, and the scratch
+# helper (tests/helpers/scratch.ts) creates every spec's per-test working
+# directory inside it so those dirs share the stack's cleanup lifecycle.
+# Browser behavior still reaches the helm through HTTP; no test reads
+# helm.db directly.
 python3 -c '
 import json, sys
 print(json.dumps({

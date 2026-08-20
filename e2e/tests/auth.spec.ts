@@ -5,8 +5,7 @@
 // WebSocket teardown on rotation.
 import { chromium, expect, Page, Route, test, webkit } from "@playwright/test";
 import { execFile } from "node:child_process";
-import { chmod, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
-import os from "node:os";
+import { chmod, readFile, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { promisify } from "node:util";
 import {
@@ -15,6 +14,7 @@ import {
   refreshHarnessAuthorization,
   requireProductPageAuth,
 } from "./helpers/device-auth";
+import { stackScratchDir } from "./helpers/scratch";
 
 const run = promisify(execFile);
 
@@ -82,7 +82,7 @@ test("an unauthenticated browser gets an in-page token prompt", async ({
 });
 
 test("a device secret survives a browser restart", async ({ browserName, baseURL }) => {
-  const profile = await mkdtemp(path.join(os.tmpdir(), "farhelm-auth-profile-"));
+  const profile = stackScratchDir("farhelm-auth-profile-");
   try {
     const browserType = browserName === "webkit" ? webkit : chromium;
     const first = await browserType.launchPersistentContext(profile, {
