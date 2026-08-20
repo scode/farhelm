@@ -58,14 +58,9 @@ roadmap and carries no priorities unless an entry says so itself.
   trip inside a 30-second budget, but each round's inner `wait_for` panics at its OWN 3-second deadline, racing the
   outer `tokio::time::timeout` that was supposed to convert the round into a retry — when the panic wins, one slow first
   round fails the test with 27 seconds of budget unspent. Fixing the ladder (give the inner wait no deadline of its own,
-  or a longer one than the wrapper) would make the observed failure impossible without changing what is pinned. Finally,
-  the same campaign confirmed a third, deeper shape (3 occurrences in ~700 iterations of the concurrent recipe, tmux
-  3.6): SIGKILLing a supervisor while its control clients hold queued output can abort the tmux SERVER itself —
-  `a_killed_supervisor_leaves_no_orphaned_sink_client`'s setup then fails with "no server running on
-  <sock>", both fabricated clients refused. This is the ci.yml-documented unsafe-control-client-teardown abort class and
-  the M6.5 ledger's pane-silenced server-death, seen from a new angle; farhelm cannot make a DEAD supervisor's teardown
-  safe, so this is a substrate risk to track (does 3.7b's abort fix cover it? does the distro tmux on CI?), not
-  something a test or product change here can remove. The test's setup panic now names the shape outright when it fires.
+  or a longer one than the wrapper) would make the observed failure impossible without changing what is pinned. (The
+  same campaign's third finding — SIGKILLing a supervisor with queued control output can abort the tmux server itself —
+  lives in BUGS.md: it is a substrate defect nothing here can fix, not wanted work.)
 
 - Deflake `boot_id_durable_outcome::a_list_polling_through_a_stop_never_erases_the_annotation` under local full-suite
   load. One occurrence so far: 2026-08-18, full workspace suite at libtest's default thread count (one runnable test per
