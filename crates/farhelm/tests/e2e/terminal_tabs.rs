@@ -1600,7 +1600,7 @@ async fn input_reaches_only_the_terminal_it_was_sent_to() {
 /// stall lasted — and this test's earlier form said so. The session sink
 /// closes it by guaranteeing tmux always has a client it can deliver every
 /// pane to, and the coverage for that guarantee is the mechanism tests
-/// (`only_the_sink_keeps_a_filtered_pane_readable` in `tmux.rs`, and the
+/// (`only_the_sink_keeps_a_filtered_pane_readable` in `tmux/sink.rs`, and the
 /// `the_session_sink_*` lifecycle tests below), not this one. This test's
 /// own claim stays what it always was: the supervisor's per-terminal
 /// machinery keeps the agent flowing while a tab's viewer is wedged.
