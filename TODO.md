@@ -35,18 +35,20 @@ roadmap and carries no priorities unless an entry says so itself.
 - Deflake `terminal_tabs::a_killed_supervisor_leaves_no_orphaned_sink_client` on CI. It failed three CI runs on
   2026-08-16/17 with "a control client outlived the supervisor that owned it: 1 still attached"
   (crates/farhelm/tests/e2e/terminal_tabs.rs, the 20-second drain loop after the SIGKILL), each time passing on a plain
-  rerun of the same commit, and it has never failed locally — including three full-suite runs on the 12-core devbox the
+  rerun of the same commit, and it has never failed locally — including three full-suite runs on the 6-core devbox the
   same day. Failing runs for reference: actions/runs/31953418151/job/95180287538 (on #172, so it predates the PaneProbe
   work entirely), actions/runs/31980616526/job/95246609920 and actions/runs/31992550444/job/95278542779 (on #174). What
   the test pins: a SIGKILLed supervisor's three tmux control clients (output, input, session sink) must all die from
   stdin EOF when the kernel reaps the supervisor's pipe ends — teardown by protocol, not by cleanup code. On CI (4
   vCPUs, `--test-threads=4`, three other process-heavy tests running concurrently) exactly one client is still attached
-  when the 20s deadline expires. Unknown which of the three it is — the assertion only counts. First steps: make the
-  failure say WHICH client survives (`list-clients -F` output in the panic, not just the count); then decide between the
-  two candidate mechanisms — the deadline is simply too tight under CI load, or a concurrently spawned tmux client
-  process inherited a duplicate of another client's stdin write end (missing CLOEXEC would keep EOF from ever arriving,
-  and would also explain why an idle rerun always passes). The second one would be a real bug in exactly the guarantee
-  the test exists to pin, so do not reach for a bigger timeout until the survivor's identity rules it out.
+  when the 20s deadline expires. The survivor-identifying diagnostics are DONE: the expiry panic now carries a
+  role-identifying roster (input = `no-output` flag, replay = `pause-after`, sink = neither), the pre-kill roster for
+  comparison, and a /proc scan naming every holder of each survivor's stdin pipe with its access mode (the scan marks
+  itself INCOMPLETE when it had blind spots). What remains is the verdict the next occurrence's report will hand over: a
+  live write-end holder that is not the dead supervisor means a leaked stdin duplicate — a real bug in exactly the
+  guarantee the test exists to pin. No write-end holder on a COMPLETE scan points away from the leak, toward deadline
+  pressure or some other client-side shutdown stall — supporting evidence for a timeout change, not proof by itself. Do
+  not reach for a bigger timeout until the survivor's identity rules the leak out.
 
 - Deflake desktop-smoke's clean-exit leg on CI. Twice on 2026-08-16/17 the gate failed with "desktop app did not exit
   cleanly" — scripts/desktop-smoke.sh's final leg sends alt+F4 via xdotool and gives the app 10 seconds (20 × 0.5s) to
@@ -61,6 +63,25 @@ roadmap and carries no priorities unless an entry says so itself.
   actions artifact on failure (today it dies with the runner), and make the leg re-deliver alt+F4 once after
   re-verifying focus before concluding the app is wedged; only then consider whether 10s is honestly enough on a 4-vCPU
   runner.
+
+- Deflake `boot_id_durable_outcome::a_list_polling_through_a_stop_never_erases_the_annotation` under local full-suite
+  load. One occurrence so far: 2026-08-18, full workspace suite at libtest's default thread count (one runnable test per
+  logical CPU — six on this devbox); passed in isolation immediately after, and has never failed on CI. The assertion at
+  boot_id_durable_outcome.rs:606 expected `Exited` and got
+  `Error { "the agent was never started: the launch never reached farhelm's exec shim, so
+  something before it — the transient cgroup scope wrapper, or the login shell itself — exited first" }`
+  — the launch-artifact classifier's never-started verdict (launch_artifacts.rs), meaning the failure is UPSTREAM of the
+  list-versus-stop behavior under test: the session's launch itself died before exec'ing the shim, so the stop recorded
+  an error rather than the annotated exit. Candidate mechanisms, unverified: under full-suite process-heavy load the
+  systemd user manager is slow or resource-starved enough that the transient scope wrapper or the login shell inside it
+  exits before reaching the shim (this box has a user manager, so launches take the scoped path; CI runners have none
+  and take the unscoped path, which would make this a local-only shape); or a concurrent test's scope sweep caught the
+  launch mid-flight. First steps: reproduce with a full-suite loop at the default thread count; make `basic_session`
+  (harness.rs) optionally wait until the fake agent's READY marker lands (a post-exec sentinel — a merely live pane is
+  NOT enough, since the scope wrapper or login shell keeps the pane alive before exec and can still die in exactly the
+  pre-shim way under investigation), so a launch that never started fails setup by name instead of corrupting the
+  assertion under test — every basic_session caller shares this exposure — and capture the scope wrapper's stderr on the
+  never-started path so the next occurrence says which of the two candidates it was.
 
 - Dispose of prerelease v0.0.3-rc.1 — the release AND the tag together — once a real release exists. Both were minted
   only to exercise the release workflow (it checks out and verifies `refs/tags/<release_tag>` before building, so a real

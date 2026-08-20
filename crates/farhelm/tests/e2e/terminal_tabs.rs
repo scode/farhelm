@@ -2411,6 +2411,12 @@ async fn a_killed_supervisor_leaves_no_orphaned_sink_client() {
         3,
         "test premise: an attached terminal must have brought a sink up"
     );
+    // Captured while all three clients are attached: the failure report
+    // prints the survivors NEXT TO this complete trio, so the clients
+    // that did die name themselves by absence. tmux can still describe
+    // whoever remains after the kill — what it cannot reconstruct is
+    // what a full roster looked like before the teardown began.
+    let pre_kill_roster = control_client_roster(&sock).await;
     let _cleanup = MarkerCleanupGuard::new(session.id.clone());
 
     // The whole point: no graceful shutdown, no `Drop`, no chance to kill
@@ -2424,11 +2430,18 @@ async fn a_killed_supervisor_leaves_no_orphaned_sink_client() {
 
     let deadline = tokio::time::Instant::now() + Duration::from_secs(20);
     while count_control_clients(&sock).await > 0 {
-        assert!(
-            tokio::time::Instant::now() < deadline,
-            "a control client outlived the supervisor that owned it: {} still attached",
-            count_control_clients(&sock).await
-        );
+        // On expiry, identify the survivor rather than counting it: this
+        // failure has only ever occurred on CI, so the panic message is
+        // the entire evidence budget. Three CI failures under the old
+        // count-only assert produced zero bits toward distinguishing a
+        // too-tight deadline from a leaked stdin write end; see the
+        // report helper for what gets captured and why.
+        if tokio::time::Instant::now() >= deadline {
+            panic!(
+                "a control client outlived the supervisor that owned it\n{}",
+                orphaned_client_report(&sock, &pre_kill_roster).await
+            );
+        }
         tokio::time::sleep(Duration::from_millis(100)).await;
     }
 
@@ -2524,6 +2537,520 @@ async fn count_control_clients(sock: &std::path::Path) -> usize {
         .lines()
         .filter(|line| !line.trim().is_empty())
         .count()
+}
+
+/// Every attached control client, one line each, in the shape the orphan
+/// diagnostics want: pid, name, flags, session, and the created/activity
+/// timestamps.
+///
+/// The flags identify each client's ROLE. Verified against a live roster
+/// (tmux 3.7b, 2026-08-18): the input client attaches `-f no-output`
+/// permanently, so that flag names it for certain; the replay client is
+/// the one carrying `pause-after=N` (the per-terminal flow control from
+/// PLAN_M4 is set on exactly that client); the sink is the one with
+/// neither. Where flags are not enough, [`stdin_pipe_holder_scan`]'s
+/// cmdline capture settles it — the three attach argument shapes differ.
+///
+/// This one listing is a diagnostic consumer's ENTIRE view of the server:
+/// pids for the per-process scans are parsed back out of these lines (see
+/// [`roster_pids`]) rather than fetched by a second query, because clients
+/// exit asynchronously and two queries can describe two different worlds
+/// (observed live: a graceful teardown dropped two of three clients
+/// between back-to-back listings). Bounded, and returns the failure or
+/// timeout text instead of panicking: every caller is either asserting a
+/// premise or assembling a failure report, and a probe that can hang — or
+/// panic inside a panic's evidence-gathering — would trade the real
+/// report for a worse one.
+async fn control_client_roster(sock: &std::path::Path) -> String {
+    // A dedicated command rather than `tmux_query`, for `kill_on_drop`:
+    // when the timeout abandons the output future, the spawned tmux
+    // process must die with it, not linger while the diagnostic loop
+    // keeps polling a wedged server.
+    let mut query = tokio::process::Command::new("tmux");
+    query
+        .arg("-S")
+        .arg(sock)
+        .args([
+            "list-clients",
+            "-F",
+            "pid=#{client_pid} name=#{client_name} flags=[#{client_flags}] \
+             session=#{client_session} created=#{client_created} activity=#{client_activity}",
+        ])
+        .kill_on_drop(true);
+    let listed = tokio::time::timeout(Duration::from_secs(5), query.output()).await;
+    match listed {
+        Err(_) => {
+            "list-clients timed out after 5s; the tmux server itself may be wedged".to_string()
+        }
+        Ok(Err(e)) => format!("list-clients could not be spawned: {e}"),
+        Ok(Ok(listed)) if listed.status.success() => String::from_utf8_lossy(&listed.stdout)
+            .trim_end()
+            .to_string(),
+        Ok(Ok(listed)) => format!(
+            "list-clients failed: {}",
+            String::from_utf8_lossy(&listed.stderr).trim()
+        ),
+    }
+}
+
+/// The client pids named by a [`control_client_roster`] listing.
+///
+/// Parsing the roster rather than re-querying keeps every consumer on the
+/// same single snapshot (the roster's docstring says why). Error and
+/// timeout text parses to an empty list; the caller prints the roster
+/// verbatim, so the failure itself stays visible.
+fn roster_pids(roster: &str) -> Vec<u32> {
+    roster
+        .lines()
+        .filter_map(|line| line.strip_prefix("pid=")?.split(' ').next()?.parse().ok())
+        .collect()
+}
+
+/// The full story of an expired orphan-drain deadline: who is still
+/// attached, who was attached before the kill, and — the part that decides
+/// the investigation — which live processes still hold the survivor's
+/// stdin pipe, in which direction.
+///
+/// The question this exists to answer: did the survivor simply not exit
+/// YET (deadline too tight under load), or can it NEVER exit because some
+/// process other than the dead supervisor holds a duplicate of its stdin
+/// write end, so EOF will never arrive? A write-end holder that is not the
+/// supervisor is the second mechanism caught red-handed — and a real bug in
+/// exactly the guarantee this test pins. No write-end holder at all points
+/// back at the first. The read-end holders are expected chatter (the tmux
+/// server holds each control client's stdin via fd passing) but are listed
+/// anyway; an unexpected reader would be its own lead.
+async fn orphaned_client_report(sock: &std::path::Path, pre_kill_roster: &str) -> String {
+    let survivors = control_client_roster(sock).await;
+    let pids = roster_pids(&survivors);
+    let mut report = format!(
+        "still attached at deadline expiry:\n{survivors}\nroster before the kill:\n{pre_kill_roster}\n",
+    );
+    if pids.is_empty() {
+        report.push_str(
+            "no client pids parsed from the survivor listing above; per-process pipe scans skipped\n",
+        );
+    }
+    for pid in pids {
+        report.push_str(&stdin_pipe_holder_scan(pid));
+    }
+    report
+}
+
+/// Trace one process's stdin pipe through /proc: its own state, the pipe's
+/// identity, and every live process holding an end of that same pipe, with
+/// each holder's access mode spelled out.
+///
+/// Linux-only by construction — every path here starts at /proc — and
+/// degrades to a note rather than failing where /proc or a permission is
+/// missing. Reads race process exit by nature; a process that vanishes
+/// mid-scan (NotFound) is skipped silently, which is the right bias for
+/// evidence-gathering — a vanished process was not keeping anything
+/// alive. Foreign-UID processes are skipped silently too, on different
+/// grounds: an unprivileged run cannot read their fd tables, and they
+/// cannot have INHERITED this test's pipe ends through any unprivileged
+/// path, so counting their routine permission errors would mark every
+/// scan on a real system incomplete and drown the signal. Every other
+/// inspection failure — same-UID processes included, and unreadable or
+/// unparsable fdinfo — is counted and the scan marked incomplete, because
+/// "no write-end holder found" is the finding that exonerates the fd-leak
+/// mechanism, and it is only worth anything from a scan without blind
+/// spots.
+fn stdin_pipe_holder_scan(pid: u32) -> String {
+    stdin_pipe_holder_scan_at(std::path::Path::new("/proc"), pid)
+}
+
+/// [`stdin_pipe_holder_scan`] against an explicit proc root, so the gap
+/// accounting and hostile-entry handling are testable against a
+/// fabricated tree (a real /proc cannot be made to misbehave on demand).
+/// The same-UID gate still consults the REAL /proc for this process's
+/// uid; the fabricated tree's entries are owned by the test user, so they
+/// pass it.
+fn stdin_pipe_holder_scan_at(proc_root: &std::path::Path, pid: u32) -> String {
+    use std::fmt::Write as _;
+    use std::os::unix::fs::MetadataExt as _;
+    let mut out = String::new();
+    let status = std::fs::read_to_string(proc_root.join(format!("{pid}/status")))
+        .map(|s| {
+            s.lines()
+                .filter(|l| l.starts_with("State:") || l.starts_with("PPid:"))
+                .collect::<Vec<_>>()
+                .join(", ")
+        })
+        .unwrap_or_else(|e| format!("status unreadable: {e}"));
+    let _ = writeln!(out, "surviving client pid {pid}: {status}");
+    let stdin = match std::fs::read_link(proc_root.join(format!("{pid}/fd/0"))) {
+        Ok(target) => target,
+        Err(e) => {
+            let _ = writeln!(out, "  stdin not inspectable (no /proc, or gone): {e}");
+            return out;
+        }
+    };
+    let _ = writeln!(out, "  stdin is {}", stdin.display());
+    if !stdin.to_string_lossy().starts_with("pipe:") {
+        return out;
+    }
+    let my_uid = std::fs::metadata(format!("/proc/{}", std::process::id()))
+        .map(|m| m.uid())
+        .ok();
+    let procs = match std::fs::read_dir(proc_root) {
+        Ok(entries) => entries,
+        Err(e) => {
+            let _ = writeln!(out, "  /proc scan unavailable: {e}");
+            return out;
+        }
+    };
+    let mut gaps: Vec<String> = Vec::new();
+    for proc_entry in procs {
+        let proc_entry = match proc_entry {
+            Ok(entry) => entry,
+            Err(e) => {
+                gaps.push(format!("proc listing error ({e})"));
+                continue;
+            }
+        };
+        let holder = proc_entry.file_name();
+        let Some(holder) = holder
+            .to_str()
+            .filter(|n| n.bytes().all(|b| b.is_ascii_digit()))
+        else {
+            continue;
+        };
+        // The foreign-UID gate (see the docstring): skip silently rather
+        // than gap-account processes this scan could neither read nor
+        // suspect.
+        match proc_entry.metadata() {
+            Ok(meta) if my_uid.is_some() && Some(meta.uid()) != my_uid => continue,
+            Ok(_) => {}
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => continue,
+            Err(e) => {
+                gaps.push(format!("pid {holder}: not statable ({e})"));
+                continue;
+            }
+        }
+        let fds = match std::fs::read_dir(proc_root.join(format!("{holder}/fd"))) {
+            Ok(fds) => fds,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => continue,
+            Err(e) => {
+                gaps.push(format!("pid {holder}: fd dir unreadable ({e})"));
+                continue;
+            }
+        };
+        for fd_entry in fds {
+            let fd_entry = match fd_entry {
+                Ok(entry) => entry,
+                Err(e) => {
+                    gaps.push(format!("pid {holder}: fd listing error ({e})"));
+                    continue;
+                }
+            };
+            match std::fs::read_link(fd_entry.path()) {
+                Ok(target) if target == stdin => {}
+                Ok(_) => continue,
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => continue,
+                Err(e) => {
+                    gaps.push(format!(
+                        "pid {holder}: fd {} unreadable ({e})",
+                        fd_entry.file_name().to_string_lossy()
+                    ));
+                    continue;
+                }
+            }
+            let fd = fd_entry.file_name();
+            let fd = fd.to_string_lossy();
+            // O_ACCMODE from fdinfo's octal flags line is what turns "holds
+            // the pipe" into "holds the WRITE end" — the whole point of the
+            // scan. A failure here is BOTH displayed ("mode ?") and gap-
+            // accounted: a holder with an unknown direction leaves the
+            // no-leaked-writer question open just as surely as a process
+            // the scan could not read.
+            let mode =
+                match std::fs::read_to_string(proc_root.join(format!("{holder}/fdinfo/{fd}"))) {
+                    Ok(info) => match info
+                        .lines()
+                        .find_map(|l| l.strip_prefix("flags:"))
+                        .map(str::trim)
+                        .and_then(|flags| u32::from_str_radix(flags, 8).ok())
+                    {
+                        Some(flags) => match flags & 0o3 {
+                            0 => "read",
+                            1 => "WRITE",
+                            _ => "read-write",
+                        },
+                        None => {
+                            gaps.push(format!("pid {holder}: fdinfo/{fd} unparsable"));
+                            "?"
+                        }
+                    },
+                    Err(e) => {
+                        gaps.push(format!("pid {holder}: fdinfo/{fd} unreadable ({e})"));
+                        "?"
+                    }
+                };
+            let comm = std::fs::read_to_string(proc_root.join(format!("{holder}/comm")))
+                .map(|c| c.trim().to_string())
+                .unwrap_or_else(|_| "?".to_string());
+            // Raw bytes, decoded lossily: an argv with invalid UTF-8 must
+            // degrade to mojibake in that argument, not erase the whole
+            // command line from the report.
+            let cmdline = std::fs::read(proc_root.join(format!("{holder}/cmdline")))
+                .map(|c| {
+                    String::from_utf8_lossy(&c)
+                        .replace('\0', " ")
+                        .trim()
+                        .to_string()
+                })
+                .unwrap_or_default();
+            let _ = writeln!(
+                out,
+                "  held by pid {holder} ({comm}) fd {fd} mode {mode}: {cmdline}"
+            );
+        }
+    }
+    if !gaps.is_empty() {
+        let shown = gaps[..gaps.len().min(3)].join("; ");
+        let _ = writeln!(
+            out,
+            "  scan INCOMPLETE ({} inspection failures — an absent write-end holder is not \
+             conclusive): {shown}",
+            gaps.len()
+        );
+    }
+    out
+}
+
+/// The /proc pipe-holder scan executes only on a rare CI failure path, so
+/// this pins its two load-bearing claims deterministically: the traversal
+/// finds EVERY live holder of a pipe — not just the first reader and
+/// writer — and the fdinfo access-mode decoding labels each end exactly.
+/// Reversed modes or a broken traversal would otherwise compile fine and
+/// stay invisible until the one CI occurrence the scan exists for — and
+/// then spoil it.
+///
+/// The controlled pipe is a spawned `cat` with piped stdin, plus a second
+/// deliberate write-end holder (a `sleep` whose stdout is a duplicate of
+/// the pipe's write end — it never writes, it just HOLDS the fd). That
+/// second writer is the scan's actual quarry in production: an unexpected
+/// extra process keeping EOF from ever arriving. All three holders must
+/// appear with exact modes.
+#[tokio::test]
+async fn the_pipe_holder_scan_names_every_holder_of_a_live_pipe() {
+    use std::os::fd::AsFd as _;
+    if !std::path::Path::new("/proc/self/fd").exists() {
+        println!("SKIPPED: no /proc on this platform, nothing to scan");
+        return;
+    }
+    // std rather than tokio spawns: the test needs the ChildStdin as a
+    // borrowable fd to duplicate, and nothing here awaits.
+    let mut cat = std::process::Command::new("cat")
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::null())
+        .spawn()
+        .expect("spawn cat");
+    let write_end = cat.stdin.take().expect("piped stdin");
+    let dup = write_end
+        .as_fd()
+        .try_clone_to_owned()
+        .expect("duplicate the pipe's write end");
+    let mut extra_writer = std::process::Command::new("sleep")
+        .arg("60")
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::from(dup))
+        .spawn()
+        .expect("spawn the extra write-end holder");
+    let report = stdin_pipe_holder_scan(cat.id());
+    let me = std::process::id();
+    let cat_pid = cat.id();
+    let extra_pid = extra_writer.id();
+    // " mode read:" (with the colon) and not a bare "mode read", so a
+    // decoder that misreports read-write cannot sneak past the substring.
+    let holds = |pid: u32, mode: &str| {
+        report
+            .lines()
+            .any(|l| l.contains(&format!("held by pid {pid} ")) && l.contains(mode))
+    };
+    assert!(
+        holds(me, " mode WRITE:"),
+        "the scan must name this test process as a write-end holder:\n{report}"
+    );
+    assert!(
+        holds(extra_pid, " mode WRITE:"),
+        "the scan must name the extra duplicate-holding process as a write-end holder:\n{report}"
+    );
+    assert!(
+        holds(cat_pid, " mode read:"),
+        "the scan must name the child as the read-end holder:\n{report}"
+    );
+    let _ = extra_writer.kill();
+    let _ = extra_writer.wait();
+    drop(write_end);
+    let _ = cat.wait();
+}
+
+/// The scan's gap accounting is what keeps a blind spot from being read
+/// as "no leaked writer", and nothing on a healthy system exercises it —
+/// a real /proc cannot be made to misbehave on demand. So: a fabricated
+/// proc root with one hostile entry (an fd directory the scan cannot
+/// read) and one complete fake holder whose argv is deliberately invalid
+/// UTF-8. Pins the INCOMPLETE marker, the holder still being reported
+/// with its mode, and the lossy cmdline decode preserving the rest of the
+/// command line.
+#[tokio::test]
+async fn the_pipe_holder_scan_reports_blind_spots_instead_of_swallowing_them() {
+    use std::os::unix::fs::PermissionsExt as _;
+    if !std::path::Path::new("/proc/self/fd").exists() {
+        println!("SKIPPED: no /proc on this platform, nothing to scan");
+        return;
+    }
+    if std::fs::metadata(format!("/proc/{}", std::process::id()))
+        .map(|m| std::os::unix::fs::MetadataExt::uid(&m))
+        .ok()
+        == Some(0)
+    {
+        println!("SKIPPED: running as root, permission-denied entries cannot be fabricated");
+        return;
+    }
+    let root = tempfile::tempdir().expect("fake proc root");
+    let root_path = root.path();
+    // The scanned "client": pid 1000001, stdin is pipe:[4242]. Dangling
+    // symlinks are fine — read_link returns the target text either way.
+    std::fs::create_dir_all(root_path.join("1000001/fd")).expect("client dirs");
+    std::fs::create_dir_all(root_path.join("1000001/fdinfo")).expect("client fdinfo");
+    std::fs::write(
+        root_path.join("1000001/status"),
+        "State:\tS (sleeping)\nPPid:\t1\n",
+    )
+    .expect("client status");
+    std::os::unix::fs::symlink("pipe:[4242]", root_path.join("1000001/fd/0")).expect("client fd0");
+    // The client holds its own read end; a complete fixture keeps it out
+    // of the gap accounting so the hostile entry below is the ONLY gap.
+    std::fs::write(root_path.join("1000001/fdinfo/0"), "pos:\t0\nflags:\t00\n")
+        .expect("client fdinfo file");
+    std::fs::write(root_path.join("1000001/comm"), "fake-client\n").expect("client comm");
+    // A complete fake holder of the same pipe's write end, argv invalid
+    // UTF-8 in the second argument.
+    std::fs::create_dir_all(root_path.join("1000002/fd")).expect("holder dirs");
+    std::fs::create_dir_all(root_path.join("1000002/fdinfo")).expect("holder fdinfo");
+    std::os::unix::fs::symlink("pipe:[4242]", root_path.join("1000002/fd/7")).expect("holder fd7");
+    std::fs::write(
+        root_path.join("1000002/fdinfo/7"),
+        "pos:\t0\nflags:\t0100001\n",
+    )
+    .expect("holder fdinfo file");
+    std::fs::write(root_path.join("1000002/comm"), "evil\n").expect("holder comm");
+    std::fs::write(
+        root_path.join("1000002/cmdline"),
+        b"evil\0arg-\xff\xfe-bytes\0last\0",
+    )
+    .expect("holder cmdline");
+    // The hostile entry: an fd directory that exists but cannot be read.
+    std::fs::create_dir_all(root_path.join("1000003/fd")).expect("hostile dirs");
+    std::fs::set_permissions(
+        root_path.join("1000003/fd"),
+        std::fs::Permissions::from_mode(0o000),
+    )
+    .expect("hostile perms");
+
+    let report = stdin_pipe_holder_scan_at(root_path, 1000001);
+
+    // Restore permissions so the tempdir can be deleted.
+    let _ = std::fs::set_permissions(
+        root_path.join("1000003/fd"),
+        std::fs::Permissions::from_mode(0o700),
+    );
+    assert!(
+        report
+            .lines()
+            .any(|l| l.contains("held by pid 1000002 (evil) fd 7 mode WRITE:")),
+        "the fake write-end holder must be reported with its exact mode:\n{report}"
+    );
+    assert!(
+        report.contains("last"),
+        "the lossy cmdline decode must preserve the valid arguments around invalid UTF-8:\n{report}"
+    );
+    assert!(
+        report.contains("scan INCOMPLETE (1 inspection failures"),
+        "the unreadable fd directory must be counted and announced:\n{report}"
+    );
+    assert!(
+        report.contains("pid 1000003: fd dir unreadable"),
+        "the gap note must name the process the scan could not inspect:\n{report}"
+    );
+}
+
+/// The orphan report's role recovery rests entirely on the flag
+/// signatures this pins: exactly one attached client carries `no-output`
+/// (the input client), exactly one carries `pause-after` (the replay
+/// client), and exactly one carries neither (the sink). If a tmux release
+/// renamed these flags — or the supervisor changed which client gets
+/// which — the report would silently regress to anonymous clients, and
+/// nobody would notice until the next CI failure arrived undecipherable.
+/// Also pins [`roster_pids`] against the roster's real output shape.
+#[tokio::test]
+async fn the_client_roster_identifies_all_three_roles_by_flags() {
+    let h = harness().await;
+    let (session, _work) = basic_session(&h).await;
+    let _cleanup = MarkerCleanupGuard::new(session.id.clone());
+    let (chan, mut rx) = h.client.attach(&session.id, 80, 24).await.expect("attach");
+    let mut seen = Vec::new();
+    wait_for(&mut rx, &mut seen, "FAKE-AGENT READY", 20).await;
+    let sock = h.state.path().join("tmux.sock");
+    // The sink comes up from a spawned task, so the roster is polled to
+    // three rather than asserted immediately.
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(20);
+    let roster = loop {
+        let roster = control_client_roster(&sock).await;
+        if roster.lines().count() == 3 {
+            break roster;
+        }
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "an attached terminal never reached three control clients: {roster}"
+        );
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    };
+    assert_eq!(
+        roster_pids(&roster).len(),
+        3,
+        "every roster line must parse to a pid: {roster}"
+    );
+    let count = |flag: &str| roster.lines().filter(|l| l.contains(flag)).count();
+    assert_eq!(
+        count("no-output"),
+        1,
+        "exactly one input client carries no-output: {roster}"
+    );
+    assert_eq!(
+        count("pause-after"),
+        1,
+        "exactly one replay client carries pause-after: {roster}"
+    );
+    assert_eq!(
+        roster
+            .lines()
+            .filter(|l| !l.contains("no-output") && !l.contains("pause-after"))
+            .count(),
+        1,
+        "exactly one sink carries neither flag: {roster}"
+    );
+    // Uniqueness of the flags is not yet identity: pin the neither-flag
+    // line to the supervisor's OWN record of the sink's pid, so a future
+    // change swapping which client carries which flag cannot pass by
+    // symmetry. The input and replay clients' pids have no supervisor
+    // accessor to cross-check against, so the sink is the one anchor
+    // available — and one anchored role breaks any flag rotation.
+    let sink_pid = h
+        .sup
+        .session_sink_pid(&format!("fh-{}", session.id))
+        .expect("an attached session has a sink pid on record");
+    assert!(
+        roster
+            .lines()
+            .find(|l| !l.contains("no-output") && !l.contains("pause-after"))
+            .is_some_and(|l| l.contains(&format!("pid={sink_pid} "))),
+        "the neither-flag line must be the supervisor's recorded sink (pid {sink_pid}): {roster}"
+    );
+    h.client.detach(chan).await;
 }
 
 /// The sink registry does not grow with the number of sessions that have
