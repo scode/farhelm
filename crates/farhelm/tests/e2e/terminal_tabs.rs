@@ -2347,22 +2347,33 @@ async fn concurrent_first_attaches_share_one_sink_and_orphan_nothing() {
     h.client.detach(agent_chan).await;
 }
 
-/// A supervisor killed outright leaves no orphaned sink client behind,
-/// and its replacement brings up exactly one fresh sink.
+/// A supervisor killed outright leaves no orphaned control clients once
+/// its replacement arrives, and the replacement's first attach brings up
+/// exactly one fresh sink.
 ///
 /// The sink's teardown is `kill_on_drop`, which a `SIGKILL`ed supervisor
 /// never gets to run — so "the owner dies" is precisely the case that
 /// mechanism cannot cover, and the one where an orphan would be silent
-/// and permanent: an attached control client draining a session's entire
-/// output stream into a dead process's pipe, for as long as the tmux
-/// server lives, invisible to every later supervisor.
+/// and permanent: an attached control client holding a session's output
+/// hostage for as long as the tmux server lives, invisible to every
+/// later supervisor.
 ///
-/// What saves it is not a sweep but the protocol: tmux control mode ends
-/// at stdin EOF, and the dead supervisor's end of that pipe closes when
-/// the kernel reaps it. This test is what pins that reasoning to
-/// observed behavior rather than leaving it as an argument — and what
-/// would fail loudly if a future change gave the sink a stdin it holds
-/// open some other way.
+/// Two mechanisms compose against that, and this test pins both. First,
+/// teardown by protocol: tmux control mode ends at stdin EOF, and the
+/// dead supervisor's pipe ends close when the kernel reaps it — that is
+/// what usually clears the clients, with no cleanup code involved. But
+/// the protocol is not a guarantee: tmux defers a control client's exit
+/// until its pending output drains, and a client whose reader died with
+/// output queued can never finish exiting — observed live 2026-08-18,
+/// after three CI flakes of this very test, as a session sink outliving
+/// a 120-second deadline with EOF deliverable and a complete /proc scan
+/// showing no write end of its stdin left anywhere. The GUARANTEE is
+/// therefore the second mechanism: a starting supervisor reaps every
+/// control-mode client already attached to its private server
+/// (`reap_stale_control_clients`). The test fabricates a client the
+/// protocol cannot reap — its stdin write end held open by the test
+/// itself — so the sweep is exercised deterministically on every run,
+/// not only on the rare runs where tmux's deferred-exit trap fires.
 ///
 /// Runs the supervisor as a real child process, because an in-process one
 /// cannot be `SIGKILL`ed without taking the test with it.
@@ -2386,10 +2397,11 @@ async fn a_killed_supervisor_leaves_no_orphaned_sink_client() {
     // the kill below. Dropping them first would close the connection, and
     // a supervisor that notices its client hung up tears the attachment —
     // and the sink with it — down GRACEFULLY, which is the one path this
-    // test is not about. Held open, the SIGKILL is what ends them, so what
-    // gets measured is the protocol's own guarantee (stdin EOF on a reaped
-    // process ends control mode) rather than our own cleanup running one
-    // last time.
+    // test is not about. Held open, the SIGKILL is what ends them: the
+    // crash shape is preserved, EOF-driven protocol teardown is then
+    // observed opportunistically during the grace period below, and the
+    // replacement's startup reap provides the final cleanup this test
+    // actually asserts.
     let client = connect_over_socket(state.path()).await;
     let session = client
         .create_session(
@@ -2428,26 +2440,161 @@ async fn a_killed_supervisor_leaves_no_orphaned_sink_client() {
     drop(rx);
     drop(client);
 
+    // Two stale control clients the PROTOCOL cannot reap: their stdin
+    // write ends live in this very test process, held open, so EOF never
+    // arrives. Two rather than one so a sweep that stopped after its
+    // first victim would still fail. Their stdouts are piped and NEVER
+    // read, so the spam burst below leaves genuinely queued output
+    // behind each of them — the exact shape that aborts tmux 3.7b when
+    // a client is closed without the acknowledged no-output boundary,
+    // which is what makes this test the regression for that hazard and
+    // not merely for "some client got removed".
+    let mut stale_clients = Vec::new();
+    let mut held_stdins = Vec::new();
+    let mut held_stdouts = Vec::new();
+    for _ in 0..2 {
+        let mut stale = tokio::process::Command::new("tmux")
+            .arg("-S")
+            .arg(&sock)
+            .args(["-C", "attach", "-t", &format!("fh-{}", session.id)])
+            .stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped())
+            .kill_on_drop(true)
+            .spawn()
+            .expect("spawn a deliberately stale control client");
+        // Taken OUT of the child before any `wait()`: tokio's `wait`
+        // drops a stored stdin to avoid pipe deadlocks, which would
+        // close the very write end this fixture depends on holding open
+        // and let the client exit naturally — masking a sweep that did
+        // nothing.
+        held_stdins.push(stale.stdin.take().expect("piped stale stdin"));
+        held_stdouts.push(stale.stdout.take().expect("piped stale stdout"));
+        stale_clients.push(stale);
+    }
+    let stale_pids: Vec<u32> = stale_clients
+        .iter()
+        .map(|c| c.id().expect("stale client pid"))
+        .collect();
+    // The sweep can only reap what is attached when the replacement
+    // starts, so both fabricated clients must be visibly attached first.
+    // The expiry panic describes each fabricated child's fate — an
+    // attach the server refused exits immediately, with the reason on
+    // stderr — plus the roster, whose error text is itself evidence
+    // (e.g. "server exited unexpectedly" means the tmux SERVER died in
+    // the dead supervisor's teardown storm, a different bug than the
+    // clients merely being slow to register).
     let deadline = tokio::time::Instant::now() + Duration::from_secs(20);
-    while count_control_clients(&sock).await > 0 {
-        // On expiry, identify the survivor rather than counting it: this
-        // failure has only ever occurred on CI, so the panic message is
-        // the entire evidence budget. Three CI failures under the old
-        // count-only assert produced zero bits toward distinguishing a
-        // too-tight deadline from a leaked stdin write end; see the
-        // report helper for what gets captured and why.
+    loop {
+        let attached = roster_pids(&control_client_roster(&sock).await);
+        if stale_pids.iter().all(|pid| attached.contains(pid)) {
+            break;
+        }
         if tokio::time::Instant::now() >= deadline {
+            use tokio::io::AsyncReadExt as _;
+            let mut fates = String::new();
+            for (i, stale) in stale_clients.iter_mut().enumerate() {
+                use std::fmt::Write as _;
+                match stale.try_wait() {
+                    Ok(Some(status)) => {
+                        let mut stderr_text = String::new();
+                        if let Some(mut err) = stale.stderr.take() {
+                            let _ = tokio::time::timeout(
+                                Duration::from_secs(2),
+                                err.read_to_string(&mut stderr_text),
+                            )
+                            .await;
+                        }
+                        let _ = writeln!(
+                            fates,
+                            "fabricated client {i} (pid {}): EXITED {status:?}, stderr: {}",
+                            stale_pids[i],
+                            stderr_text.trim()
+                        );
+                    }
+                    Ok(None) => {
+                        let _ = writeln!(
+                            fates,
+                            "fabricated client {i} (pid {}): still running, never listed",
+                            stale_pids[i]
+                        );
+                    }
+                    Err(e) => {
+                        let _ = writeln!(
+                            fates,
+                            "fabricated client {i} (pid {}): try_wait failed: {e}",
+                            stale_pids[i]
+                        );
+                    }
+                }
+            }
             panic!(
-                "a control client outlived the supervisor that owned it\n{}",
-                orphaned_client_report(&sock, &pre_kill_roster).await
+                "test setup: the fabricated stale clients never attached\n{fates}roster now:\n{}",
+                control_client_roster(&sock).await
             );
         }
         tokio::time::sleep(Duration::from_millis(100)).await;
     }
+    // Queue real output behind every attached client. The fake agent
+    // still runs — the session outlives its supervisor — so keystrokes
+    // injected straight through tmux still produce pane output, which
+    // every attached client receives: the two unread fabricated clients
+    // accumulate it, and so does the dead supervisor's sink, which
+    // reliably arms the deferred-exit trap this whole fix exists for.
+    let sent = tmux_query(
+        &sock,
+        &[
+            "send-keys",
+            "-t",
+            &format!("fh-{}", session.id),
+            "spam 3000",
+            "Enter",
+        ],
+    )
+    .await;
+    assert!(
+        sent.status.success(),
+        "test setup: injecting the spam burst failed: {}",
+        String::from_utf8_lossy(&sent.stderr)
+    );
 
-    // A replacement supervisor adopts the surviving tmux session, and its
-    // first attach must produce exactly one sink — not a second one
-    // alongside something left over.
+    // Teardown by protocol gets a grace period to clear what it CAN —
+    // the dead supervisor's output and input clients. Its sink is
+    // expected to survive (the queued spam armed the deferred-exit
+    // trap), so the wait is for "fabricated clients plus at most the
+    // sink", not for a clean board; whatever remains is reported, and
+    // then checked for the one shape that must still fail loudly here:
+    // a survivor whose stdin has a LIVE write-end holder is a leaked
+    // duplicate — the fd-leak bug this test originally hunted — not the
+    // known drain stall, and the sweep must not be allowed to mask it.
+    let grace = tokio::time::Instant::now() + Duration::from_secs(20);
+    while count_control_clients(&sock).await > stale_pids.len() + 1 {
+        if tokio::time::Instant::now() >= grace {
+            println!(
+                "note: control clients beyond the expected set outlived the grace period\n{}",
+                orphaned_client_report(&sock, &pre_kill_roster).await
+            );
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+    for pid in roster_pids(&control_client_roster(&sock).await) {
+        if stale_pids.contains(&pid) {
+            continue;
+        }
+        let scan = stdin_pipe_holder_scan(pid);
+        assert!(
+            !scan.contains(" mode WRITE:"),
+            "a surviving client of the DEAD supervisor still has a live stdin write-end \
+             holder — that is a leaked fd, not the known drain stall:\n{scan}"
+        );
+    }
+
+    // The replacement supervisor's startup reap must clear the board —
+    // both fabricated clients and the trapped sink alike, each behind
+    // the acknowledged no-output boundary first — and its first attach
+    // must then produce exactly one sink, not a second one alongside
+    // something left over.
     let mut replacement = tokio::process::Command::new(farhelm_bin())
         .args(["supervisor", "run", "--state-dir"])
         .arg(state.path())
@@ -2455,6 +2602,33 @@ async fn a_killed_supervisor_leaves_no_orphaned_sink_client() {
         .spawn()
         .expect("spawn the replacement supervisor");
     wait_for_supervisor_ready(state.path()).await;
+    // Both fabricated clients' PROCESSES must be dead, and dead of
+    // SIGKILL specifically — the reap kills the process because that is
+    // the only lever that works on a client wedged in the deferred-exit
+    // trap, and an exit by any other cause would mean this fixture
+    // cleaned itself up rather than being swept.
+    for mut stale in stale_clients {
+        let status = tokio::time::timeout(Duration::from_secs(10), stale.wait())
+            .await
+            .expect("the replacement's startup reap must kill the stale control clients")
+            .expect("waiting on a reaped stale client");
+        assert_eq!(
+            std::os::unix::process::ExitStatusExt::signal(&status),
+            Some(9),
+            "the stale client must die of the reap's SIGKILL, not exit on its own: {status:?}"
+        );
+    }
+    drop(held_stdins);
+    drop(held_stdouts);
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
+    while count_control_clients(&sock).await > 0 {
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "the replacement's startup reap must leave a clean client roster\n{}",
+            orphaned_client_report(&sock, &pre_kill_roster).await
+        );
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
     {
         let client = connect_over_socket(state.path()).await;
         let (_chan, mut rx) = client

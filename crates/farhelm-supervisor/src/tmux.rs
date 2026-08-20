@@ -1626,6 +1626,189 @@ impl TmuxDriver {
         Ok(String::from_utf8_lossy(&out).into_owned())
     }
 
+    /// Kill every control-mode client currently attached to the private
+    /// server, returning how many were signaled.
+    ///
+    /// Called exactly once, from supervisor startup, right after
+    /// [`Self::ensure_server`] — the one moment when "attached control
+    /// client" and "stale" coincide by construction: this process owns
+    /// no clients yet, the state dir is exclusively claimed, and the
+    /// private server serves nobody else, so anything still attached
+    /// belongs to a dead predecessor.
+    ///
+    /// Why a predecessor's clients can need reaping at all: teardown by
+    /// protocol — stdin EOF when the dead owner's pipe ends close — is
+    /// the primary mechanism and usually works, but tmux defers a
+    /// control client's exit until its pending output drains
+    /// (`server_client_check_exit` requires `control_all_done`, which
+    /// requires an empty output buffer; same shape from tmux 3.4 through
+    /// 3.7b), and nothing ever frees that buffer once the write side is
+    /// dead. A client whose owner was SIGKILLed with output still queued
+    /// therefore stays attached FOREVER: the EOF is seen, `CLIENT_EXIT`
+    /// is set, and the exit never completes. Observed live on 2026-08-18
+    /// (tmux 3.6): a killed supervisor's session sink outlived a
+    /// 120-second deadline with EOF deliverable and a /proc scan proving
+    /// no write end of its stdin remained anywhere.
+    ///
+    /// Each stale client is first put behind the module's acknowledged
+    /// `no-output` boundary ([`Self::disable_control_client_output`]) and
+    /// only then has its PROCESS killed. Both halves are load-bearing.
+    /// The boundary first, because the stale condition specifically means
+    /// the client has queued output, and closing or killing an
+    /// output-bearing client is the exact shape that aborts tmux 3.7b's
+    /// whole server (`fatal: not enough data` — the crash the pinned
+    /// 3.7b regression suite exists for); the acknowledged flag discards
+    /// every queued block server-side before anything is torn down. The
+    /// process kill second, because it is the one lever that works on a
+    /// client wedged in the deferred-exit trap: its death closes the
+    /// client's server socket, and socket loss tears the client down
+    /// regardless of buffer state, where `detach-client` would only set
+    /// the same `CLIENT_EXIT` flag that is already stuck behind the
+    /// drain.
+    ///
+    /// The acknowledged boundary doubles as the liveness check that
+    /// makes the kill safe to aim: the ack proves tmux still knew
+    /// `client-<pid>` an instant before the signal, shrinking the
+    /// pid-reuse window to the microseconds between ack and kill. (A
+    /// pidfd would close even that window but is Linux-only; this path
+    /// must also run on macOS, and the residual window requires a fresh
+    /// process to claim the exact freed pid within it.) A client the ack
+    /// CANNOT reach is skipped, not killed — no acknowledgement, no
+    /// standing to signal — and the roster verification below decides
+    /// whether that skip mattered.
+    ///
+    /// Fails closed: if any control-mode client is still attached when
+    /// the verification deadline expires, this returns an error and
+    /// startup fails, because proceeding would bring up a fresh sink
+    /// alongside the stale one — the precise corruption this sweep
+    /// exists to prevent. The verification also insists the clean roster
+    /// HOLDS for a beat, so a predecessor's client that was still mid-
+    /// attach during the first listing does not slip past the sweep.
+    ///
+    /// Plain (non-control) clients are deliberately left alone: a
+    /// human's `tmux attach` against the private socket is unsupported,
+    /// but killing their terminal out from under them would be a hostile
+    /// way to say so. The inverse carve-out is documented rather than
+    /// defended: a control-mode client somebody's agent process opened
+    /// against the private socket is indistinguishable from a dead
+    /// supervisor's leftovers and WILL be reaped at the next supervisor
+    /// start — private-server control clients belong to the supervisor,
+    /// full stop.
+    pub async fn reap_stale_control_clients(&self) -> anyhow::Result<usize> {
+        let mut reaped = 0usize;
+        let mut skipped: Vec<String> = Vec::new();
+        let Some(listed) = self.list_client_pids_and_flags().await? else {
+            return Ok(0);
+        };
+        for (pid, flags) in &listed {
+            if !flags.contains("control-mode") {
+                continue;
+            }
+            // The acknowledged no-output boundary; see the docstring for
+            // why it must precede the kill and how it doubles as the
+            // aim-check.
+            if let Err(error) = self
+                .disable_control_client_output(&format!("client-{pid}"))
+                .await
+            {
+                skipped.push(format!(
+                    "client-{pid}: no-output not acknowledged: {error:#}"
+                ));
+                continue;
+            }
+            // SAFETY: `libc::kill` validates the pid itself. ESRCH means
+            // the client exited between the ack and the signal — the
+            // outcome the reap wanted anyway; any other errno is a real
+            // failure the verification below must weigh.
+            let ret = unsafe { libc::kill(*pid as libc::pid_t, libc::SIGKILL) };
+            if ret == 0 {
+                reaped += 1;
+            } else {
+                let err = std::io::Error::last_os_error();
+                if err.raw_os_error() == Some(libc::ESRCH) {
+                    reaped += 1;
+                } else {
+                    skipped.push(format!("client-{pid}: kill failed: {err}"));
+                }
+            }
+        }
+        let had_candidates = reaped > 0 || !skipped.is_empty();
+        if had_candidates {
+            // Bounded verification, run whenever candidates existed —
+            // including when every signal failed, since that is exactly
+            // when the roster most needs checking. The clean state must
+            // hold across one extra beat so a client that was still
+            // mid-attach during the first listing gets seen.
+            let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(5);
+            let mut clean_once = false;
+            loop {
+                let control_remaining = match self.list_client_pids_and_flags().await? {
+                    None => 0,
+                    Some(listing) => listing
+                        .iter()
+                        .filter(|(_, flags)| flags.contains("control-mode"))
+                        .count(),
+                };
+                if control_remaining == 0 {
+                    if clean_once {
+                        break;
+                    }
+                    clean_once = true;
+                    tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+                    continue;
+                }
+                clean_once = false;
+                if tokio::time::Instant::now() >= deadline {
+                    bail!(
+                        "stale control clients survived the startup reap ({control_remaining} \
+                         still attached; skipped: [{}]); refusing to start beside them",
+                        skipped.join("; ")
+                    );
+                }
+                tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+            }
+        }
+        Ok(reaped)
+    }
+
+    /// One bounded `list-clients` snapshot as `(pid, flags)` rows, with
+    /// the clientless-server error shape mapped to `None`.
+    ///
+    /// `list-clients` on a clientless server is an ERROR ("no current
+    /// target"), not an empty listing — the ordinary fresh-start case
+    /// must read as "nothing attached", while every other failure still
+    /// propagates. Bounded with its own kill-on-drop process rather than
+    /// [`Self::run`] because the reap runs during startup, where a
+    /// wedged tmux server must fail construction instead of hanging it.
+    async fn list_client_pids_and_flags(&self) -> anyhow::Result<Option<Vec<(u32, String)>>> {
+        let mut query = self.command();
+        query
+            .args(["list-clients", "-F", "#{client_pid} [#{client_flags}]"])
+            .stdin(Stdio::null())
+            .kill_on_drop(true);
+        let out = tokio::time::timeout(CONTROL_EXCHANGE_TIMEOUT, query.output())
+            .await
+            .context("list-clients timed out during the stale-control-client reap")?
+            .context("running list-clients for the stale-control-client reap")?;
+        if !out.status.success() {
+            let error = anyhow::Error::new(TmuxCommandFailure { stderr: out.stderr });
+            if self.is_definitively_empty(&error) {
+                return Ok(None);
+            }
+            return Err(error.context("listing clients for the stale-control-client reap"));
+        }
+        let mut rows = Vec::new();
+        for line in String::from_utf8_lossy(&out.stdout).lines() {
+            let Some((pid, flags)) = line.split_once(' ') else {
+                continue;
+            };
+            if let Ok(pid) = pid.parse::<u32>() {
+                rows.push((pid, flags.to_string()));
+            }
+        }
+        Ok(Some(rows))
+    }
+
     /// Stop pane delivery to one live control client through a separate command.
     ///
     /// This deliberately does NOT use the output client's stdin or stdout.
