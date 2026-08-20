@@ -38,7 +38,7 @@ use crate::restart_with_resume::pane_capture;
 #[tokio::test]
 async fn a_second_restart_cannot_reap_the_agent_the_first_one_just_launched() {
     let h = harness().await;
-    let work = tempfile::tempdir().unwrap();
+    let work = farhelm_teststate::tempdir().unwrap();
     let session = h
         .client
         .create_session(
@@ -103,7 +103,7 @@ async fn a_second_restart_cannot_reap_the_agent_the_first_one_just_launched() {
 #[tokio::test]
 async fn a_delete_racing_a_restart_leaves_no_session_and_no_survivors() {
     let h = harness().await;
-    let work = tempfile::tempdir().unwrap();
+    let work = farhelm_teststate::tempdir().unwrap();
     let session = h
         .client
         .create_session(
@@ -232,9 +232,9 @@ async fn a_failed_restart_restores_the_stop_annotation_it_had_cleared() {
 #[tokio::test]
 async fn a_repointed_working_directory_refuses_the_restart() {
     let h = harness().await;
-    let real = tempfile::tempdir().expect("real cwd");
-    let decoy = tempfile::tempdir().expect("decoy cwd");
-    let link = tempfile::tempdir().expect("link parent");
+    let real = farhelm_teststate::tempdir().expect("real cwd");
+    let decoy = farhelm_teststate::tempdir().expect("decoy cwd");
+    let link = farhelm_teststate::tempdir().expect("link parent");
     let link = link.path().join("cwd");
     std::os::unix::fs::symlink(real.path(), &link).expect("symlink");
 
@@ -291,7 +291,7 @@ async fn a_repointed_working_directory_refuses_the_restart() {
 #[tokio::test]
 async fn a_fresh_relaunch_opens_a_new_capture_window_after_an_ambiguity() {
     let (h, fixtures) = capture_harness().await;
-    let work = tempfile::tempdir().expect("workdir");
+    let work = farhelm_teststate::tempdir().expect("workdir");
     let first = record_session(&h, &fixtures, work.path(), "claude").await;
     let second = record_session(&h, &fixtures, work.path(), "claude").await;
     let (_c1, _r1, _s1, _id1) = provoke_record(&h, &first).await;
@@ -380,7 +380,7 @@ async fn a_fresh_relaunch_opens_a_new_capture_window_after_an_ambiguity() {
 #[tokio::test]
 async fn restarting_an_alt_screen_agent_carries_its_last_frame_into_the_new_run() {
     let h = harness().await;
-    let work = tempfile::tempdir().unwrap();
+    let work = farhelm_teststate::tempdir().unwrap();
     let session = h
         .client
         .create_session(
@@ -664,7 +664,7 @@ async fn a_stale_generation_zero_sentinel_cannot_taint_generation_one() {
 #[tokio::test]
 async fn stop_then_restart_then_natural_exit_carries_no_stale_annotation() {
     let h = harness().await;
-    let work = tempfile::tempdir().expect("workdir");
+    let work = farhelm_teststate::tempdir().expect("workdir");
     let marker = work.path().join("released");
     let session = h
         .client

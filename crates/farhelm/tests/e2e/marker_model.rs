@@ -38,7 +38,7 @@ async fn an_agent_wearing_an_ambient_tab_marker_is_still_reaped_while_a_real_tab
         },
     )
     .await;
-    let work = tempfile::tempdir().unwrap();
+    let work = farhelm_teststate::tempdir().unwrap();
     let session = h
         .client
         .create_session(

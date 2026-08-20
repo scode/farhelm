@@ -206,7 +206,7 @@ pub(crate) static SLOTS: tokio::sync::Semaphore = tokio::sync::Semaphore::const_
 /// runs until they visibly slow the machine down (this happened).
 /// Synchronous because Drop cannot await. Every test that starts a tmux
 /// server — via `harness()` or by hand — must hold one of these, ordered
-/// BEFORE the state `TempDir` in its struct so the server dies before
+/// BEFORE the state `TestDir` in its struct so the server dies before
 /// the directory holding its socket disappears.
 ///
 /// That ordering rule extends to DESTRUCTURING a [`Harness`]: the fields
@@ -241,7 +241,15 @@ pub(crate) struct Harness {
     // Read in tests (socket paths); ALSO held so the tempdir outlives
     // the tmux server — it must be declared after `_tmux` so the server
     // dies before its socket directory is deleted.
-    pub(crate) state: tempfile::TempDir,
+    //
+    // A `TestDir` rather than a plain `TempDir`: drop-time removal is the
+    // same (normal exit and panic unwinding alike), but the dir lives
+    // under farhelm-teststate's shared /tmp scheme (sweepable `fh-it.`
+    // container, held flock), so state killed too abruptly for
+    // destructors to run (SIGKILL, abort) is reclaimed by a later run's
+    // sweep once the protocol's grace passes, instead of orphaned
+    // forever.
+    pub(crate) state: farhelm_teststate::TestDir,
     // Released on drop, letting the next test start its stack.
     pub(crate) _slot: tokio::sync::SemaphorePermit<'static>,
 }
@@ -272,8 +280,8 @@ pub(crate) async fn connect_client(sup: &Arc<Supervisor>) -> Arc<SupervisorClien
 /// directory — the preamble almost every test in the suite shares.
 /// Returns the workdir too: it must outlive the launch (it is the
 /// session's cwd), so callers hold it as `_work`.
-pub(crate) async fn basic_session(h: &Harness) -> (SessionInfo, tempfile::TempDir) {
-    let work = tempfile::tempdir().expect("workdir");
+pub(crate) async fn basic_session(h: &Harness) -> (SessionInfo, farhelm_teststate::TestDir) {
+    let work = farhelm_teststate::tempdir().expect("workdir");
     let session = h
         .client
         .create_session(
@@ -646,7 +654,7 @@ pub(crate) async fn harness_with_seams(
 ) -> Harness {
     let timeouts = floor_suite_timeouts(timeouts);
     let slot = SLOTS.acquire().await.expect("semaphore is never closed");
-    let state = tempfile::tempdir().expect("tempdir");
+    let state = farhelm_teststate::tempdir().expect("tempdir");
     let sup = Supervisor::new_with_seams(state.path(), farhelm_bin().into(), timeouts, seams)
         .await
         .expect("supervisor");

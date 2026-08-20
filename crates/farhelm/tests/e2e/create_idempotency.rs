@@ -184,9 +184,9 @@ pub(crate) async fn handoff_to_new_supervisor_with_seams(
 #[tokio::test]
 async fn a_retried_create_returns_the_same_session_across_a_supervisor_restart() {
     let slot = SLOTS.acquire().await.expect("semaphore is never closed");
-    let state = tempfile::tempdir().expect("tempdir");
+    let state = farhelm_teststate::tempdir().expect("tempdir");
     let _tmux = TmuxServerGuard(state.path().join("tmux.sock"));
-    let work = tempfile::tempdir().expect("workdir");
+    let work = farhelm_teststate::tempdir().expect("workdir");
     let sup1 = Supervisor::new_with_exe(state.path(), farhelm_bin().into())
         .await
         .expect("supervisor");
@@ -253,8 +253,8 @@ async fn a_retried_create_returns_the_same_session_across_a_supervisor_restart()
 #[tokio::test]
 async fn a_key_reused_for_a_different_request_is_refused() {
     let h = harness().await;
-    let work = tempfile::tempdir().expect("workdir");
-    let other = tempfile::tempdir().expect("other workdir");
+    let work = farhelm_teststate::tempdir().expect("workdir");
+    let other = farhelm_teststate::tempdir().expect("other workdir");
     let first = create_keyed(&h.client, work.path(), "intent-2")
         .await
         .expect("create");
@@ -300,9 +300,9 @@ async fn a_key_reused_for_a_different_request_is_refused() {
 #[tokio::test(flavor = "multi_thread")]
 async fn concurrent_creates_under_one_intent_key_yield_one_session() {
     let slot = SLOTS.acquire().await.expect("semaphore is never closed");
-    let state = tempfile::tempdir().expect("tempdir");
+    let state = farhelm_teststate::tempdir().expect("tempdir");
     let _tmux = TmuxServerGuard(state.path().join("tmux.sock"));
-    let work = tempfile::tempdir().expect("workdir");
+    let work = farhelm_teststate::tempdir().expect("workdir");
     // Released by the test once the second create is in flight; the first
     // create parks inside its launch until then.
     let (release, held) = std::sync::mpsc::channel::<()>();
@@ -384,7 +384,7 @@ async fn concurrent_creates_under_one_intent_key_yield_one_session() {
 #[tokio::test]
 async fn a_replay_for_a_deleted_session_reports_that_it_is_gone() {
     let h = harness().await;
-    let work = tempfile::tempdir().expect("workdir");
+    let work = farhelm_teststate::tempdir().expect("workdir");
     let session = create_keyed(&h.client, work.path(), "intent-4")
         .await
         .expect("create");
@@ -444,10 +444,10 @@ struct CrashScene {
 /// even if two stages left identical state, which would mean the seam was
 /// not injecting where it claims to.
 async fn retry_after_a_crash_at(stage: CreateStage) -> CrashScene {
-    let state = tempfile::tempdir().expect("tempdir");
+    let state = farhelm_teststate::tempdir().expect("tempdir");
     let _tmux = TmuxServerGuard(state.path().join("tmux.sock"));
     let sock = state.path().join("tmux.sock");
-    let work = tempfile::tempdir().expect("workdir");
+    let work = farhelm_teststate::tempdir().expect("workdir");
     let sup1 = Supervisor::new_with_seams(
         state.path(),
         farhelm_bin().into(),
@@ -644,9 +644,9 @@ async fn a_crash_before_the_outcome_commit_still_replays_the_same_session() {
 #[tokio::test]
 async fn a_reboot_does_not_turn_a_never_launched_intent_into_a_created_one() {
     let slot = SLOTS.acquire().await.expect("semaphore is never closed");
-    let state = tempfile::tempdir().expect("tempdir");
+    let state = farhelm_teststate::tempdir().expect("tempdir");
     let guard = TmuxServerGuard(state.path().join("tmux.sock"));
-    let work = tempfile::tempdir().expect("workdir");
+    let work = farhelm_teststate::tempdir().expect("workdir");
     let sup1 = Supervisor::new_with_seams(
         state.path(),
         farhelm_bin().into(),
@@ -730,9 +730,9 @@ async fn a_reboot_does_not_turn_a_never_launched_intent_into_a_created_one() {
 #[tokio::test]
 async fn a_settled_tilde_create_replays_after_home_becomes_unusable() {
     let slot = SLOTS.acquire().await.expect("semaphore is never closed");
-    let state = tempfile::tempdir().expect("tempdir");
+    let state = farhelm_teststate::tempdir().expect("tempdir");
     let _tmux = TmuxServerGuard(state.path().join("tmux.sock"));
-    let home = tempfile::tempdir().expect("home");
+    let home = farhelm_teststate::tempdir().expect("home");
     std::fs::create_dir(home.path().join("ws")).expect("workdir");
     let sup1 = Supervisor::new_with_seams(
         state.path(),
@@ -810,7 +810,7 @@ async fn a_settled_tilde_create_replays_after_home_becomes_unusable() {
 #[tokio::test]
 async fn a_keyed_tilde_refusal_replays_after_the_home_appears() {
     let slot = SLOTS.acquire().await.expect("semaphore is never closed");
-    let state = tempfile::tempdir().expect("tempdir");
+    let state = farhelm_teststate::tempdir().expect("tempdir");
     let _tmux = TmuxServerGuard(state.path().join("tmux.sock"));
     let sup1 = Supervisor::new_with_seams(
         state.path(),
@@ -844,7 +844,7 @@ async fn a_keyed_tilde_refusal_replays_after_the_home_appears() {
         .expect("the refusal carries a SupervisorError")
         .kind;
 
-    let home = tempfile::tempdir().expect("home");
+    let home = farhelm_teststate::tempdir().expect("home");
     std::fs::create_dir(home.path().join("ws")).expect("workdir");
     let sup2 = handoff_to_new_supervisor_with_seams(
         state.path(),
@@ -921,9 +921,9 @@ async fn a_keyed_tilde_refusal_replays_after_the_home_appears() {
 #[tokio::test]
 async fn a_pending_tilde_create_retries_from_the_stored_expansion() {
     let slot = SLOTS.acquire().await.expect("semaphore is never closed");
-    let state = tempfile::tempdir().expect("tempdir");
+    let state = farhelm_teststate::tempdir().expect("tempdir");
     let _tmux = TmuxServerGuard(state.path().join("tmux.sock"));
-    let home = tempfile::tempdir().expect("home");
+    let home = farhelm_teststate::tempdir().expect("home");
     let workdir = home.path().join("ws");
     std::fs::create_dir(&workdir).expect("workdir");
     let sup1 = Supervisor::new_with_seams(

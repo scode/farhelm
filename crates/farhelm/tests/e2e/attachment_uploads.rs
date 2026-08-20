@@ -1162,7 +1162,7 @@ async fn begin_upload_refuses_a_bad_channel_and_an_over_full_connection() {
 #[tokio::test]
 async fn startup_reconciliation_sweeps_staging_and_keeps_published_attachments() {
     let _slot = SLOTS.acquire().await.expect("semaphore is never closed");
-    let state = tempfile::tempdir().expect("tempdir");
+    let state = farhelm_teststate::tempdir().expect("tempdir");
     let sup = Supervisor::new_with_exe(state.path(), farhelm_bin().into())
         .await
         .expect("supervisor");
@@ -1179,7 +1179,7 @@ async fn startup_reconciliation_sweeps_staging_and_keeps_published_attachments()
     // ...and a session that does exist, with debris of its own.
     let (session, _work) = {
         let client = connect_client(&sup).await;
-        let work = tempfile::tempdir().expect("workdir");
+        let work = farhelm_teststate::tempdir().expect("workdir");
         let session = client
             .create_session(
                 &work.path().to_string_lossy(),
@@ -1305,7 +1305,7 @@ async fn a_zero_byte_upload_publishes_an_empty_file() {
 #[tokio::test]
 async fn a_relative_state_directory_still_reports_an_absolute_path() {
     let _slot = SLOTS.acquire().await.expect("semaphore is never closed");
-    let state = tempfile::tempdir().expect("tempdir");
+    let state = farhelm_teststate::tempdir().expect("tempdir");
     // A relative path to the same directory, which is what
     // `--state-dir ./state` produces.
     let relative = pathdiff_to_current(state.path());
@@ -1314,7 +1314,7 @@ async fn a_relative_state_directory_still_reports_an_absolute_path() {
         .expect("supervisor on a relative state dir");
     let _tmux = TmuxServerGuard(state.path().join("tmux.sock"));
     let client = connect_client(&sup).await;
-    let work = tempfile::tempdir().expect("workdir");
+    let work = farhelm_teststate::tempdir().expect("workdir");
     let session = client
         .create_session(
             &work.path().to_string_lossy(),
@@ -1496,7 +1496,7 @@ async fn an_ack_arrives_ahead_of_a_backlog_of_terminal_output() {
     const SETTLE: Duration = Duration::from_secs(5);
 
     let h = harness().await;
-    let work = tempfile::tempdir().expect("workdir");
+    let work = farhelm_teststate::tempdir().expect("workdir");
     let session = h
         .client
         .create_session(
@@ -2565,7 +2565,7 @@ async fn a_non_utf8_state_directory_is_refused_before_any_session_can_exist() {
     use std::os::unix::ffi::OsStringExt;
 
     let _slot = SLOTS.acquire().await.expect("semaphore is never closed");
-    let parent = tempfile::tempdir().expect("tempdir");
+    let parent = farhelm_teststate::tempdir().expect("tempdir");
     // One invalid byte is enough, and keeps the rest of the path (which
     // tmux and SQLite also have to live with) ordinary.
     let mut raw = parent.path().as_os_str().to_os_string().into_vec();
@@ -2578,7 +2578,7 @@ async fn a_non_utf8_state_directory_is_refused_before_any_session_can_exist() {
         .expect("a supervisor on a non-UTF-8 state dir");
     let _tmux = TmuxServerGuard(state.join("tmux.sock"));
     let client = connect_client(&sup).await;
-    let work = tempfile::tempdir().expect("workdir");
+    let work = farhelm_teststate::tempdir().expect("workdir");
     let refused = client
         .create_session(
             &work.path().to_string_lossy(),

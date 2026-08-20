@@ -75,8 +75,8 @@ fn assert_records_consecutive(records: &[u64], what: &str, allowed_seams: usize)
 /// Create a session running the `flood` script — the fast producer every
 /// backpressure test needs. Returns the workdir for the caller to hold,
 /// exactly like [`basic_session`].
-pub(crate) async fn flood_session(h: &Harness) -> (SessionInfo, tempfile::TempDir) {
-    let work = tempfile::tempdir().expect("workdir");
+pub(crate) async fn flood_session(h: &Harness) -> (SessionInfo, farhelm_teststate::TestDir) {
+    let work = farhelm_teststate::tempdir().expect("workdir");
     let session = h
         .client
         .create_session(
@@ -264,7 +264,7 @@ async fn a_forced_tmux_pause_is_recovered_through_the_real_attachment() {
     // makes that unfalsifiable — "no further records" would then be
     // correct rather than a pane left paused. `counter` runs until its
     // session is killed.
-    let work = tempfile::tempdir().expect("workdir");
+    let work = farhelm_teststate::tempdir().expect("workdir");
     let session = h
         .client
         .create_session(
@@ -335,7 +335,7 @@ async fn a_forced_tmux_pause_is_recovered_through_the_real_attachment() {
 #[tokio::test]
 async fn a_forced_tmux_pause_recovers_an_alternate_screen_pane() {
     let h = harness().await;
-    let work = tempfile::tempdir().expect("workdir");
+    let work = farhelm_teststate::tempdir().expect("workdir");
     let session = h
         .client
         .create_session(
@@ -481,7 +481,7 @@ async fn a_stall_teardown_racing_a_takeover_never_detaches_the_winner() {
         ..SupervisorTimeouts::default()
     })
     .await;
-    let work = tempfile::tempdir().expect("workdir");
+    let work = farhelm_teststate::tempdir().expect("workdir");
     let session = h
         .client
         .create_session(
@@ -651,7 +651,7 @@ async fn memory_stays_flat_while_a_viewer_is_stalled() {
 #[tokio::test]
 async fn a_paused_attachment_stops_receiving_until_it_resumes() {
     let h = harness().await;
-    let work = tempfile::tempdir().expect("workdir");
+    let work = farhelm_teststate::tempdir().expect("workdir");
     let session = h
         .client
         .create_session(
@@ -714,7 +714,7 @@ async fn repeated_short_pauses_never_accumulate_into_a_stall_detach() {
         ..SupervisorTimeouts::default()
     })
     .await;
-    let work = tempfile::tempdir().expect("workdir");
+    let work = farhelm_teststate::tempdir().expect("workdir");
     let session = h
         .client
         .create_session(
@@ -961,7 +961,7 @@ async fn a_stall_detaches_only_its_own_attachment_not_the_connections_others() {
 #[tokio::test]
 async fn a_pause_from_a_client_that_lost_a_takeover_cannot_silence_the_winner() {
     let h = harness().await;
-    let work = tempfile::tempdir().expect("workdir");
+    let work = farhelm_teststate::tempdir().expect("workdir");
     let session = h
         .client
         .create_session(
@@ -1266,7 +1266,7 @@ async fn a_pause_past_the_stall_timeout_detaches_and_leaves_the_session_healthy(
     // finish during the stall makes that unfalsifiable — its tail would
     // then be present no matter how wedged the pane still was. `counter`
     // runs until its session is killed.
-    let work = tempfile::tempdir().expect("workdir");
+    let work = farhelm_teststate::tempdir().expect("workdir");
     let session = h
         .client
         .create_session(

@@ -248,7 +248,7 @@ async fn reattach_replays_history_and_modes() {
 #[tokio::test]
 async fn reattach_cutover_has_no_missing_or_duplicated_output() {
     let h = harness().await;
-    let work = tempfile::tempdir().unwrap();
+    let work = farhelm_teststate::tempdir().unwrap();
     let session = h
         .client
         .create_session(
@@ -288,7 +288,7 @@ async fn reattach_cutover_has_no_missing_or_duplicated_output() {
 #[tokio::test]
 async fn non_utf8_terminal_output_survives_live_stream() {
     let h = harness().await;
-    let work = tempfile::tempdir().unwrap();
+    let work = farhelm_teststate::tempdir().unwrap();
     let session = h
         .client
         .create_session(
@@ -1163,7 +1163,7 @@ async fn create_with_relative_cwd_is_rejected() {
 /// repo's tests never mutate the test process's environment.
 #[tokio::test]
 async fn create_with_tilde_cwd_expands_against_the_supervisors_home() {
-    let home = tempfile::tempdir().unwrap();
+    let home = farhelm_teststate::tempdir().unwrap();
     let workdir = home.path().join("ws");
     std::fs::create_dir(&workdir).unwrap();
     let h = harness_with_seams(
@@ -1361,7 +1361,7 @@ async fn create_with_nul_byte_in_cwd_is_invalid_request() {
 /// exist at all.
 #[tokio::test]
 async fn helm_bind_failure_happens_before_any_durable_setup() {
-    let state = tempfile::tempdir().expect("state");
+    let state = farhelm_teststate::tempdir().expect("state");
     let ensure = state.path().join("ensure-hosts.json5");
     tokio::fs::write(&ensure, r#"{ hosts: [{ ssh: "user@never-registered" }] }"#)
         .await
@@ -1438,7 +1438,7 @@ async fn reattach_replays_content_scrolled_off_screen() {
 #[tokio::test]
 async fn reattach_to_alt_screen_app_preserves_content() {
     let h = harness().await;
-    let work = tempfile::tempdir().unwrap();
+    let work = farhelm_teststate::tempdir().unwrap();
 
     let session = h
         .client
@@ -1779,7 +1779,7 @@ fn looks_like_a_tmux_timeout(error: &anyhow::Error) -> bool {
 #[tokio::test]
 async fn adopted_tmux_server_gets_focus_events_explicitly_not_just_from_config() {
     let _slot = SLOTS.acquire().await.expect("semaphore is never closed");
-    let state = tempfile::tempdir().expect("state");
+    let state = farhelm_teststate::tempdir().expect("state");
     let sock = state.path().join("tmux.sock");
     let _tmux = TmuxServerGuard(sock.clone());
 
@@ -1865,7 +1865,7 @@ async fn exited_agent_lists_as_exited_with_its_exit_code() {
 #[tokio::test]
 async fn nonzero_exit_lists_with_its_precise_code() {
     let h = harness().await;
-    let work = tempfile::tempdir().unwrap();
+    let work = farhelm_teststate::tempdir().unwrap();
     let session = h
         .client
         .create_session(
@@ -1887,7 +1887,7 @@ async fn nonzero_exit_lists_with_its_precise_code() {
 #[tokio::test]
 async fn unparseable_invocations_error_without_creating_a_session() {
     let h = harness().await;
-    let work = tempfile::tempdir().unwrap();
+    let work = farhelm_teststate::tempdir().unwrap();
     let cwd = work.path().to_string_lossy().into_owned();
 
     let empty = h
@@ -1945,7 +1945,7 @@ async fn unparseable_invocations_error_without_creating_a_session() {
 /// and it needs no tmux, no supervisor, and no runtime.
 #[test]
 fn launch_shim_records_exec_failure_only_on_failure() {
-    let dir = tempfile::tempdir().unwrap();
+    let dir = farhelm_teststate::tempdir().unwrap();
 
     let write_spec = |name: &str, argv: Vec<&str>| {
         let status_file = dir.path().join(format!("{name}.status"));
@@ -2099,7 +2099,7 @@ async fn input_from_a_kicked_connection_is_dropped() {
 #[tokio::test]
 async fn connection_loss_detaches_terminals_and_fails_requests() {
     let h = harness().await;
-    let work = tempfile::tempdir().unwrap();
+    let work = farhelm_teststate::tempdir().unwrap();
 
     // A separate connection routed through a severable relay: two duplex
     // pipes joined by copy tasks. Aborting the copy tasks drops every
@@ -2345,7 +2345,7 @@ async fn writer_never_reading_peer_does_not_hang_connection_shutdown() {
 #[tokio::test]
 async fn stdio_proxy_carries_a_real_session() {
     let _slot = SLOTS.acquire().await.expect("semaphore is never closed");
-    let state = tempfile::tempdir().expect("tempdir");
+    let state = farhelm_teststate::tempdir().expect("tempdir");
     let sup =
         Supervisor::new_with_exe_and_timeouts(state.path(), farhelm_bin().into(), suite_timeouts())
             .await
@@ -2406,7 +2406,7 @@ async fn stdio_proxy_carries_a_real_session() {
         assert_eq!(sock_mode, 0o600, "supervisor socket must be owner-only");
     }
 
-    let work = tempfile::tempdir().unwrap();
+    let work = farhelm_teststate::tempdir().unwrap();
     let session = client
         .create_session(
             &work.path().to_string_lossy(),
@@ -2446,7 +2446,7 @@ async fn stdio_proxy_carries_a_real_session() {
 #[tokio::test]
 async fn large_input_survives_chunking() {
     let h = harness().await;
-    let work = tempfile::tempdir().unwrap();
+    let work = farhelm_teststate::tempdir().unwrap();
 
     let session = h
         .client
@@ -2544,7 +2544,7 @@ async fn control_mode_attach_to_missing_session_reports_tmux_reason() {
     use farhelm_supervisor::tmux::TmuxDriver;
 
     let _slot = SLOTS.acquire().await.expect("semaphore is never closed");
-    let state = tempfile::tempdir().expect("tempdir");
+    let state = farhelm_teststate::tempdir().expect("tempdir");
     let driver = TmuxDriver::new(state.path());
     driver.ensure_server().await.expect("ensure server");
     let _tmux = TmuxServerGuard(state.path().join("tmux.sock"));
@@ -2579,7 +2579,7 @@ async fn control_mode_attach_to_missing_session_reports_tmux_reason() {
 #[tokio::test]
 async fn created_sessions_are_listed_with_a_derived_title() {
     let h = harness().await;
-    let work = tempfile::tempdir().unwrap();
+    let work = farhelm_teststate::tempdir().unwrap();
     let basename = work
         .path()
         .file_name()
@@ -2733,7 +2733,7 @@ async fn serve_refuses_a_second_supervisor_but_replaces_a_stale_socket() {
     let _slot = SLOTS.acquire().await.expect("semaphore is never closed");
 
     // Half 1: live supervisor → second serve() refuses.
-    let state = tempfile::tempdir().expect("tempdir");
+    let state = farhelm_teststate::tempdir().expect("tempdir");
     let sup1 = Supervisor::new_with_exe(state.path(), farhelm_bin().into())
         .await
         .expect("supervisor 1");
@@ -2763,7 +2763,7 @@ async fn serve_refuses_a_second_supervisor_but_replaces_a_stale_socket() {
     );
 
     // Half 2: stale socket file (no listener behind it) → serve() binds.
-    let state2 = tempfile::tempdir().expect("tempdir");
+    let state2 = farhelm_teststate::tempdir().expect("tempdir");
     let sup3 = Supervisor::new_with_exe(state2.path(), farhelm_bin().into())
         .await
         .expect("supervisor 3");
@@ -2805,7 +2805,7 @@ async fn stdio_proxy_half_close_delivers_in_flight_replies() {
     use tokio::io::AsyncWriteExt;
 
     let _slot = SLOTS.acquire().await.expect("semaphore is never closed");
-    let state = tempfile::tempdir().expect("tempdir");
+    let state = farhelm_teststate::tempdir().expect("tempdir");
     let sup = Supervisor::new_with_exe(state.path(), farhelm_bin().into())
         .await
         .expect("supervisor");
@@ -2910,7 +2910,7 @@ async fn detach_from_a_kicked_connection_does_not_kill_the_winner() {
 #[tokio::test]
 async fn create_with_degenerate_size_clamps_to_1x1() {
     let h = harness().await;
-    let work = tempfile::tempdir().unwrap();
+    let work = farhelm_teststate::tempdir().unwrap();
 
     let session = h
         .client
@@ -2963,7 +2963,7 @@ fn hex_tokens(text: &str) -> Vec<u8> {
 #[tokio::test]
 async fn input_bytes_survive_verbatim_through_hexecho() {
     let h = harness().await;
-    let work = tempfile::tempdir().unwrap();
+    let work = farhelm_teststate::tempdir().unwrap();
     let session = h
         .client
         .create_session(
@@ -3360,8 +3360,8 @@ struct RecycledPaneWedge {
     pane: String,
     /// The sessions' working directories, which must outlive their
     /// launches (they are the sessions' cwds).
-    _work_old: tempfile::TempDir,
-    _work_new: tempfile::TempDir,
+    _work_old: farhelm_teststate::TestDir,
+    _work_new: farhelm_teststate::TestDir,
 }
 
 /// Construct the wedge, asserting its own precondition.
@@ -3820,7 +3820,7 @@ async fn restart_gap_is_decided_per_session() {
 #[tokio::test]
 async fn stop_kills_the_whole_process_tree() {
     let h = harness().await;
-    let work = tempfile::tempdir().unwrap();
+    let work = farhelm_teststate::tempdir().unwrap();
     let session = h
         .client
         .create_session(
@@ -3919,7 +3919,7 @@ async fn stop_kills_the_whole_process_tree() {
 #[tokio::test]
 async fn stop_kills_a_child_that_ignores_sigterm() {
     let h = harness().await;
-    let work = tempfile::tempdir().unwrap();
+    let work = farhelm_teststate::tempdir().unwrap();
     let session = h
         .client
         .create_session(
@@ -3961,7 +3961,7 @@ async fn stop_kills_a_child_that_ignores_sigterm() {
 #[tokio::test]
 async fn cheap_request_completes_before_a_slow_spawned_handler_in_flight() {
     let h = harness().await;
-    let work = tempfile::tempdir().unwrap();
+    let work = farhelm_teststate::tempdir().unwrap();
     let session = h
         .client
         .create_session(
@@ -4193,7 +4193,7 @@ async fn delete_works_on_a_terminal_less_session() {
 #[tokio::test]
 async fn delete_kills_the_whole_process_tree() {
     let h = harness().await;
-    let work = tempfile::tempdir().unwrap();
+    let work = farhelm_teststate::tempdir().unwrap();
     let session = h
         .client
         .create_session(
@@ -4320,7 +4320,7 @@ async fn stop_then_delete_both_succeed() {
 #[tokio::test]
 async fn stop_replays_the_alt_screen_snapshot() {
     let h = harness().await;
-    let work = tempfile::tempdir().unwrap();
+    let work = farhelm_teststate::tempdir().unwrap();
     let session = h
         .client
         .create_session(
@@ -4417,7 +4417,7 @@ async fn stop_replays_the_alt_screen_snapshot() {
 #[tokio::test]
 async fn stop_snapshot_preserves_trailing_styled_padding_via_capture_n() {
     let h = harness().await;
-    let work = tempfile::tempdir().unwrap();
+    let work = farhelm_teststate::tempdir().unwrap();
     let session = h
         .client
         .create_session(
@@ -4513,7 +4513,7 @@ async fn stop_snapshot_preserves_trailing_styled_padding_via_capture_n() {
 #[tokio::test]
 async fn dead_pane_still_on_alt_screen_replays_without_a_divider() {
     let h = harness().await;
-    let work = tempfile::tempdir().unwrap();
+    let work = farhelm_teststate::tempdir().unwrap();
     let session = h
         .client
         .create_session(
@@ -4635,7 +4635,7 @@ async fn dead_pane_still_on_alt_screen_replays_without_a_divider() {
 #[tokio::test]
 async fn stop_replays_the_alt_screen_snapshot_when_the_agent_ignores_term_and_never_restores() {
     let h = harness().await;
-    let work = tempfile::tempdir().unwrap();
+    let work = farhelm_teststate::tempdir().unwrap();
     let session = h
         .client
         .create_session(
@@ -4714,7 +4714,7 @@ async fn stop_replays_the_alt_screen_snapshot_when_the_agent_ignores_term_and_ne
 #[tokio::test]
 async fn attach_mid_stop_sees_the_pending_alt_screen_snapshot() {
     let h = harness().await;
-    let work = tempfile::tempdir().unwrap();
+    let work = farhelm_teststate::tempdir().unwrap();
     let session = h
         .client
         .create_session(
@@ -4793,7 +4793,7 @@ async fn attach_mid_stop_sees_the_pending_alt_screen_snapshot() {
 #[tokio::test]
 async fn attach_mid_stop_sees_the_pending_snapshot_while_still_on_the_alt_screen() {
     let h = harness().await;
-    let work = tempfile::tempdir().unwrap();
+    let work = farhelm_teststate::tempdir().unwrap();
     let session = h
         .client
         .create_session(
@@ -4958,7 +4958,7 @@ async fn attach_ignores_a_stale_snapshot_file_for_a_live_pane() {
 #[tokio::test]
 async fn stop_still_kills_when_the_snapshots_directory_cannot_be_created() {
     let h = harness().await;
-    let work = tempfile::tempdir().unwrap();
+    let work = farhelm_teststate::tempdir().unwrap();
     let session = h
         .client
         .create_session(
@@ -5152,7 +5152,7 @@ async fn delete_fails_closed_when_the_alt_screen_snapshot_cannot_be_removed() {
 #[tokio::test]
 async fn alt_screen_snapshot_survives_a_supervisor_restart() {
     let h = harness().await;
-    let work = tempfile::tempdir().unwrap();
+    let work = farhelm_teststate::tempdir().unwrap();
     let session = h
         .client
         .create_session(
@@ -5268,7 +5268,7 @@ async fn delete_after_externally_killed_tmux_session_succeeds() {
 #[tokio::test]
 async fn delete_after_renamed_tmux_session_fails_closed() {
     let h = harness().await;
-    let work = tempfile::tempdir().unwrap();
+    let work = farhelm_teststate::tempdir().unwrap();
     let session = h
         .client
         .create_session(
@@ -5360,7 +5360,7 @@ async fn delete_after_renamed_tmux_session_fails_closed() {
 #[tokio::test]
 async fn stop_kills_a_reparented_marked_daemon() {
     let h = harness().await;
-    let work = tempfile::tempdir().unwrap();
+    let work = farhelm_teststate::tempdir().unwrap();
     let session = h
         .client
         .create_session(
@@ -5405,7 +5405,7 @@ async fn stop_kills_a_reparented_marked_daemon() {
 #[tokio::test]
 async fn stop_kills_a_reparented_daemon_with_no_live_pane_to_walk_from() {
     let h = harness().await;
-    let work = tempfile::tempdir().unwrap();
+    let work = farhelm_teststate::tempdir().unwrap();
     let session = h
         .client
         .create_session(
@@ -5450,7 +5450,7 @@ async fn stop_kills_a_reparented_daemon_with_no_live_pane_to_walk_from() {
 #[tokio::test]
 async fn stop_kills_an_unmarked_child_of_a_reparented_daemon_via_closure_seeding() {
     let h = harness().await;
-    let work = tempfile::tempdir().unwrap();
+    let work = farhelm_teststate::tempdir().unwrap();
     let session = h
         .client
         .create_session(
@@ -5513,7 +5513,7 @@ async fn a_scope_launched_stop_kills_through_the_cgroup_and_still_runs_the_sweep
     else {
         return;
     };
-    let work = tempfile::tempdir().unwrap();
+    let work = farhelm_teststate::tempdir().unwrap();
     let session = h
         .client
         .create_session(
@@ -5608,7 +5608,7 @@ async fn a_recorded_scope_survives_a_supervisor_restart_and_still_kills() {
     else {
         return;
     };
-    let work = tempfile::tempdir().unwrap();
+    let work = farhelm_teststate::tempdir().unwrap();
     let session = h
         .client
         .create_session(
@@ -5799,7 +5799,7 @@ async fn without_a_user_manager_a_launch_records_the_fallback_and_stops_like_m2(
         },
     )
     .await;
-    let work = tempfile::tempdir().unwrap();
+    let work = farhelm_teststate::tempdir().unwrap();
     let session = h
         .client
         .create_session(
@@ -5906,7 +5906,7 @@ async fn delete_removes_launch_artifacts() {
 #[tokio::test]
 async fn delete_removes_the_alt_screen_snapshot() {
     let h = harness().await;
-    let work = tempfile::tempdir().unwrap();
+    let work = farhelm_teststate::tempdir().unwrap();
     let session = h
         .client
         .create_session(
@@ -6182,7 +6182,7 @@ async fn attach_during_delete_race_ends_in_a_consistent_state() {
 #[tokio::test]
 async fn stop_quiesce_survives_no_marked_process() {
     let h = harness().await;
-    let work = tempfile::tempdir().unwrap();
+    let work = farhelm_teststate::tempdir().unwrap();
     let session = h
         .client
         .create_session(

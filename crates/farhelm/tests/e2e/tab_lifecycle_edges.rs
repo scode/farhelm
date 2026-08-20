@@ -24,8 +24,8 @@ use crate::terminal_tabs::{
 #[tokio::test]
 async fn opening_a_tab_on_a_restart_gap_session_is_a_restart_first_conflict() {
     let slot = SLOTS.acquire().await.expect("semaphore is never closed");
-    let state = tempfile::tempdir().expect("tempdir");
-    let work = tempfile::tempdir().expect("workdir");
+    let state = farhelm_teststate::tempdir().expect("tempdir");
+    let work = farhelm_teststate::tempdir().expect("workdir");
     let guard = TmuxServerGuard(state.path().join("tmux.sock"));
 
     let sup = Supervisor::new_with_exe(state.path(), farhelm_bin().into())
@@ -553,8 +553,8 @@ async fn deleting_a_session_detaches_every_channel_and_reaps_scrubbed_tab_daemon
 #[tokio::test]
 async fn a_supervisor_restart_leaves_a_tabs_shell_and_scrollback_untouched() {
     let slot = SLOTS.acquire().await.expect("semaphore is never closed");
-    let state = tempfile::tempdir().expect("tempdir");
-    let work = tempfile::tempdir().expect("workdir");
+    let state = farhelm_teststate::tempdir().expect("tempdir");
+    let work = farhelm_teststate::tempdir().expect("workdir");
     let _tmux = TmuxServerGuard(state.path().join("tmux.sock"));
 
     // Both this supervisor and its restart below attach for real (a tab

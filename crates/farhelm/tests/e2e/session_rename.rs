@@ -311,7 +311,7 @@ async fn a_rename_reply_reports_the_launch_sentinel_error_a_list_would() {
 #[tokio::test]
 async fn a_rename_reply_captures_and_offers_resume_without_a_list_first() {
     let (h, fixtures) = capture_harness().await;
-    let work = tempfile::tempdir().expect("workdir");
+    let work = farhelm_teststate::tempdir().expect("workdir");
     let session = record_session(&h, &fixtures, work.path(), "claude").await;
     assert_eq!(
         session.restart_offer,
@@ -364,7 +364,7 @@ async fn a_rename_reply_captures_and_offers_resume_without_a_list_first() {
 #[tokio::test]
 async fn a_rename_before_first_input_still_captures_the_conversation() {
     let (h, fixtures) = capture_harness().await;
-    let work = tempfile::tempdir().expect("workdir");
+    let work = farhelm_teststate::tempdir().expect("workdir");
     let session = record_session(&h, &fixtures, work.path(), "claude").await;
 
     let (chan, mut rx) = h.client.attach(&session.id, 80, 24).await.expect("attach");
@@ -393,9 +393,9 @@ async fn a_rename_before_first_input_still_captures_the_conversation() {
 #[tokio::test]
 async fn a_renamed_title_survives_a_supervisor_restart() {
     let slot = SLOTS.acquire().await.expect("semaphore is never closed");
-    let state = tempfile::tempdir().expect("tempdir");
+    let state = farhelm_teststate::tempdir().expect("tempdir");
     let _tmux = TmuxServerGuard(state.path().join("tmux.sock"));
-    let work = tempfile::tempdir().expect("workdir");
+    let work = farhelm_teststate::tempdir().expect("workdir");
     let sup1 = Supervisor::new_with_exe(state.path(), farhelm_bin().into())
         .await
         .expect("supervisor");
@@ -672,7 +672,7 @@ async fn a_rename_leaves_an_active_attachment_alone() {
 #[tokio::test]
 async fn a_rename_does_not_disturb_the_create_intent_key() {
     let h = harness().await;
-    let work = tempfile::tempdir().expect("workdir");
+    let work = farhelm_teststate::tempdir().expect("workdir");
     let created = h
         .client
         .create_session_with_key(

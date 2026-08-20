@@ -30,7 +30,7 @@ use crate::boot_id_durable_outcome::{
 async fn unexecutable_invocation_lists_as_error_and_outranks_a_reboot() {
     let h = harness_believing_boot("boot-a").await;
     let sock = h.state.path().join("tmux.sock");
-    let work = tempfile::tempdir().expect("workdir");
+    let work = farhelm_teststate::tempdir().expect("workdir");
     let missing_binary = work.path().join("no-such-farhelm-agent");
 
     let session = h
@@ -108,7 +108,7 @@ async fn unexecutable_invocation_lists_as_error_and_outranks_a_reboot() {
 async fn a_reboot_never_interrupts_a_row_a_sentinel_already_claims_as_error() {
     let h = harness_believing_boot("boot-a").await;
     let sock = h.state.path().join("tmux.sock");
-    let work = tempfile::tempdir().expect("workdir");
+    let work = farhelm_teststate::tempdir().expect("workdir");
     let missing_binary = work.path().join("no-such-farhelm-agent");
 
     let session = h
@@ -151,7 +151,7 @@ async fn a_reboot_never_interrupts_a_row_a_sentinel_already_claims_as_error() {
 async fn exec_that_succeeds_and_exits_126_or_127_is_exited_never_error() {
     let h = harness().await;
     for code in [126, 127] {
-        let work = tempfile::tempdir().expect("workdir");
+        let work = farhelm_teststate::tempdir().expect("workdir");
         let session = h
             .client
             .create_session(
@@ -249,7 +249,7 @@ async fn a_planted_malformed_spec_sentinel_classifies_error_with_its_detail() {
 async fn a_reload_classified_error_session_keeps_its_terminal_for_attach_and_delete() {
     let h = harness().await;
     let sock = h.state.path().join("tmux.sock");
-    let work = tempfile::tempdir().expect("workdir");
+    let work = farhelm_teststate::tempdir().expect("workdir");
     let missing_binary = work.path().join("no-such-farhelm-agent");
 
     let session = h
@@ -320,7 +320,7 @@ async fn a_reload_classified_error_session_keeps_its_terminal_for_attach_and_del
 async fn a_sentinel_survives_an_unreadable_boot_id_undurably_then_commits_once_readable() {
     let h = harness_believing_boot("boot-a").await;
     let sock = h.state.path().join("tmux.sock");
-    let work = tempfile::tempdir().expect("workdir");
+    let work = farhelm_teststate::tempdir().expect("workdir");
     let missing_binary = work.path().join("no-such-farhelm-agent");
 
     let session = h
@@ -391,7 +391,7 @@ async fn a_sentinel_survives_an_unreadable_boot_id_undurably_then_commits_once_r
 async fn stop_before_any_list_on_an_exec_failed_session_still_ends_error() {
     let h = harness().await;
     let sock = h.state.path().join("tmux.sock");
-    let work = tempfile::tempdir().expect("workdir");
+    let work = farhelm_teststate::tempdir().expect("workdir");
     let missing_binary = work.path().join("no-such-farhelm-agent");
 
     let session = h

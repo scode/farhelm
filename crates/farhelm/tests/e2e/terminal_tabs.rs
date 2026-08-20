@@ -296,7 +296,7 @@ async fn a_tab_runs_a_shell_in_the_sessions_working_directory() {
 #[tokio::test]
 async fn opening_a_tab_after_the_working_directory_vanished_names_it() {
     let h = harness().await;
-    let work = tempfile::tempdir().unwrap();
+    let work = farhelm_teststate::tempdir().unwrap();
     let cwd = work.path().to_string_lossy().into_owned();
     let session = h
         .client
@@ -393,7 +393,7 @@ async fn opening_a_tab_without_a_tmux_session_says_to_restart_first() {
 /// exactly the shape a broken login shell has.
 #[tokio::test]
 async fn a_tab_whose_shell_is_dead_by_reply_time_is_refused_with_its_last_words() {
-    let dying = tempfile::tempdir().unwrap();
+    let dying = farhelm_teststate::tempdir().unwrap();
     let shell = dying.path().join("dying-shell");
     std::fs::write(&shell, "#!/bin/sh\necho SHELL-REFUSED-TO-START\nexit 9\n")
         .expect("writing the failing shell fixture");
@@ -404,7 +404,7 @@ async fn a_tab_whose_shell_is_dead_by_reply_time_is_refused_with_its_last_words(
     .expect("making the failing shell executable");
 
     let h = harness_with_shell(&shell.to_string_lossy()).await;
-    let work = tempfile::tempdir().unwrap();
+    let work = farhelm_teststate::tempdir().unwrap();
     // The AGENT's own launch also runs through this shell, so it is given
     // a command it never reaches — this test is about the tab, and the
     // session only has to exist and hold a tmux session.
@@ -732,8 +732,8 @@ async fn closing_a_tab_kills_an_environment_scrubbed_double_fork_through_its_sco
 #[tokio::test]
 async fn tabs_are_rediscovered_across_a_supervisor_restart_and_unmarked_windows_are_ignored() {
     let slot = SLOTS.acquire().await.expect("semaphore is never closed");
-    let state = tempfile::tempdir().expect("tempdir");
-    let work = tempfile::tempdir().expect("workdir");
+    let state = farhelm_teststate::tempdir().expect("tempdir");
+    let work = farhelm_teststate::tempdir().expect("workdir");
     let _tmux = TmuxServerGuard(state.path().join("tmux.sock"));
 
     let sup = Supervisor::new_with_exe(state.path(), farhelm_bin().into())
@@ -841,7 +841,7 @@ async fn tabs_are_rediscovered_across_a_supervisor_restart_and_unmarked_windows_
 #[tokio::test]
 async fn stopping_the_agent_leaves_a_tabs_shell_and_its_daemonized_child_running() {
     let h = harness().await;
-    let work = tempfile::tempdir().unwrap();
+    let work = farhelm_teststate::tempdir().unwrap();
     let session = h
         .client
         .create_session(
@@ -932,7 +932,7 @@ async fn stopping_the_agent_leaves_a_tabs_shell_and_its_daemonized_child_running
 #[tokio::test]
 async fn restarting_the_agent_leaves_a_tab_attached_running_and_unswept() {
     let h = harness().await;
-    let work = tempfile::tempdir().unwrap();
+    let work = farhelm_teststate::tempdir().unwrap();
     let session = h
         .client
         .create_session(
@@ -1151,8 +1151,8 @@ async fn deleting_a_session_takes_its_tabs_and_their_daemonized_descendants() {
 /// claim of sameness is to run the same program through both and assert
 /// the same properties, rather than to write a tab-shaped copy of each
 /// agent-shaped test and hope they stayed equivalent.
-async fn shell_session(h: &Harness) -> (SessionInfo, tempfile::TempDir) {
-    let work = tempfile::tempdir().expect("workdir");
+async fn shell_session(h: &Harness) -> (SessionInfo, farhelm_teststate::TestDir) {
+    let work = farhelm_teststate::tempdir().expect("workdir");
     let session = h
         .client
         .create_session(&work.path().to_string_lossy(), "/bin/sh -i", None, 80, 24)
@@ -2369,8 +2369,8 @@ async fn concurrent_first_attaches_share_one_sink_and_orphan_nothing() {
 #[tokio::test]
 async fn a_killed_supervisor_leaves_no_orphaned_sink_client() {
     let _slot = SLOTS.acquire().await.expect("semaphore is never closed");
-    let state = tempfile::tempdir().expect("tempdir");
-    let work = tempfile::tempdir().expect("workdir");
+    let state = farhelm_teststate::tempdir().expect("tempdir");
+    let work = farhelm_teststate::tempdir().expect("workdir");
     let sock = state.path().join("tmux.sock");
     let _tmux = TmuxServerGuard(sock.clone());
 
@@ -2587,7 +2587,7 @@ async fn the_sink_registry_does_not_grow_with_dead_sessions() {
 /// loud skip rather than a silent pass.
 #[tokio::test]
 async fn an_rc_file_change_between_two_tab_opens_reaches_the_second_tab() {
-    let home = tempfile::tempdir().expect("fixture home");
+    let home = farhelm_teststate::tempdir().expect("fixture home");
     write_rc_files(home.path(), "first");
     let h = harness_with_seams(
         SupervisorTimeouts::default(),
@@ -2700,7 +2700,7 @@ async fn an_rc_file_change_between_two_tab_opens_reaches_the_second_tab() {
 #[tokio::test]
 async fn a_new_tab_window_is_presized_to_the_agent_windows_geometry() {
     let h = harness().await;
-    let work = tempfile::tempdir().unwrap();
+    let work = farhelm_teststate::tempdir().unwrap();
     let session = h
         .client
         .create_session(

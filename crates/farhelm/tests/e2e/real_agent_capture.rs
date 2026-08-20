@@ -54,11 +54,17 @@ async fn real_agent_captures_its_conversation(
     // outlive the run. Claude observes the user's real home directly; codex
     // needs a synthesized one (see its test for why), and this seam is what
     // lets one helper serve both without either knowing the other's needs.
-    prepare: impl FnOnce(&std::path::Path) -> (std::path::PathBuf, String, Option<tempfile::TempDir>),
+    prepare: impl FnOnce(
+        &std::path::Path,
+    ) -> (
+        std::path::PathBuf,
+        String,
+        Option<farhelm_teststate::TestDir>,
+    ),
 ) {
     let slot = SLOTS.acquire().await.expect("semaphore is never closed");
-    let state = tempfile::tempdir().expect("tempdir");
-    let work = tempfile::tempdir().expect("workdir");
+    let state = farhelm_teststate::tempdir().expect("tempdir");
+    let work = farhelm_teststate::tempdir().expect("workdir");
     let (agent_home, agent, _agent_home_guard) = prepare(work.path());
     let agent = agent.as_str();
     let sup = Supervisor::new_with_seams(
@@ -273,7 +279,7 @@ async fn real_codex_session_captures_its_conversation_identity() {
             )
         });
 
-        let synth = tempfile::tempdir().expect("synthetic codex home");
+        let synth = farhelm_teststate::tempdir().expect("synthetic codex home");
         let codex_home = synth.path().join(".codex");
         std::fs::create_dir_all(&codex_home).expect("codex home");
         let auth_path = codex_home.join("auth.json");

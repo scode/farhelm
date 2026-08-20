@@ -55,7 +55,7 @@ pub(crate) async fn pane_capture(sock: &std::path::Path, tmux_name: &str) -> Str
 async fn restarting_a_live_session_stops_its_tree_and_reuses_the_terminal() {
     let h = harness().await;
     let sock = h.state.path().join("tmux.sock");
-    let work = tempfile::tempdir().unwrap();
+    let work = farhelm_teststate::tempdir().unwrap();
     let session = h
         .client
         .create_session(
@@ -129,7 +129,7 @@ async fn restarting_a_live_session_stops_its_tree_and_reuses_the_terminal() {
 #[tokio::test]
 async fn restarting_a_live_session_without_consent_is_refused_and_kills_nothing() {
     let h = harness().await;
-    let work = tempfile::tempdir().unwrap();
+    let work = farhelm_teststate::tempdir().unwrap();
     let session = h
         .client
         .create_session(
@@ -259,7 +259,7 @@ async fn a_reused_terminal_keeps_the_prior_run_above_the_new_one() {
 #[tokio::test]
 async fn a_restart_reaps_a_daemon_left_by_a_self_exited_agent() {
     let h = harness().await;
-    let work = tempfile::tempdir().unwrap();
+    let work = farhelm_teststate::tempdir().unwrap();
     let session = h
         .client
         .create_session(
@@ -315,7 +315,7 @@ async fn a_restart_reaps_a_daemon_left_by_a_self_exited_agent() {
 #[tokio::test]
 async fn a_vanished_working_directory_refuses_the_restart_and_keeps_the_annotation() {
     let h = harness().await;
-    let work = tempfile::tempdir().unwrap();
+    let work = farhelm_teststate::tempdir().unwrap();
     let cwd = work.path().to_string_lossy().into_owned();
     let session = h
         .client
@@ -380,7 +380,7 @@ async fn a_vanished_working_directory_refuses_the_restart_and_keeps_the_annotati
 #[tokio::test]
 async fn a_capture_that_lands_after_the_clients_read_makes_a_fresh_restart_conflict() {
     let (h, fixtures) = capture_harness().await;
-    let work = tempfile::tempdir().expect("workdir");
+    let work = farhelm_teststate::tempdir().expect("workdir");
     let session = record_session(&h, &fixtures, work.path(), "claude").await;
     // What a client that listed BEFORE the first prompt would have cached.
     assert_eq!(
@@ -517,7 +517,7 @@ fn resumed_record_file(
 #[tokio::test]
 async fn an_archived_capture_backed_session_resumes_exactly_and_reads_its_attachment() {
     let (h, fixtures) = capture_harness().await;
-    let work = tempfile::tempdir().expect("workdir");
+    let work = farhelm_teststate::tempdir().expect("workdir");
     let wrapper = work.path().join("resume-wrapper.sh");
     let invocation = format!(
         "{} internal fake-agent --script claude-record --record-home {}",
@@ -610,11 +610,11 @@ async fn an_archived_capture_backed_session_resumes_exactly_and_reads_its_attach
 /// filled in the placeholder, and the only kind-specific step left is
 /// finding where the record landed on disk ([`resumed_record_file`]).
 async fn interrupted_session_resumes_its_conversation(kind: &str) {
-    let home = tempfile::tempdir().expect("agent home");
-    let bin = tempfile::tempdir().expect("agent bin");
+    let home = farhelm_teststate::tempdir().expect("agent home");
+    let bin = farhelm_teststate::tempdir().expect("agent bin");
     std::os::unix::fs::symlink(farhelm_bin(), bin.path().join(kind))
         .expect("symlink the farhelm binary under the agent's own name");
-    let state = tempfile::tempdir().expect("state dir");
+    let state = farhelm_teststate::tempdir().expect("state dir");
     let slot = SLOTS.acquire().await.expect("semaphore is never closed");
     let _tmux = TmuxServerGuard(state.path().join("tmux.sock"));
 
@@ -628,7 +628,7 @@ async fn interrupted_session_resumes_its_conversation(kind: &str) {
         ..SupervisorSeams::default()
     };
 
-    let work = tempfile::tempdir().expect("workdir");
+    let work = farhelm_teststate::tempdir().expect("workdir");
     let conversation = {
         let sup = Supervisor::new_with_seams(
             state.path(),
@@ -834,7 +834,7 @@ async fn an_interrupted_codex_session_resumes_its_conversation_in_a_fresh_termin
 #[tokio::test]
 async fn a_configured_fallback_template_is_what_a_restart_runs() {
     let h = harness().await;
-    let work = tempfile::tempdir().expect("workdir");
+    let work = farhelm_teststate::tempdir().expect("workdir");
     let session = h
         .client
         .create_session_with_extras(
@@ -955,7 +955,7 @@ pub(crate) fn write_rc_files(home: &std::path::Path, value: &str) {
 /// failure would blame the product for the harness's blind spot.
 #[tokio::test]
 async fn an_rc_file_change_between_launches_reaches_the_relaunched_agent() {
-    let home = tempfile::tempdir().expect("fixture home");
+    let home = farhelm_teststate::tempdir().expect("fixture home");
     write_rc_files(home.path(), "first");
     let h = harness_with_seams(
         SupervisorTimeouts::default(),
@@ -978,7 +978,7 @@ async fn an_rc_file_change_between_launches_reaches_the_relaunched_agent() {
         },
     )
     .await;
-    let work = tempfile::tempdir().expect("workdir");
+    let work = farhelm_teststate::tempdir().expect("workdir");
     let session = h
         .client
         .create_session(
@@ -1069,7 +1069,7 @@ async fn an_rc_file_change_between_launches_reaches_the_relaunched_agent() {
 async fn a_restart_clears_a_previous_launch_error() {
     let h = harness().await;
     let sock = h.state.path().join("tmux.sock");
-    let work = tempfile::tempdir().expect("workdir");
+    let work = farhelm_teststate::tempdir().expect("workdir");
     let missing_binary = work.path().join("no-such-farhelm-agent");
     let session = h
         .client

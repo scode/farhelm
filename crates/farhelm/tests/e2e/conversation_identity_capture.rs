@@ -52,8 +52,8 @@ pub(crate) fn test_capture_bounds() -> CaptureWindowBounds {
 /// from a bare command name. The binary is multi-call by SUBCOMMAND, not
 /// by argv0, so it behaves identically under either name.
 pub(crate) struct CaptureFixtures {
-    home: tempfile::TempDir,
-    bin: tempfile::TempDir,
+    home: farhelm_teststate::TestDir,
+    bin: farhelm_teststate::TestDir,
 }
 
 impl CaptureFixtures {
@@ -79,8 +79,8 @@ pub(crate) async fn capture_harness() -> (Harness, CaptureFixtures) {
 async fn capture_harness_with_fault(
     fault: Option<CaptureStoreFault>,
 ) -> (Harness, CaptureFixtures) {
-    let home = tempfile::tempdir().expect("agent home");
-    let bin = tempfile::tempdir().expect("agent bin");
+    let home = farhelm_teststate::tempdir().expect("agent home");
+    let bin = farhelm_teststate::tempdir().expect("agent bin");
     for kind in ["claude", "codex"] {
         std::os::unix::fs::symlink(farhelm_bin(), bin.path().join(kind))
             .expect("symlink the farhelm binary under an agent's own name");
@@ -316,7 +316,7 @@ pub(crate) async fn settle_past_horizon(h: &Harness) {
 #[tokio::test]
 async fn two_claude_sessions_in_one_directory_each_capture_their_own_conversation() {
     let (h, fixtures) = capture_harness().await;
-    let work = tempfile::tempdir().expect("workdir");
+    let work = farhelm_teststate::tempdir().expect("workdir");
 
     let first = record_session(&h, &fixtures, work.path(), "claude").await;
     let (_chan_a, _rx_a, _seen_a, id_a) = provoke_record(&h, &first).await;
@@ -358,7 +358,7 @@ async fn two_claude_sessions_in_one_directory_each_capture_their_own_conversatio
 #[tokio::test]
 async fn two_codex_sessions_in_one_directory_each_capture_their_own_conversation() {
     let (h, fixtures) = capture_harness().await;
-    let work = tempfile::tempdir().expect("workdir");
+    let work = farhelm_teststate::tempdir().expect("workdir");
 
     let first = record_session(&h, &fixtures, work.path(), "codex").await;
     let (_chan_a, _rx_a, _seen_a, id_a) = provoke_record(&h, &first).await;
@@ -393,7 +393,7 @@ async fn two_codex_sessions_in_one_directory_each_capture_their_own_conversation
 #[tokio::test]
 async fn a_claude_and_a_codex_session_in_one_directory_do_not_poison_each_other() {
     let (h, fixtures) = capture_harness().await;
-    let work = tempfile::tempdir().expect("workdir");
+    let work = farhelm_teststate::tempdir().expect("workdir");
 
     let claude = record_session(&h, &fixtures, work.path(), "claude").await;
     let codex = record_session(&h, &fixtures, work.path(), "codex").await;
@@ -422,7 +422,7 @@ async fn a_claude_and_a_codex_session_in_one_directory_do_not_poison_each_other(
 #[tokio::test]
 async fn a_first_prompt_delayed_past_every_window_constant_still_captures() {
     let (h, fixtures) = capture_harness().await;
-    let work = tempfile::tempdir().expect("workdir");
+    let work = farhelm_teststate::tempdir().expect("workdir");
     let session = record_session(&h, &fixtures, work.path(), "claude").await;
 
     let idle =
@@ -460,7 +460,7 @@ async fn a_first_prompt_delayed_past_every_window_constant_still_captures() {
 #[tokio::test]
 async fn two_directories_that_munge_alike_are_separated_by_the_recorded_cwd() {
     let (h, fixtures) = capture_harness().await;
-    let parent = tempfile::tempdir().expect("workdir");
+    let parent = farhelm_teststate::tempdir().expect("workdir");
     let dotted = parent.path().join("a.b");
     let dashed = parent.path().join("a-b");
     std::fs::create_dir(&dotted).expect("mkdir a.b");
@@ -494,7 +494,7 @@ async fn two_directories_that_munge_alike_are_separated_by_the_recorded_cwd() {
 #[tokio::test]
 async fn a_symlinked_or_dotted_working_directory_still_correlates() {
     let (h, fixtures) = capture_harness().await;
-    let parent = tempfile::tempdir().expect("workdir");
+    let parent = farhelm_teststate::tempdir().expect("workdir");
     let real = parent.path().join("real");
     std::fs::create_dir(&real).expect("mkdir");
     let link = parent.path().join("link");
@@ -524,7 +524,7 @@ async fn a_symlinked_or_dotted_working_directory_still_correlates() {
 #[tokio::test]
 async fn a_symlinked_working_directory_still_correlates_for_codex() {
     let (h, fixtures) = capture_harness().await;
-    let parent = tempfile::tempdir().expect("workdir");
+    let parent = farhelm_teststate::tempdir().expect("workdir");
     let real = parent.path().join("real");
     std::fs::create_dir(&real).expect("mkdir");
     let link = parent.path().join("link");
@@ -550,7 +550,7 @@ async fn a_symlinked_working_directory_still_correlates_for_codex() {
 #[tokio::test]
 async fn a_rival_record_arriving_late_in_the_window_flips_a_provisional_claim() {
     let (h, fixtures) = capture_harness().await;
-    let work = tempfile::tempdir().expect("workdir");
+    let work = farhelm_teststate::tempdir().expect("workdir");
     let session = record_session(&h, &fixtures, work.path(), "claude").await;
     let (_chan, _rx, _seen, _id) = provoke_record(&h, &session).await;
     let at = wait_for_first_input(&h, &session.id, 20).await;
@@ -618,7 +618,7 @@ async fn a_rival_record_arriving_late_in_the_window_flips_a_provisional_claim() 
 #[tokio::test]
 async fn an_append_re_verifies_the_identity_and_a_fork_never_displaces_it() {
     let (h, fixtures) = capture_harness().await;
-    let work = tempfile::tempdir().expect("workdir");
+    let work = farhelm_teststate::tempdir().expect("workdir");
     let session = record_session(&h, &fixtures, work.path(), "claude").await;
     let (chan, mut rx, mut seen, id) = provoke_record(&h, &session).await;
     assert_eq!(wait_for_capture(&h, &session.id, 30).await, id);
@@ -690,7 +690,7 @@ async fn an_append_re_verifies_the_identity_and_a_fork_never_displaces_it() {
 #[tokio::test]
 async fn two_near_simultaneous_sessions_in_one_directory_stay_uncaptured() {
     let (h, fixtures) = capture_harness().await;
-    let work = tempfile::tempdir().expect("workdir");
+    let work = farhelm_teststate::tempdir().expect("workdir");
 
     let first = record_session(&h, &fixtures, work.path(), "claude").await;
     let second = record_session(&h, &fixtures, work.path(), "claude").await;
@@ -753,7 +753,7 @@ async fn two_near_simultaneous_sessions_in_one_directory_stay_uncaptured() {
 #[tokio::test]
 async fn a_capture_missed_while_the_supervisor_was_down_lands_on_reload() {
     let (h, fixtures) = capture_harness().await;
-    let work = tempfile::tempdir().expect("workdir");
+    let work = farhelm_teststate::tempdir().expect("workdir");
     let session = record_session(&h, &fixtures, work.path(), "claude").await;
     let (_chan, _rx, _seen, id) = provoke_record(&h, &session).await;
     let at = wait_for_first_input(&h, &session.id, 20).await;
@@ -841,7 +841,7 @@ async fn a_capture_missed_while_the_supervisor_was_down_lands_on_reload() {
 #[tokio::test]
 async fn an_ambiguity_survives_a_restart_even_when_its_evidence_does_not() {
     let (h, fixtures) = capture_harness().await;
-    let work = tempfile::tempdir().expect("workdir");
+    let work = farhelm_teststate::tempdir().expect("workdir");
     let first = record_session(&h, &fixtures, work.path(), "claude").await;
     let second = record_session(&h, &fixtures, work.path(), "claude").await;
     let (_c1, _r1, _s1, id_first) = provoke_record(&h, &first).await;
@@ -929,7 +929,7 @@ async fn a_failed_durable_write_never_advertises_resume_and_is_retried() {
         Ok(())
     });
     let (h, fixtures) = capture_harness_with_fault(Some(fault)).await;
-    let work = tempfile::tempdir().expect("workdir");
+    let work = farhelm_teststate::tempdir().expect("workdir");
     let session = record_session(&h, &fixtures, work.path(), "claude").await;
     let (_chan, _rx, _seen, id) = provoke_record(&h, &session).await;
 
@@ -970,7 +970,7 @@ async fn a_failed_durable_write_never_advertises_resume_and_is_retried() {
 #[tokio::test]
 async fn an_empty_input_frame_never_starts_the_correlator() {
     let (h, fixtures) = capture_harness().await;
-    let work = tempfile::tempdir().expect("workdir");
+    let work = farhelm_teststate::tempdir().expect("workdir");
     let session = record_session(&h, &fixtures, work.path(), "claude").await;
 
     let (chan, mut rx) = h.client.attach(&session.id, 80, 24).await.expect("attach");
@@ -1011,7 +1011,7 @@ async fn an_empty_input_frame_never_starts_the_correlator() {
 #[tokio::test]
 async fn capture_considers_sessions_beyond_the_list_reply_cap() {
     let (h, fixtures) = capture_harness().await;
-    let work = tempfile::tempdir().expect("workdir");
+    let work = farhelm_teststate::tempdir().expect("workdir");
     let canonical = std::fs::canonicalize(work.path())
         .expect("canonicalize")
         .to_string_lossy()
@@ -1142,7 +1142,7 @@ async fn capture_considers_sessions_beyond_the_list_reply_cap() {
 #[tokio::test]
 async fn an_overridden_kind_captures_and_a_generic_fallback_template_is_offered() {
     let (h, fixtures) = capture_harness().await;
-    let work = tempfile::tempdir().expect("workdir");
+    let work = farhelm_teststate::tempdir().expect("workdir");
 
     // `farhelm internal fake-agent ...`: basename `farhelm`, so derivation
     // says generic. The override is what makes it claude.
@@ -1242,7 +1242,7 @@ async fn an_overridden_kind_captures_and_a_generic_fallback_template_is_offered(
 #[tokio::test]
 async fn a_keyed_replay_after_capture_reports_the_resume_offer() {
     let (h, fixtures) = capture_harness().await;
-    let work = tempfile::tempdir().expect("workdir");
+    let work = farhelm_teststate::tempdir().expect("workdir");
     let invocation = format!(
         "{} internal fake-agent --script claude-record --record-home {}",
         shell_words::quote(&fixtures.bin.path().join("claude").to_string_lossy()),
@@ -1302,7 +1302,7 @@ async fn a_keyed_replay_after_capture_reports_the_resume_offer() {
 #[tokio::test]
 async fn a_session_resuming_an_old_conversation_is_not_captured() {
     let (h, fixtures) = capture_harness().await;
-    let work = tempfile::tempdir().expect("workdir");
+    let work = farhelm_teststate::tempdir().expect("workdir");
     let canonical = std::fs::canonicalize(work.path()).expect("canonicalize");
     let project = fixtures.home.path().join(".claude").join("projects").join(
         farhelm_supervisor::agent_kind::munge_cwd(&canonical.to_string_lossy()),
