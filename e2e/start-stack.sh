@@ -34,7 +34,11 @@
 # unix socket paths are limited to ~108 bytes (SUN_LEN), so a deep
 # tempdir breaks the supervisor socket; and a fixed, predictable name
 # would let any other local user pre-create the directory that ends up
-# holding this run's supervisor socket.
+# holding this run's supervisor socket. The `fh-e2e.` prefix is part of
+# the farhelm-teststate crate's prefix family: that crate's sweep (run
+# below at startup) is what reclaims this state when a run dies without
+# its trap, so the prefix and the fh-run.lock flock protocol must stay
+# in step with it.
 #
 # NOTE: no reliance on `set -e` (inert under some harnesses; see the
 # project's shell guidance) — every step carries its own guard.
@@ -52,24 +56,36 @@ test -f "$dist/index.html" || {
   exit 1
 }
 
-# Backstop for runs that died without their trap (a SIGKILL, a crashed
-# shell). Four guards, each load-bearing: `-type d` also excludes
-# symlinks (find lstats, so a link to a directory is -type l), which
-# stops a local user planting a link and having us kill THEIR tmux
-# server; `-O` skips anything we do not own; `-mmin +60` avoids
-# destroying a concurrently running suite (two worktrees, two agents)
-# mid-test; and NUL delimiting (`-print0` / `read -d ''`) keeps a
-# directory NAME from smuggling in a second path — a dirname containing
-# a newline would otherwise split into an extra line that resolves
-# relative to this script's cwd, steering the `rm -rf` at whatever it
-# names.
-while IFS= read -r -d '' stale; do
-  test -O "$stale" || continue
-  tmux -S "$stale/tmux.sock" kill-server 2>/dev/null
-  rm -rf "$stale"
-done < <(find /tmp -maxdepth 1 -name 'fh-e2e.*' -type d -mmin +60 -print0 2>/dev/null)
+# Reap runs that died without their trap (a SIGKILL, a crashed shell).
+# The sweep lives in the farhelm-teststate crate so there is exactly one
+# implementation of the guards (prefix family only, symlinks excluded,
+# owned only, liveness-gated), and this invocation is one of its entry
+# points: every new stack cleans up after dead predecessors. Best-effort
+# by contract; a failing sweep must not stop the suite.
+"$bin" internal sweep-test-state || true
 
 state="$(mktemp -d /tmp/fh-e2e.XXXXXX)" || exit 1
+# The run's liveness lock (farhelm-teststate's protocol): an exclusive
+# flock held for this script's whole lifetime, making the state dir
+# unreapable while the stack lives, no matter how long a run takes. Held
+# by THIS process only — the long-lived children below are spawned with
+# `9>&-` because a daemonized tmux server inherits inherited fds and
+# outlives everything; if it held the lock, the exact orphan the sweep
+# exists to reap would keep itself alive forever.
+#
+# Where flock(1) is unavailable (macOS), the lock FILE must not exist
+# either: the sweep reads an existing-but-unheld lock file as a dead run
+# once past a short grace, so creating one we cannot hold would invite
+# the very reap the lock exists to prevent. Lockless runs stay governed
+# by the sweep's conservative no-lock-file age backstop instead — the
+# pre-protocol behavior. The flock itself waits briefly (-w) rather than
+# failing fast: a concurrent sweep holds a candidate's lock for an
+# instant while judging its age, and a fresh stack losing that
+# microscopic race should wait it out, not abort the run.
+if command -v flock >/dev/null 2>&1; then
+  exec 9>"$state/fh-run.lock" || exit 1
+  flock -w 10 9 || exit 1
+fi
 work="$state/work"
 # Assigned BEFORE the trap below, not where it is first used. The cleanup
 # expands it, so a signal arriving while it was still unset expanded to
@@ -107,7 +123,8 @@ printf '%s\n' '{}' >"$provisioning_backend/config.json" || exit 1
 
 # Trap installed BEFORE anything is spawned: a TERM during the socket
 # wait below would otherwise exit with no trap and orphan the supervisor
-# plus its daemonized tmux server, which nothing reaps for an hour.
+# plus its daemonized tmux server, which nothing reaps until a later
+# run's sweep judges the state dead.
 cleanup() {
   kill "${helm_pid:-}" 2>/dev/null
   kill "${sup_pid:-}" 2>/dev/null
@@ -125,7 +142,7 @@ cleanup() {
 trap cleanup EXIT
 trap 'exit 143' TERM INT
 
-"$bin" supervisor run --state-dir "$state" >"$state/supervisor.log" 2>&1 &
+"$bin" supervisor run --state-dir "$state" >"$state/supervisor.log" 2>&1 9>&- &
 sup_pid=$!
 
 # A SECOND supervisor, on its own state directory inside this run's
@@ -147,7 +164,7 @@ sup_pid=$!
 # and two of them reach past the API at this supervisor: one kills it to
 # drive a host through unreachable, and both re-register it. Everything
 # they need to do that is published in $stack_info below.
-"$bin" supervisor run --state-dir "$remote_state" >"$state/remote-supervisor.log" 2>&1 &
+"$bin" supervisor run --state-dir "$remote_state" >"$state/remote-supervisor.log" 2>&1 9>&- &
 remote_sup_pid=$!
 
 # Give both supervisors a moment to bind their sockets before the helm
@@ -212,7 +229,7 @@ FARHELM_E2E_PROVISIONING_BACKEND_DIR="$provisioning_backend" "$bin" helm run \
   --state-dir "$state" \
   --port 7434 \
   --ui-dist "$dist" \
-  --ensure-hosts "$ensure" &
+  --ensure-hosts "$ensure" 9>&- &
 helm_pid=$!
 
 base="http://127.0.0.1:7434"
@@ -285,7 +302,11 @@ for host in json.load(sys.stdin)["hosts"]:
   return 1
 }
 
-host="$(connected_local_host)" || exit 1
+# `9>&-` for the same reason the service spawns close it: this command
+# substitution's subshell can outlive a killed parent for minutes (its
+# retry loop is long), and an orphan holding the liveness lock would
+# stall the sweep that should be reclaiming the abandoned stack.
+host="$(connected_local_host 9>&-)" || exit 1
 
 # The body is built by python rather than by string interpolation because
 # the invocation carries shell quoting of its own ('$bin' ...) that would
