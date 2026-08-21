@@ -92,6 +92,37 @@ roadmap and carries no priorities unless an entry says so itself.
   full-suite loop; if the margin is thin, either give the bound honest headroom or make the panic distinguish "no
   progress" from "progress but slow" so a genuine wedge stays loud.
 
+- Deflake `session_lifecycle::reattach_replays_history_and_modes` on four-thread CI. The exact fingerprint is a replay
+  that contains the later `before-reattach` marker but has lost the earlier `FAKE-AGENT READY` line, ending at
+  session_lifecycle.rs's `replay missing pre-detach history` assertion. A scan of the preceding 200 CI runs found eight
+  occurrences (4%); three failed commits also had a simultaneous successful run, and PR #194 repeated that same
+  pass/fail pair on one commit SHA. This proves the result is intermittent, not whether the cause is fragile test timing
+  or a rare product replay-boundary race. First steps: loop the exact test under CI-like process load while retaining
+  the full replay transcript and tmux capture at detach and reattach, then locate whether the earlier history is absent
+  from tmux, lost while Farhelm constructs the replay, or dropped by the test's receive window. Do not merely lengthen
+  the wait: the assertion runs after the later marker has already arrived, so more time cannot restore bytes that should
+  precede it. Once the boundary that loses the line is known, replace the race with a deterministic barrier and keep a
+  regression for the discovered mechanism.
+
+- Deflake `terminal.spec.ts`'s `list renders the session row with title, cwd, invocation, and a running badge`. During
+  the Design 1 split it failed once in a focused Chromium run and once under WebKit in the full two-engine suite: the
+  shared session row was present with the expected metadata, but its badge stayed `idle` through the 10-second assertion
+  instead of becoming `running`. The same unchanged test passed in the full suite's Chromium half, and the split changed
+  neither the test body nor the runtime that computes session status. This establishes intermittency without deciding
+  whether the listing missed an invalidation or the supervisor was late to classify the already-running session. First
+  steps: retain timestamped `/api/sessions` replies and feed invalidations from page load through the assertion, then
+  correlate them with the supervisor's status observations. Fix the missing transition or notification once its boundary
+  is known; do not merely lengthen the assertion timeout.
+
+- Deflake `terminal-reconnect.spec.ts`'s `takeover-during-backoff-does-not-steal-the-session` under WebKit. In the full
+  two-engine suite, Chromium passed but WebKit reached the taken-over banner, reclaim control, and uninterrupted-winner
+  assertions with the losing page's island registry still containing `"terminal"`; the test expected the refused
+  reconnect attempt to leave that registry empty. The test had also passed in its focused Chromium project before the
+  split, whose only change was moving the test into its own spec file. First steps: record the losing page's reconnect
+  rung, socket close, refused attach, `cancelReconnect("restore")`, island teardown, and any replacement mount as one
+  ordered trace. That should show whether WebKit delays teardown or opens a replacement after the refusal. Replace the
+  race with a deterministic lifecycle barrier once the ordering is known; do not hide it behind a longer sleep.
+
 - Dispose of prerelease v0.0.3-rc.1 — the release AND the tag together — once a real release exists. Both were minted
   only to exercise the release workflow (it checks out and verifies `refs/tags/<release_tag>` before building, so a real
   tag was required). Not before a real release exists: rc.1 currently carries the only published Linux artifact, so
