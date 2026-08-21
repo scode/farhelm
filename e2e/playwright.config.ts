@@ -36,6 +36,15 @@ function discoverSpecFiles(directory = testsDir): string[] {
 }
 
 const specFiles = discoverSpecFiles();
+const terminalMultihostSpec = "terminal-multihost.spec.ts";
+
+// The multihost suite stops its replacement remote supervisor when it exits.
+// Keep that teardown last within each engine without project dependencies,
+// which would make a directly selected multihost project run unrelated tests.
+const orderedSpecFiles = [
+  ...specFiles.filter((spec) => spec !== terminalMultihostSpec),
+  ...specFiles.filter((spec) => spec === terminalMultihostSpec),
+];
 
 const engines = [
   { name: "chromium", use: { ...devices["Desktop Chrome"] } },
@@ -83,7 +92,7 @@ export default defineConfig({
   // into the file, in order by construction, and its failure fails the
   // file's tests rather than letting them run against half-reset state.
   projects: engines.flatMap((engine) =>
-    specFiles.map((spec) => ({
+    orderedSpecFiles.map((spec) => ({
       name: `${engine.name}-${spec.replace(/\.spec\.ts$/, "")}`,
       testMatch: spec,
       use: engine.use,

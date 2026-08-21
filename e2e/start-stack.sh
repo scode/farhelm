@@ -160,7 +160,7 @@ sup_pid=$!
 # unreachable, which is an honest state and not a failure: nothing here
 # creates sessions on it, so the list and every existing assertion are
 # unaffected — and the multi-host tests skip loudly rather than failing
-# (terminal.spec.ts's fleet probe). Those tests are the fleet's consumer,
+# (terminal-multihost.spec.ts's fleet probe). Those tests are the fleet's consumer,
 # and two of them reach past the API at this supervisor: one kills it to
 # drive a host through unreachable, and both re-register it. Everything
 # they need to do that is published in $stack_info below.

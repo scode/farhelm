@@ -704,8 +704,9 @@ mod tests {
     }
 
     /// Pins every branch of the banner against the EXACT strings and classes
-    /// the browser suite selects on (`.session-count` /
-    /// `.truncation-banner` in `e2e/tests/terminal.spec.ts`).
+    /// the browser suite selects on (`.session-count` / `.truncation-banner`
+    /// across `e2e/tests/terminal-multihost.spec.ts` and
+    /// `e2e/tests/terminal.spec.ts`).
     ///
     /// This wording is a contract, not copy: PLAN_M2.md acceptance 5 is the
     /// requirement that a list the client could not walk to the end says so,

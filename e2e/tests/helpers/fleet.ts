@@ -14,8 +14,8 @@ import path from "node:path";
 
 /**
  * The fake agent's `basic` script, as the create form's `invocation` string
- * — an absolute path, quoted, exactly as terminal.spec.ts and
- * sidebar.spec.ts build theirs. The supervisor shell-splits it into argv
+ * — an absolute path, quoted, exactly as the terminal spec family's shared
+ * fixture and sidebar.spec.ts build theirs. The supervisor shell-splits it into argv
  * when the session launches.
  *
  * `basic` is deliberate: it prints, echoes, and then goes quiet, which is
