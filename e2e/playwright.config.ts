@@ -73,8 +73,9 @@ export default defineConfig({
     trace: "retain-on-failure",
   },
   globalSetup: "./global-setup.ts",
-  // The per-engine stack reset lives in terminal.spec.ts's own
-  // `beforeAll`, not in a setup project or a name-ordered spec file:
+  // The per-engine stack reset is registered by
+  // `tests/helpers/terminal-suite.ts`'s `installTerminalSuiteHooks`, not by a
+  // setup project or a name-ordered spec file:
   // Playwright does not guarantee alphabetical file ordering, and
   // project `dependencies` cannot express "webkit's reset runs AFTER
   // chromium's tests" without dragging the whole chromium suite into a
