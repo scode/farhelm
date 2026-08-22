@@ -236,7 +236,7 @@ impl ProvisioningBackend for E2eProvisioningBackend {
                 user_unit_dir: PathBuf::from(behavior.user_unit_dir),
                 arch: PayloadArch::X86_64,
                 needs_tmux: behavior.needs_tmux,
-                tmux_dir: (!behavior.needs_tmux).then(|| PathBuf::from("/usr/bin")),
+                host_tmux: (!behavior.needs_tmux).then(|| PathBuf::from("/usr/bin/tmux")),
             })),
             E2eInspectOutcome::Manual => Ok(ReachOutcome::Manual(behavior.message)),
             E2eInspectOutcome::Error => Err(BackendFailure::new(

@@ -275,7 +275,10 @@ impl PlanLayout {
             destination: farhelm_path.clone(),
             temporary: temporary(&farhelm_path),
         });
-        if reach.needs_tmux {
+        // Whichever branch runs, `tmux_program` ends up naming the exact
+        // executable the supervisor must drive — see `supervisor_unit`
+        // for why a directory on PATH is not enough.
+        let tmux_program = if reach.needs_tmux {
             let tmux_path = lib_dir.join("tmux");
             actions.push(ProvisioningAction::InstallPayload {
                 payload: PayloadKind::Tmux,
@@ -283,12 +286,19 @@ impl PlanLayout {
                 destination: tmux_path.clone(),
                 temporary: temporary(&tmux_path),
             });
-        }
+            tmux_path
+        } else {
+            reach
+                .host_tmux
+                .clone()
+                .expect("reach accepted the host tmux, so it recorded which one")
+        };
         let content = supervisor_unit(
             &farhelm_path,
             &state_dir,
             &lib_dir,
-            reach.tmux_dir.as_deref(),
+            &tmux_program,
+            reach.host_tmux.as_deref().and_then(Path::parent),
         )?;
         actions.extend([
             ProvisioningAction::WriteUnit {
@@ -364,17 +374,23 @@ pub(super) fn systemd_arg(path: &Path) -> Result<String, BackendFailure> {
 const SUPERVISOR_UNIT_TEMPLATE: &str =
     include_str!("../../../../release/farhelm-supervisor.service.in");
 
-/// Substitute the three reviewed unit-template fields without rescanning
+/// Substitute the reviewed unit-template fields without rescanning
 /// inserted path text as template syntax.
 ///
 /// A path may legally contain strings such as `@STATE_DIR@`. Appending each
 /// replacement directly, instead of chaining `str::replace`, keeps that text
 /// literal and preserves the path contract provisioning already accepts.
-fn render_supervisor_unit_template(farhelm: &str, state_dir: &str, search: &str) -> String {
+fn render_supervisor_unit_template(
+    farhelm: &str,
+    state_dir: &str,
+    search: &str,
+    tmux: &str,
+) -> String {
     let values = [
         ("@FARHELM@", farhelm),
         ("@STATE_DIR@", state_dir),
         ("@PATH@", search),
+        ("@TMUX@", tmux),
     ];
     let mut rendered = String::with_capacity(SUPERVISOR_UNIT_TEMPLATE.len() + 128);
     let mut rest = SUPERVISOR_UNIT_TEMPLATE;
@@ -391,26 +407,53 @@ fn render_supervisor_unit_template(farhelm: &str, state_dir: &str, search: &str)
     rendered
 }
 
+/// Escape one value for the body of a systemd `Environment="…"` line.
+///
+/// Shared by PATH and `FARHELM_TMUX` so the two cannot drift: systemd
+/// unescapes backslashes and double quotes inside the quoted form, and
+/// expands `%` specifiers anywhere in the value, so all three have to be
+/// doubled or the unit means something other than the path provisioning
+/// chose.
+fn environment_value(text: &str) -> String {
+    text.replace('\\', "\\\\")
+        .replace('"', "\\\"")
+        .replace('%', "%%")
+}
+
 /// Render the supervisor unit from the paths carried by the plan.
 ///
 /// `release/farhelm-supervisor.service.in` is the canonical unit. Keeping its
 /// fixed policy in one reviewed file prevents release packaging and remote
 /// provisioning from quietly shipping different lifecycle behavior.
 ///
-/// The existing tmux directory is retained because a user-manager process
-/// does not necessarily inherit the login shell PATH that the reach check
-/// used. The private payload directory stays first for hosts where Farhelm
-/// supplies tmux itself. `KillMode=process` is equally deliberate: tmux owns
-/// the durable sessions, so restarting their manager must stop only the
+/// `tmux_program` is pinned into the unit as `FARHELM_TMUX`, and that is
+/// the load-bearing part: PATH alone was not enough to express which tmux
+/// provisioning approved. Farhelm's own lib directory comes first on that
+/// PATH so a host where Farhelm supplies tmux finds the payload, which
+/// means an OBSOLETE private tmux left by an earlier install shadowed an
+/// accepted host tmux — provisioning would report success, skip the
+/// payload because the host binary cleared the floor, and then restart the
+/// supervisor onto the below-floor leftover it had just declined to
+/// replace. Naming the executable outright removes the ambiguity, on both
+/// branches: the host binary when it was accepted, the freshly installed
+/// payload when it was not.
+///
+/// `host_tmux_dir` still joins PATH after the lib directory, for the
+/// separate reason that a systemd user-manager process does not
+/// necessarily inherit the login shell PATH the reach check ran under, and
+/// anything the supervisor or a session shells out to should still find
+/// tmux by name. `KillMode=process` is equally deliberate: tmux owns the
+/// durable sessions, so restarting their manager must stop only the
 /// supervisor process rather than systemd's default whole control group.
 pub(super) fn supervisor_unit(
     farhelm: &Path,
     state_dir: &Path,
     lib_dir: &Path,
-    tmux_dir: Option<&Path>,
+    tmux_program: &Path,
+    host_tmux_dir: Option<&Path>,
 ) -> Result<String, BackendFailure> {
     let mut search = vec![lib_dir.to_path_buf()];
-    if let Some(tmux_dir) = tmux_dir
+    if let Some(tmux_dir) = host_tmux_dir
         && !search.iter().any(|path| path == tmux_dir)
     {
         search.push(tmux_dir.to_path_buf());
@@ -433,13 +476,11 @@ pub(super) fn supervisor_unit(
             Ok(text)
         })
         .collect::<Result<Vec<_>, BackendFailure>>()?
-        .join(":")
-        .replace('\\', "\\\\")
-        .replace('"', "\\\"")
-        .replace('%', "%%");
+        .join(":");
     Ok(render_supervisor_unit_template(
         &systemd_arg(farhelm)?,
         &systemd_arg(state_dir)?,
-        &search,
+        &environment_value(&search),
+        &environment_value(&path_text(tmux_program)?),
     ))
 }

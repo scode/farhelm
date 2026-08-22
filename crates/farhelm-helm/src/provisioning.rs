@@ -328,7 +328,7 @@ mod tests {
                     home,
                     arch: PayloadArch::X86_64,
                     needs_tmux: false,
-                    tmux_dir: Some(PathBuf::from("/usr/bin")),
+                    host_tmux: Some(PathBuf::from("/usr/bin/tmux")),
                 })),
                 inspect_failure: Mutex::new(None),
                 operations: Mutex::new(Vec::new()),
@@ -823,7 +823,7 @@ mod tests {
                 panic!("fixture must be supported")
             };
             reach.needs_tmux = true;
-            reach.tmux_dir = None;
+            reach.host_tmux = None;
         }
         let payloads = Arc::new(MissingTmuxPayload {
             farhelm,
@@ -1023,6 +1023,74 @@ mod tests {
         assert!(backend.operations.lock().unwrap().is_empty());
     }
 
+    /// An accepted HOST tmux must survive a stale private one sitting in
+    /// Farhelm's own lib directory.
+    ///
+    /// This is the exact shape of a live shadowing bug. When the host's
+    /// tmux clears the floor, provisioning deliberately skips installing
+    /// the private payload — but the unit still puts Farhelm's lib
+    /// directory first on PATH, so an obsolete `tmux` left there by an
+    /// earlier install would win the name lookup. Provisioning would then
+    /// report success, decline to replace that binary, and restart the
+    /// supervisor straight onto it: a below-floor substrate reached
+    /// through the ordinary upgrade path, with nothing in the run record
+    /// suggesting anything went wrong.
+    ///
+    /// So the plan is required to NAME the accepted executable
+    /// (`FARHELM_TMUX`) rather than describe where to look for one, and
+    /// to still install no tmux payload. The stale file on disk is a
+    /// fixture, not an input — the fix must hold whether or not planning
+    /// ever looks at the lib directory, which is why the assertion is on
+    /// the frozen unit text.
+    #[tokio::test]
+    async fn update_pins_the_accepted_host_tmux_over_a_stale_private_one() {
+        let harness = harness().await;
+        let root = tempfile::tempdir().unwrap();
+        let lib_dir = root.path().join(".local/lib/farhelm");
+        tokio::fs::create_dir_all(&lib_dir).await.unwrap();
+        tokio::fs::write(lib_dir.join("tmux"), b"an obsolete private tmux")
+            .await
+            .unwrap();
+
+        let host = harness
+            .store
+            .add_ssh_host("stale-tmux.example", None, None)
+            .await
+            .unwrap();
+        harness.manager.sync_registry().await.unwrap();
+        // FakeBackend::absent reports a host tmux at /usr/bin/tmux that
+        // already cleared the floor, which is what makes the payload
+        // unnecessary and the shadow possible.
+        let backend = FakeBackend::absent(root.path().to_path_buf());
+        let service = service(&harness, backend.clone(), root.path());
+
+        let preview = service.plan_update(host).await.unwrap();
+
+        let unit = preview
+            .plan
+            .actions
+            .iter()
+            .find_map(|action| match action {
+                ProvisioningAction::WriteUnit { content, .. } => Some(content.clone()),
+                _ => None,
+            })
+            .expect("every plan writes the supervisor unit");
+        assert!(
+            unit.contains("Environment=\"FARHELM_TMUX=/usr/bin/tmux\""),
+            "the unit must drive the accepted host tmux, not whatever PATH finds: {unit}"
+        );
+        assert!(
+            !preview.plan.actions.iter().any(|action| matches!(
+                action,
+                ProvisioningAction::InstallPayload {
+                    payload: PayloadKind::Tmux,
+                    ..
+                }
+            )),
+            "an accepted host tmux must still skip the private payload"
+        );
+    }
+
     /// Manual and backend planning failures retain no UPDATE claim; once
     /// inspection recovers, the same host can immediately produce a plan.
     #[tokio::test]
@@ -1042,7 +1110,7 @@ mod tests {
             user_unit_dir: root.path().join("units"),
             arch: PayloadArch::X86_64,
             needs_tmux: false,
-            tmux_dir: Some(PathBuf::from("/usr/bin")),
+            host_tmux: Some(PathBuf::from("/usr/bin/tmux")),
         });
         *backend.inspect_failure.lock().unwrap() = Some("inspection broke".to_string());
         assert!(service.plan_update(host).await.is_err());
@@ -1772,12 +1840,31 @@ mod tests {
         assert_eq!(missing.status(), StatusCode::NOT_FOUND);
     }
 
+    /// Host-tmux acceptance must use the SAME floor the remote supervisor
+    /// enforces at startup. If this test drifted looser, provisioning
+    /// would skip the private payload on a host whose tmux the supervisor
+    /// then refuses — a "successful" provision that cannot start a
+    /// session.
+    ///
+    /// The at-the-floor case is spelled through the constant rather than a
+    /// literal so a future floor bump does not need this test edited; the
+    /// too-old cases stay literal because the floor is DESIGNED to exclude
+    /// exactly these distro packages (Ubuntu 24.04's 3.4, 26.04's 3.6,
+    /// Debian 13 and Fedora 42's 3.5a) and a bump can only make that truer.
     #[test]
-    fn tmux_floor_accepts_suffixes_but_not_older_or_malformed_versions() {
-        assert!(tmux_at_least_3_3("tmux 3.3a"));
-        assert!(tmux_at_least_3_3("tmux 4.0"));
-        assert!(!tmux_at_least_3_3("tmux 3.2"));
-        assert!(!tmux_at_least_3_3("not installed"));
+    fn host_tmux_acceptance_tracks_the_supervisor_floor() {
+        let floor = farhelm_supervisor::tmux::TMUX_FLOOR;
+        assert!(tmux_meets_floor(&format!("tmux {floor}")));
+        assert!(tmux_meets_floor("tmux 99.0"));
+        assert!(!tmux_meets_floor("tmux 3.6"));
+        assert!(!tmux_meets_floor("tmux 3.5a"));
+        assert!(!tmux_meets_floor("tmux 3.4"));
+        assert!(!tmux_meets_floor("tmux 3.3a"));
+        // A host with no tmux reports an empty field, and a host whose
+        // tmux answered something unrecognizable is equally unknown; both
+        // must request the private payload rather than be assumed usable.
+        assert!(!tmux_meets_floor("not installed"));
+        assert!(!tmux_meets_floor(""));
     }
 
     /// The production classifier requires both the private marker and exit
@@ -2002,8 +2089,25 @@ mod tests {
         };
         assert_eq!(old.arch, PayloadArch::Aarch64);
         assert!(old.needs_tmux);
+        // A host whose tmux clears the floor is the ONLY case that skips
+        // the private payload; without it nothing here would notice an
+        // acceptance path that had stopped accepting anything at all.
+        let at_floor = format!("tmux {}", farhelm_supervisor::tmux::TMUX_FLOOR);
+        let ReachOutcome::Supported(usable_tmux) = parse_reach_output(
+            supported("ubuntu", "x86_64", "/usr/bin/tmux", &at_floor, "usable").as_bytes(),
+        )
+        .unwrap() else {
+            panic!("x86_64 Ubuntu with a user manager is supported")
+        };
+        assert!(!usable_tmux.needs_tmux);
+        // The EXECUTABLE, not its directory: the plan pins it into the
+        // unit as FARHELM_TMUX so a leftover private tmux cannot shadow
+        // the binary accepted here.
+        assert_eq!(usable_tmux.host_tmux, Some(PathBuf::from("/usr/bin/tmux")));
+        // The version clears the floor here, so a relative tmux path is
+        // the only thing left that can force the payload.
         let ReachOutcome::Supported(relative_tmux) = parse_reach_output(
-            supported("ubuntu", "x86_64", "bin/tmux", "tmux 3.4", "usable").as_bytes(),
+            supported("ubuntu", "x86_64", "bin/tmux", &at_floor, "usable").as_bytes(),
         )
         .unwrap() else {
             panic!("an otherwise supported host remains provisionable")
@@ -2052,7 +2156,7 @@ mod tests {
                     user_unit_dir: root.path().join("home/.config/systemd/user"),
                     arch: PayloadArch::X86_64,
                     needs_tmux: true,
-                    tmux_dir: None,
+                    host_tmux: None,
                 },
                 "nonce",
             )
@@ -2070,6 +2174,18 @@ mod tests {
             panic!("the unit follows both payloads")
         };
         assert!(content.contains(&format!("PATH={}", root.path().join("lib").display())));
+        // The installed payload is named outright, not merely reachable:
+        // the same PATH-shadowing hazard that can hide an accepted host
+        // tmux (see `update_pins_the_accepted_host_tmux_over_a_stale_
+        // private_one`) applies in reverse to anything else called `tmux`
+        // that lands earlier in the search.
+        assert!(
+            content.contains(&format!(
+                "Environment=\"FARHELM_TMUX={}\"",
+                root.path().join("lib/tmux").display()
+            )),
+            "{content}"
+        );
     }
 
     /// Production layout has no test overrides: local and SSH plans use the
@@ -2084,7 +2200,7 @@ mod tests {
             user_unit_dir: user_units.clone(),
             arch: PayloadArch::X86_64,
             needs_tmux: false,
-            tmux_dir: Some(PathBuf::from("/usr/bin")),
+            host_tmux: Some(PathBuf::from("/usr/bin/tmux")),
         };
         let layout = PlanLayout::production(local_state.clone());
 
@@ -2142,7 +2258,7 @@ mod tests {
                 panic!("the fixture starts supported")
             };
             reach.needs_tmux = true;
-            reach.tmux_dir = None;
+            reach.host_tmux = None;
         }
         std::fs::write(root.path().join("farhelm-payload"), b"farhelm").unwrap();
         std::fs::write(root.path().join("tmux-payload"), b"tmux").unwrap();
@@ -2230,21 +2346,30 @@ mod tests {
             Path::new("/tmp/%h/farhelm"),
             Path::new("/tmp/state"),
             Path::new("/tmp/%h"),
+            Path::new("/tmp/%h/tmux"),
             None,
         )
         .unwrap();
         assert!(unit.contains("/tmp/%%h/farhelm"));
         assert!(unit.contains("PATH=/tmp/%%h:"));
+        // FARHELM_TMUX goes through the same escaping as PATH; a `%h` that
+        // reached systemd unexpanded would name a different binary.
+        assert!(
+            unit.contains("Environment=\"FARHELM_TMUX=/tmp/%%h/tmux\""),
+            "{unit}"
+        );
         assert!(unit.contains("KillMode=process"));
         assert!(!unit.contains("After=default.target"));
         assert!(!unit.contains("@FARHELM@"));
         assert!(!unit.contains("@STATE_DIR@"));
         assert!(!unit.contains("@PATH@"));
+        assert!(!unit.contains("@TMUX@"));
         assert!(
             supervisor_unit(
                 Path::new("/tmp/farhelm"),
                 Path::new("/tmp/state\nother"),
                 Path::new("/tmp"),
+                Path::new("/tmp/tmux"),
                 None,
             )
             .is_err()
@@ -2254,6 +2379,7 @@ mod tests {
                 Path::new("/tmp/farhelm"),
                 Path::new("/tmp/state"),
                 Path::new("/tmp/with:colon"),
+                Path::new("/tmp/tmux"),
                 None,
             )
             .is_err()
@@ -2269,6 +2395,20 @@ mod tests {
                     Path::new("/tmp/farhelm"),
                     &non_utf8,
                     Path::new("/tmp"),
+                    Path::new("/tmp/tmux"),
+                    None,
+                )
+                .is_err()
+            );
+            // The tmux executable crosses the same text-only plan
+            // boundary as every other path and must fail there too,
+            // rather than being rendered lossily into the unit.
+            assert!(
+                supervisor_unit(
+                    Path::new("/tmp/farhelm"),
+                    Path::new("/tmp/state"),
+                    Path::new("/tmp"),
+                    &non_utf8,
                     None,
                 )
                 .is_err()

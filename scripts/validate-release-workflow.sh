@@ -114,16 +114,36 @@ assert artifact_names("publish-macos", "actions/download-artifact") == {"macos-r
 assert "gh release upload" in publish_macos
 
 def unit(path):
-    parser = configparser.RawConfigParser(strict=True)
+    # strict=False because systemd allows a directive to repeat and the
+    # supervisor unit uses two Environment= lines; configparser's
+    # one-value-per-key model would raise on the second. Repeated
+    # directives are checked by `directives` below instead.
+    parser = configparser.RawConfigParser(strict=False)
     parser.optionxform = str
     parser.read(path, encoding="utf-8")
     return parser
+
+
+def directives(path, name):
+    """Every value of a possibly-repeated unit directive, in file order."""
+    prefix = f"{name}="
+    return [
+        line[len(prefix):]
+        for line in path.read_text(encoding="utf-8").splitlines()
+        if line.startswith(prefix)
+    ]
 
 supervisor = unit(supervisor_path)
 assert "After" not in supervisor["Unit"]
 assert supervisor["Service"]["Type"] == "simple"
 assert supervisor["Service"]["ExecStart"] == "@FARHELM@ supervisor run --state-dir @STATE_DIR@"
-assert supervisor["Service"]["Environment"] == '"PATH=@PATH@"'
+# Both environment lines, in order. FARHELM_TMUX is what names the exact
+# tmux the supervisor drives; PATH alone let a stale private tmux shadow
+# the binary provisioning had accepted.
+assert directives(supervisor_path, "Environment") == [
+    '"PATH=@PATH@"',
+    '"FARHELM_TMUX=@TMUX@"',
+]
 assert supervisor["Service"]["KillMode"] == "process"
 assert supervisor["Service"]["Restart"] == "on-failure"
 assert supervisor["Install"]["WantedBy"] == "default.target"

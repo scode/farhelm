@@ -101,6 +101,23 @@ enum SupervisorCmd {
         /// State directory (default: ~/.local/state/farhelm).
         #[arg(long)]
         state_dir: Option<PathBuf>,
+        /// Drive this tmux binary instead of the one on PATH.
+        ///
+        /// Overrides FARHELM_TMUX; with neither, plain `tmux` off PATH is
+        /// used. The binary is version-checked like any other and refused
+        /// by name if it is older than Farhelm's floor. This is a "you own
+        /// the substrate" knob, not a supported configuration: Farhelm
+        /// drives tmux harder than interactive use does, versions below
+        /// the floor have crashed under it, and versions above the tested
+        /// one are unaudited.
+        ///
+        /// Only tmux's stable releases and single-letter patch releases
+        /// are recognized (3.7, 3.7c, 3.10). Its development and
+        /// release-candidate spellings — next-3.8, 3.8-rc, 3.8-rc2 — are
+        /// refused whatever they are pointed at, because Farhelm has no
+        /// defined ordering for those stages against a stable release.
+        #[arg(long = "tmux", value_name = "PATH")]
+        tmux: Option<PathBuf>,
         /// Exit when the spawning desktop app closes its inherited pipe.
         ///
         /// Hidden because ordinary foreground and systemd supervisors own
@@ -195,6 +212,7 @@ fn main() -> anyhow::Result<()> {
             command:
                 SupervisorCmd::Run {
                     state_dir,
+                    tmux,
                     exit_on_stdin_close,
                 },
         } => {
@@ -203,7 +221,11 @@ fn main() -> anyhow::Result<()> {
                 Some(dir) => dir,
                 None => farhelm_supervisor::default_state_dir()?,
             };
-            runtime()?.block_on(run_supervisor(&dir, exit_on_stdin_close))
+            // Resolved here and nowhere else: this is the supervisor's one
+            // startup, so a single resolution is what makes "every launch
+            // path honors the override" true rather than aspirational.
+            let tmux = farhelm_supervisor::tmux::resolve_tmux_program_from_env(tmux.as_deref());
+            runtime()?.block_on(run_supervisor(&dir, tmux, exit_on_stdin_close))
         }
         Cmd::Internal { command } => match command {
             InternalCmd::Stdio { state_dir } => {
@@ -248,14 +270,20 @@ fn main() -> anyhow::Result<()> {
 /// even when Rust cleanup never runs. The blocking read lives on a detached OS
 /// thread, not Tokio's blocking pool: if the supervisor itself fails first,
 /// runtime shutdown cannot wait forever for an uncancellable stdin read.
+///
+/// `tmux_program` arrives ALREADY resolved (`--tmux` over `FARHELM_TMUX`
+/// over `PATH`) and is passed straight through. Resolving it here instead
+/// would put the decision on both sides of the tether branch, which is one
+/// place too many for a value that must be identical on every launch path.
 async fn run_supervisor(
     state_dir: &std::path::Path,
+    tmux_program: PathBuf,
     exit_on_stdin_close: bool,
 ) -> anyhow::Result<()> {
     use anyhow::Context as _;
 
     if !exit_on_stdin_close {
-        return farhelm_supervisor::service::run(state_dir).await;
+        return farhelm_supervisor::service::run(state_dir, tmux_program).await;
     }
     let (stdin_closed_tx, stdin_closed) = tokio::sync::oneshot::channel();
     std::thread::Builder::new()
@@ -266,7 +294,7 @@ async fn run_supervisor(
         })
         .context("starting desktop supervisor stdin watcher")?;
     tokio::select! {
-        result = farhelm_supervisor::service::run(state_dir) => result,
+        result = farhelm_supervisor::service::run(state_dir, tmux_program) => result,
         result = stdin_closed => {
             result.context("desktop supervisor stdin watcher stopped without reporting EOF")??;
             Ok(())
