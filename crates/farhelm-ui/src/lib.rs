@@ -944,6 +944,7 @@ pub fn App() -> Element {
     #[cfg(all(feature = "desktop", not(target_arch = "wasm32")))]
     {
         desktop::use_foreground_on_launch();
+        desktop::use_preference_close_flush();
         webview_watchdog::use_webview_watchdog();
         return rsx! {
             // First script in the tree, ahead of `DesktopBootstrapGate`

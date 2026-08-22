@@ -50,3 +50,7 @@ mod view;
 
 pub(crate) use shared::OpenHost;
 pub(crate) use view::ListView;
+#[cfg(all(feature = "desktop", not(target_arch = "wasm32")))]
+pub(crate) use view::{
+    RememberedSelection, desktop_preferences_snapshot, seed_desktop_preferences,
+};

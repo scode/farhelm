@@ -138,6 +138,7 @@ curl_auth() {
 # path that ever runs teardown logic.
 TEARDOWN_DONE=""
 SID="" # set once the create-form phase produces a session; read by teardown
+SID_NEWEST="" # second restart fixture; empty during the interaction-only create
 PASS=""
 teardown() {
   [ -n "$TEARDOWN_DONE" ] && return
@@ -150,6 +151,7 @@ teardown() {
   # no-ops. Best-effort: teardown must proceed even if the helm is
   # already gone or wedged.
   [ -n "$SID" ] && [ -s "$CURL_AUTH_CONFIG" ] && curl_auth -s --max-time 5 -X DELETE "$API/api/sessions/$SID" >/dev/null 2>&1
+  [ -n "$SID_NEWEST" ] && [ -s "$CURL_AUTH_CONFIG" ] && curl_auth -s --max-time 5 -X DELETE "$API/api/sessions/$SID_NEWEST" >/dev/null 2>&1
 
   for p in desktop openbox xvfb; do
     [ -f "$X/$p.pid" ] && kill "$(cat "$X/$p.pid")" 2>/dev/null
@@ -311,11 +313,48 @@ wait_for_client_log_marker() {
 echo "== waiting for the client-log marker: shim -> /api/client-log -> tracing"
 wait_for_client_log_marker "$X/desktop.log"
 
-echo "== creating a bundle-substrate session before the hard restart"
-CREATE_BODY=$(python3 -c 'import json,sys; print(json.dumps({"cwd": sys.argv[1], "invocation": "bash", "title": "desktop-restart-smoke"}))' "$X/work") || fail "encoding smoke session"
+echo "== creating two bundle-substrate sessions before the hard restart"
+CREATE_BODY=$(python3 -c 'import json,sys; print(json.dumps({"cwd": sys.argv[1], "invocation": "bash", "title": "zzz-remembered"}))' "$X/work") || fail "encoding remembered smoke session"
 SID=$(curl_auth -sf --max-time 10 -H 'content-type: application/json' -d "$CREATE_BODY" "$API/api/sessions" | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])') || fail "creating the pre-restart smoke session"
 [ -n "$SID" ] || fail "the pre-restart create returned no session id"
 tmux -S "$X/state/tmux.sock" has-session -t "fh-$SID" 2>/dev/null || fail "the created session did not reach bundle-local tmux"
+sleep 1
+NEWEST_BODY=$(python3 -c 'import json,sys; print(json.dumps({"cwd": sys.argv[1], "invocation": "bash", "title": "aaa-newest"}))' "$X/work") || fail "encoding newest smoke session"
+SID_NEWEST=$(curl_auth -sf --max-time 10 -H 'content-type: application/json' -d "$NEWEST_BODY" "$API/api/sessions" | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])') || fail "creating the newest pre-restart smoke session"
+[ -n "$SID_NEWEST" ] || fail "the newest pre-restart create returned no session id"
+tmux -S "$X/state/tmux.sock" has-session -t "fh-$SID_NEWEST" 2>/dev/null || fail "the newest session did not reach bundle-local tmux"
+
+# The default gate deliberately does not click rows: WebKitGTK's unreliable
+# Xvfb paint is why its CI leg is non-pixel. Seed a real identity-keyed record,
+# then observe restoration through the native request trace (`sort=title`) and
+# tmux's client ownership (the remembered, non-newest session gains the page's
+# output client). The state-file assertion remains as a check of the durable
+# input, not as a substitute for those behavioral observations.
+LOCAL_IDENTITY=$(curl_auth -sf --max-time 5 "$API/api/hosts" | python3 -c '
+import json,sys
+hosts=json.load(sys.stdin)["hosts"]
+print(next(h["identity"] for h in hosts if h["kind"] == "local"))
+') || fail "reading the local install identity for the preference seed"
+[ -n "$LOCAL_IDENTITY" ] || fail "the local host row carried no install identity"
+python3 -c '
+import json,os,sys,tempfile
+path, helm, session = sys.argv[1:]
+with open(path) as source:
+    state = json.load(source)
+state["remembered_selection"] = {"helm": helm, "id": session}
+state["list_sort"] = "title"
+fd, temporary = tempfile.mkstemp(prefix="desktop-client.", suffix=".tmp", dir=os.path.dirname(path))
+try:
+    os.fchmod(fd, 0o600)
+    with os.fdopen(fd, "w") as target:
+        json.dump(state, target, separators=(",", ":"))
+        target.flush()
+        os.fsync(target.fileno())
+    os.replace(temporary, path)
+finally:
+    if os.path.exists(temporary):
+        os.unlink(temporary)
+' "$X/state/desktop-client.json" "$LOCAL_IDENTITY" "$SID" || fail "seeding desktop restart preferences"
 
 echo "== waiting for the window and nudging it to render"
 WID=""
@@ -389,7 +428,33 @@ RESTART_NATIVE=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))
 RESTART_WEBVIEW=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["webview_device_secret"])' "$X/state/desktop-client.json")
 [ "$RESTART_NATIVE" = "$NATIVE_SECRET" ] || fail "restart replaced the persisted native device session"
 [ "$RESTART_WEBVIEW" = "$WEBVIEW_SECRET" ] || fail "restart replaced the persisted webview device session"
+RESTART_SELECTION=$(python3 -c 'import json,sys; print(json.dumps(json.load(open(sys.argv[1])).get("remembered_selection"),sort_keys=True,separators=(",",":")))' "$X/state/desktop-client.json")
+EXPECTED_SELECTION=$(python3 -c 'import json,sys; print(json.dumps({"helm":sys.argv[1],"id":sys.argv[2]},sort_keys=True,separators=(",",":")))' "$LOCAL_IDENTITY" "$SID")
+RESTART_SORT=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get("list_sort") or "")' "$X/state/desktop-client.json")
+[ "$RESTART_SELECTION" = "$EXPECTED_SELECTION" ] || fail "restart changed the persisted desktop selection record"
+[ "$RESTART_SORT" = "title" ] || fail "restart dropped the persisted desktop sort"
 tmux -S "$X/state/tmux.sock" has-session -t "fh-$SID" 2>/dev/null || fail "the tmux-held session did not survive the app restart"
+RESTORED_SORT_REQUEST=""
+for _ in $(seq 1 30); do
+  if grep -q 'desktop_smoke.*query=sort=title' "$X/desktop-restart.log"; then
+    RESTORED_SORT_REQUEST=1
+    break
+  fi
+  sleep 1
+done
+[ -n "$RESTORED_SORT_REQUEST" ] || fail "the relaunched page did not request sort=title"
+RESTORED_ATTACHMENT=""
+for _ in $(seq 1 30); do
+  CLIENT_SESSIONS=$(tmux -S "$X/state/tmux.sock" list-clients -F '#{session_name}' 2>/dev/null)
+  REMEMBERED_CLIENTS=$(printf '%s\n' "$CLIENT_SESSIONS" | grep -cx "fh-$SID")
+  NEWEST_CLIENTS=$(printf '%s\n' "$CLIENT_SESSIONS" | grep -cx "fh-$SID_NEWEST")
+  if [ "$REMEMBERED_CLIENTS" -gt "$NEWEST_CLIENTS" ]; then
+    RESTORED_ATTACHMENT=1
+    break
+  fi
+  sleep 1
+done
+[ -n "$RESTORED_ATTACHMENT" ] || fail "the relaunched page did not attach the remembered non-newest session"
 SESSION_REDISCOVERED=""
 for _ in $(seq 1 30); do
   if curl_auth -sf --max-time 5 "$API/api/sessions/$SID" >/dev/null; then
@@ -440,7 +505,9 @@ DISPLAY=$DISP xdotool windowsize "$WID" 1200 900
 sleep 3
 
 curl_auth -sf --max-time 5 -X DELETE "$API/api/sessions/$SID" >/dev/null || fail "cleaning up the persisted smoke session"
+curl_auth -sf --max-time 5 -X DELETE "$API/api/sessions/$SID_NEWEST" >/dev/null || fail "cleaning up the newest persisted smoke session"
 SID=""
+SID_NEWEST=""
 
 # Guards the watchdog's other failure mode: a false positive. Every phase
 # above ran with a healthy eval bridge, so its death message
@@ -686,6 +753,17 @@ print(next(iter(new)) if len(new) == 1 else '')" 2>/dev/null)
 done
 [ -n "$SID" ] || fail "create through the desktop form did not yield exactly one new session (MT-5 class regression?)"
 echo "   created $SID"
+
+# Creation is a user-initiated selection, so it exercises the same eval and
+# debounced native write-back as a row click without adding another fragile
+# coordinate. Wait beyond the debounce through the observable file rather
+# than sleeping for an assumed duration.
+for _ in $(seq 1 20); do
+  WRITTEN_ID=$(python3 -c 'import json,sys; print((json.load(open(sys.argv[1])).get("remembered_selection") or {}).get("id") or "")' "$X/state/desktop-client.json" 2>/dev/null)
+  [ "$WRITTEN_ID" = "$SID" ] && break
+  sleep 0.25
+done
+[ "$WRITTEN_ID" = "$SID" ] || fail "the desktop page selection did not reach desktop-client.json"
 
 echo "== typing into the terminal and asserting through tmux"
 # The create lands in the session view with the terminal mounted.

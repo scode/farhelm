@@ -16,8 +16,10 @@ and browser CI gates.
 3. Create a local Mac session the same way. Confirm the local and remote sessions appear together in one list.
 4. Paste a Mac screenshot into the remote terminal. Confirm the path appears at the active cursor and Claude can read
    the file; also complete the clipboard-facts and latency records below.
-5. Quit and relaunch the app. Confirm both sessions and their terminal state remain. Reboot the Mac and confirm the
-   remote session is untouched while the local session is interrupted and offers conversation resume.
+5. Choose a non-newest session and a non-default list order, then quit and relaunch the app. Before clicking anything,
+   confirm that same session is selected and attached and that the chosen order is still applied. Also confirm both
+   sessions and their terminal state remain. Reboot the Mac and confirm the remote session is untouched while the local
+   session is interrupted and offers conversation resume.
 6. Attach to the remote session from the token-authenticated web UI and confirm the native app visibly detaches.
 7. Ask real Claude to create a new `jj workspace` and invoke the injected spawn CLI. Confirm the child appears without
    refreshing either client.

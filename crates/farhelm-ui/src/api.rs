@@ -493,10 +493,10 @@ fn encode_bytes(value: &str, keep: impl Fn(u8) -> bool) -> String {
 fn client() -> reqwest::Client {
     #[cfg(all(feature = "desktop", not(target_arch = "wasm32")))]
     {
-        return reqwest::Client::builder()
+        reqwest::Client::builder()
             .no_proxy()
             .build()
-            .expect("proxy-free desktop HTTP client construction is infallible");
+            .expect("proxy-free desktop HTTP client construction is infallible")
     }
     #[cfg(not(all(feature = "desktop", not(target_arch = "wasm32"))))]
     reqwest::Client::new()
@@ -1153,6 +1153,8 @@ pub(crate) async fn fetch_sessions(
     // `MAX_LIST_MILLIS`).
     let clock = WalkClock::start();
     let query = list_query(filter, sort);
+    #[cfg(all(feature = "desktop", not(target_arch = "wasm32")))]
+    crate::desktop::log_smoke_session_query(&query);
     // Hoisted: the filter cannot change under a walk (it is a snapshot the
     // caller took before the first request), so asking it once per page was
     // asking the same question over and over.
