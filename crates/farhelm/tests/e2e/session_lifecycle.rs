@@ -4374,7 +4374,7 @@ async fn stop_replays_the_alt_screen_snapshot() {
         "the snapshot must preserve the fixture's reverse-video SGR sequence, proving \
          capture-pane ran with -e: {text:?}"
     );
-    // Pins `sanitize_snapshot_lines` (tmux.rs): `capture-pane -e` emits no
+    // Pins `sanitize_snapshot_lines` (tmux/snapshot.rs): `capture-pane -e` emits no
     // attribute reset at a line's end, so a line that ends while a
     // background/inverse attribute is still active leaves it running —
     // a real terminal's scroll/line-feed handling then fills every cell
@@ -4460,7 +4460,7 @@ async fn stop_snapshot_preserves_trailing_styled_padding_via_capture_n() {
          capture-pane ran with -N — got a {}-byte row: {row:?}",
         row.len()
     );
-    // `sanitize_snapshot_lines` (tmux.rs) must have closed this row off
+    // `sanitize_snapshot_lines` (tmux/snapshot.rs) must have closed this row off
     // with its own SGR reset immediately before the `\r\n` this slice was
     // cut at, regardless of the `-N` padding's own attribute bytes. The
     // risk this guards against is a real terminal's scroll/line-feed
@@ -4472,7 +4472,7 @@ async fn stop_snapshot_preserves_trailing_styled_padding_via_capture_n() {
     // regardless of what this test does. That reserialization is a
     // property of THIS SPECIFIC fixture content, not a general guarantee
     // — see `sanitize_snapshot_lines`'s own "why a bare boundary reset is
-    // not enough" docs (tmux.rs) for the general case, where a following
+    // not enough" docs (tmux/snapshot.rs) for the general case, where a following
     // row's UNCHANGED style is never re-stated at all and would be lost
     // without this transform's own restore.
     assert!(
