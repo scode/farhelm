@@ -233,10 +233,11 @@ it shows the session's metadata and says why there is no terminal, rather than a
 ### Session list
 
 One flat list across all registered hosts, with filtering and search by host, directory, agent profile, status, and
-title. The filter controls open on demand rather than standing permanently above the list; while an applied filter's
-controls are closed, the list says visibly that a filter is in force, so a narrowed list can never masquerade as a small
-fleet. No mandatory hierarchy. Agent-spawned sessions (see below) carry a parent reference usable as a filter, but
-parentage does not nest the list and implies nothing about VCS state.
+title. The list can be ordered by most recent activity, by creation time, or by title; creation time is what it shows
+when nothing has been chosen. The filter controls open on demand rather than standing permanently above the list; while
+an applied filter's controls are closed, the list says visibly that a filter is in force, so a narrowed list can never
+masquerade as a small fleet. No mandatory hierarchy. Agent-spawned sessions (see below) carry a parent reference usable
+as a filter, but parentage does not nest the list and implies nothing about VCS state.
 
 The list always carries a count, and it counts the list you are looking at: archived sessions are outside the default
 view, so they are outside its count, and the archive-inclusion switch widens the rows and the count together. That

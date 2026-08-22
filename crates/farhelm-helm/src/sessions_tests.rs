@@ -4510,3 +4510,295 @@ async fn an_identity_less_hosts_archived_rows_leave_the_default_view_s_total() {
         "and the switch brings it back to both, exactly as it does for a cached host"
     );
 }
+
+// ---- Listing order (`?sort=`) ------------------------------------
+//
+// Same posture as the filter tests above: every assertion drives the real
+// query string through the real handler, because the query string IS the
+// contract. An order asserted only against `ListSort::position` would prove
+// the comparison works without proving a request can ask for it.
+
+/// A session with the two fields the non-default orders read.
+///
+/// `rest_harness::session` copies `created_at` into `last_activity_at` and
+/// the id into the title, which makes every order the same order — useless
+/// here, where the whole point is telling three sequences apart.
+fn sortable(
+    id: &str,
+    created_at: i64,
+    last_activity_at: i64,
+    title: &str,
+) -> farhelm_proto::SessionInfo {
+    farhelm_proto::SessionInfo {
+        last_activity_at,
+        title: title.to_string(),
+        ..rest_harness::session(id, created_at)
+    }
+}
+
+/// A two-host fleet whose four sessions produce three DIFFERENT sequences
+/// under the three orders.
+///
+/// That distinctness is the fixture's job: an implementation that ignored
+/// `?sort=` and served creation order throughout would pass a fixture whose
+/// orders happened to coincide. Every leading component also TIES for one
+/// pair, so the shared creation-order tail is under test rather than merely
+/// present.
+async fn sortable_fleet() -> rest_harness::Harness {
+    let (builder, alpha) = rest_harness::FleetBuilder::new()
+        .await
+        .local(rest_harness::HostScript {
+            identity: Some("identity-local".to_string()),
+            sessions: vec![
+                sortable("local-quiet", 400, 100, "Ärger"),
+                sortable("local-busy", 300, 900, "Alpha"),
+            ],
+            ..rest_harness::HostScript::default()
+        })
+        .await
+        .ssh(
+            "user@alpha",
+            rest_harness::HostScript {
+                identity: Some("identity-alpha".to_string()),
+                sessions: vec![
+                    sortable("alpha-busy", 200, 900, "alpha"),
+                    // The legacy shape: a supervisor that predates
+                    // `last_activity_at` sends 0, which is "unknown" and must
+                    // sort by creation time rather than at the epoch.
+                    sortable("alpha-legacy", 100, 0, "zeta"),
+                ],
+                ..rest_harness::HostScript::default()
+            },
+        )
+        .await;
+    let harness = builder.start().await;
+    let local = rest_harness::local_id(&harness.store).await;
+    for host in [local, alpha] {
+        harness.await_refreshed(host).await;
+    }
+    harness
+}
+
+/// `?sort=` selects which of the three orders the merged list is served
+/// in, and an unrecognized word is a 400 naming the vocabulary.
+///
+/// Spec: SPEC.md's session list can be ordered by recent activity, by
+/// creation, or by title. The refusal matters for an unknown status's
+/// reason, one dimension over: a list quietly served in a different order
+/// than the one asked for looks entirely plausible, so a typo would be
+/// believed rather than noticed.
+#[tokio::test]
+async fn the_sort_parameter_selects_the_order_and_an_unknown_word_is_refused() {
+    let harness = sortable_fleet().await;
+
+    let created = vec!["local-quiet", "local-busy", "alpha-busy", "alpha-legacy"];
+    for uri in [
+        // Absent, empty (a cleared control), and named: the default order is
+        // what every client written before there was a choice keeps getting.
+        "/api/sessions",
+        "/api/sessions?sort=",
+        "/api/sessions?sort=created",
+    ] {
+        let (status, value) = get_json(&harness, uri).await;
+        assert_eq!(status, axum::http::StatusCode::OK);
+        assert_eq!(row_ids(&value), created, "{uri} must serve creation order");
+    }
+
+    let (status, value) = get_json(&harness, "/api/sessions?sort=activity").await;
+    assert_eq!(status, axum::http::StatusCode::OK);
+    assert_eq!(
+        row_ids(&value),
+        vec!["local-busy", "alpha-busy", "local-quiet", "alpha-legacy"],
+        "equal activity falls through to creation time descending, and a legacy 0 stamp sorts \
+         by its own creation time rather than at the epoch"
+    );
+
+    let (status, value) = get_json(&harness, "/api/sessions?sort=title").await;
+    assert_eq!(status, axum::http::StatusCode::OK);
+    assert_eq!(
+        row_ids(&value),
+        vec!["local-busy", "alpha-busy", "alpha-legacy", "local-quiet"],
+        "the title order folds case, so Alpha and alpha tie and split on the tail — and Ärger \
+         sorts after zeta, which is the ordinal, locale-free collation this helm documents"
+    );
+
+    // The order is not a filter: it changes the sequence, never the
+    // membership, so the numbers beside the rows do not move with it.
+    for uri in [
+        "/api/sessions",
+        "/api/sessions?sort=activity",
+        "/api/sessions?sort=title",
+    ] {
+        let (_, value) = get_json(&harness, uri).await;
+        assert_eq!(value["total"], 4, "{uri} changed the fleet total");
+        assert_eq!(value["matching"], 4, "{uri} changed the matching count");
+    }
+
+    let (status, body) = get_json(&harness, "/api/sessions?sort=cwd").await;
+    assert_eq!(status, axum::http::StatusCode::BAD_REQUEST);
+    let text = body.as_str().unwrap_or_default();
+    assert!(
+        text.contains("created") && text.contains("activity") && text.contains("title"),
+        "the refusal must name the vocabulary it accepts, got {text:?}"
+    );
+}
+
+/// A cursor is bound to the ORDER it was minted under, and replaying one
+/// under a different `?sort=` is refused.
+///
+/// The failure this closes is silent and total: a resume point names a
+/// place in one sequence, so applied to another it lands somewhere
+/// arbitrary and every row that sorts before that point vanishes from the
+/// walk with nothing in the reply to say so. The staged replays are chosen
+/// so the damage would be visible — each names an order in which the
+/// cursor's own row is not near the front.
+#[tokio::test]
+async fn a_cursor_replayed_under_a_different_sort_is_refused() {
+    let harness = sortable_fleet().await;
+
+    let (status, first) = get_json(&harness, "/api/sessions?sort=activity&limit=1").await;
+    assert_eq!(status, axum::http::StatusCode::OK);
+    assert_eq!(row_ids(&first), vec!["local-busy"]);
+    let cursor = first["next_cursor"]
+        .as_str()
+        .expect("a truncated page carries a resume point")
+        .to_string();
+
+    for changed in [
+        format!("/api/sessions?sort=title&limit=1&cursor={cursor}"),
+        format!("/api/sessions?sort=created&limit=1&cursor={cursor}"),
+        // The absent parameter is the creation order, so it is a CHANGE from
+        // the activity order this token was minted in — not "no opinion".
+        format!("/api/sessions?limit=1&cursor={cursor}"),
+    ] {
+        let (status, body) = get_json(&harness, &changed).await;
+        assert_eq!(
+            status,
+            axum::http::StatusCode::BAD_REQUEST,
+            "{changed} resumed a walk taken in another order: {body}"
+        );
+        let text = body.as_str().unwrap_or_default();
+        assert!(
+            text.contains("fresh walk") && text.contains("sort"),
+            "the refusal must say what to change and what to do instead: {text:?}"
+        );
+    }
+
+    // The unchanged order still resumes, so the binding is a guard rather
+    // than a broken walk.
+    let (status, second) = get_json(
+        &harness,
+        &format!("/api/sessions?sort=activity&limit=1&cursor={cursor}"),
+    )
+    .await;
+    assert_eq!(status, axum::http::StatusCode::OK);
+    assert_eq!(row_ids(&second), vec!["alpha-busy"]);
+}
+
+/// Walk the whole list one row per page under `sort`, through the real query
+/// string, and return the ids in the order they were served.
+///
+/// One row per page on purpose: the resume point is then exercised at every
+/// boundary in the list rather than at one of them, which is where a resume
+/// predicate that disagrees with its own `ORDER BY` shows up.
+///
+/// The loop's own bound is a BACKSTOP, not the exit: reaching it is a
+/// failure, because a walk that never issues a cursor-free page is exactly
+/// the shape a client loops on forever. Terminating on `next_cursor: null`
+/// is the property, so it is asserted rather than merely relied on.
+async fn walk_one_at_a_time(harness: &rest_harness::Harness, sort: &str) -> Vec<String> {
+    let mut walked: Vec<String> = Vec::new();
+    let mut uri = format!("/api/sessions?sort={sort}&limit=1");
+    for _ in 0..10 {
+        let (status, value) = get_json(harness, &uri).await;
+        assert_eq!(status, axum::http::StatusCode::OK, "{uri}");
+        walked.extend(row_ids(&value));
+        match value["next_cursor"].as_str() {
+            None => return walked,
+            Some(cursor) => uri = format!("/api/sessions?sort={sort}&limit=1&cursor={cursor}"),
+        }
+    }
+    panic!("the {sort} walk never reached a page without a next_cursor; walked {walked:?}");
+}
+
+/// An identity-less host's IN-MEMORY rows are re-ordered into the order the
+/// request asked for before they are merged — and are NOT re-ordered under the
+/// default one, where they already agree with it.
+///
+/// This is the one source that cannot arrive pre-sorted for every order: its
+/// host reports creation order (the wire order the drain validates and this
+/// helm never asks anyone to change), and the merge that interleaves it with
+/// the persisted page is only correct over sources that are each already
+/// ordered. Left unsorted under `activity` or `title`, its rows would be
+/// interleaved by whichever one happened to be at the front, producing a page
+/// in neither order.
+///
+/// Both paths are walked, because they are different code. Under `created` the
+/// wire order IS the requested order, so the merge skips the sort entirely and
+/// relies on the drain's validation for the binary-searched resume point to be
+/// sound; under the other two the order is established per request. A fast
+/// path that was wrong would produce a page in creation order under an order
+/// that is not creation order — which is precisely what a fixture whose three
+/// sequences coincide could not see, so this one keeps all three distinct.
+#[tokio::test]
+async fn an_identity_less_hosts_rows_are_reordered_into_the_requested_order() {
+    let (builder, alpha) = rest_harness::FleetBuilder::new()
+        .await
+        .local(rest_harness::HostScript {
+            // No identity: this host caches nothing, and its sessions are
+            // merged in from the actor's own memory, in the order the host
+            // reported them.
+            identity: None,
+            sessions: vec![
+                // "Alpha" capitalized on the IN-MEMORY side deliberately: its
+                // key is folded by `title_sort_key` on the merge path while
+                // the cached row's was folded on the write path, and a page
+                // that interleaves the two is where a second, subtly different
+                // fold would show.
+                sortable("memory-quiet", 300, 100, "Alpha"),
+                sortable("memory-busy", 200, 900, "mid"),
+            ],
+            ..rest_harness::HostScript::default()
+        })
+        .await
+        .ssh(
+            "user@alpha",
+            rest_harness::HostScript {
+                identity: Some("identity-alpha".to_string()),
+                sessions: vec![sortable("cached-mid", 250, 500, "zebra")],
+                ..rest_harness::HostScript::default()
+            },
+        )
+        .await;
+    let harness = builder.start().await;
+    let local = rest_harness::local_id(&harness.store).await;
+    for host in [local, alpha] {
+        harness.await_refreshed(host).await;
+    }
+
+    let (status, value) = get_json(&harness, "/api/sessions").await;
+    assert_eq!(status, axum::http::StatusCode::OK);
+    assert_eq!(
+        row_ids(&value),
+        vec!["memory-quiet", "cached-mid", "memory-busy"],
+        "creation order, for the contrast the other two are against"
+    );
+
+    assert_eq!(
+        walk_one_at_a_time(&harness, "created").await,
+        vec!["memory-quiet", "cached-mid", "memory-busy"],
+        "the default order's fast path leaves the in-memory list as the host reported it, and \
+         the walk must still resume correctly across every boundary"
+    );
+    assert_eq!(
+        walk_one_at_a_time(&harness, "activity").await,
+        vec!["memory-busy", "cached-mid", "memory-quiet"],
+        "the in-memory rows must land on either side of the cached one, once each"
+    );
+    assert_eq!(
+        walk_one_at_a_time(&harness, "title").await,
+        vec!["memory-quiet", "memory-busy", "cached-mid"],
+        "and the title order is a third sequence again: the cached row's own title puts it last, \
+         behind two in-memory rows that neither of the other orders puts together"
+    );
+}

@@ -35,17 +35,32 @@
 //! local data, and leaves the two cursor layers free to disagree about
 //! page sizes, timing, and failure entirely.
 //!
-//! ## The order
+//! ## The order, and the three of them
 //!
 //! Creation time descending, session id ascending, host id ascending — the
 //! same total order the wire uses (`farhelm-supervisor`'s `list_order_key`)
 //! with one extra component, so a merged list reads as one list rather than
-//! as concatenated per-host ones. helm.db's `session_cache_order` index is
-//! exactly that key, so a page is an index range scan rather than a sort.
+//! as concatenated per-host ones. helm.db carries that key as an index, so a
+//! page is an index range scan rather than a sort — one branch of the scan per
+//! host, merged, for the reason [`HelmStore::scan_page`] gives.
 //!
 //! The host id is in the key even though session ids are unique: it makes
 //! the order TOTAL unconditionally, and a cursor over a non-total order can
 //! skip or repeat rows. See [`store::CacheKey`].
+//!
+//! That order is now one of three ([`store::ListSort`]): a caller may ask for
+//! recent activity or for title instead, and each of those ends in this exact
+//! creation-order tail so it is total for the same reason. What changes with
+//! the sort is which index the persisted scan walks and how the in-memory
+//! rows below are ordered before they are merged into it; what does not
+//! change is anything about WHICH rows the view holds, so neither count moves.
+//!
+//! The sort is a property of THIS merged view and of nothing underneath it.
+//! Hosts go on reporting their sessions in creation order, the drain goes on
+//! validating that (`crate::manager::drain_sessions`), and the cache stores
+//! what the drain brought — an in-memory list is therefore in creation order
+//! whatever the request asked for, which is exactly why the merge below
+//! re-orders it per request rather than assuming it arrives sorted.
 //!
 //! ## Filtering, and why it happens HERE (PLAN_M6_75.md item 5)
 //!
@@ -221,6 +236,22 @@ pub(crate) fn host_display_name(kind: HostKind, destination: Option<&str>) -> St
 /// level of each row, and the host fields are additive siblings. A nested
 /// `{"session": {...}, "host": ...}` would have been tidier and would have
 /// broken every existing reader.
+///
+/// The flattening is also why a new `SessionInfo` field needs nothing here to
+/// reach a client: `last_activity_at` is on every row already, so a client can
+/// show recent activity without a second request or a row shape of its own.
+///
+/// What travels is the RAW field, exactly as its supervisor reported it —
+/// `0` and all. `?sort=activity` does NOT order by that value; it orders by
+/// the EFFECTIVE one, `SessionInfo::effective_activity`, which reads `0` as
+/// "this sender never told us" and falls back to `created_at`. Serving the raw
+/// field is deliberate (a synthesized value written into it would be
+/// indistinguishable from an observation at the next merge — see
+/// `crate::manager::merge_cached_session`), and it puts one obligation on the
+/// client: a row rendered from `last_activity_at` directly will show 1970 for
+/// exactly the sessions the list sorted by their creation time. Apply
+/// `effective_activity` when displaying the stamp, or the rendering and the
+/// order disagree on the same row.
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 pub(crate) struct SessionRow {
     #[serde(flatten)]
@@ -358,27 +389,97 @@ pub(crate) struct SessionPageBody {
 /// which is what lets a cursor naming a session that has since been deleted
 /// (or whose host was removed) resume cleanly instead of erroring.
 ///
+/// ## The leading key is now MUTABLE, and that is a real weakening
+///
+/// A keyset cursor is stable against inserts and deletes, but only because
+/// the key it names does not move. That was unconditionally true while
+/// `created_at` was the leading component: a session's creation time never
+/// changes. It is NOT true of the other two orders. A session that produces
+/// output advances its activity stamp, and a rename rewrites its folded
+/// title, so a row can cross the cursor between two page fetches of one
+/// walk — appearing on a later page it was already shown on, or moving to
+/// the far side of the resume point and never being shown at all.
+///
+/// Nothing here prevents that, deliberately. The fix a database would reach
+/// for is a snapshot or a generation the walk pins itself to, which means
+/// holding server state per in-flight walk and deciding when to expire it,
+/// for a list a user re-reads constantly anyway. What stands instead is two
+/// things that were already there: the activity stamp moves on a coarse
+/// quantum rather than per byte of output (the supervisor advances it at most
+/// once per `ACTIVITY_STAMP_QUANTUM`, a whole minute), which bounds how often
+/// a row can cross at all; and the UI re-reads the whole list when its own
+/// coherence checks trip, saying so on screen — "the list changed while it was
+/// being read; refreshing" (`crates/farhelm-ui/src/rows.rs`). A duplicated or
+/// missed row under an activity or title walk is a stale read of a list that
+/// is visibly moving, not a lost session.
+///
 /// ## What it carries, and what it deliberately does not
 ///
-/// A position and the filter it was taken under. Nothing else — in
-/// particular no COUNT. A cursor is a string the client holds, so a count
-/// carried in one is a count the client picks, and every number the reply
-/// derives from it becomes a number the caller dictated to the server about
-/// its own fleet. The matching count is kept server-side instead
-/// ([`MatchingCounts`]), where the only thing a client can influence is
-/// whether a cache entry is hit.
+/// A position, the ORDER that position is a position in, and the filter it
+/// was taken under. Nothing else — in particular no COUNT. A cursor is a
+/// string the client holds, so a count carried in one is a count the client
+/// picks, and every number the reply derives from it becomes a number the
+/// caller dictated to the server about its own fleet. The matching count is
+/// kept server-side instead ([`MatchingCounts`]), where the only thing a
+/// client can influence is whether a cache entry is hit.
+///
+/// ## A position is a position IN AN ORDER
+///
+/// The sort travels with the position for the same reason the filter digest
+/// does, and the failure it prevents is the same shape: a resume point from a
+/// title-ordered walk applied to an activity-ordered one names a place in a
+/// sequence it never described, so the walk resumes mid-list and drops
+/// everything before it with no error a client could see. Hence [`Self::s`],
+/// compared in [`session_page`].
+///
+/// Only the components the sort actually compares are carried
+/// ([`Self::la`], [`Self::t`]): a creation-ordered cursor omits both, so it
+/// stays FIXED-SIZE — bounded by the session id, like every version of this
+/// token — even though version 3 grew it by the order word and the longer
+/// domain tag. A title-ordered one pays for the title only where the title is
+/// the thing being ordered by.
+///
+/// That last one is the only order whose cursor grows with peer-supplied text,
+/// and what bounds it is [`store::title_sort_key`]'s own truncation
+/// ([`store::TITLE_SORT_KEY_CHARS`] folded characters) rather than anything the
+/// peer chose — the supervisor's create-field cap is 64 KiB, which is a
+/// request-body ceiling and no bound at all for a value that has to fit in a
+/// query string. Truncating is sound ONLY because it happens where the key is
+/// minted, so the cut value is the row's actual position under the title order
+/// rather than a shortened stand-in for it; truncating here instead would name
+/// a position the order does not contain, and the walk would skip or repeat
+/// rows.
 #[derive(Serialize, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 struct ListCursor {
     /// The domain tag; only [`CURSOR_DOMAIN`] is accepted.
     fh: String,
-    /// `created_at`, descending.
+    /// The order this position was taken in, as [`store::ListSort::key`]
+    /// spells it.
+    s: String,
+    /// `created_at`, descending. Present under every order — it leads the
+    /// creation order and is the first tiebreak of the other two.
     at: i64,
     /// Session id, ascending.
     sid: String,
-    /// Host id, ascending — the third component that makes the order total
+    /// Host id, ascending — the component that makes every order total
     /// even where the one-owner index is absent (see [`store::CacheKey`]).
     h: HostId,
+    /// Effective activity, descending — present exactly under
+    /// [`store::ListSort::Activity`], and REQUIRED there: a token that named
+    /// that order without carrying its leading component would resume at an
+    /// activity of zero, which is a real position in the order rather than an
+    /// absence of one. Where that position falls differs per order — the
+    /// bottom of a descending stamp, the top of an ascending title — so the
+    /// damage is a silent skip or a silent repeat depending on which, and the
+    /// refusal is what makes it neither.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    la: Option<i64>,
+    /// The collated title, ascending — present exactly under
+    /// [`store::ListSort::Title`], and required there for [`Self::la`]'s
+    /// reason.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    t: Option<String>,
     /// The digest of the FILTER this position was taken under
     /// ([`store::SessionFilter::digest`]) — required on every cursor, an
     /// unfiltered walk's included.
@@ -404,22 +505,49 @@ struct ListCursor {
 /// is the shape that stopped carrying a matching count and started requiring
 /// a filter digest; a version-1 token names neither correctly, and there is
 /// no reading of one that is safe to attempt.
-const CURSOR_DOMAIN: &str = "farhelm/helm-sessions/2";
+///
+/// Version 3 is the shape that names its ORDER. A version-2 token predates
+/// the choice, so every one of them was minted in the creation order — but
+/// reading them as such would be a compatibility gesture with a real cost:
+/// the field would have to be optional forever, and every later reader would
+/// have to keep deciding what an absent order means. They are rejected
+/// instead, which costs a walk in progress across a helm upgrade one
+/// re-fetch. Cursors already do not survive a restart (the filter digest is
+/// keyed per process), so this adds no failure mode that was not there.
+const CURSOR_DOMAIN: &str = "farhelm/helm-sessions/3";
 
-/// Encode one row's ordering key, bound to the filter it was taken under,
-/// into the opaque token [`SessionPageBody::next_cursor`] carries.
+/// Encode one row's ordering key, bound to the order and the filter it was
+/// taken under, into the opaque token [`SessionPageBody::next_cursor`]
+/// carries.
 ///
 /// Base64url-unpadded JSON: self-describing enough that [`decode_cursor`]
 /// can reject a malformed value by construction (a JSON parse failure)
 /// instead of by delimiter scanning, and free of characters that would need
 /// escaping in the query string this token actually travels in.
-fn encode_cursor(key: &store::CacheKey, digest: &str) -> String {
+///
+/// Carries the components `sort` COMPARES and no others — see
+/// [`ListCursor`]. The dropped components are not lost: nothing may ever
+/// compare a position under an order other than its own, which is what the
+/// sort binding enforces.
+fn encode_cursor(key: &store::CacheKey, sort: store::ListSort, digest: &str) -> String {
     use base64::Engine;
+    // ONE match over the order, so the two optional components are decided
+    // together and by exhaustiveness: a fourth order added later cannot
+    // silently mint a cursor carrying neither of them, which
+    // [`decode_cursor`] would then refuse as missing its own leading key.
+    let (la, t) = match sort {
+        store::ListSort::Created => (None, None),
+        store::ListSort::Activity => (Some(key.activity_at), None),
+        store::ListSort::Title => (None, Some(key.title_sort.clone())),
+    };
     let cursor = ListCursor {
         fh: CURSOR_DOMAIN.to_string(),
+        s: sort.key().to_string(),
         at: key.created_at,
         sid: key.session_id.clone(),
         h: key.host,
+        la,
+        t,
         f: digest.to_string(),
     };
     // Unwrap is safe: `ListCursor` has no map keys and no non-UTF-8 bytes
@@ -428,11 +556,12 @@ fn encode_cursor(key: &store::CacheKey, digest: &str) -> String {
     base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(json)
 }
 
-/// Decode a caller-supplied cursor into its position and the filter digest
-/// it is bound to, or `None` for anything malformed — invalid base64,
-/// unparseable JSON, JSON of the wrong shape, or a token from a different
-/// domain (a supervisor's wire cursor, an older or newer version of this
-/// one).
+/// Decode a caller-supplied cursor into its position, the order it names, and
+/// the filter digest it is bound to, or `None` for anything malformed —
+/// invalid base64, unparseable JSON, JSON of the wrong shape, a token from a
+/// different domain (a supervisor's wire cursor, an older or newer version of
+/// this one), an order word this build does not know, or an order whose own
+/// leading component the token does not carry.
 ///
 /// Every failure mode collapses to the same `None` on purpose: a
 /// bit-flipped byte, a truncated value, and a string from nowhere are
@@ -440,10 +569,16 @@ fn encode_cursor(key: &store::CacheKey, digest: &str) -> String {
 /// actionable answer to give for any of them. Never panics on caller
 /// input; `?` short-circuits through `Option` at every fallible step.
 ///
-/// Note what this does NOT do: it does not judge the digest. Deciding
-/// whether the bound filter is the request's filter belongs to
-/// [`session_page`], which is the only place that knows what was asked.
-fn decode_cursor(cursor: &str) -> Option<(store::CacheKey, String)> {
+/// The key it returns is filled out ONLY where the named order compares: the
+/// components that order ignores come back as placeholders (`0`, `""`)
+/// because the token never carried them. That is safe precisely because
+/// [`session_page`] refuses a cursor whose order is not the request's, so a
+/// placeholder can never reach a comparison that would read it.
+///
+/// Note what this does NOT do: it does not judge the digest or the sort.
+/// Deciding whether either is the request's belongs to [`session_page`],
+/// which is the only place that knows what was asked.
+fn decode_cursor(cursor: &str) -> Option<(store::CacheKey, store::ListSort, String)> {
     use base64::Engine;
     let bytes = base64::engine::general_purpose::URL_SAFE_NO_PAD
         .decode(cursor)
@@ -452,12 +587,31 @@ fn decode_cursor(cursor: &str) -> Option<(store::CacheKey, String)> {
     if decoded.fh != CURSOR_DOMAIN {
         return None;
     }
+    let sort = store::parse_sort_key(&decoded.s)?;
+    // Each order's leading component is REQUIRED under that order. A default
+    // is not "no position": zero activity and the empty title are REAL
+    // positions in their orders, so a token missing its own leading key would
+    // resume at one of them and the walk would silently continue from a place
+    // the caller never reached. Which rows that skips or repeats depends on
+    // where the default falls relative to the walk, and the answer is not
+    // fixed — the point is that it is arbitrary, not that it is late.
+    let activity_at = match sort {
+        store::ListSort::Activity => decoded.la?,
+        store::ListSort::Created | store::ListSort::Title => 0,
+    };
+    let title_sort = match sort {
+        store::ListSort::Title => decoded.t?,
+        store::ListSort::Created | store::ListSort::Activity => String::new(),
+    };
     Some((
         store::CacheKey {
             created_at: decoded.at,
             session_id: decoded.sid,
             host: decoded.h,
+            activity_at,
+            title_sort,
         },
+        sort,
         decoded.f,
     ))
 }
@@ -571,20 +725,6 @@ impl MatchingCounts {
     }
 }
 
-/// The total order pages walk: creation time DESCENDING, then session id
-/// ascending, then host id ascending.
-///
-/// `Reverse` on `created_at` turns "descending time, ascending id" into one
-/// ordinary ascending comparison, so a resume point is a plain `>` rather
-/// than a hand-written three-field comparison repeated at every call site.
-/// This must agree EXACTLY with the `ORDER BY` in
-/// [`HelmStore::scan_page`]: the page comes back sorted by SQL and the
-/// in-memory rows below are merged into it by this comparison, so a
-/// disagreement between the two would interleave them wrongly.
-fn order_key(info: &SessionInfo, host: HostId) -> (std::cmp::Reverse<i64>, &str, HostId) {
-    (std::cmp::Reverse(info.created_at), info.id.as_str(), host)
-}
-
 /// Tag one host's session with that host, for the merged list.
 ///
 /// `identity` is the registry's recorded install identity for the host —
@@ -622,15 +762,22 @@ struct MergeItem {
 /// The sources are pulled from lazily and in lockstep, which is what keeps
 /// this bounded: the merge takes `limit + 1` items in total, so an
 /// identity-less host holding thousands of sessions contributes exactly as
-/// much work to a `limit=1` request as a host holding one. Cloning happens
-/// per item TAKEN, never per item available.
+/// much work to a `limit=1` request as a host holding one. Cloning of the
+/// SESSION happens per item TAKEN, never per item available.
+///
+/// "Already-ordered" is a precondition the two sources meet differently. The
+/// persisted page is ordered by SQL, in the order the request asked for. A
+/// live list arrives in the order its host reported it (creation time — see
+/// this module's docs), so it is put into the requested order by the caller
+/// before it becomes a source, which is also where each entry's ordering key
+/// is computed once instead of at every comparison.
 struct MergeSource<'a> {
     snapshot: Option<&'a HostSnapshot>,
     /// Remaining items, in order. For the persisted source these are
     /// already-decoded scan results; for a live source they are borrowed
-    /// `SessionInfo`s cloned only when taken.
+    /// `SessionInfo`s, beside the key they occupy, cloned only when taken.
     persisted: std::collections::VecDeque<store::ScannedRow>,
-    live: &'a [SessionInfo],
+    live: std::collections::VecDeque<(store::CacheKey, &'a SessionInfo)>,
 }
 
 impl<'a> MergeSource<'a> {
@@ -655,25 +802,21 @@ impl<'a> MergeSource<'a> {
         let Some(snapshot) = self.snapshot else {
             return;
         };
-        let skip = self
+        while self
             .live
-            .iter()
-            .take_while(|info| !filter.matches(snapshot.id, info))
-            .count();
-        self.live = &self.live[skip..];
+            .front()
+            .is_some_and(|(_, info)| !filter.matches(snapshot.id, info))
+        {
+            self.live.pop_front();
+        }
     }
 
-    /// This source's next ordering key, without consuming it.
-    fn peek(&self) -> Option<(std::cmp::Reverse<i64>, &str, HostId)> {
+    /// This source's next position under `sort`, without consuming it.
+    fn peek(&self, sort: store::ListSort) -> Option<store::OrderPosition<'_>> {
         if let Some(scanned) = self.persisted.front() {
-            return Some((
-                std::cmp::Reverse(scanned.key.created_at),
-                scanned.key.session_id.as_str(),
-                scanned.key.host,
-            ));
+            return Some(sort.position(&scanned.key));
         }
-        let host = self.snapshot?.id;
-        self.live.first().map(|info| order_key(info, host))
+        self.live.front().map(|(key, _)| sort.position(key))
     }
 
     /// Take this source's next item, cloning only what is taken.
@@ -706,14 +849,9 @@ impl<'a> MergeSource<'a> {
             });
         }
         let snapshot = self.snapshot?;
-        let (info, rest) = self.live.split_first()?;
-        self.live = rest;
+        let (key, info) = self.live.pop_front()?;
         Some(MergeItem {
-            key: store::CacheKey {
-                created_at: info.created_at,
-                session_id: info.id.clone(),
-                host: snapshot.id,
-            },
+            key,
             row: Some(row_of(snapshot, identity_of(snapshot.id), info.clone())),
         })
     }
@@ -756,6 +894,15 @@ impl<'a> MergeSource<'a> {
 /// there — the resume point does not need it to still exist. That mirrors
 /// the supervisor's own page-walk contract exactly, one layer up.
 ///
+/// That guarantee is WEAKER under the two new orders, and the difference is
+/// worth stating rather than inheriting silently. It rested on the leading
+/// key being immutable: `created_at` never changes, so a row cannot move
+/// across a creation-ordered cursor no matter what happens to it. An activity
+/// stamp advances and a title is renamed, so under those orders a row CAN
+/// cross the resume point between two fetches of one walk and be shown twice
+/// or not at all. See [`ListCursor`] for why no snapshot machinery stands
+/// against that and what does instead.
+///
 /// ## Two independent cuts
 ///
 /// The caller's `limit` and [`PAGE_BYTE_BUDGET`] both cut, exactly as the
@@ -783,6 +930,24 @@ impl<'a> MergeSource<'a> {
 /// of meaning here — it is the widest possible result set — and a walk
 /// resumed after a filter was cleared skips just as much as one resumed after
 /// it was tightened.
+///
+/// ## A cursor and its ORDER travel together too
+///
+/// The same rule, for the same failure, one axis over: a resume point names a
+/// place in a sequence, and re-sorting the list makes it a different sequence.
+/// A cursor minted under one `sort` and replayed under another is refused
+/// rather than applied, because applying it would resume in the middle of an
+/// order it never described and drop every row before that point.
+///
+/// ## Ordering, and what it does not touch
+///
+/// `sort` selects which of [`store::ListSort`]'s orders this page is a page of.
+/// It reaches the persisted scan as an `ORDER BY` and reaches the live side as
+/// the order its in-memory rows are put into before the merge; it touches
+/// neither count, because both count a SET and re-ordering a set does not
+/// resize it. The matching-count cache is keyed by the FILTER alone for the
+/// same reason — a walk that changes sort keeps a valid count and pays only
+/// for a fresh page.
 ///
 /// ## Filtering, and the counts
 ///
@@ -832,6 +997,7 @@ pub(crate) async fn session_page(
     cursor: Option<&str>,
     limit: usize,
     filter: &store::SessionFilter,
+    sort: store::ListSort,
 ) -> anyhow::Result<SessionPageBody> {
     session_page_staged(
         manager,
@@ -840,6 +1006,7 @@ pub(crate) async fn session_page(
         cursor,
         limit,
         filter,
+        sort,
         std::future::ready(()),
         std::future::ready(()),
     )
@@ -874,6 +1041,7 @@ async fn session_page_staged(
     cursor: Option<&str>,
     limit: usize,
     filter: &store::SessionFilter,
+    sort: store::ListSort,
     staged: impl std::future::Future<Output = ()>,
     staged_between_reads: impl std::future::Future<Output = ()>,
 ) -> anyhow::Result<SessionPageBody> {
@@ -881,9 +1049,17 @@ async fn session_page_staged(
     let after = match cursor {
         None => None,
         Some(raw) => {
-            let (key, bound) = decode_cursor(raw).ok_or_else(malformed_cursor)?;
+            let (key, bound_sort, bound) = decode_cursor(raw).ok_or_else(malformed_cursor)?;
             if bound != digest {
                 return Err(cursor_filter_changed());
+            }
+            // Checked separately from the digest, and reported separately,
+            // because the caller's mistake is a different one: the filter is
+            // right and the ORDER moved under it. A merged answer would tell
+            // a client that changed its sort control to go and check its
+            // filters.
+            if bound_sort != sort {
+                return Err(cursor_sort_changed());
             }
             Some(key)
         }
@@ -951,6 +1127,7 @@ async fn session_page_staged(
             limit,
             PAGE_BYTE_BUDGET,
             filter.clone(),
+            sort,
             match (filter.is_empty(), &held) {
                 // An unfiltered listing makes no matching claim, so there is
                 // nothing to count.
@@ -972,14 +1149,34 @@ async fn session_page_staged(
     let mut sources: Vec<MergeSource<'_>> = vec![MergeSource {
         snapshot: None,
         persisted: persisted.rows.into(),
-        live: &[],
+        live: std::collections::VecDeque::new(),
     }];
 
-    // The in-memory side, positioned at the resume point by binary search
-    // rather than by scanning: each list is already in the merged order (a
-    // drain follows the wire order — validated, not assumed, see
-    // `manager::drain_sessions` — and one list is one host, so the third
-    // key component is constant), so the resume point is a partition.
+    // The in-memory side, put into the REQUESTED order and then positioned at
+    // the resume point by binary search rather than by scanning.
+    //
+    // A live list arrives in the order its host reported it — creation time
+    // descending with the id as tiebreak, VALIDATED rather than assumed
+    // (`manager::drain_sessions` refuses a list that is not in it) — and one
+    // list is one host, so `host_id` is constant across it and that wire order
+    // IS this helm's creation order restricted to that host. The default sort
+    // therefore skips the re-sort entirely, which is not a micro-optimization:
+    // it is the difference between an ordinary listing paying nothing for the
+    // in-memory side and paying a comparison sort per request.
+    //
+    // Under the other two orders the wire order is not the requested one, and
+    // merging as though it were would interleave the list into the persisted
+    // page arbitrarily: a k-way merge is only correct over sources that are
+    // each already ordered. So those two establish the order here, once per
+    // request, over a list bounded by `crate::manager::REFRESH_SESSION_CAP`
+    // and held only as pointers plus ordering keys — the sessions themselves
+    // are still cloned only when taken.
+    //
+    // Either way the resume point is found by BINARY SEARCH, which is sound
+    // for both paths for the same reason: the slice is in the requested order
+    // by the time it is searched. Hosts serving from memory are the exception
+    // rather than the rule (a supervisor reporting no identity at all), so the
+    // common request builds none of this.
     let mut live_total: u64 = 0;
     let mut live_matching: u64 = 0;
     for snapshot in &snapshots {
@@ -1030,16 +1227,23 @@ async fn session_page_staged(
                     .count() as u64,
             );
         }
+        let mut ordered: Vec<(store::CacheKey, &SessionInfo)> = live
+            .iter()
+            .map(|info| (store::CacheKey::of(info, snapshot.id), info))
+            .collect();
+        if sort != store::ListSort::Created {
+            ordered.sort_by(|(left, _), (right, _)| sort.position(left).cmp(&sort.position(right)));
+        }
         let start = match &after {
             None => 0,
             Some(after) => {
-                live.partition_point(|info| order_key(info, snapshot.id) <= key_order(after))
+                ordered.partition_point(|(key, _)| sort.position(key) <= sort.position(after))
             }
         };
         sources.push(MergeSource {
             snapshot: Some(snapshot),
             persisted: std::collections::VecDeque::new(),
-            live: &live[start..],
+            live: ordered.drain(start..).collect(),
         });
     }
 
@@ -1060,7 +1264,7 @@ async fn session_page_staged(
         let next = sources
             .iter()
             .enumerate()
-            .filter_map(|(index, source)| source.peek().map(|key| (key, index)))
+            .filter_map(|(index, source)| source.peek(sort).map(|key| (key, index)))
             .min()
             .map(|(_, index)| index);
         let Some(index) = next else { break };
@@ -1076,8 +1280,8 @@ async fn session_page_staged(
         if sources[index].snapshot.is_some()
             && let Some(fence) = &fence
             && sources[index]
-                .peek()
-                .is_some_and(|key| key >= key_order(fence))
+                .peek(sort)
+                .is_some_and(|key| key >= sort.position(fence))
         {
             more = true;
             break;
@@ -1115,11 +1319,13 @@ async fn session_page_staged(
     // and a cursor built from the payload would resume somewhere the order
     // does not contain.
     //
-    // It carries the filter's digest and nothing else. Everything a later
-    // page needs to know about the COUNT lives on this side.
-    let next_cursor = more
-        .then(|| taken.last().map(|item| encode_cursor(&item.key, &digest)))
-        .flatten();
+    // It carries the order it was taken in and the filter's digest, and
+    // nothing else. Everything a later page needs to know about the COUNT
+    // lives on this side.
+    let next_cursor = match (more, taken.last()) {
+        (true, Some(item)) => Some(encode_cursor(&item.key, sort, &digest)),
+        _ => None,
+    };
     let sessions: Vec<SessionRow> = taken.into_iter().filter_map(|item| item.row).collect();
     // Only the PERSISTED component is remembered; the live one is added on
     // the way out, freshly counted above, on both the hit and the miss path.
@@ -1144,16 +1350,6 @@ async fn session_page_staged(
     })
 }
 
-/// One [`store::CacheKey`] as the comparable ordering tuple [`order_key`]
-/// produces, so a key and a row are compared by the same rule.
-fn key_order(key: &store::CacheKey) -> (std::cmp::Reverse<i64>, &str, HostId) {
-    (
-        std::cmp::Reverse(key.created_at),
-        key.session_id.as_str(),
-        key.host,
-    )
-}
-
 /// The refusal an undecodable `?cursor=` produces.
 fn malformed_cursor() -> anyhow::Error {
     anyhow::Error::new(crate::SupervisorError {
@@ -1176,6 +1372,24 @@ fn cursor_filter_changed() -> anyhow::Error {
         message: "this session list cursor was issued for a different filter; a resume point \
                   only means something within the result set it came from, so changing, \
                   clearing or adding a filter parameter requires a fresh walk with no cursor"
+            .to_string(),
+    })
+}
+
+/// The refusal a cursor replayed under a DIFFERENT order produces.
+///
+/// Its own message rather than [`cursor_filter_changed`]'s, because the thing
+/// the caller has to change is different: nothing is wrong with the filter,
+/// and a client told to check its filters after moving a sort control would
+/// look in the wrong place. The damage it prevents is the same — a position
+/// in one sequence applied to another resumes mid-list and drops everything
+/// before that point, with nothing in the reply to say so.
+fn cursor_sort_changed() -> anyhow::Error {
+    anyhow::Error::new(crate::SupervisorError {
+        kind: farhelm_proto::ErrorKind::InvalidRequest,
+        message: "this session list cursor was issued for a different sort order; a resume \
+                  point names a place in one order and means nothing in another, so changing \
+                  ?sort= requires a fresh walk with no cursor"
             .to_string(),
     })
 }
@@ -1227,40 +1441,239 @@ mod tests {
         }
     }
 
-    /// A cursor must survive its own round trip exactly — a resume point
-    /// that decoded to a DIFFERENT key would skip or repeat rows with no
-    /// error anywhere, which is the one failure mode a page walk cannot
-    /// detect for itself.
+    /// A cursor must survive its own round trip exactly, in EVERY order — a
+    /// resume point that decoded to a different position would skip or repeat
+    /// rows with no error anywhere, which is the one failure mode a page walk
+    /// cannot detect for itself.
+    ///
+    /// Asserted as POSITIONS rather than as whole keys, because a cursor
+    /// deliberately carries only the components its own order compares (see
+    /// [`ListCursor`]): what has to survive is where the token sits in the
+    /// order it names, and the components that order ignores are not in the
+    /// token at all.
     #[test]
     fn a_cursor_round_trips_every_component_of_the_key() {
-        for key in [
-            store::CacheKey {
-                created_at: 1_700_000_000,
-                session_id: "sess-1".to_string(),
-                host: 7,
-            },
-            // The extremes, because the key is signed and the id is
-            // arbitrary text a supervisor chose.
-            store::CacheKey {
-                created_at: i64::MIN,
-                session_id: String::new(),
-                host: i64::MAX,
-            },
-            store::CacheKey {
-                created_at: i64::MAX,
-                session_id: "a \"quoted\" / slashed \u{1f600} id".to_string(),
-                host: 0,
-            },
+        for sort in [
+            store::ListSort::Created,
+            store::ListSort::Activity,
+            store::ListSort::Title,
         ] {
-            let digest = store::SessionFilter::default().title("drain").digest();
-            let (decoded, bound) =
-                decode_cursor(&encode_cursor(&key, &digest)).expect("our own cursor decodes");
-            assert_eq!(decoded, key);
-            assert_eq!(
-                bound, digest,
-                "the filter binding must survive the round trip beside the position"
-            );
+            for key in [
+                store::CacheKey {
+                    created_at: 1_700_000_000,
+                    session_id: "sess-1".to_string(),
+                    host: 7,
+                    activity_at: 1_700_000_900,
+                    title_sort: "refactor the drain".to_string(),
+                },
+                // The extremes, because the key is signed and the id is
+                // arbitrary text a supervisor chose.
+                store::CacheKey {
+                    created_at: i64::MIN,
+                    session_id: String::new(),
+                    host: i64::MAX,
+                    activity_at: i64::MIN,
+                    title_sort: String::new(),
+                },
+                store::CacheKey {
+                    created_at: i64::MAX,
+                    session_id: "a \"quoted\" / slashed \u{1f600} id".to_string(),
+                    host: 0,
+                    activity_at: i64::MAX,
+                    title_sort: "a \"quoted\" / slashed \u{1f600} title".to_string(),
+                },
+            ] {
+                let digest = store::SessionFilter::default().title("drain").digest();
+                let (decoded, bound_sort, bound) =
+                    decode_cursor(&encode_cursor(&key, sort, &digest))
+                        .expect("our own cursor decodes");
+                assert_eq!(
+                    sort.position(&decoded),
+                    sort.position(&key),
+                    "the position must survive the round trip under {sort:?}"
+                );
+                assert_eq!(
+                    bound_sort, sort,
+                    "and so must the order the position belongs to"
+                );
+                assert_eq!(
+                    bound, digest,
+                    "the filter binding must survive the round trip beside the position"
+                );
+            }
         }
+    }
+
+    /// A cursor is bound to its ORDER, not merely to its filter: the token
+    /// names the sort it was minted under, and the position it carries is the
+    /// one that order compares.
+    ///
+    /// Two properties, and both are load-bearing. A decoded cursor reports
+    /// the order it came from, which is what lets [`session_page`] refuse a
+    /// replay under a different one — applying it instead would resume
+    /// mid-list through a sequence the position never described. And each
+    /// order's own leading component is REQUIRED: a token naming the activity
+    /// order without an activity stamp is refused rather than defaulted,
+    /// because a default is a real position in that order and the walk would
+    /// silently resume there — skipping or repeating rows depending on where
+    /// in the order the default happens to fall.
+    #[test]
+    fn a_cursor_is_bound_to_the_order_it_was_minted_under() {
+        use base64::Engine;
+
+        let key = store::CacheKey {
+            created_at: 100,
+            session_id: "sess-1".to_string(),
+            host: 1,
+            activity_at: 900,
+            title_sort: "nightly sweep".to_string(),
+        };
+        let digest = store::SessionFilter::default().digest();
+
+        // That a decoded cursor REPORTS its order is
+        // `a_cursor_round_trips_every_component_of_the_key`'s, asserted there
+        // for every order beside the position itself; what is left to this
+        // test is which components the token carries and which forgeries the
+        // decoder refuses.
+
+        // The leading component is carried exactly where it is compared, so a
+        // creation-ordered cursor carries neither `la` nor `t` and stays
+        // fixed-size — version 3 grew it by the order word, not by anything
+        // that scales with a peer's text.
+        let fields = |token: &str| -> Vec<String> {
+            let json: serde_json::Value = serde_json::from_slice(
+                &base64::engine::general_purpose::URL_SAFE_NO_PAD
+                    .decode(token)
+                    .expect("our cursor is base64url"),
+            )
+            .expect("our cursor is JSON");
+            json.as_object()
+                .expect("a cursor is a JSON object")
+                .keys()
+                .cloned()
+                .collect()
+        };
+        assert_eq!(
+            fields(&encode_cursor(&key, store::ListSort::Created, &digest)),
+            vec!["at", "f", "fh", "h", "s", "sid"]
+        );
+        assert_eq!(
+            fields(&encode_cursor(&key, store::ListSort::Activity, &digest)),
+            vec!["at", "f", "fh", "h", "la", "s", "sid"]
+        );
+        assert_eq!(
+            fields(&encode_cursor(&key, store::ListSort::Title, &digest)),
+            vec!["at", "f", "fh", "h", "s", "sid", "t"]
+        );
+
+        // A token naming an order it does not carry the key for is refused
+        // outright, as is one naming an order this build has never served.
+        let decodes = |value: serde_json::Value| -> bool {
+            let token = base64::engine::general_purpose::URL_SAFE_NO_PAD
+                .encode(serde_json::to_vec(&value).expect("test JSON"));
+            decode_cursor(&token).is_some()
+        };
+        assert!(
+            !decodes(serde_json::json!({
+                "fh": CURSOR_DOMAIN, "s": "activity", "at": 100, "sid": "s", "h": 1, "f": digest
+            })),
+            "the activity order's own stamp is required, never defaulted"
+        );
+        assert!(
+            !decodes(serde_json::json!({
+                "fh": CURSOR_DOMAIN, "s": "title", "at": 100, "sid": "s", "h": 1, "f": digest
+            })),
+            "and so is the title order's collated title"
+        );
+        assert!(
+            !decodes(serde_json::json!({
+                "fh": CURSOR_DOMAIN, "s": "cwd", "at": 100, "sid": "s", "h": 1, "f": digest
+            })),
+            "an order word this build does not know is not an order"
+        );
+        // The requiredness above is about the LEADING component and nothing
+        // else: the same token with every other required field present still
+        // decodes once its own order's component is there, so what these
+        // refusals pin is the missing key rather than an incidentally
+        // malformed token.
+        assert!(
+            decodes(serde_json::json!({
+                "fh": CURSOR_DOMAIN, "s": "activity", "at": 100, "sid": "s", "h": 1,
+                "la": 900, "f": digest
+            })),
+            "an activity cursor carrying its stamp is well formed"
+        );
+        assert!(
+            decodes(serde_json::json!({
+                "fh": CURSOR_DOMAIN, "s": "title", "at": 100, "sid": "s", "h": 1,
+                "t": "nightly sweep", "f": digest
+            })),
+            "and so is a title cursor carrying its collated title"
+        );
+    }
+
+    /// A cursor minted by the version that predates the sort binding must
+    /// fail to decode, rather than being read as a creation-ordered one.
+    ///
+    /// Every version-2 token WAS creation-ordered, so reading it that way
+    /// would even be correct — and it would cost the decoder a permanently
+    /// optional field plus a rule about what its absence means. The domain
+    /// tag exists to make that a clean refusal instead, and this pins that
+    /// the tag is what does it.
+    ///
+    /// Two tokens, and the second is what makes the claim honest. The first is
+    /// a version-2 cursor as one was actually minted: no `s`, because the
+    /// order had no name yet. That alone proves nothing about the TAG — the
+    /// decoder would refuse it for the missing order too. The second is a
+    /// fully current token with only the domain wound back, so the tag is the
+    /// single thing standing between it and a successful decode.
+    #[test]
+    fn a_cursor_from_the_previous_domain_is_refused() {
+        use base64::Engine;
+
+        let digest = store::SessionFilter::default().digest();
+        let encode = |value: serde_json::Value| {
+            base64::engine::general_purpose::URL_SAFE_NO_PAD
+                .encode(serde_json::to_vec(&value).expect("test JSON"))
+        };
+        let as_minted = encode(serde_json::json!({
+            "fh": "farhelm/helm-sessions/2",
+            "at": 100,
+            "sid": "sess-1",
+            "h": 1,
+            "f": digest,
+        }));
+        let only_the_domain_is_old = encode(serde_json::json!({
+            "fh": "farhelm/helm-sessions/2",
+            "s": "created",
+            "at": 100,
+            "sid": "sess-1",
+            "h": 1,
+            "f": digest,
+        }));
+        assert!(
+            decode_cursor(&as_minted).is_none(),
+            "a token from the previous cursor version names no order and must not be guessed at"
+        );
+        assert!(
+            decode_cursor(&only_the_domain_is_old).is_none(),
+            "and the tag alone is enough to refuse one that is otherwise current"
+        );
+        // The control: the same token under the current tag decodes, so the
+        // two refusals above are about the tag rather than about anything else
+        // in the payload.
+        assert!(
+            decode_cursor(&encode(serde_json::json!({
+                "fh": CURSOR_DOMAIN,
+                "s": "created",
+                "at": 100,
+                "sid": "sess-1",
+                "h": 1,
+                "f": digest,
+            })))
+            .is_some(),
+            "the fixture must be a well-formed cursor apart from its domain"
+        );
     }
 
     /// A cursor carries a POSITION and a filter binding, and no count of any
@@ -1281,7 +1694,10 @@ mod tests {
                 created_at: 1_700_000_000,
                 session_id: "sess-1".to_string(),
                 host: 3,
+                activity_at: 1_700_000_900,
+                title_sort: "refactor the drain".to_string(),
             },
+            store::ListSort::Created,
             &store::SessionFilter::default().title("drain").digest(),
         );
         let json: serde_json::Value = serde_json::from_slice(
@@ -1301,9 +1717,9 @@ mod tests {
             .collect();
         assert_eq!(
             fields,
-            vec!["at", "f", "fh", "h", "sid"],
-            "a cursor carries the domain tag, the ordering key and the filter binding — a count \
-             among these would be a number the caller gets to choose"
+            vec!["at", "f", "fh", "h", "s", "sid"],
+            "a cursor carries the domain tag, the order, the ordering key and the filter \
+             binding — a count among these would be a number the caller gets to choose"
         );
     }
 
@@ -1339,9 +1755,15 @@ mod tests {
             created_at: 1,
             session_id: "s".to_string(),
             host: 1,
+            activity_at: 1,
+            title_sort: "s".to_string(),
         };
-        let (_, bound) = decode_cursor(&encode_cursor(&key, &filtered.digest()))
-            .expect("our own cursor decodes");
+        let (_, _, bound) = decode_cursor(&encode_cursor(
+            &key,
+            store::ListSort::Created,
+            &filtered.digest(),
+        ))
+        .expect("our own cursor decodes");
         assert_ne!(
             bound,
             unfiltered.digest(),
@@ -1382,7 +1804,10 @@ mod tests {
                 created_at: 1_700_000_000,
                 session_id: "sess-1".to_string(),
                 host: 1,
+                activity_at: 1_700_000_000,
+                title_sort: "sess-1".to_string(),
             },
+            store::ListSort::Created,
             &store::SessionFilter::default().digest(),
         );
         let helm_json = base64::engine::general_purpose::URL_SAFE_NO_PAD
@@ -1414,6 +1839,13 @@ mod tests {
     /// thing standing between the old shape and this one: v1 cursors carried
     /// a matching count and no filter binding, and a decoder that shrugged at
     /// the extra fields would resume a walk with neither guarantee in place.
+    ///
+    /// Every hand-built fixture below carries EVERY field a current cursor
+    /// needs except the one it is about, and the control at the end asserts
+    /// that the shared shape does decode. Without that discipline a fixture
+    /// missing two things proves only that the decoder refused it, never
+    /// which of the two did the refusing — and a later change that dropped one
+    /// of the checks would leave the table green.
     #[test]
     fn a_malformed_or_foreign_cursor_decodes_to_nothing() {
         use base64::Engine;
@@ -1421,21 +1853,31 @@ mod tests {
         let encode = |value: serde_json::Value| {
             base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(value.to_string())
         };
+        let digest = "0000000000000000";
         let foreign_domain = encode(
-            serde_json::json!({"fh": "farhelm/helm-sessions/3", "at": 1, "sid": "s",
-                                      "h": 1, "f": "0000000000000000"}),
+            serde_json::json!({"fh": "farhelm/other-sessions/3", "s": "created", "at": 1,
+                               "sid": "s", "h": 1, "f": digest}),
         );
         let superseded_version = encode(
             serde_json::json!({"fh": "farhelm/helm-sessions/1", "at": 1, "sid": "s",
                                       "h": 1, "m": 99, "r": 1, "f": "h-;d-;t-;p-;s-;"}),
         );
-        let extra_field = encode(serde_json::json!({"fh": CURSOR_DOMAIN, "at": 1, "sid": "s",
-                                                    "h": 1, "f": "0000000000000000", "x": 1}));
+        let extra_field = encode(
+            serde_json::json!({"fh": CURSOR_DOMAIN, "s": "created", "at": 1, "sid": "s",
+                               "h": 1, "f": digest, "x": 1}),
+        );
         // The binding is REQUIRED, not defaulted: a token without one names
         // no result set, and inventing "the unfiltered walk" for it would
-        // resume exactly the way this refusal exists to prevent.
-        let no_binding = encode(serde_json::json!({"fh": CURSOR_DOMAIN, "at": 1, "sid": "s",
-                                                   "h": 1}));
+        // resume exactly the way this refusal exists to prevent. `f` is the
+        // only thing missing here, which is what makes it a test OF `f`.
+        let no_binding = encode(
+            serde_json::json!({"fh": CURSOR_DOMAIN, "s": "created", "at": 1, "sid": "s", "h": 1}),
+        );
+        // And the order is required for the same reason, on the same terms.
+        let no_order = encode(
+            serde_json::json!({"fh": CURSOR_DOMAIN, "at": 1, "sid": "s", "h": 1,
+                                      "f": digest}),
+        );
         for malformed in [
             "not-base64!!",
             "",
@@ -1445,12 +1887,24 @@ mod tests {
             superseded_version.as_str(),
             extra_field.as_str(),
             no_binding.as_str(),
+            no_order.as_str(),
         ] {
             assert!(
                 decode_cursor(malformed).is_none(),
                 "cursor {malformed:?} must not decode"
             );
         }
+
+        // The control: the shape every fixture above is one field away from.
+        assert!(
+            decode_cursor(&encode(
+                serde_json::json!({"fh": CURSOR_DOMAIN, "s": "created", "at": 1, "sid": "s",
+                                   "h": 1, "f": digest}),
+            ))
+            .is_some(),
+            "each refusal above must be about its own missing or wrong field, not about a \
+             fixture that was never a cursor"
+        );
     }
 
     /// The matching-count cache is BOUNDED and evicts by recency, so a walk
@@ -1567,6 +2021,7 @@ mod tests {
             None,
             50,
             &filter,
+            store::ListSort::Created,
         )
         .await
         .expect("the first page reads");
@@ -1580,6 +2035,7 @@ mod tests {
             None,
             50,
             &filter,
+            store::ListSort::Created,
             async {
                 harness.fleet.edit(local, |script| {
                     script
@@ -1617,6 +2073,82 @@ mod tests {
         assert_eq!(
             second.total, 3,
             "the fleet total counts the same three sessions"
+        );
+    }
+
+    /// Changing the SORT does not recount an unchanged filter.
+    ///
+    /// Spec: three pages of one filter under three different orders cost the
+    /// store exactly one counting pass.
+    ///
+    /// This is the operational half of "ordering is not filtering". A sort
+    /// changes the sequence and never the membership, so the matching count
+    /// cache is keyed by the filter alone ([`MatchingCounts`]) — and the whole
+    /// point of that key is that a user moving a sort control pays for a fresh
+    /// page and nothing else. A count is a decode of every row in scope under
+    /// the store's one mutex, so recounting per sort change would make an idle
+    /// UI control expensive for every other reader too.
+    ///
+    /// Instrumented rather than inferred, for
+    /// `a_filtered_walk_counts_once_and_recounts_only_after_a_change`'s reason:
+    /// an implementation that recounted on every sort would report the same
+    /// number every time, so no reply can tell the two apart. The counter can.
+    #[tokio::test]
+    async fn changing_the_sort_does_not_recount_an_unchanged_filter() {
+        use crate::rest_harness;
+
+        let builder = rest_harness::FleetBuilder::new()
+            .await
+            .local(rest_harness::HostScript {
+                identity: Some("identity-local".to_string()),
+                sessions: vec![
+                    rest_harness::session("keep-1", 300),
+                    rest_harness::session("keep-2", 200),
+                    rest_harness::session("other", 100),
+                ],
+                ..rest_harness::HostScript::default()
+            })
+            .await;
+        let harness = builder.start().await;
+        let local = rest_harness::local_id(&harness.store).await;
+        harness.await_refreshed(local).await;
+
+        let filter = store::SessionFilter::default().title("keep");
+        let baseline = harness.store.counting_passes();
+        let mut counts = Vec::new();
+        for sort in [
+            store::ListSort::Created,
+            store::ListSort::Activity,
+            store::ListSort::Title,
+        ] {
+            let page = session_page(
+                &harness.manager,
+                &harness.store,
+                &harness.state.counts,
+                None,
+                50,
+                &filter,
+                sort,
+            )
+            .await
+            .expect("the page reads");
+            assert_eq!(
+                page.sessions.len(),
+                2,
+                "{sort:?} must serve the same membership"
+            );
+            counts.push(page.matching);
+        }
+        assert_eq!(
+            counts,
+            vec![Some(2), Some(2), Some(2)],
+            "the matching count is a property of the filter, so it cannot move with the order"
+        );
+        assert_eq!(
+            harness.store.counting_passes() - baseline,
+            1,
+            "and the count is computed once: a sort change reuses the cached entry rather than \
+             re-decoding the scope"
         );
     }
 
@@ -1661,6 +2193,7 @@ mod tests {
             None,
             50,
             &store::SessionFilter::default(),
+            store::ListSort::Created,
             std::future::ready(()),
             async {
                 let rows = harness.store.list_hosts().await.expect("hosts list");
@@ -1698,25 +2231,89 @@ mod tests {
     /// resulting page would be neither order.
     #[test]
     fn the_order_is_time_descending_then_id_then_host() {
+        let sort = store::ListSort::Created;
+        let position = |row: &SessionRow| store::CacheKey::of(&row.info, row.host);
+
         let newest = row("b", 200, 1);
         let older = row("a", 100, 1);
-        assert!(order_key(&newest.info, newest.host) < order_key(&older.info, older.host));
+        assert!(sort.position(&position(&newest)) < sort.position(&position(&older)));
 
         let tie_low_id = row("a", 100, 9);
         let tie_high_id = row("b", 100, 1);
         assert!(
-            order_key(&tie_low_id.info, tie_low_id.host)
-                < order_key(&tie_high_id.info, tie_high_id.host),
+            sort.position(&position(&tie_low_id)) < sort.position(&position(&tie_high_id)),
             "equal creation times order by session id, not by host"
         );
 
         let same_id_low_host = row("a", 100, 1);
         let same_id_high_host = row("a", 100, 2);
         assert!(
-            order_key(&same_id_low_host.info, same_id_low_host.host)
-                < order_key(&same_id_high_host.info, same_id_high_host.host),
+            sort.position(&position(&same_id_low_host))
+                < sort.position(&position(&same_id_high_host)),
             "the host id is the final tiebreak, so the order is total even where two hosts \
              claim one session id"
         );
+    }
+
+    /// Each of the other two orders leads with its own component and then
+    /// falls into the SAME creation-order tail.
+    ///
+    /// The tail is the property worth pinning: a sort whose leading component
+    /// ties has to break that tie identically to every other sort, or two
+    /// equally-ranked rows can swap places between two page fetches and a
+    /// cursor over them will skip one and repeat the other. Asserted here on
+    /// in-memory keys because that is the side a merge builds by hand; the
+    /// store's own tests pin that SQLite agrees.
+    #[test]
+    fn the_other_orders_lead_with_their_own_component_and_share_the_tail() {
+        let keyed = |id: &str, created_at: i64, activity: i64, title: &str, host: HostId| {
+            let mut row = row(id, created_at, host);
+            row.info.last_activity_at = activity;
+            row.info.title = title.to_string();
+            store::CacheKey::of(&row.info, host)
+        };
+
+        let activity = store::ListSort::Activity;
+        let busy = keyed("a", 100, 900, "zzz", 1);
+        let quiet = keyed("b", 800, 200, "aaa", 1);
+        assert!(
+            activity.position(&busy) < activity.position(&quiet),
+            "recent activity outranks a later creation time under the activity order"
+        );
+        let tie_new = keyed("z", 300, 500, "zzz", 1);
+        let tie_old = keyed("a", 200, 500, "aaa", 1);
+        assert!(
+            activity.position(&tie_new) < activity.position(&tie_old),
+            "equal activity falls through to creation time descending, not to the id"
+        );
+
+        let title = store::ListSort::Title;
+        let apple = keyed("z", 100, 100, "Apple", 1);
+        let banana = keyed("a", 900, 900, "banana", 1);
+        assert!(
+            title.position(&apple) < title.position(&banana),
+            "the title order is case-insensitive, so Apple precedes banana"
+        );
+        let same_new = keyed("z", 300, 100, "Same", 1);
+        let same_old = keyed("a", 200, 900, "same", 1);
+        assert!(
+            title.position(&same_new) < title.position(&same_old),
+            "titles that differ only by case tie, and the tie breaks by creation time"
+        );
+
+        // The final tiebreak is the host id under every order, which is what
+        // makes each of them total even where two hosts claim one session id.
+        for sort in [
+            store::ListSort::Created,
+            store::ListSort::Activity,
+            store::ListSort::Title,
+        ] {
+            let low = keyed("a", 100, 100, "same", 1);
+            let high = keyed("a", 100, 100, "same", 2);
+            assert!(
+                sort.position(&low) < sort.position(&high),
+                "{sort:?} must be a total order"
+            );
+        }
     }
 }

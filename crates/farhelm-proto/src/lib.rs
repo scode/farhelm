@@ -640,6 +640,11 @@ pub struct SessionInfo {
     /// should be storing a synthesized value back. It carries the same
     /// pre-epoch-clock collision `created_at`'s own docs accept —
     /// indistinguishable, and harmless for the same reason.
+    ///
+    /// [`SessionInfo::effective_activity`] is that fallback, written once so
+    /// that every reader ordering or rendering by activity applies the same
+    /// rule; read this field raw only when the distinction between "unknown"
+    /// and a real stamp is the point.
     #[serde(default)]
     pub last_activity_at: i64,
     /// Monotonic creation order assigned by this session's supervisor.
@@ -740,6 +745,34 @@ pub struct SessionInfo {
     /// version 8 shipped `Hello::host_identity` under, and it makes the
     /// absent case the one every current consumer must handle correctly.
     pub source_profile: Option<SourceProfile>,
+}
+
+impl SessionInfo {
+    /// The activity stamp to SORT and DISPLAY by: [`Self::last_activity_at`]
+    /// when the sender supplied one, and [`Self::created_at`] when it did
+    /// not.
+    ///
+    /// One spelling of the compatibility rule `last_activity_at`'s own docs
+    /// state, so every reader that has to order or render sessions by recent
+    /// activity applies it identically. Two readers disagreeing about what a
+    /// `0` means would not merely look different: the helm's cache extracts
+    /// this value into an indexed column while the merge of an
+    /// identity-less host's in-memory rows computes it live, and an
+    /// activity-ordered page interleaves the two — so a second, subtly
+    /// different fallback would produce a page in neither order.
+    ///
+    /// Deliberately NOT written back into the field it falls back from:
+    /// storing the synthesized value would make a guess indistinguishable
+    /// from an observation for every later merge (see
+    /// `farhelm-helm`'s `merge_cached_session`, which keeps the raw value
+    /// monotonic). Derive it at read time, every time.
+    pub fn effective_activity(&self) -> i64 {
+        if self.last_activity_at > 0 {
+            self.last_activity_at
+        } else {
+            self.created_at
+        }
+    }
 }
 
 /// A spawned session's attribution credential, presented once in its
@@ -4082,6 +4115,50 @@ mod tests {
             decoded.last_activity_at, 0,
             "a sender that predates last_activity_at must default to 0, which readers take as \
              \"unknown, fall back to created_at\" rather than as an instant in 1970"
+        );
+    }
+
+    /// The activity fallback every reader is supposed to apply, pinned as
+    /// one rule rather than left to each of them.
+    ///
+    /// It matters because two readers disagreeing about what `0` means do not
+    /// merely render differently: the helm orders a session list by this
+    /// value, merging rows it read out of an indexed column with rows it
+    /// computed live, so a second, subtly different fallback would produce a
+    /// page in neither order. The `0` case is the whole point — a sender that
+    /// predates the field must sort by its creation time, not at the epoch.
+    #[test]
+    fn the_effective_activity_falls_back_to_creation_time_only_when_unknown() {
+        let at = |created_at: i64, last_activity_at: i64| SessionInfo {
+            id: "s1".to_string(),
+            parent: None,
+            title: "demo".to_string(),
+            created_at,
+            last_activity_at,
+            creation_seq: None,
+            cwd: "/tmp".to_string(),
+            invocation: "agent".to_string(),
+            status: SessionStatus::default(),
+            annotation: None,
+            restart_offer: RestartOffer::default(),
+            tabs: Vec::new(),
+            archived: false,
+            source_profile: None,
+        };
+
+        let sampled = at(1_700_000_000, 1_700_000_600);
+        assert_eq!(sampled.effective_activity(), 1_700_000_600);
+
+        let unknown = at(1_700_000_000, 0);
+        assert_eq!(
+            unknown.effective_activity(),
+            1_700_000_000,
+            "0 is the field's \"unknown\", so it reads as the session's creation time"
+        );
+        assert_eq!(
+            unknown.last_activity_at, 0,
+            "and the fallback is DERIVED, never written back — a stored guess would be \
+             indistinguishable from an observation at the next merge"
         );
     }
 
