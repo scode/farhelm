@@ -123,6 +123,134 @@ async function rememberSocket(page: Page, elementId: string) {
   }, elementId);
 }
 
+/**
+ * Hold this page's TERMINAL sockets off the helm — every reconnect attempt
+ * fails to connect — until `admitTerminalSockets` puts the real constructor
+ * back.
+ *
+ * What this pair buys is ORDERING, and the takeover test below cannot be
+ * correct without it: the winner has to own the session BEFORE the loser's
+ * next unattended attach reaches the helm, because that attach being
+ * refused is the entire subject. The test used to buy that order with a
+ * four-second backoff rung and the hope that a second browser context's
+ * whole cold start — a fresh cache, the WASM bundle fetched and compiled
+ * again — fit inside it. Traced on a quiet 4-core worker the winner needed
+ * ~2.9s of that 4s; under WebKit in a loaded two-engine run the margin was
+ * gone.
+ *
+ * When it went, what failed was not teardown. The loser's ladder simply
+ * fired FIRST, reattached, went live, and was then displaced while
+ * attached — a different, equally correct path that deliberately leaves the
+ * island mounted (`recoverable()` refuses to recover a view that lost the
+ * session, so nothing tears it down). Every assertion below still passed
+ * except the empty-registry one, which is why the flake read as a WebKit
+ * teardown bug rather than as the test having measured the wrong scenario.
+ * A longer rung would only have moved the same coin flip.
+ *
+ * A withheld attempt is a REAL failed handshake against a route this helm
+ * does not serve, so the ladder counts it exactly as it counts an
+ * unreachable helm — none of the client's state machine is stubbed out.
+ * Only terminal sockets are diverted, unlike the whole-`WebSocket` swap
+ * `background-probes-recover-without-a-click` uses for its own purposes:
+ * the feed socket (`/api/events`) keeps connecting, so the rest of the page
+ * goes on behaving like a page.
+ */
+async function withholdTerminalSockets(page: Page) {
+  await page.evaluate(() => {
+    const Real = (window as any).WebSocket;
+    (window as any).__realWebSocket = Real;
+    // Two counters `expectTerminalSocketsWereWithheld` reads. Attempts
+    // proves the ladder actually ran into the barrier (so a terminal URL
+    // that stopped matching the predicate below could not slip past it
+    // unnoticed); opens proves none of the diverted handshakes upgraded.
+    // Their ABSENCE is what catches a caller that never installed this.
+    (window as any).__withheldTerminalAttempts = 0;
+    (window as any).__withheldTerminalOpens = 0;
+    const Withheld: any = function (url: string, protocols?: any) {
+      const terminal = String(url).includes("/term");
+      if (terminal) {
+        (window as any).__withheldTerminalAttempts += 1;
+      }
+      const socket = new Real(
+        terminal ? `ws://${location.host}/api/farhelm-no-such-socket` : url,
+        protocols,
+      );
+      if (terminal) {
+        socket.addEventListener("open", () => {
+          (window as any).__withheldTerminalOpens += 1;
+        });
+      }
+      return socket;
+    };
+    for (const state of ["CONNECTING", "OPEN", "CLOSING", "CLOSED"]) {
+      Withheld[state] = Real[state];
+    }
+    (window as any).WebSocket = Withheld;
+  });
+}
+
+/**
+ * Fail by NAME if the ordering barrier did not actually hold, rather than
+ * letting a leak surface later as the assertion under test going wrong.
+ *
+ * That is not hypothetical bookkeeping: the flake being fixed here failed
+ * exactly that way — a real, correct alternative path produced a mounted
+ * island, and the empty-registry assertion took the blame for it. Three
+ * ways of losing the barrier are caught: a socket that reached the helm
+ * anyway counts an open; a ladder that never tried — because the terminal
+ * URL stopped matching the withholding predicate, say, and went straight
+ * to the helm as a real socket — counts no attempt at all; and a
+ * `withholdTerminalSockets` call that was removed or reordered leaves both
+ * counters undefined.
+ */
+async function expectTerminalSocketsWereWithheld(page: Page) {
+  // Waits for the first diverted attempt rather than demanding it already
+  // happened: a warm winner (Chromium on a quiet box) attaches inside the
+  // loser's first rung, so at this instant the ladder may not have fired
+  // yet. The rung guarantees it will within a second, which makes this a
+  // bounded wait for a certainty, not a sprint.
+  await expect
+    .poll(() => page.evaluate(() => (window as any).__withheldTerminalAttempts), {
+      timeout: 10_000,
+      message: "setup: the loser's ladder must have tried (and been diverted) at least once while withheld",
+    })
+    .toBeGreaterThanOrEqual(1);
+  expect(
+    await page.evaluate(() => (window as any).__withheldTerminalOpens),
+    "setup: the loser's terminal sockets must stay off the helm until the winner has attached",
+  ).toBe(0);
+}
+
+/**
+ * Let this page's terminal sockets reach the helm again
+ * (`withholdTerminalSockets`) — through a counting pass-through rather than
+ * the bare constructor, so the test can later prove the ladder went QUIET:
+ * `terminalSocketsConstructedSince` reads how many terminal sockets were
+ * built after a baseline, which is what "attaching nothing" means once the
+ * sockets are reachable again.
+ */
+async function admitTerminalSockets(page: Page) {
+  await page.evaluate(() => {
+    const Real = (window as any).__realWebSocket;
+    (window as any).__terminalSocketConstructions = 0;
+    const Counting: any = function (url: string, protocols?: any) {
+      if (String(url).includes("/term")) {
+        (window as any).__terminalSocketConstructions += 1;
+      }
+      return new Real(url, protocols);
+    };
+    for (const state of ["CONNECTING", "OPEN", "CLOSING", "CLOSED"]) {
+      Counting[state] = Real[state];
+    }
+    (window as any).WebSocket = Counting;
+  });
+}
+
+/** How many terminal sockets this page has constructed since `admitTerminalSockets`. */
+async function terminalSocketsConstructed(page: Page): Promise<number> {
+  return page.evaluate(() => (window as any).__terminalSocketConstructions);
+}
+
 // A terminal whose socket dies gets itself back, unaided, and comes back
 // where the session IS — not scrolling its history past again.
 //
@@ -429,22 +557,31 @@ test("manual-reconnect-is-offered-during-the-first-rung", async ({ page, request
   }
 });
 
-// A takeover that lands while a client is BETWEEN reconnect attempts is
-// the race auto-reconnect creates and must not lose: that client holds no
-// socket, so the takeover notice reaches it nowhere, and its next
-// automatic attach would reuse the same lease and silently displace the
-// new owner — an eviction with nobody behind it.
+// A takeover that lands while a client is ON THE RECONNECT LADDER, holding
+// no attachment, is the race auto-reconnect creates and must not lose: the
+// takeover notice reaches that client nowhere, and its next automatic
+// attach would reuse the same lease and silently displace the new owner —
+// an eviction with nobody behind it.
 //
 // Two independent mechanisms are asserted, because each covers the other's
 // gap. The supervisor REFUSES an unattended attach while another lease
 // holds the session (`if_unowned`), and the browser stops attempting at
 // all once it learns it was taken over. The observable consequence is the
 // one that matters to a user: the winner keeps typing, uninterrupted.
+//
+// The ORDER — winner attached, then the loser's attempt refused — is
+// established by `withholdTerminalSockets` rather than by outrunning a
+// backoff rung; see that helper for the flake that taught us the
+// difference.
 test("takeover-during-backoff-does-not-steal-the-session", async ({ browser, page, request }) => {
-  // A long first rung: the takeover below has to land while this client is
-  // WAITING, which is the whole scenario.
+  // A cadence, not a barrier: with terminal sockets withheld below, the
+  // rung only decides how soon after the winner attaches the loser's first
+  // reachable attempt fires. The probe interval matches so a winner that
+  // takes longer than the ladder is indistinguishable from one that does
+  // not — nothing here depends on which phase the recovery is in.
   await reconnectTimingsFromNextLoad(page, {
-    delaysMs: [4_000, 4_000, 4_000, 4_000, 4_000, 4_000],
+    delaysMs: [1_000, 1_000, 1_000, 1_000, 1_000, 1_000],
+    probeIntervalMs: 1_000,
   });
   let ownId: string | undefined;
   try {
@@ -457,6 +594,9 @@ test("takeover-during-backoff-does-not-steal-the-session", async ({ browser, pag
     await page.keyboard.type(marker);
     await page.keyboard.press("Enter");
     await waitForTermText(page, `echo:${marker}`);
+    // Withheld BEFORE the close, so there is no window at all in which the
+    // ladder could reach the helm ahead of the winner below.
+    await withholdTerminalSockets(page);
     await rememberSocket(page, "terminal");
     await page.evaluate(() => (window as any).__farhelmIslands["terminal"].ws.close());
     await expect(page.locator(".terminal-reconnect-now")).toBeVisible();
@@ -464,8 +604,16 @@ test("takeover-during-backoff-does-not-steal-the-session", async ({ browser, pag
     const second = await browser.newContext();
     const page2 = await second.newPage();
     try {
-      // The winner attaches while the loser is mid-backoff, holding nothing.
+      // The winner attaches while the loser is on the ladder holding
+      // nothing — however long its cold start takes, since the loser cannot
+      // reach the helm meanwhile.
       await openSessionTerminal(page2, ownId!);
+
+      // Only now can the loser attach at all, so its next rung is the first
+      // attempt the helm ever sees from it — and it is unattended, which is
+      // what makes it `if_unowned` and refusable.
+      await expectTerminalSocketsWereWithheld(page);
+      await admitTerminalSockets(page);
 
       // The loser's next attempt fires, is refused, and lands it in the
       // state it was actually in: taken over, with the deliberate way back.
@@ -486,9 +634,20 @@ test("takeover-during-backoff-does-not-steal-the-session", async ({ browser, pag
       await page2.keyboard.press("Enter");
       await waitForTermText(page2, `echo:${typed}`, 15_000);
 
-      // And it stays that way: several further rungs elapse with the loser
-      // attaching nothing.
-      await page.waitForTimeout(1_000);
+      // And it stays that way: more than two further rungs elapse with the
+      // loser CONSTRUCTING no terminal socket at all — counted in the page,
+      // so an attempt that was built, refused, and torn down between two
+      // registry samples cannot hide. The wait runs on the loser page's own
+      // event loop rather than the runner's clock: under WebKit throttling
+      // the runner can finish a `waitForTimeout` before the page's 1s rung
+      // timers have fired even once, which would make the negative check
+      // below vacuous.
+      const afterRefusal = await terminalSocketsConstructed(page);
+      await page.evaluate(() => new Promise((resolve) => setTimeout(resolve, 2_500)));
+      expect(
+        (await terminalSocketsConstructed(page)) - afterRefusal,
+        "the retired ladder must construct no further terminal socket once sockets are admitted",
+      ).toBe(0);
       // The registry is EMPTY here, and that is the recovery being properly
       // retired rather than a terminal being abandoned: the refused
       // attempt's island was torn down and the screen the user had was put
