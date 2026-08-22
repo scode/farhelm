@@ -64,6 +64,7 @@
 // the path every one of these mechanisms is actually meant to serve.
 import { expect, test, type Page } from "@playwright/test";
 import { cleanupSession, createSession } from "./helpers/fleet";
+import { attachSession, termText, waitForTermText } from "./helpers/term";
 
 /**
  * Build a session invocation that blocks on `read _gate` until this test
@@ -77,48 +78,6 @@ import { cleanupSession, createSession } from "./helpers/fleet";
  */
 function gatedShellInvocation(script: string): string {
   return `sh -c 'read _gate; ${script}; sleep 300'`;
-}
-
-/**
- * Open a freshly created session and wait until its terminal is genuinely
- * usable — mounted AND socket-open, not merely mounted. The extra
- * `readyState` wait is what `openTerminal` in terminal.spec.ts does not
- * need (the shared "e2e-session" is long since idle by the time any test
- * attaches it) but every fixture in THIS file does: each session here is
- * brand new, and the DECRPM regression test's own docs record the gap this
- * closes — input sent between mount and socket-OPEN is silently dropped.
- */
-async function attachSession(page: Page, id: string): Promise<void> {
-  const target = page.locator(`[data-session-id="${id}"]`);
-  await expect(target).toBeVisible({ timeout: 20_000 });
-  await target.locator(".session-row-open").click();
-  await page.waitForFunction(() => (window as any).__farhelmTermReady === true);
-  await page.waitForFunction(() => (window as any).__farhelmWs?.readyState === WebSocket.OPEN);
-}
-
-/** Full text content of the terminal buffer (scrollback + viewport) —
- * duplicated from terminal.spec.ts's identical helper rather than imported,
- * matching mouse-modes.spec.ts's own precedent: that file exports nothing,
- * and per this suite's per-area-file convention a new spec starts clean. */
-async function termText(page: Page): Promise<string> {
-  return page.evaluate(() => {
-    const term = (window as any).__farhelmTerm;
-    if (!term) return "";
-    const buf = term.buffer.active;
-    const lines: string[] = [];
-    for (let i = 0; i < buf.length; i++) {
-      lines.push(buf.getLine(i)?.translateToString(true) ?? "");
-    }
-    return lines.join("\n");
-  });
-}
-
-/** Poll the buffer until `needle` shows up — terminal output arrives
- * asynchronously over the WebSocket with no DOM event to await. */
-async function waitForTermText(page: Page, needle: string, timeout = 15_000) {
-  await expect
-    .poll(() => termText(page), { timeout, message: `waiting for ${needle}` })
-    .toContain(needle);
 }
 
 /**

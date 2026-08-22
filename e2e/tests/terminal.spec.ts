@@ -43,10 +43,10 @@
 // re-read pick it up. The handful whose subject genuinely IS the fallback
 // cadence say so in their own docs and make the feed unhealthy on purpose.
 //
-// The stub is imported rather than copied, unlike this file's other
-// helpers: what it defines is not a snippet but the CONTRACT for what "the
-// feed is healthy" means, and a second definition of that would drift from
-// the one the feed's own spec asserts against.
+// The feed stub and terminal-island helpers are imported because both are
+// contracts: the former defines "the feed is healthy"; the latter owns
+// `window.__farhelmTerm`, `term.buffer.active`, and readiness globals. A
+// genuinely one-off snippet still stays local with the test that needs it.
 import { test, expect, Page, APIRequestContext } from "@playwright/test";
 import {
   createSession,
@@ -74,6 +74,7 @@ import { stackScratchDir } from "./helpers/scratch";
 // because no API makes a host go away.
 import { ChildProcess, spawn } from "node:child_process";
 import net from "node:net";
+import { cleanupSession, fillCreateForm, termText, waitForTermText } from "./helpers/term";
 
 // Any status a session's agent can carry while it is UP (PLAN_M6_75.md
 // item 3's live split: running / waiting / idle).
@@ -263,48 +264,6 @@ const FLOOD_AGENT_COMMAND = `"${path.resolve(__dirname, "../../target/debug/farh
 const FLOOD_RECORDS = 800_000;
 
 /**
- * Open the list view's inline create form (PLAN_M2.md step 8: "not a
- * modal library" — a plain toggled `<div>`, not a dialog element), fill
- * in the three fields, and optionally submit.
- *
- * `title` is a required argument, not optional: every call site in this
- * file needs a distinct, known title anyway (to look the session up
- * afterward, or to assert on the row it produces), so there is no test
- * here that actually wants the field left blank — "a blank title creates
- * a session titled after the working directory's basename, not an empty
- * string" below fills it with the empty string explicitly rather than
- * omitting it, which reads the same in the test body and drops a branch
- * this helper does not otherwise need.
- *
- * Filling and submitting are split into two steps (rather than one
- * "createSession" helper) because the failure and double-submit tests
- * below need to inspect the form BETWEEN filling it and the response
- * landing — e.g. asserting the submit button is disabled mid-flight, or
- * that a failed submit leaves the fields exactly as filled.
- */
-async function fillCreateForm(
-  page: Page,
-  { cwd, invocation, title }: { cwd: string; invocation: string; title: string },
-) {
-  await page.locator(".new-session-button").click();
-  const form = page.locator(".create-session-form");
-  await expect(form).toBeVisible();
-  // The agent picker is told, explicitly, that this create means the command
-  // below. It is not a formality: the dialog defaults to the target host's
-  // last-used profile, and when that profile has since been DELETED — which
-  // is the state any run that exercised profiles leaves the shared stack in —
-  // it selects nothing at all and blocks the create until someone answers
-  // (SPEC.md's ask-don't-guess). Saying "custom command" here is what a user
-  // in that state would do, and it makes this helper independent of whatever
-  // the last profile-backed create left behind.
-  await form.locator(".create-session-profile").selectOption("");
-  await form.locator('input[type="text"]').nth(0).fill(cwd);
-  await form.locator('input[type="text"]').nth(1).fill(invocation);
-  await form.locator('input[type="text"]').nth(2).fill(title);
-  return form;
-}
-
-/**
  * Locator for a session row by its exact title, matched against the
  * `.session-title` element specifically rather than `hasText` on the
  * whole row: `hasText` matches a row's full text content (title, cwd, AND
@@ -335,31 +294,6 @@ async function findSessionIdByTitle(
 ): Promise<string | undefined> {
   const listing = await (await request.get("/api/sessions")).json();
   return listing.sessions.find((s: any) => s.title === title)?.id;
-}
-
-/** Full text content of the terminal buffer (scrollback + viewport). */
-async function termText(page: Page): Promise<string> {
-  return page.evaluate(() => {
-    const term = (window as any).__farhelmTerm;
-    if (!term) return "";
-    const buf = term.buffer.active;
-    const lines: string[] = [];
-    for (let i = 0; i < buf.length; i++) {
-      lines.push(buf.getLine(i)?.translateToString(true) ?? "");
-    }
-    return lines.join("\n");
-  });
-}
-
-/**
- * Poll the buffer until `needle` shows up. Polling, not a one-shot read:
- * terminal output arrives asynchronously over the WebSocket with no DOM
- * event to await, so there is nothing else to hook.
- */
-async function waitForTermText(page: Page, needle: string, timeout = 15_000) {
-  await expect
-    .poll(() => termText(page), { timeout, message: `waiting for ${needle}` })
-    .toContain(needle);
 }
 
 /**
@@ -702,29 +636,6 @@ function drainFloodOffScreen(
       }),
     { id, ...geometry, secretKey: DEVICE_SECRET_KEY },
   );
-}
-
-/**
- * Stop then delete a session, tolerating ONLY "already gone" (404 — the
- * expected case when a test's own happy path already cleaned up). Every
- * OTHER failure is surfaced rather than swallowed: a silently leaked flood
- * session — a long-running fake-agent process — would otherwise
- * contaminate every test that runs after it in this serially-run suite,
- * and a `.catch(() => {})` here would hide exactly that.
- */
-async function cleanupSession(request: APIRequestContext, id: string) {
-  const stopped = await request.post(`/api/sessions/${id}/stop`);
-  if (!stopped.ok() && stopped.status() !== 404) {
-    throw new Error(
-      `cleanup: stopping session ${id} failed (${stopped.status()}): ${await stopped.text()}`,
-    );
-  }
-  const deleted = await request.delete(`/api/sessions/${id}`);
-  if (!deleted.ok() && deleted.status() !== 404) {
-    throw new Error(
-      `cleanup: deleting session ${id} failed (${deleted.status()}): ${await deleted.text()}`,
-    );
-  }
 }
 
 /**
