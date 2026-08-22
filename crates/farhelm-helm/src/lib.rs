@@ -123,6 +123,9 @@ mod ensure;
 /// polling loops (PLAN_M6_75.md item 5).
 mod events;
 
+/// The changed-only fleet invalidation feed shared by the manager and REST edge.
+mod feed;
+
 /// `/api/hosts` — the registry's REST surface, and the JSON shape a UI
 /// renders a host chip from.
 mod hosts;
@@ -169,6 +172,9 @@ mod terminal;
 /// Private local coordination between the token CLI and a serving helm.
 mod token_control;
 pub use token_control::{rotate as rotate_token, show as show_token};
+
+/// Local and SSH transport implementations behind the connection manager's seam.
+mod transport;
 
 /// `POST /api/sessions/{id}/attachments` — the streaming attachment
 /// upload.
