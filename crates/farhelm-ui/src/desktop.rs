@@ -138,37 +138,41 @@ impl DesktopBootstrap {
         runtime.block_on(farhelm_supervisor::ensure_private_dir(&state_dir))?;
 
         let farhelm = bundled_farhelm()?;
-        let executable_dir = farhelm
-            .parent()
-            .context("the bundled Farhelm CLI has no executable directory")?;
-        let mut supervisor_paths = vec![executable_dir.to_path_buf()];
-        if let Some(path) = std::env::var_os("PATH") {
-            supervisor_paths.extend(std::env::split_paths(&path));
-        }
-        let supervisor_path = std::env::join_paths(supervisor_paths)
-            .context("constructing the bundled supervisor PATH")?;
+        let supervisor_tmux = resolve_supervisor_tmux(
+            std::env::var_os("FARHELM_TMUX"),
+            macos_tmux_prefixes(),
+            is_executable_file,
+        );
         let mut supervisor = match runtime.block_on(farhelm_helm::discover_local_supervisor(
             &farhelm, &state_dir,
         ))? {
             farhelm_helm::LocalSupervisorDiscovery::Answering => None,
-            farhelm_helm::LocalSupervisorDiscovery::Absent => Some(
-                Command::new(&farhelm)
+            farhelm_helm::LocalSupervisorDiscovery::Absent => Some({
+                let mut command = Command::new(&farhelm);
+                command
                     .args(["supervisor", "run", "--exit-on-stdin-close", "--state-dir"])
                     .arg(&state_dir)
-                    // Finder does not include Contents/MacOS on PATH. Putting
-                    // the CLI's directory first makes its private tmux the
-                    // authoritative substrate while retaining ordinary tools.
-                    .env("PATH", supervisor_path)
+                    // The supervisor inherits this process's PATH unchanged.
+                    // The bundle's own directory used to be prepended so a
+                    // bundled tmux would win; there is no bundled tmux any
+                    // more (TODO.md's 2026-08-22 floor decision) — the
+                    // `FARHELM_TMUX` below is what names the substrate — and
+                    // the supervisor is launched by absolute path while the
+                    // launch shim prepends its own directory for the spawn
+                    // CLI inside sessions, so nothing else needed it.
+                    //
                     // Retaining the write end tethers only the child this app
                     // owns, including GUI exits that skip Rust destructors.
                     .stdin(Stdio::piped())
                     .stdout(Stdio::null())
-                    .stderr(Stdio::inherit())
-                    .spawn()
-                    .with_context(|| {
-                        format!("starting bundled supervisor at {}", farhelm.display())
-                    })?,
-            ),
+                    .stderr(Stdio::inherit());
+                if let Some(tmux) = &supervisor_tmux {
+                    command.env("FARHELM_TMUX", tmux);
+                }
+                command.spawn().with_context(|| {
+                    format!("starting bundled supervisor at {}", farhelm.display())
+                })?
+            }),
         };
         ensure_managed_supervisor_running(&mut supervisor)?;
 
@@ -995,6 +999,80 @@ fn loopback_client() -> anyhow::Result<reqwest::Client> {
         .context("building proxy-free desktop HTTP client")
 }
 
+/// The macOS Homebrew/MacPorts prefixes `resolve_supervisor_tmux` should
+/// probe, or an empty list everywhere else.
+///
+/// Kept as a thin `cfg!` wrapper (a runtime branch), not a `#[cfg(target_os =
+/// "macos")]` item, so the branch itself — and everything it feeds — stays
+/// compiled and exercised on every CI host, matching `tmux_probe`'s own
+/// platform-agnostic design (see that module's docs).
+fn macos_tmux_prefixes() -> &'static [&'static str] {
+    if cfg!(target_os = "macos") {
+        crate::tmux_probe::MACOS_TMUX_PREFIXES
+    } else {
+        &[]
+    }
+}
+
+/// Real executability check behind the macOS tmux probe: a regular file with
+/// at least one execute bit set.
+///
+/// `tmux_probe::find_tmux_in_prefixes` takes this as an injected predicate so
+/// its search-ORDER logic can be unit-tested without touching a real
+/// filesystem; this function is the one real implementation, used only at
+/// this call site.
+fn is_executable_file(path: &Path) -> bool {
+    let Ok(metadata) = std::fs::metadata(path) else {
+        return false;
+    };
+    if !metadata.is_file() {
+        return false;
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        metadata.permissions().mode() & 0o111 != 0
+    }
+    #[cfg(not(unix))]
+    {
+        true
+    }
+}
+
+/// Decide the `FARHELM_TMUX` value (if any) the managed supervisor should be
+/// launched with.
+///
+/// Precedence, per TODO.md's 2026-08-22 tmux floor decision (part 3, "a
+/// simple, documented 'pick your own' override ... honored by every launch
+/// path, desktop app included"): an `ambient_override` already present in the
+/// app's own environment is passed through UNTOUCHED and the probe is
+/// skipped entirely — the user's choice always wins, and probing anyway
+/// would risk silently overruling it with a different Homebrew install found
+/// first. Only absent an override does `prefixes` get searched (macOS only in
+/// practice; every other platform passes an empty list here and leaves
+/// resolution to the supervisor's own PATH lookup, unchanged from before this
+/// probe existed).
+///
+/// `prefixes` and `is_executable` are parameters, not globals, purely so this
+/// precedence can be unit-tested by passing in fake values directly —
+/// without mutating `std::env` (which races every other test reading the
+/// same process-wide environment) or touching a real filesystem.
+fn resolve_supervisor_tmux(
+    ambient_override: Option<std::ffi::OsString>,
+    prefixes: &[&str],
+    is_executable: impl FnMut(&Path) -> bool,
+) -> Option<std::ffi::OsString> {
+    // An EMPTY value means "no override", exactly as the supervisor reads
+    // it (a profile or unit that writes `FARHELM_TMUX=` means that to
+    // whoever wrote it); passing it through would skip the probe and then
+    // fall back to the bare `tmux` on Finder's PATH, which is the case the
+    // probe exists for.
+    if let Some(value) = ambient_override.filter(|value| !value.is_empty()) {
+        return Some(value);
+    }
+    crate::tmux_probe::find_tmux_in_prefixes(prefixes, is_executable).map(PathBuf::into_os_string)
+}
+
 fn desktop_state_dir() -> anyhow::Result<PathBuf> {
     match std::env::var_os("FARHELM_DESKTOP_STATE_DIR") {
         Some(path) => Ok(PathBuf::from(path)),
@@ -1106,6 +1184,73 @@ mod tests {
             helm: helm.to_string(),
             id: id.to_string(),
         }
+    }
+
+    /// A `FARHELM_TMUX` already present in the app's own environment is the
+    /// user's explicit override (TODO.md's floor decision, part 3) and must
+    /// win outright — probing must not even run. Asserted here by making the
+    /// injected predicate return `true` for everything: if the override were
+    /// ignored, the probe would "find" a match and this test could not tell
+    /// the two cases apart, so a passing predicate is what makes this a real
+    /// test of precedence rather than of the override merely being present.
+    #[test]
+    fn ambient_tmux_override_wins_without_probing() {
+        let resolved = resolve_supervisor_tmux(
+            Some(std::ffi::OsString::from("/wherever/the/user/said/tmux")),
+            &["/opt/homebrew/bin"],
+            |candidate| {
+                panic!("the probe must not run under an override; asked about {candidate:?}")
+            },
+        );
+        assert_eq!(
+            resolved,
+            Some(std::ffi::OsString::from("/wherever/the/user/said/tmux"))
+        );
+    }
+
+    /// Absent an override, the first prefix the predicate accepts is what the
+    /// supervisor is launched with.
+    #[test]
+    fn probe_result_is_used_when_no_override_is_set() {
+        let resolved = resolve_supervisor_tmux(
+            None,
+            &["/opt/homebrew/bin", "/usr/local/bin"],
+            |candidate| candidate == Path::new("/usr/local/bin/tmux"),
+        );
+        assert_eq!(
+            resolved,
+            Some(std::ffi::OsString::from("/usr/local/bin/tmux"))
+        );
+    }
+
+    /// No override and no prefix match (or, equivalently, an empty prefix
+    /// list — the shape the non-macOS call site always passes) must yield
+    /// `None`, leaving PATH resolution to the supervisor exactly as before
+    /// this probe existed.
+    #[test]
+    fn no_override_and_no_probe_hit_falls_back_to_nothing() {
+        assert_eq!(
+            resolve_supervisor_tmux(None, &["/opt/homebrew/bin"], |_| false),
+            None
+        );
+        assert_eq!(resolve_supervisor_tmux(None, &[], |_| true), None);
+    }
+
+    /// `FARHELM_TMUX=` (present but empty) is how a unit file or profile
+    /// spells "no override", and the supervisor reads it that way too; the
+    /// app must then probe rather than pass the empty value through, which
+    /// would disable the discovery Finder launches depend on.
+    #[test]
+    fn an_empty_ambient_override_counts_as_unset_and_probes() {
+        let resolved = resolve_supervisor_tmux(
+            Some(std::ffi::OsString::new()),
+            &["/opt/homebrew/bin"],
+            |candidate| candidate == Path::new("/opt/homebrew/bin/tmux"),
+        );
+        assert_eq!(
+            resolved,
+            Some(std::ffi::OsString::from("/opt/homebrew/bin/tmux"))
+        );
     }
 
     enum EvalReply {

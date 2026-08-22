@@ -92,13 +92,16 @@ validate = joined_steps("validate")
 assert "pyyaml==6.0.2" in validate.lower()
 assert "hashFiles('**/Cargo.lock')" in linux
 assert "hashFiles('**/Cargo.lock')" in macos
-for recipe in (linux, macos):
-    assert ".github/release/source-pins.env" in recipe
-    assert "scripts/build-private-tmux.sh" in recipe
+assert ".github/release/source-pins.env" in linux
+assert "scripts/build-private-tmux.sh" in linux
+# The Mac app requires Homebrew's tmux and bundles none (TODO.md's 2026-08-22
+# floor decision); a darwin private build reappearing in the macos job would
+# be a silent reversal of that policy, so its every trace is forbidden here.
+for forbidden in ("scripts/build-private-tmux.sh", "Contents/MacOS/tmux", "macos-14-arm64-clang"):
+    assert forbidden not in macos, forbidden
 assert "ziglang-0.14.1" in linux
 assert "--require-hashes" in linux
 assert ".github/release/ziglang-requirements.txt" in linux
-assert "macos-14-arm64-clang" in macos
 linux_steps = {step.get("name"): step for step in jobs["linux"]["steps"]}
 elf = linux_steps["Verify Linux payload architecture and static linkage"]["run"]
 assert "readelf -h" in elf and "readelf -l" in elf and "file \"$payload\"" in elf

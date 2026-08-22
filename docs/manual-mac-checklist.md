@@ -5,28 +5,38 @@ latency needs a real Mac-to-host link. Record the observed facts and timings her
 
 ## Native-app release close-out
 
-Run these seven steps against the same release candidate and record failures with the app build, Mac model, macOS
+Run these eight steps against the same release candidate and record failures with the app build, Mac model, macOS
 version, and remote Ubuntu version. A pass here is evidence about that exact candidate, not a substitute for the Linux
 and browser CI gates.
 
-1. Start the native app and provision a fresh Ubuntu host using only the account's existing passwordless SSH. Confirm
+1. Confirm the tmux discovery and floor (TODO.md's 2026-08-22 decision), in three controlled launches from Finder with
+   `FARHELM_TMUX` unset in the app's environment. (a) With Homebrew tmux installed, the app starts and a local session
+   runs. (b) With `FARHELM_TMUX` pointing at a tmux below the floor (a distro or older Homebrew build), the supervisor
+   refuses with `tmux <version> at <path> is below Farhelm's floor <floor> (see README: tmux)`; record how — or whether
+   — that text reached you in Finder (TODO.md's macOS entry records that today it goes to the supervisor's stderr and
+   the app exits before opening a window). (c) With no tmux in `/opt/homebrew/bin`, `/usr/local/bin`, `/opt/local/bin`,
+   or on Finder's PATH, the supervisor fails to start the program at all; record that message the same way. Restore
+   Homebrew tmux before the remaining steps.
+2. Start the native app and provision a fresh Ubuntu host using only the account's existing passwordless SSH. Confirm
    that setup needs no root, the supervisor registers, and a session runs. Then use
    `Farhelm.app/Contents/MacOS/farhelm helm token show` and open the same embedded helm's authenticated web UI.
-2. In an existing `jj` workspace where Git reports detached HEAD, create an official Claude Code session in one action.
-3. Create a local Mac session the same way. Confirm the local and remote sessions appear together in one list.
-4. Paste a Mac screenshot into the remote terminal. Confirm the path appears at the active cursor and Claude can read
+3. In an existing `jj` workspace where Git reports detached HEAD, create an official Claude Code session in one action.
+4. Create a local Mac session the same way. Confirm the local and remote sessions appear together in one list.
+5. Paste a Mac screenshot into the remote terminal. Confirm the path appears at the active cursor and Claude can read
    the file; also complete the clipboard-facts and latency records below.
-5. Choose a non-newest session and a non-default list order, then quit and relaunch the app. Before clicking anything,
+6. Choose a non-newest session and a non-default list order, then quit and relaunch the app. Before clicking anything,
    confirm that same session is selected and attached and that the chosen order is still applied. Also confirm both
    sessions and their terminal state remain. Reboot the Mac and confirm the remote session is untouched while the local
    session is interrupted and offers conversation resume.
-6. Attach to the remote session from the token-authenticated web UI and confirm the native app visibly detaches.
-7. Ask real Claude to create a new `jj workspace` and invoke the injected spawn CLI. Confirm the child appears without
+7. Attach to the remote session from the token-authenticated web UI and confirm the native app visibly detaches.
+8. Ask real Claude to create a new `jj workspace` and invoke the injected spawn CLI. Confirm the child appears without
    refreshing either client.
 
 Observed release/build: not run
 
 Mac and remote environment: not recorded
+
+Tmux floor refusal message: not recorded
 
 Close-out result: not run
 

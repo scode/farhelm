@@ -186,10 +186,13 @@ echo "== building (cargo + web bundle + dx desktop bundle)"
 BUILT_APP="$REPO/target/dx/farhelm-ui/debug/linux/app/farhelm-ui"
 [ -x "$BUILT_APP" ] || fail "bundled app missing at $BUILT_APP"
 
-# Stage the release shape and make its tmux a sentinel wrapper around the
-# preflighted host binary. The app starts with a deliberately small PATH; the
-# marker proves DesktopBootstrap prepended the CLI's sibling directory and
-# the supervisor resolved this exact `tmux` entry rather than the host copy.
+# Stage the release shape. The bundle carries NO tmux (TODO.md's 2026-08-22
+# floor decision: the Mac app requires Homebrew's and hands it to its
+# supervisor through FARHELM_TMUX); the sentinel below is a wrapper around the
+# preflighted host binary staged OUTSIDE the bundle and named only through
+# that variable, so the marker proves the override reached the managed
+# supervisor and that it ran this exact program rather than whatever `tmux`
+# the app's deliberately small PATH would have found.
 APP_CONTENTS="$X/Farhelm.app/Contents"
 mkdir -p "$APP_CONTENTS/MacOS" "$APP_CONTENTS/Resources/web"
 cp "$BUILT_APP" "$APP_CONTENTS/MacOS/farhelm-ui"
@@ -209,11 +212,13 @@ cp -R "$REPO/target/dx/farhelm-ui/release/web/public/." "$APP_CONTENTS/Resources
 cp -R "$(dirname "$BUILT_APP")/assets" "$APP_CONTENTS/MacOS/assets" || fail "staging desktop assets"
 APP="$APP_CONTENTS/MacOS/farhelm-ui"
 HOST_TMUX=$(command -v tmux)
+SENTINEL_TMUX="$X/sentinel-tmux/tmux"
+mkdir -p "$(dirname "$SENTINEL_TMUX")"
 printf '%s\n' \
   '#!/bin/sh' \
   'printf used >"$FARHELM_SMOKE_TMUX_MARKER"' \
-  "exec \"$HOST_TMUX\" \"\$@\"" >"$APP_CONTENTS/MacOS/tmux"
-chmod 700 "$APP_CONTENTS/MacOS/farhelm" "$APP_CONTENTS/MacOS/tmux"
+  "exec \"$HOST_TMUX\" \"\$@\"" >"$SENTINEL_TMUX"
+chmod 700 "$APP_CONTENTS/MacOS/farhelm" "$SENTINEL_TMUX"
 
 echo "== booting Xvfb, openbox, and the self-contained app"
 
@@ -237,8 +242,9 @@ DISPLAY=$DISP openbox >"$X/openbox.log" 2>&1 &
 echo $! >"$X/openbox.pid"
 sleep 1
 DISPLAY=$DISP \
-  PATH="$APP_CONTENTS/MacOS:/usr/bin:/bin" \
-  FARHELM_SMOKE_TMUX_MARKER="$X/bundled-tmux-used" \
+  PATH="/usr/bin:/bin" \
+  FARHELM_TMUX="$SENTINEL_TMUX" \
+  FARHELM_SMOKE_TMUX_MARKER="$X/tmux-override-used" \
   FARHELM_SMOKE_CLIENT_LOG_MARKER="$CLIENT_LOG_MARKER" \
   RUST_LOG=info \
   FARHELM_DESKTOP_PORT="$PORT" \
@@ -272,7 +278,8 @@ assert any(h["kind"] == "local" and h["state"]["phase"] == "connected" for h in 
   sleep 1
 done
 [ -n "$LOCAL_READY" ] || fail "authenticated native API or managed local supervisor was not reachable"
-[ -s "$X/bundled-tmux-used" ] || fail "managed supervisor did not resolve the bundle-shaped tmux sentinel"
+[ -s "$X/tmux-override-used" ] || fail "managed supervisor did not run the tmux named by FARHELM_TMUX"
+[ ! -e "$APP_CONTENTS/MacOS/tmux" ] || fail "the staged bundle must not carry a tmux of its own"
 for _ in $(seq 1 30); do
   WEBVIEW_SECRET=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get("webview_device_secret") or "")' "$X/state/desktop-client.json")
   WEBVIEW_GENERATION=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get("webview_auth_generation") or 0)' "$X/state/desktop-client.json")
@@ -344,12 +351,12 @@ echo "== creating two bundle-substrate sessions before the hard restart"
 CREATE_BODY=$(python3 -c 'import json,sys; print(json.dumps({"cwd": sys.argv[1], "invocation": "bash", "title": "zzz-remembered"}))' "$X/work") || fail "encoding remembered smoke session"
 SID=$(curl_auth -sf --max-time 10 -H 'content-type: application/json' -d "$CREATE_BODY" "$API/api/sessions" | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])') || fail "creating the pre-restart smoke session"
 [ -n "$SID" ] || fail "the pre-restart create returned no session id"
-tmux -S "$X/state/tmux.sock" has-session -t "fh-$SID" 2>/dev/null || fail "the created session did not reach bundle-local tmux"
+tmux -S "$X/state/tmux.sock" has-session -t "fh-$SID" 2>/dev/null || fail "the created session did not reach the supervisor's tmux"
 sleep 1
 NEWEST_BODY=$(python3 -c 'import json,sys; print(json.dumps({"cwd": sys.argv[1], "invocation": "bash", "title": "aaa-newest"}))' "$X/work") || fail "encoding newest smoke session"
 SID_NEWEST=$(curl_auth -sf --max-time 10 -H 'content-type: application/json' -d "$NEWEST_BODY" "$API/api/sessions" | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])') || fail "creating the newest pre-restart smoke session"
 [ -n "$SID_NEWEST" ] || fail "the newest pre-restart create returned no session id"
-tmux -S "$X/state/tmux.sock" has-session -t "fh-$SID_NEWEST" 2>/dev/null || fail "the newest session did not reach bundle-local tmux"
+tmux -S "$X/state/tmux.sock" has-session -t "fh-$SID_NEWEST" 2>/dev/null || fail "the newest session did not reach the supervisor's tmux"
 
 # The default gate deliberately does not click rows: WebKitGTK's unreliable
 # Xvfb paint is why its CI leg is non-pixel. Seed a real identity-keyed record,
@@ -435,8 +442,9 @@ for _ in $(seq 1 20); do
 done
 
 DISPLAY=$DISP \
-  PATH="$APP_CONTENTS/MacOS:/usr/bin:/bin" \
-  FARHELM_SMOKE_TMUX_MARKER="$X/bundled-tmux-used" \
+  PATH="/usr/bin:/bin" \
+  FARHELM_TMUX="$SENTINEL_TMUX" \
+  FARHELM_SMOKE_TMUX_MARKER="$X/tmux-override-used" \
   FARHELM_SMOKE_CLIENT_LOG_MARKER="$CLIENT_LOG_MARKER" \
   RUST_LOG=info \
   FARHELM_DESKTOP_PORT="$PORT" \
