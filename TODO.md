@@ -176,10 +176,3 @@ roadmap and carries no priorities unless an entry says so itself.
   fired (provisioning grew it to 20 props). Only with a memoization-preserving grouping — state-only structs, never
   callback structs (the framework's callback-prop memoization does not survive struct nesting; the session row learned
   this) — and with a host-row render-count regression test like the session row's.
-
-- Desktop cross-restart selection memory: browser clients remember the last-selected session across reloads
-  (localStorage `{helm, id}` record); the desktop app remembers only within a process, so a relaunch auto-attaches the
-  newest-created session. SPEC.md documents exactly this, so nothing is WRONG — it was deferred because the webview's
-  localStorage is not synchronously reachable from native Rust, not because the fallback is right. If desktop use makes
-  it annoying: persist the record native-side (the desktop bootstrap owns a state dir) and restore it before the
-  fallback in `list.rs`'s auto-select effect.

@@ -234,12 +234,13 @@ it shows the session's metadata and says why there is no terminal, rather than a
 
 One flat list across all registered hosts, with filtering and search by host, directory, agent profile, status, and
 title. The list can be ordered by most recent activity, by creation time, or by title, chosen from a control that is
-reachable without opening the filter controls; the order someone picks is remembered per client, and most recent
-activity is what a client shows until someone picks otherwise. A client that asks the helm for no particular order gets
-creation time. The filter controls open on demand rather than standing permanently above the list; while an applied
-filter's controls are closed, the list says visibly that a filter is in force, so a narrowed list can never masquerade
-as a small fleet. No mandatory hierarchy. Agent-spawned sessions (see below) carry a parent reference usable as a
-filter, but parentage does not nest the list and implies nothing about VCS state.
+reachable without opening the filter controls; the order someone picks is remembered per client across browser reloads
+and desktop relaunches, and most recent activity is what a client shows until someone picks otherwise. A client that
+asks the helm for no particular order gets creation time. The filter controls open on demand rather than standing
+permanently above the list; while an applied filter's controls are closed, the list says visibly that a filter is in
+force, so a narrowed list can never masquerade as a small fleet. No mandatory hierarchy. Agent-spawned sessions (see
+below) carry a parent reference usable as a filter, but parentage does not nest the list and implies nothing about VCS
+state.
 
 The list always carries a count, and it counts the list you are looking at: archived sessions are outside the default
 view, so they are outside its count, and the archive-inclusion switch widens the rows and the count together. That
@@ -297,16 +298,17 @@ whatever the agent renders is what you see. There is no composer, no message abs
   archived, terminal contents are gone, and recovering the conversation is the agent's job (resume). A stopped or exited
   session's terminal stays viewable while its host is up, since the terminal outlives the process.
 - Opening a session attaches to it — and opening a CLIENT counts as opening a session: with a non-empty fleet, a freshly
-  loaded client selects and attaches the session the user most recently had selected there (falling back to the
-  newest-created non-archived one), so launching the app is itself the deliberate act the attach semantics below key
-  off. Opening a second client therefore takes the terminal over exactly as clicking the same session there would. The
-  attached client owns input and terminal dimensions: the PTY resizes to that client, and the last size sticks when
-  nothing is attached. Reconnecting replays the terminal so the session looks as it would have had the client stayed
-  attached, modulo redraws caused by dimension changes. The floor: the host-side terminal retains, and replay covers, at
-  least the current screen plus 10,000 lines of scrollback. The sidebar visibly marks the selected session's row
-  whenever that session is listed, so which session the main pane is interacting with is readable at a glance rather
-  than only from the titlebar. A filter that excludes the selected session leaves no row to mark — the titlebar remains
-  the identifier in that state, and the main pane deliberately stays put (filtering the list is not deselecting).
+  loaded client selects and attaches the session the user most recently had selected there — including after a desktop
+  relaunch — falling back to the newest-created non-archived one, so launching the app is itself the deliberate act the
+  attach semantics below key off. Opening a second client therefore takes the terminal over exactly as clicking the same
+  session there would. The attached client owns input and terminal dimensions: the PTY resizes to that client, and the
+  last size sticks when nothing is attached. Reconnecting replays the terminal so the session looks as it would have had
+  the client stayed attached, modulo redraws caused by dimension changes. The floor: the host-side terminal retains, and
+  replay covers, at least the current screen plus 10,000 lines of scrollback. The sidebar visibly marks the selected
+  session's row whenever that session is listed, so which session the main pane is interacting with is readable at a
+  glance rather than only from the titlebar. A filter that excludes the selected session leaves no row to mark — the
+  titlebar remains the identifier in that state, and the main pane deliberately stays put (filtering the list is not
+  deselecting).
 - One attached client per session, enforced by the supervisor: attaching from a second client visibly detaches the
   first, which keeps a non-live snapshot and an explicit take-control action. No shared-input mirroring in v1.
 - A viewer that is slow is served slowly, for as long as it takes. Honoring that can briefly slow the agent's OUTPUT — a
@@ -464,7 +466,9 @@ worktree, workspace, or branch as part of spawning — if the agent wants a `jj 
 ## Errors and diagnostics
 
 - Every failed operation surfaces a concrete, actionable error in the client. A dialog must never close as though an
-  operation succeeded when it failed.
+  operation succeeded when it failed. Remembering desktop selection and sort across relaunches is the one exception:
+  persistence is best-effort, and failures are logged but silent because losing next-launch convenience must not turn a
+  choice that already took effect into a failed current operation.
 - Connection state per host is always visible — at minimum as the session list's compact per-host indicator, with the
   full hosts panel a toggle away; reconnection uses bounded retries followed by periodic low-frequency re-probing, so a
   host that comes back overnight resurfaces by itself. The UI shows which phase it is in either way.

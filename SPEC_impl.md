@@ -49,10 +49,33 @@ localStorage under `farhelm.sort`, beside the `farhelm.last-selected` record, as
 takes; an absent or unrecognized value reads as the UI default (`activity`). Falling back rather than failing matters
 because that storage outlives the build that wrote it: a word a later build stored is one the helm answers with a 400,
 so passing it through unchecked would leave the sidebar unable to list anything until someone cleared their browser
-storage. It is written only when the control changes, so a client that never touches it never writes. Desktop holds the
-same word in a process-local static for now — the webview's localStorage is not synchronously reachable from native
-Rust, the same constraint that leaves the remembered selection process-local there — so a fresh desktop launch starts on
-the default order until a follow-up wires real desktop persistence.
+storage. It is written only when the control changes, so a client that never touches it never writes.
+
+Desktop keeps both that word and the selection's same `{helm, id}` record in the bootstrap state file
+`desktop-client.json`, alongside (not instead of) its two device credentials. Missing fields decode as absent so a file
+from an older build remains valid. At first authentication the native side sends the two values through the existing
+desktop-auth eval exchange, which seeds the SAME localStorage keys the browser uses. localStorage was chosen over a new
+page-only global because it preserves one record shape, key vocabulary, and invalid-value fallback across both engines;
+native Rust also mirrors the values in process memory because it cannot synchronously read the webview's storage. The
+page attempts both localStorage updates before sending `ready`; storage errors are swallowed, so only the native mirrors
+are guaranteed to contain the seed. `AppBody` does not mount before `ready`, and therefore the sort signal and
+auto-select effect see those native remembered values on their first run — there is no frame that selects the newest
+session and then corrects itself.
+
+On a user selection or sort change, the native-rendered component updates that synchronous mirror immediately and queues
+the browser-shaped record. Native coalesces a burst for 150 ms, then runs one one-shot eval that writes the matching
+localStorage values and echoes the update to native; serialized batches prevent an older round trip from landing after a
+newer click. Native then read-merges the acknowledged fields into `desktop-client.json` under the same state-file lock
+as auth: selection cannot discard sort, and neither preference can discard credential material or the webview-auth
+generation. The round trip and state-file replacement are best-effort: IPC and native-file failures are logged under
+`desktop_preferences` and never surface in the UI or roll back the current choice, while JavaScript deliberately
+swallows localStorage failures before acknowledging the attempt. The earlier implementation declined this round trip
+because a nicety alone did not justify owning an eval channel's failure modes; desktop authentication now requires and
+monitors that channel already, so preference persistence adds no new failure class, only a silent loss of next-launch
+convenience when the owned bridge or disk write is unavailable. An ordinary app shutdown drains the native pending and
+in-flight records directly because its webview is already going away; a hard kill can lose the last choice until the
+state-file merge completes, including the debounce, eval, and blocking atomic replacement rather than only the first 150
+ms.
 
 Keeping the order out of `SessionFilter` mirrors the helm's own split, and on this side the argument is about
 reconciliation rather than about caches: what a reply COVERS is keyed to the filter — whether the banner may say the

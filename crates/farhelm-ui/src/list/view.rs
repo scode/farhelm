@@ -47,16 +47,15 @@ use super::shared::{
 /// that happens to sit beyond a TRUNCATED listing's bound must survive
 /// that listing, not be overwritten by whichever row the fallback picked.
 ///
-/// Desktop builds remember within the process only: the webview's
-/// localStorage is not synchronously reachable from native Rust, and an
-/// eval round trip for a best-effort nicety is not worth its failure
-/// modes. A fresh desktop launch therefore lands on the newest-created
-/// session — the decision's own fallback (SPEC.md says so in as many
-/// words; revisit if real desktop use wants more).
-#[derive(Clone, PartialEq, serde::Serialize, serde::Deserialize)]
-struct RememberedSelection {
-    helm: String,
-    id: String,
+/// Desktop uses the same record and localStorage key. Its native renderer
+/// mirrors the value in process memory because native Rust cannot read the
+/// webview's storage synchronously; desktop bootstrap guarantees the native
+/// copy and attempts the page copy before this component mounts. User changes
+/// cross the eval channel before the native state-file writer records them.
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+pub(crate) struct RememberedSelection {
+    pub(crate) helm: String,
+    pub(crate) id: String,
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -101,12 +100,15 @@ fn stored_selection(helm: &str) -> Option<String> {
 
 #[cfg(not(target_arch = "wasm32"))]
 fn remember_selection(helm: &str, id: &str) {
+    let record = RememberedSelection {
+        helm: helm.to_string(),
+        id: id.to_string(),
+    };
     if let Ok(mut slot) = LAST_SELECTED.get_or_init(Default::default).write() {
-        *slot = Some(RememberedSelection {
-            helm: helm.to_string(),
-            id: id.to_string(),
-        });
+        *slot = Some(record.clone());
     }
+    #[cfg(feature = "desktop")]
+    crate::desktop::report_selection_preference(record);
 }
 
 /// Where this client's chosen listing order is kept: the bare wire word, in
@@ -158,21 +160,13 @@ fn remember_sort(sort: ListSort) {
     }
 }
 
-/// Desktop's half of the preference: in-process only, for now.
+/// Desktop's synchronous mirror of the page's persisted preference.
 ///
-/// The webview's localStorage is not synchronously reachable from native
-/// Rust — the same constraint that leaves `LAST_SELECTED` a process-local
-/// static — so a desktop relaunch starts on the default order again. A
-/// follow-up change wires desktop persistence properly (through the
-/// webview's own storage or a native preferences file); until it lands, this
-/// static is the whole of desktop's memory, and it deliberately mirrors the
-/// selection record's shape so both are rewired at once.
-///
-/// It holds the stored WORD rather than a decoded [`ListSort`], which is not
-/// redundancy: the follow-up will replace this static with a real store that
-/// can only ever hand back text, and keeping the word here means both targets
-/// already go through the one decode ([`decoded_sort`]) that the fallback
-/// rules live in.
+/// It holds the stored WORD rather than a decoded [`ListSort`] so both
+/// renderers go through [`decoded_sort`]. Desktop bootstrap fills it from
+/// `desktop-client.json` before `ListView` mounts; writes update it before
+/// their best-effort eval/state-file round trip, so this process responds to
+/// the user's choice even when persistence fails.
 #[cfg(not(target_arch = "wasm32"))]
 static LIST_SORT: std::sync::OnceLock<std::sync::RwLock<Option<String>>> =
     std::sync::OnceLock::new();
@@ -191,6 +185,51 @@ fn stored_sort() -> ListSort {
 fn remember_sort(sort: ListSort) {
     if let Ok(mut slot) = LIST_SORT.get_or_init(Default::default).write() {
         *slot = Some(sort.key().to_string());
+    }
+    #[cfg(feature = "desktop")]
+    crate::desktop::report_sort_preference(sort.key().to_string());
+}
+
+/// Install desktop bootstrap's durable preferences into the native
+/// renderer's synchronous mirrors.
+///
+/// `DesktopBootstrapGate` calls this only after the auth JavaScript has
+/// attempted the same localStorage seed, and immediately before it mounts
+/// `AppBody`. These native mirrors are the guaranteed ordering edge that
+/// makes `stored_sort` and the auto-select effect see restart state on their
+/// first run rather than choosing their fallbacks and correcting later.
+#[cfg(all(feature = "desktop", not(target_arch = "wasm32")))]
+pub(crate) fn seed_desktop_preferences(
+    selection: Option<RememberedSelection>,
+    sort: Option<String>,
+) {
+    if let Ok(mut slot) = LAST_SELECTED.get_or_init(Default::default).write() {
+        *slot = selection;
+    }
+    if let Ok(mut slot) = LIST_SORT.get_or_init(Default::default).write() {
+        *slot = sort;
+    }
+}
+
+/// Snapshot both native preference mirrors for the synchronous close flush.
+///
+/// They are updated before any best-effort IPC begins, so they remain the
+/// authoritative latest choices when shutdown interrupts a debounce or eval.
+#[cfg(all(feature = "desktop", not(target_arch = "wasm32")))]
+pub(crate) fn desktop_preferences_snapshot() -> crate::desktop::DesktopPreferences {
+    let remembered_selection = LAST_SELECTED
+        .get_or_init(Default::default)
+        .read()
+        .ok()
+        .and_then(|slot| slot.clone());
+    let list_sort = LIST_SORT
+        .get_or_init(Default::default)
+        .read()
+        .ok()
+        .and_then(|slot| slot.clone());
+    crate::desktop::DesktopPreferences {
+        remembered_selection,
+        list_sort,
     }
 }
 

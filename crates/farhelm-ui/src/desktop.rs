@@ -16,7 +16,7 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::sync::{
-    Arc,
+    Arc, LazyLock, Mutex,
     atomic::{AtomicBool, Ordering},
     mpsc,
 };
@@ -25,6 +25,8 @@ use std::time::Duration;
 const APP_STATE_FILE: &str = "desktop-client.json";
 const DEFAULT_DESKTOP_PORT: u16 = 7433;
 const DESKTOP_STARTUP_TIMEOUT: Duration = Duration::from_secs(30);
+const PREFERENCE_DEBOUNCE: Duration = Duration::from_millis(150);
+const PREFERENCE_EVAL_TIMEOUT: Duration = Duration::from_secs(5);
 
 /// Values the webview needs to validate or mint its own device session.
 ///
@@ -34,7 +36,10 @@ const DESKTOP_STARTUP_TIMEOUT: Duration = Duration::from_secs(30);
 #[derive(Clone, PartialEq)]
 pub struct WebviewBootstrap {
     pub(crate) base: String,
+    /// Durable browser credential candidate; `None` means the page must mint.
     pub(crate) persisted_secret: Option<String>,
+    /// Full launch snapshot, including `None` fields that clear stale storage.
+    pub(crate) preferences: DesktopPreferences,
     /// A smoke-test-only hook: `None` in every real run.
     ///
     /// `scripts/desktop-smoke.sh` sets `FARHELM_SMOKE_CLIENT_LOG_MARKER` so
@@ -77,6 +82,21 @@ pub struct DesktopBootstrap {
     expected_helm_shutdown: Arc<AtomicBool>,
 }
 
+/// A launch snapshot or sparse runtime patch of desktop preference values.
+///
+/// In `WebviewBootstrap`, `None` means the durable snapshot has no value and
+/// the page must clear a stale copy. In the change queue, omitted `None`
+/// fields mean that update leaves the other preference untouched. Keeping one
+/// wire shape is what lets the page store the browser's ordinary keys while
+/// native merges only the choice the user changed.
+#[derive(Clone, Debug, Default, PartialEq, Deserialize, Serialize)]
+pub(crate) struct DesktopPreferences {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) remembered_selection: Option<crate::list::RememberedSelection>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) list_sort: Option<String>,
+}
+
 #[derive(Debug, Default, Deserialize, Serialize)]
 struct PersistedState {
     native_device_secret: Option<String>,
@@ -86,7 +106,19 @@ struct PersistedState {
     /// gate can distinguish new readiness from old persisted credentials.
     #[serde(default)]
     webview_auth_generation: u64,
+    remembered_selection: Option<crate::list::RememberedSelection>,
+    list_sort: Option<String>,
 }
+
+#[derive(Default)]
+struct PreferenceChangeQueue {
+    pending: DesktopPreferences,
+    in_flight: DesktopPreferences,
+    worker_running: bool,
+}
+
+static STATE_FILE_WRITE: Mutex<()> = Mutex::new(());
+static PREFERENCE_CHANGES: LazyLock<Mutex<PreferenceChangeQueue>> = LazyLock::new(Mutex::default);
 
 #[derive(Debug, Deserialize)]
 struct DeviceExchange {
@@ -157,7 +189,7 @@ impl DesktopBootstrap {
         let helm = std::thread::Builder::new()
             .name("farhelm-embedded-helm".to_string())
             .spawn(move || {
-                let result = (|| {
+                (|| {
                     let runtime =
                         tokio::runtime::Runtime::new().context("starting embedded helm runtime")?;
                     runtime.block_on(farhelm_helm::run_embedded(
@@ -170,8 +202,7 @@ impl DesktopBootstrap {
                         ready_tx,
                         shutdown_rx,
                     ))
-                })();
-                result
+                })()
             })
             .context("starting embedded helm thread")?;
         let helm_deadline = std::time::Instant::now() + DESKTOP_STARTUP_TIMEOUT;
@@ -246,6 +277,10 @@ impl DesktopBootstrap {
         let webview = WebviewBootstrap {
             base: base.clone(),
             persisted_secret: persisted.webview_device_secret,
+            preferences: DesktopPreferences {
+                remembered_selection: persisted.remembered_selection,
+                list_sort: persisted.list_sort,
+            },
             smoke_client_log_marker: std::env::var("FARHELM_SMOKE_CLIENT_LOG_MARKER").ok(),
         };
         Ok(Self {
@@ -295,10 +330,351 @@ pub(crate) fn persist_webview_secret(secret: String) -> anyhow::Result<()> {
         .get()
         .context("desktop authentication runtime is not initialized")?
         .state_path;
-    let mut state = read_state(state_path)?;
-    state.webview_device_secret = Some(secret);
-    state.webview_auth_generation = state.webview_auth_generation.saturating_add(1);
-    write_state(state_path, &state)
+    update_state(state_path, |state| {
+        state.webview_device_secret = Some(secret);
+        state.webview_auth_generation = state.webview_auth_generation.saturating_add(1);
+    })
+    .map(|_| ())
+}
+
+/// Report one selection preference through the webview's page context.
+///
+/// The native component already knows the value, but the eval is the bridge
+/// that keeps the page's browser-shaped localStorage record and the native
+/// state file in one flow. The renderer mirror is updated by the caller
+/// before this best-effort work begins, so neither an unavailable bridge nor
+/// a failed disk write can undo the user's current selection.
+pub(crate) fn report_selection_preference(selection: crate::list::RememberedSelection) {
+    report_preference_change(DesktopPreferences {
+        remembered_selection: Some(selection),
+        list_sort: None,
+    });
+}
+
+/// Report one chosen list order through the same page/native preference
+/// channel as a selection.
+pub(crate) fn report_sort_preference(sort: String) {
+    report_preference_change(DesktopPreferences {
+        remembered_selection: None,
+        list_sort: Some(sort),
+    });
+}
+
+/// Enqueue a page preference for one coalesced eval and state-file
+/// replacement.
+///
+/// This is intentionally best-effort. Authentication already makes this
+/// eval channel part of the desktop app's owned failure surface; preferences
+/// add no new kind of bridge failure, and unlike authentication they do not
+/// need a visible error. A failure is diagnostic-only and costs persistence
+/// across the next launch, never the choice already applied in this one.
+fn report_preference_change(update: DesktopPreferences) {
+    let mut queue = PREFERENCE_CHANGES
+        .lock()
+        .expect("desktop preference queue lock poisoned");
+    merge_preferences(&mut queue.pending, update);
+    if queue.worker_running {
+        return;
+    }
+    queue.worker_running = true;
+    drop(queue);
+    let state_path = RUNTIME_AUTH
+        .get()
+        .expect("desktop authentication runtime is initialized before rendering")
+        .state_path
+        .clone();
+    dioxus::core::spawn_forever(flush_preference_changes_with(
+        &PREFERENCE_CHANGES,
+        PREFERENCE_DEBOUNCE,
+        WebviewPreferenceReporter,
+        FilePreferenceWriter { state_path },
+    ));
+}
+
+trait PreferenceReporter {
+    async fn report(&mut self, update: DesktopPreferences) -> bool;
+}
+
+trait PreferenceWriter {
+    async fn persist(&mut self, update: DesktopPreferences) -> anyhow::Result<()>;
+}
+
+struct WebviewPreferenceReporter;
+
+impl PreferenceReporter for WebviewPreferenceReporter {
+    async fn report(&mut self, update: DesktopPreferences) -> bool {
+        report_preference_batch(update).await
+    }
+}
+
+struct FilePreferenceWriter {
+    state_path: PathBuf,
+}
+
+impl PreferenceWriter for FilePreferenceWriter {
+    async fn persist(&mut self, update: DesktopPreferences) -> anyhow::Result<()> {
+        let state_path = self.state_path.clone();
+        tokio::task::spawn_blocking(move || persist_preferences(&state_path, update))
+            .await
+            .context("joining desktop preference state-file writer")?
+    }
+}
+
+/// Make cancellation leave the queue eligible to run again.
+///
+/// An interrupted eval or blocking-write await can otherwise strand
+/// `worker_running = true` after the component that started it unmounts. The
+/// in-flight sparse patch is put ahead of newer pending fields so the newer
+/// user choices still win when a replacement worker starts.
+struct PreferenceWorkerGuard {
+    queue: &'static Mutex<PreferenceChangeQueue>,
+    armed: bool,
+}
+
+impl PreferenceWorkerGuard {
+    fn new(queue: &'static Mutex<PreferenceChangeQueue>) -> Self {
+        Self { queue, armed: true }
+    }
+
+    fn disarm(&mut self) {
+        self.armed = false;
+    }
+}
+
+impl Drop for PreferenceWorkerGuard {
+    fn drop(&mut self) {
+        if !self.armed {
+            return;
+        }
+        let mut queue = self
+            .queue
+            .lock()
+            .expect("desktop preference queue lock poisoned");
+        let mut retry = std::mem::take(&mut queue.in_flight);
+        merge_preferences(&mut retry, std::mem::take(&mut queue.pending));
+        queue.pending = retry;
+        queue.worker_running = false;
+    }
+}
+
+/// Persist every accepted burst without tying the worker to a component.
+///
+/// One worker serializes the evals as well as the writes. That is not merely
+/// an optimization: two independent round trips may answer out of order, and
+/// letting the older click persist last would make the next launch disagree
+/// with the selection this process ended on. Disk work is delegated to the
+/// writer because the desktop runtime must remain free to render and service
+/// IPC while the atomic replacement performs its fsyncs.
+async fn flush_preference_changes_with<R, W>(
+    queue: &'static Mutex<PreferenceChangeQueue>,
+    debounce: Duration,
+    mut reporter: R,
+    mut writer: W,
+) where
+    R: PreferenceReporter,
+    W: PreferenceWriter,
+{
+    let mut cancellation = PreferenceWorkerGuard::new(queue);
+    loop {
+        tokio::time::sleep(debounce).await;
+        let update = {
+            let mut queue = queue
+                .lock()
+                .expect("desktop preference queue lock poisoned");
+            let update = std::mem::take(&mut queue.pending);
+            queue.in_flight = update.clone();
+            update
+        };
+        if reporter.report(update.clone()).await
+            && let Err(error) = writer.persist(update).await
+        {
+            tracing::warn!(
+                target: "desktop_preferences",
+                error = %format_args!("{error:#}"),
+                "could not persist desktop preferences"
+            );
+        }
+        let mut queue = queue
+            .lock()
+            .expect("desktop preference queue lock poisoned");
+        queue.in_flight = DesktopPreferences::default();
+        if queue.pending == DesktopPreferences::default() {
+            queue.worker_running = false;
+            cancellation.disarm();
+            return;
+        }
+    }
+}
+
+trait PreferenceEval {
+    fn send(&mut self, value: serde_json::Value) -> Result<(), String>;
+    async fn recv(&mut self) -> Result<DesktopPreferences, String>;
+}
+
+impl PreferenceEval for dioxus::document::Eval {
+    fn send(&mut self, value: serde_json::Value) -> Result<(), String> {
+        dioxus::document::Eval::send(self, value).map_err(|error| error.to_string())
+    }
+
+    async fn recv(&mut self) -> Result<DesktopPreferences, String> {
+        dioxus::document::Eval::recv(self)
+            .await
+            .map_err(|error| error.to_string())
+    }
+}
+
+/// Accept a preference batch only when the page acknowledges that exact patch.
+///
+/// The acknowledgement proves the browser-shaped copy was attempted, not a
+/// replacement record native should trust. Success therefore authorizes the
+/// caller to persist its original sparse patch; any send, receive, timeout,
+/// or mismatch rejects the batch without touching the state file.
+async fn report_preference_batch(update: DesktopPreferences) -> bool {
+    let eval = dioxus::prelude::document::eval(
+        "await window.__farhelmDesktopPreferences.report(\
+         { recv: function () { return dioxus.recv(); }, \
+           send: function (value) { dioxus.send(value); } }, \
+         window.localStorage);",
+    );
+    report_preference_batch_with(eval, &update, PREFERENCE_EVAL_TIMEOUT).await
+}
+
+async fn report_preference_batch_with(
+    mut eval: impl PreferenceEval,
+    update: &DesktopPreferences,
+    timeout: Duration,
+) -> bool {
+    if let Err(error) =
+        eval.send(serde_json::to_value(update).expect("desktop preferences are serializable"))
+    {
+        tracing::warn!(
+            target: "desktop_preferences",
+            %error,
+            "could not send a desktop preference to the webview"
+        );
+        return false;
+    }
+    let acknowledged = match tokio::time::timeout(timeout, eval.recv()).await {
+        Ok(Ok(acknowledged)) => acknowledged,
+        Ok(Err(error)) => {
+            tracing::warn!(
+                target: "desktop_preferences",
+                %error,
+                "desktop preference eval did not answer"
+            );
+            return false;
+        }
+        Err(_) => {
+            tracing::warn!(
+                target: "desktop_preferences",
+                "desktop preference eval timed out"
+            );
+            return false;
+        }
+    };
+    if acknowledged != *update {
+        tracing::warn!(
+            target: "desktop_preferences",
+            "desktop preference eval returned a different record"
+        );
+        return false;
+    }
+    true
+}
+
+/// Flush the native preference mirrors at the real desktop close edge.
+///
+/// Tao's event loop does not return, so `DesktopBootstrap::drop` cannot cover
+/// ordinary window closure. Wry delivers `CloseRequested` before Dioxus tears
+/// down the webview and exits; synchronously merging both sparse native slots
+/// there closes the debounce/eval loss window without asking the dying page.
+fn flush_preferences_on_shutdown() {
+    let Some(runtime) = RUNTIME_AUTH.get() else {
+        return;
+    };
+    flush_preferences_on_shutdown_at(
+        &runtime.state_path,
+        &PREFERENCE_CHANGES,
+        crate::list::desktop_preferences_snapshot(),
+    );
+}
+
+fn flush_preferences_on_shutdown_at(
+    state_path: &Path,
+    changes: &Mutex<PreferenceChangeQueue>,
+    native: DesktopPreferences,
+) {
+    let mut update = DesktopPreferences::default();
+    let mut queue = changes
+        .lock()
+        .expect("desktop preference queue lock poisoned");
+    merge_preferences(&mut update, std::mem::take(&mut queue.in_flight));
+    merge_preferences(&mut update, std::mem::take(&mut queue.pending));
+    merge_preferences(&mut update, native);
+    queue.worker_running = false;
+    drop(queue);
+    if update == DesktopPreferences::default() {
+        return;
+    }
+    if let Err(error) = persist_preferences(state_path, update) {
+        tracing::warn!(
+            target: "desktop_preferences",
+            error = %format_args!("{error:#}"),
+            "could not flush desktop preferences during shutdown"
+        );
+    }
+}
+
+/// Register the process-lifetime preference flush before the window can exit.
+pub(crate) fn use_preference_close_flush() {
+    use dioxus::desktop::tao::event::Event;
+    use dioxus::desktop::{WindowEvent, use_wry_event_handler};
+
+    use_wry_event_handler(|event, _| {
+        if matches!(
+            event,
+            Event::WindowEvent {
+                event: WindowEvent::CloseRequested,
+                ..
+            } | Event::LoopDestroyed
+        ) {
+            flush_preferences_on_shutdown();
+        }
+    });
+}
+
+/// Expose the desktop smoke run's real listing query without a pixel oracle.
+///
+/// The hook is inert outside the private smoke environment. Its trace line is
+/// deliberately emitted where native reqwest is about to issue the walk, so
+/// `sort=title` proves restored behavior rather than merely restored bytes.
+pub(crate) fn log_smoke_session_query(query: &str) {
+    if std::env::var_os("FARHELM_SMOKE_CLIENT_LOG_MARKER").is_some() {
+        tracing::info!(target: "desktop_smoke", %query, "session listing requested");
+    }
+}
+
+/// Merge only fields the page changed, preserving credentials and the other
+/// preference already in `desktop-client.json`.
+fn persist_preferences(path: &Path, update: DesktopPreferences) -> anyhow::Result<()> {
+    update_state(path, |state| {
+        if let Some(selection) = update.remembered_selection {
+            state.remembered_selection = Some(selection);
+        }
+        if let Some(sort) = update.list_sort {
+            state.list_sort = Some(sort);
+        }
+    })
+    .map(|_| ())
+}
+
+fn merge_preferences(current: &mut DesktopPreferences, update: DesktopPreferences) {
+    if update.remembered_selection.is_some() {
+        current.remembered_selection = update.remembered_selection;
+    }
+    if update.list_sort.is_some() {
+        current.list_sort = update.list_sort;
+    }
 }
 
 /// Read the current bootstrap token for a webview exchange. Rotation can
@@ -394,9 +770,9 @@ fn persist_then_publish_native(
     secret: String,
     publish: impl FnOnce(String),
 ) -> anyhow::Result<PersistedState> {
-    let mut state = read_state(state_path)?;
-    state.native_device_secret = Some(secret.clone());
-    write_state(state_path, &state)?;
+    let state = update_state(state_path, |state| {
+        state.native_device_secret = Some(secret.clone());
+    })?;
     publish(secret);
     Ok(state)
 }
@@ -643,6 +1019,34 @@ fn read_state(path: &Path) -> anyhow::Result<PersistedState> {
     }
 }
 
+/// Serialize every read-modify-replace of the shared desktop state file.
+///
+/// Authentication refresh and the debounced preference worker can arrive
+/// concurrently. Locking the whole merge is what prevents either writer
+/// from reinstalling a snapshot that silently drops fields the other just
+/// committed.
+fn update_state(
+    path: &Path,
+    mutate: impl FnOnce(&mut PersistedState),
+) -> anyhow::Result<PersistedState> {
+    update_state_after_read(path, mutate, || {})
+}
+
+fn update_state_after_read(
+    path: &Path,
+    mutate: impl FnOnce(&mut PersistedState),
+    after_read: impl FnOnce(),
+) -> anyhow::Result<PersistedState> {
+    let _guard = STATE_FILE_WRITE
+        .lock()
+        .expect("desktop state-file lock poisoned");
+    let mut state = read_state(path)?;
+    after_read();
+    mutate(&mut state);
+    write_state(path, &state)?;
+    Ok(state)
+}
+
 fn write_state(path: &Path, state: &PersistedState) -> anyhow::Result<()> {
     let temporary = path.with_extension("json.tmp");
     let bytes = serde_json::to_vec(state).context("encoding desktop state")?;
@@ -667,13 +1071,493 @@ fn write_state(path: &Path, state: &PersistedState) -> anyhow::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::collections::VecDeque;
+    use std::future::pending;
     use std::io::Read as _;
     use std::net::TcpListener;
+    use std::sync::Barrier;
     use std::sync::atomic::{AtomicBool, Ordering};
     use std::time::Instant;
 
     const PROXY_CHILD_ENV: &str = "FARHELM_DESKTOP_PROXY_TEST_CHILD";
     const PROXY_TARGET_ENV: &str = "FARHELM_DESKTOP_PROXY_TEST_TARGET";
+
+    fn selection(helm: &str, id: &str) -> crate::list::RememberedSelection {
+        crate::list::RememberedSelection {
+            helm: helm.to_string(),
+            id: id.to_string(),
+        }
+    }
+
+    enum EvalReply {
+        Value(Result<DesktopPreferences, String>),
+        Never,
+    }
+
+    struct FakeEval {
+        send_error: Option<String>,
+        sent: Arc<Mutex<Vec<serde_json::Value>>>,
+        reply: EvalReply,
+    }
+
+    impl PreferenceEval for FakeEval {
+        fn send(&mut self, value: serde_json::Value) -> Result<(), String> {
+            if let Some(error) = self.send_error.take() {
+                return Err(error);
+            }
+            self.sent.lock().unwrap().push(value);
+            Ok(())
+        }
+
+        async fn recv(&mut self) -> Result<DesktopPreferences, String> {
+            match std::mem::replace(&mut self.reply, EvalReply::Never) {
+                EvalReply::Value(result) => result,
+                EvalReply::Never => pending().await,
+            }
+        }
+    }
+
+    struct ImmediateReporter {
+        results: VecDeque<bool>,
+    }
+
+    impl PreferenceReporter for ImmediateReporter {
+        async fn report(&mut self, _update: DesktopPreferences) -> bool {
+            self.results.pop_front().unwrap_or(true)
+        }
+    }
+
+    struct BlockingReporter {
+        arrived: Arc<tokio::sync::Notify>,
+        release: Arc<tokio::sync::Notify>,
+        result: bool,
+        first: bool,
+    }
+
+    impl PreferenceReporter for BlockingReporter {
+        async fn report(&mut self, _update: DesktopPreferences) -> bool {
+            if self.first {
+                self.first = false;
+                self.arrived.notify_one();
+                self.release.notified().await;
+                return self.result;
+            }
+            true
+        }
+    }
+
+    struct MemoryWriter {
+        attempts: Arc<Mutex<Vec<DesktopPreferences>>>,
+        persisted: Arc<Mutex<Vec<DesktopPreferences>>>,
+        fail_first: bool,
+    }
+
+    impl PreferenceWriter for MemoryWriter {
+        async fn persist(&mut self, update: DesktopPreferences) -> anyhow::Result<()> {
+            self.attempts.lock().unwrap().push(update.clone());
+            if std::mem::take(&mut self.fail_first) {
+                bail!("injected disk failure");
+            }
+            self.persisted.lock().unwrap().push(update);
+            Ok(())
+        }
+    }
+
+    /// State files from desktop builds predating preference persistence stay
+    /// valid and mean exactly "no remembered choice" for both new fields.
+    #[test]
+    fn persisted_state_decodes_without_preference_fields() {
+        let state: PersistedState = serde_json::from_str(
+            r#"{
+                "native_device_secret":"native-old",
+                "webview_device_secret":"webview-old",
+                "webview_auth_generation":7
+            }"#,
+        )
+        .unwrap();
+
+        assert_eq!(state.native_device_secret.as_deref(), Some("native-old"));
+        assert_eq!(state.webview_device_secret.as_deref(), Some("webview-old"));
+        assert_eq!(state.webview_auth_generation, 7);
+        assert_eq!(state.remembered_selection, None);
+        assert_eq!(state.list_sort, None);
+    }
+
+    /// The durable selection keeps the browser record's `{helm, id}` shape,
+    /// while sort remains the helm's bare wire word.
+    #[test]
+    fn persisted_state_decodes_preference_fields() {
+        let state: PersistedState = serde_json::from_str(
+            r#"{
+                "native_device_secret":"native-new",
+                "webview_device_secret":"webview-new",
+                "webview_auth_generation":8,
+                "remembered_selection":{"helm":"helm-a","id":"session-1"},
+                "list_sort":"title"
+            }"#,
+        )
+        .unwrap();
+
+        assert_eq!(
+            state.remembered_selection,
+            Some(crate::list::RememberedSelection {
+                helm: "helm-a".to_string(),
+                id: "session-1".to_string(),
+            })
+        );
+        assert_eq!(state.list_sort.as_deref(), Some("title"));
+    }
+
+    /// Preference write-back is a field merge, never a reconstructed
+    /// preferences-only file that discards either authenticated client.
+    #[test]
+    fn preference_write_back_preserves_authentication_material() {
+        let root = tempfile::tempdir().unwrap();
+        let state_path = root.path().join(APP_STATE_FILE);
+        write_state(
+            &state_path,
+            &PersistedState {
+                native_device_secret: Some("native-secret".to_string()),
+                webview_device_secret: Some("webview-secret".to_string()),
+                webview_auth_generation: 11,
+                remembered_selection: None,
+                list_sort: Some("created".to_string()),
+            },
+        )
+        .unwrap();
+
+        persist_preferences(
+            &state_path,
+            DesktopPreferences {
+                remembered_selection: Some(crate::list::RememberedSelection {
+                    helm: "helm-a".to_string(),
+                    id: "session-picked".to_string(),
+                }),
+                list_sort: None,
+            },
+        )
+        .unwrap();
+
+        let state = read_state(&state_path).unwrap();
+        assert_eq!(state.native_device_secret.as_deref(), Some("native-secret"));
+        assert_eq!(
+            state.webview_device_secret.as_deref(),
+            Some("webview-secret")
+        );
+        assert_eq!(state.webview_auth_generation, 11);
+        assert_eq!(state.list_sort.as_deref(), Some("created"));
+        assert_eq!(
+            state.remembered_selection,
+            Some(selection("helm-a", "session-picked"))
+        );
+    }
+
+    /// Closing at either side of the eval handoff commits both native sparse
+    /// mirrors as one merge and preserves every unrelated state-file field.
+    #[test]
+    fn close_flush_persists_pending_and_in_flight_native_values() {
+        let root = tempfile::tempdir().unwrap();
+        let state_path = root.path().join(APP_STATE_FILE);
+        write_state(
+            &state_path,
+            &PersistedState {
+                native_device_secret: Some("native-secret".to_string()),
+                webview_device_secret: Some("webview-secret".to_string()),
+                webview_auth_generation: 13,
+                remembered_selection: None,
+                list_sort: None,
+            },
+        )
+        .unwrap();
+        let changes = Mutex::new(PreferenceChangeQueue {
+            pending: DesktopPreferences {
+                remembered_selection: None,
+                list_sort: Some("created".to_string()),
+            },
+            in_flight: DesktopPreferences {
+                remembered_selection: Some(selection("helm-a", "session-old")),
+                list_sort: None,
+            },
+            worker_running: true,
+        });
+
+        flush_preferences_on_shutdown_at(
+            &state_path,
+            &changes,
+            DesktopPreferences {
+                remembered_selection: Some(selection("helm-a", "session-picked")),
+                list_sort: Some("title".to_string()),
+            },
+        );
+
+        let state = read_state(&state_path).unwrap();
+        assert_eq!(state.native_device_secret.as_deref(), Some("native-secret"));
+        assert_eq!(
+            state.webview_device_secret.as_deref(),
+            Some("webview-secret")
+        );
+        assert_eq!(state.webview_auth_generation, 13);
+        assert_eq!(
+            state.remembered_selection,
+            Some(selection("helm-a", "session-picked"))
+        );
+        assert_eq!(state.list_sort.as_deref(), Some("title"));
+        let changes = changes.lock().unwrap();
+        assert_eq!(changes.pending, DesktopPreferences::default());
+        assert_eq!(changes.in_flight, DesktopPreferences::default());
+        assert!(!changes.worker_running);
+    }
+
+    /// The eval protocol authorizes persistence only for an exact, timely
+    /// acknowledgement of the caller's original sparse patch.
+    #[tokio::test]
+    async fn preference_report_rejects_every_ipc_failure_shape() {
+        let update = DesktopPreferences {
+            remembered_selection: Some(selection("helm-a", "session-picked")),
+            list_sort: None,
+        };
+        let sent = Arc::new(Mutex::new(Vec::new()));
+        let eval = |send_error, reply| FakeEval {
+            send_error,
+            sent: Arc::clone(&sent),
+            reply,
+        };
+
+        assert!(
+            !report_preference_batch_with(
+                eval(Some("send failed".to_string()), EvalReply::Never),
+                &update,
+                Duration::from_millis(10),
+            )
+            .await
+        );
+        assert!(
+            !report_preference_batch_with(
+                eval(None, EvalReply::Value(Err("receive failed".to_string()))),
+                &update,
+                Duration::from_millis(10),
+            )
+            .await
+        );
+        assert!(
+            !report_preference_batch_with(
+                eval(None, EvalReply::Never),
+                &update,
+                Duration::from_millis(10),
+            )
+            .await
+        );
+        assert!(
+            !report_preference_batch_with(
+                eval(
+                    None,
+                    EvalReply::Value(Ok(DesktopPreferences {
+                        remembered_selection: None,
+                        list_sort: Some("title".to_string()),
+                    }))
+                ),
+                &update,
+                Duration::from_millis(10),
+            )
+            .await
+        );
+        assert!(
+            report_preference_batch_with(
+                eval(None, EvalReply::Value(Ok(update.clone()))),
+                &update,
+                Duration::from_millis(10),
+            )
+            .await
+        );
+    }
+
+    /// A cancelled root worker requeues its in-flight patch and clears the
+    /// running bit, so a later worker can durably complete the same choice.
+    #[tokio::test]
+    async fn cancelled_preference_worker_does_not_wedge_later_updates() {
+        let queue: &'static Mutex<PreferenceChangeQueue> =
+            Box::leak(Box::new(Mutex::new(PreferenceChangeQueue {
+                pending: DesktopPreferences {
+                    remembered_selection: Some(selection("helm-a", "session-picked")),
+                    list_sort: None,
+                },
+                in_flight: DesktopPreferences::default(),
+                worker_running: true,
+            })));
+        let arrived = Arc::new(tokio::sync::Notify::new());
+        let release = Arc::new(tokio::sync::Notify::new());
+        let attempts = Arc::new(Mutex::new(Vec::new()));
+        let persisted = Arc::new(Mutex::new(Vec::new()));
+        let worker = tokio::spawn(flush_preference_changes_with(
+            queue,
+            Duration::ZERO,
+            BlockingReporter {
+                arrived: Arc::clone(&arrived),
+                release,
+                result: true,
+                first: true,
+            },
+            MemoryWriter {
+                attempts: Arc::clone(&attempts),
+                persisted: Arc::clone(&persisted),
+                fail_first: false,
+            },
+        ));
+        arrived.notified().await;
+        worker.abort();
+        assert!(worker.await.unwrap_err().is_cancelled());
+        {
+            let mut queue = queue.lock().unwrap();
+            assert!(!queue.worker_running);
+            assert_eq!(
+                queue.pending.remembered_selection,
+                Some(selection("helm-a", "session-picked"))
+            );
+            queue.worker_running = true;
+        }
+
+        flush_preference_changes_with(
+            queue,
+            Duration::ZERO,
+            ImmediateReporter {
+                results: VecDeque::from([true]),
+            },
+            MemoryWriter {
+                attempts,
+                persisted: Arc::clone(&persisted),
+                fail_first: false,
+            },
+        )
+        .await;
+
+        assert_eq!(
+            persisted.lock().unwrap().as_slice(),
+            &[DesktopPreferences {
+                remembered_selection: Some(selection("helm-a", "session-picked")),
+                list_sort: None,
+            }]
+        );
+    }
+
+    /// Rejected and failed writes do not terminate serialization; a newer
+    /// pending batch is still reported and can complete normally.
+    #[tokio::test]
+    async fn preference_worker_recovers_after_rejection_and_disk_failure() {
+        async fn run(first_report: bool, fail_first_write: bool) -> Vec<DesktopPreferences> {
+            let queue: &'static Mutex<PreferenceChangeQueue> =
+                Box::leak(Box::new(Mutex::new(PreferenceChangeQueue {
+                    pending: DesktopPreferences {
+                        remembered_selection: Some(selection("helm-a", "session-old")),
+                        list_sort: None,
+                    },
+                    in_flight: DesktopPreferences::default(),
+                    worker_running: true,
+                })));
+            let arrived = Arc::new(tokio::sync::Notify::new());
+            let release = Arc::new(tokio::sync::Notify::new());
+            let persisted = Arc::new(Mutex::new(Vec::new()));
+            let worker = tokio::spawn(flush_preference_changes_with(
+                queue,
+                Duration::ZERO,
+                BlockingReporter {
+                    arrived: Arc::clone(&arrived),
+                    release: Arc::clone(&release),
+                    result: first_report,
+                    first: true,
+                },
+                MemoryWriter {
+                    attempts: Arc::new(Mutex::new(Vec::new())),
+                    persisted: Arc::clone(&persisted),
+                    fail_first: fail_first_write,
+                },
+            ));
+            arrived.notified().await;
+            {
+                let mut queue = queue.lock().unwrap();
+                queue.pending.list_sort = Some("title".to_string());
+            }
+            release.notify_one();
+            worker.await.unwrap();
+            Arc::try_unwrap(persisted).unwrap().into_inner().unwrap()
+        }
+
+        assert_eq!(
+            run(false, false).await,
+            vec![DesktopPreferences {
+                remembered_selection: None,
+                list_sort: Some("title".to_string()),
+            }]
+        );
+        assert_eq!(
+            run(true, true).await,
+            vec![DesktopPreferences {
+                remembered_selection: None,
+                list_sort: Some("title".to_string()),
+            }]
+        );
+    }
+
+    /// A preference merge paused after its read forces the auth writer to
+    /// queue behind the same mutex; both complete without reinstalling stale
+    /// snapshots over the other's fields.
+    #[test]
+    fn concurrent_preference_and_auth_writes_preserve_the_whole_record() {
+        let root = tempfile::tempdir().unwrap();
+        let state_path = root.path().join(APP_STATE_FILE);
+        write_state(
+            &state_path,
+            &PersistedState {
+                native_device_secret: Some("native-old".to_string()),
+                webview_device_secret: Some("webview-old".to_string()),
+                webview_auth_generation: 4,
+                remembered_selection: None,
+                list_sort: Some("activity".to_string()),
+            },
+        )
+        .unwrap();
+        let read = Arc::new(Barrier::new(2));
+        let release = Arc::new(Barrier::new(2));
+        let preference_path = state_path.clone();
+        let preference_read = Arc::clone(&read);
+        let preference_release = Arc::clone(&release);
+        let preference = std::thread::spawn(move || {
+            update_state_after_read(
+                &preference_path,
+                |state| {
+                    state.remembered_selection = Some(selection("helm-a", "session-picked"));
+                    state.list_sort = Some("title".to_string());
+                },
+                || {
+                    preference_read.wait();
+                    preference_release.wait();
+                },
+            )
+            .unwrap();
+        });
+        read.wait();
+        let auth_path = state_path.clone();
+        let authentication = std::thread::spawn(move || {
+            update_state(&auth_path, |state| {
+                state.native_device_secret = Some("native-new".to_string());
+                state.webview_device_secret = Some("webview-new".to_string());
+                state.webview_auth_generation += 1;
+            })
+            .unwrap();
+        });
+        release.wait();
+        preference.join().unwrap();
+        authentication.join().unwrap();
+
+        let state = read_state(&state_path).unwrap();
+        assert_eq!(state.native_device_secret.as_deref(), Some("native-new"));
+        assert_eq!(state.webview_device_secret.as_deref(), Some("webview-new"));
+        assert_eq!(state.webview_auth_generation, 5);
+        assert_eq!(
+            state.remembered_selection,
+            Some(selection("helm-a", "session-picked"))
+        );
+        assert_eq!(state.list_sort.as_deref(), Some("title"));
+    }
 
     /// A failed atomic replacement must leave the credential visible to REST
     /// unchanged, or later requests can no longer drive webview recovery.
