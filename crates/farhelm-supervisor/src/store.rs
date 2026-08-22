@@ -109,7 +109,7 @@ const BUSY_TIMEOUT: Duration = Duration::from_secs(5);
 /// step in `apply_schema`: version 2 (PLAN_M3.md item 2 — the durable
 /// last-known outcome and the boot id) is the first real migration this
 /// database has ever had, and the template every later one follows.
-const SCHEMA_VERSION: i64 = 12;
+const SCHEMA_VERSION: i64 = 13;
 
 /// Random payload size behind one URL-safe session bearer.
 const SESSION_TOKEN_BYTES: usize = 32;
@@ -1154,6 +1154,19 @@ pub type BootTxFault = Arc<dyn Fn() -> anyhow::Result<()> + Send + Sync>;
 /// redundant at best and actively misleading at worst. [`LastOutcome`] is
 /// not that column: it records witnessed transitions, not probe results
 /// (module docs).
+///
+/// [`StoredSession::last_activity_at`] is NOT a counterexample to that
+/// paragraph, and the difference is worth naming because the two look
+/// alike from a distance — both are downstream of the same activity
+/// sampler. A status is a claim about NOW ("this agent is running"), so it
+/// rots the moment the process it describes moves on and there is nothing
+/// in SQLite to notice. `last_activity_at` is a claim about THEN ("the
+/// last moment this supervisor saw the pane change"), which the passage of
+/// time cannot falsify: an hour later it is the same true statement about
+/// the same past instant, merely an hour older. That is what makes it
+/// storable when a status is not, and it is also why a restart RESTORES it
+/// rather than re-minting it — a fresh supervisor did not witness that
+/// moment, but the record of it is still the best answer anyone has.
 #[derive(Debug, Clone)]
 pub struct StoredSession {
     pub id: String,
@@ -1192,6 +1205,30 @@ pub struct StoredSession {
     /// `created_at`, this field is immutable either way — nothing later
     /// in this session's life re-derives or overwrites it.
     pub created_at: i64,
+    /// Seconds since the Unix epoch when a supervisor last OBSERVED this
+    /// session's agent pane change (`service::ticker`'s sampler), seeded
+    /// to [`StoredSession::created_at`] at insert so a session that has
+    /// never produced output sorts by its creation instead of by the
+    /// epoch.
+    ///
+    /// Advanced only through [`SessionStore::record_activity`], which
+    /// enforces exactly one of the two rules this value obeys: MONOTONIC,
+    /// in SQL, so no caller and no clock step can move it backwards. The
+    /// other rule — that it is QUANTIZED to a minute — belongs to the
+    /// caller and lives in `service::ticker`'s `ACTIVITY_STAMP_QUANTUM`,
+    /// because granularity is a question about sampling cadence and write
+    /// volume that this module cannot see. Read the column as "activity
+    /// around this time" accordingly, never as an exact instant, and never
+    /// as a liveness claim: it keeps its last value for a session that has
+    /// exited, because it is a fact about the past rather than about now
+    /// (see this type's own docs for why that makes it storable when
+    /// `SessionInfo::status` is not).
+    ///
+    /// Carried across a crash-interrupted create's retry for the same
+    /// reason `created_at` is: the dead attempt's row was durable and
+    /// listable, so re-minting would move a value a client may already
+    /// have seen.
+    pub last_activity_at: i64,
     /// Strict creation order within this supervisor installation.
     ///
     /// Unlike `created_at`, this cannot tie. Retries preserve the original
@@ -1463,6 +1500,17 @@ pub struct SessionStore {
 ///   cannot make its value reusable the way a bare SQLite rowid could.
 /// - 12: PLAN_M7.md item 5 — `sessions.archived`, durable metadata kept
 ///   separate from the recorded exit outcome it accompanies.
+/// - 13: `sessions.last_activity_at`, the persisted "last time output was
+///   observed" a most-recently-active sort orders by. Backfilled from
+///   `created_at` rather than left at the column default: a reader that
+///   sees 0 does fall back to `created_at` (that IS the wire contract —
+///   `farhelm_proto::SessionInfo::last_activity_at`), so the backfill is
+///   not what keeps old sessions off the epoch. What it buys is that this
+///   build's rows carry a real value and this build's replies therefore
+///   stop emitting the compatibility sentinel at all, which keeps the
+///   fallback where it belongs: a concession to OLDER senders, not
+///   something every local read has to keep applying forever. See
+///   [`StoredSession::last_activity_at`].
 ///
 /// `may_migrate` is the caller's assertion that it holds this state
 /// directory's exclusivity (see `service::StateDirOwnership`). Upgrading a
@@ -1518,7 +1566,8 @@ fn apply_schema(conn: &Connection, may_migrate: bool) -> anyhow::Result<()> {
                  parent                TEXT,
                  session_token         TEXT,
                  creation_seq          INTEGER,
-                 archived              INTEGER NOT NULL DEFAULT 0
+                 archived              INTEGER NOT NULL DEFAULT 0,
+                 last_activity_at      INTEGER NOT NULL DEFAULT 0
              ) STRICT;
              CREATE TABLE supervisor_meta (
                  id            INTEGER PRIMARY KEY CHECK (id = 0),
@@ -1541,7 +1590,7 @@ fn apply_schema(conn: &Connection, may_migrate: bool) -> anyhow::Result<()> {
                  ON create_reservations (session_id) WHERE state = 'pending';
              {PROFILES_SCHEMA}
              {STARTER_PROFILES}
-             PRAGMA user_version = 12;
+             PRAGMA user_version = 13;
              COMMIT;"
         ))
         .context("creating schema")?;
@@ -1874,6 +1923,31 @@ fn apply_schema(conn: &Connection, may_migrate: bool) -> anyhow::Result<()> {
         .context("migrating schema from version 11 to 12")?;
         version = 12;
     }
+    if version == 12 {
+        // Backfilled from `created_at` rather than left at the column
+        // default. Not because a 0 would be MISREAD — the wire contract
+        // says 0 means "unknown, fall back to `created_at`", so a reader
+        // handles it correctly — but because normalizing here is what
+        // stops this build ever emitting that sentinel about its own
+        // rows. The fallback then stays what it is meant to be: a
+        // concession to senders older than the field, rather than a rule
+        // every consumer must keep applying to local data forever. The
+        // value chosen says exactly what a brand-new session's seed says
+        // — nothing has been observed here yet — which is the truthful
+        // historical answer for a row written by a build that never
+        // looked. One `UPDATE` over the table: this runs once per
+        // install, on a table bounded by how many sessions a person has
+        // ever created.
+        conn.execute_batch(
+            "BEGIN;
+             ALTER TABLE sessions ADD COLUMN last_activity_at INTEGER NOT NULL DEFAULT 0;
+             UPDATE sessions SET last_activity_at = created_at;
+             PRAGMA user_version = 13;
+             COMMIT;",
+        )
+        .context("migrating schema from version 12 to 13")?;
+        version = 13;
+    }
     if version == SCHEMA_VERSION {
         return Ok(());
     }
@@ -2009,9 +2083,10 @@ fn insert_session_row(
           outcome_state, exit_code, annotation, error_detail, \
           agent_kind, resume_template, canonical_cwd, captured_conversation, \
           captured_record, capture_ambiguous, first_input_at, generation, launch_scoped, \
-          source_profile_id, source_profile_name, parent, session_token, archived) \
+          source_profile_id, source_profile_name, parent, session_token, archived, \
+          last_activity_at) \
          VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, \
-                 ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26)",
+                 ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27)",
         rusqlite::params![
             row.id,
             row.title,
@@ -2042,6 +2117,7 @@ fn insert_session_row(
             row.parent,
             session_token,
             i64::from(row.archived),
+            row.last_activity_at,
         ],
     )
     .context("inserting session row")?;
@@ -2055,9 +2131,10 @@ fn insert_session_row(
 /// [`decode_session_row`] expects. Named so the two readers cannot drift
 /// apart by one column and start decoding each other's fields.
 ///
-/// `created_at` is appended at the END here even though the schema itself
-/// puts the column right after `pane` (see the `CREATE TABLE` above) —
-/// this list's order does NOT need to match the table's. What it must
+/// Every column added since the original projection was APPENDED here —
+/// `created_at`, for instance, sits near the end of this list even though
+/// the schema puts it right after `pane` (see the `CREATE TABLE` above) —
+/// because this list's order does NOT need to match the table's. What it must
 /// match is [`read_session_columns`]'s positional `r.get(N)` calls: every
 /// position before a given column is load-bearing for every index after
 /// it, so inserting a new column in the MIDDLE of this projection would
@@ -2070,7 +2147,7 @@ const SESSION_COLUMNS: &str = "id, title, cwd, invocation, tmux_name, pane, \
                                captured_conversation, captured_record, capture_ambiguous, \
                                first_input_at, generation, launch_scoped, created_at, \
                                source_profile_id, source_profile_name, parent, creation_seq, \
-                               archived";
+                               archived, last_activity_at";
 
 /// The raw columns of one session row, before the fallible decoding that
 /// cannot happen inside a rusqlite row mapper (whose error type is
@@ -2117,6 +2194,7 @@ fn read_session_columns(r: &rusqlite::Row<'_>) -> rusqlite::Result<SessionColumn
             generation: r.get(17)?,
             launch_scoped: r.get::<_, i64>(18)? != 0,
             created_at: r.get(19)?,
+            last_activity_at: r.get(25)?,
             creation_seq: 0,
             source_profile: None,
             archived: r.get::<_, i64>(24)? != 0,
@@ -2712,10 +2790,10 @@ impl SessionStore {
             {
                 return Ok(RetryClaim::Resolved(Box::new(reservation)));
             }
-            let current: Option<(String, String, i64, String, String, i64)> = tx
+            let current: Option<(String, String, i64, String, String, i64, i64)> = tx
                 .query_row(
-                    "SELECT outcome_state, pane, created_at, title, session_token, creation_seq \
-                     FROM sessions WHERE id = ?1",
+                    "SELECT outcome_state, pane, created_at, title, session_token, \
+                     creation_seq, last_activity_at FROM sessions WHERE id = ?1",
                     rusqlite::params![row.id],
                     |r| {
                         Ok((
@@ -2725,6 +2803,7 @@ impl SessionStore {
                             r.get(3)?,
                             r.get(4)?,
                             r.get(5)?,
+                            r.get(6)?,
                         ))
                     },
                 )
@@ -2746,39 +2825,49 @@ impl SessionStore {
             // timestamp the reply must honor, so reading all three off one
             // committed snapshot rules out a second query ever disagreeing
             // with the first about which row it saw.
-            let (preserved_created_at, preserved_title, preserved_token, preserved_sequence) =
-                match current {
-                    Some((state, pane, created_at, title, token, sequence)) => {
-                        if !pane.is_empty()
-                            || !matches!(state.as_str(), "launching" | "interrupted")
-                        {
-                            return Ok(RetryClaim::Launched);
-                        }
-                        (
-                            created_at,
-                            title,
-                            Some(token),
-                            Some(u64::try_from(sequence).context("negative creation sequence")?),
-                        )
+            let (
+                preserved_created_at,
+                preserved_title,
+                preserved_token,
+                preserved_sequence,
+                preserved_last_activity_at,
+            ) = match current {
+                Some((state, pane, created_at, title, token, sequence, last_activity_at)) => {
+                    if !pane.is_empty() || !matches!(state.as_str(), "launching" | "interrupted") {
+                        return Ok(RetryClaim::Launched);
                     }
-                    // Contradicts `SessionStore::insert_session`'s own
-                    // invariant — a Pending reservation's row is committed in
-                    // the SAME transaction as the reservation itself, so one
-                    // can never durably exist without the other. Handled
-                    // rather than asserted for the same reason the relaunch
-                    // takeover as a whole re-checks its conditions instead of
-                    // trusting the caller's evidence: "cannot happen" is a
-                    // poor thing to stake a duplicate agent on, and here that
-                    // would extend to a lost timestamp too. Falls back to the
-                    // caller's own freshly minted `row.created_at` — the
-                    // least-wrong answer when the row this takeover was
-                    // supposed to preserve cannot be found at all. (The
-                    // original `current.is_some_and(..)` check this replaces
-                    // took the same "nothing found, proceed anyway" branch for
-                    // `None`, so this preserves that behavior rather than
-                    // introducing a new refusal path.)
-                    None => (row.created_at, row.title.clone(), None, None),
-                };
+                    (
+                        created_at,
+                        title,
+                        Some(token),
+                        Some(u64::try_from(sequence).context("negative creation sequence")?),
+                        last_activity_at,
+                    )
+                }
+                // Contradicts `SessionStore::insert_session`'s own
+                // invariant — a Pending reservation's row is committed in
+                // the SAME transaction as the reservation itself, so one
+                // can never durably exist without the other. Handled
+                // rather than asserted for the same reason the relaunch
+                // takeover as a whole re-checks its conditions instead of
+                // trusting the caller's evidence: "cannot happen" is a
+                // poor thing to stake a duplicate agent on, and here that
+                // would extend to a lost timestamp too. Falls back to the
+                // caller's own freshly minted `row.created_at` — the
+                // least-wrong answer when the row this takeover was
+                // supposed to preserve cannot be found at all. (The
+                // original `current.is_some_and(..)` check this replaces
+                // took the same "nothing found, proceed anyway" branch for
+                // `None`, so this preserves that behavior rather than
+                // introducing a new refusal path.)
+                None => (
+                    row.created_at,
+                    row.title.clone(),
+                    None,
+                    None,
+                    row.last_activity_at,
+                ),
+            };
             tx.execute(
                 "DELETE FROM sessions WHERE id = ?1",
                 rusqlite::params![row.id],
@@ -2797,6 +2886,14 @@ impl SessionStore {
             // read racing the first.
             let mut row = StoredSession {
                 created_at: preserved_created_at,
+                // Carried for `created_at`'s reason and with the same
+                // reach: the replaced row provably never launched (an
+                // empty pane is what let the takeover happen at all), so
+                // this is its seed value — but reading it rather than
+                // re-deriving it keeps the two columns preserved by one
+                // rule instead of by a coincidence a later change could
+                // break.
+                last_activity_at: preserved_last_activity_at,
                 creation_seq: 0,
                 title: preserved_title,
                 ..row
@@ -3586,6 +3683,53 @@ impl SessionStore {
         })
         .await
         .context("first-input record task panicked")?
+    }
+
+    /// Move a session's [`StoredSession::last_activity_at`] forward to
+    /// `at_unix`, if that is actually forward.
+    ///
+    /// The `last_activity_at < ?2` predicate makes the write MONOTONIC in
+    /// SQL rather than by caller discipline, which matters for two cases
+    /// the caller cannot see: a host clock stepped backwards (NTP, a
+    /// suspend/resume), and a supervisor that reloaded a row while a
+    /// stale in-memory cell elsewhere still held an older value. Both
+    /// would otherwise walk a session BACKWARDS in a most-recently-active
+    /// sort, which reads as the session mysteriously aging while it is
+    /// visibly producing output. Never moving backwards is the honest
+    /// direction: the observation genuinely happened at the recorded time,
+    /// and a later clock disagreeing does not unhappen it.
+    ///
+    /// Deliberately NOT generation-fenced, unlike
+    /// [`SessionStore::record_first_input`]. A first-input anchor belongs
+    /// to one launch — the capture window opens from it — so a write
+    /// racing a relaunch would corrupt the next run's correlation. This
+    /// value belongs to the SESSION across all of its launches: "the last
+    /// time anything was seen happening here" is equally true whichever
+    /// generation produced the output, and a late write from a
+    /// just-replaced generation is at worst a few seconds early for a
+    /// value the new generation is about to advance anyway.
+    ///
+    /// The caller is expected to have quantized `at_unix` already (see
+    /// `service::ticker`); this method enforces only direction, not
+    /// granularity, so it will happily accept every second if a future
+    /// caller stops quantizing. That is a write-volume question, not a
+    /// correctness one, and it belongs where the sampling cadence is
+    /// known.
+    pub async fn record_activity(&self, id: &str, at_unix: i64) -> anyhow::Result<()> {
+        let conn = Arc::clone(&self.conn);
+        let id = id.to_string();
+        tokio::task::spawn_blocking(move || -> anyhow::Result<()> {
+            let conn = conn.lock().expect("session db mutex poisoned");
+            conn.execute(
+                "UPDATE sessions SET last_activity_at = ?2 \
+                 WHERE id = ?1 AND last_activity_at < ?2",
+                rusqlite::params![id, at_unix],
+            )
+            .context("recording a session's last observed activity")?;
+            Ok(())
+        })
+        .await
+        .context("activity record task panicked")?
     }
 
     /// Claim a conversation identity for a session (PLAN_M3.md item 8), if
@@ -4596,6 +4740,7 @@ mod tests {
                     archived: false,
                     title: id.to_string(),
                     created_at: now_unix(),
+                    last_activity_at: now_unix(),
                     creation_seq: 0,
                     cwd: "/tmp/work".to_string(),
                     invocation: "agent".to_string(),
@@ -5491,6 +5636,7 @@ mod tests {
                     archived: false,
                     title: "demo".to_string(),
                     created_at: now_unix(),
+                    last_activity_at: now_unix(),
                     creation_seq: 0,
                     cwd: "/tmp/work".to_string(),
                     invocation: "agent".to_string(),
@@ -5540,6 +5686,7 @@ mod tests {
                     parent: None,
                     archived: false,
                     created_at: now_unix(),
+                    last_activity_at: now_unix(),
                     creation_seq: 0,
                     cwd: "/tmp/work".to_string(),
                     invocation: "agent".to_string(),
@@ -6143,6 +6290,7 @@ mod tests {
                     archived: false,
                     title: "demo".to_string(),
                     created_at: now_unix(),
+                    last_activity_at: now_unix(),
                     creation_seq: 0,
                     cwd: "/tmp/work".to_string(),
                     invocation: "agent --flag".to_string(),
@@ -6471,6 +6619,7 @@ mod tests {
                     archived: false,
                     title: "s1".to_string(),
                     created_at: SENTINEL_CREATED_AT,
+                    last_activity_at: SENTINEL_CREATED_AT,
                     creation_seq: 0,
                     cwd: "/tmp/work".to_string(),
                     invocation: "agent".to_string(),
@@ -6531,6 +6680,7 @@ mod tests {
             archived: false,
             title: id.to_string(),
             created_at: now_unix(),
+            last_activity_at: now_unix(),
             creation_seq: 0,
             cwd: "/tmp/work".to_string(),
             invocation: "agent".to_string(),
@@ -7254,17 +7404,30 @@ mod tests {
     /// `created_at` from the original, so a test that silently re-minted —
     /// rather than preserved — would fail loudly instead of by
     /// coincidentally matching.
+    ///
+    /// `last_activity_at` is asserted alongside it because the two are
+    /// preserved by ONE rule rather than by coincidence, and separating
+    /// them into two tests would invite separating the rule. On this path
+    /// the two columns genuinely hold the same value — a row eligible for
+    /// takeover provably never reached tmux, so nothing has sampled it and
+    /// the activity column still holds its creation seed — but the fixture
+    /// gives them different numbers anyway, so that a takeover which
+    /// re-derived one from the other, or crossed the two columns, fails
+    /// here instead of passing by arithmetic accident.
     #[tokio::test]
     async fn restart_pending_launch_preserves_created_at_across_a_retry() {
         let (_dir, store) = fresh_store().await;
 
         const ORIGINAL_CREATED_AT: i64 = 1_000_000_000;
+        const ORIGINAL_ACTIVITY_AT: i64 = 1_000_000_111;
         const RETRY_CREATED_AT: i64 = 2_000_000_000;
+        const RETRY_ACTIVITY_AT: i64 = 2_000_000_222;
 
         store
             .insert_session(
                 StoredSession {
                     created_at: ORIGINAL_CREATED_AT,
+                    last_activity_at: ORIGINAL_ACTIVITY_AT,
                     creation_seq: 0,
                     ..launching_row("s1")
                 },
@@ -7281,6 +7444,7 @@ mod tests {
             .restart_pending_launch(
                 StoredSession {
                     created_at: RETRY_CREATED_AT,
+                    last_activity_at: RETRY_ACTIVITY_AT,
                     creation_seq: 0,
                     ..launching_row("s1")
                 },
@@ -7305,6 +7469,70 @@ mod tests {
             row.created_at, ORIGINAL_CREATED_AT,
             "the durable row after the takeover must still carry the original timestamp"
         );
+        assert_eq!(
+            row.last_activity_at, ORIGINAL_ACTIVITY_AT,
+            "and the activity stamp beside it, which a retry must not re-mint either"
+        );
+    }
+
+    /// `record_activity` round-trips through the row and refuses to move
+    /// the value BACKWARDS.
+    ///
+    /// The monotonic half is the reason this predicate lives in SQL rather
+    /// than in the ticker that calls it. Two situations reach the store
+    /// with a stale timestamp and neither is a bug the caller can see: a
+    /// host clock stepped back by NTP or a resume, and a second supervisor
+    /// (or a reloaded entry) still holding an older in-memory value. Either
+    /// one walking a visibly-busy session down a most-recently-active sort
+    /// is a user-visible wrong answer, so "never backwards" has to hold
+    /// against whatever the caller passes.
+    #[tokio::test]
+    async fn record_activity_persists_and_never_moves_backwards() {
+        let (_dir, store) = fresh_store().await;
+
+        const CREATED: i64 = 1_000_000_000;
+        store
+            .insert_session(
+                StoredSession {
+                    created_at: CREATED,
+                    last_activity_at: CREATED,
+                    ..launching_row("s1")
+                },
+                None,
+            )
+            .await
+            .expect("insert");
+        assert_eq!(
+            store.session("s1").await.unwrap().unwrap().last_activity_at,
+            CREATED,
+            "the inserted seed must survive a round trip through the row"
+        );
+
+        store
+            .record_activity("s1", CREATED + 60)
+            .await
+            .expect("advance");
+        assert_eq!(
+            store.session("s1").await.unwrap().unwrap().last_activity_at,
+            CREATED + 60
+        );
+
+        for stale in [CREATED, CREATED + 59, 0, -1] {
+            store.record_activity("s1", stale).await.expect("no-op");
+            assert_eq!(
+                store.session("s1").await.unwrap().unwrap().last_activity_at,
+                CREATED + 60,
+                "a stamp of {stale} is not newer than what the row already holds"
+            );
+        }
+
+        // A row that does not exist is not an error: the session may have
+        // been deleted between the observation and this write, which is
+        // ordinary and costs nothing.
+        store
+            .record_activity("gone", CREATED + 600)
+            .await
+            .expect("a vanished session is not a failure");
     }
 
     /// A reservation row this build cannot honestly decode is refused, not
@@ -7386,6 +7614,7 @@ mod tests {
                     archived: false,
                     title: "t".to_string(),
                     created_at: now_unix(),
+                    last_activity_at: now_unix(),
                     creation_seq: 0,
                     cwd: "/tmp/work".to_string(),
                     invocation: "agent".to_string(),
@@ -7788,8 +8017,14 @@ mod tests {
         drop(store);
 
         let conn = Connection::open(&db_path).expect("open fixture");
+        // Every column added AFTER v11 has to come off, not just the one
+        // this test is about: the ladder replays from whatever
+        // `user_version` claims, and a leftover column makes the next
+        // step's `ADD COLUMN` fail as a duplicate rather than exercising
+        // the migration under test.
         conn.execute_batch(
             "ALTER TABLE sessions DROP COLUMN archived;
+             ALTER TABLE sessions DROP COLUMN last_activity_at;
              PRAGMA user_version = 11;",
         )
         .expect("downgrade the fixture to the pre-archive schema");
@@ -7802,6 +8037,95 @@ mod tests {
         assert!(!row.archived);
         assert_eq!(row.title, "s1");
         assert_eq!(row.pane, "%0");
+    }
+
+    /// The v12-to-v13 migration gives every preexisting row a
+    /// `last_activity_at` equal to its own `created_at`.
+    ///
+    /// The backfill is the whole point of the step. A column left at its
+    /// `DEFAULT 0` would not be misread — 0 is the wire's "unknown, fall
+    /// back to `created_at`" — but it would leave this build emitting that
+    /// compatibility sentinel about rows it owns and knows the answer for,
+    /// so every consumer would go on applying a rule that exists for
+    /// senders older than the field. Seeding from creation says the same
+    /// thing a brand-new session's row says — "nothing has been observed
+    /// here yet" — which is the truthful historical value for a row
+    /// written by a build that never looked.
+    ///
+    /// SEVERAL rows with distinct creation times, because the bug the
+    /// backfill can most easily grow is a per-table constant rather than a
+    /// per-row copy — an `UPDATE` seeded from a scalar subquery, or from
+    /// "now", would satisfy a single-row fixture perfectly while collapsing
+    /// every real user's list into one indistinguishable timestamp. And
+    /// reopened afterwards, because a migration that is replayed rather
+    /// than recorded would recompute the same values and hide that
+    /// `user_version` never moved.
+    #[tokio::test]
+    async fn schema_12_rows_backfill_last_activity_from_created_at() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let db_path = dir.path().join("supervisor.db");
+        let store = SessionStore::open(&db_path, true)
+            .await
+            .expect("create current db");
+        // Distinct, and distinct by more than a second, so no two rows can
+        // pass by coincidence of a shared clock read.
+        let creations: Vec<(String, i64)> = (0..4)
+            .map(|index| (format!("s{index}"), 1_700_000_000 + index * 3_600))
+            .collect();
+        for (id, created_at) in &creations {
+            store
+                .insert_session(
+                    StoredSession {
+                        created_at: *created_at,
+                        last_activity_at: *created_at,
+                        ..launching_row(id)
+                    },
+                    None,
+                )
+                .await
+                .expect("insert a pre-migration row");
+        }
+        drop(store);
+
+        let conn = Connection::open(&db_path).expect("open fixture");
+        conn.execute_batch(
+            "ALTER TABLE sessions DROP COLUMN last_activity_at;
+             PRAGMA user_version = 12;",
+        )
+        .expect("downgrade the fixture to the pre-activity schema");
+        drop(conn);
+
+        let migrated = SessionStore::open(&db_path, true)
+            .await
+            .expect("migrate v12");
+        for (id, created_at) in &creations {
+            let row = migrated.session(id).await.unwrap().unwrap();
+            assert_eq!(
+                row.last_activity_at, *created_at,
+                "{id} must inherit ITS OWN creation time, not the column default and not \
+                 another row's"
+            );
+            assert_ne!(row.last_activity_at, 0);
+        }
+        drop(migrated);
+
+        // Reopened: the backfill has to be a committed one-time step, not
+        // something the ladder redoes on every open.
+        let reopened = SessionStore::open(&db_path, true)
+            .await
+            .expect("reopen the migrated db");
+        for (id, created_at) in &creations {
+            assert_eq!(
+                reopened
+                    .session(id)
+                    .await
+                    .unwrap()
+                    .unwrap()
+                    .last_activity_at,
+                *created_at,
+                "{id}'s backfilled value must be durable"
+            );
+        }
     }
 
     /// PLAN_M3.md items 4 and 9: a restart's new generation reopens a
@@ -8625,6 +8949,7 @@ mod tests {
                     archived: false,
                     title: "s1".to_string(),
                     created_at: now_unix(),
+                    last_activity_at: now_unix(),
                     creation_seq: 0,
                     cwd: "/tmp/work".to_string(),
                     invocation: "claude".to_string(),
@@ -8838,6 +9163,7 @@ mod tests {
             archived: false,
             title: title.to_string(),
             created_at: 1_700_000_000,
+            last_activity_at: 1_700_000_000,
             creation_seq: 0,
             cwd: "/tmp/work".to_string(),
             invocation: "agent".to_string(),

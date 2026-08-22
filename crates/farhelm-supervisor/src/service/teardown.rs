@@ -408,6 +408,14 @@ impl Supervisor {
             first_input: Arc::clone(&entry.first_input),
             capture: Arc::clone(&entry.capture),
             activity: ActivitySample::unsampled(),
+            // Shared rather than reset, unlike the sampler cell above:
+            // archiving ends the RUN, not the session's history. This cell
+            // is session-scoped everywhere (a relaunch shares it too — see
+            // its field docs), so a sampling pass still holding the
+            // pre-archive entry writes somewhere the archived entry can be
+            // read from, which is the right place for an observation made
+            // a moment before the teardown.
+            last_activity_at: Arc::clone(&entry.last_activity_at),
             generation: entry.generation,
             // Keep the prior launch's scope identity so a restart can run
             // its ordinary leftover sweep. Archive has already emptied it,

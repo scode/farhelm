@@ -2707,6 +2707,7 @@ mod tests {
             id: id.into(),
             title: id.into(),
             created_at: 1_700_000_000,
+            last_activity_at: 1_700_000_000,
             creation_seq: None,
             cwd: format!("/{id}"),
             invocation: "agent".into(),

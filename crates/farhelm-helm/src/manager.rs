@@ -1330,6 +1330,44 @@ pub fn merged_status(previous: &SessionStatus, incoming: SessionStatus) -> Sessi
     }
 }
 
+/// Fold what the helm already cached for a session into the `SessionInfo`
+/// a MUTATION's reply just produced, before that reply is recorded.
+///
+/// One helper for both storage shapes on purpose. The helm caches sessions
+/// two ways — durably in `session_cache` for a host with an identity, in
+/// memory for one without — and each has its own "what did we know"
+/// lookup. The rules for reconciling a mutation's reply against it are the
+/// same rules either way, and two copies of them is how the two shapes
+/// come to disagree about what a reply is evidence of.
+///
+/// A mutation's reply is authoritative about everything it describes
+/// EXCEPT the two fields handled here, and for the same underlying reason:
+/// both are computed by machinery the reply did not run. `status` is
+/// [`merged_status`]'s subject. `last_activity_at` is the supervisor's
+/// sampler's, and a create/rename/restart/archive reply merely copies
+/// whatever the entry happened to hold when it was built — which can be
+/// OLDER than what a `ListSessions` drain already committed here, because
+/// replies and drains race and nothing orders them.
+///
+/// So the value is carried forward monotonically: a reply may push it
+/// forward, never back. `0` is the field's "unknown" (an old sender omits
+/// it entirely — see `SessionInfo::last_activity_at`), and it is also the
+/// smallest value the field takes, so a plain maximum is exactly the rule
+/// "never let an absent or stale answer erase a real one". Moving it
+/// backwards would be user-visible in the one place it is read: a session
+/// would drop down a most-recently-active list at the moment somebody
+/// renamed or restarted it, and stay there until the owning host's next
+/// refresh.
+///
+/// The `created_at` fallback a 0 implies is deliberately NOT applied here.
+/// It belongs at read and sort time, where the reader has both fields in
+/// hand; writing a synthesized value into the cache would make a guess
+/// indistinguishable from an observation for every later merge.
+pub fn merge_cached_session(previous: &SessionInfo, incoming: &mut SessionInfo) {
+    incoming.status = merged_status(&previous.status, incoming.status.clone());
+    incoming.last_activity_at = previous.last_activity_at.max(incoming.last_activity_at);
+}
+
 /// Whether two published clients are the SAME live connection.
 ///
 /// Pointer identity, not equality: two `Arc<SupervisorClient>`s are the same
@@ -1913,15 +1951,17 @@ impl ConnectionManager {
                         .unwrap_or_default();
                     // Same merge rule as the durable path, applied where
                     // this path's "previous value" lives: a reply's
-                    // `Unknown` must not erase a definite status. See
-                    // `merged_status`. Two call sites, one predicate, so
-                    // the two storage shapes cannot come to disagree about
-                    // what a mutation's reply is evidence of.
+                    // `Unknown` must not erase a definite status, and its
+                    // `last_activity_at` may not walk backwards. See
+                    // `merge_cached_session`. Two call sites, one
+                    // predicate, so the two storage shapes cannot come to
+                    // disagree about what a mutation's reply is evidence
+                    // of.
                     let mut session = session.clone();
                     if let Some(previous) =
                         entries.iter().find(|existing| existing.id == session.id)
                     {
-                        session.status = merged_status(&previous.status, session.status);
+                        merge_cached_session(previous, &mut session);
                     }
                     let session = &session;
                     entries.retain(|existing| existing.id != session.id);
@@ -4852,6 +4892,7 @@ mod tests {
             id: id.to_string(),
             title: id.to_string(),
             created_at,
+            last_activity_at: created_at,
             creation_seq: None,
             cwd: format!("/{id}"),
             invocation: "agent".to_string(),
@@ -4994,6 +5035,100 @@ mod tests {
     /// rounding tolerance here would only hide a real drift.
     fn seconds(attempts: &[Duration]) -> Vec<u64> {
         attempts.iter().map(|d| d.as_secs()).collect()
+    }
+
+    /// The IN-MEMORY cache applies the same monotonic activity merge the
+    /// durable one does: a mutation's reply may push `last_activity_at`
+    /// forward, never back, and a 0 from an old sender never wins.
+    ///
+    /// Both halves of [`merge_cached_session`] have a call site, and a
+    /// helper is only shared as long as both keep calling it. The durable
+    /// path's copy of this property is pinned in `store`; this is the
+    /// identity-less path, which is not a niche configuration — it is
+    /// every supervisor too old to report an identity, and it is the one
+    /// with no `session_cache` row anywhere to correct a bad value from.
+    ///
+    /// The stale reply is the ordinary case rather than a contrived one: a
+    /// refresh drain and a create/rename/restart reply both write this
+    /// list, nothing orders them, and a reply only ever echoes whatever
+    /// the supervisor's entry held when it was built.
+    #[tokio::test(start_paused = true)]
+    async fn an_in_memory_reply_never_walks_the_activity_stamp_backwards() {
+        let listed = SessionInfo {
+            last_activity_at: 900,
+            ..session("s-1", 100)
+        };
+        let fixture = fixture(Cadence::default(), {
+            let listed = listed.clone();
+            |store, transport| async move {
+                let host = store
+                    .add_ssh_host("memoryless.example", None, None)
+                    .await
+                    .unwrap();
+                // No identity anywhere: the row has never recorded one and
+                // the peer reports none, so this host serves from memory
+                // and writes no `session_cache` row at all.
+                transport.set_script(
+                    host,
+                    Script {
+                        identity: None,
+                        sessions: vec![listed],
+                        ..Script::default()
+                    },
+                );
+            }
+        })
+        .await;
+        let host = fixture.store.list_hosts().await.unwrap()[1].id;
+        fixture
+            .manager
+            .wait_for_state(host, |state| {
+                matches!(
+                    state,
+                    HostState::Connected {
+                        identity: None,
+                        last_refresh: RefreshHealth::Ok { sessions: 1 },
+                        ..
+                    }
+                )
+            })
+            .await
+            .expect("actor is running");
+
+        let claim = SessionClaim {
+            host,
+            incarnation: fixture.manager.status(host).expect("connected").incarnation,
+            identity: None,
+        };
+        let cached_stamp = |fixture: &Fixture| {
+            fixture
+                .manager
+                .status(host)
+                .expect("connected")
+                .live_sessions
+                .expect("an identity-less host serves its list from memory")[0]
+                .last_activity_at
+        };
+        assert_eq!(cached_stamp(&fixture), 900, "what the drain committed");
+
+        for (label, reply, expected) in [
+            ("a reply built before the drain landed", 500, 900),
+            ("a reply from a sender that predates the field", 0, 900),
+            ("a genuinely newer observation", 1_500, 1_500),
+        ] {
+            fixture
+                .manager
+                .remember_session(
+                    &claim,
+                    &SessionInfo {
+                        last_activity_at: reply,
+                        ..listed.clone()
+                    },
+                )
+                .await
+                .expect("record the reply");
+            assert_eq!(cached_stamp(&fixture), expected, "{label}");
+        }
     }
 
     /// A refresh whose session cache is byte-identical still publishes when

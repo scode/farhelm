@@ -404,6 +404,12 @@ pub(crate) fn source_profile_existence(
 /// rediscovered `tabs`, a freshly derived `restart_offer`, and the source
 /// profile's existence.
 ///
+/// `last_activity_at` is refreshed here too, and is deliberately not one
+/// of those four: it IS stored, and this is a plain read of the entry's
+/// live cell rather than a recomputation. It needs refreshing for a
+/// mechanical reason only — the entry is immutable behind its `Arc`, so
+/// the ticker advances a cell beside `info` rather than `info` itself.
+///
 /// The single place that shape is defined, shared by `ListSessions` and by
 /// the single-session replies that must match it (`SessionRenamed`, whose
 /// own protocol docs promise a `SessionInfo` "built the same way
@@ -437,6 +443,16 @@ pub(crate) fn entry_info(
 ) -> SessionInfo {
     let mut info = entry.info.clone();
     info.restart_offer = session_restart_offer(entry);
+    // The entry's `info` froze this at build time (creation, reload, or
+    // restart); the sampler has been advancing the cell beside it ever
+    // since. Overwritten here rather than kept in sync on the entry
+    // because a `SessionEntry` is immutable behind its `Arc` — the same
+    // reason `status` and `restart_offer` are recomputed above. Unlike
+    // those, this is a READ of a value the ticker decided, not a fresh
+    // computation: nothing on the reply path may mint an activity time.
+    info.last_activity_at = entry
+        .last_activity_at
+        .load(std::sync::atomic::Ordering::Relaxed);
     // The entry carries the SNAPSHOT (id and name as recorded at creation);
     // the existence beside it is a placeholder nothing reads, re-derived
     // here against the catalog as it stands for this reply — which is what

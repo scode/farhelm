@@ -66,14 +66,27 @@
 //!   `handle_control`, and with it the connection read loop that
 //!   dispatches keystrokes. That field's docs carry the full argument.
 //!
-//! Sampling itself writes nothing durable — it reads panes and updates
-//! in-memory [`ActivitySample`] cells — so it is not a `may_record`
-//! question at all. The capture half is, but only PARTLY: a supervisor
-//! that may not record still scans the agents' record trees and still
-//! advances its in-memory capture state, because reading and concluding
-//! are not the thing it lacks standing for. What `may_record` gates is the
-//! durable write, inside the pass, where the conclusion would become a
-//! claim.
+//! Sampling used to write nothing durable at all, and that is no longer
+//! true: it now also DATES the changes it observes, into
+//! `SessionEntry::last_activity_at` and — rarely — into the session's row.
+//! The lifecycle, since this is the only writer of that column: the value
+//! is minted at create (equal to `created_at`), reloaded verbatim on
+//! restart, and moved forward only here — only when
+//! [`ActivitySample::observe`] reports the screen actually changed, and
+//! only when the change is at least [`ACTIVITY_STAMP_QUANTUM`] newer than
+//! the value already held. Everything else — every reply, every listing —
+//! only ever reads it. A lost write costs precision in a "most recently
+//! active" sort and nothing more: this process keeps answering from the
+//! in-memory cell, and the next observed change past the quantum writes
+//! again. `may_record` gates the durable half exactly as it does
+//! capture's, for the same reason.
+//!
+//! The capture half is a `may_record` question in the same PARTIAL way: a
+//! supervisor that may not record still scans the agents' record trees and
+//! still advances its in-memory capture state, because reading and
+//! concluding are not the thing it lacks standing for. What `may_record`
+//! gates is the durable write, inside the pass, where the conclusion would
+//! become a claim.
 //!
 //! # What the samples are for
 //!
@@ -197,6 +210,59 @@ const SAMPLE_TAIL_BYTES: usize = 4096;
 /// resolution of a cosmetic status is the right thing to give up here.
 const SAMPLE_TAIL_BUDGET: usize = 16;
 
+/// How much newer an observed change must be before it is allowed to move
+/// a session's `last_activity_at` (overridable per supervisor through
+/// [`crate::service::SupervisorSeams::activity_quantum`]).
+///
+/// This is a rate limit, not a precision choice, and the two costs it
+/// bounds are worth spelling out separately because they scale
+/// differently and neither is local to this file.
+///
+/// The one that scales PER SESSION is the durable write: every crossing
+/// of this quantum is an `UPDATE` against the session's row
+/// ([`SessionStore::record_activity`]), so a field that moved on every
+/// sample would be a write per active session per two seconds, forever,
+/// for a value nobody reads that fast.
+///
+/// The other is a FLEET-WIDE UI wake, and it is coalesced rather than
+/// per-session — a distinction worth stating so nobody sizes this
+/// constant against a cost that does not exist. The helm detects a
+/// changed session by comparing the whole serialized `SessionInfo`
+/// against what its cache holds (`farhelm-helm`'s
+/// `replace_host_sessions`), but it bumps the fleet invalidation feed at
+/// most ONCE per host refresh that found anything different, however many
+/// sessions moved. So the wake is per refresh, not per session: without
+/// this quantum, a host with even one busy agent would wake every
+/// connected UI client on every drain — a browser re-render every few
+/// seconds for as long as anyone is working. A minute means an otherwise
+/// settled fleet goes back to waking on real changes.
+///
+/// A minute is also all the resolution the consumer needs: this exists to
+/// order a session list by "most recently active", and no user
+/// distinguishes two sessions whose last output was 20 seconds apart. The
+/// visible cost is that a session's reported activity can lag reality by
+/// up to this long, which is the right trade for a sort key and would not
+/// be for a status.
+pub(crate) const ACTIVITY_STAMP_QUANTUM: Duration = Duration::from_secs(60);
+
+/// Decide whether an observed change may move `stored` to `now`.
+///
+/// Split out as a pure function because it is the entire quantization
+/// rule, and a rule that lives inside the sampling loop is one only a
+/// running tmux can test. `None` means "leave it alone" — the observation
+/// still happened, it simply falls inside the minute the stored value
+/// already covers.
+///
+/// A `now` that is EARLIER than `stored` also yields `None`, which is the
+/// case a host clock stepped backwards produces. Refusing to move
+/// backwards here (and again, durably, in
+/// `SessionStore::record_activity`'s SQL predicate) keeps a visibly busy
+/// session from sliding down a recency sort because NTP corrected the
+/// clock.
+fn advanced_activity_stamp(stored: i64, now: i64, quantum: i64) -> Option<i64> {
+    (now.saturating_sub(stored) >= quantum).then_some(now)
+}
+
 /// Permits in [`Supervisor::sampling_admission`] — see that field's docs
 /// for why the ticker may not draw on the request semaphore at all.
 ///
@@ -281,7 +347,10 @@ impl ActivitySample {
     /// Handed out pre-wrapped because the wrapper is part of the contract:
     /// a rename SHARES this `Arc` while a relaunch mints a new one, and a
     /// constructor returning a bare value would let a call site quietly
-    /// pick the wrong side of that rule.
+    /// pick the wrong side of that rule. (The timestamp cell beside it,
+    /// `core::SessionEntry::last_activity_at`, takes the opposite side on
+    /// relaunch — it is session-scoped where this is run-scoped — which is
+    /// exactly why each has its own named constructor.)
     pub(crate) fn unsampled() -> Arc<std::sync::Mutex<ActivitySample>> {
         Arc::new(std::sync::Mutex::new(ActivitySample::default()))
     }
@@ -300,16 +369,49 @@ impl ActivitySample {
     /// Takes no clock, deliberately: everything the classifier needs is a
     /// count of this session's own observations (see the type's docs), and
     /// a timestamp here would only invite a wall-clock comparison back in.
-    pub(crate) fn observe(&mut self, tail: String) {
+    /// Returning WHETHER the screen changed is not the same concession —
+    /// the caller is what owns a clock, and it dates the observation
+    /// outside this type rather than inside it.
+    ///
+    /// `true` means a comparison against a RETAINED screen actually found
+    /// a difference — the only positive evidence of output this type ever
+    /// has. Every case where no such comparison was possible returns
+    /// `false`: a pane's first sample (nothing to compare against, and
+    /// treating a baseline as output would make every session look busy
+    /// the moment it was first looked at) and the first sample after a
+    /// [`ActivitySample::forget_tail`] dropped the baseline.
+    ///
+    /// That second case is where the reported change and the streak reset
+    /// deliberately DISAGREE, and the asymmetry is the point. The streak
+    /// resets after a forget because a session whose captures are failing
+    /// must not decay to `Idle` on evidence nobody has — "we do not know"
+    /// is answered conservatively, as `Running`. Dating an activity is the
+    /// opposite kind of claim: it is written down, it outlives the process
+    /// that wrote it, and it orders a list. Guessing there does not
+    /// degrade gracefully — after a server-wide capture failure every idle
+    /// session would re-baseline at once and jump ahead of the sessions
+    /// that were genuinely producing output, permanently. So an
+    /// unverifiable change is treated as no change, and the next
+    /// comparison against the re-established baseline reports the truth.
+    pub(crate) fn observe(&mut self, tail: String) -> bool {
+        let mut changed = false;
         if self.samples > 0 {
-            if self.tail.as_deref() == Some(tail.as_str()) {
-                self.unchanged_streak += 1;
-            } else {
-                self.unchanged_streak = 0;
+            match self.tail.as_deref() {
+                Some(previous) if previous == tail.as_str() => self.unchanged_streak += 1,
+                Some(_) => {
+                    self.unchanged_streak = 0;
+                    changed = true;
+                }
+                // No retained screen: `forget_tail` dropped it after a
+                // failed capture. The streak still resets (see above and
+                // `forget_tail`), but this sample only re-establishes the
+                // baseline — it is not evidence that anything changed.
+                None => self.unchanged_streak = 0,
             }
         }
         self.tail = Some(tail);
         self.samples += 1;
+        changed
     }
 
     /// Drop the retained screen after a capture this session was SELECTED
@@ -341,6 +443,14 @@ impl ActivitySample {
     /// Resetting the streak is the conservative direction: it means
     /// `Running`, which is what "we do not know" has meant on this path
     /// since the beginning.
+    ///
+    /// The activity STAMP takes the opposite branch of that same "we do
+    /// not know", and [`ActivitySample::observe`]'s docs argue why: a
+    /// re-baselining sample reports no change, so recovering from a
+    /// capture failure never dates an observation nobody made. The two
+    /// readings are not in tension — one is a cosmetic status that
+    /// self-corrects on the next sample, the other is a durable ordering
+    /// key that does not.
     pub(crate) fn forget_tail(&mut self) {
         self.tail = None;
     }
@@ -860,11 +970,82 @@ async fn sample_pass(
                 continue;
             }
         };
-        entry
+        let changed = entry
             .activity
             .lock()
             .expect("activity mutex poisoned")
             .observe(tail);
+        if changed {
+            note_activity(sup, entry).await;
+        }
+    }
+}
+
+/// Date this session's just-observed change, in memory and — only if that
+/// moved the value — on disk.
+///
+/// The quantization gate is checked against the IN-MEMORY cell before any
+/// lock or task is taken, which is the point: a supervisor watching a
+/// dozen busy agents observes changes several times a second, and this
+/// path must cost a relaxed atomic load in all but one of those. Only a
+/// crossing of [`ACTIVITY_STAMP_QUANTUM`] reaches SQLite.
+///
+/// A lost write costs sort precision and nothing else. The in-memory cell
+/// is already advanced, so every reply this supervisor serves reports the
+/// new value; what a failed write loses is the value a FUTURE supervisor
+/// would reload. The bound on that loss is NOT one quantum — nothing
+/// retries — it is "until another observed change crosses the gate". For
+/// a session that goes on producing output that is the next minute; for
+/// one that goes quiet immediately after the failed write, the row keeps
+/// whatever it last held for as long as the session stays quiet, and a
+/// reload would place it that much lower in a recency sort. That is still
+/// the right trade, which is why this warns and moves on rather than
+/// retrying or unwinding the in-memory advance: the reverse would give up
+/// a certainly-correct live answer for a marginally fresher durable one.
+///
+/// The atomic store is deliberately unconditional rather than a
+/// compare-and-swap. Only the ticker writes this cell, there is one
+/// ticker, and its captures are sequential, so nothing can interleave
+/// between the load above and this store — even now that the cell is
+/// shared across a session's entries rather than re-minted per launch
+/// (`core::SessionEntry::last_activity_at`), because sharing changes which
+/// cell is written, not how many writers there are. A CAS would defend
+/// against nothing while making the common path harder to read.
+/// Monotonicity where it actually matters — across processes, across a
+/// clock step — is enforced by the store's own predicate.
+async fn note_activity(sup: &Arc<Supervisor>, entry: &Arc<SessionEntry>) {
+    let stored = entry
+        .last_activity_at
+        .load(std::sync::atomic::Ordering::Relaxed);
+    // A quantum too large to express in seconds means "never advance",
+    // which is the only sane reading of an absurd setting and keeps this
+    // conversion from needing a panic. Returned from rather than clamped
+    // to `i64::MAX`: the gate below compares a SATURATING difference, so a
+    // clamp would still let a sufficiently strange pair of timestamps
+    // (`stored` near `i64::MIN`) saturate up to `i64::MAX` and satisfy the
+    // comparison — "never" would then not mean never.
+    let Ok(quantum) = i64::try_from(sup.seams.activity_quantum.as_secs()) else {
+        return;
+    };
+    let Some(advanced) = advanced_activity_stamp(stored, crate::store::now_unix(), quantum) else {
+        return;
+    };
+    entry
+        .last_activity_at
+        .store(advanced, std::sync::atomic::Ordering::Relaxed);
+    if !sup.may_record() {
+        // A supervisor with no claim on this state directory tracks the
+        // value for its own replies but does not write facts about
+        // sessions that are not its to own — the same standing rule the
+        // first-input anchor follows.
+        return;
+    }
+    if let Err(e) = sup.store.record_activity(&entry.info.id, advanced).await {
+        warn!(
+            session = %entry.info.id, error = %format!("{e:#}"),
+            "could not persist this session's last-activity time; this supervisor still \
+             reports it, and the next observed change past the quantum retries the write"
+        );
     }
 }
 
@@ -1083,6 +1264,22 @@ mod tests {
             .lock()
             .await
             .insert(id.to_string(), Arc::new(entry));
+    }
+
+    /// This session's `last_activity_at` as the map holds it right now.
+    ///
+    /// Read out of the map on every call rather than from a cloned entry:
+    /// the tests below restart and republish sessions, and a cached entry
+    /// would quietly answer for whichever launch the test happened to grab
+    /// first.
+    async fn stamp_of(sup: &Arc<Supervisor>, id: &str) -> i64 {
+        sup.sessions
+            .lock()
+            .await
+            .get(id)
+            .expect("the session is in the map")
+            .last_activity_at
+            .load(std::sync::atomic::Ordering::Relaxed)
     }
 
     /// A live session: a real pane running `command`, and a map entry that
@@ -1400,6 +1597,80 @@ mod tests {
         assert!(
             corpses.iter().all(|pane| !states.contains_key(pane)),
             "the next pass finishes what the budget deferred"
+        );
+    }
+
+    /// A pass over a REAL pane that is producing output dates the
+    /// observation on the entry, and a pass over one that is not leaves
+    /// the value alone.
+    ///
+    /// The unit tests above pin the two halves separately — `observe`
+    /// reports the change, `advanced_activity_stamp` decides whether it
+    /// may move the value — and what is left to prove is that the sampling
+    /// pass actually joins them to a live pane rather than, say, dating
+    /// every sample or none. The quantum is injected as zero because the
+    /// production minute is unobservable in a test that does not sleep
+    /// through one, and zero is exactly the setting that makes every
+    /// observed change advance the value.
+    ///
+    /// Asserted against the ENTRY's cell rather than the database: these
+    /// fixtures install entries directly into the session map with no row
+    /// behind them, so `record_activity` finds nothing to update. The
+    /// durable half is covered where a real create exists — the store's
+    /// own tests, and the farhelm crate's e2e suite.
+    #[tokio::test]
+    async fn a_sampling_pass_dates_a_changing_pane_and_leaves_a_still_one_alone() {
+        let state = StateDir::new();
+        let sup = supervisor_with(
+            &state,
+            SupervisorSeams {
+                activity_quantum: Duration::ZERO,
+                ..SupervisorSeams::default()
+            },
+        )
+        .await;
+        // One pane redrawing a counter forever, one that never writes
+        // anything at all. The still pane's command is deliberately
+        // output-FREE rather than "print one line and then wait": a line
+        // printed at pane startup can land between the baseline sample and
+        // the next one, which is a genuine observed change and would fail
+        // this test at random. The other quiet-pane fixtures in this file
+        // use the same `sleep` for the same reason.
+        install_live_session(
+            &sup,
+            "busy",
+            "i=0; while :; do i=$((i+1)); echo \"line $i\"; sleep 0.05; done",
+        )
+        .await;
+        install_live_session(&sup, "still", "sleep 600").await;
+
+        let busy_before = stamp_of(&sup, "busy").await;
+        let still_before = stamp_of(&sup, "still").await;
+
+        // Two passes minimum: the first establishes each pane's baseline
+        // and can date nothing, so only the second can observe a change.
+        // A deadline loop rather than a fixed pass count because the busy
+        // pane's first line may not have been written yet when the
+        // baseline is taken.
+        let mut cursor = None;
+        let (_stop_tx, mut stop) = oneshot::channel();
+        let deadline = tokio::time::Instant::now() + TEST_DEADLINE;
+        loop {
+            sample_pass(&sup, &mut cursor, SAMPLE_TAIL_BUDGET, &mut stop).await;
+            if stamp_of(&sup, "busy").await > busy_before {
+                break;
+            }
+            assert!(
+                tokio::time::Instant::now() < deadline,
+                "a pane printing a new line every 50ms never had a change dated"
+            );
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+
+        assert_eq!(
+            stamp_of(&sup, "still").await,
+            still_before,
+            "a pane whose screen never changed has produced no activity to date"
         );
     }
 
@@ -1755,22 +2026,30 @@ mod tests {
     fn the_first_sample_is_not_evidence_and_any_change_resets_the_streak() {
         let mut sample = ActivitySample::default();
 
-        sample.observe("hello".to_string());
+        assert!(
+            !sample.observe("hello".to_string()),
+            "a baseline is not a change; reporting one here would date every session's \
+             activity to the moment it was first looked at"
+        );
         assert_eq!(sample.samples, 1);
         assert_eq!(
             sample.unchanged_streak, 0,
             "one observation cannot establish that anything stood still"
         );
 
-        sample.observe("hello".to_string());
+        assert!(!sample.observe("hello".to_string()));
         assert_eq!(
             sample.unchanged_streak, 1,
             "the first COMPARISON is the first evidence of quiet"
         );
-        sample.observe("hello".to_string());
+        assert!(!sample.observe("hello".to_string()));
         assert_eq!(sample.unchanged_streak, 2, "and they accumulate");
 
-        sample.observe("hello world".to_string());
+        assert!(
+            sample.observe("hello world".to_string()),
+            "the reported change is what dates `SessionEntry::last_activity_at`, so it must \
+             track the same comparison the streak reset does"
+        );
         assert_eq!(
             sample.unchanged_streak, 0,
             "a change resets the decay outright; the classifier reads this as 'how many times \
@@ -1778,9 +2057,332 @@ mod tests {
         );
         assert_eq!(sample.tail.as_deref(), Some("hello world"));
 
-        sample.observe("hello there".to_string());
+        assert!(sample.observe("hello there".to_string()));
         assert_eq!(sample.unchanged_streak, 0);
         assert_eq!(sample.samples, 5);
+
+        // A forgotten screen leaves nothing to compare against, so the
+        // next capture re-establishes the baseline and reports NO change —
+        // while still resetting the streak. The two answers to "we do not
+        // know" diverge here deliberately; `observe`'s docs carry the
+        // argument, and the recovery test below pins the consequence.
+        sample.forget_tail();
+        sample.unchanged_streak = 7;
+        assert!(
+            !sample.observe("hello there".to_string()),
+            "a re-baselining sample has no retained screen to have seen change against"
+        );
+        assert_eq!(
+            sample.unchanged_streak, 0,
+            "the status side is unchanged by any of this: a failed capture still refuses to \
+             decay a session toward idle"
+        );
+        assert!(
+            sample.observe("hello elsewhere".to_string()),
+            "and the baseline it re-established is live again immediately"
+        );
+    }
+
+    /// Recovering from failed captures must not INVENT activity — neither
+    /// for one pane nor, worse, for a whole server at once.
+    ///
+    /// This is the regression with the ugliest failure mode in the whole
+    /// feature, which is why it gets a test of its own rather than a line
+    /// in the unit test above. `forget_tail` runs on every capture failure,
+    /// and capture failures are rarely solitary: a tmux server that stops
+    /// answering for a stretch drops the baseline of EVERY session on it.
+    /// If the first sample afterwards counted as a change, every idle
+    /// session on that host would be dated to the moment of recovery — in
+    /// one batch, ahead of the sessions that had actually been producing
+    /// output — and nothing would ever correct it, because the value is
+    /// durable and monotonic. A most-recently-active list would put the
+    /// quietest sessions on top for as long as they existed.
+    ///
+    /// Asserted through the same `observe` the sampler calls, since that
+    /// return value is the sole input to whether the stamp moves at all.
+    #[test]
+    fn a_recovered_capture_re_baselines_without_reporting_activity() {
+        // One pane: baseline, failure, recovery to a DIFFERENT screen than
+        // the one that was forgotten. Even that is not evidence — the
+        // change may have happened while nobody could look, and the honest
+        // answer is that this supervisor did not see it happen.
+        let mut one = ActivitySample::default();
+        one.observe("before".to_string());
+        one.forget_tail();
+        assert!(
+            !one.observe("after".to_string()),
+            "a screen that changed while captures were failing was not OBSERVED changing"
+        );
+        assert!(
+            one.observe("after and more".to_string()),
+            "the very next comparison is real evidence again"
+        );
+
+        // A whole server: every session forgets, every session recovers,
+        // and not one of them may report activity in that batch.
+        let mut fleet: Vec<ActivitySample> = (0..8).map(|_| ActivitySample::default()).collect();
+        for (index, sample) in fleet.iter_mut().enumerate() {
+            sample.observe(format!("idle screen {index}"));
+        }
+        for sample in &mut fleet {
+            sample.forget_tail();
+        }
+        for (index, sample) in fleet.iter_mut().enumerate() {
+            assert!(
+                !sample.observe(format!("idle screen {index}")),
+                "session {index} sat at the same screen throughout; a server-wide capture \
+                 outage must not date every idle session to the recovery"
+            );
+        }
+    }
+
+    /// The quantization gate, exhaustively, with no clock and no runtime.
+    ///
+    /// A pure function precisely so this can be asserted rather than
+    /// timed: the production quantum is a whole minute, and the only other
+    /// way to observe the boundary is a test that sleeps through one. The
+    /// rule it encodes is not a rounding nicety — see
+    /// [`ACTIVITY_STAMP_QUANTUM`] for the fleet-wide UI wake it bounds —
+    /// so the boundary itself (exactly one quantum later advances; one
+    /// second short of it does not) is worth pinning by value.
+    ///
+    /// The backwards cases are the ones with a real-world trigger: a host
+    /// clock stepped back by NTP or a suspend/resume hands this an earlier
+    /// `now` than the value already stored, and advancing on it would walk
+    /// a visibly busy session DOWN a most-recently-active sort.
+    ///
+    /// The boundary cases are DERIVED from [`ACTIVITY_STAMP_QUANTUM`]
+    /// rather than from a second copy of the number, so a change to the
+    /// production value moves the whole table with it and this test goes
+    /// on asserting the rule instead of a stale arithmetic fact. The value
+    /// itself is pinned separately, once, below — including on
+    /// `SupervisorSeams`, since production reads the constant only through
+    /// that default and a seam that drifted would silently give every
+    /// supervisor a quantum nothing documents.
+    #[test]
+    fn an_observed_change_advances_the_stamp_only_across_the_quantum() {
+        assert_eq!(
+            ACTIVITY_STAMP_QUANTUM,
+            Duration::from_secs(60),
+            "a minute is the value the fleet-wake argument in the constant's own docs is about"
+        );
+        assert_eq!(
+            SupervisorSeams::default().activity_quantum,
+            ACTIVITY_STAMP_QUANTUM,
+            "the seam exists for tests to override; its DEFAULT is what production runs"
+        );
+        let quantum = i64::try_from(ACTIVITY_STAMP_QUANTUM.as_secs())
+            .expect("a quantum of whole seconds fits an i64");
+
+        const STORED: i64 = 1_700_000_000;
+
+        for (now, expected) in [
+            (STORED, None),
+            (STORED + 1, None),
+            (STORED + quantum - 1, None),
+            (STORED + quantum, Some(STORED + quantum)),
+            (STORED + quantum + 1, Some(STORED + quantum + 1)),
+            // Far beyond the quantum: the advance is to NOW, never to
+            // stored-plus-one-quantum. A session quiet for a day and then
+            // busy again must report today, not yesterday plus a minute.
+            (STORED + 86_400, Some(STORED + 86_400)),
+            // Clock stepped backwards.
+            (STORED - 1, None),
+            (STORED - 86_400, None),
+            (i64::MIN, None),
+        ] {
+            assert_eq!(
+                advanced_activity_stamp(STORED, now, quantum),
+                expected,
+                "stored {STORED}, now {now}, quantum {quantum}"
+            );
+        }
+
+        // A zero quantum is what the tests inject to make every observed
+        // change advance the value, so it has to mean exactly that —
+        // including for an observation landing in the same second.
+        assert_eq!(
+            advanced_activity_stamp(STORED, STORED, 0),
+            Some(STORED),
+            "a disabled quantum must not accidentally require a full second"
+        );
+    }
+
+    /// A session with BOTH halves of the activity state — a durable row
+    /// and a map entry — seeded to the same deliberately-stale `at`.
+    ///
+    /// The tests below are all about the two halves disagreeing, so a
+    /// fixture that planted only one of them could not express the
+    /// question. The seed must be genuinely OLD: with the quantum injected
+    /// as zero an advance lands on the current second, which a
+    /// freshly-minted seed would already equal, and "it moved" would be
+    /// indistinguishable from "it never moved".
+    ///
+    /// No terminal, because none of these drive a sampling pass — they
+    /// call [`note_activity`] directly, which is where the durable
+    /// decision is made.
+    async fn session_with_stale_activity(
+        sup: &Arc<Supervisor>,
+        id: &str,
+        at: i64,
+    ) -> Arc<SessionEntry> {
+        sup.store
+            .insert_session(
+                StoredSession {
+                    id: id.to_string(),
+                    parent: None,
+                    archived: false,
+                    title: id.to_string(),
+                    created_at: at,
+                    last_activity_at: at,
+                    creation_seq: 0,
+                    cwd: "/tmp".to_string(),
+                    invocation: "agent".to_string(),
+                    tmux_name: format!("fh-{id}"),
+                    pane: String::new(),
+                    outcome: LastOutcome::Running,
+                    agent_kind: AgentKind::Generic,
+                    resume_template: None,
+                    canonical_cwd: None,
+                    captured_conversation: None,
+                    captured_record: None,
+                    capture_ambiguous: false,
+                    first_input_at: None,
+                    generation: 0,
+                    launch_scoped: false,
+                    source_profile: None,
+                },
+                None,
+            )
+            .await
+            .expect("insert the row the durable write targets");
+        let mut entry = entry_with(None, LastOutcome::Running);
+        entry.info.id = id.to_string();
+        entry.info.last_activity_at = at;
+        entry.last_activity_at = crate::service::core::activity_stamp(at);
+        let entry = Arc::new(entry);
+        sup.sessions
+            .lock()
+            .await
+            .insert(id.to_string(), Arc::clone(&entry));
+        entry
+    }
+
+    /// A supervisor that may not RECORD still dates activity for its own
+    /// replies, and writes nothing.
+    ///
+    /// The same standing rule the capture pass and the first-input anchor
+    /// follow, and it is worth pinning separately for each writer because
+    /// the failure is silent in both directions. A supervisor without a
+    /// claim on the state directory — a handoff candidate, or one whose
+    /// boot-id read failed — is a second process looking at sessions that
+    /// are not its to own: writing there would have it contradicting the
+    /// supervisor that does own them. But it still answers `ListSessions`,
+    /// and answering with a value it knows to be stale would be a worse
+    /// lie than not writing. So the in-memory cell moves and the row does
+    /// not.
+    #[tokio::test]
+    async fn a_supervisor_that_may_not_record_dates_activity_in_memory_only() {
+        let state = StateDir::new();
+        let sup = supervisor_with(
+            &state,
+            SupervisorSeams {
+                activity_quantum: Duration::ZERO,
+                ..SupervisorSeams::default()
+            },
+        )
+        .await;
+        let seeded = now_unix() - 3_600;
+        let entry = session_with_stale_activity(&sup, "s1", seeded).await;
+        sup.may_record.store(false, Ordering::SeqCst);
+
+        note_activity(&sup, &entry).await;
+
+        assert!(
+            stamp_of(&sup, "s1").await > seeded,
+            "a supervisor with no standing to write still has standing to answer from what it \
+             just observed"
+        );
+        assert_eq!(
+            sup.store
+                .session("s1")
+                .await
+                .expect("read the row")
+                .expect("the row is there")
+                .last_activity_at,
+            seeded,
+            "and it must not write a fact about a session another supervisor owns"
+        );
+    }
+
+    /// A durable write that FAILS costs sort precision and nothing else:
+    /// the in-memory advance stands and the sampling loop carries on.
+    ///
+    /// This is the failure mode `note_activity` is explicitly built to
+    /// swallow, so the alternative behaviors are the ones worth ruling
+    /// out. Unwinding the in-memory advance would trade a
+    /// certainly-correct live answer for a marginally fresher durable one.
+    /// Propagating the error would let a broken row — or a database on a
+    /// full disk — stop the pass that classifies every session's status,
+    /// turning a cosmetic sort key into an outage of the thing SPEC.md
+    /// actually promises.
+    ///
+    /// The failure is injected by removing the column the write names,
+    /// through a second connection to the same file. That is not a
+    /// contrived shape: it is exactly what a database written by a NEWER
+    /// build and opened by an older one looks like from this statement's
+    /// point of view, and it fails the one statement under test while
+    /// leaving the rest of the supervisor working.
+    #[tokio::test]
+    async fn a_failed_activity_write_leaves_the_in_memory_advance_and_the_pass_standing() {
+        let state = StateDir::new();
+        let sup = supervisor_with(
+            &state,
+            SupervisorSeams {
+                activity_quantum: Duration::ZERO,
+                ..SupervisorSeams::default()
+            },
+        )
+        .await;
+        install_live_session(
+            &sup,
+            "busy",
+            "i=0; while :; do i=$((i+1)); echo \"line $i\"; sleep 0.05; done",
+        )
+        .await;
+        {
+            let conn = rusqlite::Connection::open(state.path().join("supervisor.db"))
+                .expect("open the store's file alongside the supervisor");
+            conn.execute_batch("ALTER TABLE sessions DROP COLUMN last_activity_at;")
+                .expect("take the activity column away from under the write");
+        }
+        // The injection, checked rather than assumed. Without this the
+        // test passes just as happily against a write that still succeeds
+        // — and would then be asserting nothing at all about failure.
+        assert!(
+            sup.store.record_activity("busy", now_unix()).await.is_err(),
+            "the durable write must actually be failing for the rest of this test to mean \
+             anything"
+        );
+
+        let before = stamp_of(&sup, "busy").await;
+        let mut cursor = None;
+        let (_stop_tx, mut stop) = never_stopped();
+        let deadline = tokio::time::Instant::now() + TEST_DEADLINE;
+        loop {
+            // A pass that propagated the write's failure would never
+            // return, so reaching the next iteration at all is half the
+            // assertion.
+            sample_pass(&sup, &mut cursor, SAMPLE_TAIL_BUDGET, &mut stop).await;
+            if stamp_of(&sup, "busy").await > before {
+                break;
+            }
+            assert!(
+                tokio::time::Instant::now() < deadline,
+                "a failing durable write must not stop the in-memory stamp from moving"
+            );
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
     }
 
     /// The scheduling rule, exhaustively, with no clock and no runtime:
@@ -2356,6 +2958,7 @@ mod tests {
                     first_input: Arc::clone(&entry.first_input),
                     capture: Arc::clone(&entry.capture),
                     activity: Arc::clone(&entry.activity),
+                    last_activity_at: Arc::clone(&entry.last_activity_at),
                     generation: entry.generation,
                     scope: entry.scope.clone(),
                 })
@@ -2468,6 +3071,7 @@ mod tests {
                     archived: false,
                     title: id.to_string(),
                     created_at: now_unix(),
+                    last_activity_at: now_unix(),
                     creation_seq: 0,
                     cwd: "/tmp".to_string(),
                     invocation: "agent".to_string(),

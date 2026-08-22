@@ -1057,6 +1057,7 @@ async fn capture_considers_sessions_beyond_the_list_reply_cap() {
                     parent: None,
                     title: format!("extra-{i}"),
                     created_at: now_unix(),
+                    last_activity_at: now_unix(),
                     creation_seq: 0,
                     cwd: work.path().to_string_lossy().into_owned(),
                     invocation: "agent".to_string(),
