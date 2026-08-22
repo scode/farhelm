@@ -2807,6 +2807,36 @@
           // reason to risk when simply omitting the key is known to
           // preserve the intended fallback.
           ...(fontReady ? { fontFamily: '"JetBrains Mono", monospace' } : {}),
+          // OSC 8 hyperlinks (the kind Claude Code and other modern CLIs
+          // emit) open directly. Without a `linkHandler` xterm falls back
+          // to its own `confirm()` — "Do you want to navigate to …?
+          // WARNING: This link could potentially be dangerous" — on every
+          // click, a blanket warning that tells the user nothing they can
+          // act on. `noopener` keeps the target from reaching back into
+          // this page.
+          //
+          // Desktop takes a different route. dioxus-desktop (checked
+          // against 0.7.9's webview.rs) installs a wry NAVIGATION handler
+          // that catches any `http(s)://`/`mailto:` navigation of the main
+          // webview, hands the URL to the system browser via `webbrowser`,
+          // and refuses the navigation itself — but sets NO new-window
+          // handler, so `window.open` is a silent no-op there (verified by
+          // hand on the macOS build: clicks did nothing). Navigating the
+          // page itself is therefore the desktop path, and it is safe
+          // precisely because that handler never lets the webview leave
+          // the app. The page origin is `dioxus://` only in the desktop
+          // webview, which is what the protocol check keys on; in a real
+          // browser `location.assign` would leave Farhelm, so the web
+          // keeps `window.open`.
+          linkHandler: {
+            activate(_event, uri) {
+              if (window.location.protocol === 'dioxus:') {
+                window.location.assign(uri);
+              } else {
+                window.open(uri, '_blank', 'noopener');
+              }
+            },
+          },
         });
         const fit = new FitAddon.FitAddon();
         term.loadAddon(fit);
