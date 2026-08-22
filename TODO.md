@@ -231,3 +231,55 @@ roadmap and carries no priorities unless an entry says so itself.
   fired (provisioning grew it to 20 props). Only with a memoization-preserving grouping — state-only structs, never
   callback structs (the framework's callback-prop memoization does not survive struct nesting; the session row learned
   this) — and with a host-row render-count regression test like the session row's.
+
+- UI refresh (brainstormed 2026-08-22 from screenshots of the web UI): a set of chrome tweaks to make the shell read as
+  modern rather than as the "minimal M1 chrome, nothing decorative" placeholder app.css still declares itself to be. The
+  terminal itself is off-limits throughout — fidelity to the agent's real TUI is the product — and the sidebar stays
+  fixed-width (a recorded decision; denser rows solve the same pain). Each sub-item is its own PR; the token item goes
+  first (see it for why):
+
+  - Introduce design tokens in app.css — RECOMMENDED FIRST, before any other entry (here or elsewhere) that tweaks the
+    UI's look, since every later visual change otherwise pays a scattered-edit tax. Today the file has no CSS custom
+    properties and ~40 distinct hex literals inline (`#8a919e` 24 times, a long tail of one-offs that are probably
+    unintended near-duplicates). Replace with a `:root` block of named roles — surface levels (`--bg-0/1/2`), foreground
+    levels, one accent, ok/warn/danger, radius, and `--font-ui`/`--font-mono` — and `var()` at use sites.
+    Pixel-identical refactor; audit the one-offs into roles as part of it. Same file, no framework, no build change; a
+    light theme later becomes a second `:root` block.
+
+  - Finish the JetBrains Mono conversion. The chrome font is still `system-ui` (app.css's html/body rule) and the
+    vendored face is applied only through xterm's `fontFamily`; app.css's own header says nothing else uses it. The
+    earlier intent was everything in JetBrains Mono. Use the already-vendored Nerd Font face for chrome too (its Latin
+    glyphs are identical to upstream JetBrains Mono, and the browser has already fetched it for the terminal); do NOT
+    vendor a second non-Nerd copy. If UI-size line spacing looks off, that is a `line-height` fix, not a font-file one.
+
+  - Sidebar row hierarchy. Rows are four near-equal-weight lines (title, host, full cwd, full invocation), ~120px each.
+    Drop the host line entirely when the session is on the helm's own machine (show it only for remote hosts); tilde-
+    abbreviate the cwd and, if it still does not fit, hard-cut on the LEFT (right-most segments are the informative
+    ones) with the full path on hover; render the invocation compactly (profile name or `claude ·skip-perms` style
+    badge) rather than the full command line. Target roughly half the current row height.
+
+  - Status as dot plus timestamp, not a word. Replace the `running`/`idle`/`exited` text with a color-coded dot beside
+    the title (pulsing for running) and put a relative last-activity timestamp (`2m`, `1h`) where the word was — it
+    makes the "recently active" sort visibly meaningful.
+
+  - Surface layering. Sidebar, rows, header, and terminal all sit on essentially the same background and the selected
+    row is barely distinguishable. Use two or three surface levels and a single accent (selection edge/tint, focus
+    rings, primary button) — sparingly; this is stared at all day, so hover transitions stay ~100ms and the status pulse
+    is the only animation.
+
+  - Consolidate the main-pane header. Title/cwd line, archive button, restart banner, and tab strip currently stack into
+    ~170px of chrome before the terminal. Fold title, cwd, status dot, and actions (archive, restart, overflow menu)
+    into one ~40px row with tabs beneath; the restart explanation becomes a tooltip or dismissible inline note rather
+    than a permanent band.
+
+  - Two-tier buttons. Everything is an outlined gray box. Keep one filled primary (`new session`); everything else
+    becomes ghost (no border, hover background). Per-row kebab menus reveal on hover/focus instead of sitting as eight
+    identical boxes down the column.
+
+  - Row overflow menus look like a stack of outlined buttons, floating centered over the row with no tie to the `⋯` that
+    opened them; with several `⋯` in view there is no way to tell which one is open. Make it an actual menu: one raised
+    surface (1px border, soft shadow) anchored to the opening button's corner, full-width left-aligned rows that
+    highlight on hover with no per-item borders, a divider before the destructive `delete` (red text, no red box), and
+    the `profile: …` line demoted to a small muted footer under its own divider. The opening `⋯` stays in a visible
+    pressed/active state and its row gets a subtle highlight for as long as the menu is up. Check that Escape and
+    arrow-key navigation work while at it.
