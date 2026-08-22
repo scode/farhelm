@@ -69,23 +69,26 @@ jobs:
         with:
           cache: false
           rustflags: ""
-      # The integration tests drive a real tmux server; without this they
-      # fail here rather than exercising the substrate they exist to pin.
-      - name: Install tmux
-        run: sudo apt-get update && sudo apt-get install -y tmux python3-venv
-      # Keep the distro package as the supported-version floor for the full
-      # suite, then add the exact pinned release (source-pins.env) on which
-      # queued output plus control-client teardown aborted the server. The
-      # binary is built from the release workflow's checksummed source pins
-      # and cached separately; silently drifting to the runner image's tmux
-      # would make the focused regression green without exercising the
-      # affected version. The pin file is in the cache key, so a bump
-      # rebuilds rather than reusing the previous version's binary.
+      # The integration tests drive a real tmux server, and the one they
+      # drive is the pinned release from source-pins.env — not the runner's
+      # distro package, which sits below the version floor that lands later
+      # in this stack (TODO.md's 2026-08-22 decision: the floor IS the
+      # regression-tested version, so a suite run on anything else would
+      # exercise a substrate the product refuses). The binary is built from
+      # the release workflow's checksummed source pins (python3-venv is for
+      # the zig toolchain that build needs) and cached. Every build input is
+      # in the cache key — the key is the only thing that rolls the binary
+      # when libevent, ncurses, zig, or the build script change; the build
+      # script's own version assertion catches just the wrong tmux release.
+      - name: Install pinned tmux build dependencies
+        run: sudo apt-get update && sudo apt-get install -y python3-venv
       - name: Restore pinned tmux
         uses: actions/cache@v4
         with:
           path: .ci-tmux/tmux
-          key: tmux-pinned-ci-ziglang-0.14.1-${{ hashFiles('.github/release/source-pins.env', '.github/release/ziglang-requirements.txt', 'scripts/build-private-tmux.sh', 'scripts/test-tmux-pinned-shutdown.sh') }}
+          key: tmux-pinned-ci-${{ runner.os }}-${{ runner.arch }}-ziglang-0.14.1-${{ hashFiles('.github/release/source-pins.env', '.github/release/ziglang-requirements.txt', 'scripts/build-private-tmux.sh', 'scripts/build-pinned-tmux-ci.sh') }}
+      - name: Build pinned tmux
+        run: scripts/build-pinned-tmux-ci.sh
       # From M6 on, `ssh localhost` is a transport under test, not just a
       # deployment detail: the connection manager's ssh-row test dials a
       # real supervisor through the user's own ssh (PLAN_M6.md's testing
@@ -131,7 +134,15 @@ jobs:
       # earlier "server exited unexpectedly" failures were later traced to
       # unsafe control-client teardown, not scheduler starvation; this cap is
       # retained as a resource bound rather than as that crash's workaround.
-      - run: cargo test -- --show-output --test-threads=4
+      #
+      # PATH puts the pinned build first for this process tree only; the
+      # supervisor resolves `tmux` through PATH, so this is the whole of how
+      # the suite selects its substrate.
+      - run: PATH="$PWD/.ci-tmux:$PATH" cargo test -- --show-output --test-threads=4
+      # Still its own step after the full suite: each of these scenarios
+      # gets a fresh test process so a surviving client or server cannot
+      # contaminate the next, which the full suite's shared binaries cannot
+      # offer.
       - name: Regress safe output-client teardown on the pinned tmux
         run: scripts/test-tmux-pinned-shutdown.sh
       # The JS unit harness (PLAN_M6_5.md item 1) rides in this job rather
@@ -204,8 +215,18 @@ jobs:
       - name: Install desktop smoke dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y xvfb xdotool openbox imagemagick curl python3 tmux libwebkit2gtk-4.1-dev libgtk-3-dev libxdo-dev
+          sudo apt-get install -y xvfb xdotool openbox imagemagick curl python3 python3-venv libwebkit2gtk-4.1-dev libgtk-3-dev libxdo-dev
           cargo install --locked dioxus-cli --version 0.7.10
+      # Same pinned build as the test job, for the same reason: the managed
+      # supervisor the desktop app spawns inherits this step's PATH, and it
+      # must find the floor version there rather than the distro package.
+      - name: Restore pinned tmux
+        uses: actions/cache@v4
+        with:
+          path: .ci-tmux/tmux
+          key: tmux-pinned-ci-${{ runner.os }}-${{ runner.arch }}-ziglang-0.14.1-${{ hashFiles('.github/release/source-pins.env', '.github/release/ziglang-requirements.txt', 'scripts/build-private-tmux.sh', 'scripts/build-pinned-tmux-ci.sh') }}
+      - name: Build pinned tmux
+        run: scripts/build-pinned-tmux-ci.sh
       # A pinned state-dir path (instead of the script's default mktemp)
       # exists solely so the failure artifact below has a stable path to
       # collect. The script refuses a pre-existing directory, which is
@@ -214,7 +235,7 @@ jobs:
         env:
           CI: true
           DESKTOP_SMOKE_DIR: ${{ runner.temp }}/desktop-smoke
-        run: scripts/desktop-smoke.sh
+        run: PATH="$PWD/.ci-tmux:$PATH" scripts/desktop-smoke.sh
       # The script deliberately keeps its run dir when a phase fails — but
       # until this upload existed, that evidence died with the runner,
       # which is why the gate's rare CI-only failures (the clean-exit
