@@ -179,7 +179,7 @@ pub(crate) struct DiscoveredTab {
 ///   inherit `TMUX`, which is why a positional "windows 1 and up" scan was
 ///   never an option.
 /// - **The marker must be complete and minted-shaped**, validated where it
-///   is read (`tmux::join_pane_markers`) rather than here.
+///   is read (`tmux/control_codec.rs`) rather than here.
 /// - **An AGENT-marked window is never a tab**, whatever else is written
 ///   on it. Nothing stops a pane from adding a tab marker to the agent's
 ///   own window, and adopting it would offer a "tab" whose close would

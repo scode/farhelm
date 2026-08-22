@@ -2433,7 +2433,7 @@ async fn stdio_proxy_carries_a_real_session() {
 /// straddling the split, and each arriving frame is handed to
 /// `InputClient::send`, which further chunks it into many 256-byte
 /// `send-keys -H` commands against the same dedicated input client (see
-/// `tmux.rs`). Every other test sends a dozen bytes, so a truncation, a
+/// `tmux/input.rs`). Every other test sends a dozen bytes, so a truncation, a
 /// reorder, or a dropped chunk at either boundary — the frame split or
 /// any of the many `send-keys` chunk splits inside it — would otherwise
 /// go unnoticed.
