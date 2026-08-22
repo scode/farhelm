@@ -645,12 +645,31 @@ pub(crate) fn use_preference_close_flush() {
 
 /// Expose the desktop smoke run's real listing query without a pixel oracle.
 ///
-/// The hook is inert outside the private smoke environment. Its trace line is
+/// The hook is inert outside the private smoke environment. Its line is
 /// deliberately emitted where native reqwest is about to issue the walk, so
 /// `sort=title` proves restored behavior rather than merely restored bytes.
+///
+/// The line goes straight to stderr as plain text rather than through
+/// `tracing`, on purpose: the smoke script greps the redirected log for a
+/// literal `query=sort=title`, and `tracing-subscriber`'s fmt layer styles
+/// field names and `=` with ANSI escapes by default — the pinned 0.3.23
+/// turns styling on whenever its `ansi` feature is compiled in and
+/// `NO_COLOR` is unset, without asking whether stderr is a terminal. On CI
+/// (run 32584494800, PR #210) the bytes were therefore
+/// `\e[3mquery\e[0m\e[2m=\e[0msort=title`, the grep never matched, and the
+/// feature under test had worked all along. A hook whose whole job is to be
+/// grepped must own its own formatting. The format is a contract with
+/// `scripts/desktop-smoke.sh`'s `wait_for_listing_request`; change both
+/// together.
+///
+/// Armed-ness is decided once per process: the script sets the environment
+/// before launch and nothing changes it afterwards, so re-reading the
+/// variable on every listing walk bought nothing.
 pub(crate) fn log_smoke_session_query(query: &str) {
-    if std::env::var_os("FARHELM_SMOKE_CLIENT_LOG_MARKER").is_some() {
-        tracing::info!(target: "desktop_smoke", %query, "session listing requested");
+    static ARMED: LazyLock<bool> =
+        LazyLock::new(|| std::env::var_os("FARHELM_SMOKE_CLIENT_LOG_MARKER").is_some());
+    if *ARMED {
+        eprintln!("desktop_smoke: session listing requested query={query}");
     }
 }
 

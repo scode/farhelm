@@ -152,25 +152,6 @@ roadmap and carries no priorities unless an entry says so itself.
   ordered trace. That should show whether WebKit delays teardown or opens a replacement after the refusal. Replace the
   race with a deterministic lifecycle barrier once the ordering is known; do not hide it behind a longer sleep.
 
-- Fix `scripts/desktop-smoke.sh`'s "relaunched page did not request sort=title" failure on CI (first seen 2026-08-22 on
-  PR #210's `desktop-smoke` job, run 32584494800; passes locally on the devbox and on a fresh Ubuntu 26.04 worker). This
-  is NOT a timing flake, and the feature under test is working: the run's `desktop-smoke-failure` artifact holds
-  `desktop-restart.log`, and it contains the restored listing requests two seconds after relaunch — three
-  `desktop_smoke: session listing requested query=sort=title` lines between 16:35:17 and 16:35:26, well inside the
-  script's 30-second window. What the script greps for (`desktop_smoke.*query=sort=title`, near line 439) never matches
-  that log because tracing's ANSI styling is on in the CI job's log: the bytes are `[3mquery[0m[2m=[0msort=title`, so
-  `query=sort=title` is not a literal substring. The local runs pass because their log carried no escape codes.
-  Candidate fixes, in order of preference: make the emitting hook (`crate::desktop::log_smoke_session_query`,
-  crates/farhelm-ui/src/desktop.rs) write its own plain line to the smoke log instead of relying on the tracing
-  subscriber's formatting, or have the script strip escapes (`sed
-  's/\x1b\[[0-9;]*m//g'`) before grepping, or pin
-  `NO_COLOR`/`RUST_LOG_STYLE=never` for the relaunched app; whichever is chosen, make the first-boot leg assert the same
-  way so both legs share one oracle. Worth checking the same run's tmux `list-clients` assertion that follows (the
-  remembered, non-newest session should own the page's output client), which never ran because the grep failed first;
-  the same artifact's `failure.png` is the relaunched window. Also decide whether the trace hook should read an env var
-  at every call — it currently checks `FARHELM_SMOKE_CLIENT_LOG_MARKER` per listing walk, which is fine for a smoke-only
-  hook but a reviewer may ask.
-
 - Deflake `manager::tests::default_changed_alone_bumps_the_fleet_revision` (crates/farhelm-helm/src/manager.rs) if it
   fires again. One occurrence: 2026-08-22, CI `test` job on PR #206 at e44900f9 (run 32561406561); the same job passed
   on the PR's previous head two hours earlier with identical manager/profile code, and the helm lib suite passed
