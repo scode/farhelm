@@ -74,16 +74,18 @@ jobs:
       - name: Install tmux
         run: sudo apt-get update && sudo apt-get install -y tmux python3-venv
       # Keep the distro package as the supported-version floor for the full
-      # suite, then add the exact 3.7b release on which queued output plus
-      # control-client teardown aborted the server. The binary is built from
-      # the release workflow's checksummed source pins and cached separately;
-      # silently drifting to the runner image's tmux would make the focused
-      # regression green without exercising the affected version.
-      - name: Restore pinned tmux 3.7b
+      # suite, then add the exact pinned release (source-pins.env) on which
+      # queued output plus control-client teardown aborted the server. The
+      # binary is built from the release workflow's checksummed source pins
+      # and cached separately; silently drifting to the runner image's tmux
+      # would make the focused regression green without exercising the
+      # affected version. The pin file is in the cache key, so a bump
+      # rebuilds rather than reusing the previous version's binary.
+      - name: Restore pinned tmux
         uses: actions/cache@v4
         with:
           path: .ci-tmux/tmux
-          key: tmux-3.7b-ci-ziglang-0.14.1-${{ hashFiles('.github/release/source-pins.env', '.github/release/ziglang-requirements.txt', 'scripts/build-private-tmux.sh', 'scripts/test-tmux-3.7b-shutdown.sh') }}
+          key: tmux-pinned-ci-ziglang-0.14.1-${{ hashFiles('.github/release/source-pins.env', '.github/release/ziglang-requirements.txt', 'scripts/build-private-tmux.sh', 'scripts/test-tmux-pinned-shutdown.sh') }}
       # From M6 on, `ssh localhost` is a transport under test, not just a
       # deployment detail: the connection manager's ssh-row test dials a
       # real supervisor through the user's own ssh (PLAN_M6.md's testing
@@ -130,8 +132,8 @@ jobs:
       # unsafe control-client teardown, not scheduler starvation; this cap is
       # retained as a resource bound rather than as that crash's workaround.
       - run: cargo test -- --show-output --test-threads=4
-      - name: Regress safe output-client teardown on tmux 3.7b
-        run: scripts/test-tmux-3.7b-shutdown.sh
+      - name: Regress safe output-client teardown on the pinned tmux
+        run: scripts/test-tmux-pinned-shutdown.sh
       # The JS unit harness (PLAN_M6_5.md item 1) rides in this job rather
       # than a new one: it is milliseconds of work, and a whole job's
       # scheduling overhead would dwarf it. Node is preinstalled on this

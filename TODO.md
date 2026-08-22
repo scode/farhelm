@@ -11,12 +11,12 @@ roadmap and carries no priorities unless an entry says so itself.
   output-client teardown, pane-death timing — and the supervisor's driver is full of behavior audited per version (3.3a,
   3.4, 3.7b each differ in ways that shaped real code); crashes have been observed on older versions (the distro 3.4
   server hosting every production session on the devbox died in BUGS.md's fatal()-abort shape on 2026-08-19, and BUGS.md
-  records the same abort class reproduced on distro 3.6), and the pinned 3.7b build has its own crash-regression suite
-  (`scripts/test-tmux-3.7b-shutdown.sh`). The alternative of always running a bundled static tmux was considered and
+  records the same abort class reproduced on distro 3.6), and the pinned build (3.7c) has its own crash-regression suite
+  (`scripts/test-tmux-pinned-shutdown.sh`). The alternative of always running a bundled static tmux was considered and
   rejected: it loses distro security patching (tmux AND libevent, which is where the 2026-08-16 3.7b segfault lived),
   concentrates a bad build's blast radius on every host at once, needs a static build per platform — the darwin one has
   never completed — and a from-source install has no bundle to run anyway, so a floor check survives as the fallback
-  regardless. The decision, in three parts: (1) The floor is the regression-tested version, currently 3.7b, bumped
+  regardless. The decision, in three parts: (1) The floor is the regression-tested version, currently 3.7c, bumped
   deliberately together with the regression suite — not "whatever Homebrew ships today". Be explicit in the spec that
   this floor is DESIGNED to exclude current distro packages (Ubuntu 24.04 ships 3.4, 26.04 about 3.6, Debian 13 and
   Fedora 42 3.5a): on Linux this is close to always-bundled in practice, with the opt-outs below. Versions above the
