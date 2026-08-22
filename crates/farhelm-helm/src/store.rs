@@ -129,7 +129,7 @@ const BUSY_TIMEOUT: Duration = Duration::from_secs(5);
 
 /// The schema's current shape. See [`apply_schema`] for the version
 /// history and the ladder future migrations extend.
-const SCHEMA_VERSION: i64 = 9;
+const SCHEMA_VERSION: i64 = 10;
 
 /// Surrogate primary key of a `hosts` row.
 ///
@@ -369,8 +369,10 @@ pub struct CachePage {
 ///
 /// - **archive is a default-off inclusion switch.** Withholding archived
 ///   rows is the ordinary view; enabling the switch removes that predicate
-///   rather than selecting archived rows alone. The fleet total still counts
-///   both, so the default view can say how much durable history it hides.
+///   rather than selecting archived rows alone. It is also the one dimension
+///   the served `total` follows ([`HelmStore::count_rows`]): the switch picks
+///   which view is being counted, while every other dimension narrows a view
+///   whose size the count goes on reporting.
 /// - **host, parent, status, profile — EXACT.** Each is an identifier or a
 ///   value chosen from a finite set
 ///   the client already has in hand (the hosts list, the status vocabulary,
@@ -493,6 +495,18 @@ impl SessionFilter {
     pub fn include_archived(mut self, include: bool) -> SessionFilter {
         self.include_archived = include;
         self
+    }
+
+    /// Whether this view admits archived rows.
+    ///
+    /// Exposed for the DENOMINATOR rather than for the predicate: unlike
+    /// every other dimension, this one changes which view `total` is a count
+    /// of, so [`HelmStore::count_rows`] has to ask. [`Self::matches`] applies
+    /// it independently, on the same reasoning as [`Self::host_scope`] — the
+    /// predicate is the contract and this is what the SQL is allowed to know
+    /// about it.
+    pub fn includes_archived(&self) -> bool {
+        self.include_archived
     }
 
     /// Narrow to one host.
@@ -1195,6 +1209,11 @@ pub struct HelmStore {
 /// - 9: a supervisor-local creation sequence for provenance ordering. Older
 ///   cached supervisors omit it, so the timestamp/id ordering remains the
 ///   compatibility fallback until a sequenced observation arrives.
+/// - 10: `session_cache.archived`, so the served `total` can be "what the
+///   default view holds" (see [`HelmStore::count_rows`]) without decoding
+///   every payload to find out. Like version 4 this arrives with DATA that
+///   predates it — the flag has always lived inside `info_json` — so the
+///   migration backfills the column by decoding each existing row once.
 fn apply_schema(conn: &mut Connection) -> anyhow::Result<()> {
     let tx = conn
         .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
@@ -1290,6 +1309,22 @@ fn apply_schema(conn: &mut Connection) -> anyhow::Result<()> {
                  -- itself — see this table's own comment above for the
                  -- cross-upgrade format contract this column is bound by.
                  info_json  TEXT NOT NULL,
+                 -- Whether the payload said this session was archived,
+                 -- extracted at write time exactly as created_at is and for
+                 -- the same reason (schema version 10): the default view
+                 -- EXCLUDES archived rows and reports how many rows it
+                 -- holds, so counting it must not mean decoding every blob
+                 -- in the fleet.
+                 --
+                 -- Written from the payload, never re-derived, and that is
+                 -- what decides where a row whose info_json has since gone
+                 -- undecodable belongs: it keeps the classification it was
+                 -- stored with, so it stays counted inside the ONE view its
+                 -- flag names, unshowable but never silently gone. Only a
+                 -- row this column never saw defaults to 0 -- version 10's
+                 -- backfill files a payload it cannot parse as active, on
+                 -- the same reasoning (see HelmStore::count_rows).
+                 archived   INTEGER NOT NULL DEFAULT 0,
                  PRIMARY KEY (host_id, session_id)
              ) STRICT;
              -- At most one HOST may cache a given session id (schema
@@ -1375,7 +1410,7 @@ fn apply_schema(conn: &mut Connection) -> anyhow::Result<()> {
                  cookie_hash BLOB PRIMARY KEY CHECK (length(cookie_hash) = 32),
                  created_at  INTEGER NOT NULL
              ) STRICT;
-             PRAGMA user_version = 9;",
+             PRAGMA user_version = 10;",
         )
         .context("creating schema")?;
         version = SCHEMA_VERSION;
@@ -1588,6 +1623,63 @@ fn apply_schema(conn: &mut Connection) -> anyhow::Result<()> {
         )
         .context("migrating helm.db to schema version 9")?;
         version = 9;
+    }
+    if version == 9 {
+        // The archive flag has always been INSIDE `info_json`; version 10
+        // lifts a copy of it out beside `created_at` so the default view's
+        // own count is an indexed-scope `COUNT(*)` rather than a decode of
+        // the whole fleet. Every row already here predates the column, so
+        // the backfill is the migration: read the flag out of each payload
+        // ONCE, here, or the first read after the upgrade would report every
+        // archived session as part of the default view.
+        //
+        // `ALTER TABLE ... ADD COLUMN` rather than the rebuild versions 6
+        // and 8 used, and that is safe for the schema-agreement invariant
+        // (`a_migrated_database_matches_a_freshly_created_one`) precisely
+        // because SQLite splices the new definition in after the LAST COLUMN
+        // rather than at the end of the statement — which lands it exactly
+        // where the fresh-create branch above writes it, before the table
+        // constraint. A rebuild would also have meant copying every cached
+        // row for a column the next statement fills in anyway.
+        //
+        // A payload SQLite cannot parse as JSON, or that carries no
+        // `archived` member at all, keeps the column's `0` default: such a
+        // row counts as active, which is the SAME divergence `count_rows`
+        // has always had for rows nothing can read (they are in the total
+        // even though no page can show them), and the alternative — dropping
+        // them out of the default view — would make an upgrade look like
+        // data loss.
+        tx.execute_batch(
+            "ALTER TABLE session_cache ADD COLUMN archived INTEGER NOT NULL DEFAULT 0;",
+        )
+        .context("adding the session_cache archive column")?;
+        // ONE statement over the whole table, deliberately, and the reason is
+        // memory rather than elegance: the shape this replaced read every
+        // cached row into Rust to decode it, which made the peak cost of an
+        // upgrade proportional to the fleet's cache. SQLite streams this and
+        // holds a row at a time.
+        //
+        // It asks the payload TEXT rather than `SessionInfo`, which is a
+        // deliberate difference from every other reader here. `json_extract`
+        // wants only the one member, so a payload written by a NEWER farhelm
+        // — carrying fields this build's struct would reject — is still
+        // classified correctly, where a `serde_json` decode would have
+        // silently filed it as active. That direction matters because the
+        // cache is explicitly a cross-version format (see `session_cache`'s
+        // own comment). JSON1 is compiled into the bundled SQLite and has
+        // been built in since 3.38, so the functions are always present.
+        //
+        // `json_valid` guards the extract rather than relying on it to
+        // return NULL: `json_extract` raises on malformed JSON, and a
+        // poisoned row must not abort an upgrade.
+        tx.execute_batch(
+            "UPDATE session_cache SET archived = 1 \
+             WHERE json_valid(info_json) AND json_extract(info_json, '$.archived') = 1;",
+        )
+        .context("backfilling the session_cache archive flags")?;
+        tx.execute_batch("PRAGMA user_version = 10;")
+            .context("migrating helm.db to schema version 10")?;
+        version = 10;
     }
     if version == SCHEMA_VERSION {
         // Nothing to change; commit the otherwise-empty transaction to
@@ -2816,7 +2908,9 @@ impl HelmStore {
             // built on), so a row whose payload is unchanged while its
             // timestamp is repaired IS a change — and reporting otherwise
             // would starve the feed of exactly the reordering a client needs
-            // to re-read for.
+            // to re-read for. The `archived` column needs no third
+            // comparison: it is extracted from the payload on the way in, so
+            // it cannot move without `info_json` moving with it.
             //
             // ONE map, consumed as the rewrite goes: entries are removed as
             // they are matched, so this holds the host's cache once rather
@@ -2864,10 +2958,11 @@ impl HelmStore {
                         // collision persisted. First claim holds; the
                         // skipped row is announced below rather than
                         // swallowed.
-                        "INSERT INTO session_cache (host_id, session_id, created_at, info_json) \
-                         VALUES (?1, ?2, ?3, ?4) \
+                        "INSERT INTO session_cache \
+                             (host_id, session_id, created_at, info_json, archived) \
+                         VALUES (?1, ?2, ?3, ?4, ?5) \
                          ON CONFLICT (session_id) DO NOTHING",
-                        rusqlite::params![host, entry.id, entry.created_at, json],
+                        rusqlite::params![host, entry.id, entry.created_at, json, entry.archived],
                     )
                     .context("inserting cached session")?;
                 if inserted == 0 {
@@ -3170,11 +3265,13 @@ impl HelmStore {
             let entry = &entry;
             let json = serde_json::to_string(entry).context("serializing cached session")?;
             tx.execute(
-                "INSERT INTO session_cache (host_id, session_id, created_at, info_json) \
-                 VALUES (?1, ?2, ?3, ?4) \
+                "INSERT INTO session_cache \
+                     (host_id, session_id, created_at, info_json, archived) \
+                 VALUES (?1, ?2, ?3, ?4, ?5) \
                  ON CONFLICT (session_id) DO UPDATE SET \
-                     created_at = excluded.created_at, info_json = excluded.info_json",
-                rusqlite::params![host, entry.id, entry.created_at, json],
+                     created_at = excluded.created_at, info_json = excluded.info_json, \
+                     archived = excluded.archived",
+                rusqlite::params![host, entry.id, entry.created_at, json, entry.archived],
             )
             .context("seeding a cached session")?;
             tx.commit().context("committing cache seed")?;
@@ -3415,6 +3512,27 @@ impl HelmStore {
     /// matching, because claiming a match for a payload this build cannot
     /// read would be inventing one.
     ///
+    /// ## The archive switch is cut in SQL, and only it
+    ///
+    /// One dimension does not wait for [`SessionFilter::matches`]: the
+    /// default view's `AND archived = 0` is in the query, mirroring
+    /// [`Self::count_rows`] so the rows and the number describing them come
+    /// from one clause. `matches` re-applies it — the predicate is the
+    /// contract and this is what the SQL is allowed to know about it — but
+    /// nothing reaches `matches` to be re-judged.
+    ///
+    /// This is also the one place a row's stored flag outranks the paragraph
+    /// above. An archived row whose payload has since gone bad is not "a row
+    /// nobody can judge": the flag was extracted when the row was WRITTEN,
+    /// and it still says archived, so the row is outside the default view
+    /// altogether — which is where its own total has always put it.
+    ///
+    /// Cursors are unaffected. Rows the clause removes are never a frontier
+    /// and never have to be stepped past (the resume predicate is a strict
+    /// ordering test over the rows that remain), and a cursor cannot survive
+    /// the switch being flipped: the token carries the filter it was minted
+    /// under.
+    ///
     /// ## Counting rides along, when it is wanted
     ///
     /// With `count` set this same walk also answers "how many rows in scope
@@ -3473,9 +3591,28 @@ impl HelmStore {
         } else {
             String::new()
         };
+        // The archive switch is the ONE filter dimension this SQL applies,
+        // mirroring [`Self::count_rows`] so the page and the total are cut by
+        // the same clause rather than by two spellings that could drift.
+        // [`SessionFilter::matches`] still applies it below, and has to: that
+        // is the contract, and this is only the part SQLite can help with.
+        //
+        // Two things it buys. Archived rows are no longer read and decoded
+        // just to be discarded a few lines down — the default view is the
+        // common request, so that was most of a fleet's archive on every
+        // poll. And a row whose payload has gone bad is now judged by the
+        // flag STORED with it: undecodable-and-archived leaves the default
+        // view entirely, where before it slipped past `matches` (nothing can
+        // judge a payload it cannot read) and occupied a slot in a page whose
+        // total had already excluded it.
+        let archive_clause = if filter.includes_archived() {
+            ""
+        } else {
+            " AND archived = 0"
+        };
         let sql = format!(
             "SELECT host_id, session_id, created_at, info_json FROM session_cache \
-             WHERE host_id IN ({placeholders}){resume} \
+             WHERE host_id IN ({placeholders}){archive_clause}{resume} \
              ORDER BY created_at DESC, session_id ASC, host_id ASC{bound_rows}"
         );
         let mut stmt = conn
@@ -3583,32 +3720,98 @@ impl HelmStore {
         Ok((page, count.then_some(matching)))
     }
 
-    /// How many sessions the merged view holds across `hosts` — the `total`
-    /// a page reports.
+    /// How many sessions the merged view holds across `hosts` UNDER THE
+    /// REQUEST'S ARCHIVE SWITCH — the `total` a page reports.
     ///
     /// A separate cheap query rather than a by-product of the page, because
     /// the page deliberately stops at its limit and therefore cannot know.
     /// `COUNT(*)` over an indexed IN-list touches no `info_json` at all,
     /// which is what keeps "how many are there" from costing what "show me
-    /// all of them" used to.
+    /// all of them" used to — and it keeps that property with the archive
+    /// predicate in it only because the flag is a COLUMN
+    /// ([`apply_schema`]'s version 10) rather than a field inside the blob.
+    ///
+    /// ## Why the archive switch is in the denominator and no other filter is
+    ///
+    /// `include_archived` is not a user narrowing; it is the definition of
+    /// which view is being served. With it off — the public default — the
+    /// list shows non-archived sessions, so a `total` counting the archived
+    /// ones too made the banner's two numbers disagree out of the box: ten
+    /// rows above "of 12 sessions", with no filter typed and nothing on
+    /// screen to explain the gap (maintainer's verdict, 2026-08-22).
+    ///
+    /// Every OTHER dimension stays out of this count, and the old reasoning
+    /// for that is untouched: a filtered page holding fewer rows than the
+    /// view holds is not an incoherent list, it is a working filter, and the
+    /// matching count beside it is what says how many the filter found.
+    ///
+    /// The column and the payload agree by construction — every writer
+    /// extracts one from the other in the same statement, and the migration
+    /// backfilled the rows that predate it — which is what lets this count
+    /// and [`SessionFilter::matches`] (which reads the decoded payload) be
+    /// two spellings of one predicate. Nothing re-validates that at read
+    /// time: a hand-edited row where the two disagree can report a `matching`
+    /// larger than this total, which the client already renders as the
+    /// list-changed-underneath note rather than as a number it believes.
+    ///
+    /// ## What it still counts that no page can show
     ///
     /// Counts ROWS, including any whose payload no longer decodes. That is a
     /// deliberate, documented divergence from the page and from the matching
-    /// count, both of which skip them: a total is an answer about the fleet,
-    /// and quietly shrinking it to hide a corrupt row would make "showing 4
-    /// of 5" read as data loss rather than as the one unshowable entry it is.
+    /// count, both of which skip them: a total is an answer about what the
+    /// view holds, and quietly shrinking it to hide a corrupt row would make
+    /// "showing 4 of 5" read as data loss rather than as the one unshowable
+    /// entry it is.
+    ///
+    /// WHICH view holds it is decided by the column, which is exactly the
+    /// point of the column being stored rather than derived. The flag was
+    /// extracted when the row was written, so a row that decoded then and
+    /// does not now keeps the classification it was filed under: an
+    /// undecodable archived row counts inside the widened view and is absent
+    /// from the default one, an undecodable active row the other way around.
+    /// Neither is dropped from both — a row nothing can read is still a row.
+    ///
+    /// The one place an unreadable payload defaults to ACTIVE is version
+    /// 10's backfill, which had no stored flag to keep and could only ask the
+    /// text; a payload SQLite cannot parse as JSON lands at 0 there. Same
+    /// principle from the other side: the upgrade counts what it cannot
+    /// classify rather than hiding it.
+    ///
+    /// ## No index carries the archive predicate, and what that costs
+    ///
+    /// The host scope is still an index range (`session_cache_by_host_order`),
+    /// but testing a column that index does not carry means visiting the
+    /// table row for each candidate rather than counting index entries — so
+    /// the default view's count is a row visit per cached session, where the
+    /// widened one is not. That is bounded work on a cache that is itself
+    /// bounded per host (`crate::manager::REFRESH_SESSION_CAP`) and it still
+    /// decodes nothing, which is the property that mattered. An index on the
+    /// flag would be a write cost on every refresh bought against a read
+    /// nobody has measured as a problem; add one when there is a measurement,
+    /// not before.
     ///
     /// Borrows a connection rather than taking `&self`, so it runs inside
     /// [`Self::merged_page`]'s read transaction. There is deliberately no
     /// standalone async wrapper: production has exactly one reason to ask how
     /// big the merged view is — to answer `GET /api/sessions` — and that
     /// answer must come from the same moment as the page beside it.
-    fn count_rows(conn: &Connection, hosts: &[HostId]) -> anyhow::Result<u64> {
+    fn count_rows(
+        conn: &Connection,
+        hosts: &[HostId],
+        include_archived: bool,
+    ) -> anyhow::Result<u64> {
         if hosts.is_empty() {
             return Ok(0);
         }
         let placeholders = host_placeholders(hosts.len(), 1);
-        let sql = format!("SELECT COUNT(*) FROM session_cache WHERE host_id IN ({placeholders})");
+        let archive_clause = if include_archived {
+            ""
+        } else {
+            " AND archived = 0"
+        };
+        let sql = format!(
+            "SELECT COUNT(*) FROM session_cache WHERE host_id IN ({placeholders}){archive_clause}"
+        );
         let params: Vec<Box<dyn rusqlite::ToSql>> = hosts
             .iter()
             .map(|host| Box::new(*host) as Box<dyn rusqlite::ToSql>)
@@ -3651,9 +3854,14 @@ impl HelmStore {
     /// `total` counts. The PAGE and the MATCHING count are computed over
     /// `scope` intersected with the filter's host, so a host-filtered
     /// request never decodes another host's rows at all — while `total` goes
-    /// on describing the whole fleet, because "N matching of M sessions" is
-    /// a comparison against the fleet and not against the filter's own
+    /// on describing every host, because "N matching of M sessions" is a
+    /// comparison against the whole view and not against the filter's own
     /// scope.
+    ///
+    /// The one dimension `total` DOES honor is the archive switch, which
+    /// says which view this is rather than narrowing it — see
+    /// [`Self::count_rows`] for why that one is in the denominator and the
+    /// user's filters are not.
     ///
     /// ## Whether it COUNTS is decided here, inside the lock
     ///
@@ -3702,7 +3910,10 @@ impl HelmStore {
             // `total` is the whole merged scope's, so it is taken FIRST and
             // the scope is then consumed rather than cloned: the unfiltered
             // case is the common one and its page scope is the same list.
-            let total = Self::count_rows(&tx, &scope)?;
+            // The archive switch travels with it because it selects the VIEW
+            // being counted rather than narrowing one (see
+            // [`Self::count_rows`]); no other dimension of `filter` does.
+            let total = Self::count_rows(&tx, &scope, filter.includes_archived())?;
             // A host filter naming a host outside the merged view selects
             // nothing — not everything, which is what an empty IN-list would
             // silently mean if it reached the scan.
@@ -4725,6 +4936,171 @@ mod tests {
         );
     }
 
+    /// The version-10 migration, which is what makes an UPGRADED helm's
+    /// default view count itself correctly on its very first read.
+    ///
+    /// Spec: every row that predates the `archived` column is backfilled
+    /// from the flag inside its own payload, the version stamp lands at 10,
+    /// and both counts survive a reopen — so the default view's `total`
+    /// excludes archived sessions from the first read onward and the
+    /// inclusion switch brings them back.
+    ///
+    /// Without the backfill the column would be 0 everywhere and every
+    /// archived session would silently rejoin the denominator on upgrade —
+    /// the exact incoherence this schema version exists to remove, restored
+    /// by the migration meant to fix it.
+    ///
+    /// Three payload shapes, because the backfill reads JSON TEXT rather
+    /// than `SessionInfo` and each shape pins a different consequence of
+    /// that:
+    ///
+    /// - A well-formed payload is the ordinary case, in both flag positions.
+    /// - A payload that is not JSON at all is the one case the backfill
+    ///   cannot answer, and the direction it fails in is a decision rather
+    ///   than an accident: it stays ACTIVE, matching `count_rows`'s standing
+    ///   rule that a total is a count of what is there and never quietly
+    ///   shrinks to hide a row nothing can read.
+    /// - A payload that is valid JSON this build's struct would reject —
+    ///   what a NEWER farhelm's cache looks like to an older one — is still
+    ///   classified from its `archived` member. That is the whole reason the
+    ///   statement asks SQLite's JSON functions instead of serde, and a
+    ///   regression to a struct decode would file such a row as active and
+    ///   put a session the user archived back into the ordinary list.
+    ///
+    /// Reopened at the end because the point of a COLUMN is durability: a
+    /// second `open` must find version 10, skip the ladder entirely, and
+    /// still report the same two numbers. That is what distinguishes a
+    /// backfilled column from a value some read path recomputes.
+    ///
+    /// Driven through a genuinely planted OLD database, like the version-4
+    /// test above, so the whole ladder runs over the fixture a real user's
+    /// file would have been.
+    #[tokio::test]
+    async fn migrating_to_v10_backfills_the_archive_flag_from_each_payload() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let db_path = dir.path().join("helm.db");
+        {
+            let conn = plant_v1_database(&db_path);
+            conn.execute_batch("INSERT INTO hosts (kind) VALUES ('local');")
+                .expect("plant the local row");
+            let archived = serde_json::to_string(&SessionInfo {
+                archived: true,
+                ..session("archived-1", 300)
+            })
+            .unwrap();
+            let active = serde_json::to_string(&session("active-1", 200)).unwrap();
+            for (id, created_at, json) in [
+                ("archived-1", 300, archived.as_str()),
+                ("active-1", 200, active.as_str()),
+                // Not JSON at all: the payload the backfill cannot read.
+                ("undecodable", 100, "not valid json"),
+                // Valid JSON, and NOT a `SessionInfo` this build could
+                // decode — the stand-in for a cache written by a newer
+                // farhelm. Its archive flag is still right there to read.
+                (
+                    "from-the-future",
+                    50,
+                    r#"{"archived":true,"shape":"unknown"}"#,
+                ),
+            ] {
+                conn.execute(
+                    "INSERT INTO session_cache (host_id, session_id, created_at, info_json)
+                     VALUES (1, ?1, ?2, ?3)",
+                    rusqlite::params![id, created_at, json],
+                )
+                .expect("plant a pre-column cache row");
+            }
+        }
+
+        let store = HelmStore::open(&db_path).await.expect("migrate and open");
+        // The reserved local row planted above; ids start at 1.
+        let host: HostId = 1;
+
+        let (flags, user_version): (Vec<(String, i64)>, i64) = {
+            let conn = Arc::clone(&store.conn);
+            tokio::task::spawn_blocking(move || {
+                let conn = conn.lock().unwrap();
+                let flags = {
+                    let mut stmt = conn
+                        .prepare(
+                            "SELECT session_id, archived FROM session_cache ORDER BY session_id",
+                        )
+                        .unwrap();
+                    stmt.query_map([], |r| Ok((r.get(0)?, r.get(1)?)))
+                        .unwrap()
+                        .collect::<Result<_, _>>()
+                        .unwrap()
+                };
+                let version: i64 = conn
+                    .query_row("PRAGMA user_version", [], |r| r.get(0))
+                    .unwrap();
+                (flags, version)
+            })
+            .await
+            .unwrap()
+        };
+        assert_eq!(
+            flags,
+            vec![
+                ("active-1".to_string(), 0),
+                ("archived-1".to_string(), 1),
+                ("from-the-future".to_string(), 1),
+                ("undecodable".to_string(), 0),
+            ],
+            "each row's flag must come from the JSON in its own payload, and a payload that is \
+             not JSON at all stays active"
+        );
+        assert_eq!(
+            user_version, 10,
+            "an unstamped migration replays the ADD COLUMN on the next open and fails there"
+        );
+
+        // What each view HOLDS, as a pair, taken twice: once against the
+        // store that just migrated, and once against a fresh open of the
+        // same file.
+        async fn both_totals(store: &HelmStore, host: HostId) -> (u64, u64) {
+            let mut totals = Vec::new();
+            for filter in [
+                SessionFilter::default(),
+                SessionFilter::default().include_archived(true),
+            ] {
+                totals.push(
+                    store
+                        .merged_page(
+                            vec![host],
+                            None,
+                            10,
+                            usize::MAX,
+                            filter,
+                            MatchingCount::Skip,
+                        )
+                        .await
+                        .expect("merged read")
+                        .total,
+                );
+            }
+            (totals[0], totals[1])
+        }
+        assert_eq!(
+            both_totals(&store, host).await,
+            (2, 4),
+            "the default view counts what it HOLDS, which is not the same as what it can show: \
+             the active row and the unreadable one, the latter counted but unshowable — and the \
+             inclusion switch brings both archived rows back into the denominator"
+        );
+
+        drop(store);
+        let reopened = HelmStore::open(&db_path)
+            .await
+            .expect("reopen at version 10");
+        assert_eq!(
+            both_totals(&reopened, host).await,
+            (2, 4),
+            "the flag is stored, not recomputed: a reopen that skips the ladder must count the \
+             same two views"
+        );
+    }
+
     /// A migrated database and a freshly created one must end up with
     /// byte-identical schemas — the invariant that lets [`apply_schema`]'s
     /// version-0 branch create the final shape directly instead of
@@ -4786,13 +5162,18 @@ mod tests {
         };
 
         // Back to the shape version 5 shipped: no identity column, and a row
-        // recorded under it.
+        // recorded under it. The session cache is downgraded too — a fixture
+        // stamped `user_version = 5` while still carrying version 10's
+        // `archived` column would make the ladder replay the ADD COLUMN over
+        // a column that is already there, which is the migration failing
+        // loudly at a state no real database can be in.
         {
             let conn = Connection::open(&path).expect("reopen raw");
             conn.execute_batch(
                 "DROP TABLE device_sessions;
                  DROP TABLE web_token;
                  DROP TABLE remembered_profiles;
+                 ALTER TABLE session_cache DROP COLUMN archived;
                  CREATE TABLE remembered_profiles (
                      host_id    INTEGER PRIMARY KEY
                                 REFERENCES hosts (id) ON DELETE CASCADE,
@@ -4844,8 +5225,13 @@ mod tests {
         };
         {
             let conn = Connection::open(&path).unwrap();
+            // The session cache goes back with it: a fixture stamped at
+            // version 7 that still carried version 10's `archived` column
+            // would replay the ADD COLUMN over an existing one and fail the
+            // open, on a state no real database reaches.
             conn.execute_batch(
                 "DROP TABLE remembered_profiles;
+                 ALTER TABLE session_cache DROP COLUMN archived;
                  CREATE TABLE remembered_profiles (
                      host_id INTEGER PRIMARY KEY REFERENCES hosts(id) ON DELETE CASCADE,
                      profile_id TEXT NOT NULL,
@@ -7582,6 +7968,282 @@ mod tests {
         assert_eq!(
             read.total, 3,
             "while the fleet total counts every row, unshowable or not"
+        );
+    }
+
+    /// `total` is a count of the VIEW the request asked for: archived rows
+    /// are outside the default one and inside the widened one.
+    ///
+    /// This is the denominator half of "N matching of M sessions", and the
+    /// reason it is worth its own test is that the two numbers used to
+    /// disagree by construction — the ordinary list hides archived sessions
+    /// while the total counted them, so a fleet with two archived sessions
+    /// showed ten rows above "of 12" with nothing typed into any filter
+    /// (maintainer's verdict, 2026-08-22).
+    ///
+    /// The undecodable row is asserted in the same breath because the two
+    /// rules meet here and pull opposite ways: the archive flag REMOVES a row
+    /// from the default count, while an unreadable payload never does. Its
+    /// column says active (nothing could read a flag out of it), so it counts
+    /// in both views — which is what keeps a corrupt row visible as an
+    /// unshowable entry rather than as a session that quietly ceased to
+    /// exist.
+    #[tokio::test]
+    async fn the_total_counts_the_view_the_archive_switch_selects() {
+        let (_dir, store) = fresh_store().await;
+        let host = host_with_identity(&store, "archive@host", "archive-identity").await;
+        store
+            .replace_host_sessions(
+                host,
+                "archive-identity",
+                vec![
+                    SessionInfo {
+                        archived: true,
+                        ..session("archived-1", 300)
+                    },
+                    session("active-1", 200),
+                    session("poisoned", 100),
+                ],
+            )
+            .await
+            .expect("seed the cache");
+        {
+            // Poisoned AFTER the write, so the row was stored as active and
+            // its column says so — the state a real corrupt row is in, since
+            // nothing rewrites a column it cannot read.
+            let conn = Arc::clone(&store.conn);
+            tokio::task::spawn_blocking(move || {
+                conn.lock()
+                    .unwrap()
+                    .execute(
+                        "UPDATE session_cache SET info_json = 'not valid json' \
+                         WHERE session_id = 'poisoned'",
+                        [],
+                    )
+                    .unwrap();
+            })
+            .await
+            .unwrap();
+        }
+
+        let total_for = async |filter: SessionFilter| {
+            store
+                .merged_page(
+                    vec![host],
+                    None,
+                    10,
+                    usize::MAX,
+                    filter,
+                    MatchingCount::Skip,
+                )
+                .await
+                .expect("merged read")
+                .total
+        };
+        assert_eq!(
+            total_for(SessionFilter::default()).await,
+            2,
+            "the default view's total is what the default view holds"
+        );
+        assert_eq!(
+            total_for(SessionFilter::default().include_archived(true)).await,
+            3,
+            "and the switch widens the count with the view"
+        );
+        assert_eq!(
+            total_for(SessionFilter::default().title("active-1")).await,
+            2,
+            "a user's own filter narrows the rows and leaves the denominator alone"
+        );
+    }
+
+    /// Archived rows are cut by the PAGE QUERY, so they cost the default
+    /// view neither a row slot nor a decode — including the one shape that
+    /// used to slip past the Rust-side predicate entirely.
+    ///
+    /// That shape is the reason this is worth a test of its own. A decodable
+    /// archived row was always stepped over before the page's cuts, but a row
+    /// whose payload has since gone bad cannot be judged by
+    /// [`SessionFilter::matches`] — nothing can read a flag out of it — so it
+    /// was taken into the page under the cursor contract, occupying a slot in
+    /// a view whose own total had already excluded it. The list then reported
+    /// "showing 1 of 2" with a continuation, over a fleet of two active
+    /// sessions and one corpse.
+    ///
+    /// The archived rows are planted NEWER than the active ones because
+    /// `created_at` descends: they sit at the front of the merged order,
+    /// which is exactly where a page cut that ran before the predicate would
+    /// spend its whole limit.
+    #[tokio::test]
+    async fn archived_rows_leave_the_default_page_before_its_cuts() {
+        let (_dir, store) = fresh_store().await;
+        let host = host_with_identity(&store, "page@host", "page-identity").await;
+        store
+            .replace_host_sessions(
+                host,
+                "page-identity",
+                vec![
+                    SessionInfo {
+                        archived: true,
+                        ..session("archived-poisoned", 500)
+                    },
+                    SessionInfo {
+                        archived: true,
+                        ..session("archived-readable", 400)
+                    },
+                    session("active-1", 200),
+                    session("active-2", 100),
+                ],
+            )
+            .await
+            .expect("seed the cache");
+        {
+            // Poisoned after the write, so the row carries the archive flag
+            // it was stored with while its payload no longer decodes — the
+            // state a real corrupt row reaches, since nothing rewrites a
+            // column it cannot read.
+            let conn = Arc::clone(&store.conn);
+            tokio::task::spawn_blocking(move || {
+                conn.lock()
+                    .unwrap()
+                    .execute(
+                        "UPDATE session_cache SET info_json = 'not valid json' \
+                         WHERE session_id = 'archived-poisoned'",
+                        [],
+                    )
+                    .unwrap();
+            })
+            .await
+            .unwrap();
+        }
+
+        // A limit of exactly the active rows: anything the archive predicate
+        // lets through takes one of these two slots.
+        let ordinary = store
+            .merged_page(
+                vec![host],
+                None,
+                2,
+                usize::MAX,
+                SessionFilter::default(),
+                MatchingCount::Compute,
+            )
+            .await
+            .expect("default page");
+        assert_eq!(
+            ordinary
+                .page
+                .rows
+                .iter()
+                .map(|row| row.key.session_id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["active-1", "active-2"],
+            "two archived rows sit ahead of these in the merged order and neither may cost a slot"
+        );
+        assert!(
+            !ordinary.page.more,
+            "the default view ends here; a continuation would send the client back for rows that \
+             do not belong to this view at all"
+        );
+        assert_eq!(
+            (ordinary.matching, ordinary.total),
+            (Some(2), 2),
+            "and the counts describe the same two rows the page holds"
+        );
+
+        // The widened view is where both archived rows live, corpse
+        // included: the cursor contract still applies there, so the
+        // undecodable one is carried as a payload-less row rather than
+        // skipped into unreachability.
+        let all = store
+            .merged_page(
+                vec![host],
+                None,
+                10,
+                usize::MAX,
+                SessionFilter::default().include_archived(true),
+                MatchingCount::Compute,
+            )
+            .await
+            .expect("widened page");
+        assert_eq!(
+            all.page
+                .rows
+                .iter()
+                .map(|row| (row.key.session_id.as_str(), row.info.is_some()))
+                .collect::<Vec<_>>(),
+            vec![
+                ("archived-poisoned", false),
+                ("archived-readable", true),
+                ("active-1", true),
+                ("active-2", true),
+            ],
+        );
+        assert_eq!(
+            (all.matching, all.total),
+            (Some(3), 4),
+            "the unreadable row is counted as a row and never claimed as a match"
+        );
+    }
+
+    /// A session that comes back UNARCHIVED returns to the default view,
+    /// column and counts together.
+    ///
+    /// The single-row write's `ON CONFLICT` clause has to carry `archived`
+    /// in both directions, and only one of them is exercised by ordinary
+    /// use. Drop it from the update and an archived row's flag becomes
+    /// permanent in the cache: the session would be invisible in the
+    /// ordinary list and absent from its count no matter what the supervisor
+    /// went on to say about it, with no way back short of deleting the cache
+    /// — a wrong answer that survives every refresh is the worst kind for a
+    /// denormalized column to give.
+    #[tokio::test]
+    async fn a_session_that_comes_back_unarchived_rejoins_the_default_view() {
+        let (_dir, store) = fresh_store().await;
+        let host = host_with_identity(&store, "flip@host", "flip-identity").await;
+        let default_view = async |store: &HelmStore| {
+            let read = store
+                .merged_page(
+                    vec![host],
+                    None,
+                    10,
+                    usize::MAX,
+                    SessionFilter::default(),
+                    MatchingCount::Compute,
+                )
+                .await
+                .expect("default view");
+            (read.page.rows.len(), read.matching, read.total)
+        };
+
+        store
+            .remember_session(
+                host,
+                "flip-identity",
+                &SessionInfo {
+                    archived: true,
+                    ..session("s-1", 100)
+                },
+            )
+            .await
+            .expect("remember an archived session");
+        assert_eq!(
+            default_view(&store).await,
+            (0, Some(0), 0),
+            "an archived session is outside the ordinary list and outside its count"
+        );
+
+        assert!(
+            store
+                .remember_session(host, "flip-identity", &session("s-1", 100))
+                .await
+                .expect("remember it as active"),
+            "the payload changed, so the write is a change clients must be told about"
+        );
+        assert_eq!(
+            default_view(&store).await,
+            (1, Some(1), 1),
+            "and the row, the matching count and the denominator all come back together"
         );
     }
 

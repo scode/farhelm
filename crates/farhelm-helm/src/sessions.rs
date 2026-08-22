@@ -63,8 +63,8 @@ use tracing::warn;
 ///
 /// Everything except the archive inclusion switch is absent-by-default.
 /// A caller sending no query sees the ordinary, non-archived fleet view;
-/// `include_archived=true` widens that view without changing any of the
-/// search dimensions.
+/// `include_archived=true` widens that view — rows AND `total` both — without
+/// changing any of the search dimensions.
 ///
 /// The filter parameters are SPEC.md's session-list dimensions: host,
 /// parent, directory, profile, status, and title. Their match semantics live on
@@ -104,8 +104,12 @@ pub(crate) struct ListQuery {
     /// A limit of zero is refused too — it could never make progress through
     /// the pages.
     limit: Option<usize>,
-    /// Include archived sessions. They remain part of the fleet total even
-    /// when this default-off switch hides them from the result rows.
+    /// Include archived sessions.
+    ///
+    /// The one parameter that moves `total`: it selects which view is being
+    /// served rather than narrowing one, so with it off the reply's rows and
+    /// its total are both about the non-archived list, and with it on both
+    /// are about the whole fleet (see [`aggregate::SessionPageBody::total`]).
     #[serde(default)]
     include_archived: bool,
     /// Only sessions on this registered host (a `HostView::id`).
@@ -204,8 +208,9 @@ fn list_filter(q: &ListQuery) -> anyhow::Result<store::SessionFilter> {
 /// unfiltered and makes no matching claim (see
 /// [`aggregate::SessionPageBody::matching`] for why equating that claim with
 /// `total` would have been a small lie). `total` now counts the merged view
-/// rather than one supervisor's list, and `truncated` now means
-/// "there is a next page"
+/// rather than one supervisor's list — the view the request asked for,
+/// archived rows included only under `include_archived=true` — and
+/// `truncated` now means "there is a next page"
 /// rather than "entries were held back" — see [`aggregate::SessionPageBody`]
 /// for all of them, including why the filter's count is a SECOND number
 /// beside `total` rather than a redefinition of it.

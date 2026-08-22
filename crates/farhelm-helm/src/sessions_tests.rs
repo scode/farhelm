@@ -3339,12 +3339,17 @@ async fn lifecycle_mutations_reach_the_list_without_waiting_for_a_refresh() {
     assert!(row_ids(&ordinary).is_empty());
     assert_eq!(ordinary["matching"], 0);
     assert_eq!(
-        ordinary["total"], 1,
-        "archive changes the default match set, not the fleet size"
+        ordinary["total"], 0,
+        "archiving takes the session out of the default view, denominator included — the \
+         list and its own count describe the same view"
     );
     let (_, retained) = get_json(&harness, "/api/sessions?include_archived=true").await;
     assert_eq!(row_ids(&retained), vec!["sess-1"]);
     assert_eq!(retained["sessions"][0]["archived"], true);
+    assert_eq!(
+        retained["total"], 1,
+        "the session is still a fleet member; the widened view counts it"
+    );
 
     let archived_revision = harness.manager.events().revision();
     let (status, body) = post_text(
@@ -4241,8 +4246,15 @@ async fn a_filtered_page_is_capped_lower_than_an_unfiltered_one() {
     assert_eq!(status, axum::http::StatusCode::OK);
 }
 
-/// Archived sessions stay in the fleet total, disappear from the
-/// ordinary result set, and reappear only through the inclusion switch.
+/// Archived sessions leave the ordinary view — its rows AND its total — and
+/// reappear in both only through the inclusion switch.
+///
+/// The denominator half is the point: the served `total` is a count of the
+/// view the request asked for, so the ordinary list can never show ten rows
+/// above "of 12 sessions" with nothing typed into any filter. The page cut
+/// is exercised in the same test because both cuts have to apply in that
+/// order — filter first, cut second — or a limited page would report a
+/// number the rows contradict.
 #[tokio::test]
 async fn archived_sessions_are_hidden_by_default_and_included_on_request() {
     let mut archived = filterable(
@@ -4270,7 +4282,10 @@ async fn archived_sessions_are_hidden_by_default_and_included_on_request() {
     let (_, ordinary) = get_json(&harness, "/api/sessions").await;
     assert_eq!(row_ids(&ordinary), vec!["active"]);
     assert_eq!(ordinary["matching"], 1);
-    assert_eq!(ordinary["total"], 2);
+    assert_eq!(
+        ordinary["total"], 1,
+        "the default view's total counts the default view: one active session"
+    );
 
     let (_, limited) = get_json(&harness, "/api/sessions?limit=1").await;
     assert_eq!(
@@ -4279,12 +4294,18 @@ async fn archived_sessions_are_hidden_by_default_and_included_on_request() {
         "the newest archived row must be filtered before the page is cut"
     );
     assert_eq!(limited["matching"], 1);
-    assert_eq!(limited["total"], 2);
+    assert_eq!(
+        limited["total"], 1,
+        "and the page cut does not move a count taken over the whole view"
+    );
 
     let (_, all) = get_json(&harness, "/api/sessions?include_archived=true").await;
     assert_eq!(row_ids(&all), vec!["archived", "active"]);
     assert!(all.get("matching").is_none());
-    assert_eq!(all["total"], 2);
+    assert_eq!(
+        all["total"], 2,
+        "the switch widens the view, so it widens the count with it"
+    );
 }
 
 /// A filtered walk's later pages report a count that is still TRUE: the
@@ -4421,4 +4442,65 @@ async fn a_filter_applies_to_an_identity_less_hosts_in_memory_rows() {
     assert_eq!(row_ids(&value), vec!["memory-running"]);
     assert_eq!(value["matching"], 2);
     assert_eq!(value["truncated"], true);
+}
+
+/// The archive switch moves the denominator on the IN-MEMORY path too.
+///
+/// The two sources reach `total` by different code — the persisted side by
+/// an indexed count over a column, the identity-less side by walking the
+/// actor's own list — so the rule has to be stated twice and can drift
+/// exactly once. Drifted, a fleet whose only archived session lives on an
+/// identity-less host would show the ordinary list under a total that counts
+/// one row it does not display, which is the incoherence the whole change
+/// removes.
+#[tokio::test]
+async fn an_identity_less_hosts_archived_rows_leave_the_default_view_s_total() {
+    use farhelm_proto::SessionStatus;
+
+    let mut archived = filterable(
+        "memory-archived",
+        200,
+        "/opt/work",
+        "Put away",
+        SessionStatus::Exited { exit_code: None },
+        None,
+    );
+    archived.archived = true;
+    let harness = rest_harness::FleetBuilder::new()
+        .await
+        .local(rest_harness::HostScript {
+            identity: None,
+            sessions: vec![
+                archived,
+                filterable(
+                    "memory-active",
+                    100,
+                    "/opt/other",
+                    "Still here",
+                    SessionStatus::Running,
+                    None,
+                ),
+            ],
+            ..rest_harness::HostScript::default()
+        })
+        .await
+        .start()
+        .await;
+    let local = rest_harness::local_id(&harness.store).await;
+    harness.await_refreshed(local).await;
+
+    let (status, ordinary) = get_json(&harness, "/api/sessions").await;
+    assert_eq!(status, axum::http::StatusCode::OK);
+    assert_eq!(row_ids(&ordinary), vec!["memory-active"]);
+    assert_eq!(
+        ordinary["total"], 1,
+        "an in-memory archived row is outside the default view and outside its count"
+    );
+
+    let (_, all) = get_json(&harness, "/api/sessions?include_archived=true").await;
+    assert_eq!(row_ids(&all), vec!["memory-archived", "memory-active"]);
+    assert_eq!(
+        all["total"], 2,
+        "and the switch brings it back to both, exactly as it does for a cached host"
+    );
 }

@@ -1,6 +1,7 @@
 // Archive's browser contract against the real authenticated stack: both
-// entry points, the default-off list switch, the terminal-less retained
-// view, and restart as the route back.
+// entry points, the default-off list switch, the count banner's
+// denominator, the terminal-less retained view, and restart as the route
+// back.
 
 import { expect, Page, test } from "@playwright/test";
 import {
@@ -72,6 +73,109 @@ test("the row confirmation names every live thing and the toggle reveals the arc
     await expect(row(page, session.id).locator(".session-row-archive")).toHaveCount(0);
     await expect(row(page, session.id).locator(".session-row-rename")).toBeEnabled();
     await expect(row(page, session.id).locator(".session-row-delete")).toBeEnabled();
+  } finally {
+    await cleanupSession(request, session.id);
+  }
+});
+
+/**
+ * Read the count banner, insisting on the UNFILTERED wording, and return its
+ * one number.
+ *
+ * The shape is half the assertion: the ordinary list and the archive switch
+ * are both views rather than filters, so the banner must never reach for "N
+ * matching of M sessions" in either. The absolute number belongs to a shared
+ * stack, so every test below compares it against itself.
+ */
+async function unfilteredCount(page: Page): Promise<number> {
+  const banner = page.locator(".session-count");
+  await expect(banner).toBeVisible({ timeout: 20_000 });
+  const text = (await banner.textContent())?.trim() ?? "";
+  const match = /^(\d+) sessions$/.exec(text);
+  expect(
+    match,
+    `an unapplied filter must produce the plain count sentence; saw ${JSON.stringify(text)}`,
+  ).toBeTruthy();
+  return Number(match![1]);
+}
+
+/**
+ * The count banner's denominator is the view's own size: archiving takes a
+ * session out of it, and the inclusion switch puts it back.
+ *
+ * This is the browser half of the 2026-08-22 verdict, and the reason it
+ * needs a browser at all is that the number reaching the user is the end of
+ * a chain no unit test spans — the helm counts a column, the walk carries
+ * the count, and the banner picks a sentence for it. The bug it rules out
+ * was visible on a fresh install: the default list hid archived sessions
+ * while its count included them, so ten rows sat under "10 matching of 12
+ * sessions" with nothing typed into any filter.
+ *
+ * The row count is asserted alongside the number because that is the whole
+ * claim — a denominator nobody can see is not the thing that was wrong.
+ *
+ * The "filtered" badge and the Clear button are pinned in the same test
+ * because they read the switch differently ON PURPOSE, and only a rendered
+ * page shows both answers at once: the switch earns no badge (it chose a
+ * view, it narrowed nothing) while still being something Clear can undo.
+ * Collapsing the two is the natural-looking mistake in either direction.
+ */
+test("the count banner counts the view the archive switch selects", async ({ page, request }) => {
+  const session = await createSession(request, { title: `archive-count-${Date.now()}` });
+  try {
+    await page.goto("/");
+    await openFilterBar(page);
+    const target = row(page, session.id);
+    await expect(target).toBeVisible({ timeout: 20_000 });
+
+    await expect(
+      page.locator(".filter-active-note"),
+      "the untouched list has no filter to announce",
+    ).toHaveCount(0);
+    await expect(
+      page.locator(".filter-clear"),
+      "and nothing for Clear to undo either",
+    ).toBeDisabled();
+
+    const before = await unfilteredCount(page);
+    await expect(
+      page.locator(".session-row"),
+      "a complete walk shows every session its own count claims",
+    ).toHaveCount(before);
+
+    await openRowMenu(target);
+    await target.locator(".session-row-archive").click();
+    await target.locator(".confirm-archive").click();
+    await expect(target).toHaveCount(0, { timeout: 20_000 });
+
+    await expect
+      .poll(() => unfilteredCount(page), {
+        timeout: 20_000,
+        message: "an archived session leaves the default view's count with its row",
+      })
+      .toBe(before - 1);
+    await expect(page.locator(".session-row")).toHaveCount(before - 1);
+
+    // The switch widens the view, so it widens the count with it — and the
+    // wording stays unfiltered, because turning it on is not a narrowing
+    // anybody applied.
+    await page.locator(".filter-include-archived").check();
+    await page.locator(".filter-apply").click();
+    await expect(row(page, session.id)).toBeVisible({ timeout: 20_000 });
+    await expect.poll(() => unfilteredCount(page), { timeout: 20_000 }).toBe(before);
+    await expect(page.locator(".session-row")).toHaveCount(before);
+
+    // The switch alone: no badge, because nothing was narrowed and the
+    // count beside the rows already moved with them — but Clear is live,
+    // because the switch is still a setting the user turned on.
+    await expect(
+      page.locator(".filter-active-note"),
+      "turning the archive switch on must not announce a filter nobody applied",
+    ).toHaveCount(0);
+    await expect(
+      page.locator(".filter-clear"),
+      "while Clear is the only way back to the default view",
+    ).toBeEnabled();
   } finally {
     await cleanupSession(request, session.id);
   }
@@ -378,6 +482,70 @@ test("an external archive invalidates an open detail confirmation", async ({ pag
     await expect(page.locator(".archive-confirm")).toHaveCount(0, { timeout: 20_000 });
     await expect(page.locator(".archived-notice")).toBeVisible();
     await expect(page.locator(".restart-primary")).toBeEnabled();
+  } finally {
+    await cleanupSession(request, session.id);
+  }
+});
+
+/**
+ * A rename in progress survives another client archiving the session, and
+ * is still there when the archive switch brings the row back.
+ *
+ * This is the reconciliation half of the 2026-08-22 split, end to end, and
+ * it is the reason `omits_fleet_members` exists as a second flag rather
+ * than a second reading of `filtered`. The default view now reads as
+ * UNFILTERED — the banner says "N sessions" — while still withholding every
+ * archived row, so a listing poll that treated its own absences as
+ * departures would retire an answer the user is in the middle of giving.
+ * Collapse the two predicates and this test fails by the editor closing
+ * under the user's hands the moment somebody else archives the session.
+ *
+ * The row itself does leave the sidebar, and must: the default view is not
+ * showing archived sessions, and the actions menu is a lens that closes
+ * with its row. What has to survive is the STATE — the open editor and its
+ * unsent draft — which is what reopening the menu after the switch is
+ * flipped puts back on screen.
+ */
+test("an external archive does not close an open rename editor", async ({ page, request }) => {
+  const session = await createSession(request, { title: `archive-rename-${Date.now()}` });
+  const draft = `${session.title}-unsent`;
+  try {
+    await page.goto("/");
+    await openFilterBar(page);
+    const target = row(page, session.id);
+    await expect(target).toBeVisible({ timeout: 20_000 });
+
+    await openRowMenu(target);
+    await target.locator(".session-row-rename").click();
+    await expect(target.locator(".rename-form")).toBeVisible();
+    // Typed and deliberately NOT submitted: an answer in progress is
+    // exactly what a poll must not be allowed to throw away.
+    await target.locator(".rename-input").fill(draft);
+
+    const archived = await request.post(`/api/sessions/${session.id}/archive`);
+    expect(archived.ok(), await archived.text()).toBeTruthy();
+    await expect(
+      target,
+      "the default view withholds archived rows, which is the premise of this test",
+    ).toHaveCount(0, { timeout: 20_000 });
+    // Several polls' worth, so this is "the reconciliation declined to run"
+    // rather than "the first read had not landed yet".
+    await page.waitForTimeout(6_000);
+
+    await page.locator(".filter-include-archived").check();
+    await page.locator(".filter-apply").click();
+    const restored = row(page, session.id);
+    await expect(restored).toBeVisible({ timeout: 20_000 });
+
+    await openRowMenu(restored);
+    await expect(
+      restored.locator(".rename-form"),
+      "the rename was still in progress; only the row went away",
+    ).toBeVisible();
+    await expect(
+      restored.locator(".rename-input"),
+      "and the unsent draft went with it, character for character",
+    ).toHaveValue(draft);
   } finally {
     await cleanupSession(request, session.id);
   }

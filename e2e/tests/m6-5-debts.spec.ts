@@ -455,7 +455,10 @@ test.describe("the M6.5 test debts", () => {
 
     const banner = page.locator(".truncation-banner");
     await expect(banner).toBeVisible({ timeout: 20_000 });
-    await expect(banner).toContainText("showing 2 of 1 matching sessions (1 in all)");
+    // The UNFILTERED shortfall wording: the request carried no filter a
+    // person applied, so the sentence has one denominator and the note
+    // beside it carries the contradiction.
+    await expect(banner).toContainText("showing 2 of 1 sessions");
     await expect(banner).toContainText("the list changed while it was being read");
     // Two runs, not one sentence: the count and the note are separate text
     // nodes inside the banner.

@@ -223,13 +223,15 @@ test.describe("session list filtering", () => {
     }
 
     // Clearing removes the explicit title search and returns to the default
-    // view. That view still excludes archived sessions, so it is still a
-    // filter and the banner keeps both numbers: matching rows and the whole
-    // fleet. The wire distinguishes a cleared title from a search for the
-    // empty string — no `title` parameter versus `?title=`.
+    // view, which reports itself as unfiltered: it still withholds archived
+    // sessions, but its count withholds them too, so there are no longer two
+    // numbers to reconcile and no filter a person applied to announce (see
+    // archive.spec.ts for the denominator itself). The wire distinguishes a
+    // cleared title from a search for the empty string — no `title`
+    // parameter versus `?title=`.
     await page.locator(".filter-clear").click();
     await expect(row(page, other.id)).toBeVisible({ timeout: 20_000 });
-    await expect(page.locator(".session-count")).toHaveText(/^\d+ matching of \d+ sessions$/);
+    await expect(page.locator(".session-count")).toHaveText(/^\d+ sessions$/);
     const cleared = reads.slice(filtered.length);
     expect(cleared.length, "clearing the filter must re-read the list").toBeGreaterThan(0);
     for (const read of cleared) {

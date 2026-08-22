@@ -781,9 +781,9 @@ pub(crate) fn ListView(
             // sessions" on a committed result that actually proves one:
             // the DEFAULT view's own reply, complete and coherent, with no
             // rows. Not `rows::is_empty_fleet` — that helper answers a
-            // different question (is the WHOLE fleet empty), and since the
-            // ordinary exclude-archived view is itself an active
-            // server-side predicate it would never say yes here. An
+            // different question (is the WHOLE fleet empty), and the
+            // ordinary view withholds archived rows, so it can never
+            // support that claim no matter what its own count says. An
             // archived-only fleet lists nothing in the default view, and
             // "no ACTIVE sessions" is exactly right for it. A user filter
             // proves nothing about the pane and leaves the verdict as it
@@ -892,7 +892,11 @@ pub(crate) fn ListView(
         // `commit_listing`).
         let index = poll_sequence.peek().to_owned();
         poll_sequence += 1;
-        let authoritative = !requested.is_active();
+        // The EVIDENCE predicate, never the banner's: the default view reads
+        // as unfiltered on screen while still hiding archived rows, so
+        // authorizing its reads to treat absence as departure would retire
+        // work on any session archived from another client.
+        let authoritative = !requested.omits_fleet_members();
         let generation = listing_reads.write().start();
         async move {
             let fetched = fetch_sessions(&base, &requested).await;
@@ -1700,12 +1704,25 @@ pub(crate) fn ListView(
     // than an option the user cannot even select to find out.
     let host_options: Vec<HostOption> = host_options(hosts.read().hosts().unwrap_or_default());
 
-    // Whether the applied filter differs from the public default, for the
-    // clear control and empty-result line. The default still excludes
-    // archived rows, so `false` means "the documented default view", not
-    // "no predicate is active". Read from the applied filter rather than
-    // the draft because typed-but-unsubmitted text has changed no results.
+    // Two questions about the same applied filter, and they part exactly
+    // where the archive switch is concerned. Both read the APPLIED filter
+    // rather than the draft, because typed-but-unsubmitted text has changed
+    // no results.
+    //
+    // What the CLEAR control has to undo: any departure from the public
+    // default, the archive switch included. Flipping that switch is
+    // something the user did and "clear" is the way back from it, so the
+    // comparison stays the full one.
     let filter_changed = *filter.read() != SessionFilter::default();
+    // What the list may SAY is in force, which is the narrower question. The
+    // archive switch chooses which list is on screen rather than narrowing
+    // one — the count beside the rows moves with it — so a badge for it
+    // would announce a filter nobody applied. Deliberately the SAME
+    // predicate the banner's wording uses (`SessionFilter::
+    // narrows_beyond_archive`, via `rows::count_banner`'s `filtered`), so
+    // the badge and the sentence under the list can never contradict each
+    // other.
+    let filter_narrowed = filter.read().narrows_beyond_archive();
     // The selector's own copy: the create form takes ownership of
     // `host_options` further down, and both surfaces want the same list —
     // the same hosts, called the same things, with the same phase labels.
@@ -1762,10 +1779,13 @@ pub(crate) fn ListView(
                 onclick: move |_| filter_open.set(!filter_open()),
                 "filter"
             }
-            // An applied non-default filter narrows the list even while
-            // the bar is closed; saying so beside the toggle is what keeps
-            // a hidden filter from reading as a shrunken fleet.
-            if filter_changed {
+            // A filter a PERSON applied narrows the list even while the bar
+            // is closed; saying so beside the toggle is what keeps a hidden
+            // filter from reading as a shrunken fleet. The archive switch
+            // gets no badge in either position: it widens or narrows the
+            // view together with the count that describes it, so there is
+            // no gap between rows and number for this badge to explain.
+            if filter_narrowed {
                 span { class: "filter-active-note", "filtered" }
             }
         }
@@ -2019,6 +2039,10 @@ pub(crate) fn ListView(
                 // offer to undo something that never happened. Cosmetic
                 // only, like every other `disabled` on this page — the
                 // handler clears an already-empty filter harmlessly.
+                //
+                // `filter_changed`, not the badge's `filter_narrowed`: the
+                // archive switch is something to clear even though it is
+                // not something to announce.
                 disabled: !filter_changed,
                 onclick: move |_| clear_filter(SessionFilter::default()),
                 "clear"
