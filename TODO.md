@@ -24,13 +24,33 @@ roadmap and carries no priorities unless an entry says so itself.
   `Contents/MacOS/farhelm`) has never completed, which means the README's primary quickstart references an artifact that
   does not exist. Two failed attempts so far, 23 minutes spent of a standing 180-minute macOS-runner budget: attempt 1
   died on ncurses terminfo installation under case-insensitive APFS (already fixed — `--disable-db-install` + system
-  terminfo); attempt 2 died because tmux 3.7b's darwin configure demands an explicit utf8proc decision.
-  Believed-complete next step: add `--disable-utf8proc` to the darwin tmux configure in `scripts/build-private-tmux.sh`
-  (utf8proc is not a pinned source, and tmux runs without it on Linux); budget for one more configure-iteration stop
-  behind it. With the old stack long merged, the stacked-history mechanics in the original mop-up entry no longer apply:
-  land the script fix on main, tag the release commit, and
+  terminfo); attempt 2 died because tmux's darwin configure demands an explicit utf8proc decision. That demand is
+  deliberate upstream and not going away: 3.7b errors outright when neither flag is given, and 3.7c/master instead
+  auto-tries utf8proc on darwin and falls back to the same error when it is not found — an upgrade would only change who
+  makes the decision, and a silently found Homebrew utf8proc is exactly what the private build must not link. The
+  decision is `--disable-utf8proc` (2026-08-22): add it to the darwin `tmux_configure` in
+  `scripts/build-private-tmux.sh`. Cost: macOS's stale `wcwidth(3)` misreports widths for newer Unicode (emoji
+  sequences, CJK extensions), so Mac-LOCAL sessions may draw those glyphs a cell off; remote Ubuntu sessions run Linux
+  tmux and are unaffected. Enabling it properly means a fourth pinned static source, and is worth revisiting only if
+  Mac-local rendering becomes a real complaint. Do the same change with a link-isolation assertion, decided at the same
+  time: after `make`, in the darwin case, fail the build unless every load command in `otool -L tmux` is an Apple system
+  library under `/usr/lib/`. The concern it closes: macOS cannot link a fully static executable, so "static" here means
+  every non-Apple library is a private `.a` under the script's prefix — and the darwin leg of that isolation (the
+  `--disable-shared`/`--without-shared` builds, the `PKG_CONFIG_LIBDIR` restriction, the ncurses symlink) has never
+  actually executed on a Mac. `ld` prefers a `.dylib` over a `.a` in the same directory, so any dynamic library that
+  reaches the prefix or a pkg-config-leaked `-L/opt/homebrew/lib` would produce a tmux that works on the runner and dies
+  on every user's Mac with `dyld: Library not loaded`. Linux gets this guarantee for free from `-static`; darwin
+  currently has nothing, and the assertion turns "we believe the prefix isolation works" into a build failure if it does
+  not, at the cost of one `otool` call. It also makes a later `--enable-utf8proc` safe to attempt (the
+  dylib-beside-archive trap is the main reason not to), provided utf8proc is then installed as an archive only and
+  linked by path. Then: land both script changes on main, tag the release commit, and
   `gh workflow run release.yml --ref <tag> -f release_tag=<tag>`, counting the job against the remaining 157 minutes.
-  Unblocks the manual Mac checklist (`docs/manual-mac-checklist.md`) and the README quickstart NOTE.
+  Budget for one more configure-iteration stop behind the utf8proc one; everything after tmux's configure — the
+  ncursesw/ncurses symlink trick, the prefix-restricted pkg-config, `dx bundle`, and the bundle assembly's `find` for
+  dx's `.app` output — has never run on darwin either. If a Mac is available, run
+  `scripts/build-private-tmux.sh aarch64-apple-darwin <out>` there first; it costs no CI budget and flushes out anything
+  past the utf8proc stop. Unblocks the manual Mac checklist (`docs/manual-mac-checklist.md`) and the README quickstart
+  NOTE.
 
 - Review the two security-relevant resolutions made during the M7 run, and record a dated verdict (a note in
   SPEC_impl.md or a review comment on PR #117). (a) A product-spec/impl-spec conflict over where the web token is stored
