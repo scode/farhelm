@@ -1722,6 +1722,7 @@ mod tests {
                 status: crate::SessionStatus::Exited { exit_code: Some(0) },
                 annotation: None,
                 restart_offer: crate::RestartOffer::FreshOnly,
+                created_at: 0,
                 archived: true,
                 tabs: Vec::new(),
                 host: None,

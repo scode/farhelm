@@ -227,6 +227,87 @@ pub(crate) fn is_empty_fleet(listing: &SessionListing) -> bool {
         && matches!(listing.matching, None | Some(0))
 }
 
+/// Whether this reply holds every row it claims exist — the exact negation
+/// of what [`count_banner`] prints "showing N of M" for.
+///
+/// ONE definition of "this list is short", read by three callers: the banner
+/// (which says so to the user), [`absence_is_evidence`] (which refuses to
+/// read a missing row as a departure), and `list::ListView`'s auto-select
+/// fallback (which cannot pick "the newest-created session" out of a prefix
+/// that may not contain it). Two of those are silent, which is precisely why
+/// they must not carry their own approximation of the third's rule: a UI that
+/// tells the user its list is incomplete and then reasons as if it were
+/// complete is worse than one that does neither.
+///
+/// The conditions are [`count_banner`]'s, and its docs carry the full
+/// argument for each — the ceilings behind `truncated`, the two count
+/// contradictions the helm's own flags cannot express, and why the
+/// denominator is `matching` for a filtered reply and the view's `total`
+/// otherwise.
+///
+/// What is worth stating HERE is the plain shortfall, because it is the
+/// condition that changed meaning. Fewer rows than the denominator, with no
+/// flag set at all, became reachable when the list gained an order the user
+/// picks: sort keys are MUTABLE — a session's activity stamp moves when it
+/// prints, its title moves when someone renames it — so a live row can cross
+/// the cursor's position between two pages of one walk and be served by
+/// neither, while the walk ends normally with `next_cursor` absent. Nothing
+/// in such a reply says a row went missing. Only the counts do.
+pub(crate) fn listing_is_complete(listing: &SessionListing) -> bool {
+    let shown = listing.sessions.len() as u64;
+    // What the rows on screen are a subset OF — always the number the
+    // banner's chosen arm prints as its denominator, which is what keeps
+    // "showing N of M" measurable against the M beside it.
+    //
+    // For an unfiltered banner that is `total`, even where the helm reported
+    // a matching count: it does so for the default view (the archive
+    // exclusion is a predicate on its side), and there the two differ only by
+    // rows nothing can show. Measuring against that count would make the same
+    // fleet read as a complete walk in the default view and a truncated one
+    // with the archive switch on, which reports no matching count at all.
+    let claimed = if listing.filtered {
+        listing.matching.unwrap_or(listing.total)
+    } else {
+        listing.total
+    };
+    !(listing.truncated || counts_are_incoherent(listing) || shown < claimed)
+}
+
+/// Whether this reply's counts and rows disagree in a direction that means
+/// the list CHANGED under the walk, rather than that there is more of it.
+///
+/// The condition behind [`count_banner`]'s incoherence note, and half of
+/// [`listing_is_complete`] — split out because the banner needs the two
+/// answers separately: a walk can be short without anything having moved (a
+/// ceiling), and the note must appear only where something actually did.
+///
+/// Three sources, and the last two are contradictions the helm's own flags
+/// cannot express (`api::fetch_sessions` measures incoherence against the
+/// VIEW's total, which is the helm's reading and stays that way):
+///
+/// - `incoherent` from the walk itself.
+/// - **More rows than matched.** A walk can hold more rows than the final
+///   page's refreshed `matching` while still sitting under the view's total,
+///   so the flags alone would print "3 matching of 700" above five visible
+///   rows.
+/// - **More matched than exist.** `matching > total` cannot be true of any
+///   view; it is what two counts read at different moments look like.
+///
+/// Both contradictions are checked wherever the helm made a claim to
+/// contradict — `matching.is_some()`, not `filtered`. The default view is
+/// why that distinction matters: it reads as unfiltered while the helm still
+/// answers it with a real matching count, so keying these on `filtered`
+/// would leave "5 sessions" printed above five rows the helm said only three
+/// of matched.
+fn counts_are_incoherent(listing: &SessionListing) -> bool {
+    let shown = listing.sessions.len() as u64;
+    listing.incoherent
+        || listing.matching.is_some_and(|matching| shown > matching)
+        || listing
+            .matching
+            .is_some_and(|matching| matching > listing.total)
+}
+
 /// Whether a reply's ABSENCES may be read as departures.
 ///
 /// The question `list::ListView` asks before retiring an optimistic rename,
@@ -241,20 +322,27 @@ pub(crate) fn is_empty_fleet(listing: &SessionListing) -> bool {
 ///   (that is the banner's question) while still hiding every archived
 ///   session, so a session archived from another client would otherwise
 ///   vanish from this reply and be mistaken for one that left.
-/// - **The walk actually finished.** A truncated walk stops at a ceiling —
-///   pages, rows, bytes, time — and every session past that cutoff is
-///   missing for a reason that has nothing to do with existing. Reading
-///   those absences as departures silently discards work on a large fleet:
-///   a rename the user just made retires, an open editor closes under them,
-///   a confirmation they are mid-decision on disappears. `truncated` also
-///   carries the incoherent case (`api::fetch_sessions` sets it), which is
-///   the same argument with the counts disagreeing.
+/// - **The walk actually finished**, which is [`listing_is_complete`] and is
+///   more than the `truncated` flag alone. A truncated walk stops at a
+///   ceiling — pages, rows, bytes, time — and every session past that cutoff
+///   is missing for a reason that has nothing to do with existing. So is
+///   every session an UNDERFILLED walk failed to serve: with a mutable sort
+///   key a live row can cross the cursor mid-walk and be skipped by a walk
+///   that ends looking finished, and that row's absence is exactly as
+///   meaningless as a truncated walk's.
+///
+/// Reading either kind of absence as a departure silently discards the
+/// user's own work on a large fleet: a rename they just made retires, an
+/// open editor closes under them, a confirmation they are mid-decision on
+/// disappears — and, worst of the set, the SELECTED session is treated as
+/// deleted, tearing down the pane they are working in and auto-opening some
+/// other session in its place.
 ///
 /// The caller ANDs this with its own standing, because one more kind of read
 /// has none: a mutation's immediate refetch exists to show ONE session and
 /// is not a statement about the rest.
 pub(crate) fn absence_is_evidence(listing: &SessionListing) -> bool {
-    !listing.omits_fleet_members && !listing.truncated
+    !listing.omits_fleet_members && listing_is_complete(listing)
 }
 
 /// Whether the list should say, in words, that this filter matched nothing.
@@ -400,35 +488,13 @@ const FILTER_UNSUPPORTED_NOTE: &str =
 /// ignored filter's partial list as if it were everything.
 pub(crate) fn count_banner(listing: &SessionListing) -> CountBanner {
     let shown = listing.sessions.len() as u64;
-    // What the rows on screen are a subset OF — always the number the chosen
-    // arm is about to PRINT as its denominator, which is what keeps "showing
-    // N of M" measurable against the M beside it.
-    //
-    // For an unfiltered banner that is `total`, even where the helm reported
-    // a matching count: it does so for the default view (the archive
-    // exclusion is a predicate on its side), and there the two differ only by
-    // rows nothing can show. Measuring against that count would make the same
-    // fleet read as a complete walk in the default view and a truncated one
-    // with the archive switch on, which reports no matching count at all.
-    let claimed = if listing.filtered {
-        listing.matching.unwrap_or(listing.total)
-    } else {
-        listing.total
-    };
-    // The two contradictions above, and both are checked wherever the helm
-    // made a claim to contradict — `matching.is_some()`, not `filtered`.
-    // The default view is why that distinction matters now: it reads as
-    // unfiltered while the helm still answers it with a real matching count
-    // (its archive exclusion is a predicate on the server side), so keying
-    // `overshot` on `filtered` would leave "5 sessions" printed above five
-    // rows the helm said only three of matched. Under the old shape the
-    // unfiltered `matching` was just `total` by another name and the check
-    // would have been the fleet-coherence one duplicated; it no longer is.
-    let overshot = listing.matching.is_some_and(|matching| shown > matching);
-    let counts_contradict = listing
-        .matching
-        .is_some_and(|matching| matching > listing.total);
-    let short = listing.truncated || overshot || counts_contradict || shown < claimed;
+    // The shortfall test itself lives in `listing_is_complete`, and sharing
+    // it is not tidiness: the same question decides whether an absent session
+    // may be read as departed and whether the auto-select fallback may trust
+    // the rows it holds. A banner saying "showing 3 of 5" while the code
+    // beside it reasoned as though the list were whole would be the UI
+    // disagreeing with itself about the one fact it just printed.
+    let short = !listing_is_complete(listing);
     let (class, text) = match (listing.filtered, listing.matching, short) {
         (false, _, false) => (
             "banner session-count",
@@ -478,8 +544,7 @@ pub(crate) fn count_banner(listing: &SessionListing) -> CountBanner {
         // underneath would contradict itself in one line. Both local
         // contradictions force `short`, so the two conditions never
         // disagree.
-        incoherence: (short && (listing.incoherent || overshot || counts_contradict))
-            .then_some(INCOHERENCE_NOTE),
+        incoherence: (short && counts_are_incoherent(listing)).then_some(INCOHERENCE_NOTE),
     }
 }
 
@@ -500,6 +565,7 @@ mod tests {
             status: SessionStatus::Unknown,
             annotation: None,
             restart_offer: crate::RestartOffer::FreshOnly,
+            created_at: 0,
             archived: false,
             tabs: Vec::new(),
             host: None,
@@ -1114,6 +1180,58 @@ mod tests {
         // which is what makes one check cover both: counts that disagree
         // with the rows are no basis for declaring anything gone.
         assert!(!absence_is_evidence(&listing(5, 3, true, true)));
+    }
+
+    /// A walk that ended cleanly while still SHORT of its own count speaks
+    /// for nothing either — the case no flag on the reply reports.
+    ///
+    /// Short by one row, because one is all it takes and one is what the
+    /// bug looks like in the field. The order the sidebar now offers is
+    /// keyed on values that move while a walk is in progress (a session's
+    /// activity stamp advances the moment it prints; its title changes when
+    /// anyone renames it), so a live row can cross the cursor between two
+    /// pages and be served by neither. The walk ends normally: no ceiling
+    /// was hit, `next_cursor` is absent, `truncated` and `incoherent` are
+    /// both false. Only the counts betray it.
+    ///
+    /// Believing such a reply is the most destructive reading in this file.
+    /// The missing row is a LIVE session, so `commit_listing` would retire
+    /// its rename, close its editor, drop its confirmation — and, if it is
+    /// the selected one, tear the pane down and auto-open something else,
+    /// all while the session is running perfectly well.
+    #[test]
+    fn an_underfilled_walk_is_not_evidence_of_departure() {
+        assert!(
+            !listing_is_complete(&listing(2, 3, false, false)),
+            "two rows against a count of three is an incomplete walk however it ended"
+        );
+        assert!(
+            !absence_is_evidence(&listing(2, 3, false, false)),
+            "so the session it failed to serve must not be read as one that left"
+        );
+        // The boundary in both directions: exactly the counted rows is
+        // complete, and MORE than counted is the incoherent case, which the
+        // walk already reports but which must not be waved through here by
+        // a `>=` comparison read on its own.
+        assert!(listing_is_complete(&listing(3, 3, false, false)));
+        assert!(!listing_is_complete(&SessionListing {
+            incoherent: true,
+            ..listing(4, 3, false, false)
+        }));
+        // The filtered reading: `matching` is the number a complete walk
+        // would have carried, so it — not the fleet total — is what a
+        // filtered walk is short of. A filtered listing has no absence
+        // standing anyway, but the auto-select fallback asks the same
+        // question and does consult filtered replies.
+        assert!(listing_is_complete(&filtered_listing(3, 3, 700, false)));
+        assert!(!listing_is_complete(&filtered_listing(2, 3, 700, false)));
+        // And a helm that reports no `matching` at all falls back to the
+        // fleet total, which is the same number for the walk it served (it
+        // ignored the filter — see `api::matching_count`).
+        assert!(listing_is_complete(&old_peer_filtered_listing(3, 3, false)));
+        assert!(!listing_is_complete(&old_peer_filtered_listing(
+            2, 3, false
+        )));
     }
 
     /// The bare "no sessions" line is for an empty FLEET, never for a filter

@@ -8,8 +8,8 @@ use std::collections::{HashMap, HashSet};
 use dioxus::prelude::*;
 
 use crate::api::{
-    SessionFilter, SessionListing, archive_session, delete_session, fetch_hosts, fetch_session,
-    fetch_sessions, rename_session, stop_session,
+    ListSort, SessionFilter, SessionListing, archive_session, delete_session, fetch_hosts,
+    fetch_newest_created, fetch_session, fetch_sessions, rename_session, stop_session,
 };
 use crate::archive::confirmation as archive_confirmation;
 use crate::feed::{fallback_polls_now, fallback_sleep, use_feed_reader};
@@ -19,8 +19,8 @@ use crate::peer::{DetailPart, PeerLine, display_peer};
 use crate::profiles::{HostTarget, use_catalog_surface};
 use crate::reader::{SurfaceReader, Trigger, request_read};
 use crate::rows::{
-    self, absence_is_evidence, apply_optimistic_renames, count_banner, menu_row_reordered,
-    retire_vanished_renames, settle_optimistic_renames,
+    self, absence_is_evidence, apply_optimistic_renames, count_banner, listing_is_complete,
+    menu_row_reordered, retire_vanished_renames, settle_optimistic_renames,
 };
 use crate::{ApiBase, HostId, HostKind, Session};
 
@@ -109,6 +109,151 @@ fn remember_selection(helm: &str, id: &str) {
     }
 }
 
+/// Where this client's chosen listing order is kept: the bare wire word, in
+/// the same localStorage the selection uses.
+///
+/// A bare word rather than the selection's `{helm, id}` record, and NOT keyed
+/// by helm identity, because an order is not a pointer at an object. The
+/// selection is keyed because two helms behind one origin could otherwise
+/// auto-attach each other's session ids; "show me the most recently active
+/// first" says nothing about any particular fleet and is exactly as true of
+/// the second helm as of the first.
+///
+/// The value is written on CHANGE only (see `apply_sort`), so a client that
+/// never touches the control never writes here at all.
+///
+/// Browser builds only, like the storage it names — the desktop half is the
+/// process-local `LIST_SORT` below, which holds the same word so that both
+/// arms decode through one function.
+#[cfg(target_arch = "wasm32")]
+const SORT_STORAGE_KEY: &str = "farhelm.sort";
+
+/// A stored preference as an order: anything this build does not recognize —
+/// absent, junk, a word a later build wrote — is the default.
+///
+/// Split out from the storage arms below so the decision is testable without
+/// a browser, and so both targets provably make the same one. Falling back
+/// rather than failing is the whole contract: a page that refused to list
+/// sessions because of a word in localStorage would be broken by a value the
+/// user cannot see and did not knowingly write.
+fn decoded_sort(raw: Option<&str>) -> ListSort {
+    raw.and_then(ListSort::from_key).unwrap_or_default()
+}
+
+#[cfg(target_arch = "wasm32")]
+fn stored_sort() -> ListSort {
+    let raw = web_sys::window()
+        .and_then(|window| window.local_storage().ok().flatten())
+        .and_then(|storage| storage.get_item(SORT_STORAGE_KEY).ok().flatten());
+    decoded_sort(raw.as_deref())
+}
+
+#[cfg(target_arch = "wasm32")]
+fn remember_sort(sort: ListSort) {
+    if let Some(storage) = web_sys::window().and_then(|w| w.local_storage().ok().flatten()) {
+        // Best-effort, exactly like the selection record: a full or disabled
+        // storage must cost the user their preference NEXT load, never this
+        // load's re-sort.
+        let _ = storage.set_item(SORT_STORAGE_KEY, sort.key());
+    }
+}
+
+/// Desktop's half of the preference: in-process only, for now.
+///
+/// The webview's localStorage is not synchronously reachable from native
+/// Rust — the same constraint that leaves `LAST_SELECTED` a process-local
+/// static — so a desktop relaunch starts on the default order again. A
+/// follow-up change wires desktop persistence properly (through the
+/// webview's own storage or a native preferences file); until it lands, this
+/// static is the whole of desktop's memory, and it deliberately mirrors the
+/// selection record's shape so both are rewired at once.
+///
+/// It holds the stored WORD rather than a decoded [`ListSort`], which is not
+/// redundancy: the follow-up will replace this static with a real store that
+/// can only ever hand back text, and keeping the word here means both targets
+/// already go through the one decode ([`decoded_sort`]) that the fallback
+/// rules live in.
+#[cfg(not(target_arch = "wasm32"))]
+static LIST_SORT: std::sync::OnceLock<std::sync::RwLock<Option<String>>> =
+    std::sync::OnceLock::new();
+
+#[cfg(not(target_arch = "wasm32"))]
+fn stored_sort() -> ListSort {
+    let raw = LIST_SORT
+        .get_or_init(Default::default)
+        .read()
+        .ok()
+        .and_then(|slot| slot.clone());
+    decoded_sort(raw.as_deref())
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn remember_sort(sort: ListSort) {
+    if let Ok(mut slot) = LIST_SORT.get_or_init(Default::default).write() {
+        *slot = Some(sort.key().to_string());
+    }
+}
+
+/// The orders the sidebar offers, in the order it offers them, each with the
+/// words the user reads.
+///
+/// The labels are this surface's alone; the helm never sees them. What must
+/// not drift is the MEANING — "recently active" is the wire's `activity`,
+/// whose stamp is the supervisor's coarse activity observation rather than a
+/// liveness signal — so the label deliberately says "active" rather than
+/// anything implying "running now" (which is what the status badge answers).
+///
+/// The default leads the list as PRESENTATION, not as mechanism. Which
+/// option a user sees selected is decided by the select's own `value` and by
+/// each option's `selected` — the control is fully controlled from `sort`,
+/// so nothing would visibly break if the default sat third. What ordering it
+/// first buys is that the list reads the way the sidebar behaves out of the
+/// box, and that a stray uncontrolled render (an engine ignoring the
+/// attribute on mount, a framework losing the binding) degrades to showing
+/// the order the rows are actually in rather than to a control that lies.
+const SORT_OPTIONS: [(ListSort, &str); 3] = [
+    (ListSort::Activity, "recently active"),
+    (ListSort::Created, "newest created"),
+    (ListSort::Title, "title A–Z"),
+];
+
+/// SPEC.md's auto-select fallback — "the newest-created non-archived
+/// session" — chosen from the rows one listing actually carries.
+///
+/// A function of its own because the choice is subtler than it looks and
+/// because it is the half of the fallback that can be tested without a
+/// browser. The caller decides WHETHER these rows are a sound basis for the
+/// question at all (`rows::listing_is_complete`, and the extra creation-order
+/// read the auto-select effect makes when they are not); this decides only
+/// who wins among them.
+///
+/// Three rules, and each exists because a plainer one is wrong:
+///
+/// - **By `created_at`, never by position.** The rows arrive in whichever
+///   order the client asked for, so the first row is the newest-created one
+///   only under `ListSort::Created`. That assumption was true for the whole
+///   life of this list until the sort control landed, and it is the reason
+///   the UI decodes `created_at` at all.
+/// - **Zero means UNKNOWN, not 1970.** A helm that predates the field leaves
+///   it defaulted (`Session::created_at`), and treating that as a real
+///   timestamp would make every such row lose to any row that has one, and
+///   would make an all-old fleet's winner arbitrary. Rows with no stamp are
+///   therefore not candidates; if none of them has one, the answer is the
+///   first non-archived row in the listing's own order, which is what this
+///   fallback did before `created_at` existed here.
+/// - **Equal stamps keep the listing's order.** `created_at` has one-second
+///   granularity, so ties are ordinary rather than exotic. `min_by` over a
+///   REVERSED comparator is what implements "first of the maxima":
+///   `Iterator::max_by` returns the LAST maximal element, which would make
+///   the winner depend on the listing's length rather than on its head.
+fn newest_created_fallback(sessions: &[Session]) -> Option<&Session> {
+    sessions
+        .iter()
+        .filter(|session| !session.archived && session.created_at > 0)
+        .min_by(|a, b| b.created_at.cmp(&a.created_at))
+        .or_else(|| sessions.iter().find(|session| !session.archived))
+}
+
 /// Every status this list offers as a filter, in the spelling the wire uses
 /// and the helm parses.
 ///
@@ -150,16 +295,19 @@ const FILTERABLE_STATUSES: [&str; 6] = [
 ///   describes B. Nothing corrects that either — with a healthy feed the
 ///   fallback poll is off, and if B's own read failed there is no later
 ///   reply coming. Refusing it costs nothing, since applying a filter marks
-///   a demand on the surface and the reader will ask again under B.
+///   a demand on the surface and the reader will ask again under B. The
+///   ORDER is half of that question too, and in exactly the same shape: a
+///   reply walked under the previous sort is a correctly-ordered list of the
+///   wrong sequence, arriving under a control that now names another one.
 /// - **Is it the newest word?** The generation gate's ordinary split, with
 ///   successes and failures gated differently for the reasons `ops` gives.
 fn accepts_listing(
     reads: &mut ReadGate,
     generation: u64,
     succeeded: bool,
-    answers_applied_filter: bool,
+    answers_applied_query: bool,
 ) -> bool {
-    if !answers_applied_filter {
+    if !answers_applied_query {
         return false;
     }
     if succeeded {
@@ -247,6 +395,25 @@ fn accepts_listing(
 /// cursor walk per character typed, and the debounce that would make that
 /// tolerable is a second cadence to tune in a UI whose entire point this
 /// milestone is that it has none left.
+///
+/// ## Ordering is a query too, and a separate one
+///
+/// The sort control is the same arrangement with a different dimension: it
+/// changes `api::ListSort`, the next walk asks the helm for that order, and
+/// nothing here rearranges rows it was handed (which pagination forbids for
+/// the same reason it forbids a client-side filter — the rows past a cut are
+/// the ones a local sort never sees). Applied on CHANGE rather than on
+/// submit, because unlike a filter there is no second field to fill in first.
+///
+/// It is deliberately NOT part of the filter's state, and the consequence
+/// worth carrying in mind while reading the rest of this file is that every
+/// reconciliation below keys off the FILTER: what a reply is evidence about,
+/// whether the banner may call the list filtered, whether an absent session
+/// left the fleet. A re-sorted listing covers exactly what the same filter's
+/// listing covered, so none of those answers moves with it. The one thing the
+/// order does gate is whether a reply is still on-topic at all (see
+/// `accepts_listing`), since a walk under the previous order is a correct
+/// list of the wrong sequence.
 ///
 /// ## One operation at a time
 ///
@@ -560,6 +727,18 @@ pub(crate) fn ListView(
     // the filter whose results are on screen rather than a half-typed one.
     let mut filter = use_signal(SessionFilter::default);
     let mut filter_draft = use_signal(SessionFilter::default);
+    // The order the reads are carrying, seeded from this client's remembered
+    // preference (`stored_sort`).
+    //
+    // ONE signal, unlike the filter's applied/draft pair, because a sort has
+    // no draft state to speak of: picking an option IS the decision, there is
+    // nothing else on the control to fill in first, and applying it costs the
+    // same one re-read a submit would. It is deliberately not a field of
+    // `SessionFilter` either — see `api::ListSort` for why the two dimensions
+    // stay apart, and note that every reconciliation predicate on this page
+    // reads the FILTER: a re-sorted listing covers exactly what the same
+    // filter's listing covered, so nothing about evidence changes with it.
+    let mut sort = use_signal(stored_sort);
 
     // The two surfaces' readers (`reader::SurfaceReader`): one reader each,
     // coalescing every trigger into a single live read and retrying one that
@@ -670,16 +849,18 @@ pub(crate) fn ListView(
     // to be polled. Taking an already-claimed `generation` keeps that
     // property with the caller, where the `await` is.
     //
-    // `requested` is the filter this reply ANSWERS, sampled where the
-    // request was issued. Ordering alone is not enough to make a reply
-    // usable: the gate knows that read A started before read B, but not that
-    // B asked a different question. A read for filter A completing after
-    // filter B was applied would paint A's rows under controls describing B
-    // — indefinitely, if B's own read failed — so a reply whose filter is no
-    // longer the applied one is refused outright. The user's next move
-    // (submitting, clearing) is a read of its own, and the surface reader
-    // has already recorded the submit's own demand, so nothing is lost by
-    // dropping this one.
+    // `requested` and `ordered_by` are the filter and the order this reply
+    // ANSWERS, both sampled where the request was issued. Ordering alone is
+    // not enough to make a reply usable: the gate knows that read A started
+    // before read B, but not that B asked a different question. A read for
+    // filter A completing after filter B was applied would paint A's rows
+    // under controls describing B — indefinitely, if B's own read failed —
+    // so a reply whose filter is no longer the applied one is refused
+    // outright, and its order is checked on the same argument (a walk under
+    // the old sort would land as a list in a sequence the control no longer
+    // names). The user's next move (submitting, clearing, re-sorting) is a
+    // read of its own, and the surface reader has already recorded that
+    // demand, so nothing is lost by dropping this one.
     //
     // `authoritative` says whether this READ speaks for the whole fleet —
     // `on_stop`'s refetch exists to show ONE session's new status and does
@@ -696,6 +877,7 @@ pub(crate) fn ListView(
     // server's own rows for as long as any filter was applied.
     let mut commit_listing = move |generation: u64,
                                    requested: SessionFilter,
+                                   ordered_by: ListSort,
                                    fetched: Result<SessionListing, String>,
                                    index: u64,
                                    authoritative: bool| {
@@ -707,7 +889,7 @@ pub(crate) fn ListView(
             &mut listing_reads.write(),
             generation,
             fetched.is_ok(),
-            *filter.peek() == requested,
+            *filter.peek() == requested && *sort.peek() == ordered_by,
         );
         if !accepted {
             return;
@@ -884,6 +1066,10 @@ pub(crate) fn ListView(
         // async block below would be held across the walk's every round
         // trip, and the filter surface's own submit writes that signal.
         let requested: SessionFilter = filter.peek().clone();
+        // Sampled with the filter and for the same reason: the reply has to
+        // be able to say which SEQUENCE it walked, or a re-sort landing
+        // mid-flight would relabel it as answering the order now on screen.
+        let ordered_by: ListSort = *sort.peek();
         // Read before incrementing, so `index` is this read's own position
         // in the view's read order — what tells an optimistic rename whether
         // this reply is late enough to be evidence about it. Claimed even
@@ -899,9 +1085,16 @@ pub(crate) fn ListView(
         let authoritative = !requested.omits_fleet_members();
         let generation = listing_reads.write().start();
         async move {
-            let fetched = fetch_sessions(&base, &requested).await;
+            let fetched = fetch_sessions(&base, &requested, ordered_by).await;
             let answered = fetched.is_ok();
-            commit_listing(generation, requested, fetched, index, authoritative);
+            commit_listing(
+                generation,
+                requested,
+                ordered_by,
+                fetched,
+                index,
+                authoritative,
+            );
             answered
         }
     };
@@ -1081,6 +1274,38 @@ pub(crate) fn ListView(
         filter_read(Trigger::Explicit);
     };
 
+    // Change the order the list is read in, and remember it for this client.
+    //
+    // Three things happen and each is deliberate. The signal moves, so every
+    // read from here on asks for the new sequence. The preference is written
+    // — on CHANGE only, which is what keeps a client that never touches the
+    // control from writing storage at all. And a read is asked for, for
+    // `apply_filter`'s reason: nothing else is coming, since the fleet did
+    // not change and no revision will be published for a decision this client
+    // made about itself.
+    //
+    // The walk simply restarts, which is the only correct way to re-sort a
+    // cursor-paginated list: a cursor names a position in ONE order, and the
+    // helm refuses one replayed under another (`api::fetch_sessions`).
+    //
+    // What deliberately does NOT happen is any change to the selection. A
+    // sort reorders rows; it does not decide which session the other pane is
+    // showing — the same principle SPEC.md states for filtering, where the
+    // list may stop showing the selected session's row entirely and the pane
+    // still stays put. Here even the row survives: it is still listed, just
+    // elsewhere, so it goes on rendering as the selected one.
+    let sort_read = request_listing.clone();
+    let mut apply_sort = move |next: ListSort| {
+        // Re-selecting the option already in force is not a change: acting on
+        // it would restart the walk and rewrite storage for nothing.
+        if *sort.peek() == next {
+            return;
+        }
+        sort.set(next);
+        remember_sort(next);
+        sort_read(Trigger::Explicit);
+    };
+
     let stop_base = base.clone();
     // The surface reader, for the one path that reads outside it: a stop's
     // own refetch fails on its own and has nobody to retry it (see below).
@@ -1176,19 +1401,24 @@ pub(crate) fn ListView(
                     // through it — see `listing_read` for why a guard must
                     // not survive into an await.
                     let snapshot: SessionFilter = filter.peek().clone();
+                    // The order this refetch walks, snapshotted on the same
+                    // terms — a stop's own read is still a read, and it must
+                    // be refused like any other if the user re-sorts while it
+                    // is in flight.
+                    let ordered_by: ListSort = *sort.peek();
                     // Claimed like any other read, so the read order stays
                     // one sequence: an optimistic rename asks whether a
                     // reply STARTED after it, and a read outside the
                     // numbering could not answer.
                     let index = poll_sequence.peek().to_owned();
                     poll_sequence += 1;
-                    let fetched = fetch_sessions(&base, &snapshot).await;
+                    let fetched = fetch_sessions(&base, &snapshot, ordered_by).await;
                     let failed = fetched.is_err();
                     // Not authoritative: this read speaks for one session's
                     // status, so a session missing from it is not a session
                     // that left — see `commit_listing`. It still settles the
                     // renames its own rows agree or disagree with.
-                    commit_listing(generation, snapshot, fetched, index, false);
+                    commit_listing(generation, snapshot, ordered_by, fetched, index, false);
                     // A failure here replaces a perfectly good list with an
                     // error line, and nothing outside the reader ever retries
                     // — this walk is the operation's own, so a lost request
@@ -1544,13 +1774,21 @@ pub(crate) fn ListView(
                         renaming.set(None);
                     }
                     // The overlay paints the new title and can do nothing
-                    // else — and a title is exactly what a filter can be ON.
-                    // A row renamed OUT of an active title search stays on
-                    // screen under a query it no longer matches, and the
-                    // counts beside it still describe the old name, until
-                    // something re-reads. Normally the feed does; under a
-                    // latched build mismatch nothing does, so this explicit
-                    // read is the correction.
+                    // else — and a title is exactly what a filter can be ON,
+                    // and now also what the list can be ORDERED by. A row
+                    // renamed OUT of an active title search stays on screen
+                    // under a query it no longer matches, and the counts
+                    // beside it still describe the old name; a row renamed
+                    // under title order paints its new name in its OLD
+                    // position, so the sidebar is briefly not alphabetical.
+                    // Both are the same staleness and both end the same way,
+                    // on the next read. That is acceptable rather than
+                    // merely tolerated: the position is cosmetic where the
+                    // title is the thing the user just typed, and the
+                    // correction costs nothing extra — the read below is the
+                    // one every rename already triggers. Normally the feed
+                    // would supply it; under a latched build mismatch nothing
+                    // does, so this explicit read is the correction.
                     refresh(Trigger::Explicit);
                 }
                 Err(e) => {
@@ -1599,9 +1837,13 @@ pub(crate) fn ListView(
     let guarded_open = use_callback(guarded_open);
     // Auto-select (BUGS_BURNDOWN.md issue 5, interviewed): an empty right
     // pane is a state to END, not to show — the remembered selection if
-    // its row is still listed, else the newest-created non-archived row
-    // (the merged listing is created_at DESCENDING, so that is the first
-    // match). Everything consulted is a TRACKED read, deliberately: the
+    // its row is still listed, else the newest-created non-archived row.
+    // That fallback is picked by `created_at` rather than by position (see
+    // `newest_created_fallback`), and has to be: the list is no longer
+    // necessarily read in creation order, so the first row is whatever the
+    // client's chosen sort put there while SPEC.md's fallback is
+    // specifically the newest-created session.
+    // Everything consulted is a TRACKED read, deliberately: the
     // effect must rerun when the listing commits, when the selection
     // clears, when the hosts read lands (the remembered id is keyed by
     // helm identity, which comes from the local host row), and when the
@@ -1614,8 +1856,18 @@ pub(crate) fn ListView(
     // The fallback itself deliberately does not re-persist: overwriting
     // the user's real choice with whichever row a bounded walk happened
     // to return first would erase it permanently (see `stored_selection`).
+    //
+    // The fallback has an incomplete-listing arm of its own, for the same
+    // reason and with a different remedy. Picking the newest-created row out
+    // of a listing that does not hold every row (a ceiling, or an
+    // underfilled walk) is only sound while the rows arrived in creation
+    // order, because only then is the newest session guaranteed to be in the
+    // prefix that was collected. Under any other order the answer has to be
+    // asked for directly — `api::fetch_newest_created`, one page of one row.
     let resolve_base = base.clone();
+    let newest_base = base.clone();
     let mut resolving_remembered = use_signal(|| false);
+    let mut resolving_newest = use_signal(|| false);
     let mut remembered_dead = use_signal(|| None::<String>);
     use_effect(move || {
         if selected.read().is_some() {
@@ -1667,7 +1919,48 @@ pub(crate) fn ListView(
             }
             return;
         }
-        let candidate = in_page.or_else(|| listing_ok.sessions.iter().find(|s| !s.archived));
+        // The newest-created row among the ones in hand (see
+        // `newest_created_fallback` for why that is not simply the first).
+        let local_newest = newest_created_fallback(&listing_ok.sessions);
+        // The rows in hand are only a sound basis for that question while
+        // they are ALL the rows, or while they arrived newest-created first
+        // — in which case the newest is necessarily in the collected prefix
+        // however early the walk stopped. Neither holds here, so the answer
+        // is asked for rather than guessed: one page, one row, creation
+        // order, default filter. The default filter is deliberate even under
+        // an applied one, because SPEC.md's fallback is about the FLEET; the
+        // common complete-walk case never reaches this arm, so a filtered
+        // sidebar keeps picking from its own rows unless its walk fell short.
+        if in_page.is_none()
+            && !listing_is_complete(listing_ok)
+            && *sort.peek() != ListSort::Created
+        {
+            if !*resolving_newest.peek() {
+                resolving_newest.set(true);
+                let base = newest_base.clone();
+                // Cloned before the spawn so the failure arm below still has
+                // an answer without borrowing the listing across an await.
+                let local = local_newest.cloned();
+                spawn(async move {
+                    match fetch_newest_created(&base).await {
+                        Ok(Some(session)) => on_open.call(session),
+                        // The extra read is an IMPROVEMENT on a local guess,
+                        // not a precondition for one. A helm that cannot
+                        // answer it leaves the best row this walk did collect
+                        // as the honest choice, and an empty right pane is
+                        // the one outcome this whole effect exists to avoid.
+                        _ => {
+                            if let Some(session) = local {
+                                on_open.call(session);
+                            }
+                        }
+                    }
+                    resolving_newest.set(false);
+                });
+            }
+            return;
+        }
+        let candidate = in_page.or(local_newest);
         if let Some(session) = candidate {
             // The same synchronous handler-time guard a click gets.
             if ops.busy_now() || !pending.peek().is_empty() {
@@ -1787,6 +2080,49 @@ pub(crate) fn ListView(
             // no gap between rows and number for this badge to explain.
             if filter_narrowed {
                 span { class: "filter-active-note", "filtered" }
+            }
+            // The order lives HERE rather than in the filter bar, and that
+            // placement is the decision: the bar is closed on every load by
+            // design, and an order the user chose once and expects to keep
+            // must not be reachable only by opening something. It is also not
+            // part of the bar's draft/apply model — there is no second field
+            // to fill in before a sort means anything, so picking IS applying
+            // (see `apply_sort`), and a sort inside a form whose submit
+            // button says "filter" would read as one more filter to apply.
+            //
+            // A native `select`, so keyboard and screen-reader behavior are
+            // the platform's rather than something reimplemented here; the
+            // wrapping `label` is what names it for both.
+            label { class: "sidebar-sort",
+                "sort"
+                select {
+                    class: "sort-select",
+                    value: sort().key(),
+                    onchange: move |evt| {
+                        // A word this build does not know is ignored rather
+                        // than defaulted: every option here is ours, so the
+                        // only way to reach that arm is a value nobody
+                        // offered, and silently re-sorting the list to the
+                        // default would be a worse answer than doing nothing.
+                        if let Some(next) = ListSort::from_key(&evt.value()) {
+                            apply_sort(next);
+                        }
+                    },
+                    // Stated per option as well as on the select, for the
+                    // reason the host filter's own options carry it: the
+                    // initial value comes from storage rather than from the
+                    // first option, and a select whose Rust-side `value`
+                    // never changes afterwards is one the framework has no
+                    // reason to re-apply if an engine ignored it on mount.
+                    for (option_sort, option_label) in SORT_OPTIONS {
+                        option {
+                            key: "{option_sort.key()}",
+                            value: "{option_sort.key()}",
+                            selected: sort() == option_sort,
+                            "{option_label}"
+                        }
+                    }
+                }
             }
         }
         // The always-visible compact form of the hosts panel: SPEC.md
@@ -2285,6 +2621,176 @@ mod tests {
         assert!(
             !accepts_listing(&mut reads, older, false, true),
             "while one older than it says nothing about the rows now displayed"
+        );
+    }
+
+    /// A remembered sort preference is honored when this build knows it, and
+    /// every other case is the default rather than a failure.
+    ///
+    /// The three cases are the three ways this value actually arrives. VALID
+    /// is the whole point of persisting it. ABSENT is every first visit, and
+    /// is why the default has to be a real answer rather than an empty one.
+    /// INVALID is the case worth a test of its own: storage is writable by
+    /// the user, survives across builds, and a later build may well store a
+    /// word this one has never heard of — and the helm answers an
+    /// unrecognized `sort` with a 400, so a value passed through unchecked
+    /// would not sort the list differently, it would leave the sidebar
+    /// reading "failed to load sessions" until someone cleared their browser
+    /// storage.
+    #[test]
+    fn an_unrecognized_stored_sort_falls_back_to_the_default() {
+        assert_eq!(decoded_sort(Some("title")), ListSort::Title);
+        assert_eq!(decoded_sort(Some("created")), ListSort::Created);
+        assert_eq!(decoded_sort(Some("activity")), ListSort::Activity);
+
+        assert_eq!(
+            decoded_sort(None),
+            ListSort::default(),
+            "a client that never chose gets the default order"
+        );
+        assert_eq!(
+            decoded_sort(Some("")),
+            ListSort::default(),
+            "and so does one whose stored value is empty"
+        );
+        assert_eq!(
+            decoded_sort(Some("most-recent")),
+            ListSort::default(),
+            "a word from another build must not reach the helm, which would refuse it with a 400"
+        );
+        assert_eq!(
+            decoded_sort(Some("Activity")),
+            ListSort::default(),
+            "the wire's vocabulary is exact; a near-miss is not a spelling to be forgiving about"
+        );
+    }
+
+    /// The sidebar offers exactly the three wire orders, spelled the way the
+    /// wire spells them, with the default first.
+    ///
+    /// The words are asserted LITERALLY rather than round-tripped through
+    /// `ListSort::from_key`, because a round trip agrees with itself no
+    /// matter which words this build invented, and an invented word is a 400
+    /// at the helm rather than a list that sorts oddly. `api`'s
+    /// `every_listing_request_names_its_order` pins the same three literals
+    /// on the request side; between them, an option and the query it produces
+    /// cannot drift apart without one of the two failing.
+    ///
+    /// The default-first half is a presentation contract rather than a
+    /// functional one — the select is controlled from `sort`, so the right
+    /// option shows selected whatever position it sits in (see
+    /// `SORT_OPTIONS`). What the assertion protects is the fallback reading:
+    /// a render that lost the binding shows the head of the list, and the
+    /// head being the default is what makes that degrade to a control
+    /// agreeing with the rows instead of one contradicting them.
+    #[test]
+    fn the_offered_orders_are_the_wire_vocabulary_with_the_default_first() {
+        assert_eq!(
+            SORT_OPTIONS.map(|(sort, _)| sort.key()),
+            ["activity", "created", "title"],
+            "the offered words are the helm's own, and the default leads them"
+        );
+        assert_eq!(
+            SORT_OPTIONS[0].0,
+            ListSort::default(),
+            "the head of the list is the order an unbound render would show"
+        );
+        for (_, label) in SORT_OPTIONS {
+            assert!(
+                !label.is_empty(),
+                "every order must be labelled for the person reading it"
+            );
+        }
+    }
+
+    /// The auto-select fallback picks the newest-created row, which is not
+    /// the same as the first row and not the same as the largest `created_at`
+    /// naively taken.
+    ///
+    /// Every case here is one the sidebar can actually be in. DISPLAY ORDER ≠
+    /// CREATION ORDER is the whole reason this function exists: under `title`
+    /// or `activity` the newest session is wherever its name or its last
+    /// output put it. EQUAL STAMPS are ordinary rather than exotic, since
+    /// `created_at` has one-second granularity, and the tie has to resolve to
+    /// the listing's own head rather than to whichever row an iterator
+    /// happened to visit last. ARCHIVED rows are excluded because SPEC.md's
+    /// fallback says non-archived and an archived session has no terminal to
+    /// open. MISSING `created_at` is an older helm (`Session::created_at`),
+    /// where the honest answer is the one this fallback gave before the field
+    /// was decoded at all.
+    #[test]
+    fn the_fallback_picks_the_newest_created_row_not_the_first_one() {
+        // Ids are spelled as words rather than as UUIDs so each assertion
+        // reads as "which session won" — the row's position and its stamp
+        // are what every case here is about, and a real id would hide both.
+        fn row(id: &str, created_at: i64, archived: bool) -> Session {
+            Session {
+                created_at,
+                archived,
+                ..crate::list::row::row_specimen(id)
+            }
+        }
+
+        // Title order: the newest session sits last, exactly where a
+        // first-row fallback would miss it.
+        let by_title = [
+            row("aaa", 300, false),
+            row("mmm", 100, false),
+            row("zzz", 500, false),
+        ];
+        assert_eq!(
+            newest_created_fallback(&by_title).map(|s| s.id.as_str()),
+            Some("zzz")
+        );
+
+        // Ties keep the listing's own order. `Iterator::max_by` returns the
+        // LAST maximal element, so a naive `max_by` here would answer "third"
+        // — and would change its answer as unrelated rows were appended.
+        let tied = [
+            row("first", 500, false),
+            row("second", 100, false),
+            row("third", 500, false),
+        ];
+        assert_eq!(
+            newest_created_fallback(&tied).map(|s| s.id.as_str()),
+            Some("first"),
+            "equal creation stamps must resolve to the listing's own head"
+        );
+
+        // Archived rows are not candidates even when they are the newest.
+        let with_archived = [row("archived-newest", 900, true), row("live", 100, false)];
+        assert_eq!(
+            newest_created_fallback(&with_archived).map(|s| s.id.as_str()),
+            Some("live")
+        );
+
+        // A helm too old to send the field leaves every stamp at zero, which
+        // means UNKNOWN. The answer is the first non-archived row, not the
+        // one an ordering over zeroes would single out.
+        let stampless = [
+            row("archived", 0, true),
+            row("head", 0, false),
+            row("tail", 0, false),
+        ];
+        assert_eq!(
+            newest_created_fallback(&stampless).map(|s| s.id.as_str()),
+            Some("head")
+        );
+
+        // Mixed: one row does carry a stamp, so the unknowns must not be
+        // allowed to beat it by being earlier in the list.
+        let mixed = [row("unknown", 0, false), row("stamped", 1, false)];
+        assert_eq!(
+            newest_created_fallback(&mixed).map(|s| s.id.as_str()),
+            Some("stamped"),
+            "a real timestamp outranks a missing one wherever the row sits"
+        );
+
+        assert_eq!(newest_created_fallback(&[]), None);
+        assert_eq!(
+            newest_created_fallback(&[row("only-archived", 900, true)]).map(|s| s.id.as_str()),
+            None,
+            "an all-archived listing offers nothing to auto-select"
         );
     }
 }

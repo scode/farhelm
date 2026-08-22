@@ -122,6 +122,36 @@ body,
   font-size: 12px;
 }
 
+/* The listing order, in the sidebar header rather than inside the filter
+   bar: the bar is closed on every load by design, and a remembered order
+   must not be reachable only by opening something (see the control's own
+   comment in list/view.rs). `margin-left: auto` pushes it to the trailing
+   edge so the two toggles stay grouped as the header's actions and this
+   reads as the state it is. */
+.sidebar-sort {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: auto;
+  color: #8a919e;
+  font-size: 12px;
+}
+
+/* Deliberately compact and unbounded in the other direction: the three
+   labels are short and known, so the control can be sized to its content
+   without the filter fields' max-width guard against long typed values. */
+.sidebar-sort .sort-select {
+  background: #14161a;
+  border: 1px solid #3a3f47;
+  border-radius: 3px;
+  color: #d8dee9;
+  /* `font: inherit` alone, and it is doing real work: a form control does
+     not inherit type styling by default, so this is what pulls the 12px
+     from `.sidebar-sort` above rather than a second declaration of it. */
+  font: inherit;
+  padding: 1px 4px;
+}
+
 /* The hosts panel's permanent mount, collapsed rather than unmounted when
    toggled shut: removal would tear down in-flight discovery/plan/mutation
    tasks (silently discarding their replies) and forget provisioning-busy

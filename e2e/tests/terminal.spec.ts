@@ -38,7 +38,7 @@
 // `window.__farhelmTerm`, `term.buffer.active`, and readiness globals. A
 // genuinely one-off snippet still stays local with the test that needs it.
 import { test, expect } from "@playwright/test";
-import { createSession, pinAutoSelect, openRowMenu, stubFeed } from "./helpers/fleet";
+import { createSession, openRowMenu, pinAutoSelect, SESSION_LISTING, stubFeed } from "./helpers/fleet";
 import { cleanupSession, fillCreateForm, termText, waitForTermText } from "./helpers/term";
 import {
   FAKE_AGENT_INVOCATION,
@@ -985,7 +985,7 @@ test("opening a terminal-less session shows its metadata and the server's own ex
   // This test only ever issues GETs against this route (no create/stop/
   // delete call in its body), so there is no other method to fall through
   // to `route.continue()` for.
-  await page.route("**/api/sessions", async (route) => {
+  await page.route(SESSION_LISTING, async (route) => {
     // Fetch the REAL listing and append one row, rather than fabricating
     // the whole response: every other row (in particular the shared
     // "e2e-session" other tests in this file depend on) must keep coming
@@ -1857,7 +1857,7 @@ test("an inline confirming state survives a listing refresh; cancel still works 
   // Baseline listing (the session's real invocation) until `markerArmed`
   // flips — see the comment above for why arming has to wait.
   let markerArmed = false;
-  await page.route("**/api/sessions", async (route) => {
+  await page.route(SESSION_LISTING, async (route) => {
     if (route.request().method() !== "GET") {
       await route.continue();
       return;
@@ -1918,7 +1918,7 @@ test("an inline confirming state survives a listing refresh; cancel still works 
     await expect(row.locator(".confirm-consequence")).toHaveCount(0);
     await expect(row.locator(".session-row-delete")).toBeEnabled();
   } finally {
-    await page.unroute("**/api/sessions");
+    await page.unroute(SESSION_LISTING);
     await request.post(`/api/sessions/${id}/stop`).catch(() => {});
     await request.delete(`/api/sessions/${id}`).catch(() => {});
   }
@@ -2087,7 +2087,7 @@ test("a failed listing read while confirming does not clear the confirming state
   // the start: arming up front would fail the page's own mount read, which
   // has nothing to do with confirming at all.
   let failing = false;
-  await page.route("**/api/sessions", async (route) => {
+  await page.route(SESSION_LISTING, async (route) => {
     if (route.request().method() !== "GET") {
       await route.continue();
       return;
@@ -2139,7 +2139,7 @@ test("a failed listing read while confirming does not clear the confirming state
     });
     await expect(row.locator(".status-badge")).toHaveText(LIVE_BADGE);
   } finally {
-    await page.unroute("**/api/sessions");
+    await page.unroute(SESSION_LISTING);
     await request.post(`/api/sessions/${id}/stop`).catch(() => {});
     await request.delete(`/api/sessions/${id}`).catch(() => {});
   }
@@ -2182,7 +2182,7 @@ test("a failed listing read while confirming does not clear the confirming state
 test("create-shows-no-badge-until-a-status-is-classified", async ({ page }) => {
   const sessionId = "unclassified-create-session";
   let classified = false;
-  await page.route("**/api/sessions", async (route) => {
+  await page.route(SESSION_LISTING, async (route) => {
     if (route.request().method() !== "GET") {
       await route.continue();
       return;
@@ -2268,7 +2268,7 @@ test("stale-session-view-with-no-status-renders-metadata-and-no-badge", async ({
     total: 1,
     truncated: false,
   };
-  await page.route("**/api/sessions", async (route) => {
+  await page.route(SESSION_LISTING, async (route) => {
     if (route.request().method() !== "GET") {
       await route.continue();
       return;
@@ -2309,7 +2309,7 @@ test("deleting a session with unknown status confirms first, with wording that a
   page,
 }) => {
   const sessionId = "unknown-status-session";
-  await page.route("**/api/sessions", async (route) => {
+  await page.route(SESSION_LISTING, async (route) => {
     if (route.request().method() !== "GET") {
       await route.continue();
       return;
@@ -3083,7 +3083,7 @@ test("an interrupted session shows its badge and deletes without confirming", as
     status: { state: "interrupted" },
     annotation: null,
   };
-  await page.route("**/api/sessions", (route) =>
+  await page.route(SESSION_LISTING, (route) =>
     fulfillAsHelm(route, {
       status: 200,
       contentType: "application/json",
@@ -3153,7 +3153,7 @@ test("an error session shows its badge with detail and deletes without confirmin
     status: { state: "error", detail },
     annotation: null,
   };
-  await page.route("**/api/sessions", (route) =>
+  await page.route(SESSION_LISTING, (route) =>
     fulfillAsHelm(route, {
       status: 200,
       contentType: "application/json",
@@ -3225,7 +3225,7 @@ test("a long error detail clips the badge without pushing the delete button out 
     status: { state: "error", detail },
     annotation: null,
   };
-  await page.route("**/api/sessions", (route) =>
+  await page.route(SESSION_LISTING, (route) =>
     fulfillAsHelm(route, {
       status: 200,
       contentType: "application/json",
@@ -3272,7 +3272,7 @@ test("an error detail containing executable HTML renders literally in the badge"
     status: { state: "error", detail },
     annotation: null,
   };
-  await page.route("**/api/sessions", (route) =>
+  await page.route(SESSION_LISTING, (route) =>
     fulfillAsHelm(route, {
       status: 200,
       contentType: "application/json",
@@ -3291,7 +3291,7 @@ test("an error detail containing executable HTML renders literally in the badge"
 test("truncation banner shows when the listing reports truncated", async ({
   page,
 }) => {
-  await page.route("**/api/sessions", (route) =>
+  await page.route(SESSION_LISTING, (route) =>
     fulfillAsHelm(route, {
       status: 200,
       contentType: "application/json",

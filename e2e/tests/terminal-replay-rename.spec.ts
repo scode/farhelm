@@ -14,7 +14,7 @@
 
 
 import { test, expect, type Page } from "@playwright/test";
-import { openRowMenu, stubFeed } from "./helpers/fleet";
+import { openRowMenu, SESSION_LISTING, stubFeed } from "./helpers/fleet";
 import { cleanupSession, termText, waitForTermText } from "./helpers/term";
 import {
   addTab,
@@ -263,8 +263,8 @@ async function stuckWebSocketFromNextLoad(page: Page) {
 }
 
 /**
- * Trigger two reads matching `pattern` and resolve once both have landed in
- * the page.
+ * Trigger two reads of the URLs `matches` accepts and resolve once both have
+ * landed in the page.
  *
  * Two, always, and it is not padding: the first read is the one that RETIRES
  * an optimistic correction (`ListView`'s and `SessionView`'s `renamed`
@@ -277,12 +277,18 @@ async function stuckWebSocketFromNextLoad(page: Page) {
  * wait because nothing asks on its own any more: this used to count polls,
  * and a healthy page performs none (PLAN_M6_75.md item 6). Callers pass the
  * feed stub's notification, which is what the helm would have sent.
+ *
+ * `matches` takes a parsed `URL` rather than a regex over the raw string
+ * deliberately. It was a regex anchored at the end (`/\/api\/sessions$/`),
+ * which stopped matching the moment the listing started carrying a query —
+ * and a predicate that never matches here does not fail loudly, it hangs for
+ * thirty seconds and then blames the read. Matching on `pathname` is immune
+ * to whatever parameters the request grows next.
  */
-async function afterTwoReads(page: Page, pattern: RegExp, trigger: () => void) {
+async function afterTwoReads(page: Page, matches: (url: URL) => boolean, trigger: () => void) {
   for (let i = 0; i < 2; i++) {
     const landed = page.waitForResponse(
-      (response) =>
-        response.request().method() === "GET" && pattern.test(response.url()),
+      (response) => response.request().method() === "GET" && matches(new URL(response.url())),
       { timeout: 30_000 },
     );
     trigger();
@@ -787,7 +793,7 @@ test("rename-from-list: the row takes the new title and keeps it across re-reads
     expect(listed.title).toBe(renamed);
 
     // And the re-read listing agrees — see `afterTwoReads` for why two.
-    await afterTwoReads(page, /\/api\/sessions$/, () => feed.notify(++revision));
+    await afterTwoReads(page, SESSION_LISTING, () => feed.notify(++revision));
     await expect(row.locator(".session-title")).toHaveText(renamed);
     await expect(row.locator(".action-error")).toHaveCount(0);
   } finally {
@@ -1180,7 +1186,7 @@ test("rename-draft-survives-a-failed-read: the field keeps what was typed", asyn
   let id: string | undefined;
 
   let failing = false;
-  await page.route("**/api/sessions", async (route) => {
+  await page.route(SESSION_LISTING, async (route) => {
     if (route.request().method() !== "GET") {
       await route.continue();
       return;
@@ -1234,7 +1240,7 @@ test("rename-draft-survives-a-failed-read: the field keeps what was typed", asyn
     await row.locator(".rename-submit").click();
     await expect(row.locator(".session-title")).toHaveText(draft);
   } finally {
-    await page.unroute("**/api/sessions");
+    await page.unroute(SESSION_LISTING);
     if (id) await cleanupSession(request, id);
   }
 });

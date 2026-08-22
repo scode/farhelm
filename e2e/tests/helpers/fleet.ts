@@ -27,6 +27,29 @@ export const FAKE_AGENT = `"${
 }" internal fake-agent --script basic`;
 
 /**
+ * The session LISTING endpoint, as a route matcher.
+ *
+ * A pathname predicate rather than the `"**\/api/sessions"` glob every spec
+ * here used to write, and the difference is not stylistic. Playwright anchors
+ * a glob against the WHOLE request URL, query string included, so that glob
+ * matched the listing only while the listing carried no parameters. The
+ * sidebar's sort control ended that: every list read now carries at least
+ * `?sort=`, and every one of those handlers silently stopped intercepting —
+ * silently being the problem, since an interceptor that never fires makes its
+ * test assert against the live stack instead of against its fixture.
+ *
+ * Deliberately matches the POST create endpoint too, because it is the same
+ * path; handlers that care keep their own method guard, exactly as they did
+ * under the glob.
+ *
+ * A shared CONSTANT rather than an inline arrow at each call site so that
+ * `page.unroute` can be handed the same reference: Playwright compares
+ * function matchers by identity, so an unroute with a fresh arrow removes
+ * nothing.
+ */
+export const SESSION_LISTING = (url: URL) => url.pathname === "/api/sessions";
+
+/**
  * A session as the helm's JSON describes it, narrowed to what these specs
  * read.
  *

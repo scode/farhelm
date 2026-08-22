@@ -356,6 +356,25 @@ pub struct Session {
     /// tolerance as `status`, defaulting to the safe `FreshOnly`.
     #[serde(default)]
     pub restart_offer: RestartOffer,
+    /// Seconds since the Unix epoch when this session was created, straight
+    /// off the wire (`SessionInfo::created_at`).
+    ///
+    /// Decoded for ONE reason: the sidebar's auto-select fallback is
+    /// specified as "the newest-created non-archived session" (SPEC.md), and
+    /// once the list could be ordered by activity or by title the head of
+    /// the rows could no longer be ASSUMED to be that session. The fallback
+    /// therefore picks by this field rather than by position — see
+    /// `list::view::newest_created_fallback`.
+    ///
+    /// `#[serde(default)]` to `0` means "this helm predates the field", not
+    /// "created in 1970" (the proto's own reading), and the fallback treats
+    /// it that way: a row with no stamp is not a candidate at all, so a
+    /// fleet served by such a helm degrades to the listing's own first
+    /// non-archived row — the behavior this fallback had before the field
+    /// was decoded — rather than to whichever row a comparator over zeroes
+    /// happened to favor.
+    #[serde(default)]
+    pub created_at: i64,
     /// Whether archive has deliberately removed this session's processes
     /// and terminal while retaining the conversation metadata and committed
     /// attachments.
