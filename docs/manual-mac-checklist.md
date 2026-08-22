@@ -9,14 +9,14 @@ Run these eight steps against the same release candidate and record failures wit
 version, and remote Ubuntu version. A pass here is evidence about that exact candidate, not a substitute for the Linux
 and browser CI gates.
 
-1. Confirm the tmux discovery and floor (TODO.md's 2026-08-22 decision), in three controlled launches from Finder with
-   `FARHELM_TMUX` unset in the app's environment. (a) With Homebrew tmux installed, the app starts and a local session
-   runs. (b) With `FARHELM_TMUX` pointing at a tmux below the floor (a distro or older Homebrew build), the supervisor
-   refuses with `tmux <version> at <path> is below Farhelm's floor <floor> (see README: tmux)`; record how — or whether
-   — that text reached you in Finder (TODO.md's macOS entry records that today it goes to the supervisor's stderr and
-   the app exits before opening a window). (c) With no tmux in `/opt/homebrew/bin`, `/usr/local/bin`, `/opt/local/bin`,
-   or on Finder's PATH, the supervisor fails to start the program at all; record that message the same way. Restore
-   Homebrew tmux before the remaining steps.
+1. Confirm the tmux discovery and floor (SPEC_impl.md's "Terminal substrate" section), in three controlled launches from
+   Finder with `FARHELM_TMUX` unset in the app's environment. (a) With Homebrew tmux installed, the app starts and a
+   local session runs. (b) With `FARHELM_TMUX` pointing at a tmux below the floor (a distro or older Homebrew build),
+   the supervisor refuses with `tmux <version> at <path> is below Farhelm's floor <floor> (see README: tmux)`; record
+   how — or whether — that text reached you in Finder (TODO.md's macOS entry records that today it goes to the
+   supervisor's stderr and the app exits before opening a window). (c) With no tmux in `/opt/homebrew/bin`,
+   `/usr/local/bin`, `/opt/local/bin`, or on Finder's PATH, the supervisor fails to start the program at all; record
+   that message the same way. Restore Homebrew tmux before the remaining steps.
 2. Start the native app and provision a fresh Ubuntu host using only the account's existing passwordless SSH. Confirm
    that setup needs no root, the supervisor registers, and a session runs. Then use
    `Farhelm.app/Contents/MacOS/farhelm helm token show` and open the same embedded helm's authenticated web UI.

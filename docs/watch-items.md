@@ -11,9 +11,10 @@ numbering from that file is preserved for cross-reference with older logs.
     reproduced the tmux server death. The actual trigger was closing an output-bearing tmux 3.7b control client while
     pane bytes were still queued for it. Farhelm now establishes an acknowledged client-wide `no-output` boundary from a
     separate tmux process before closing or reaping that client, including cancellation and failed-open paths. CI keeps
-    the four-thread cap as a resource bound and separately runs the focused teardown scenarios against a checksummed
-    tmux 3.7b build. PLAN.md's M6.5 amendment carries the detailed evidence and discriminator. Any recurrence after
-    those review units is new evidence; do not classify it as oversubscription without a mechanism.
+    the four-thread cap as a resource bound and separately runs the focused teardown scenarios against the checksummed
+    pinned build (3.7b when this was written; currently 3.7c). PLAN.md's M6.5 amendment carries the detailed evidence
+    and discriminator. Any recurrence after those review units is new evidence; do not classify it as oversubscription
+    without a mechanism.
 12. **Playwright flood-harness sightings.** The flood test now lives in `e2e/tests/terminal-flood.spec.ts`. The
     second-occurrence trigger fired, but it was not a recurrence of the original `drain socket closed before FLOOD-DONE`
     error. WebKit instead exhausted a fixed 45-second completion budget while the in-page verifier was still making
