@@ -5,6 +5,9 @@ Intent and preferences only — for what the system is and how it works, read SP
 change behavior they specify without surfacing the conflict. The historical build-order docs (PLAN.md / PLAN_M*.md,
 cited by name throughout code comments) are archived under lore/ and are not maintained.
 
+This project is either public now, or may become public in the future. No content in this project should contain
+personal information such as personal usernames, hostnames, details about the local environments, etc.
+
 # Conventional Commits
 
 All commit messages and PR titles must use Conventional Commit format: `<type>: <short summary>`
