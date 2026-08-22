@@ -43,7 +43,10 @@ use super::terminals::{
     TAB_LAUNCH_SETTLE, TAB_LAUNCH_SETTLE_STEP, Terminal, TerminalId, agent_pane_from_states,
     resolve_terminal_for_close, tabs_from_pane_states,
 };
-use super::ticker::{ActivitySample, SAMPLING_ADMISSION_PERMITS, TICKER_INTERVAL, start_ticker};
+use super::ticker::{
+    ACTIVITY_STAMP_QUANTUM, ActivitySample, SAMPLING_ADMISSION_PERMITS, TICKER_INTERVAL,
+    start_ticker,
+};
 use super::uploads::UploadHandle;
 use crate::agent_kind::{CaptureWindowBounds, IntegrationSnapshot, RecordStamp};
 use crate::launch::{LaunchSpec, resolve_shell, window_command};
@@ -479,6 +482,25 @@ pub struct SupervisorSeams {
     /// shorten it to milliseconds so proving "capture advances with nobody
     /// polling" costs a moment rather than several production intervals.
     pub ticker_interval: Duration,
+    /// How much newer an observed pane change must be before it moves a
+    /// session's `last_activity_at` — see
+    /// [`crate::service::ticker::ACTIVITY_STAMP_QUANTUM`] for why
+    /// production picks a whole minute.
+    ///
+    /// A seam for one reason: without it, the only way to observe an
+    /// advance is to wait out a production minute of real time, and this
+    /// repo does not put minute-long sleeps in its test suite. Tests set
+    /// it to zero, which makes every observed change advance the value —
+    /// the behavior the quantum exists to suppress, which is exactly what
+    /// makes it the right setting for proving the value moves at all.
+    ///
+    /// Whole seconds only, matching the resolution of the timestamps it
+    /// gates; a sub-second value truncates to zero. Zero does NOT mean
+    /// sub-second resolution: the stamp itself is unix SECONDS, so two
+    /// changes observed within one second still land on the same value,
+    /// and a test that wants to see the value move must start from a seed
+    /// at least a second in the past rather than from "now".
+    pub activity_quantum: Duration,
     /// Extra environment entries every launch of every session in this
     /// supervisor starts with, injected into tmux (`-e`) so they reach the
     /// login shell before it sources anything.
@@ -592,6 +614,7 @@ impl Default for SupervisorSeams {
             archive_gate: None,
             sample_fault: None,
             ticker_interval: TICKER_INTERVAL,
+            activity_quantum: ACTIVITY_STAMP_QUANTUM,
             launch_env: Vec::new(),
             scopes: Arc::new(crate::scope::ScopeManager::systemd()),
             launch_shell: None,
@@ -1600,6 +1623,21 @@ impl RelaunchFailure {
     }
 }
 
+/// A [`SessionEntry::last_activity_at`] cell holding `at`.
+///
+/// A named constructor rather than the `Arc::new(AtomicI64::new(..))`
+/// spelling at each of the half-dozen sites that build an entry, for
+/// [`ActivitySample::unsampled`]'s reason: the wrapper is part of the
+/// contract and a bare value at the call sites invites getting it wrong
+/// without noticing. Here the contract is that this cell is SESSION-wide —
+/// only a session's first entry mints one, and every later entry for the
+/// same session (rename, archive, relaunch) clones the `Arc` instead. A
+/// call to this function anywhere but a create, a reload, or a test
+/// fixture is a bug; see the field's own docs.
+pub(crate) fn activity_stamp(at: i64) -> Arc<std::sync::atomic::AtomicI64> {
+    Arc::new(std::sync::atomic::AtomicI64::new(at))
+}
+
 /// Build the entry that describes the SAME launch under a new title
 /// (PLAN_M5.md item 3) — everything but `info.title` carried over.
 ///
@@ -1615,7 +1653,7 @@ impl RelaunchFailure {
 /// difference from [`relaunched_entry`]: a rename is not a new run, so
 /// nothing about the run may be reset.
 ///
-/// The three mutable cells are SHARED — the `Arc`s are cloned, not their
+/// The mutable cells are all SHARED — the `Arc`s are cloned, not their
 /// values — and that is the whole reason [`SessionEntry`] wraps them in
 /// `Arc` at all. A title-only replacement does not end anything, so every
 /// holder of the old entry is still a legitimate writer about the SAME
@@ -1638,6 +1676,7 @@ fn renamed_entry(entry: &SessionEntry, title: String) -> Arc<SessionEntry> {
         first_input: Arc::clone(&entry.first_input),
         capture: Arc::clone(&entry.capture),
         activity: Arc::clone(&entry.activity),
+        last_activity_at: Arc::clone(&entry.last_activity_at),
         generation: entry.generation,
         scope: entry.scope.clone(),
     })
@@ -1658,13 +1697,20 @@ fn renamed_entry(entry: &SessionEntry, title: String) -> Arc<SessionEntry> {
 /// verdict in memory either, or the very next capture pass would correlate
 /// the new run against a window that closed long ago.
 ///
-/// Every mutable cell is FRESH here — new `Arc`s, never the previous
-/// entry's — even where the VALUE is carried over. That isolation is the
-/// in-memory half of the generation fence: a list or capture pass still
-/// holding the old entry is describing a run that has ended, and its late
-/// write must land in the abandoned run's cell rather than on the launch
-/// that replaced it. It is the exact opposite of what [`renamed_entry`]
-/// needs, which is why the two build their cells differently.
+/// Every RUN-SCOPED mutable cell is fresh here — new `Arc`s, never the
+/// previous entry's — even where the VALUE is carried over. That isolation
+/// is the in-memory half of the generation fence: a list or capture pass
+/// still holding the old entry is describing a run that has ended, and its
+/// late write must land in the abandoned run's cell rather than on the
+/// launch that replaced it. It is the exact opposite of what
+/// [`renamed_entry`] needs, which is why the two build their cells
+/// differently.
+///
+/// `last_activity_at` is the one cell that is NOT run-scoped and is
+/// therefore shared rather than re-minted; the comment at its field below
+/// argues why fencing it would be a bug rather than a safeguard. Anyone
+/// adding a cell here should decide which of the two it is before copying
+/// either pattern.
 fn relaunched_entry(
     entry: &SessionEntry,
     info: SessionInfo,
@@ -1710,6 +1756,24 @@ fn relaunched_entry(
         // the OLD pane stopped changing, or sharpened `Waiting` from a
         // dialog the previous run was showing when it died.
         activity: ActivitySample::unsampled(),
+        // The one cell SHARED across a relaunch, and the exception to the
+        // paragraph above is deliberate. The generation fence exists
+        // because the cells beside it describe one RUN: a late write about
+        // a process that has ended must not be read as describing the
+        // process that replaced it. This value is not scoped to a run at
+        // all — "the last time anything was seen happening in this
+        // session" is equally true whichever launch produced the output —
+        // so there is nothing here for a fence to protect, and minting a
+        // fresh cell would instead open a hole. A sampler that read the
+        // old entry, awaited, and then advanced it would leave the
+        // published entry BEHIND the row its own write just advanced in
+        // SQLite, and the discrepancy would survive until the next
+        // observed change past the quantum. Sharing the `Arc` makes that
+        // impossible rather than merely unlikely: there is one cell per
+        // session, and every holder of any entry for it writes to the same
+        // place. Monotonicity across processes and clock steps is still
+        // the store's predicate to enforce.
+        last_activity_at: Arc::clone(&entry.last_activity_at),
         generation,
         scope,
     })
@@ -2269,6 +2333,12 @@ async fn sweep_tmux_config_temp_files(state_dir: &Path) {
 /// the new one (the generation fence does the same job durably; this is
 /// its in-memory half).
 ///
+/// [`SessionEntry::last_activity_at`] is beside those four and obeys
+/// NEITHER rule as stated: it is shared by both paths, because it is the
+/// one mutable value here that belongs to the session rather than to a
+/// run. Its own docs argue why fencing it would lose writes instead of
+/// containing them.
+///
 /// A RENAME must share: it describes the SAME run, so its replacement
 /// clones the Arcs. Anything still holding the pre-rename entry — an
 /// `InputRoute` pinned at attach time, a list pass mid-flight, a capture
@@ -2355,6 +2425,57 @@ pub(crate) struct SessionEntry {
     /// for the same reason `outcome` is not: a leaf `std::sync::Mutex`
     /// held across no await and alongside no other lock.
     pub(crate) activity: Arc<std::sync::Mutex<ActivitySample>>,
+    /// When the sampler last saw this session's pane CHANGE, in unix
+    /// seconds — the durable half of the activity signal, mirroring
+    /// `store::StoredSession::last_activity_at`.
+    ///
+    /// Separate from [`SessionEntry::activity`] on purpose, and the
+    /// separation is the whole design rather than a layering accident.
+    /// `ActivitySample` deliberately holds no clock — its own docs argue
+    /// at length why a wall-clock window is the wrong shape for STATUS
+    /// classification under a budgeted round robin — and that argument is
+    /// about classification only. Sorting a list by recency is a different
+    /// question, it genuinely wants a time, and answering it inside
+    /// `ActivitySample` would put a timestamp exactly where the next
+    /// reader would be tempted to compare it against `now` and reintroduce
+    /// the population-dependent status bug. So the two live side by side:
+    /// one counts observations, this one dates the last interesting one.
+    ///
+    /// An atomic rather than one more `Arc<Mutex<..>>` cell because there
+    /// is nothing to keep consistent with anything else — it is a single
+    /// `i64` whose only writer already decided, under the sample's own
+    /// lock, that it should move. `Relaxed` ordering throughout for the
+    /// same reason: nothing is published through it.
+    ///
+    /// `info.last_activity_at` carries the value this entry was BUILT
+    /// with (creation, reload, or restart); this cell carries the current
+    /// one, and `status::entry_info` overwrites the clone from here on
+    /// every reply — the same shape `outcome` uses, and for the same
+    /// reason: the entry itself is immutable behind its `Arc`.
+    ///
+    /// SESSION-SCOPED, not generation-scoped — the one mutable cell here
+    /// that a relaunch shares instead of re-minting, and the distinction
+    /// deserves to be read before anyone "fixes" it into line with its
+    /// neighbours. The cells above describe one RUN, so
+    /// [`relaunched_entry`] gives the new launch fresh ones and a late
+    /// write from a pass still holding the old entry lands harmlessly in
+    /// the abandoned run's copy. This one describes the SESSION: "the last
+    /// time anything was seen happening here" does not become false
+    /// because a new process is producing the output, and a restart that
+    /// reset it would jump the session backwards in a recency sort at the
+    /// exact moment a user acted on it.
+    ///
+    /// Fencing it would therefore not protect anything — it would open a
+    /// hole. A sampler that read an entry, awaited, and then advanced its
+    /// cell would advance the abandoned copy while its own durable write
+    /// moved the row, leaving this process answering from a value older
+    /// than its own database until the next observed change crossed the
+    /// quantum. Sharing one cell per session across renames, archives, and
+    /// relaunches alike makes every holder of any entry a writer to the
+    /// same place, which is what the value's meaning already implies.
+    /// Cross-process and clock-step monotonicity stay the store's job
+    /// (`SessionStore::record_activity`).
+    pub(crate) last_activity_at: Arc<std::sync::atomic::AtomicI64>,
     /// Which LAUNCH of this session this entry describes
     /// (`store::StoredSession::generation`).
     ///
@@ -2368,6 +2489,16 @@ pub(crate) struct SessionEntry {
     /// (`SessionStore::transition_many` and the capture writers), and
     /// `Attach` compares it before installing an attachment on what may be
     /// a respawned pane.
+    ///
+    /// The fence is for state that DESCRIBES A RUN, which is most of this
+    /// struct but not all of it. [`SessionEntry::last_activity_at`] is
+    /// session-wide — the last time anything was seen happening here is
+    /// equally true whichever launch produced the output — so it is shared
+    /// across a relaunch rather than fenced, and
+    /// `SessionStore::record_activity` deliberately takes no generation.
+    /// Adding one later would not tighten anything; it would drop the very
+    /// writes the value wants. Decide which of the two kinds a new field
+    /// is before copying either pattern.
     pub(crate) generation: i64,
     /// The cgroup scope THIS generation launched into
     /// (`store::StoredSession::launch_scope`), or `None` for a launch that
@@ -3527,6 +3658,11 @@ impl Supervisor {
                         id: row.id,
                         title: row.title,
                         created_at: row.created_at,
+                        // Restored, not re-minted: see the entry's own
+                        // `last_activity_at` cell below for why this one
+                        // durable value survives a restart when the
+                        // sampler's in-memory state deliberately does not.
+                        last_activity_at: row.last_activity_at,
                         creation_seq: Some(row.creation_seq),
                         cwd: row.cwd,
                         invocation: row.invocation,
@@ -3578,10 +3714,21 @@ impl Supervisor {
                     capture: Arc::new(std::sync::Mutex::new(capture)),
                     // Activity samples are process-local and deliberately
                     // not durable: a reloaded session has been observed by
-                    // nobody in THIS process, and inventing a recency for
-                    // it from a stored timestamp would claim knowledge of
+                    // nobody in THIS process, and inventing a STATUS for
+                    // it from a stored screen would claim knowledge of
                     // what happened while the supervisor was down.
                     activity: ActivitySample::unsampled(),
+                    // The timestamp beside it IS restored, and the two are
+                    // not in tension. What the sampler holds is a claim
+                    // about now — this pane looks like this, it has been
+                    // quiet this many looks — which nothing in SQLite can
+                    // still vouch for after a restart. What this holds is
+                    // a claim about a past instant, which stays true
+                    // however long the supervisor was down; re-minting it
+                    // to "now" would be the actual lie, and dropping it to
+                    // zero would tell a recency sort that a session with
+                    // years of history has never done anything.
+                    last_activity_at: activity_stamp(row.last_activity_at),
                     generation: row.generation,
                     // The SELECTION comes straight back out of the row
                     // rather than from this supervisor's own probe: the
@@ -4787,6 +4934,11 @@ impl Supervisor {
                     id: row.id,
                     title: row.title,
                     created_at: row.created_at,
+                    // Read from the row like everything else here: a
+                    // replay answers from the durable record, and the
+                    // session it describes may have been producing output
+                    // for hours since the original create.
+                    last_activity_at: row.last_activity_at,
                     creation_seq: Some(row.creation_seq),
                     cwd: row.cwd,
                     invocation: row.invocation,
@@ -5046,6 +5198,13 @@ impl Supervisor {
                 archived: false,
                 title: title.clone(),
                 created_at,
+                // Seeded to creation, never to 0: a session nobody has
+                // watched produce output yet has no activity to report,
+                // and the honest fallback for a recency sort is "as recent
+                // as it is old". `restart_pending_launch` reads the
+                // preserved column back out anyway, so this value only
+                // survives on the path where no prior row was found.
+                last_activity_at: created_at,
                 creation_seq: 0,
                 cwd: cwd.to_string(),
                 invocation: invocation.clone(),
@@ -5173,6 +5332,10 @@ impl Supervisor {
                         archived: false,
                         title: title.clone(),
                         created_at,
+                        // Nothing has been observed happening in a session
+                        // that has not launched, so creation is the only
+                        // honest seed — see the retry path's copy above.
+                        last_activity_at: created_at,
                         creation_seq: 0,
                         cwd: cwd.to_string(),
                         invocation: invocation.clone(),
@@ -5366,6 +5529,11 @@ impl Supervisor {
             // read clock value; see `StoredSession::created_at`'s docs for
             // why a retry in particular must not re-mint.
             created_at,
+            // Equal to `created_at` for a session that has produced
+            // nothing yet, which is what every create reply describes. The
+            // two only diverge once the ticker has watched this session's
+            // pane change.
+            last_activity_at: created_at,
             creation_seq: Some(creation_seq),
             cwd: cwd.to_string(),
             invocation: invocation.clone(),
@@ -5579,6 +5747,10 @@ impl Supervisor {
                 // at yet; the ticker's next sample establishes the baseline
                 // every later one is compared against.
                 activity: ActivitySample::unsampled(),
+                // Agrees with the reply going out above and with the row
+                // just committed: all three say creation, because nothing
+                // has been seen happening here yet.
+                last_activity_at: activity_stamp(info.last_activity_at),
                 // A create is a session's FIRST launch by definition
                 // (`store::StoredSession::generation`); only a restart ever
                 // moves this off zero.
@@ -6826,6 +6998,18 @@ impl Supervisor {
             // a new session — carried forward from the entry being
             // replaced, never re-derived from "now".
             created_at: entry.info.created_at,
+            // From the entry's LIVE cell rather than its `info` copy: the
+            // sampler may have advanced it many times since this entry was
+            // built, and a restart reply that reported the build-time
+            // value would walk the session backwards in a recency sort
+            // until the next sample corrected it. Carried across the
+            // generation boundary on purpose, like `created_at` above and
+            // unlike everything below that describes the RUN — the new
+            // entry shares this very cell (`relaunched_entry`), so this
+            // read and every later reply answer from one place.
+            last_activity_at: entry
+                .last_activity_at
+                .load(std::sync::atomic::Ordering::Relaxed),
             creation_seq: entry.info.creation_seq,
             cwd: entry.info.cwd.clone(),
             invocation: entry.info.invocation.clone(),
@@ -8983,6 +9167,7 @@ pub(crate) mod tests {
                 id: "s1".to_string(),
                 title: "t".to_string(),
                 created_at: 1_700_000_000,
+                last_activity_at: 1_700_000_000,
                 creation_seq: None,
                 cwd: "/tmp".to_string(),
                 invocation: "agent".to_string(),
@@ -9005,6 +9190,7 @@ pub(crate) mod tests {
             })),
             capture: Arc::new(std::sync::Mutex::new(CaptureState::Unclaimed)),
             activity: ActivitySample::unsampled(),
+            last_activity_at: crate::service::core::activity_stamp(1_700_000_000),
             generation: 0,
             scope: None,
         }
@@ -9082,6 +9268,13 @@ pub(crate) mod tests {
     /// the generation fence exists to prevent. Carried-over VALUES are not
     /// the same as a shared cell — this asserts the value came across and
     /// the identity did not.
+    ///
+    /// `last_activity_at` is asserted here too, and it is the deliberate
+    /// EXCEPTION: that cell is session-scoped, so a relaunch shares the
+    /// very `Arc`. Pinned alongside its opposites so the two rules are
+    /// read together — a future reader tidying this entry's cells into one
+    /// consistent policy would otherwise pick a policy that is wrong for
+    /// one of them either way.
     #[test]
     fn a_relaunched_entry_gets_fresh_cells_even_when_it_carries_the_values_over() {
         let old = entry_with(Some(a_terminal()), LastOutcome::Running);
@@ -9119,6 +9312,23 @@ pub(crate) mod tests {
             &*relaunched.capture.lock().unwrap(),
             CaptureState::Provisional { conversation } if conversation == "conv-old"
         ));
+
+        // And the exception, by identity rather than by value: a late
+        // observation written through the old entry has to reach the
+        // published one, because "when was output last seen here" is a
+        // fact about the session and not about either run.
+        assert!(
+            Arc::ptr_eq(&old.last_activity_at, &relaunched.last_activity_at),
+            "the activity stamp is session-scoped and must be the SAME cell across a relaunch"
+        );
+        old.last_activity_at
+            .store(1_900_000_000, std::sync::atomic::Ordering::Relaxed);
+        assert_eq!(
+            relaunched
+                .last_activity_at
+                .load(std::sync::atomic::Ordering::Relaxed),
+            1_900_000_000
+        );
     }
 
     /// The activity sample is the one cell a relaunch resets outright
@@ -9214,6 +9424,10 @@ pub(crate) mod tests {
                 .await
                 .expect("create a tmux session directly");
         }
+        // Deliberately unequal to `created_at`, and deliberately in the
+        // past: it is what the restore assertion below distinguishes from
+        // both a re-mint and a reset.
+        let stored_activity_at = now_unix() - 3_600;
         for (id, tmux_name) in [("live", "fh-live"), ("dead", "fh-dead")] {
             sup.store
                 .insert_session(
@@ -9223,6 +9437,7 @@ pub(crate) mod tests {
                         archived: false,
                         title: id.to_string(),
                         created_at: now_unix(),
+                        last_activity_at: stored_activity_at,
                         creation_seq: 0,
                         cwd: "/tmp".to_string(),
                         invocation: "agent".to_string(),
@@ -9287,6 +9502,15 @@ pub(crate) mod tests {
         // recency for a stretch of time nobody was looking at. Asserted on
         // the real reload path because that is the only place the rule can
         // be got wrong.
+        //
+        // The activity TIMESTAMP is the deliberate counterexample beside
+        // it, asserted here so the two rules are read together rather than
+        // one being "fixed" into the other later: that value is a fact
+        // about a past instant, which a supervisor being down does not
+        // falsify, so a reload restores it verbatim. Re-minting it would
+        // claim this process saw something it did not; dropping it to zero
+        // would tell a most-recently-active sort that a long-lived session
+        // has never done anything.
         for (id, entry) in &sessions {
             let sample = entry.activity.lock().unwrap();
             assert_eq!(
@@ -9294,6 +9518,17 @@ pub(crate) mod tests {
                 "session {id} came back from the store, so nothing has observed its pane yet"
             );
             assert_eq!(sample.unchanged_streak, 0);
+            assert_eq!(
+                entry
+                    .last_activity_at
+                    .load(std::sync::atomic::Ordering::Relaxed),
+                stored_activity_at,
+                "session {id} must come back with the activity time the row recorded"
+            );
+            assert_eq!(
+                entry.info.last_activity_at, stored_activity_at,
+                "and the entry's own wire snapshot must agree with its cell"
+            );
         }
         let dead = sessions["dead"].outcome.lock().unwrap().clone();
         match dead {
@@ -9363,6 +9598,7 @@ pub(crate) mod tests {
                     archived: false,
                     title: "scoped".to_string(),
                     created_at: now_unix(),
+                    last_activity_at: now_unix(),
                     creation_seq: 0,
                     cwd: "/tmp".to_string(),
                     invocation: "agent".to_string(),
@@ -9443,6 +9679,7 @@ pub(crate) mod tests {
                         archived: false,
                         title: id.to_string(),
                         created_at: now_unix(),
+                        last_activity_at: now_unix(),
                         creation_seq: 0,
                         cwd: "/tmp".to_string(),
                         invocation: "agent".to_string(),
@@ -9547,6 +9784,7 @@ pub(crate) mod tests {
                     archived: false,
                     title: "t".to_string(),
                     created_at: now_unix(),
+                    last_activity_at: now_unix(),
                     creation_seq: 0,
                     cwd: "/tmp".to_string(),
                     invocation: "agent".to_string(),
@@ -9636,6 +9874,7 @@ pub(crate) mod tests {
                     archived: false,
                     title: "t".to_string(),
                     created_at: now_unix(),
+                    last_activity_at: now_unix(),
                     creation_seq: 0,
                     cwd: "/tmp".to_string(),
                     invocation: "agent".to_string(),
@@ -9713,6 +9952,7 @@ pub(crate) mod tests {
                     archived: false,
                     title: "t".to_string(),
                     created_at: now_unix(),
+                    last_activity_at: now_unix(),
                     creation_seq: 0,
                     cwd: "/tmp".to_string(),
                     invocation: "agent".to_string(),
@@ -10261,6 +10501,16 @@ pub(crate) mod tests {
     /// supervisor did (the claim is caller-supplied, so the test can write
     /// the exact bytes); the retry computes its own the way this build
     /// does. Replaying to the SAME session id is the whole assertion.
+    ///
+    /// The activity stamp is advanced between the two creates and checked
+    /// on the reply, because a replay is the one create path that answers
+    /// entirely from the DURABLE record rather than from what it just did.
+    /// The session it describes may have been producing output for hours
+    /// since the original create — a retry after a network partition can
+    /// arrive arbitrarily late — so a replay that reported creation time,
+    /// or re-derived the field from `created_at`, would hand a client a
+    /// session that has visibly moved backwards in its own list. Equal
+    /// values on the two sides would let that pass unnoticed.
     #[tokio::test]
     async fn a_settled_v9_reservation_replays_instead_of_conflicting() {
         let state = StateDir::new();
@@ -10283,6 +10533,18 @@ pub(crate) mod tests {
             )
             .await
             .expect("the pre-upgrade create");
+        assert_eq!(
+            original.last_activity_at, original.created_at,
+            "a session nothing has watched yet reports its creation time"
+        );
+
+        // Ten minutes of observed output, the way the ticker would have
+        // recorded it while the client was away.
+        let observed_at = original.created_at + 600;
+        sup.store
+            .record_activity(&original.id, observed_at)
+            .await
+            .expect("advance the durable stamp");
 
         let replayed = sup
             .create_session_without_overrides(
@@ -10302,6 +10564,11 @@ pub(crate) mod tests {
         assert_eq!(
             replayed.id, original.id,
             "the retry must answer with the session the key already made"
+        );
+        assert_eq!(
+            replayed.last_activity_at, observed_at,
+            "a replay answers from the record as it stands, not from the create it is \
+             replaying"
         );
         assert_eq!(
             sup.store.load_all().await.expect("load").len(),
@@ -10335,6 +10602,7 @@ pub(crate) mod tests {
                     archived: false,
                     title: "stranded".to_string(),
                     created_at: now_unix(),
+                    last_activity_at: now_unix(),
                     creation_seq: 0,
                     cwd: "/".to_string(),
                     invocation: "agent".to_string(),
@@ -10410,6 +10678,68 @@ pub(crate) mod tests {
         ] {
             assert!(reason.contains(needle), "{needle:?} missing from: {reason}");
         }
+    }
+
+    /// A brand-new session's activity stamp equals its creation time in
+    /// all FOUR places the value lives, before anything has watched it.
+    ///
+    /// The seed is the field's contract at rest, and it is written down
+    /// four separate times by four separate pieces of code: the row the
+    /// create commits, the `SessionInfo` the reply carries, the entry's own
+    /// frozen `info`, and the atomic cell the ticker later advances. Any
+    /// one of them starting at 0 instead would be invisible until a
+    /// most-recently-active sort existed to read it, and would then park
+    /// that session at the epoch — indistinguishable from a real
+    /// timestamp, with nothing to correct it until the session next
+    /// produced output. Asserting them together is what makes "they agree"
+    /// a property rather than four coincidences.
+    ///
+    /// No ticker runs here (`serve` is what starts one), so nothing can
+    /// have moved the value: what this observes is purely what creation
+    /// planted.
+    #[tokio::test]
+    async fn a_created_session_dates_its_activity_to_creation_everywhere() {
+        let state = StateDir::new();
+        let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
+            .await
+            .expect("supervisor");
+        let created = sup
+            .create_session_without_overrides("/", "agent", None, 80, 24, None)
+            .await
+            .expect("create");
+
+        assert_eq!(
+            created.last_activity_at, created.created_at,
+            "the reply the client actually reads"
+        );
+        assert_eq!(
+            sup.store
+                .session(&created.id)
+                .await
+                .expect("read the row")
+                .expect("a create commits a row")
+                .last_activity_at,
+            created.created_at,
+            "the durable row a later supervisor reloads from"
+        );
+        let entry = sup
+            .sessions
+            .lock()
+            .await
+            .get(&created.id)
+            .cloned()
+            .expect("the created session is on the map");
+        assert_eq!(
+            entry.info.last_activity_at, created.created_at,
+            "the entry's frozen wire snapshot"
+        );
+        assert_eq!(
+            entry
+                .last_activity_at
+                .load(std::sync::atomic::Ordering::Relaxed),
+            created.created_at,
+            "and the live cell every later reply is answered from"
+        );
     }
 
     /// The snapshot is item 7's IMMUTABLE record, and immutability is only
@@ -10621,6 +10951,7 @@ pub(crate) mod tests {
                 archived: false,
                 title: title.to_string(),
                 created_at: SEEDED_CREATED_AT,
+                last_activity_at: SEEDED_CREATED_AT,
                 creation_seq: 0,
                 cwd: cwd.clone(),
                 invocation: "agent".to_string(),
@@ -11151,6 +11482,7 @@ pub(crate) mod tests {
                     archived: false,
                     title: "stranded".to_string(),
                     created_at: now_unix(),
+                    last_activity_at: now_unix(),
                     creation_seq: 0,
                     cwd: "/".to_string(),
                     invocation: "agent".to_string(),
@@ -11234,6 +11566,7 @@ pub(crate) mod tests {
                     archived: false,
                     title: "ended".to_string(),
                     created_at: now_unix(),
+                    last_activity_at: now_unix(),
                     creation_seq: 0,
                     cwd: "/".to_string(),
                     invocation: "agent".to_string(),
@@ -11738,6 +12071,7 @@ pub(crate) mod tests {
                     archived: false,
                     title: "stranded".to_string(),
                     created_at: now_unix(),
+                    last_activity_at: now_unix(),
                     creation_seq: 0,
                     cwd: "/".to_string(),
                     invocation: "agent".to_string(),
@@ -11828,6 +12162,7 @@ pub(crate) mod tests {
                     archived: false,
                     title: "stranded".to_string(),
                     created_at: now_unix(),
+                    last_activity_at: now_unix(),
                     creation_seq: 0,
                     cwd: "/".to_string(),
                     invocation: "agent".to_string(),
@@ -12201,6 +12536,7 @@ pub(crate) mod tests {
                     archived: false,
                     title: "stranded".to_string(),
                     created_at: now_unix(),
+                    last_activity_at: now_unix(),
                     creation_seq: 0,
                     cwd: "/".to_string(),
                     invocation: "claude --original".to_string(),
@@ -12312,6 +12648,7 @@ pub(crate) mod tests {
                     archived: false,
                     title: "stranded".to_string(),
                     created_at: now_unix(),
+                    last_activity_at: now_unix(),
                     creation_seq: 0,
                     cwd: "/".to_string(),
                     invocation: "codex".to_string(),
@@ -12470,6 +12807,105 @@ pub(crate) mod tests {
         );
     }
 
+    /// A sampler still holding the PRE-restart entry advances the value
+    /// every later reply reads — because the activity cell is one per
+    /// session, not one per launch.
+    ///
+    /// The bug this pins is a lost update with no symptom at the moment it
+    /// happens. `sample_pass` clones an entry, awaits a `capture-pane`
+    /// round trip, and only then dates what it saw; a restart landing in
+    /// that window republishes a new entry under the same id. With a
+    /// per-launch cell the late write would advance the ABANDONED entry
+    /// while the same sampler's durable write advanced the row, leaving
+    /// this supervisor answering every reply from a value older than its
+    /// own database — and staying wrong until some later change crossed
+    /// the quantum, which for a session that just went quiet may be never.
+    /// Restarting a session is also exactly when a user is watching the
+    /// list, so the stale answer lands where it is most visible.
+    ///
+    /// The barrier is what makes the ordering a fact rather than a hope:
+    /// the late writer is released only after `restart_session` has
+    /// returned and published the replacement. The value it writes is
+    /// chosen rather than sampled, so the assertion can be an equality —
+    /// what is under test is WHERE a late write lands, and the sampler's
+    /// own quantization and durable write have their own tests in
+    /// `service::ticker` and `store`.
+    #[tokio::test]
+    async fn a_late_activity_write_from_a_pre_restart_entry_reaches_the_live_reply() {
+        let state = StateDir::new();
+        let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
+            .await
+            .expect("supervisor");
+        let cwd = state.path().to_string_lossy().to_string();
+        let created = sup
+            .create_session(
+                CreateInputs {
+                    cwd: &cwd,
+                    parent: None,
+                    mode: CreateMode::Raw {
+                        invocation: "agent".to_string(),
+                        agent_kind: Some(AgentKind::Generic),
+                        resume_template: None,
+                    },
+                    title: None,
+                    cols: 80,
+                    rows: 24,
+                },
+                None,
+            )
+            .await
+            .expect("create");
+
+        // The handle a sampling pass would be holding across its await.
+        let sampled = sup
+            .sessions
+            .lock()
+            .await
+            .get(&created.id)
+            .cloned()
+            .expect("the created session is on the map");
+
+        let observed_at = created.created_at + 600;
+        let released = Arc::new(tokio::sync::Barrier::new(2));
+        let late_write = {
+            let released = Arc::clone(&released);
+            tokio::spawn(async move {
+                released.wait().await;
+                // The one line `ticker::note_activity` runs once it has
+                // decided the observation may move the value.
+                sampled
+                    .last_activity_at
+                    .store(observed_at, std::sync::atomic::Ordering::Relaxed);
+            })
+        };
+
+        sup.restart_session(&created.id, RestartMode::Fresh, true)
+            .await
+            .expect("restart");
+        released.wait().await;
+        late_write.await.expect("the late writer finished");
+
+        let live = sup
+            .sessions
+            .lock()
+            .await
+            .get(&created.id)
+            .cloned()
+            .expect("the restarted session is back on the map");
+        assert_eq!(
+            crate::service::status::entry_info(
+                &live,
+                &HashMap::new(),
+                None,
+                &crate::store::ProfileNames::new(),
+            )
+            .last_activity_at,
+            observed_at,
+            "the replacement entry must read the same cell the pre-restart entry was written \
+             through; a per-launch cell would report the build-time value instead"
+        );
+    }
+
     /// The source-profile snapshot survives a supervisor RESTART, and its
     /// existence is derived fresh on the way back up (PLAN_M6_75.md item
     /// 4).
@@ -12600,6 +13036,7 @@ pub(crate) mod tests {
                     archived: false,
                     title: "stranded".to_string(),
                     created_at: now_unix(),
+                    last_activity_at: now_unix(),
                     creation_seq: 0,
                     cwd: cwd.clone(),
                     invocation: "agent".to_string(),
@@ -12916,6 +13353,7 @@ pub(crate) mod tests {
             archived: false,
             title: "as created".to_string(),
             created_at: now_unix(),
+            last_activity_at: now_unix(),
             creation_seq: 0,
             cwd: cwd.clone(),
             invocation: "agent".to_string(),
@@ -13056,6 +13494,7 @@ pub(crate) mod tests {
                     archived: false,
                     title: "stranded".to_string(),
                     created_at: now_unix(),
+                    last_activity_at: now_unix(),
                     creation_seq: 0,
                     cwd: cwd.clone(),
                     invocation: "''".to_string(),
@@ -13275,6 +13714,7 @@ pub(crate) mod tests {
                     archived: false,
                     title: "stranded".to_string(),
                     created_at: now_unix(),
+                    last_activity_at: now_unix(),
                     creation_seq: 0,
                     cwd: cwd.clone(),
                     invocation: "agent".to_string(),

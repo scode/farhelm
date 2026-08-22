@@ -3252,15 +3252,18 @@ impl HelmStore {
             // Read and merged INSIDE the transaction that overwrites it, so
             // no refresh can land between "what did we know" and "what do
             // we now record". A mutation's reply is authoritative about
-            // everything except liveness — see
-            // `crate::manager::merged_status` for why `Unknown` must not
-            // erase a definite status, and why the previous value is kept
-            // even at the cost of being briefly stale.
+            // everything except liveness and the activity stamp — see
+            // `crate::manager::merge_cached_session` for why `Unknown`
+            // must not erase a definite status, why the previous value is
+            // kept even at the cost of being briefly stale, and why a
+            // reply may only push `last_activity_at` forward. The same
+            // helper serves the in-memory cache, so the two shapes cannot
+            // drift apart.
             let mut entry = entry;
             if let Some((_, _, previous)) = &claimed
                 && let Ok(previous) = serde_json::from_str::<SessionInfo>(previous)
             {
-                entry.status = crate::manager::merged_status(&previous.status, entry.status);
+                crate::manager::merge_cached_session(&previous, &mut entry);
             }
             let entry = &entry;
             let json = serde_json::to_string(entry).context("serializing cached session")?;
@@ -4389,6 +4392,7 @@ mod tests {
             id: id.to_string(),
             title: id.to_string(),
             created_at,
+            last_activity_at: created_at,
             creation_seq: None,
             cwd: format!("/{id}"),
             invocation: "agent".to_string(),
@@ -7422,6 +7426,91 @@ mod tests {
             .await
             .unwrap();
         assert!(!settled.changed);
+    }
+
+    /// A mutation's reply may push a session's `last_activity_at` forward
+    /// and never back — including when the reply carries the old wire
+    /// value of 0.
+    ///
+    /// The durable half of `crate::manager::merge_cached_session`'s
+    /// contract, pinned where it is actually reachable. The race is
+    /// routine rather than exotic: a refresh drain and a create, rename,
+    /// restart, or archive reply both write this cache, nothing orders
+    /// them, and a reply merely echoes whatever the supervisor's session
+    /// entry held when it was built. So a reply that overwrote the field
+    /// wholesale would regularly move a session BACKWARDS in a
+    /// most-recently-active list at the moment the user acted on it, and
+    /// leave it there until the owning host's next refresh.
+    ///
+    /// The `0` case is the one with no natural correction at all: it means
+    /// "this sender predates the field" (`SessionInfo::last_activity_at`),
+    /// and letting it win would replace a real observation with the epoch
+    /// — a value a reader cannot tell from a genuine one, since the
+    /// `created_at` fallback is applied at read time and never written
+    /// down.
+    #[tokio::test]
+    async fn a_mutation_reply_never_walks_the_activity_stamp_backwards() {
+        let (_dir, store) = fresh_store().await;
+        let host = host_with_identity(&store, "user@host", "identity-1").await;
+
+        let stamped = |at: i64| SessionInfo {
+            last_activity_at: at,
+            ..session("s-1", 100)
+        };
+        let cached_stamp = async |store: &HelmStore| {
+            let read = store
+                .merged_page(
+                    vec![host],
+                    None,
+                    10,
+                    usize::MAX,
+                    SessionFilter::default(),
+                    MatchingCount::Skip,
+                )
+                .await
+                .expect("read the cache back");
+            read.page.rows[0]
+                .info
+                .as_ref()
+                .expect("the cached row decodes")
+                .last_activity_at
+        };
+
+        // A drain commits a fresh observation.
+        store
+            .replace_host_sessions(host, "identity-1", vec![stamped(900)])
+            .await
+            .expect("drain");
+        assert_eq!(cached_stamp(&store).await, 900);
+
+        // A mutation reply built before that drain landed.
+        store
+            .remember_session(host, "identity-1", &stamped(500))
+            .await
+            .expect("stale reply");
+        assert_eq!(
+            cached_stamp(&store).await,
+            900,
+            "a reply carrying an older observation must not undo a newer one"
+        );
+
+        // And one from a sender that does not know the field at all.
+        store
+            .remember_session(host, "identity-1", &stamped(0))
+            .await
+            .expect("reply from an old sender");
+        assert_eq!(
+            cached_stamp(&store).await,
+            900,
+            "0 means unknown, not 1970; it may never replace a real observation"
+        );
+
+        // Forward is still allowed — the merge is monotonic, not frozen.
+        store
+            .remember_session(host, "identity-1", &stamped(1_500))
+            .await
+            .expect("fresh reply");
+        assert_eq!(cached_stamp(&store).await, 1_500);
     }
 
     /// The single-row writes answer the same question, so a mutation that

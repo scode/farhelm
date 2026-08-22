@@ -87,6 +87,7 @@ pub(crate) fn session(id: &str, created_at: i64) -> SessionInfo {
         id: id.to_string(),
         title: id.to_string(),
         created_at,
+        last_activity_at: created_at,
         creation_seq: None,
         cwd: format!("/{id}"),
         invocation: "agent".to_string(),

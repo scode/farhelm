@@ -1210,6 +1210,7 @@ mod tests {
                 id: id.to_string(),
                 title: id.to_string(),
                 created_at,
+                last_activity_at: created_at,
                 creation_seq: None,
                 cwd: "/tmp".to_string(),
                 invocation: "agent".to_string(),

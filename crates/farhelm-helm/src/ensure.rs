@@ -350,6 +350,7 @@ mod tests {
                     id: "remembered".to_string(),
                     title: "remembered".to_string(),
                     created_at: 100,
+                    last_activity_at: 100,
                     creation_seq: None,
                     cwd: "/tmp".to_string(),
                     invocation: "agent".to_string(),

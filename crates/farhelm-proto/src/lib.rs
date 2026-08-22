@@ -610,6 +610,38 @@ pub struct SessionInfo {
     /// way through the `id` tiebreak.
     #[serde(default)]
     pub created_at: i64,
+    /// Seconds since the Unix epoch when the supervisor last saw this
+    /// session's agent pane CHANGE — the ordering key a "most recently
+    /// active" session sort needs, and nothing more.
+    ///
+    /// The observation behind it is the same screen comparison that drives
+    /// `status` (the supervisor's activity sampler), so it inherits that
+    /// comparison's coarseness: output that lands and is overwritten
+    /// between two samples was never seen, and a session sampled rarely
+    /// because its host is busy advances this rarely. It is also
+    /// QUANTIZED at the source — the supervisor only moves it when the
+    /// change it saw is at least a minute newer than the value it already
+    /// holds — so consumers must read it as "activity around this time",
+    /// never as a precise instant. Nothing about liveness may be inferred
+    /// from it: `status` is the only field that answers "is this session
+    /// doing something right now", and this one keeps its last value for
+    /// a session that has exited.
+    ///
+    /// A session that has never produced observed output carries its own
+    /// `created_at`, so a sort over this field degrades to creation order
+    /// rather than to a pile of sessions at the epoch. That is what a
+    /// CURRENT sender always sends — including for rows that predate the
+    /// field, which the supervisor's schema-13 migration normalized at
+    /// upgrade time — so 0 on the wire says one thing only: the sender is
+    /// older than the field, and `#[serde(default)]` filled the missing
+    /// key in. Receivers must read that 0 as "unknown, fall back to
+    /// `created_at`" rather than as 1970, and the fallback is exactly that
+    /// compatibility rule rather than a general one — nothing local
+    /// should be storing a synthesized value back. It carries the same
+    /// pre-epoch-clock collision `created_at`'s own docs accept —
+    /// indistinguishable, and harmless for the same reason.
+    #[serde(default)]
+    pub last_activity_at: i64,
     /// Monotonic creation order assigned by this session's supervisor.
     ///
     /// `None` means the sender predates the field. Consumers comparing
@@ -2994,6 +3026,7 @@ mod tests {
             id: "s1".to_string(),
             title: "demo".to_string(),
             created_at: 1_700_000_000,
+            last_activity_at: 1_700_000_000,
             creation_seq: None,
             cwd: "/tmp".to_string(),
             invocation: "agent".to_string(),
@@ -3027,6 +3060,7 @@ mod tests {
                 parent,
                 title: "child".to_string(),
                 created_at: 1_700_000_000,
+                last_activity_at: 1_700_000_000,
                 creation_seq: None,
                 cwd: "/tmp".to_string(),
                 invocation: "agent".to_string(),
@@ -3207,6 +3241,7 @@ mod tests {
             id: "s1".to_string(),
             title: "demo".to_string(),
             created_at: 1_700_000_000,
+            last_activity_at: 1_700_000_000,
             creation_seq: Some(7),
             cwd: "/tmp".to_string(),
             invocation: "agent".to_string(),
@@ -3241,6 +3276,7 @@ mod tests {
                         "parent": null,
                         "title": "demo",
                         "created_at": 1_700_000_000,
+                        "last_activity_at": 1_700_000_000,
                         "creation_seq": 7,
                         "cwd": "/tmp",
                         "invocation": "agent",
@@ -3646,6 +3682,7 @@ mod tests {
                     id: "s1".to_string(),
                     title: "demo".to_string(),
                     created_at: 0,
+                    last_activity_at: 0,
                     creation_seq: Some(1),
                     cwd: "/tmp".to_string(),
                     invocation: "agent".to_string(),
@@ -3685,6 +3722,7 @@ mod tests {
                 id: "s1".to_string(),
                 title: "demo".to_string(),
                 created_at: 0,
+                last_activity_at: 0,
                 creation_seq: Some(1),
                 cwd: "/tmp".to_string(),
                 invocation: "agent".to_string(),
@@ -3878,6 +3916,7 @@ mod tests {
                 id: "s1".to_string(),
                 title: "demo".to_string(),
                 created_at: 1_700_000_000,
+                last_activity_at: 1_700_000_000,
                 creation_seq: None,
                 cwd: "/tmp".to_string(),
                 invocation: "agent".to_string(),
@@ -3926,6 +3965,14 @@ mod tests {
     /// present-shape golden (with actual `TabInfo` entries) is more
     /// informative pinned separately in
     /// `session_info_tabs_json_shape_is_pinned`.
+    ///
+    /// `last_activity_at` (version 11's addition) rides along in both
+    /// halves rather than earning a test of its own — the golden below
+    /// already pins its wire name and its bare-integer type, and the
+    /// old-shape decode below pins its default. It is given a value
+    /// DIFFERENT from `created_at` here for one reason worth stating: the
+    /// two are independent fields, and equal values would let a
+    /// serialization that derived one from the other pass unnoticed.
     #[test]
     fn session_info_annotation_and_restart_offer_json_shapes_are_pinned() {
         let bare = SessionInfo {
@@ -3934,6 +3981,7 @@ mod tests {
             id: "s1".to_string(),
             title: "demo".to_string(),
             created_at: 1_700_000_000,
+            last_activity_at: 1_700_000_600,
             creation_seq: None,
             cwd: "/tmp".to_string(),
             invocation: "agent".to_string(),
@@ -3950,6 +3998,7 @@ mod tests {
                 "parent": null,
                 "title": "demo",
                 "created_at": 1_700_000_000,
+                "last_activity_at": 1_700_000_600,
                 "creation_seq": null,
                 "cwd": "/tmp",
                 "invocation": "agent",
@@ -3960,6 +4009,21 @@ mod tests {
                 "archived": false,
                 "source_profile": null,
             })
+        );
+
+        // Dropping ONE of the two timestamps must leave the other alone —
+        // the half of the additive contract a whole-object golden cannot
+        // express, and the case a real old sender produces.
+        let mut without = serde_json::to_value(&bare).unwrap();
+        without
+            .as_object_mut()
+            .expect("a SessionInfo serializes as an object")
+            .remove("last_activity_at");
+        let decoded: SessionInfo = serde_json::from_value(without).expect("decodes without it");
+        assert_eq!(decoded.last_activity_at, 0);
+        assert_eq!(
+            decoded.created_at, 1_700_000_000,
+            "dropping one timestamp must not disturb the other"
         );
 
         let stopped = SessionInfo {
@@ -3978,8 +4042,9 @@ mod tests {
         );
 
         // JSON shaped as if none of `annotation`, `restart_offer`, `tabs`,
-        // or (version 8) `created_at` had been added YET — must still
-        // decode, defaulting all four. This is intra-version additive
+        // (version 8) `created_at`, or (version 11) `last_activity_at` had
+        // been added YET — must still decode, defaulting every one of
+        // them. This is intra-version additive
         // discipline, not real cross-build interop: an actual pre-M3 (v4)
         // peer is refused outright at the handshake (see
         // `PROTOCOL_VERSION`'s own docs) and never reaches this decode
@@ -4013,6 +4078,11 @@ mod tests {
             decoded.created_at, 0,
             "a sender that predates created_at must default to 0, not fail or guess a real time"
         );
+        assert_eq!(
+            decoded.last_activity_at, 0,
+            "a sender that predates last_activity_at must default to 0, which readers take as \
+             \"unknown, fall back to created_at\" rather than as an instant in 1970"
+        );
     }
 
     /// PLAN_M4.md item 2's `SessionInfo::tabs` addition, golden-pinned
@@ -4032,6 +4102,7 @@ mod tests {
             id: "s1".to_string(),
             title: "demo".to_string(),
             created_at: 1_700_000_000,
+            last_activity_at: 1_700_000_000,
             creation_seq: None,
             cwd: "/tmp".to_string(),
             invocation: "agent".to_string(),
@@ -4795,6 +4866,7 @@ mod tests {
                 id: "s1".to_string(),
                 title: "demo".to_string(),
                 created_at: 1_700_000_000,
+                last_activity_at: 1_700_000_000,
                 creation_seq: None,
                 cwd: "/tmp".to_string(),
                 invocation: "claude".to_string(),
@@ -4888,6 +4960,7 @@ mod tests {
                 id: "s1".to_string(),
                 title: "demo".to_string(),
                 created_at: 1_700_000_000,
+                last_activity_at: 1_700_000_000,
                 creation_seq: None,
                 cwd: "/tmp".to_string(),
                 invocation: "claude".to_string(),
@@ -4908,6 +4981,7 @@ mod tests {
                     "parent": null,
                     "title": "demo",
                     "created_at": 1_700_000_000,
+                    "last_activity_at": 1_700_000_000,
                     "creation_seq": null,
                     "cwd": "/tmp",
                     "invocation": "claude",
@@ -5009,6 +5083,7 @@ mod tests {
                         id: "s1".to_string(),
                         title: "renamed title".to_string(),
                         created_at: 1_700_000_000,
+                        last_activity_at: 1_700_000_000,
                         creation_seq: None,
                         cwd: "/tmp".to_string(),
                         invocation: "claude".to_string(),
@@ -5027,6 +5102,7 @@ mod tests {
                         "parent": null,
                         "title": "renamed title",
                         "created_at": 1_700_000_000,
+                        "last_activity_at": 1_700_000_000,
                         "creation_seq": null,
                         "cwd": "/tmp",
                         "invocation": "claude",
@@ -5396,6 +5472,7 @@ mod tests {
                 id: "s1".to_string(),
                 title: "demo".to_string(),
                 created_at: 1_700_000_000,
+                last_activity_at: 1_700_000_000,
                 creation_seq: None,
                 cwd: "/tmp".to_string(),
                 invocation: "claude".to_string(),
@@ -5537,6 +5614,7 @@ mod tests {
             "id": "s1",
             "title": "demo",
             "created_at": 1_700_000_000,
+            "last_activity_at": 1_700_000_000,
             "cwd": "/tmp",
             "invocation": "agent",
             "status": { "state": "running" },

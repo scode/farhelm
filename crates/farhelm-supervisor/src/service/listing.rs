@@ -685,6 +685,7 @@ mod tests {
             id: id.to_string(),
             title: "x".repeat(title_len),
             created_at: 1_700_000_000,
+            last_activity_at: 1_700_000_000,
             creation_seq: None,
             cwd: "/tmp".to_string(),
             invocation: "agent".to_string(),

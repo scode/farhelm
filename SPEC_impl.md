@@ -317,6 +317,14 @@ binary honors ~/.ssh/config fully (ProxyJump, Match blocks, agent forwarding, Co
 exactly that: partial config support would quietly break the promise. JSON control frames keep the protocol debuggable
 by eye; raw binary data channels keep PTY throughput off the JSON path.
 
+`SessionInfo` carries a `last_activity_at` (unix seconds) beside `created_at`: the last time the supervisor observed
+that session's agent pane change. It was added WITHIN protocol version 11 rather than bumping it, per the running rule
+every version since 3 has followed — a new optional field with a decode default, whose omission a receiver can ignore
+harmlessly, is additive; a new tagged variant or a required field is not. Absent means the sender predates the field and
+decodes to 0, which a receiver reads as "unknown, fall back to `created_at`" and never as an instant in 1970. This is
+recorded here because the per-version changelog in `lore/` is frozen at the moment it was written and is not maintained
+as the protocol grows.
+
 The session list is cursor-paginated on this wire (protocol 8, M6). The contract, recorded here because the milestone
 plan that settled it is history the moment M6 closes: pages walk a total order — creation time descending, session id
 ascending as the tiebreak — over columns that never change for a live session, so an issued cursor stays a valid resume
@@ -376,6 +384,23 @@ remains that can never be represented on any page.
   real sampling period grows with the fleet, and any wall-clock window would eventually report a continuously-working
   agent as idle because the HOST was busy. Waiting is never derived from activity at all (a blocked agent and a finished
   one are equally quiet); it comes only from per-kind sharpening.
+- Last-activity timestamp: the same ticker that samples for status also DATES the changes it sees, into a
+  `last_activity_at` column on the session row and onto the wire. It is the ordering key a "most recently active"
+  session list needs, seeded to the session's creation time so one that has never produced output sorts by age rather
+  than landing at the epoch, and restored verbatim on supervisor restart. Persisting it does not contradict the rule
+  that liveness is never persisted: a status is a claim about NOW and rots the instant the process it describes moves
+  on, while this is a claim about a past instant that the passage of time cannot falsify. The two must not be conflated
+  in the other direction either — classification still reads sample COUNTS and never this clock, for the
+  population-dependence reason above. The value advances only when the observed change is at least a minute newer than
+  what is already stored, and the reason is blast radius rather than resolution. Two costs, scaling differently: a
+  durable `UPDATE` per session per crossing, which without the quantum would be a write per busy session every two
+  seconds; and a fleet-wide UI wake, which is COALESCED — the helm detects a changed session by comparing whole
+  serialized `SessionInfo`s, but bumps the invalidation feed at most once per host refresh that found anything
+  different, however many sessions moved. So the wake is bounded per refresh while the writes are bounded per session,
+  and without a quantum a single busy agent would re-render every connected client on every drain. No user distinguishes
+  two sessions whose last output was twenty seconds apart. Writes are monotonic in SQL as well as in memory, so a
+  backwards clock step cannot walk a visibly busy session down the sort; a lost write costs sort precision until another
+  observed change crosses the quantum, and nothing else.
 - Agent-kind integrations live in the supervisor as a small trait (`AgentIntegration`; `AgentKind` is the wire enum
   naming the kind itself): status sharpening over the sampled tail, and conversation-identity capture. Sharpening is a
   DEFAULTED trait method that may only promote a live baseline to waiting, never invent liveness, and never panic on

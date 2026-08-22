@@ -140,6 +140,7 @@ fn child_session(cwd: String) -> SessionInfo {
         parent: Some("parent-123".to_string()),
         title: "child".to_string(),
         created_at: 1_700_000_000,
+        last_activity_at: 1_700_000_000,
         creation_seq: None,
         cwd,
         invocation: "agent".to_string(),

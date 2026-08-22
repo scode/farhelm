@@ -183,6 +183,156 @@ async fn create_attach_and_roundtrip_input() {
     wait_for(&mut rx, &mut seen, "hello-farhelm", 5).await;
 }
 
+/// A session's `last_activity_at` starts equal to its `created_at` and
+/// moves only once the supervisor has actually WATCHED the pane change.
+///
+/// The whole value of this field is as a sort key, and both halves of it
+/// are only real end to end. A seeded value that arrived as 0 (or as some
+/// re-minted "now" per reply) would look fine in a unit test and would
+/// scramble the order of a real session list; an advance that never
+/// happened would leave every session pinned at its creation forever, with
+/// nothing anywhere reporting a problem. `ticker`'s own unit tests do
+/// sample real panes, and some of them run a real ticker task; what is
+/// only available here is the whole chain — a real create through the
+/// client, the pane it launched, the ticker `serve` started, and the
+/// `ListSessions` reply a UI would read — meeting in one process.
+///
+/// The quantum is injected as zero because the production one is a whole
+/// minute: the alternative is a test that sleeps through it, which is not
+/// a trade this suite makes. What that gives up is coverage of the gate
+/// itself, which `ticker`'s own unit tests pin against the real value.
+///
+/// Input is sent on every poll rather than once, because a change is only
+/// observed when two consecutive samples DIFFER — one burst of output
+/// could land entirely between two samples and be gone by the next.
+///
+/// `serve` is spawned rather than relying on the harness alone, and that
+/// is not incidental: every other test in this suite drives
+/// `handle_connection` over an in-process pipe, and the ticker is started
+/// by `serve` and nowhere else — so without it this test would sit for
+/// thirty seconds watching a value nothing was ever going to move. Same
+/// pattern `stdio_proxy_carries_a_real_session` uses further down, with
+/// the loop's error parked where the assertions can report it: a `serve`
+/// that failed at startup (a state directory already owned, a socket that
+/// will not bind) otherwise shows up only as this test's own thirty-second
+/// deadline, blaming the ticker for something that never got as far as
+/// starting one.
+///
+/// The durable half is asserted at the end, from a SECOND connection to
+/// the same database, and that is the assertion with the longest reach:
+/// the whole justification for persisting this value — recorded in
+/// `store`'s own docs against that module's rule that liveness is never
+/// written down — is that a restarted supervisor keeps answering the
+/// question. A version that advanced only the in-memory cell would satisfy
+/// every assertion above and lose the field's entire point at the next
+/// restart, silently.
+#[tokio::test]
+async fn a_session_dates_its_activity_to_creation_and_output_moves_it() {
+    let h = harness_with_seams(
+        suite_timeouts(),
+        SupervisorSeams {
+            activity_quantum: Duration::ZERO,
+            ticker_interval: Duration::from_millis(100),
+            ..SupervisorSeams::default()
+        },
+    )
+    .await;
+    // Where the spawned accept loop reports an error nobody would
+    // otherwise see; read into every deadline message below.
+    let serve_failure: Arc<std::sync::Mutex<Option<String>>> =
+        Arc::new(std::sync::Mutex::new(None));
+    let serving = Arc::clone(&h.sup);
+    let reported = Arc::clone(&serve_failure);
+    let serve_task = tokio::spawn(async move {
+        if let Err(error) = serving.serve().await {
+            *reported.lock().expect("serve failure mutex") = Some(format!("{error:#}"));
+        }
+    });
+    let why = || {
+        serve_failure
+            .lock()
+            .expect("serve failure mutex")
+            .clone()
+            .unwrap_or_else(|| "serve() is still running".to_string())
+    };
+    wait_for_supervisor_ready(h.state.path()).await;
+
+    let (session, _work) = basic_session(&h).await;
+    assert_eq!(
+        session.last_activity_at, session.created_at,
+        "a session nobody has watched produce anything reports its creation time, so a \
+         recency sort degrades to creation order rather than to the epoch"
+    );
+
+    let (chan, mut rx) = h.client.attach(&session.id, 80, 24).await.expect("attach");
+    let mut seen = Vec::new();
+    wait_for(&mut rx, &mut seen, "FAKE-AGENT READY", 20).await;
+
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(30);
+    let advanced = loop {
+        h.client.send_input(chan, b"nudge\r".to_vec()).await;
+        let listed = h.client.list_sessions().await.expect("list");
+        let found = listed
+            .sessions
+            .iter()
+            .find(|s| s.id == session.id)
+            .expect("the created session is listed");
+        assert!(
+            found.last_activity_at >= session.created_at,
+            "the activity stamp may never move backwards past creation (was {}, created {})",
+            found.last_activity_at,
+            session.created_at
+        );
+        if found.last_activity_at > session.created_at {
+            break found.last_activity_at;
+        }
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "a pane echoing input every poll never had its activity dated ({})",
+            why()
+        );
+        tokio::time::sleep(Duration::from_millis(200)).await;
+    };
+
+    // The row, read through a second connection to the live supervisor's
+    // own database — the same thing a restart would reload. Polled rather
+    // than read once because the reply above is served from the in-memory
+    // cell, which `ticker::note_activity` advances BEFORE it awaits the
+    // write; a single read here would be racing a write that is merely in
+    // flight, not one that is missing.
+    let store = SessionStore::open(&h.state.path().join("supervisor.db"), false)
+        .await
+        .expect("open the supervisor's database read-side");
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
+    loop {
+        let stored = store
+            .session(&session.id)
+            .await
+            .expect("read the session row")
+            .expect("the created session has a row")
+            .last_activity_at;
+        if stored == advanced {
+            break;
+        }
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "the advance the list reported ({advanced}) never reached the row ({stored}); a \
+             value that lives only in memory does not survive the restart this field exists \
+             to answer across ({})",
+            why()
+        );
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+
+    // Aborted rather than left detached: `serve` never returns on its own,
+    // so a spawned loop would otherwise hold this state directory and its
+    // supervisor alive for the rest of the test binary. Awaited so the
+    // abort has actually taken effect before the harness's own teardown
+    // starts pulling the directory out from under it.
+    serve_task.abort();
+    let _ = serve_task.await;
+}
+
 /// Reconnect-with-replay: detach, reattach, and require the replay to
 /// contain output produced before the reattach AND the bracketed-paste
 /// mode the fake agent enabled. Mode restoration is the audited
